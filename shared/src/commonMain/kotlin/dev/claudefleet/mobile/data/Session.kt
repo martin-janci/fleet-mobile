@@ -65,16 +65,21 @@ class AppSession(
      */
     suspend fun pair(scanned: String, base: String? = null): Credentials {
         val target = PairTarget.require(scanned)
-        val hubBase = target.base
-            ?: base?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
+        // The typed address goes through the same check as a scanned one
+        // (`hubBase`), rather than through `trim()` alone: it is the field an
+        // operator dictates over the phone and a person pastes into, so it is
+        // the easier of the two to get something wrong into, not the harder.
+        val reached = target.base
+            ?: base?.let { hubBase(it) }
             ?: throw NotAPairingCode(
                 "that code does not say which hub it belongs to. Scan the QR " +
-                    "instead, or type the hub's address as well.",
+                    "instead, or type the hub's address — starting http:// or " +
+                    "https:// and with no user@ in it.",
             )
 
-        val result = HubClient(http, hubBase).pair(target.code)
+        val result = HubClient(http, reached).pair(target.code)
         val credentials = Credentials(
-            hub = preferredBase(echoed = result.hub, reached = hubBase),
+            hub = preferredBase(echoed = result.hub, reached = reached),
             token = result.token,
             name = result.name,
             mode = result.mode,

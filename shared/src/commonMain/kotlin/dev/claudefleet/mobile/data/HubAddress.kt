@@ -1,6 +1,37 @@
 package dev.claudefleet.mobile.data
 
 /**
+ * A hub's base URL as the app will store and use it, or null if it is not one.
+ *
+ * `http` or `https`, an authority, no userinfo, no trailing slash. One
+ * implementation for both ways an address arrives — the base carved out of a
+ * scanned pair URL, and the one a person types beside a dictated code — because
+ * the typed field is the *easier* of the two to get something wrong into, and it
+ * used to be the one that went through `trim()` and nothing else.
+ *
+ * Userinfo is refused for parity with the hub's own `HubBase::public`
+ * ("credentials (user@) are not allowed") and for one reason of this app's own:
+ * `Credentials.hub` is the single field `Credentials.toString()` prints
+ * unredacted, so `user:pw@` would be both a route through someone else's host
+ * and a password in every log line that prints the auth state.
+ */
+internal fun hubBase(url: String): String? {
+    val trimmed = url.trim()
+    val scheme = trimmed.substringBefore("://", "").lowercase()
+    if (scheme != "http" && scheme != "https") return null
+    val base = trimmed.trimEnd('/')
+    // Everything after `://` up to the first `/` is the authority; a URL with
+    // none ("https:///pair") names no hub.
+    val authority = base.substringAfter("://", "").substringBefore('/')
+    if (authority.isEmpty()) return null
+    if ('@' in authority) return null
+    // Whitespace anywhere is a paste accident, and a header built from it is a
+    // request smuggling primitive rather than a typo.
+    if (base.any { it.isWhitespace() }) return null
+    return base
+}
+
+/**
  * Does this URL name the machine it is read on?
  *
  * The question matters exactly once, and it is not academic. After pairing, the
@@ -40,7 +71,19 @@ private fun isThisMachine(rawHost: String): Boolean {
     // `::ffff:127.0.0.1` — the same IPv4 addresses, wearing an IPv6 hat.
     if (host.startsWith("::ffff:") && '.' in host) return isThisMachine(host.removePrefix("::ffff:"))
     val groups = expandIpv6(host) ?: return false
-    return groups == IPV6_LOOPBACK || groups == IPV6_UNSPECIFIED
+    if (groups == IPV6_LOOPBACK || groups == IPV6_UNSPECIFIED) return true
+    // The *hex* spelling of the same mapped address, which is what every tool
+    // that prints an IPv6 address prints: `::ffff:7f00:1`, no dot anywhere, so
+    // the dotted branch above never sees it. Missing this failed OPEN — the
+    // echoed address won, and an app that stores it never reaches the hub again.
+    val v4 = mappedIpv4(groups) ?: return false
+    return v4[0] == 127 || v4.all { it == 0 }
+}
+
+/** The four IPv4 octets inside an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`), or null. */
+private fun mappedIpv4(groups: List<Int>): List<Int>? {
+    if (groups.take(5).any { it != 0 } || groups[5] != 0xffff) return null
+    return listOf(groups[6] shr 8, groups[6] and 0xff, groups[7] shr 8, groups[7] and 0xff)
 }
 
 private val IPV6_LOOPBACK = listOf(0, 0, 0, 0, 0, 0, 0, 1)

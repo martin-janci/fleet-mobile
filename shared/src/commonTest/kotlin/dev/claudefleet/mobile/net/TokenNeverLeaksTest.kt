@@ -9,6 +9,7 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertContains
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -130,6 +131,68 @@ class TokenNeverLeaksTest {
         val failure = assertFailsWith<HubError.Http> { hub(huge, HttpStatusCode.BadGateway).listSessions() }
 
         assertTrue(failure.body.length < 2_000, "body was ${failure.body.length} chars")
+    }
+
+    /**
+     * The Task 4 review's BLOCKER. `redacted()` capped the body *before* it
+     * scrubbed, so a token that straddled the 1 000-character cut was sliced in
+     * half, the `replace` stopped matching what was left, and the surviving
+     * prefix went out verbatim. A 64-character hex token cut at its last
+     * character leaves a brute-force space of sixteen.
+     *
+     * And it is not only a log: `FleetRepository` puts an `Http` failure's text
+     * into the reconnect banner, which a person reads on the screen.
+     */
+    @Test
+    fun a_token_that_straddles_the_cap_is_scrubbed_before_the_body_is_cut() = runTest {
+        val secret = "0123456789abcdef".repeat(4) // 64 chars, like a hub token
+        // Ends at 1 010: the first 54 characters sit inside the cap, the rest
+        // outside, which is exactly the case the old order got wrong.
+        val page = "x".repeat(946) + "Bearer $secret" + "</html>"
+
+        val failure = assertFailsWith<HubError.Http> {
+            HubClient(
+                HttpClient(MockEngine { respond(page, HttpStatusCode.BadGateway) }),
+                HUB,
+                secret,
+            ).listSessions()
+        }
+
+        assertSilentAbout(secret, failure)
+        // The half that used to survive the cut, on its own:
+        assertFalse(secret.take(54) in failure.body, "a prefix of the token survived the cap")
+        assertContains(failure.body, "redacted")
+    }
+
+    /**
+     * The invariant this file's header states — "any body that came off the wire
+     * goes through [redacted]" — did not hold for [HubError.Tool], whose message
+     * comes straight out of the hub's `structuredContent`. A hub, or something
+     * in front of it, that quotes the request back in a tool's message put the
+     * token on the screen through the one path nothing was checking.
+     */
+    @Test
+    fun a_tool_refusal_never_repeats_the_token_either() = runTest {
+        val body = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"isError\":true," +
+            "\"structuredContent\":{\"code\":\"E_FORBIDDEN\"," +
+            "\"message\":\"rejected Authorization: Bearer $TOKEN\"},\"content\":[]}}\n\n"
+
+        val failure = assertFailsWith<HubError.Tool> { hub(body).listSessions() }
+
+        assertSilentAbout(TOKEN, failure)
+        assertContains(failure.message, "rejected")
+        assertEquals("E_FORBIDDEN", failure.code)
+    }
+
+    /** The same for a JSON-RPC `error`, which is the other way a tool says no. */
+    @Test
+    fun a_json_rpc_error_never_repeats_the_token() = runTest {
+        val body = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32602," +
+            "\"message\":\"bad arguments for Bearer $TOKEN\"}}\n\n"
+
+        val failure = assertFailsWith<HubError.Tool> { hub(body).listSessions() }
+
+        assertSilentAbout(TOKEN, failure)
     }
 
     /** The hub's own 404 for a spent pairing code still says why. */

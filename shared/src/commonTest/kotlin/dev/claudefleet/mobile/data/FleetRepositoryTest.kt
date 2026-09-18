@@ -64,6 +64,9 @@ private class FakeHub(
     /** Makes `list_hosts` answer 401, so a refresh fails after its first call. */
     var failHosts = false
 
+    /** Makes `list_sessions` answer 502, so every refresh fails at its first call. */
+    var failSessions = false
+
     val client: HubClient = HubClient(
         HttpClient(
             MockEngine { request ->
@@ -76,6 +79,8 @@ private class FakeHub(
                 }
                 if (failHosts && "list_hosts" in body) {
                     respond("", HttpStatusCode.Unauthorized)
+                } else if (failSessions && "list_sessions" in body) {
+                    respond("upstream is down", HttpStatusCode.BadGateway)
                 } else {
                     respond(
                         okResult(payload),
@@ -316,6 +321,42 @@ class FleetRepositoryTest {
 
         // 0, +1 s, +2 s, then a good connection, so the next wait is 1 s again.
         assertEquals(listOf(0L, 1_000L, 3_000L, 4_000L), stream.openedAt.take(4))
+    }
+
+    /**
+     * Task 4 review. The failure count was zeroed when the `ready` frame
+     * arrived, *before* the refetch it triggers — so a hub whose `/events`
+     * answers and whose `/mcp` does not reconnected every second forever: each
+     * pass reset the count to zero, the refetch threw, the count went back to
+     * one, and the wait never grew past the first step. That is a phone radio
+     * held open against a half-working hub.
+     *
+     * A connection is not a success until the resync it exists for has worked.
+     */
+    @Test
+    fun a_ready_whose_refetch_fails_still_grows_the_backoff() = runTest {
+        val hub = FakeHub()
+        hub.failSessions = true
+        val fourth = CompletableDeferred<Unit>()
+        // The signal comes BEFORE the emit: a `ready` whose refetch throws takes
+        // the exception out through `collect`, so anything after `emit` in this
+        // block never runs.
+        val stream = FakeStream { attempt ->
+            if (attempt >= 4) {
+                fourth.complete(Unit)
+                awaitCancellation()
+            }
+            emit(READY)
+        }
+        stream.clock = this
+        val repository = repo(hub, stream, backgroundScope)
+
+        repository.start()
+        fourth.await()
+        repository.stop()
+
+        // 0, +1 s, +2 s, +4 s — doubling, not a flat second.
+        assertEquals(listOf(0L, 1_000L, 3_000L, 7_000L), stream.openedAt.take(4))
     }
 
     /** Retrying against a revoked token forever helps nobody. */

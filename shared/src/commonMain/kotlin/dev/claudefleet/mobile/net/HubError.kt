@@ -126,14 +126,26 @@ private fun safeCause(cause: Throwable): Throwable? =
 private const val MAX_ERROR_BODY = 1_000
 
 /**
- * A response body, made safe to put in a [HubError]: capped, and with [secret]
- * — this client's bearer token — taken out of it.
+ * Text that came off the wire, made safe to put in a [HubError]: with [secret]
+ * — this client's bearer token — taken out of it, and then capped.
  *
- * Every body that came off the wire goes through here. It is not a general
- * sanitiser and cannot be: it removes the one secret this app holds, which is
- * the one a proxy's error page is liable to echo back.
+ * **The order is the whole point, and it used to be the other way round.**
+ * Capping first cuts a token that straddles the cut in half; the `replace` then
+ * matches nothing, and the surviving prefix goes out verbatim. For a 64-hex
+ * token cut at its last character that leaves sixteen possibilities. It is not
+ * only a log line either: an `Http` failure's text reaches the reconnect banner
+ * a person reads. So: scrub the whole thing, then cap what is left.
+ *
+ * It is not a general sanitiser and cannot be. It removes the one secret this
+ * app holds, which is the one a proxy's error page is liable to echo back; a
+ * proxy that re-encoded it would slip through. Read the name as
+ * "token-scrubbed", not "safe".
  */
 internal fun redacted(body: String, secret: String?): String {
-    val capped = if (body.length > MAX_ERROR_BODY) body.take(MAX_ERROR_BODY) + "… (truncated)" else body
-    return if (secret.isNullOrBlank()) capped else capped.replace(secret, "<redacted>")
+    val scrubbed = if (secret.isNullOrBlank()) body else body.replace(secret, "<redacted>")
+    return if (scrubbed.length > MAX_ERROR_BODY) {
+        scrubbed.take(MAX_ERROR_BODY) + "… (truncated)"
+    } else {
+        scrubbed
+    }
 }

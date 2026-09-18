@@ -249,6 +249,16 @@ class HubClient(
         }
     }
 
+    /**
+     * A tool's refusal, scrubbed.
+     *
+     * [HubError]'s own invariant — "any body that came off the wire goes through
+     * [redacted] before it reaches one of these" — did not hold here, and this
+     * is the path most likely to quote a request back: fleet's own messages
+     * never contain the token, but a gateway that answers a tool call with its
+     * own refusal, or a hub that grows a message naming the caller, would. The
+     * code goes through too; it is wire text like any other.
+     */
     private fun toolError(result: JsonObject): HubError.Tool {
         val structured = result["structuredContent"] as? JsonObject
         val code = (structured?.get("code") as? JsonPrimitive)?.content
@@ -258,7 +268,7 @@ class HubClient(
                 ?.mapNotNull { it as? JsonObject }
                 ?.firstNotNullOfOrNull { (it["text"] as? JsonPrimitive)?.content }
             ?: "the tool failed without saying why"
-        return HubError.Tool(code ?: UNKNOWN_CODE, message)
+        return HubError.Tool(redacted(code ?: UNKNOWN_CODE, token), redacted(message, token))
     }
 
     private fun rpcError(error: JsonObject): HubError.Tool {
@@ -270,7 +280,7 @@ class HubClient(
             ?: UNKNOWN_CODE
         val message = (error["message"] as? JsonPrimitive)?.content
             ?: "the hub rejected the call"
-        return HubError.Tool(code, message)
+        return HubError.Tool(redacted(code, token), redacted(message, token))
     }
 
     private companion object {

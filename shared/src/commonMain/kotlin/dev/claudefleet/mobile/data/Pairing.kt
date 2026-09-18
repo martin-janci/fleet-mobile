@@ -84,29 +84,18 @@ data class PairTarget(val base: String?, val code: String) {
             return cleaned.joinToString("")
         }
 
-        /** `https://host[:port][/prefix]/pair` → the base, or null. */
+        /**
+         * `https://host[:port][/prefix]/pair` → the base, or null.
+         *
+         * Strips the route and hands the rest to [hubBase], which is the one
+         * place the scheme / authority / userinfo rules live — the typed
+         * address on the Pair screen goes through the same function.
+         */
         private fun pairBase(url: String): String? {
-            val trimmed = url.trim()
-            val scheme = trimmed.substringBefore("://", "").lowercase()
-            if (scheme != "http" && scheme != "https") return null
-
             // A trailing slash on `/pair/` is the same route.
-            val withoutSlash = trimmed.trimEnd('/')
+            val withoutSlash = url.trim().trimEnd('/')
             if (!withoutSlash.lowercase().endsWith(PAIR_PATH)) return null
-
-            val base = withoutSlash.dropLast(PAIR_PATH.length).trimEnd('/')
-            // Everything after `://` up to the first `/` is the authority; a URL
-            // with none ("https:///pair") names no hub.
-            val authority = base.substringAfter("://", "").substringBefore('/')
-            if (authority.isEmpty()) return null
-            // Userinfo, refused for parity with the hub's own `HubBase::public`
-            // ("credentials (user@) are not allowed"), and for one more reason
-            // here: `Credentials.hub` is the one field `Credentials.toString()`
-            // prints unredacted, so a crafted QR would both route the app
-            // through an attacker's host and put `user:pw@` in every log line
-            // that prints the auth state.
-            if ('@' in authority) return null
-            return base
+            return hubBase(withoutSlash.dropLast(PAIR_PATH.length).trimEnd('/'))
         }
     }
 }

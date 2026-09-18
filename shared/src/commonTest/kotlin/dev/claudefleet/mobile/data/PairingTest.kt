@@ -261,6 +261,17 @@ class AppSessionTest {
             "http://[::]:8899",
             "http://[0:0:0:0:0:0:0:1]:8899",
             "http://[::ffff:127.0.0.1]:8899",
+            // Task 4 review. The same address, written the way every tool that
+            // prints an IPv6 address actually prints it: the mapped IPv4 in hex,
+            // with no dot anywhere. The dotted spelling was handled and this one
+            // fell through to the plain-IPv6 comparison, did not match `::1`,
+            // and was declared a real address — and this failure is the one that
+            // fails OPEN, storing an unreachable hub the app never recovers from.
+            "http://[::ffff:7f00:1]:8899",
+            "http://[::ffff:7f00:0001]:8899",
+            "http://[0:0:0:0:0:ffff:7f00:1]:8899",
+            // Mapped 0.0.0.0, which is a pasted bind address wearing the same hat.
+            "http://[::ffff:0:0]:8899",
         )
 
         for (echo in meansThisMachine) {
@@ -273,7 +284,14 @@ class AppSessionTest {
     /** A real address still wins, or the rule would be "always ignore the hub". */
     @Test
     fun an_address_that_does_not_mean_this_machine_still_wins() = runTest {
-        for (echo in listOf("https://fleet.example.com", "http://10.0.0.7:8899", "http://[2001:db8::1]:8899")) {
+        // `::ffff:8f00:1` is 143.0.0.1 — a mapped address that is NOT loopback,
+        // so the new rule must not swallow the whole mapped range.
+        for (echo in listOf(
+            "https://fleet.example.com",
+            "http://10.0.0.7:8899",
+            "http://[2001:db8::1]:8899",
+            "http://[::ffff:8f00:1]:8899",
+        )) {
             val (app, _, secrets) = session { pairOk(hub = echo) to HttpStatusCode.OK }
             app.pair("https://10.0.0.4:8899/pair#$CODE")
             assertEquals(echo, secrets.read()?.hub, "$echo should have won")
@@ -328,6 +346,50 @@ class AppSessionTest {
 
         app.pair(CODE, base = BASE)
         assertEquals("fleet.example.com", calls.host(0))
+    }
+
+    /**
+     * Task 4 review. The scanned URL went through `pairBase`, which refuses a
+     * scheme that is not http(s), an empty authority and userinfo — and the
+     * *typed* address next to a bare code went through `trim()` and nothing
+     * else. That is the field an operator dictates over the phone and a person
+     * pastes into, so it is the easier of the two to get something wrong into,
+     * not the harder.
+     *
+     * Userinfo is the one that bites twice: `Credentials.hub` is the single
+     * field `Credentials.toString()` prints unredacted, so `user:pw@` would be
+     * both a route through someone else's host and a password in every log line
+     * that prints the auth state.
+     */
+    @Test
+    fun a_typed_hub_address_is_checked_exactly_like_a_scanned_one() = runTest {
+        val refused = listOf(
+            "https://someone:secret@evil.example.com",
+            "ftp://fleet.example.com",
+            "fleet.example.com",
+            "https://",
+            "   ",
+        )
+
+        for (base in refused) {
+            val (app, calls, secrets) = session { pairOk() to HttpStatusCode.OK }
+            assertFailsWith<NotAPairingCode>("$base should have been refused") {
+                app.pair(CODE, base = base)
+            }
+            assertTrue(calls.requests.isEmpty(), "$base reached the network")
+            assertNull(secrets.read())
+        }
+    }
+
+    /** …and an ordinary typed address still works, trailing slash and all. */
+    @Test
+    fun a_typed_hub_address_that_is_fine_still_pairs() = runTest {
+        val (app, calls, secrets) = session { pairOk(hub = "") to HttpStatusCode.OK }
+
+        app.pair(CODE, base = "https://fleet.example.com:8899/")
+
+        assertEquals("fleet.example.com", calls.host(0))
+        assertEquals("https://fleet.example.com:8899", secrets.read()?.hub)
     }
 
     // ---- the credential's life after pairing ----

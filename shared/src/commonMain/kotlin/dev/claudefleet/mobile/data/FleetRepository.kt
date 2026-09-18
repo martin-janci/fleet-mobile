@@ -112,10 +112,15 @@ class FleetRepository(
                 events.connect().collect { event ->
                     when (event) {
                         is HubEvent.Ready -> {
-                            // Reset before the refetch: the connection itself
-                            // succeeded, whatever the refetch then does.
-                            failures = 0
+                            // Reset AFTER the refetch, not before. A connection
+                            // is not a success until the resync it exists for
+                            // has worked: a hub whose `/events` answers and
+                            // whose `/mcp` does not used to zero the count on
+                            // every `ready`, so the wait never grew past its
+                            // first step and the phone reconnected once a second
+                            // for as long as the half-outage lasted.
                             refresh()
+                            failures = 0
                             _status.value = ConnectionStatus.Connected(event.version)
                         }
                         is HubEvent.Lagged -> refresh()
