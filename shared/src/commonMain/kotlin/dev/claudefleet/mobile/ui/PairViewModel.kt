@@ -9,6 +9,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -86,16 +87,16 @@ class PairViewModel(
     private var lastScan: String? = null
 
     fun onAddressChange(text: String) {
-        _state.value = _state.value.copy(address = text)
+        _state.update { it.copy(address = text) }
     }
 
     fun onCodeChange(text: String) {
-        _state.value = _state.value.copy(code = text)
+        _state.update { it.copy(code = text) }
     }
 
     /** Show or hide the camera. Hiding it never hides the fields underneath. */
     fun setScanning(on: Boolean) {
-        _state.value = _state.value.copy(scanning = on && _state.value.cameraAvailable)
+        _state.update { it.copy(scanning = on && it.cameraAvailable) }
     }
 
     /**
@@ -107,7 +108,7 @@ class PairViewModel(
      * goes on the screen.
      */
     fun onScannerUnavailable(reason: String) {
-        _state.value = _state.value.copy(scanning = false, error = reason)
+        _state.update { it.copy(scanning = false, error = reason) }
     }
 
     /** One decoded QR. Called per frame; see the class comment. */
@@ -121,7 +122,7 @@ class PairViewModel(
     fun submit(): Job? = redeem(_state.value.code)
 
     fun dismissError() {
-        _state.value = _state.value.copy(error = null)
+        _state.update { it.copy(error = null) }
     }
 
     private fun redeem(input: String): Job? {
@@ -148,11 +149,11 @@ class PairViewModel(
                 // cheaper than two places that disagree about what a code is,
                 // and `AppSession` is where the "which base wins" rule lives.
                 val credentials = auth.pair(input, typed)
-                _state.value = _state.value.copy(
+                _state.update { it.copy(
                     pairing = false,
                     code = "",
                     paired = PairedHub(credentials.hub, credentials.name, credentials.mode),
-                )
+                ) }
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {
@@ -165,7 +166,7 @@ class PairViewModel(
                 // or expired code needs a new QR, and a 429 needs less traffic,
                 // not thirty attempts a second more. Retrying is a deliberate
                 // act — a fresh QR, or the button.
-                _state.value = _state.value.copy(pairing = false, error = explain(t))
+                _state.update { it.copy(pairing = false, error = explain(t)) }
             }
         }
     }

@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** The sessions of one project on one host. */
@@ -99,7 +100,7 @@ class SessionsViewModel(
 
     /** Show only the rows that want a person. A view over rows already held. */
     fun setNeedsAttentionOnly(on: Boolean) {
-        local.value = local.value.copy(needsAttentionOnly = on)
+        local.update { it.copy(needsAttentionOnly = on) }
     }
 
     fun toggleNeedsAttentionOnly() = setNeedsAttentionOnly(!local.value.needsAttentionOnly)
@@ -109,14 +110,14 @@ class SessionsViewModel(
      * snapshot is still the best picture there is — and the failure is shown.
      */
     fun refresh(): Job = scope.launch {
-        local.value = local.value.copy(refreshing = true, error = null)
+        local.update { it.copy(refreshing = true, error = null) }
         try {
             fleet.refresh()
-            local.value = local.value.copy(refreshing = false, error = null)
+            local.update { it.copy(refreshing = false, error = null) }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.value = local.value.copy(refreshing = false, error = explain(t))
+            local.update { it.copy(refreshing = false, error = explain(t)) }
         }
     }
 

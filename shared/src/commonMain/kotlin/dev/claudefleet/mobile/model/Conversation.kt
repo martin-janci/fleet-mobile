@@ -59,13 +59,41 @@ fun Conversation.appending(fresh: Conversation): Conversation {
             break
         }
     }
+    // Review N1. With no overlap at all, one of two things happened: the
+    // windows are genuinely disjoint (a long gap between reads), or the identity
+    // of some held turn *drifted* and the overlap was missed. The second is not
+    // exotic — `at` for a headless turn is its first surviving assistant entry's
+    // timestamp, which moves forward as the hub's 1 MB tail slides off it, and
+    // `fit_last_turn` cuts an over-budget prompt from its **head** — and the
+    // consequence was that the entire fresh window got appended under the held
+    // one, repeating every turn they share, for the life of the screen.
+    //
+    // So when the splice finds nothing, each held turn is asked the direct
+    // question instead: are you in the fresh window? A held turn whose identity
+    // appears anywhere in `fresh` is the same turn and is dropped in favour of
+    // the fresher reading. Only the turn that actually drifted survives twice,
+    // which turns "the whole window is duplicated" into "one turn is", and
+    // leaves a genuinely disjoint older window untouched.
+    //
+    // Deliberately *not* the time-boundary test the review suggested (drop held
+    // turns stamped at or after the first arrived turn). A drifted headless turn
+    // is re-stamped to its first surviving entry, which can be **later** than the
+    // prompts that follow it in the same window, so the boundary lands in the
+    // wrong place and the turns after it are kept and duplicated anyway. It also
+    // dropped a genuine second turn in the same second, which is a case with a
+    // test of its own.
+    val kept = if (overlap == 0) {
+        val arrivedIdentities = arrived.toSet()
+        turns.filterIndexed { index, _ -> held[index] !in arrivedIdentities }
+    } else {
+        turns.subList(0, turns.size - overlap)
+    }
     return Conversation(
-        turns = turns.subList(0, turns.size - overlap) + fresh.turns,
+        turns = kept + fresh.turns,
         truncated = truncated || fresh.truncated,
     )
 }
 
-/** What tells one turn from another across two reads. See [appending]. */
 private fun ConvTurn.identity(): Pair<String?, String?> = at to prompt
 
 /** One turn: the human prompt that opened it and what the agent said or did. */

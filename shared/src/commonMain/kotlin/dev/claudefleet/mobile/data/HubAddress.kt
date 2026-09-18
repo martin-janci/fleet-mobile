@@ -3,33 +3,85 @@ package dev.claudefleet.mobile.data
 /**
  * A hub's base URL as the app will store and use it, or null if it is not one.
  *
- * `http` or `https`, an authority, no userinfo, no trailing slash. One
- * implementation for both ways an address arrives — the base carved out of a
- * scanned pair URL, and the one a person types beside a dictated code — because
- * the typed field is the *easier* of the two to get something wrong into, and it
- * used to be the one that went through `trim()` and nothing else.
+ * `http` or `https`, an authority, optionally a path prefix, and nothing else.
+ * **All three** ways an address arrives go through here — the base carved out of
+ * a scanned pair URL, the one a person types beside a dictated code, and the one
+ * the hub echoes back after pairing — because all three land in
+ * `Credentials.hub`, which is dialled for every later request.
  *
- * Userinfo is refused for parity with the hub's own `HubBase::public`
- * ("credentials (user@) are not allowed") and for one reason of this app's own:
- * `Credentials.hub` is the single field `Credentials.toString()` prints
- * unredacted, so `user:pw@` would be both a route through someone else's host
- * and a password in every log line that prints the auth state.
+ * The rules mirror the hub's own `HubBase::public`
+ * (`crates/fleet-core/src/service/hub.rs`), so that anything a correctly-built
+ * hub can be configured with is accepted and nothing else is:
+ *
+ *  - **userinfo is refused** — the Rust says "credentials (user@) are not
+ *    allowed", and this app has a second reason: `hub` is the one field
+ *    `Credentials.toString()` prints unredacted, so `user:pw@` would be both a
+ *    route through someone else's host and a password in every log line that
+ *    prints the auth state;
+ *  - **query and fragment are refused.** Not a security hole — they simply fail
+ *    to connect — but every later URL is built by concatenating onto this
+ *    string, and a base already carrying a `?` produces nonsense rather than an
+ *    error. Someone who pastes the address bar of a hub behind an SSO redirect
+ *    gets told, instead of a silent dead end;
+ *  - **a port must be a port**, 1–65535, for the same reason;
+ *  - **whitespace and control characters are refused anywhere.** A CR or LF in
+ *    an address is a request-smuggling primitive rather than a typo, and a NUL
+ *    is how a name gets read as one thing by a check and another by a dialler;
+ *  - **the scheme is lower-cased** rather than echoed back as it arrived, so two
+ *    spellings of one hub are one string.
+ *
+ * A path prefix is deliberately allowed: the hub can be mounted under one, and
+ * `pairBase` depends on it.
  */
 internal fun hubBase(url: String): String? {
     val trimmed = url.trim()
-    val scheme = trimmed.substringBefore("://", "").lowercase()
+    val separator = trimmed.indexOf("://")
+    if (separator < 0) return null
+    val scheme = trimmed.substring(0, separator).lowercase()
     if (scheme != "http" && scheme != "https") return null
-    val base = trimmed.trimEnd('/')
-    // Everything after `://` up to the first `/` is the authority; a URL with
-    // none ("https:///pair") names no hub.
-    val authority = base.substringAfter("://", "").substringBefore('/')
+
+    val rest = trimmed.substring(separator + 3).trimEnd('/')
+    if (rest.isEmpty()) return null
+    // Neither may appear, so neither is somewhere a path could be split.
+    if ('?' in rest || '#' in rest) return null
+    // Whitespace is a paste accident; the other control characters are not.
+    if (rest.any { it.isWhitespace() || it.isControl() }) return null
+
+    val authority = rest.substringBefore('/')
     if (authority.isEmpty()) return null
     if ('@' in authority) return null
-    // Whitespace anywhere is a paste accident, and a header built from it is a
-    // request smuggling primitive rather than a typo.
-    if (base.any { it.isWhitespace() }) return null
-    return base
+    if (!authority.hasUsablePort()) return null
+
+    return "$scheme://$rest"
 }
+
+/**
+ * Whether the authority's port, if it has one, is a port.
+ *
+ * The colon that matters is the one after any bracketed IPv6 literal; inside the
+ * brackets every colon belongs to the address. An unclosed bracket is not an
+ * authority at all.
+ */
+private fun String.hasUsablePort(): Boolean {
+    if (startsWith("[")) {
+        val close = indexOf(']')
+        if (close < 0) return false
+        val after = substring(close + 1)
+        if (after.isEmpty()) return true
+        return after.startsWith(":") && after.drop(1).isPort()
+    }
+    val colons = count { it == ':' }
+    // A bracketless authority with more than one colon is an IPv6 literal that
+    // has lost its brackets, which is not a URL authority at all.
+    if (colons > 1) return false
+    if (colons == 0) return true
+    return substringAfterLast(':').isPort()
+}
+
+private fun String.isPort(): Boolean = (toIntOrNull() ?: return false) in 1..65535
+
+/** The C0 controls, DEL, and the C1 range. */
+private fun Char.isControl(): Boolean = this < ' ' || this in ''..''
 
 /**
  * Does this URL name the machine it is read on?
@@ -59,9 +111,45 @@ internal fun isLoopbackUrl(url: String): Boolean {
     return isThisMachine(host)
 }
 
-/** [isLoopbackUrl] for a bare host, which is where all the shapes live. */
+/**
+ * Does this bare host denote the machine the app is running on?
+ *
+ * This function has been wrong four times, always in the same direction and
+ * always for the same reason: each fix added the spelling that had just been
+ * found. So it is now two steps rather than a list.
+ *
+ * **First normalise, then decide.** Everything that is merely *notation* — the
+ * brackets around an IPv6 literal, letter case, a fully-qualified trailing dot,
+ * an IPv4 address embedded in an IPv6 one — is removed before anything is
+ * compared, so the decision sees one canonical form. The misses were all
+ * normalisation failures, not missing cases: `localhost.` is `localhost` with a
+ * root label, and `[0:0:0:0:0:ffff:127.0.0.1]` is `127.0.0.1` written the way
+ * RFC 4291 §2.2.3 allows. Adding them as strings would have left their
+ * neighbours (`2130706433.`, `[::0.0.0.0]`) still open, which is exactly what
+ * happened each previous time.
+ *
+ * **Over-matching is the safe direction and under-matching is not.** A host this
+ * says yes to merely loses to the address the phone demonstrably just reached; a
+ * host it says no to is stored and dialled forever, and re-pairing never
+ * recovers, because the hub echoes the same thing again. That asymmetry is why
+ * `127.0.0.1.evil.com` is deliberately left matching: it is a hostname, not an
+ * address, and the false positive costs nobody anything.
+ *
+ * The shapes covered, each verified rather than assumed: `localhost` and
+ * anything under it, with or without a root dot; the whole `127/8` block and
+ * `0.0.0.0` in all four `inet_aton` notations (dotted, octal, hex, and fewer
+ * than four parts); `::1` and `::` however padded; and IPv4 embedded in IPv6
+ * both mapped (`::ffff:a.b.c.d`, `::ffff:7f00:1`) and compatible
+ * (`::a.b.c.d`) — Java's `InetAddress` folds both to the IPv4 address, so an
+ * HTTP client really does reach this machine through them.
+ */
 private fun isThisMachine(rawHost: String): Boolean {
-    val host = rawHost.trim().trim('[', ']').lowercase()
+    // A trailing dot is the root label of a fully-qualified name: `localhost.`
+    // and `localhost` are the same name to every resolver, and the hub's own
+    // `HubBase::public` accepts it because axum's `Authority` parses it. Not
+    // stripping it defeated the numeric parser too — `2130706433.` is the form
+    // the previous commit had just fixed, beaten by one character.
+    val host = rawHost.trim().trim('[', ']').lowercase().trimEnd('.')
     if (host.isEmpty()) return false
     // `localhost` and, per RFC 6761, anything under it.
     if (host == "localhost" || host.endsWith(".localhost")) return true
@@ -78,15 +166,13 @@ private fun isThisMachine(rawHost: String): Boolean {
     // `0x7f.0.0.1` and `127.1` are all 127.0.0.1 to `inet_aton`, and therefore
     // to `InetAddress.getByName` and to the HTTP clients built on it.
     inetAton(host)?.let { return (it ushr 24) == 127L || it == 0L }
-    // `::ffff:127.0.0.1` — the same IPv4 addresses, wearing an IPv6 hat.
-    if (host.startsWith("::ffff:") && '.' in host) return isThisMachine(host.removePrefix("::ffff:"))
+    // An IPv6 literal, with any embedded IPv4 already folded into its two
+    // groups by `expandIpv6`. There is deliberately no special case for
+    // `::ffff:` spelled with dots any more: it is the same address as
+    // `::ffff:7f00:1` and now takes the same path.
     val groups = expandIpv6(host) ?: return false
     if (groups == IPV6_LOOPBACK || groups == IPV6_UNSPECIFIED) return true
-    // The *hex* spelling of the same mapped address, which is what every tool
-    // that prints an IPv6 address prints: `::ffff:7f00:1`, no dot anywhere, so
-    // the dotted branch above never sees it. Missing this failed OPEN — the
-    // echoed address won, and an app that stores it never reaches the hub again.
-    val v4 = mappedIpv4(groups) ?: return false
+    val v4 = embeddedIpv4(groups) ?: return false
     return v4[0] == 127 || v4.all { it == 0 }
 }
 
@@ -130,9 +216,22 @@ private fun numericPart(part: String): Long? = when {
     else -> part.toLongOrNull(10)
 }?.takeIf { it >= 0 }
 
-/** The four IPv4 octets inside an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`), or null. */
-private fun mappedIpv4(groups: List<Int>): List<Int>? {
-    if (groups.take(5).any { it != 0 } || groups[5] != 0xffff) return null
+/**
+ * The four IPv4 octets carried inside an IPv6 address, or null.
+ *
+ * Both embeddings RFC 4291 defines: IPv4-**mapped** (`::ffff:a.b.c.d`, group 5
+ * is `ffff`) and the deprecated IPv4-**compatible** (`::a.b.c.d`, group 5 is
+ * zero). The compatible form is included because Java's `InetAddress` folds it
+ * to a plain `Inet4Address` — so `http://[::127.0.0.1]/` really does reach this
+ * machine through OkHttp, whatever the RFC says about deprecation.
+ *
+ * `::1` and `::` reach here too and would come back as `0.0.0.1` and `0.0.0.0`;
+ * both are decided by the loopback/unspecified comparison before this is called,
+ * so the order at the call site is load-bearing.
+ */
+private fun embeddedIpv4(groups: List<Int>): List<Int>? {
+    if (groups.take(5).any { it != 0 }) return null
+    if (groups[5] != 0xffff && groups[5] != 0) return null
     return listOf(groups[6] shr 8, groups[6] and 0xff, groups[7] shr 8, groups[7] and 0xff)
 }
 
@@ -147,8 +246,15 @@ private val IPV6_UNSPECIFIED = listOf(0, 0, 0, 0, 0, 0, 0, 0)
  * `0:0:0:0:0:0:0:1` and `0000:...:0001` are the same address and a set of
  * strings would catch whichever ones someone thought of.
  */
-private fun expandIpv6(host: String): List<Int>? {
-    if (':' !in host) return null
+private fun expandIpv6(raw: String): List<Int>? {
+    if (':' !in raw) return null
+    // RFC 4291 §2.2.3 lets the last 32 bits be written as an IPv4 address:
+    // `::ffff:127.0.0.1` and `[0:0:0:0:0:ffff:127.0.0.1]` are the same address
+    // as `::ffff:7f00:1`. Folding it into two hex groups here is what lets the
+    // rest of this function stay a pure IPv6 parser, and is what removed the
+    // `startsWith("::ffff:")` special case that only ever caught one spelling
+    // of it.
+    val host = foldIpv4Tail(raw) ?: return null
     val halves = host.split("::")
     if (halves.size > 2) return null
     fun groups(part: String): List<String>? =
@@ -165,4 +271,19 @@ private fun expandIpv6(host: String): List<Int>? {
         if (group.length > 4) return null
         group.toIntOrNull(16) ?: return null
     }
+}
+
+/**
+ * An IPv6 literal whose last group is a dotted IPv4 address, rewritten with that
+ * address as two hex groups. Unchanged when there is no dotted tail, null when
+ * the tail is present but is not an IPv4 address.
+ */
+private fun foldIpv4Tail(host: String): String? {
+    val lastColon = host.lastIndexOf(':')
+    val tail = host.substring(lastColon + 1)
+    if ('.' !in tail) return host
+    val address = inetAton(tail) ?: return null
+    val high = ((address ushr 16) and 0xffff).toString(16)
+    val low = (address and 0xffff).toString(16)
+    return host.substring(0, lastColon + 1) + high + ":" + low
 }

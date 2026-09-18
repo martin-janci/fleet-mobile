@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** What the Settings screen draws. */
@@ -88,7 +89,7 @@ class SettingsViewModel(
     }
 
     fun dismissError() {
-        local.value = local.value.copy(error = null)
+        local.update { it.copy(error = null) }
     }
 
     private fun assemble(auth: AuthState, l: Local): SettingsUiState {

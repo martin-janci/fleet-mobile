@@ -59,6 +59,22 @@ class FleetRepository(
     private val scope: CoroutineScope,
     /** How long to wait after N consecutive failures. Injectable for tests. */
     private val backoff: (Int) -> Duration = ::reconnectDelay,
+    /**
+     * What to do when the hub answers 401 — drop the credential and return to
+     * Pair (review N4).
+     *
+     * This repository is the one caller that holds a raw [HubClient] rather than
+     * going through `AppSession.withClient`, which is where "a 401 drops the
+     * credential" lives. Without this it stopped the loop and said so in a
+     * banner, and the app sat on a revoked token while the identical 401 through
+     * `HubSessionActions` would have routed to Pair. A callback rather than an
+     * `AppSession` reference, so the repository still knows nothing about
+     * storage and the test can count the calls.
+     *
+     * Failures are swallowed on purpose: the stream is already going `Offline`
+     * and a store that will not clear must not turn that into a crash.
+     */
+    private val onRevoked: suspend () -> Unit = {},
 ) : FleetState {
     private val _sessions = MutableStateFlow<List<SessionRow>>(emptyList())
     override val sessions: StateFlow<List<SessionRow>> = _sessions.asStateFlow()
@@ -132,6 +148,11 @@ class FleetRepository(
                 throw e
             } catch (e: HubError.Unauthorized) {
                 _status.value = ConnectionStatus.Offline(REVOKED)
+                try {
+                    onRevoked()
+                } catch (_: Exception) {
+                    // Already Offline and already giving up; see the KDoc.
+                }
                 return
             } catch (t: Throwable) {
                 reason = t.message ?: t::class.simpleName ?: STREAM_CLOSED

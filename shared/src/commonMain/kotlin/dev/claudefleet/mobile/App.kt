@@ -77,6 +77,12 @@ class AppContainer(
             client = HubClient(http, credentials.hub, credentials.token),
             events = HubEventStream(http, credentials.hub, credentials.token),
             scope = scope,
+            // The repository is the one caller holding a raw `HubClient` rather
+            // than going through `AppSession.withClient`, so a 401 there has to
+            // be routed back to the same rule by hand (review N4). Without this
+            // the app sat on a revoked token behind a banner, while the identical
+            // 401 through `HubSessionActions` returned it to Pair.
+            onRevoked = { session.forget() },
         )
 }
 

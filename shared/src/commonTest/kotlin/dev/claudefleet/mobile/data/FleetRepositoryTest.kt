@@ -359,6 +359,56 @@ class FleetRepositoryTest {
         assertEquals(listOf(0L, 1_000L, 3_000L, 7_000L), stream.openedAt.take(4))
     }
 
+    /**
+     * Task 5 review, N4. Stopping the loop was only half of it.
+     *
+     * `SessionActions` exists so that "a 401 drops the credential and returns to
+     * Pair" is impossible to forget rather than merely discouraged — and the
+     * repository, which holds a raw `HubClient`, was the one caller outside it.
+     * The app sat on a revoked token showing a sentence, while the identical 401
+     * through `HubSessionActions` would have routed to Pair.
+     */
+    @Test
+    fun a_401_on_the_stream_drops_the_credential_as_well_as_stopping() = runTest {
+        val hub = FakeHub()
+        val stream = FakeStream { throw HubError.Unauthorized("no") }
+        stream.clock = this
+        var revoked = 0
+        val repository = FleetRepository(
+            hub.client,
+            stream,
+            backgroundScope,
+            onRevoked = { revoked += 1 },
+        )
+
+        repository.start()
+        testScheduler.advanceTimeBy(600_000)
+
+        assertEquals(1, revoked, "the credential must be dropped, not merely reported")
+        assertTrue(repository.status.value is ConnectionStatus.Offline)
+    }
+
+    /** Only a 401. A hub that is merely down has not revoked anything. */
+    @Test
+    fun any_other_stream_failure_leaves_the_credential_alone() = runTest {
+        val hub = FakeHub()
+        val stream = FakeStream { throw HubError.Http(503, "events are not enabled") }
+        stream.clock = this
+        var revoked = 0
+        val repository = FleetRepository(
+            hub.client,
+            stream,
+            backgroundScope,
+            onRevoked = { revoked += 1 },
+        )
+
+        repository.start()
+        testScheduler.advanceTimeBy(10_000)
+        repository.stop()
+
+        assertEquals(0, revoked)
+    }
+
     /** Retrying against a revoked token forever helps nobody. */
     @Test
     fun a_401_stops_the_loop_instead_of_reconnecting() = runTest {

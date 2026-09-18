@@ -21,6 +21,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -58,9 +61,21 @@ fun SessionScreen(
 
         val turns = state.conversation.turns
         val listState = rememberLazyListState()
-        // Newest at the bottom, so a new turn should bring the view with it.
-        LaunchedEffect(turns.size) {
-            if (turns.isNotEmpty()) listState.scrollToItem(turns.lastIndex)
+        val newest = newestItemIndex(turns.size, state.conversation.truncated)
+        // Newest at the bottom, so new output should bring the view with it —
+        // but only for someone who was already at the bottom. Review S1: this
+        // used to fire unconditionally and yank the view down while a person was
+        // scrolled up reading, and it keyed on `turns.size`, so the live bottom
+        // turn growing — the usual case, since the agent appends items to it
+        // while it works — did not scroll at all.
+        val atBottom by remember(listState) {
+            derivedStateOf {
+                val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()
+                last == null || newest == null || last.index >= newest - 1
+            }
+        }
+        LaunchedEffect(turns.size, turns.lastOrNull()?.endedAt, newest) {
+            if (newest != null && atBottom) listState.scrollToItem(newest)
         }
 
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -236,4 +251,22 @@ private fun PromptBox(state: SessionUiState, onDraftChange: (String) -> Unit, on
             }
         }
     }
+}
+
+/**
+ * Which **LazyColumn item** holds the newest turn, or null when there are none.
+ *
+ * Not `turns.lastIndex`, and that was review S1: `scrollToItem` takes an item
+ * index, and the truncation note occupies index 0 whenever `truncated` is set —
+ * which is the normal case, since the hub sets it on any conversation longer
+ * than its window. The target was one short, so the screen settled on the
+ * second-to-last turn with the newest one below the fold: exactly the turn the
+ * screen exists to show.
+ *
+ * A pure function because nothing in this repository can render a `LazyColumn`,
+ * and an off-by-one that only a device can see is an off-by-one that ships.
+ */
+internal fun newestItemIndex(turns: Int, truncated: Boolean): Int? {
+    if (turns <= 0) return null
+    return turns - 1 + if (truncated) 1 else 0
 }

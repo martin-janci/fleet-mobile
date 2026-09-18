@@ -137,12 +137,19 @@ private const val MAX_ERROR_BODY = 1_000
  * a person reads. So: scrub the whole thing, then cap what is left.
  *
  * It is not a general sanitiser and cannot be. It removes the one secret this
- * app holds, which is the one a proxy's error page is liable to echo back; a
- * proxy that re-encoded it would slip through. Read the name as
- * "token-scrubbed", not "safe".
+ * app holds, in any letter case, which is the one a proxy's error page is liable
+ * to echo back. A proxy that base64'd it, url-encoded it, or split it across
+ * markup would still slip through, and no `replace` can fix that. Read the name
+ * as "token-scrubbed", not "safe".
  */
 internal fun redacted(body: String, secret: String?): String {
-    val scrubbed = if (secret.isNullOrBlank()) body else body.replace(secret, "<redacted>")
+    // `ignoreCase` because a hub token is 32 bytes rendered as **lowercase hex**
+    // (`mcp/mod.rs`), and an upper-cased echo of it is still the token — not a
+    // re-encoding but the same 64 characters, which a case-sensitive `replace`
+    // walks straight past. Plenty of proxies upper-case what they quote back in
+    // a header dump. Measured before the fix: 64 of 64 characters survived.
+    val scrubbed =
+        if (secret.isNullOrBlank()) body else body.replace(secret, "<redacted>", ignoreCase = true)
     return if (scrubbed.length > MAX_ERROR_BODY) {
         scrubbed.take(MAX_ERROR_BODY) + "… (truncated)"
     } else {

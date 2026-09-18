@@ -206,3 +206,61 @@ class TokenNeverLeaksTest {
         assertFalse("redacted" in failure.body)
     }
 }
+
+/**
+ * Task 5 review, N3 — `redacted()` is defeated by case-folding, and a hub token
+ * is lowercase hex.
+ *
+ * `mcp/mod.rs` mints 32 bytes rendered as lowercase hex. A proxy or an error
+ * page that upper-cases what it echoes — and plenty do, in a header dump or a
+ * `<CODE>` block — hands back the same 64 characters in a form `replace` no
+ * longer matches, and the whole token goes out verbatim. The reviewer measured
+ * a leaked run of 64 of 64.
+ *
+ * This is the one re-encoding worth defending against, and the reason is that it
+ * is not a re-encoding at all: an upper-cased hex token *is* the token. Base64,
+ * URL-encoding and markup-splitting genuinely cannot be caught by a `replace`,
+ * and `redacted`'s KDoc is right to say so rather than pretend.
+ */
+class RedactionIsCaseInsensitiveTest {
+
+    private val hexToken = "a3f9c1d2e4b5061728394a5b6c7d8e9f0123456789abcdef0123456789abcdef"
+
+    @Test
+    fun an_upper_cased_echo_of_a_hex_token_is_still_scrubbed() {
+        val body = "gateway error: Authorization: Bearer ${hexToken.uppercase()}"
+
+        val safe = redacted(body, hexToken)
+
+        assertFalse(hexToken.uppercase() in safe, "the token came back upper-cased: $safe")
+        assertFalse(hexToken in safe, safe)
+        assertTrue("<redacted>" in safe, safe)
+    }
+
+    @Test
+    fun a_mixed_case_echo_is_scrubbed_too() {
+        val mixed = hexToken.mapIndexed { i, c -> if (i % 2 == 0) c.uppercaseChar() else c }
+            .joinToString("")
+
+        val safe = redacted("proxy said: $mixed", hexToken)
+
+        assertFalse(mixed in safe, safe)
+    }
+
+    /** And the ordinary exact-match case still works. */
+    @Test
+    fun the_exact_token_is_still_scrubbed() {
+        val safe = redacted("Bearer $hexToken", hexToken)
+        assertFalse(hexToken in safe, safe)
+    }
+
+    /**
+     * Case-insensitivity must not start eating text that merely resembles the
+     * token. The scrub replaces the token, not everything near it.
+     */
+    @Test
+    fun text_that_is_not_the_token_survives() {
+        val safe = redacted("upstream timed out after 30s", hexToken)
+        assertEquals("upstream timed out after 30s", safe)
+    }
+}

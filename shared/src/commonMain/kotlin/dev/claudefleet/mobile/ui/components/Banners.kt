@@ -11,6 +11,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.data.ConnectionStatus
 
@@ -47,7 +48,19 @@ fun ErrorBanner(message: String?, onDismiss: (() -> Unit)? = null, modifier: Mod
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(text = message, style = MaterialTheme.typography.bodySmall)
+            // Review S4. `explain(HubError.Http)` is "the hub answered HTTP
+            // $status: $body" with the body capped at 1 000 characters plus an
+            // ellipsis — 1 040 measured — and a reverse proxy's error page is
+            // exactly that shape. Unbounded, it pushed Dismiss off the row and
+            // swallowed the list behind it. Three lines is enough to read what
+            // went wrong; the rest was never legible on a phone anyway.
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
             if (onDismiss != null) TextButton(onClick = onDismiss) { Text("Dismiss") }
         }
     }

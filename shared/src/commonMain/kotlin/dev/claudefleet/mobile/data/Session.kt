@@ -130,15 +130,30 @@ class AppSession(
          * that is the right one: the name scanned off a QR may be one of
          * several that reach it, and only the hub knows its public address.
          *
-         * But that field is the configured public URL *or*, when none is
+         * It is checked exactly as a scanned or typed address is — see
+         * [hubBase] — and an echo that would be refused from either of those
+         * loses to the address that demonstrably worked.
+         *
+         * Beyond that, the field is the configured public URL *or*, when none is
          * configured, the hub's own loopback base. `http://127.0.0.1:8899`
          * means "this phone" once it is stored on a phone, and the app would
          * never reach the hub again. So a loopback echo loses to the address
          * that demonstrably just worked.
          */
         fun preferredBase(echoed: String, reached: String): String {
-            val candidate = echoed.trim().trimEnd('/')
-            if (candidate.isEmpty()) return reached
+            // Review S3: this was the THIRD door into `Credentials.hub` and the
+            // one the "both now go through one `hubBase`" commit did not touch.
+            // A hub that echoes `https://someone:secret@evil.example.com` had it
+            // stored verbatim and printed unredacted by `Credentials.toString()`,
+            // which is the exact failure the userinfo rule exists to prevent —
+            // arriving through the entry point nobody checked.
+            //
+            // Severity is lower than the typed field, because fleet's own
+            // `HubBase::public` refuses all of this before it can be echoed and
+            // someone who can rewrite the pair response cannot mint a token
+            // anyway. It is defence in depth on a field this app has decided
+            // matters, and leaving one of three doors open reads as closed.
+            val candidate = hubBase(echoed) ?: return reached
             return if (isLoopbackUrl(candidate)) reached else candidate
         }
     }

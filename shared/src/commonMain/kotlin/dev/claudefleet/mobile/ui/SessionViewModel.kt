@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** One session's screen: its row, its conversation, and what is being typed. */
@@ -67,6 +68,16 @@ class SessionViewModel(
     private val scope: CoroutineScope,
     canSendPrompts: Boolean = true,
 ) {
+    /**
+     * The screen state this class owns, as opposed to what the fleet owns.
+     *
+     * Every mutation goes through `MutableStateFlow.update {}` rather than
+     * `local.value = local.value.copy(...)` — review N5. The latter is a
+     * read-modify-write, and two coroutines in this scope really can interleave
+     * across one: a pull-to-refresh while a send's follow-up read is in flight,
+     * or a double tap, would lose one merge or clear `loading` while the other
+     * call was still running.
+     */
     private data class Local(
         val conversation: Conversation = Conversation(),
         val loaded: Boolean = false,
@@ -90,7 +101,7 @@ class SessionViewModel(
     fun refresh(): Job = fetch(first = false)
 
     fun onDraftChange(text: String) {
-        local.value = local.value.copy(draft = text)
+        local.update { it.copy(draft = text) }
     }
 
     /**
@@ -108,15 +119,15 @@ class SessionViewModel(
         // collector takes to be resumed. A send must not depend on that.
         if (!canSendNow(current)) return@launch
         val text = current.draft
-        local.value = local.value.copy(sending = true, error = null)
+        local.update { it.copy(sending = true, error = null) }
         try {
             actions.sendPrompt(sessionId, text)
-            local.value = local.value.copy(sending = false, draft = "")
+            local.update { it.copy(sending = false, draft = "") }
             read(first = false)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.value = local.value.copy(sending = false, error = explain(t))
+            local.update { it.copy(sending = false, error = explain(t)) }
         }
     }
 
@@ -128,20 +139,20 @@ class SessionViewModel(
     private fun fetch(first: Boolean): Job = scope.launch { read(first) }
 
     private suspend fun read(first: Boolean) {
-        local.value = local.value.copy(loading = first, error = null)
+        local.update { it.copy(loading = first, error = null) }
         try {
             val fresh = actions.conversation(sessionId)
-            local.value = local.value.copy(
+            local.update { it.copy(
                 conversation = local.value.conversation.appending(fresh),
                 loaded = true,
                 loading = false,
-            )
+            ) }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
             // The conversation on screen stays: a failed read is not evidence
             // that what was already said has stopped being true.
-            local.value = local.value.copy(loading = false, error = explain(t))
+            local.update { it.copy(loading = false, error = explain(t)) }
         }
     }
 
