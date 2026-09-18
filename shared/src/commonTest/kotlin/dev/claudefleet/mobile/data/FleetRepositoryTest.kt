@@ -263,6 +263,40 @@ class FleetRepositoryTest {
         assertTrue(gaps.all { it <= 30_000L }, "nothing waits longer than the cap: $gaps")
     }
 
+    /**
+     * The reconnect reason is a sentence written for a person, not whatever a
+     * throwable happens to carry.
+     *
+     * `explain()` exists to stop an unexpected throwable's own message walking
+     * onto the screen, and the repository used to have a second mapping —
+     * `t.message ?: t::class.simpleName` — that did exactly that. It went
+     * unnoticed while the field was never drawn; now that the banner renders
+     * it, an arbitrary library's exception text would go with it.
+     */
+    @Test
+    fun a_reconnect_reason_is_explained_rather_than_repeated() = runTest {
+        val hub = FakeHub()
+        val leaky = "Authorization: Bearer 0123456789abcdef"
+        val stream = FakeStream { throw IllegalStateException(leaky) }
+        stream.clock = this
+        val repository = repo(hub, stream, backgroundScope)
+
+        repository.start()
+        testScheduler.advanceTimeBy(1_500)
+        val status = repository.status.value
+        repository.stop()
+
+        assertTrue(status is ConnectionStatus.Reconnecting, "expected Reconnecting, got $status")
+        assertFalse(
+            status.reason.orEmpty().contains("Bearer"),
+            "an unexpected throwable's own message reached the banner: ${status.reason}",
+        )
+        assertTrue(
+            status.reason.orEmpty().contains("IllegalStateException"),
+            "it should still say what kind of failure it was: ${status.reason}",
+        )
+    }
+
     @Test
     fun the_status_flow_reports_each_reconnect_attempt() = runTest {
         val hub = FakeHub()

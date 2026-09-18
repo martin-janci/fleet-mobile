@@ -4,13 +4,18 @@ package dev.claudefleet.mobile.ui.scan
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.UIKitView
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.readValue
+import platform.AVFoundation.AVAuthorizationStatusAuthorized
+import platform.AVFoundation.AVAuthorizationStatusNotDetermined
 import platform.AVFoundation.AVCaptureConnection
 import platform.AVFoundation.AVCaptureDevice
 import platform.AVFoundation.AVCaptureDeviceInput
@@ -24,6 +29,8 @@ import platform.AVFoundation.AVLayerVideoGravityResizeAspectFill
 import platform.AVFoundation.AVMediaTypeVideo
 import platform.AVFoundation.AVMetadataMachineReadableCodeObject
 import platform.AVFoundation.AVMetadataObjectTypeQRCode
+import platform.AVFoundation.authorizationStatusForMediaType
+import platform.AVFoundation.requestAccessForMediaType
 import platform.CoreGraphics.CGRectZero
 import platform.UIKit.UIView
 import platform.darwin.NSObject
@@ -61,6 +68,43 @@ actual fun QrScannerView(
     DisposableEffect(session) {
         onDispose { if (session.isRunning()) session.stopRunning() }
     }
+
+    // Null while the answer is not yet known, which is the state the very first
+    // use is in: iOS only shows the permission sheet when the app asks.
+    //
+    // Without this the shared contract was a lie on this platform. It says
+    // `onUnavailable` fires when "the permission was refused", and
+    // [CAMERA_PERMISSION_REFUSED] exists and is kept identical across the two
+    // platforms — and the only caller was the Android actual. On iOS a denied
+    // permission does not stop `AVCaptureSession` starting: it starts, delivers
+    // nothing, and the viewfinder is simply black with no explanation and no
+    // hint that the eight characters under the QR would work.
+    var permitted by remember { mutableStateOf<Boolean?>(null) }
+
+    LaunchedEffect(Unit) {
+        when (AVCaptureDevice.authorizationStatusForMediaType(AVMediaTypeVideo)) {
+            AVAuthorizationStatusAuthorized -> permitted = true
+            AVAuthorizationStatusNotDetermined ->
+                // Asking is what shows the sheet, and the callback arrives on an
+                // arbitrary queue — assigning Compose state is safe, drawing is
+                // not, and nothing is drawn here.
+                AVCaptureDevice.requestAccessForMediaType(AVMediaTypeVideo) { granted ->
+                    permitted = granted
+                }
+            // Denied and Restricted. Restricted is a managed device and no
+            // amount of asking changes it, so both get the same sentence: the
+            // code can always be typed.
+            else -> permitted = false
+        }
+    }
+
+    LaunchedEffect(permitted) {
+        if (permitted == false) unavailable(CAMERA_PERMISSION_REFUSED)
+    }
+
+    // Nothing is composed until the answer is yes. Building the capture graph
+    // while the sheet is up would start a session that cannot see anything.
+    if (permitted != true) return
 
     UIKitView(
         modifier = modifier,

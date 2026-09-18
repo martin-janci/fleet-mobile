@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.data
 
+import dev.claudefleet.mobile.ui.explain
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
@@ -27,6 +28,12 @@ sealed interface ConnectionStatus {
      * Attempt [attempt] is pending or underway — 1 is the first connect, so a
      * screen that says "reconnecting" should read the attempt, not the name.
      * [reason] is why the last one ended, and is null before the first.
+     *
+     * [reason] is drawn by `ConnectionBanner`. It was not, for three tasks: the
+     * field was computed on every failure and read by nothing, so a person
+     * watching the app retry saw a rising counter and never what it was
+     * retrying from. It is a sentence from `explain`, not a raw throwable
+     * message, for the same reason every other string that reaches a screen is.
      */
     data class Reconnecting(val attempt: Int, val reason: String?) : ConnectionStatus
 
@@ -155,7 +162,14 @@ class FleetRepository(
                 }
                 return
             } catch (t: Throwable) {
-                reason = t.message ?: t::class.simpleName ?: STREAM_CLOSED
+                // `explain(t)`, not `t.message`. This was a SECOND
+                // throwable-to-words mapping, which is the one thing `explain`
+                // exists to prevent: an unexpected throwable's own message
+                // walking onto the screen. It mattered little while `reason`
+                // was never drawn; now that the banner shows it, it is the
+                // difference between a sentence written for a person and
+                // whatever a library author put in a constructor.
+                reason = explain(t)
             }
             failures += 1
             _status.value = ConnectionStatus.Reconnecting(failures + 1, reason)

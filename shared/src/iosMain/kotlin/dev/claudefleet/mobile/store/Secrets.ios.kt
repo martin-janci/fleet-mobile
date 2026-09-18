@@ -192,6 +192,16 @@ class KeychainSecrets(
 /**
  * The Keychain refused an operation. Carries Apple's `OSStatus` and nothing
  * else — never the value that was being stored.
+ *
+ * A [SecretsUnavailable], because that is the contract [Secrets.clear] states
+ * and the one Android already keeps. As a bare `Exception` this fell through
+ * `explain()`'s whitelist to "something went wrong (KeychainFailure)", while
+ * the identical Android failure read "the credential could not be removed" —
+ * and the case is reachable by this file's own documentation:
+ * `errSecInteractionNotAllowed` on a background wake before the device's first
+ * unlock, which is exactly the situation `AfterFirstUnlock` invites. It can
+ * make the promise honestly: the message carries an `OSStatus` and never a
+ * stored value.
  */
 class KeychainFailure(val status: Int) :
-    Exception("the iOS Keychain refused the operation (OSStatus $status)")
+    SecretsUnavailable("the iOS Keychain refused the operation (OSStatus $status)")

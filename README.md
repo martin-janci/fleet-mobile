@@ -65,8 +65,11 @@ not revoke it, it cannot revoke it, and the screen says so.
 - **Paired, then nothing loads.** The hub tells a freshly paired device which
   base URL to use, and if `hub.public_url` is not set it names its own loopback
   address, which on a phone means the phone. The app ignores an echoed loopback
-  and keeps the address it actually reached, so this should not bite — but if
-  the hub is reachable under several names, the app keeps the one in the QR.
+  and keeps the address it actually reached, so this should not bite. But note
+  which way round the rule goes: **any other valid echo wins over the address
+  in the QR.** A hub reachable under several names stores the name the hub
+  gives for itself, not the one you scanned, so set `hub.public_url` to the
+  name you want phones to use.
 - **A hub on the LAN, over plain `http://`.** Read *Transport* below before
   trying this. The short version: use HTTPS. Android blocks cleartext outright
   at this `targetSdk`, and the app now refuses plain `http` to anything that is
@@ -284,7 +287,14 @@ And the parts that need a **device or emulator on either platform**, or a
 - **`AndroidSecrets` has never executed.** `AndroidSecretsTest` exists and
   compiles into `shared-androidTest.apk`; the machine it was written on has no
   `/dev/kvm` and cannot start an emulator. The CI job that would run it has
-  never run either.
+  never run either — **and that job is `continue-on-error`, so it cannot fail
+  the build.** Read that plainly: the only test that ever executes the app's
+  secure storage is currently incapable of turning CI red. It is deliberate,
+  because a job nobody has watched pass is more likely to be red for emulator
+  reasons than for code reasons, and a first push that goes red for an
+  unreproducible reason teaches people to ignore CI. **Delete the
+  `continue-on-error` line the first time the job is seen to pass.** Until then
+  the secure store is guarded by a green tick that means nothing.
 - **The Android camera path.** Two mutations in `task-7-mutations.py` survive on
   purpose — deleting the permission request, and wiring the Scan button to
   nothing — because no headless JVM test can render a composable or grant a

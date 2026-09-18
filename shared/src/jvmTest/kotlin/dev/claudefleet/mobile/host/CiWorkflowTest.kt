@@ -65,6 +65,17 @@ class CiWorkflowTest {
     @Test
     fun ci_counts_compiler_errors_in_raw_output() {
         assertTrue("""grep -c '^e: '""" in ci, "CI must count `e:` lines in the raw Gradle output")
+
+        // And the line that turns the count into a failure. Asserting only the
+        // grep guards the *measurement* and not the *gate*: delete
+        // `test "$errors" -eq 0` and the grep, the echo and this test all stay
+        // green while CI stops failing on a broken compile. That is the whole
+        // bug this test was written to prevent, living inside the test itself.
+        val fails = """test "${'$'}errors" -eq 0"""
+        assertTrue(
+            ci.lineSequence().any { it.trim() == fails },
+            "counting the errors is not a gate unless a non-zero count fails the job",
+        )
     }
 
     /**
@@ -94,6 +105,29 @@ class CiWorkflowTest {
         assertTrue(
             "connectedAndroidDeviceTest" in ci,
             "the emulator job is the only thing that ever executes AndroidSecrets",
+        )
+    }
+
+    /**
+     * If the secure-store job cannot fail the build, the README says so.
+     *
+     * `continue-on-error` is the right call for a job nobody has watched pass —
+     * but it makes the only test that ever executes `AndroidSecrets`
+     * structurally incapable of turning CI red, and a comment in a workflow file
+     * saying "delete this line one day" is not a thing anyone reads. Either the
+     * flag goes, or the README admits the green tick means nothing. This test
+     * fails if someone silently keeps the first without the second.
+     */
+    @Test
+    fun a_secure_store_job_that_cannot_fail_is_admitted_in_the_readme() {
+        if ("continue-on-error: true" !in ci) return
+
+        // The admission, not the word: "delete the `continue-on-error` line one
+        // day" names the flag without telling anyone what it costs today.
+        val readme = Repo.file("README.md").readText()
+        assertTrue(
+            Regex("""`continue-on-error`[^.]*\bcannot\s+fail\b""").containsMatchIn(readme),
+            "the emulator job cannot fail CI and the README does not say so",
         )
     }
 }

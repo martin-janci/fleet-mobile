@@ -91,7 +91,7 @@ interface Secrets {
  * one of these: an unreadable store reads as "not paired", because that degrade
  * is recoverable and a crash on every cold start is not.
  */
-class SecretsUnavailable(message: String) : Exception(message)
+open class SecretsUnavailable(message: String) : Exception(message)
 
 // ---------------------------------------------------------------------------
 // The stored form, shared by both platform stores so the shape lives once.

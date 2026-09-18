@@ -45,7 +45,17 @@ private class FakeSecrets(
         stored = credentials
     }
 
+    /**
+     * How many times `clear()` was entered. Counted because the test that names
+     * the once-only guard could not see it: clearing an already-empty store
+     * leaves it null either way, so asserting `read() == null` passes whether
+     * the guard exists or not.
+     */
+    var clears = 0
+        private set
+
     override suspend fun clear() {
+        clears += 1
         gate?.await()
         refuseToClear?.let { throw it }
         stored = null
@@ -209,6 +219,7 @@ class SettingsViewModelTest {
         secrets.gate?.complete(Unit)
         runCurrent()
 
+        assertEquals(1, secrets.clears, "the second tap must not reach the store")
         assertNull(secrets.read())
         assertIs<AuthState.Unpaired>(session.state.value)
     }

@@ -24,14 +24,30 @@ import dev.claudefleet.mobile.data.ConnectionStatus
  */
 @Composable
 fun ConnectionBanner(status: ConnectionStatus, modifier: Modifier = Modifier) {
-    val text = when (status) {
-        is ConnectionStatus.Connected -> return
-        is ConnectionStatus.Reconnecting ->
+    val text = connectionNotice(status) ?: return
+    Notice(text, modifier)
+}
+
+/**
+ * What [ConnectionBanner] says, or null while connected. Out here rather than
+ * inside the composable because nothing in this repository can render one, and
+ * the one claim worth a test — the reconnect reason reaches the screen — is a
+ * claim about this string.
+ */
+internal fun connectionNotice(status: ConnectionStatus): String? = when (status) {
+    is ConnectionStatus.Connected -> null
+    // The reason is drawn. It used to be carried and discarded — the field
+    // existed, was computed on every failure, and no composable read it, so
+    // a person watching the app retry saw a counter going up and never what
+    // it was retrying *from*. Absent on the first attempt, where there is no
+    // previous failure to name.
+    is ConnectionStatus.Reconnecting -> {
+        val head =
             if (status.attempt <= 1) "connecting to the hub…"
             else "reconnecting to the hub (attempt ${status.attempt})…"
-        is ConnectionStatus.Offline -> status.reason
+        status.reason?.let { "$head $it" } ?: head
     }
-    Notice(text, modifier)
+    is ConnectionStatus.Offline -> status.reason
 }
 
 /** A failure a person can act on: the hub's own words, not a paraphrase. */

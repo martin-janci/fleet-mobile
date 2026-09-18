@@ -132,9 +132,20 @@ private const val MAX_ERROR_BODY = 1_000
  * **The order is the whole point, and it used to be the other way round.**
  * Capping first cuts a token that straddles the cut in half; the `replace` then
  * matches nothing, and the surviving prefix goes out verbatim. For a 64-hex
- * token cut at its last character that leaves sixteen possibilities. It is not
- * only a log line either: an `Http` failure's text reaches the reconnect banner
- * a person reads. So: scrub the whole thing, then cap what is left.
+ * token cut at its last character that leaves sixteen possibilities. So: scrub
+ * the whole thing, then cap what is left.
+ *
+ * **A correction to this comment's own reasoning.** It used to justify the
+ * order by saying an `Http` failure's text reaches the reconnect banner. That
+ * was not true when it was written — `ConnectionStatus.Reconnecting.reason` was
+ * computed and never drawn — and the claim survived because nobody checked the
+ * one composable that renders a status. It is true now, because that field was
+ * wired into the banner rather than deleted. The fix was always right on the
+ * strength of the paths that *were* live: a `Forbidden` body renders on the
+ * error banner of five screens, and the `/pair` error goes straight to the
+ * Pair screen. A right answer resting on a wrong reason is still worth
+ * correcting, because the next person prunes what the reason no longer
+ * supports.
  *
  * It is not a general sanitiser and cannot be. It removes the one secret this
  * app holds, in any letter case, which is the one a proxy's error page is liable

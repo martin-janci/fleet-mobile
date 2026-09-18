@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.net
 
+import dev.claudefleet.mobile.data.SNAPSHOT_EVENT_KINDS
 import io.ktor.client.HttpClient
 import io.ktor.client.request.header
 import io.ktor.client.request.prepareGet
@@ -205,13 +206,14 @@ class HubEventStream(
     base: String,
     private val token: String? = null,
     /**
-     * The `?kinds=` filter. Defaults to the kinds the snapshot actually applies
-     * — kept in step with `SNAPSHOT_EVENT_KINDS` in `data/FleetSnapshot.kt`,
-     * with a test on each side pinning the same pair. Subscribing to more would
-     * spend a phone's radio on frames that get dropped; to less would leave
-     * rows quietly stale.
+     * The `?kinds=` filter. Defaults to `SNAPSHOT_EVENT_KINDS` itself rather
+     * than to a second copy of its contents, which is what this was: two
+     * literals kept in step by a test on each side is a convention, not a
+     * mechanism. Subscribing to more kinds than the snapshot applies
+     * spends a phone's radio on frames that get dropped, and to fewer leaves
+     * rows quietly stale — and neither shows up until someone edits a list.
      */
-    private val kinds: List<String> = listOf("session", "host", "project"),
+    private val kinds: List<String> = SNAPSHOT_EVENT_KINDS,
 ) : EventStream {
 
     /** The hub's base URL, without a trailing slash. */

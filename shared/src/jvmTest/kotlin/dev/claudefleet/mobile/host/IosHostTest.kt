@@ -88,9 +88,13 @@ class TheIosHostInfoPlistTest {
             stringValue("NSLocalNetworkUsageDescription")?.isNotBlank() == true,
             "without a local-network purpose string iOS cannot prompt, and the connection just fails",
         )
+        // The KEY element, not the string anywhere in the file. The plist
+        // explains this key in a comment three lines above it, so a bare
+        // substring test stayed green when the key was deleted and the
+        // explanation left behind — a gate guarding its own documentation.
         assertTrue(
-            "NSAllowsLocalNetworking" in plist,
-            "App Transport Security blocks http:// to the LAN without this",
+            Regex("""<key>NSAllowsLocalNetworking</key>\s*<true\s*/>""").containsMatchIn(plist),
+            "App Transport Security blocks http:// to the LAN without this key set true",
         )
         assertTrue(
             "NSAllowsArbitraryLoads" !in plist,
