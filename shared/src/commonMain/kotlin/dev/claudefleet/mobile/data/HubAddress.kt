@@ -277,6 +277,15 @@ private fun expandIpv6(raw: String): List<Int>? {
  * An IPv6 literal whose last group is a dotted IPv4 address, rewritten with that
  * address as two hex groups. Unchanged when there is no dotted tail, null when
  * the tail is present but is not an IPv4 address.
+ *
+ * **Known gap, review N-L1:** a zone-scoped literal — `[::1%25eth0]`, the
+ * percent-encoded RFC 6874 form — is not recognised as this machine, and fails
+ * OPEN: the hub's echoed base would win. Nothing in `fleet-hub` emits a scoped
+ * loopback literal; it would take an operator configuring `hub.public_url` to
+ * one by hand. It is written down rather than fixed because the fix is to strip
+ * a `%…` suffix before parsing, and this file has been "fixed" four times by
+ * people adding one more spelling to a list. The next change here should be the
+ * normalisation, not another branch.
  */
 private fun foldIpv4Tail(host: String): String? {
     val lastColon = host.lastIndexOf(':')

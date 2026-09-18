@@ -82,6 +82,15 @@ fun Conversation.appending(fresh: Conversation): Conversation {
     // wrong place and the turns after it are kept and duplicated anyway. It also
     // dropped a genuine second turn in the same second, which is a case with a
     // test of its own.
+    //
+    // Review N-C1, the price of that: with `overlap == 0` this drops ANY held
+    // turn whose identity appears in `fresh`, including one in the middle of
+    // the held list, so held [A, B, C] against a genuinely disjoint fresh
+    // [B', D] where B' has B's identity yields [A, C, B, D] — C now precedes B.
+    // It takes two turns sharing an `(at, prompt)` across non-overlapping
+    // windows, so it is narrow, and the failure it replaced (the whole window
+    // duplicated, permanently) was worse. The trade is a possible reorder
+    // instead of a certain duplicate, and it is a trade rather than a fix.
     val kept = if (overlap == 0) {
         val arrivedIdentities = arrived.toSet()
         turns.filterIndexed { index, _ -> held[index] !in arrivedIdentities }

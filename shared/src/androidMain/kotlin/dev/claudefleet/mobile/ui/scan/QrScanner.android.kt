@@ -190,6 +190,18 @@ private class QrAnalyzer(private val onCode: (String) -> Unit) : ImageAnalysis.A
      *
      * The array is reused across frames — this runs thirty times a second and a
      * fresh megabyte each time is work the garbage collector does not need.
+     *
+     * **`pixelStride` is deliberately not read** (review N-A1). `YUV_420_888`
+     * guarantees the Y plane's pixel stride is 1, which is the whole reason the
+     * Y plane can be handed to ZXing as a luminance buffer at all; if it could
+     * be 2, every second byte here would be padding and the image would be
+     * garbage rather than merely sheared. It is written down because "the field
+     * exists and is not read" looks like an oversight, and the next person
+     * should be able to tell that it was considered.
+     *
+     * `rowStride`, by contrast, is genuinely not the width on many devices, and
+     * treating the buffer as tightly packed shears the image and silently never
+     * decodes.
      */
     private fun ImageProxy.luminanceSource(): PlanarYUVLuminanceSource? {
         val plane = planes.firstOrNull() ?: return null
@@ -199,18 +211,32 @@ private class QrAnalyzer(private val onCode: (String) -> Unit) : ImageAnalysis.A
         if (needed <= 0) return null
         if (luminance.size != needed) luminance = ByteArray(needed)
 
+        // Review N-A2: a short buffer must not leave the PREVIOUS frame's rows
+        // in the reused array. Whatever is not filled from this frame is zeroed,
+        // so a truncated frame decodes as a black band rather than as a stale
+        // image — the same failure shape as the stride bug, and the same fix:
+        // never show ZXing pixels that did not come from the frame it is
+        // looking at.
+        val filled: Int
+
         if (rowStride == width) {
-            buffer.get(luminance, 0, minOf(needed, buffer.remaining()))
+            filled = minOf(needed, buffer.remaining())
+            buffer.get(luminance, 0, filled)
         } else {
             // A padded buffer: take `width` bytes from the start of each row and
             // skip the padding.
             val row = ByteArray(rowStride)
+            var rows = 0
             for (y in 0 until height) {
-                if (buffer.remaining() < rowStride) break
-                buffer.get(row, 0, rowStride)
+                val take = minOf(rowStride, buffer.remaining())
+                if (take < width) break
+                buffer.get(row, 0, take)
                 row.copyInto(luminance, y * width, 0, width)
+                rows = y + 1
             }
+            filled = rows * width
         }
+        if (filled < needed) luminance.fill(0, filled, needed)
 
         return PlanarYUVLuminanceSource(
             luminance,

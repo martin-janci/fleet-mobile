@@ -134,6 +134,23 @@ class PairViewModel(
 
     /** One decoded QR. Called per frame; see the class comment. */
     fun onScanned(text: String) {
+        // Review S-1. A frame arriving while an attempt is already in flight is
+        // not acted on, so its key must NOT be recorded. The old order set
+        // `lastScan` first and `redeem` then returned early on `pairing`, which
+        // burned a good QR that had never been sent anywhere.
+        //
+        // The scenario is the ordinary one: the first code is spent, the
+        // operator runs `fleet-hub pair` again, and the person moves the phone
+        // to the new QR while the app is still waiting on the old one. The
+        // screen then read "no such pairing code" — true of a code nobody was
+        // pointing at any more — while the good QR in front of the lens did
+        // nothing at all, for as long as anyone cared to hold it there.
+        //
+        // This branch is the only exemption. Every *decided* outcome still
+        // burns the key, refusals included, or a QR that is not a pairing code
+        // re-reports itself thirty times a second. `redeem` says why.
+        if (_state.value.pairing) return
+
         if (text == lastScan) return
         lastScan = text
         redeem(text)

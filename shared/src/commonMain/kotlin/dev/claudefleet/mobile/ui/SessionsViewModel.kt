@@ -105,6 +105,21 @@ class SessionsViewModel(
 
     fun toggleNeedsAttentionOnly() = setNeedsAttentionOnly(!local.value.needsAttentionOnly)
 
+
+    /**
+     * Clear the banner (review N-B1).
+     *
+     * Two of five screens had one and three did not, and the three without are
+     * where an error can sit longest: a refresh that failed leaves its sentence
+     * on screen until the *next* refresh succeeds, and on a hub that is down
+     * that is never. The banner is not dangerous — the rows behind it are still
+     * the last good picture — but an error a person has read and cannot put away
+     * teaches them to stop reading the banner, which is the one thing it must
+     * not do.
+     */
+    fun dismissError() {
+        local.update { it.copy(error = null) }
+    }
     /**
      * Re-list the fleet. The rows on screen stay put if it fails — the last
      * snapshot is still the best picture there is — and the failure is shown.

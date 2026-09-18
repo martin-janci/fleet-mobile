@@ -105,6 +105,20 @@ class SessionViewModel(
     }
 
     /**
+     * Clear the banner (review N-B1).
+     *
+     * Two of five screens had a Dismiss and three did not, and the three
+     * without are where an error can sit longest: a send or a read that failed
+     * leaves its sentence on screen until the next one succeeds, and on a hub
+     * that is down that is never. The conversation behind it is still the last
+     * good picture; an error a person has read and cannot put away just teaches
+     * them to stop reading the banner, which is the one thing it must not do.
+     */
+    fun dismissError() {
+        local.update { it.copy(error = null) }
+    }
+
+    /**
      * Send what is typed, then pull the reply in.
      *
      * The box is disabled for the whole call — [SessionUiState.sending] — and a

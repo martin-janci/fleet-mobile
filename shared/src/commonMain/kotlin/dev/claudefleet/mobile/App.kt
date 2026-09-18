@@ -22,6 +22,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.backhandler.BackHandler
 import androidx.lifecycle.compose.LifecycleStartEffect
 import dev.claudefleet.mobile.data.AppSession
 import dev.claudefleet.mobile.data.AuthState
@@ -124,7 +126,14 @@ fun App(container: AppContainer) {
                 when (val state = auth) {
                     AuthState.Unknown -> Splash()
                     AuthState.Unpaired -> {
-                        justPaired = null
+                        // Not `justPaired = null` in the composable body (review
+                        // N-D1). Writing Compose state during composition happens
+                        // to converge here, because the write is idempotent once
+                        // it has landed — but it is the shape that produces
+                        // endless recomposition the moment someone makes it
+                        // conditional, and it costs nothing to say it in an
+                        // effect instead.
+                        LaunchedEffect(state) { justPaired = null }
                         PairRoute(container) { justPaired = it }
                     }
                     is AuthState.Paired -> {
@@ -187,6 +196,11 @@ private fun PairRoute(container: AppContainer, onPaired: (PairedHub) -> Unit) {
  * to the foreground re-subscribes and redraws the fleet as it was last seen,
  * with the refetch on `ready` filling in what changed while the app was away.
  */
+// `BackHandler` is `@ExperimentalComposeUiApi` in Compose Multiplatform 1.12.
+// Opted in here, on the one function that uses it, rather than repo-wide: the
+// opt-in is a promise to re-read this call when Compose changes the API, and a
+// module-level `freeCompilerArgs` entry is a promise nobody is reminded of.
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     val scope = rememberCoroutineScope()
@@ -199,6 +213,20 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     val nav = remember(credentials) { Navigator() }
     val screen by nav.screen.collectAsState()
     val tab by nav.tab.collectAsState()
+
+    // Review S-3. `Navigator.back()` returns false on a tab specifically so the
+    // platform can have the gesture instead, `NavigatorTest` pins that, and a
+    // mutation guards it — and until now the only caller was the Back *button*
+    // on the session bar, which discards the Boolean. There was no `BackHandler`
+    // anywhere in the repository, so the system back gesture out of an open
+    // session did not return to the list: it finished the activity and left the
+    // app. A designed, documented, tested contract wired to nothing.
+    //
+    // `enabled` is the whole of the contract in one expression: on a session the
+    // app handles back, and on a tab it does not, which lets Android close the
+    // app and iOS do whatever it does with an unclaimed swipe. That is why the
+    // return value still does not need reading here.
+    BackHandler(enabled = screen is Screen.Session) { nav.back() }
 
     val sessions = remember(repository, scope) { SessionsViewModel(repository, scope) }
     val hosts = remember(repository, scope) { HostsViewModel(repository, scope) }
@@ -229,6 +257,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         onOpenSession = nav::open,
                         onToggleNeedsAttention = sessions::toggleNeedsAttentionOnly,
                         onRefresh = { sessions.refresh() },
+                        onDismissError = sessions::dismissError,
                     )
                 }
                 is Screen.Session -> SessionRoute(
@@ -240,7 +269,11 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                 )
                 Screen.Hosts -> {
                     val state by hosts.state.collectAsState()
-                    HostsScreen(state = state, onRefresh = { hosts.refresh() })
+                    HostsScreen(
+                        state = state,
+                        onRefresh = { hosts.refresh() },
+                        onDismissError = hosts::dismissError,
+                    )
                 }
                 Screen.Settings -> {
                     val state by settings.state.collectAsState()
@@ -287,5 +320,6 @@ private fun SessionRoute(
         onSend = { vm.send() },
         onRefresh = { vm.refresh() },
         onBack = onBack,
+        onDismissError = vm::dismissError,
     )
 }

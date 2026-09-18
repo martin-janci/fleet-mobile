@@ -156,6 +156,36 @@ class SessionViewModelTest {
         assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error)
     }
 
+
+    /**
+     * Review N-B1: the banner can be put away.
+     *
+     * It could not be, on three of the five screens. A failed call left its
+     * sentence on screen until the next one succeeded, and on a hub that is
+     * down that is never — an error a person has read and cannot dismiss is how
+     * people learn to stop reading the banner.
+     */
+    @Test
+    fun a_failure_can_be_dismissed_without_the_conversation_going_with_it() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "a")))
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        actions.readFails = HubError.Tool("E_NOTFOUND", "session 42 is gone")
+        vm.refresh().join()
+        runCurrent()
+        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error)
+
+        vm.dismissError()
+        // The screen's state is assembled from `local` and the fleet flows by a
+        // `combine(...).stateIn(...)`, so the new value lands on the next turn
+        // of the test dispatcher rather than inside `dismissError`.
+        runCurrent()
+
+        assertNull(vm.state.value.error)
+        assertEquals(listOf("t1"), vm.state.value.conversation.turns.map { it.at }, "the turns stay")
+    }
+
     @Test
     fun the_prompt_box_is_disabled_while_the_prompt_is_in_flight() = runTest {
         val actions = FakeActions()

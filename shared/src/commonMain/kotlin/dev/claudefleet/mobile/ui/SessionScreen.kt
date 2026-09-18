@@ -52,12 +52,13 @@ fun SessionScreen(
     onSend: () -> Unit,
     onRefresh: () -> Unit,
     onBack: () -> Unit,
+    onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         SessionBar(state = state, onBack = onBack, onRefresh = onRefresh)
         ConnectionBanner(status)
-        ErrorBanner(state.error)
+        ErrorBanner(state.error, onDismiss = onDismissError)
 
         val turns = state.conversation.turns
         val listState = rememberLazyListState()
@@ -68,7 +69,18 @@ fun SessionScreen(
         // scrolled up reading, and it keyed on `turns.size`, so the live bottom
         // turn growing — the usual case, since the agent appends items to it
         // while it works — did not scroll at all.
-        val atBottom by remember(listState) {
+        //
+        // Review S-2: the key has to include `newest`. `remember(listState)`
+        // alone allocated the lambda once and closed over the `newest` of the
+        // FIRST composition — which is null, because `SessionRoute` composes
+        // this with `SessionUiState`'s initial empty `Conversation` and only
+        // then runs `vm.load()`. `newest == null` is the second disjunct, so
+        // `atBottom` was permanently true and the effect below fired
+        // unconditionally: exactly the behaviour it was written to replace.
+        // `listState` comes from `rememberLazyListState()` and never changes, so
+        // the key could never have invalidated on its own. The off-by-one half
+        // of S1 worked; this half was dead code that read like a fix.
+        val atBottom by remember(listState, newest) {
             derivedStateOf {
                 val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()
                 last == null || newest == null || last.index >= newest - 1

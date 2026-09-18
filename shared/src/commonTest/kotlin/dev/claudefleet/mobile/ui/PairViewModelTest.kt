@@ -389,6 +389,81 @@ class PairViewModelTest {
         assertNotNull(vm.state.value.paired)
     }
 
+    /**
+     * Review S-1. The test above completes the gate with a **success**, so the
+     * code it swallowed is never wanted again and the hole is invisible. This
+     * one refuses the first code, which is the ordinary case: the first QR is
+     * spent or expired, the operator prints another, and the person moves the
+     * phone to it while the app is still waiting on the old one.
+     *
+     * The second code must reach the hub. Before the fix it never did — its key
+     * was recorded by `onScanned` before `redeem` decided it would not act, and
+     * `if (text == lastScan) return` then dropped it forever. Recovery was to
+     * type the code or to have a third QR printed.
+     */
+    @Test
+    fun a_code_seen_during_an_attempt_that_then_fails_is_still_sent() = runTest {
+        val auth = FakeAuth()
+        auth.gate = CompletableDeferred()
+        auth.failWith = HubError.Tool("E_NOT_FOUND", "no such pairing code")
+        val vm = PairViewModel(auth, backgroundScope, cameraAvailable = true)
+
+        vm.onScanned(PAIR_URL)
+        runCurrent()
+        assertTrue(vm.state.value.pairing)
+
+        // The camera sees the new QR while the old attempt is still open. The
+        // app is right not to send it yet — one attempt at a time — but it must
+        // not throw the code away.
+        val second = "$HUB/pair#ZZZZ9999"
+        vm.onScanned(second)
+        runCurrent()
+        assertEquals(1, auth.pairs.size, "one attempt at a time")
+
+        auth.gate?.complete(Unit)
+        runCurrent()
+        assertEquals(1, auth.pairs.size)
+        assertNotNull(vm.state.value.error, "the first code was refused")
+
+        // Still pointed at the new QR, thirty frames later.
+        auth.failWith = null
+        repeat(30) { vm.onScanned(second) }
+        runCurrent()
+
+        assertEquals(
+            listOf(PAIR_URL, second),
+            auth.pairs.map { it.first },
+            "the code seen during the failed attempt must be sent, exactly once",
+        )
+        assertNotNull(vm.state.value.paired)
+    }
+
+    /**
+     * And the burn still happens for the reasons it exists.
+     *
+     * `redeem` also returns null for input that is not a pairing code and for
+     * one that names no hub, and those must keep recording the key: a camera
+     * pointed at a QR for a Wi-Fi network would otherwise re-report it thirty
+     * times a second, replacing the error with an identical error forever. Only
+     * the "an attempt is already in flight" branch may leave `lastScan` alone.
+     */
+    @Test
+    fun a_qr_that_is_not_a_pairing_code_is_still_only_reported_once() = runTest {
+        val auth = FakeAuth()
+        val vm = PairViewModel(auth, backgroundScope, cameraAvailable = true)
+        var reports = 0
+
+        repeat(30) {
+            vm.onScanned("WIFI:S=coffeeshop;T=WPA;P=hunter2;;")
+            if (vm.state.value.error != null) reports += 1
+            vm.dismissError()
+        }
+        runCurrent()
+
+        assertEquals(1, reports, "a QR that is not a pairing code is reported once")
+        assertEquals(0, auth.pairs.size, "and never sent anywhere")
+    }
+
     @Test
     fun a_scan_after_pairing_succeeded_does_nothing() = runTest {
         val auth = FakeAuth()

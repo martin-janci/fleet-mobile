@@ -236,6 +236,34 @@ class SessionsViewModelTest {
         assertEquals(1, state.groups.sumOf { it.sessionCount })
     }
 
+
+    /**
+     * Review N-B1: the banner can be put away.
+     *
+     * It could not be, on three of the five screens. A failed call left its
+     * sentence on screen until the next one succeeded, and on a hub that is
+     * down that is never — an error a person has read and cannot dismiss is how
+     * people learn to stop reading the banner.
+     */
+    @Test
+    fun a_failure_can_be_dismissed_without_the_rows_going_with_it() = runTest {
+        val fleet = FakeFleet(rows = listOf(session(1)))
+        fleet.failWith = HubError.Tool("E_NOTFOUND", "no such session")
+        val vm = SessionsViewModel(fleet, backgroundScope)
+        vm.refresh().join()
+        runCurrent()
+        assertEquals("E_NOTFOUND: no such session", vm.state.value.error)
+
+        vm.dismissError()
+        // The screen's state is assembled from `local` and the fleet flows by a
+        // `combine(...).stateIn(...)`, so the new value lands on the next turn
+        // of the test dispatcher rather than inside `dismissError`.
+        runCurrent()
+
+        assertNull(vm.state.value.error)
+        assertEquals(1, vm.state.value.groups.sumOf { it.sessionCount }, "the rows stay")
+    }
+
     @Test
     fun a_refresh_is_marked_in_flight_until_it_returns() = runTest {
         val fleet = FakeFleet(rows = listOf(session(1)))

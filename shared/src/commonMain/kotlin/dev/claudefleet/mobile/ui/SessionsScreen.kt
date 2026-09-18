@@ -42,6 +42,7 @@ fun SessionsScreen(
     onOpenSession: (Long) -> Unit,
     onToggleNeedsAttention: () -> Unit,
     onRefresh: () -> Unit,
+    onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -53,7 +54,7 @@ fun SessionsScreen(
             onRefresh = onRefresh,
         )
         ConnectionBanner(state.status)
-        ErrorBanner(state.error)
+        ErrorBanner(state.error, onDismiss = onDismissError)
 
         if (state.isEmpty) {
             EmptyFleet(needsAttentionOnly = state.needsAttentionOnly)

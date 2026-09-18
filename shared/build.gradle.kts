@@ -92,6 +92,12 @@ kotlin {
             api(libs.compose.foundation)
             api(libs.compose.material3)
             api(libs.compose.ui)
+            // The system back gesture. `BackHandler` is multiplatform in Compose
+            // 1.12 and published for both iOS targets as well as Android, so
+            // `FleetRoute` handles back once rather than once per platform.
+            // Already on the runtime classpath through material3; declaring it
+            // makes the package visible to commonMain and costs no APK bytes.
+            api(libs.compose.ui.backhandler)
 
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)

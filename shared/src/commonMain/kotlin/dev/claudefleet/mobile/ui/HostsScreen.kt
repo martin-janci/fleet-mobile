@@ -37,6 +37,7 @@ import dev.claudefleet.mobile.ui.components.ErrorBanner
 fun HostsScreen(
     state: HostsUiState,
     onRefresh: () -> Unit,
+    onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -53,7 +54,7 @@ fun HostsScreen(
             }
         }
         ConnectionBanner(state.status)
-        ErrorBanner(state.error)
+        ErrorBanner(state.error, onDismiss = onDismissError)
 
         if (state.isEmpty) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

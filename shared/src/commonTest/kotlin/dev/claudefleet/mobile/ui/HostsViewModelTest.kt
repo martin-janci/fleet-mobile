@@ -178,6 +178,35 @@ class HostsViewModelTest {
         assertFalse(vm.state.value.refreshing)
     }
 
+
+    /**
+     * Review N-B1: the banner can be put away.
+     *
+     * It could not be, on three of the five screens. A failed refresh left its
+     * sentence on screen until the next refresh succeeded, and on a hub that is
+     * down that is never — an error a person has read and cannot dismiss is how
+     * people learn to stop reading the banner.
+     */
+    @Test
+    fun a_failure_can_be_dismissed_without_the_rows_going_with_it() = runTest {
+        val fleet = FakeFleetForHosts(hostRows = listOf(HostRow("box")))
+        fleet.failWith = HubError.Tool("E_TIMEOUT", "list_hosts timed out")
+        val vm = HostsViewModel(fleet, backgroundScope)
+        runCurrent()
+        vm.refresh()
+        runCurrent()
+        assertNotNull(vm.state.value.error)
+
+        vm.dismissError()
+        // The screen's state is assembled from `local` and the fleet flows by a
+        // `combine(...).stateIn(...)`, so the new value lands on the next turn
+        // of the test dispatcher rather than inside `dismissError`.
+        runCurrent()
+
+        assertNull(vm.state.value.error)
+        assertEquals(listOf("box"), vm.state.value.hosts.map { it.alias }, "the rows stay")
+    }
+
     @Test
     fun the_spinner_runs_for_as_long_as_the_refresh_does() = runTest {
         val fleet = FakeFleetForHosts(hostRows = listOf(HostRow("box")))

@@ -37,6 +37,13 @@ android-targetSdk = "35"
 compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose-multiplatform" }
 compose-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "compose-multiplatform" }
 compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "compose-multiplatform" }
+# The multiplatform BackHandler (`androidx.compose.ui.backhandler`), published
+# separately from `ui`. Measured, not assumed: it is ALREADY on the runtime
+# classpath — `material3` 1.9.1 depends on `ui-backhandler` 1.9.1, which the
+# atomic-group constraint lifts to 1.12.0 — so declaring it adds nothing to the
+# APK (byte-identical at 20,294,236 B before and after) and only makes the
+# package visible to `commonMain`.
+compose-ui-backhandler = { module = "org.jetbrains.compose.ui:ui-backhandler", version.ref = "compose-multiplatform" }
 compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "compose-material3" }
 
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
