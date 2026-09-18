@@ -8,6 +8,7 @@ coroutines = "1.11.0"
 serialization = "1.11.0"
 ktor = "3.6.0"
 androidx-activity-compose = "1.13.0"
+androidx-security-crypto = "1.1.0"
 
 # 37 is forced by the current stable AndroidX/Compose/OkHttp artifacts, which
 # refuse a lower compileSdk. targetSdk stays at 35: the app is not yet tested
@@ -34,6 +35,7 @@ ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
 ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }
 
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity-compose" }
+androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "androidx-security-crypto" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

@@ -65,6 +65,9 @@ kotlin {
 
         androidMain.dependencies {
             implementation(libs.ktor.client.okhttp)
+            // EncryptedSharedPreferences, and the Keystore-backed master key
+            // behind it. See `store/Secrets.android.kt` for the deprecation.
+            implementation(libs.androidx.security.crypto)
         }
 
         iosMain.dependencies {
