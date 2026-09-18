@@ -25,9 +25,19 @@ class CiWorkflowTest {
      */
     @Test
     fun ci_runs_the_whole_build() {
+        // Commands only. This test used to search the whole file, and the step
+        // is *named* `./gradlew build`, so replacing the command underneath it
+        // with two task names left the test passing — found by mutation P, which
+        // is the entire reason for running mutations against one's own gates.
+        val commands = ci.lineSequence()
+            .filterNot { it.trimStart().startsWith("- name:") }
+            .filterNot { it.trimStart().startsWith("name:") }
+            .filter { "./gradlew" in it }
+            .toList()
+
         assertTrue(
-            Regex("""\./gradlew build\b""").containsMatchIn(ci),
-            "CI must run `./gradlew build` — a pair of task names does not compile the iOS targets",
+            commands.any { Regex("""\./gradlew build(\s|$)""").containsMatchIn(it) },
+            "CI must run `./gradlew build` — a pair of task names does not compile the iOS targets; found $commands",
         )
     }
 
