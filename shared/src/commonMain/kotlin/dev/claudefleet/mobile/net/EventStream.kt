@@ -21,9 +21,10 @@ import kotlinx.serialization.json.long
 /**
  * One server-sent-event frame: the `event:` name and the joined `data:` lines.
  *
- * Both halves matter here, which is why [extractJsonRpcPayload] cannot serve —
- * it takes a finished response body, returns the first frame only, and throws
- * the name away.
+ * Both halves are kept. The reader this replaced took a finished response body,
+ * returned the first frame only and threw the name away, which is exactly the
+ * two things a change stream needs — and, as it turned out, one thing a
+ * *request* needs too, since the first frame is not necessarily the reply.
  */
 internal data class SseFrame(val event: String?, val data: String)
 
@@ -75,6 +76,15 @@ internal class SseFrameReader {
         }
         return null
     }
+
+    /**
+     * The frame left buffered when the input ran out, for a **complete response
+     * body** that ended without its terminating blank line.
+     *
+     * The live stream must not call this: there, a partial frame means the
+     * connection was cut mid-payload, and half a JSON object is not a fact.
+     */
+    fun flush(): SseFrame? = dispatch()
 
     private fun dispatch(): SseFrame? {
         if (!hasData) {
@@ -154,6 +164,21 @@ private fun JsonObject?.text(key: String): String? =
     (this?.get(key) as? JsonPrimitive)?.takeUnless { it is JsonNull }?.content
 
 /**
+ * Every frame in a **complete** response body, in order and with its name.
+ *
+ * The request-scoped counterpart to the live reader above, sharing the same
+ * framing so there is one implementation of it. The difference is the tail: a
+ * response body that ends without its terminating blank line still carries a
+ * whole frame, where the same thing on a live stream means a cut connection.
+ */
+internal fun sseFrames(raw: String): List<SseFrame> {
+    val reader = SseFrameReader()
+    val frames = raw.lineSequence().mapNotNull(reader::accept).toMutableList()
+    reader.flush()?.let(frames::add)
+    return frames
+}
+
+/**
  * A subscription to one hub's change stream.
  *
  * An interface so the repository's reconnect policy can be tested without a
@@ -203,7 +228,7 @@ class HubEventStream(
                 if (token != null) header(HttpHeaders.Authorization, "Bearer $token")
             }.execute { response ->
                 val status = response.status.value
-                if (status !in 200..299) throwForStatus(status, response.bodyAsText(), base)
+                if (status !in 200..299) throwForStatus(status, response.bodyAsText(), base, token)
                 val body = response.bodyAsChannel()
                 val reader = SseFrameReader()
                 while (true) {
@@ -228,13 +253,18 @@ class HubEventStream(
  * Turn a response status into the one closed set the app branches on.
  *
  * Shared by [HubClient] and [HubEventStream] so that a 401 on the stream and a
- * 401 on a tool call cannot come to mean different things.
+ * 401 on a tool call cannot come to mean different things — and so that the
+ * scrubbing below happens in one place rather than at each call site. [secret]
+ * is this client's bearer token, which is what a proxy's error page is liable
+ * to quote back at us.
  */
-internal fun throwForStatus(status: Int, body: String, hub: String) {
+internal fun throwForStatus(status: Int, body: String, hub: String, secret: String? = null) {
     when {
-        status == 401 -> throw HubError.Unauthorized(body)
-        status == 403 -> throw HubError.Forbidden(body, hub)
+        // The 401 body does not come in at all: nothing reads it, and it is the
+        // single most likely place for the token to be echoed. See [Unauthorized].
+        status == 401 -> throw HubError.Unauthorized()
+        status == 403 -> throw HubError.Forbidden(redacted(body, secret), hub)
         status in 200..299 -> Unit
-        else -> throw HubError.Http(status, body)
+        else -> throw HubError.Http(status, redacted(body, secret))
     }
 }

@@ -34,6 +34,7 @@ import platform.CoreFoundation.kCFTypeDictionaryValueCallBacks
 import platform.Security.SecItemAdd
 import platform.Security.SecItemCopyMatching
 import platform.Security.SecItemDelete
+import platform.Security.errSecItemNotFound
 import platform.Security.errSecSuccess
 import platform.Security.kSecAttrAccessible
 import platform.Security.kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
@@ -82,7 +83,7 @@ class KeychainSecrets(
 
     override suspend fun clear() {
         withContext(Dispatchers.Default) {
-            withQuery { query -> SecItemDelete(query) }
+            withQuery { query -> requireDeleted(SecItemDelete(query)) }
         }
     }
 
@@ -133,10 +134,29 @@ class KeychainSecrets(
         }
     }
 
+    /**
+     * A `SecItemDelete` status that means the item is gone.
+     *
+     * `errSecItemNotFound` is benign — there was nothing to delete. Anything
+     * else is not, and review finding S3 names the reachable case:
+     * `errSecInteractionNotAllowed`, when the device has not been unlocked since
+     * boot. The item is `AfterFirstUnlock` precisely so a background wake can
+     * read it, so a background wake before the *first* unlock is exactly the
+     * situation this accessibility choice invites — and a discarded status there
+     * makes `clear()` a silent no-op while `AppSession.forget()` has already
+     * published `Unpaired`.
+     */
+    private fun requireDeleted(status: Int) {
+        if (status != errSecSuccess && status != errSecItemNotFound) throw KeychainFailure(status)
+    }
+
     private fun save(value: String) {
         // Delete then add, rather than branching on whether an item exists:
         // one path, and no window where a failed update leaves the old token.
-        withQuery { query -> SecItemDelete(query) }
+        // The status is checked for the same reason `clear()` checks it: a
+        // delete that quietly failed would make the `SecItemAdd` below return
+        // `errSecDuplicateItem` and leave the *old* token in place.
+        withQuery { query -> requireDeleted(SecItemDelete(query)) }
 
         val bytes = value.encodeToByteArray()
         if (bytes.isEmpty()) return

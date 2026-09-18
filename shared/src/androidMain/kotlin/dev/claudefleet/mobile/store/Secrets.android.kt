@@ -37,37 +37,74 @@ class AndroidSecrets(
     /**
      * Built lazily and on a worker thread: creating the master key talks to the
      * Keystore, which on a cold start can take long enough to be felt.
+     *
+     * Nullable, and that is the whole of review finding S2's second half. The
+     * prefs *file* is restorable from a backup or a device-to-device transfer;
+     * the Keystore master key that decrypts it is not. On a device that has been
+     * restored, `create` (or the first `getString`) throws
+     * `AEADBadTagException` / `InvalidProtocolBufferException`, and
+     * `AppSession.restore()` has no catch — so the app would have crashed on
+     * every cold start with no way out but a reinstall. An unreadable store is
+     * treated as an empty one, which is the same degrade `decodeCredentials`
+     * already makes for an unreadable *value*.
      */
     @Suppress("DEPRECATION")
-    private val prefs: SharedPreferences by lazy {
-        val masterKey = MasterKey.Builder(appContext)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            appContext,
-            fileName,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
+    private val prefs: SharedPreferences? by lazy {
+        try {
+            val masterKey = MasterKey.Builder(appContext)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
+                appContext,
+                fileName,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+        } catch (_: Exception) {
+            // Deliberately no logging and no rethrow: the exception carries the
+            // store's identity, and there is nothing the person can do with it.
+            null
+        }
     }
 
     override suspend fun read(): Credentials? = withContext(Dispatchers.IO) {
-        decodeCredentials(prefs.getString(KEY_CREDENTIALS, null))
+        val store = prefs ?: return@withContext null
+        val stored = try {
+            store.getString(KEY_CREDENTIALS, null)
+        } catch (_: Exception) {
+            // The file opened but this entry will not decrypt: same degrade.
+            null
+        }
+        decodeCredentials(stored)
     }
 
     override suspend fun write(credentials: Credentials) {
         withContext(Dispatchers.IO) {
+            val store = prefs ?: throw SecretsUnavailable("the secure store could not be opened")
             // `commit`, not `apply`: `write` is a suspending function whose
             // caller is entitled to believe the credential is on disk when it
             // returns. `apply` would return before the write landed.
-            prefs.edit().putString(KEY_CREDENTIALS, credentials.encode()).commit()
+            //
+            // And the result is checked (review S3): a discarded `false` here
+            // means `pair()` returns, publishes `Paired`, and the credential is
+            // gone at the next launch with nothing having said so.
+            val wrote = store.edit().putString(KEY_CREDENTIALS, credentials.encode()).commit()
+            if (!wrote) throw SecretsUnavailable("the credential could not be written")
         }
     }
 
     override suspend fun clear() {
         withContext(Dispatchers.IO) {
-            prefs.edit().remove(KEY_CREDENTIALS).commit()
+            // A store that will not open holds nothing this app can read, so
+            // there is nothing to forget and nothing to fail about.
+            val store = prefs ?: return@withContext
+            // The mirror image, and the worse one: a discarded `false` leaves
+            // the token on disk while `AppSession.forget()` has already
+            // published `Unpaired`, so the next cold start silently pairs the
+            // app again with a credential the operator believes was forgotten.
+            val cleared = store.edit().remove(KEY_CREDENTIALS).commit()
+            if (!cleared) throw SecretsUnavailable("the credential could not be removed")
         }
     }
 

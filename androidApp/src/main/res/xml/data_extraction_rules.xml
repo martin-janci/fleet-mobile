@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ (API 31) backup and device-to-device transfer rules.
+
+  Both are empty on purpose. The only thing this app persists is the hub
+  credential, in `EncryptedSharedPreferences` — and the master key that decrypts
+  that file lives in the Keystore, which is *not* restorable with it. So a
+  restored copy is two bad things at once: a credential outside the device it
+  was issued to, and a file the app cannot open, which used to crash it on every
+  cold start.
+
+  `android:allowBackup="false"` in the manifest covers Auto Backup on older
+  releases; from API 31 these rules are what govern cloud backup and D2D
+  transfer, and `allowBackup` alone does not stop the transfer.
+
+  The iOS side reaches the same place through
+  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>

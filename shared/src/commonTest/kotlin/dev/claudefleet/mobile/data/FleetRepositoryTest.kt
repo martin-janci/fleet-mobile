@@ -268,9 +268,16 @@ class FleetRepositoryTest {
 
         assertTrue(status is ConnectionStatus.Reconnecting, "expected Reconnecting, got $status")
         assertEquals(4, status.attempt, "three failures so far, so the fourth attempt is pending")
+        // The banner names the failure's *type*, not its text: `HubError.Transport`
+        // stopped repeating `cause.message` when it turned out that a truncated
+        // pair reply put the bearer token in it. See `TokenNeverLeaksTest`.
         assertTrue(
+            status.reason.orEmpty().contains("RuntimeException"),
+            "the banner should still say what kind of failure it was: ${status.reason}",
+        )
+        assertFalse(
             status.reason.orEmpty().contains("connection reset"),
-            "the banner should say why: ${status.reason}",
+            "and must not repeat the cause's own text: ${status.reason}",
         )
     }
 

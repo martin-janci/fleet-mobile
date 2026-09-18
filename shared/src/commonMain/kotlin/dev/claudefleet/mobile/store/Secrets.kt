@@ -72,9 +72,26 @@ interface Secrets {
     /** Replace whatever is stored. */
     suspend fun write(credentials: Credentials)
 
-    /** Forget the credential. This does *not* revoke it — that is the operator's. */
+    /**
+     * Forget the credential. This does *not* revoke it — that is the operator's.
+     *
+     * Throws [SecretsUnavailable] rather than returning quietly if the store
+     * refused: `AppSession.forget()` publishes `Unpaired` on the strength of
+     * this call, and a silent failure would leave the token on disk for the next
+     * cold start to find while the operator believes it was forgotten.
+     */
     suspend fun clear()
 }
+
+/**
+ * The secure store refused an operation that must not fail quietly.
+ *
+ * Carries a description of *what* failed and never the value involved — the
+ * same rule the platform implementations follow. A failed [Secrets.read] is not
+ * one of these: an unreadable store reads as "not paired", because that degrade
+ * is recoverable and a crash on every cold start is not.
+ */
+class SecretsUnavailable(message: String) : Exception(message)
 
 // ---------------------------------------------------------------------------
 // The stored form, shared by both platform stores so the shape lives once.

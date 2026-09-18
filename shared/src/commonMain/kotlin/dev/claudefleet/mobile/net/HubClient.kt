@@ -51,7 +51,7 @@ class HubClient(
      * self-contained exchange with exactly one reply, so the JSON-RPC `id` is
      * a constant and nothing needs correlating. Its responses keep SSE framing
      * (rmcp's `json_response = false`) so that a 15 s keep-alive keeps flowing
-     * during a long poll — hence [extractJsonRpcPayload].
+     * during a long poll — hence [jsonRpcReply].
      *
      * A tool that fails does *not* come back as a JSON-RPC error: per the MCP
      * spec it is a successful result with `isError: true`, and fleet puts the
@@ -74,9 +74,9 @@ class HubClient(
             }
         }
         val (status, body) = send("$base/mcp", json.encodeToString(JsonObject.serializer(), envelope), authenticated = true)
-        throwForStatus(status, body, base)
+        throwForStatus(status, body, base, token)
 
-        val reply = parseObject(extractJsonRpcPayload(body))
+        val reply = jsonRpcReply(body)
         (reply["error"] as? JsonObject)?.let { throw rpcError(it) }
         val result = reply["result"] as? JsonObject
             ?: throw HubError.Transport(IllegalStateException("the hub's reply had neither a result nor an error"))
@@ -111,7 +111,7 @@ class HubClient(
             buildJsonObject { put("code", code) },
         )
         val (status, text) = send("$base/pair", body, authenticated = false)
-        throwForStatus(status, text, base)
+        throwForStatus(status, text, base, token)
         return try {
             json.decodeFromString(PairResult.serializer(), text)
         } catch (e: Exception) {
@@ -185,6 +185,37 @@ class HubClient(
     }
 
     /**
+     * The JSON-RPC reply inside the hub's answer to one POST.
+     *
+     * The first frame that **carries** a reply, not merely the first frame. The
+     * old single-frame reader was safe only because rmcp's stateless mode
+     * happens to send exactly one message per POST — a property of someone
+     * else's code that nobody is holding still for us. If it ever interleaves a
+     * progress notification ahead of the response, taking frame one means taking
+     * the notification and reporting "neither a result nor an error" for a call
+     * that in fact succeeded.
+     *
+     * A server configured for plain JSON (`json_response = true`) answers the
+     * object directly, with no framing at all; both shapes are accepted, so the
+     * framing stays the server's business.
+     */
+    private fun jsonRpcReply(raw: String): JsonObject {
+        val trimmed = raw.trim()
+        if (trimmed.startsWith("{")) return parseObject(trimmed)
+        for (frame in sseFrames(raw)) {
+            val reply = try {
+                json.parseToJsonElement(frame.data) as? JsonObject
+            } catch (_: Exception) {
+                null
+            } ?: continue
+            if ("result" in reply || "error" in reply) return reply
+        }
+        throw HubError.Transport(
+            IllegalStateException("the hub's reply had neither a result nor an error"),
+        )
+    }
+
+    /**
      * The payload of a successful tool result. Fleet's tools serialize their
      * answer as JSON *inside* the first text content block; a tool that answers
      * prose (`capture_session`, `session_transcript`) puts the prose there
@@ -248,40 +279,3 @@ internal val json = Json {
 
 private fun JsonElement.asBooleanOrNull(): Boolean? =
     (this as? JsonPrimitive)?.content?.toBooleanStrictOrNull()
-
-/**
- * Pull the JSON-RPC body out of the hub's reply to **one** `POST /mcp`.
- *
- * The hub answers SSE-framed, so the body looks like
- * `event: message\ndata: {…}\n\n`, possibly preceded by `: keep-alive` comment
- * lines on a long poll. A server configured for plain JSON answers the object
- * directly; both are accepted, so the framing is the server's business.
- *
- * **Not a general SSE reader, and not reusable for `GET /events`.** It takes a
- * complete response body and returns the first frame's `data:`, discarding the
- * `event:` name — which is exactly the two things an event stream needs and
- * cannot get here. `/events` is framed the same way but must be *streamed*:
- * every frame, with its name, as it arrives. That reader belongs to the event
- * subscription and has to be written there. `SseFramingIsRequestScopedTest`
- * pins both limits so this comment cannot quietly stop being true.
- */
-internal fun extractJsonRpcPayload(raw: String): String {
-    val trimmed = raw.trim()
-    if (trimmed.isEmpty() || trimmed.startsWith("{") || trimmed.startsWith("[")) return trimmed
-    val frame = StringBuilder()
-    for (rawLine in trimmed.lineSequence()) {
-        val line = rawLine.trimEnd('\r')
-        if (line.isEmpty()) {
-            // A blank line ends a frame; the first one with a payload is the reply.
-            if (frame.isNotEmpty()) return frame.toString()
-            continue
-        }
-        // `event:`, `id:`, `retry:` and `:` comments (the keep-alives) carry
-        // nothing this client needs.
-        if (line.startsWith("data:")) {
-            if (frame.isNotEmpty()) frame.append('\n')
-            frame.append(line.removePrefix("data:").removePrefix(" "))
-        }
-    }
-    return if (frame.isNotEmpty()) frame.toString() else trimmed
-}

@@ -6,8 +6,9 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * The streaming half of the framing, which `extractJsonRpcPayload` deliberately
- * is not: every frame, in order, with its `event:` name kept.
+ * The streaming half of the framing: every frame, in order, with its `event:`
+ * name kept. `JsonRpcFramingTest` covers the request-scoped half, which shares
+ * this reader.
  *
  * The shapes here are what `axum::response::sse` actually writes for
  * `crates/fleet-core/src/mcp/events_route.rs` — `sse_event(name, payload)` is
@@ -30,7 +31,7 @@ class SseFrameReaderTest {
         assertEquals("""{"id":7}""", frames[0].data)
     }
 
-    /** The thing `extractJsonRpcPayload` cannot do: hand back more than one. */
+    /** The thing the old single-frame reader could not do: hand back more than one. */
     @Test
     fun every_frame_arrives_not_just_the_first() {
         val frames = read(

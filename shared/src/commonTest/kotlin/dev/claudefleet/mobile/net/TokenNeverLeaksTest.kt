@@ -1,0 +1,145 @@
+package dev.claudefleet.mobile.net
+
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
+import kotlinx.coroutines.test.runTest
+import kotlin.test.Test
+import kotlin.test.assertContains
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+private const val HUB = "https://fleet.example.com"
+private const val TOKEN = "tok-SECRET-value"
+
+private fun hub(body: String, status: HttpStatusCode = HttpStatusCode.OK, token: String? = TOKEN): HubClient {
+    val engine = MockEngine {
+        respond(body, status, headersOf(HttpHeaders.ContentType, "application/json"))
+    }
+    return HubClient(HttpClient(engine), HUB, token)
+}
+
+private fun okResult(payloadJson: String): String {
+    val quoted = payloadJson.replace("\\", "\\\\").replace("\"", "\\\"")
+    return "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1," +
+        "\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"$quoted\"}]}}\n\n"
+}
+
+/** Everything a failure is allowed to say, checked against the one secret. */
+private fun assertSilentAbout(secret: String, failure: Throwable) {
+    assertFalse(secret in failure.message.orEmpty(), "leaked into message: ${failure.message}")
+    assertFalse(secret in failure.toString(), "leaked into toString: $failure")
+    assertFalse(
+        generateSequence(failure.cause) { it.cause }.any { secret in it.message.orEmpty() || secret in it.toString() },
+        "leaked through the cause chain: ${failure.cause}",
+    )
+}
+
+/**
+ * Task 3 review B1 and S1. Both are the same shape: text that came off the wire,
+ * or out of a parser that quotes the wire, reaching a string a person can see.
+ *
+ * A `HubError` is what a screen shows and what a crash reporter records. The
+ * token is issued once, in exactly one response, and is never recoverable
+ * afterwards — so a failure that repeats it hands the fleet to whoever reads the
+ * screenshot.
+ */
+class TokenNeverLeaksTest {
+
+    /**
+     * B1, the reported case: kotlinx.serialization appends the *input document*
+     * to its own exception message, and the hub writes `token` as the first
+     * field of the pair reply. A body cut short — a dropped connection, a proxy
+     * buffer limit, a captive portal — is enough.
+     */
+    @Test
+    fun a_truncated_pair_reply_never_repeats_the_token() = runTest {
+        val truncated = """{"token":"$TOKEN","name":"phone","""
+
+        val failure = assertFailsWith<HubError.Transport> { hub(truncated, token = null).pair("ABCD1234") }
+
+        assertSilentAbout(TOKEN, failure)
+        assertTrue(failure.message.orEmpty().isNotBlank(), "silence is not the same as saying nothing")
+    }
+
+    /** The same hole, reached through a trailing comma rather than a cut. */
+    @Test
+    fun a_malformed_pair_reply_never_repeats_the_token_either() = runTest {
+        val malformed = """{"token":"$TOKEN","name":"phone",}"""
+
+        assertSilentAbout(TOKEN, assertFailsWith<HubError.Transport> { hub(malformed, token = null).pair("X") })
+    }
+
+    /** Not confined to pairing: every tool payload goes down the same path. */
+    @Test
+    fun a_tool_payload_that_fails_to_decode_is_not_quoted_back() = runTest {
+        val body = okResult("""[{"id":"not-a-number","last_prompt":"$TOKEN"}]""")
+
+        assertSilentAbout(TOKEN, assertFailsWith<HubError.Transport> { hub(body).listSessions() })
+    }
+
+    /** A failure still has to be diagnosable — the type survives, the text does not. */
+    @Test
+    fun a_transport_failure_still_names_what_kind_of_failure_it_was() = runTest {
+        val failure = assertFailsWith<HubError.Transport> { hub("""{"token":"$TOKEN",""", token = null).pair("X") }
+
+        assertTrue(failure.kind.isNotBlank())
+        assertContains(failure.message.orEmpty(), failure.kind)
+    }
+
+    /**
+     * S1. fleet's own 401 is bare, but the design puts Caddy in front, and
+     * oauth2-proxy, nginx `auth_request` and most WAFs render an error page that
+     * quotes the offending header.
+     */
+    @Test
+    fun a_401_body_that_echoes_the_authorization_header_never_reaches_the_error() = runTest {
+        val proxyPage = "401: Bearer $TOKEN rejected by the identity provider"
+
+        val failure = assertFailsWith<HubError.Unauthorized> {
+            hub(proxyPage, HttpStatusCode.Unauthorized).listSessions()
+        }
+
+        assertSilentAbout(TOKEN, failure)
+    }
+
+    /** Same for the 502 page, which `Http` does have to show something of. */
+    @Test
+    fun an_http_error_body_has_the_token_scrubbed_out_of_it() = runTest {
+        val proxyPage = "<html>upstream rejected Authorization: Bearer $TOKEN</html>"
+
+        val failure = assertFailsWith<HubError.Http> {
+            hub(proxyPage, HttpStatusCode.BadGateway).listSessions()
+        }
+
+        assertSilentAbout(TOKEN, failure)
+        // The rest of the page is exactly what an operator needs, so it stays.
+        assertContains(failure.body, "upstream rejected")
+        assertContains(failure.body, "redacted")
+    }
+
+    /** A proxy that answers with a megabyte of HTML must not become the message. */
+    @Test
+    fun a_very_long_error_body_is_capped() = runTest {
+        val huge = "x".repeat(50_000)
+
+        val failure = assertFailsWith<HubError.Http> { hub(huge, HttpStatusCode.BadGateway).listSessions() }
+
+        assertTrue(failure.body.length < 2_000, "body was ${failure.body.length} chars")
+    }
+
+    /** The hub's own 404 for a spent pairing code still says why. */
+    @Test
+    fun a_body_with_no_secret_in_it_is_passed_through_unchanged() = runTest {
+        val failure = assertFailsWith<HubError.Http> {
+            hub("""{"error":"invalid code"}""", HttpStatusCode.NotFound, token = null).pair("ABCD1234")
+        }
+
+        assertContains(failure.body, "invalid code")
+        assertFalse("redacted" in failure.body)
+    }
+}

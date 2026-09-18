@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.data
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.store.Credentials
 import dev.claudefleet.mobile.store.Secrets
+import dev.claudefleet.mobile.store.SecretsUnavailable
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -105,6 +106,31 @@ class PairTargetTest {
         assertEquals(
             PairTarget("http://10.0.0.4:8899", "ABCD1234"),
             PairTarget.parse("http://10.0.0.4:8899/pair/#ABCD1234"),
+        )
+    }
+
+    /**
+     * Task 3 review S5. `HubBase::public` refuses this shape on the hub side —
+     * "credentials (user@) are not allowed" (`service/hub.rs`) — because the
+     * value ends up in hook blocks, logs and `serve` output. The phone must
+     * refuse it for the same reason and one more: `Credentials.hub` is printed
+     * **unredacted** by `Credentials.toString()`, so a crafted QR would route
+     * the app through an attacker's host *and* put `user:pw@` in every log line
+     * that prints the auth state.
+     */
+    @Test
+    fun a_pair_url_carrying_userinfo_is_refused() {
+        assertNull(PairTarget.parse("https://user:pw@hub.example.com/pair#ABCD1234"))
+        assertNull(PairTarget.parse("https://user@hub.example.com/pair#ABCD1234"))
+        assertNull(PairTarget.parse("https://user:pw@hub.example.com:8899/fleet/pair#ABCD1234"))
+    }
+
+    /** An `@` after the authority is a path, not userinfo, and is nobody's business. */
+    @Test
+    fun an_at_sign_further_along_the_url_is_not_userinfo() {
+        assertEquals(
+            PairTarget("https://hub.example.com/a@b", "ABCD1234"),
+            PairTarget.parse("https://hub.example.com/a@b/pair#ABCD1234"),
         )
     }
 
@@ -214,6 +240,46 @@ class AppSessionTest {
         assertEquals("https://10.0.0.4:8899", secrets.read()?.hub)
     }
 
+    /**
+     * Task 3 review S4. The hub's own `HubBase::loopback` only ever emits
+     * `http://127.0.0.1:{port}`, so the shipped default was covered — but
+     * `HubBase::public` (`service/hub.rs:49-104`) validates scheme, userinfo,
+     * whitespace, path and port and then **accepts `0.0.0.0` and `[::]`**. An
+     * operator who pastes the bind address into `hub.public_url` is the same
+     * operator this rule exists to protect, and the echo wins every time, so
+     * re-pairing never recovers.
+     */
+    @Test
+    fun every_address_that_means_this_machine_loses_to_the_one_that_was_reached() = runTest {
+        val meansThisMachine = listOf(
+            "http://127.0.0.1:8899",
+            "http://127.1:8899",
+            "http://localhost:8899",
+            "http://LOCALHOST:8899",
+            "http://[::1]:8899",
+            "http://0.0.0.0:8899",
+            "http://[::]:8899",
+            "http://[0:0:0:0:0:0:0:1]:8899",
+            "http://[::ffff:127.0.0.1]:8899",
+        )
+
+        for (echo in meansThisMachine) {
+            val (app, _, secrets) = session { pairOk(hub = echo) to HttpStatusCode.OK }
+            app.pair("https://10.0.0.4:8899/pair#$CODE")
+            assertEquals("https://10.0.0.4:8899", secrets.read()?.hub, "$echo should have lost")
+        }
+    }
+
+    /** A real address still wins, or the rule would be "always ignore the hub". */
+    @Test
+    fun an_address_that_does_not_mean_this_machine_still_wins() = runTest {
+        for (echo in listOf("https://fleet.example.com", "http://10.0.0.7:8899", "http://[2001:db8::1]:8899")) {
+            val (app, _, secrets) = session { pairOk(hub = echo) to HttpStatusCode.OK }
+            app.pair("https://10.0.0.4:8899/pair#$CODE")
+            assertEquals(echo, secrets.read()?.hub, "$echo should have won")
+        }
+    }
+
     /** A spent, unknown or expired code: one answer for all three, and nothing stored. */
     @Test
     fun a_refused_code_stores_nothing() = runTest {
@@ -277,6 +343,26 @@ class AppSessionTest {
 
         assertNull(secrets.read())
         assertIs<AuthState.Unpaired>(app.state.value)
+    }
+
+    /**
+     * Review S3 made `clear()` throw rather than fail quietly, which put the 401
+     * rule at risk: a store that refuses to forget must not swallow the refusal
+     * that made us try. The 401 is what routes the app back to Pair, and it is
+     * the news the caller needs.
+     */
+    @Test
+    fun a_store_that_refuses_to_forget_does_not_swallow_the_401() = runTest {
+        val secrets = object : Secrets by FakeSecrets(Credentials(BASE, "tok-secret-value", "phone", "full")) {
+            override suspend fun clear() = throw SecretsUnavailable("the store is sealed")
+        }
+        val (app, _, _) = session(secrets) { "" to HttpStatusCode.Unauthorized }
+        app.restore()
+
+        assertFailsWith<HubError.Unauthorized> { app.withClient { it.listSessions() } }
+
+        // And it does not claim to have forgotten what it could not forget.
+        assertIs<AuthState.Paired>(app.state.value)
     }
 
     /** Only a 401 means the credential is gone. A 403 or a flat tyre does not. */

@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.net
 
+import kotlinx.serialization.SerializationException
+
 /**
  * Every way talking to a hub can fail, as one closed set the UI can branch on.
  *
@@ -8,12 +10,33 @@ package dev.claudefleet.mobile.net
  * returns to Pair; [Forbidden] is a hub-side configuration problem the operator
  * must fix, so its body is shown verbatim; [Tool] is the hub answering a
  * question with a refusal written for a person, so it is shown as-is.
+ *
+ * **Nothing in here may repeat the bearer token.** A `HubError` is what a screen
+ * shows and what a crash reporter records, and the token is issued once, in
+ * exactly one response, and is never recoverable afterwards. Two rules keep that
+ * true and both are load-bearing: any body that came off the wire goes through
+ * [redacted] before it reaches one of these, and [Transport] never repeats its
+ * cause's text.
  */
 sealed class HubError(message: String, cause: Throwable? = null) : Exception(message, cause) {
 
-    /** `401` — the bearer token is unknown or has been revoked. */
-    data class Unauthorized(val body: String = "") :
-        HubError("the hub did not accept the credential (401)")
+    /**
+     * `401` — the bearer token is unknown or has been revoked.
+     *
+     * [detail] is the app's own words, never a response body. fleet's own 401 is
+     * bare, but the design puts a reverse proxy in front, and oauth2-proxy,
+     * nginx's `auth_request` and most WAFs render an error page that quotes the
+     * offending `Authorization` header. A 401 body is therefore the single most
+     * likely place for the token to come *back* at us, and nothing reads it —
+     * `AppSession.withClient` branches on the type — so it does not come in.
+     */
+    data class Unauthorized(val detail: String = "") :
+        HubError(
+            buildString {
+                append("the hub did not accept the credential (401)")
+                if (detail.isNotBlank()) append(": ").append(detail)
+            },
+        )
 
     /**
      * `403` — the `Host`/`Origin` the request arrived with is not on the hub's
@@ -48,14 +71,69 @@ sealed class HubError(message: String, cause: Throwable? = null) : Exception(mes
      * Any other HTTP status — `404` from a spent pairing code, `429` from the
      * pairing rate limit, a `502` from the reverse proxy.
      *
-     * Not in the design's sketch of this type, which elided the tail; added
-     * rather than folding these into [Transport] (they are answers, not
-     * failures to reach) or minting a fake `E_*` code for them.
+     * [body] has already been through [redacted]: capped, and with the token
+     * taken out of it. A 502 page from a proxy is exactly what an operator needs
+     * to see and exactly the kind of page that quotes the request's headers.
      */
     data class Http(val status: Int, val body: String) :
         HubError("the hub answered HTTP $status: $body")
 
-    /** The hub could not be reached, or answered something unintelligible. */
-    data class Transport(override val cause: Throwable) :
-        HubError("could not reach the hub: ${cause.message}", cause)
+    /**
+     * The hub could not be reached, or answered something unintelligible.
+     *
+     * Deliberately **not** a `data class`, and deliberately silent about the
+     * cause's text, both for the same reason: kotlinx.serialization appends the
+     * *input document* to its own exception message, and the hub writes `token`
+     * as the first field of the pair reply. A pair response cut short by a
+     * dropped connection or a proxy buffer was enough to put the plaintext token
+     * into `message`, into a generated `toString()`, and from there into a
+     * screenshot and a crash service.
+     *
+     * So: the message names the failure's *type* and never its text, the
+     * generated `toString()` that would have printed the cause is replaced, and
+     * a cause that quotes its input is not kept at all — otherwise a stack trace
+     * would print what the message would not.
+     *
+     * The cost is real and accepted: "could not reach the hub
+     * (SocketTimeoutException)" says less than the underlying text would. The
+     * alternative is a rule that holds only until someone wraps a new throwable
+     * that happens to quote the wire, and fails silently when they do.
+     */
+    class Transport(cause: Throwable) : HubError(transportMessage(cause), safeCause(cause)) {
+        /** The failure's type, which is all of it that is safe to repeat. */
+        val kind: String = kindOf(cause)
+
+        override fun toString(): String = "HubError.Transport(kind=$kind)"
+    }
+}
+
+private fun kindOf(cause: Throwable): String =
+    cause::class.simpleName?.takeIf { it.isNotBlank() } ?: "failure"
+
+private fun transportMessage(cause: Throwable): String =
+    "could not reach the hub (${kindOf(cause)})"
+
+/**
+ * The cause, unless keeping it would keep the wire text with it.
+ *
+ * `SerializationException` and everything under it quote the document they
+ * failed on. Dropping the cause loses a stack trace; keeping it loses the token.
+ */
+private fun safeCause(cause: Throwable): Throwable? =
+    if (generateSequence(cause) { it.cause }.any { it is SerializationException }) null else cause
+
+/** How much of a response body an error may carry. */
+private const val MAX_ERROR_BODY = 1_000
+
+/**
+ * A response body, made safe to put in a [HubError]: capped, and with [secret]
+ * — this client's bearer token — taken out of it.
+ *
+ * Every body that came off the wire goes through here. It is not a general
+ * sanitiser and cannot be: it removes the one secret this app holds, which is
+ * the one a proxy's error page is liable to echo back.
+ */
+internal fun redacted(body: String, secret: String?): String {
+    val capped = if (body.length > MAX_ERROR_BODY) body.take(MAX_ERROR_BODY) + "… (truncated)" else body
+    return if (secret.isNullOrBlank()) capped else capped.replace(secret, "<redacted>")
 }

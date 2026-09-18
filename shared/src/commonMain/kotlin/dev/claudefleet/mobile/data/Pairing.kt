@@ -98,7 +98,15 @@ data class PairTarget(val base: String?, val code: String) {
             // Everything after `://` up to the first `/` is the authority; a URL
             // with none ("https:///pair") names no hub.
             val authority = base.substringAfter("://", "").substringBefore('/')
-            return if (authority.isEmpty()) null else base
+            if (authority.isEmpty()) return null
+            // Userinfo, refused for parity with the hub's own `HubBase::public`
+            // ("credentials (user@) are not allowed"), and for one more reason
+            // here: `Credentials.hub` is the one field `Credentials.toString()`
+            // prints unredacted, so a crafted QR would both route the app
+            // through an attacker's host and put `user:pw@` in every log line
+            // that prints the auth state.
+            if ('@' in authority) return null
+            return base
         }
     }
 }

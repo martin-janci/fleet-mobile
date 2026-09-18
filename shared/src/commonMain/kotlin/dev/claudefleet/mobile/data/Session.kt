@@ -106,7 +106,17 @@ class AppSession(
         return try {
             block(HubClient(http, credentials.hub, credentials.token))
         } catch (e: HubError.Unauthorized) {
-            forget()
+            // `clear()` now throws rather than failing quietly (review S3), and
+            // that must not swallow the 401: the 401 is what routes the app back
+            // to Pair, and a store that refused to forget is the lesser problem
+            // of the two. The state deliberately stays `Paired` in that case —
+            // publishing `Unpaired` while the token is still on disk is exactly
+            // the lie S3 exists to stop.
+            try {
+                forget()
+            } catch (_: Exception) {
+                // Nothing to add: the caller is about to be told about the 401.
+            }
             throw e
         }
     }
@@ -128,18 +138,7 @@ class AppSession(
         fun preferredBase(echoed: String, reached: String): String {
             val candidate = echoed.trim().trimEnd('/')
             if (candidate.isEmpty()) return reached
-            return if (isLoopback(candidate)) reached else candidate
-        }
-
-        fun isLoopback(url: String): Boolean {
-            val authority = url.substringAfter("://", "").substringBefore('/')
-            val host = when {
-                authority.startsWith("[") -> authority.substringAfter('[').substringBefore(']')
-                else -> authority.substringBefore(':')
-            }
-            return host.equals("localhost", ignoreCase = true) ||
-                host == "::1" ||
-                host.startsWith("127.")
+            return if (isLoopbackUrl(candidate)) reached else candidate
         }
     }
 }

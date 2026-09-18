@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.net
 
+import dev.claudefleet.mobile.model.ConvItem
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -10,6 +11,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /**
@@ -97,7 +99,14 @@ class HubErrorIsAClosedSetTest {
 
         val conversation = hub.conversation(sessionId = 42)
 
-        assertEquals(1, conversation.turns.single().items.size)
+        // Review NIT N10: counting the items would have passed on an item that
+        // survived without being usable. What "survives" has to mean is that the
+        // screen can draw it and the kind is still recoverable for a bug report.
+        val item = conversation.turns.single().items.single()
+        assertIs<ConvItem.Unsupported>(item)
+        assertEquals("image", item.kind)
+        assertTrue(item.label.isNotBlank(), "an unsupported item still has to render as something")
+        assertTrue("image" in item.label, "and should say what it could not show: ${item.label}")
     }
 }
 
@@ -134,29 +143,10 @@ class ForbiddenExplainsItselfTest {
     }
 }
 
-class SseFramingIsRequestScopedTest {
-
-    /**
-     * The Task 2 report said this could be reused for `GET /events` because
-     * "`/events` is framed the same way". The framing is the same; the *reader*
-     * is not. This one stops at the first frame and throws the event name away,
-     * which is exactly the two things an event stream needs. Pinned here so
-     * Task 4 writes its own reader rather than inheriting a wrong assumption.
-     */
-    @Test
-    fun it_returns_only_the_first_frame() {
-        val stream = "event: session\ndata: {\"a\":1}\n\nevent: session\ndata: {\"a\":2}\n\n"
-
-        assertEquals("""{"a":1}""", extractJsonRpcPayload(stream))
-    }
-
-    @Test
-    fun it_discards_the_event_name() {
-        val framed = "event: session:killed\ndata: {\"id\":7}\n\n"
-
-        val payload = extractJsonRpcPayload(framed)
-
-        assertEquals("""{"id":7}""", payload)
-        assertTrue("session:killed" !in payload, "the event name is not recoverable from the result")
-    }
-}
+// `SseFramingIsRequestScopedTest` lived here. It pinned the two limits of
+// `extractJsonRpcPayload` — first frame only, event name discarded — so that
+// Task 4 would write its own reader instead of inheriting a wrong assumption.
+// Task 4 wrote one, and on the controller's ruling `call()` now uses it too, so
+// the old function is gone and with it the behaviour these tests pinned.
+// `JsonRpcFramingTest` is the replacement, and it asserts more: every frame, its
+// name, and the first frame that actually *carries* a result or an error.

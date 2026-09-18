@@ -134,13 +134,22 @@ class HubClientTest {
         assertTrue(e.message.orEmpty().contains(BASE))
     }
 
+    /**
+     * The message names the failure's *type*, never its text — see
+     * `HubError.Transport` and `TokenNeverLeaksTest`. A failure that does not
+     * quote its input still keeps its cause, so a stack trace is not lost for
+     * the ordinary network case.
+     */
     @Test
     fun a_connection_failure_becomes_transport() = runTest {
         val engine = MockEngine { throw RuntimeException("connection refused") }
         val hub = HubClient(HttpClient(engine), BASE, "tok-phone")
 
         val e = assertFailsWith<HubError.Transport> { hub.listSessions() }
-        assertEquals("connection refused", e.cause.message)
+
+        assertEquals("RuntimeException", e.kind)
+        assertTrue(e.message.orEmpty().contains("RuntimeException"))
+        assertEquals("connection refused", e.cause?.message)
     }
 
     @Test
