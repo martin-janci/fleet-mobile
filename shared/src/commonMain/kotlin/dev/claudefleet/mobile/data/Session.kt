@@ -153,6 +153,19 @@ class AppSession(
             // someone who can rewrite the pair response cannot mint a token
             // anyway. It is defence in depth on a field this app has decided
             // matters, and leaving one of three doors open reads as closed.
+            // THE ORDER OF THESE TWO LINES IS LOAD-BEARING, and the Task 6
+            // review found it undocumented. `hubBase` runs FIRST, and the only
+            // value this function can return other than `reached` is `hubBase`'s
+            // output — never `echoed` itself. That is the whole of what keeps
+            // `https://user:pw@evil.example.com` out of `Credentials.hub`, since
+            // refusing userinfo is `hubBase`'s job and not `isLoopbackUrl`'s.
+            //
+            // A rewrite that tested `isLoopbackUrl(echoed)` first and returned
+            // the raw `echoed` on the other branch would look equivalent, pass a
+            // reading, and store the password. `EchoedBaseTest` fails if it is
+            // ever written that way — including the case that names the harm,
+            // that `hub` is the one field `Credentials.toString()` prints in the
+            // clear.
             val candidate = hubBase(echoed) ?: return reached
             return if (isLoopbackUrl(candidate)) reached else candidate
         }

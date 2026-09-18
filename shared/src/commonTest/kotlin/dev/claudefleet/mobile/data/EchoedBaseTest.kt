@@ -67,6 +67,10 @@ class EchoedBaseTest {
             "https://a b",
             "https://hub.example.com?x=1",
             "https://[::1",
+            // A bracketless IPv6 literal, which without `hasUsablePort`'s
+            // colon count would parse as host `::1` port `8899`, be accepted
+            // by `hubBase`, and then not be recognised as loopback.
+            "http://::1:8899",
         )
         for (echo in refusable) {
             val (app, store) = sessionEchoing(echo)

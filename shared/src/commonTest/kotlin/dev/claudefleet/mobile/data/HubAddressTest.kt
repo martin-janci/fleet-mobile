@@ -191,6 +191,32 @@ class HubBaseTest {
         assertEquals("https://[::1]:8899", hubBase("https://[::1]:8899"))
     }
 
+    /**
+     * An IPv6 literal that has lost its brackets is not an authority.
+     *
+     * Called out by the Task 6 review as load-bearing and unprotected — the
+     * comment in `hasUsablePort` was there, but nothing pinned the branch, so
+     * deleting `if (colons > 1) return false` changed no test. It is not a
+     * tidiness rule: without it `substringAfterLast(':')` on `::1:8899` reads
+     * `8899`, calls it a valid port, and `hubBase` returns the address. It then
+     * reaches `isLoopbackUrl`, whose normalisation folds a *bracketed* IPv4 tail
+     * and does not recognise this shape — so a loopback echo would be accepted
+     * and stored, which is the fail-open case this file has now been fixed for
+     * four times. The bracketed spelling of the same address is still accepted.
+     */
+    @Test
+    fun a_bracketless_ipv6_literal_is_refused() {
+        assertNull(hubBase("http://::1:8899"))
+        assertNull(hubBase("http://::1"))
+        assertNull(hubBase("https://fe80::1"))
+        assertNull(hubBase("https://2001:db8::7f00:1:8899"))
+        // One colon is a port, and stays one.
+        assertEquals("https://hub.example.com:8899", hubBase("https://hub.example.com:8899"))
+        // And the same addresses, spelled correctly, are still addresses.
+        assertEquals("http://[::1]:8899", hubBase("http://[::1]:8899"))
+        assertEquals("https://[fe80::1]", hubBase("https://[fe80::1]"))
+    }
+
     @Test
     fun a_control_character_anywhere_is_refused() {
         assertNull(hubBase("https://evil.com\u0000.good.com"))
