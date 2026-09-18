@@ -81,7 +81,20 @@ class HubClient(
         val result = reply["result"] as? JsonObject
             ?: throw HubError.Transport(IllegalStateException("the hub's reply had neither a result nor an error"))
         if (result["isError"]?.asBooleanOrNull() == true) throw toolError(result)
-        return deserialize(payloadOf(result))
+        // Inside the try, not outside it: [HubError] claims to be the closed set
+        // every screen branches on, and a payload that does not fit the model
+        // would otherwise throw a raw SerializationException straight past them.
+        // `Transport` is the right bucket — it covers a hub that "answered
+        // something unintelligible" as well as one that could not be reached.
+        return try {
+            deserialize(payloadOf(result))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: HubError) {
+            throw e
+        } catch (t: Throwable) {
+            throw HubError.Transport(t)
+        }
     }
 
     /**
@@ -168,7 +181,7 @@ class HubClient(
     private fun throwForStatus(status: Int, body: String) {
         when {
             status == 401 -> throw HubError.Unauthorized(body)
-            status == 403 -> throw HubError.Forbidden(body)
+            status == 403 -> throw HubError.Forbidden(body, base)
             status in 200..299 -> Unit
             else -> throw HubError.Http(status, body)
         }
@@ -246,12 +259,20 @@ private fun JsonElement.asBooleanOrNull(): Boolean? =
     (this as? JsonPrimitive)?.content?.toBooleanStrictOrNull()
 
 /**
- * Pull the JSON-RPC body out of the hub's reply.
+ * Pull the JSON-RPC body out of the hub's reply to **one** `POST /mcp`.
  *
- * The hub answers `POST /mcp` SSE-framed, so the body looks like
+ * The hub answers SSE-framed, so the body looks like
  * `event: message\ndata: {…}\n\n`, possibly preceded by `: keep-alive` comment
  * lines on a long poll. A server configured for plain JSON answers the object
  * directly; both are accepted, so the framing is the server's business.
+ *
+ * **Not a general SSE reader, and not reusable for `GET /events`.** It takes a
+ * complete response body and returns the first frame's `data:`, discarding the
+ * `event:` name — which is exactly the two things an event stream needs and
+ * cannot get here. `/events` is framed the same way but must be *streamed*:
+ * every frame, with its name, as it arrives. That reader belongs to the event
+ * subscription and has to be written there. `SseFramingIsRequestScopedTest`
+ * pins both limits so this comment cannot quietly stop being true.
  */
 internal fun extractJsonRpcPayload(raw: String): String {
     val trimmed = raw.trim()

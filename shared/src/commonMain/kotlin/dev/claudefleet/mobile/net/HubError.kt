@@ -17,11 +17,26 @@ sealed class HubError(message: String, cause: Throwable? = null) : Exception(mes
 
     /**
      * `403` — the `Host`/`Origin` the request arrived with is not on the hub's
-     * allowlist. Carries the body because only the hub can say which name it
-     * expects.
+     * allowlist.
+     *
+     * [body] is very often **empty**, and the explanation cannot lean on it:
+     * fleet's `authorize` layer refuses with a bare `StatusCode`, which axum
+     * renders with no body at all. Only something *in front* of the hub, like a
+     * reverse proxy, tends to send one. So the message explains the condition
+     * itself and names [hub] — the address this app used, which is the one
+     * piece of the puzzle the app is certain of — and appends the body only
+     * when there is one.
      */
-    data class Forbidden(val body: String) :
-        HubError("the hub refused the request (403): $body")
+    data class Forbidden(val body: String, val hub: String = "") :
+        HubError(
+            buildString {
+                append("the hub refused the request (403). ")
+                append("Its allowed-hosts list does not accept the address this app used")
+                if (hub.isNotBlank()) append(" ($hub)")
+                append(". Only the operator can change that, on the hub itself.")
+                if (body.isNotBlank()) append(" The hub added: $body")
+            },
+        )
 
     /**
      * The tool ran and said no: an MCP result with `isError: true` carrying an

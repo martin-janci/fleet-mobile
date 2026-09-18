@@ -117,12 +117,21 @@ class HubClientTest {
         assertFailsWith<HubError.Unauthorized> { hub.listSessions() }
     }
 
+    /**
+     * What fleet actually sends: `authorize` refuses with a bare
+     * `StatusCode::FORBIDDEN` (`mcp/mod.rs:208-212`), which axum renders with an
+     * **empty body**. This test used to assert "Host header not allowed", a
+     * string no fleet build emits; only rmcp's own later Host check carries
+     * text, and it runs after fleet's layer has already passed.
+     */
     @Test
-    fun a_403_becomes_forbidden_carrying_the_body() = runTest {
-        val (hub, _) = client { "Host header not allowed" to HttpStatusCode.Forbidden }
+    fun a_403_becomes_forbidden_with_the_empty_body_the_hub_really_sends() = runTest {
+        val (hub, _) = client { "" to HttpStatusCode.Forbidden }
 
         val e = assertFailsWith<HubError.Forbidden> { hub.listSessions() }
-        assertEquals("Host header not allowed", e.body)
+        assertEquals("", e.body)
+        // The explanation must survive the body being empty.
+        assertTrue(e.message.orEmpty().contains(BASE))
     }
 
     @Test
