@@ -1,0 +1,21 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Local machine configuration (points at this machine's Android SDK)
+local.properties
+
+# IDEs
+.idea/
+*.iml
+.kotlin/
+
+# Xcode / iOS
+xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+Pods/
+
+# OS
+.DS_Store
