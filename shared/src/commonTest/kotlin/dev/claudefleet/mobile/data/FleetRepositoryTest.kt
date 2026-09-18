@@ -52,10 +52,13 @@ private fun okResult(payloadJson: String): String {
 private class FakeHub(
     var sessionsJson: String = "[]",
     var hostsJson: String = "[]",
+    var projectsJson: String = "[]",
 ) {
     var sessionCalls = 0
         private set
     var hostCalls = 0
+        private set
+    var projectCalls = 0
         private set
 
     /** Makes `list_hosts` answer 401, so a refresh fails after its first call. */
@@ -68,6 +71,7 @@ private class FakeHub(
                 val payload = when {
                     "list_sessions" in body -> { sessionCalls += 1; sessionsJson }
                     "list_hosts" in body -> { hostCalls += 1; hostsJson }
+                    "list_projects" in body -> { projectCalls += 1; projectsJson }
                     else -> "[]"
                 }
                 if (failHosts && "list_hosts" in body) {
@@ -377,6 +381,26 @@ class FleetRepositoryTest {
 
         assertEquals(listOf(1L, 2L), repository.sessions.value.map { it.id })
         assertFalse(repository.status.value is ConnectionStatus.Connected)
+    }
+
+    /**
+     * A session row names its project by id alone, so the list of projects is
+     * the only thing that can turn `project_id: 3` into a heading a person
+     * recognises. It is part of the snapshot for that reason.
+     */
+    @Test
+    fun a_refresh_fetches_the_projects_the_session_rows_point_at() = runTest {
+        val hub = FakeHub(
+            sessionsJson = sessionRows(1),
+            hostsJson = """[{"alias":"box"}]""",
+            projectsJson = """[{"id":3,"owner":"martin-janci","repo":"claude-fleet","worktree_count":2}]""",
+        )
+        val repository = repo(hub, FakeStream { awaitCancellation() }, backgroundScope)
+
+        repository.refresh()
+
+        assertEquals(1, hub.projectCalls)
+        assertEquals(listOf("martin-janci/claude-fleet"), repository.projects.value.map { it.label })
     }
 
     /** `refresh()` is the explicit path, and it tells the caller when it failed. */

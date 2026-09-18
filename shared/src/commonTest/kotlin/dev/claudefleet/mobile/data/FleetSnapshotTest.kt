@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.net.HubEvent
 import kotlinx.serialization.json.Json
@@ -183,10 +184,42 @@ class FleetSnapshotTest {
         assertEquals(listOf("trn"), after.hosts.map { it.alias })
     }
 
-    /** The hub streams ten kinds; the phone's snapshot holds two of them. */
+    /**
+     * `project:updated` carries the **store** row (`base_path`, `adopted`, no
+     * `worktree_count`), where `list_projects` answers the slim summary
+     * (`worktree_count`, no `base_path`). Only the fields both shapes carry are
+     * modelled, so a frame cannot silently blank a field the list had filled in.
+     */
+    @Test
+    fun a_project_frame_replaces_the_row_by_id() {
+        val before = FleetSnapshot(
+            projects = listOf(ProjectRow(id = 3, owner = "martin-janci", repo = "old-name")),
+        )
+        val after = before.applying(
+            row(
+                "project:updated",
+                """{"id":3,"owner":"martin-janci","repo":"claude-fleet",
+                   "base_path":"/home/dev/projects","last_session_at":1758153600,"adopted":false}""",
+            ),
+        )
+
+        assertEquals(listOf("martin-janci/claude-fleet"), after.projects.map { it.label })
+        assertEquals(1758153600L, after.projects.single().lastSessionAt)
+    }
+
+    @Test
+    fun a_project_the_snapshot_has_never_seen_is_added_rather_than_dropped() {
+        val after = FleetSnapshot().applying(
+            row("project:updated", """{"id":9,"owner":"o","repo":"r","base_path":"/p","adopted":true}"""),
+        )
+
+        assertEquals(listOf(9L), after.projects.map { it.id })
+    }
+
+    /** The hub streams ten kinds; the phone's snapshot holds three of them. */
     @Test
     fun an_event_name_the_snapshot_knows_nothing_about_is_ignored() {
-        for (name in listOf("task:updated", "account_usage:updated", "sync:progress", "project:updated")) {
+        for (name in listOf("task:updated", "account_usage:updated", "sync:progress", "worktree:updated")) {
             assertSame(two, two.applying(row(name, """{"id":1}""")), "$name must not touch the snapshot")
         }
     }
@@ -197,6 +230,7 @@ class FleetSnapshotTest {
         assertSame(two, two.applying(row("session:updated", """{"id":"not-a-number"}""")))
         assertSame(two, two.applying(row("session:killed", """{"no-id-here":true}""")))
         assertSame(two, two.applying(row("host:removed", """{}""")))
+        assertSame(two, two.applying(row("project:updated", """{"owner":"o","repo":"r"}""")))
     }
 
     /**
@@ -206,12 +240,13 @@ class FleetSnapshotTest {
      */
     @Test
     fun the_subscribed_kinds_are_exactly_the_ones_the_snapshot_acts_on() {
-        assertEquals(listOf("session", "host"), SNAPSHOT_EVENT_KINDS)
+        assertEquals(listOf("session", "host", "project"), SNAPSHOT_EVENT_KINDS)
 
         val empty = FleetSnapshot()
         val acted = listOf(
             "session" to row("session:created", sessionPayload(id = 1)),
             "host" to row("host:added", hostPayload("box")),
+            "project" to row("project:updated", """{"id":3,"owner":"o","repo":"r","base_path":"/p","adopted":false}"""),
         )
         assertEquals(SNAPSHOT_EVENT_KINDS, acted.map { it.first })
         for ((kind, frame) in acted) {

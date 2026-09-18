@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.net.HubEvent
 import dev.claudefleet.mobile.net.json
@@ -14,6 +15,8 @@ import kotlinx.serialization.json.long
 data class FleetSnapshot(
     val sessions: List<SessionRow> = emptyList(),
     val hosts: List<HostRow> = emptyList(),
+    /** Not drawn on their own: what names the groups the session list is cut into. */
+    val projects: List<ProjectRow> = emptyList(),
 )
 
 /**
@@ -21,12 +24,12 @@ data class FleetSnapshot(
  * hub for with `?kinds=`.
  *
  * The hub publishes ten (`EVENT_KINDS` in `crates/fleet-core/src/events.rs`);
- * a phone draws two of them. `HubEventStream`'s default carries the same pair
+ * a phone draws three of them. `HubEventStream`'s default carries the same list
  * and a test on each side pins it, so the filter and the applier cannot drift
  * apart — a filter that is too narrow leaves rows quietly stale, and one that
  * is too wide spends a phone's radio on frames that get dropped.
  */
-val SNAPSHOT_EVENT_KINDS: List<String> = listOf("session", "host")
+val SNAPSHOT_EVENT_KINDS: List<String> = listOf("session", "host", "project")
 
 /**
  * Apply one row event, returning the snapshot it produces.
@@ -46,6 +49,7 @@ fun FleetSnapshot.applying(event: HubEvent.Row): FleetSnapshot = when (event.nam
     "session:killed" -> removeSession(event.payload)
     "host:added", "host:probed" -> upsertHost(event.payload)
     "host:removed" -> removeHost(event.payload)
+    "project:updated" -> upsertProject(event.payload)
     else -> this
 }
 
@@ -80,6 +84,19 @@ private fun FleetSnapshot.removeHost(payload: JsonElement): FleetSnapshot {
     val alias = payload.text("alias")?.takeIf { it.isNotBlank() } ?: return this
     val remaining = hosts.filterNot { it.alias == alias }
     return if (remaining.size == hosts.size) this else copy(hosts = remaining)
+}
+
+/**
+ * There is no `project:removed`. The hub's stale-rows sweep deletes a project
+ * row without an event, so a project only ever leaves this list at the next
+ * refetch — which every `ready` and every `lagged` frame forces anyway. A
+ * lingering row costs a heading nothing points at, and nothing more.
+ */
+private fun FleetSnapshot.upsertProject(payload: JsonElement): FleetSnapshot {
+    val incoming = decode(ProjectRow.serializer(), payload) ?: return this
+    val at = projects.indexOfFirst { it.id == incoming.id }
+    if (at < 0) return copy(projects = projects + incoming)
+    return copy(projects = projects.toMutableList().also { it[at] = incoming })
 }
 
 private fun <T> decode(serializer: DeserializationStrategy<T>, payload: JsonElement): T? = try {

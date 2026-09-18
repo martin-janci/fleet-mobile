@@ -271,6 +271,28 @@ class HubClientTest {
         assertNull(hosts[0].accountUuid)
     }
 
+    /**
+     * `list_projects` answers the slim summary by default, which is all the app
+     * needs: a session row names its project by id, and this is what turns that
+     * id into `owner/repo`. `worktree_count` is on the wire and deliberately not
+     * modelled — `project:updated` carries the store row, which has no such
+     * field, so modelling it would let a frame blank what the list had filled in.
+     */
+    @Test
+    fun list_projects_parses_the_summary_rows() = runTest {
+        val rows = """[{"id":3,"owner":"martin-janci","repo":"claude-fleet",""" +
+            """"worktree_count":4,"last_session_at":1758200000}]"""
+
+        val (hub, _) = client { sse(okResult(rows)) to HttpStatusCode.OK }
+
+        val projects = hub.listProjects()
+
+        assertEquals(1, projects.size)
+        assertEquals(3L, projects[0].id)
+        assertEquals("martin-janci/claude-fleet", projects[0].label)
+        assertEquals(1758200000L, projects[0].lastSessionAt)
+    }
+
     @Test
     fun a_conversation_parses_its_kind_tagged_items() = runTest {
         val conv = """{"turns":[{"prompt":"run the tests","at":"2026-09-18T10:00:00Z",""" +

@@ -1,0 +1,69 @@
+package dev.claudefleet.mobile.ui.components
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import dev.claudefleet.mobile.data.ConnectionStatus
+
+/**
+ * What the event stream is doing, when it is doing anything worth saying.
+ *
+ * Draws nothing while connected — a banner that is always there stops being
+ * read. The design's rule is that the last snapshot stays on screen behind it
+ * and actions are disabled rather than hidden, so this never covers the list.
+ */
+@Composable
+fun ConnectionBanner(status: ConnectionStatus, modifier: Modifier = Modifier) {
+    val text = when (status) {
+        is ConnectionStatus.Connected -> return
+        is ConnectionStatus.Reconnecting ->
+            if (status.attempt <= 1) "connecting to the hub…"
+            else "reconnecting to the hub (attempt ${status.attempt})…"
+        is ConnectionStatus.Offline -> status.reason
+    }
+    Notice(text, modifier)
+}
+
+/** A failure a person can act on: the hub's own words, not a paraphrase. */
+@Composable
+fun ErrorBanner(message: String?, onDismiss: (() -> Unit)? = null, modifier: Modifier = Modifier) {
+    if (message == null) return
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(text = message, style = MaterialTheme.typography.bodySmall)
+            if (onDismiss != null) TextButton(onClick = onDismiss) { Text("Dismiss") }
+        }
+    }
+}
+
+@Composable
+private fun Notice(text: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+    }
+}

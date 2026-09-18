@@ -18,6 +18,56 @@ data class Conversation(
     val truncated: Boolean = false,
 )
 
+/**
+ * Fold a fresh read of the conversation into the one already on screen.
+ *
+ * `session_conversation` answers a **rolling window of the tail**, not a
+ * continuation: the hub re-reads the last N turns of the transcript every time.
+ * So neither of the obvious things is right. Replacing wholesale loses the turns
+ * that have scrolled off the top of the hub's window but are still on the
+ * screen; appending wholesale repeats every turn the two reads share.
+ *
+ * What is true of two reads of the same tail is that they **overlap**: the fresh
+ * window's first turns are the ones already held, unless so much happened in
+ * between that the windows are disjoint. So the longest overlap between the tail
+ * of what is held and the head of what arrived is found, and the fresh window
+ * replaces it — which also lets the bottom turn grow, since the agent is still
+ * appending items to it while it works.
+ *
+ * A turn is known by its `at` and its `prompt` together: `at` alone collides for
+ * two turns inside the same second, and `prompt` alone collides whenever the
+ * same thing is asked twice. Turns with neither — assistant output whose prompt
+ * lies before the read tail — are matched on that empty identity, which folds
+ * two of them together; that is the price of not repeating the one that is
+ * usually there, and the conversation is a view, not a ledger.
+ *
+ * When the windows do not overlap at all, both are kept in order and nothing is
+ * invented to bridge them. [Conversation.truncated] is how the screen says there
+ * may be a gap, and once set it stays set.
+ */
+fun Conversation.appending(fresh: Conversation): Conversation {
+    // An empty read says nothing at all, including about truncation.
+    if (fresh.turns.isEmpty()) return this
+    if (turns.isEmpty()) return fresh
+
+    val held = turns.map { it.identity() }
+    val arrived = fresh.turns.map { it.identity() }
+    var overlap = 0
+    for (n in minOf(held.size, arrived.size) downTo 1) {
+        if (held.subList(held.size - n, held.size) == arrived.subList(0, n)) {
+            overlap = n
+            break
+        }
+    }
+    return Conversation(
+        turns = turns.subList(0, turns.size - overlap) + fresh.turns,
+        truncated = truncated || fresh.truncated,
+    )
+}
+
+/** What tells one turn from another across two reads. See [appending]. */
+private fun ConvTurn.identity(): Pair<String?, String?> = at to prompt
+
 /** One turn: the human prompt that opened it and what the agent said or did. */
 @Serializable
 data class ConvTurn(

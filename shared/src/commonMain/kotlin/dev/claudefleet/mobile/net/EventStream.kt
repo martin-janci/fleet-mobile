@@ -211,7 +211,7 @@ class HubEventStream(
      * spend a phone's radio on frames that get dropped; to less would leave
      * rows quietly stale.
      */
-    private val kinds: List<String> = listOf("session", "host"),
+    private val kinds: List<String> = listOf("session", "host", "project"),
 ) : EventStream {
 
     /** The hub's base URL, without a trailing slash. */

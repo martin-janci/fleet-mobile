@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.net.EventStream
 import dev.claudefleet.mobile.net.HubClient
@@ -58,15 +59,18 @@ class FleetRepository(
     private val scope: CoroutineScope,
     /** How long to wait after N consecutive failures. Injectable for tests. */
     private val backoff: (Int) -> Duration = ::reconnectDelay,
-) {
+) : FleetState {
     private val _sessions = MutableStateFlow<List<SessionRow>>(emptyList())
-    val sessions: StateFlow<List<SessionRow>> = _sessions.asStateFlow()
+    override val sessions: StateFlow<List<SessionRow>> = _sessions.asStateFlow()
 
     private val _hosts = MutableStateFlow<List<HostRow>>(emptyList())
-    val hosts: StateFlow<List<HostRow>> = _hosts.asStateFlow()
+    override val hosts: StateFlow<List<HostRow>> = _hosts.asStateFlow()
+
+    private val _projects = MutableStateFlow<List<ProjectRow>>(emptyList())
+    override val projects: StateFlow<List<ProjectRow>> = _projects.asStateFlow()
 
     private val _status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Offline(NOT_STARTED))
-    val status: StateFlow<ConnectionStatus> = _status.asStateFlow()
+    override val status: StateFlow<ConnectionStatus> = _status.asStateFlow()
 
     private var job: Job? = null
 
@@ -87,15 +91,16 @@ class FleetRepository(
     /**
      * Re-list everything, replacing the snapshot.
      *
-     * All or nothing: the flows are written only once both calls have answered,
+     * All or nothing: the flows are written only once every call has answered,
      * so a refresh that fails half way leaves the old picture intact rather than
      * pairing new sessions with stale hosts. Failures are raised, not swallowed
      * — a pull-to-refresh has to be able to say it did not work.
      */
-    suspend fun refresh() {
+    override suspend fun refresh() {
         val sessions = client.listSessions()
         val hosts = client.listHosts()
-        publish(FleetSnapshot(sessions, hosts))
+        val projects = client.listProjects()
+        publish(FleetSnapshot(sessions, hosts, projects))
     }
 
     private suspend fun follow() {
@@ -132,11 +137,12 @@ class FleetRepository(
         }
     }
 
-    private fun snapshot() = FleetSnapshot(_sessions.value, _hosts.value)
+    private fun snapshot() = FleetSnapshot(_sessions.value, _hosts.value, _projects.value)
 
     private fun publish(snapshot: FleetSnapshot) {
         _sessions.value = snapshot.sessions
         _hosts.value = snapshot.hosts
+        _projects.value = snapshot.projects
     }
 
     private companion object {

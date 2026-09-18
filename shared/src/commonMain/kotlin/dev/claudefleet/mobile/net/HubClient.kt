@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.net
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.PairResult
+import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
 import io.ktor.client.HttpClient
@@ -133,6 +134,19 @@ class HubClient(
 
     suspend fun listHosts(): List<HostRow> =
         call("list_hosts") { json.decodeFromJsonElement(ListSerializer(HostRow.serializer()), it) }
+
+    /**
+     * Every project the hub knows about — what turns a session row's
+     * `project_id` into a heading a person recognises.
+     *
+     * The hub's default `summary=true` is exactly right here: the full form
+     * nests every worktree's path under every project, which is a lot of wire
+     * for a list this only needs `owner`/`repo` from.
+     */
+    suspend fun listProjects(): List<ProjectRow> =
+        call("list_projects") {
+            json.decodeFromJsonElement(ListSerializer(ProjectRow.serializer()), it)
+        }
 
     /** A session's recent exchange. [turns] left null keeps the hub's default of 10. */
     suspend fun conversation(sessionId: Long, turns: Int? = null): Conversation =
