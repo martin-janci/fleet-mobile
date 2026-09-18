@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Fleet</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+
+	<!--
+	  THE KEY THIS APP CANNOT SHIP WITHOUT.
+
+	  iOS does not refuse the camera permission when the purpose string is
+	  missing: it TERMINATES the process. The app would die the first time
+	  anyone tapped "Scan the QR code" on the Pair screen, which on a fresh
+	  install is the first screen there is. The string is shown verbatim in the
+	  permission dialog, so it says what the camera is for and nothing else —
+	  the camera is opened for one QR code and no image ever leaves the device
+	  or is written anywhere.
+
+	  `IosHostTest` in `shared/src/jvmTest` fails if this key is deleted.
+	-->
+	<key>NSCameraUsageDescription</key>
+	<string>The camera reads the pairing QR code your hub prints. Nothing is recorded, stored or sent anywhere.</string>
+
+	<!--
+	  A self-hosted hub is often on the same network as the phone rather than
+	  on the public internet, and iOS 14 and later require permission before an
+	  app may talk to a local-network address at all. Without this string the
+	  system dialog cannot be shown and the connection fails with no useful
+	  error. A hub reached over the public internet does not need it, so the
+	  prompt appears only for the people it applies to.
+
+	  UNVERIFIED: no one has watched this dialog appear. See README.md →
+	  "What a Mac still has to check".
+	-->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Connecting to your fleet hub on this network.</string>
+
+	<!--
+	  App Transport Security blocks cleartext HTTP. `fleet-hub` behind a public
+	  name is HTTPS and unaffected; a hub on the LAN at `http://…:8899` is
+	  exactly the case `NSAllowsLocalNetworking` exists for. This does NOT
+	  permit cleartext to arbitrary hosts: the general exception stays off, so
+	  a plain-HTTP hub on the public internet is still refused, which is the
+	  right answer for a bearer token.
+	-->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+</dict>
+</plist>

@@ -8,6 +8,22 @@ plugins {
     alias(libs.plugins.composeMultiplatform)
 }
 
+/**
+ * Compose Multiplatform 1.12's resource plugin registers a
+ * `copy…ComposeResourcesToAndroidAssets` task for every Android compilation,
+ * including the `androidDeviceTest` one AGP's KMP library plugin adds — and for
+ * that compilation it never configures the task's `outputDirectory`, so Gradle
+ * fails validation with "property 'outputDirectory' doesn't have a configured
+ * value" before the task can even run.
+ *
+ * This project has no `composeResources` directory at all: every one of these
+ * tasks reports NO-SOURCE. Disabling the device-test one therefore copies the
+ * same nothing it would have copied, and is preferred to inventing an output
+ * directory for a task with no input. Remove it when CMP configures the task.
+ */
+tasks.matching { it.name == "copyAndroidDeviceTestComposeResourcesToAndroidAssets" }
+    .configureEach { enabled = false }
+
 kotlin {
     jvmToolchain(21)
 
@@ -15,6 +31,21 @@ kotlin {
         namespace = "dev.claudefleet.mobile.shared"
         compileSdk = libs.versions.android.compileSdk.get().toInt()
         minSdk = libs.versions.android.minSdk.get().toInt()
+
+        // The one thing in this project that cannot be tested without a device.
+        // `AndroidSecrets` is `EncryptedSharedPreferences` over a Keystore master
+        // key, and neither exists on the JVM; every other Android-specific claim
+        // in this repository is a source scan or a `MockEngine` test, but the
+        // secure store either does the round trip on real hardware or it does
+        // not, and until this ran nothing had ever executed a line of it.
+        //
+        // Source set: `shared/src/androidDeviceTest/kotlin`.
+        @Suppress("UnstableApiUsage")
+        withDeviceTestBuilder {
+            sourceSetTreeName = "test"
+        }.configure {
+            instrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        }
     }
 
     // A plain JVM target so commonTest runs on the host without a device or emulator.
@@ -38,8 +69,20 @@ kotlin {
     // a simulator nobody here runs. If iosX64 is ever genuinely needed, bring
     // it back with a CMP version that publishes it, not by re-adding the
     // target under 1.12.
-    iosArm64()
-    iosSimulatorArm64()
+    for (target in listOf(iosArm64(), iosSimulatorArm64())) {
+        target.binaries.framework {
+            // What `iosApp` imports: `import Shared`. Changing this renames the
+            // Swift module, so the Xcode project's OTHER_LDFLAGS changes with it.
+            baseName = "Shared"
+
+            // Static, which is what the Kotlin Multiplatform wizard produces and
+            // what `embedAndSignAppleFrameworkForXcode` expects. A dynamic
+            // framework would have to be embedded and code-signed into the app
+            // bundle; a static one is linked in and there is nothing to sign,
+            // which is one fewer thing to be wrong on a machine nobody here has.
+            isStatic = true
+        }
+    }
 
     sourceSets {
         commonMain.dependencies {
@@ -77,6 +120,15 @@ kotlin {
             implementation(libs.androidx.camera.lifecycle)
             implementation(libs.androidx.camera.view)
             implementation(libs.zxing.core)
+        }
+
+        // Not an accessor: AGP's KMP library plugin creates this source set from
+        // `withDeviceTestBuilder` above, after the generated accessors exist.
+        getByName("androidDeviceTest").dependencies {
+            implementation(libs.androidx.test.core)
+            implementation(libs.androidx.test.runner)
+            implementation(libs.androidx.test.ext.junit)
+            implementation(libs.kotlinx.coroutines.test)
         }
 
         iosMain.dependencies {

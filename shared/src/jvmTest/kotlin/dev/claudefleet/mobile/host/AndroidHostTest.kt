@@ -6,59 +6,17 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
-/**
- * The Android host's manifest and the one place the camera is asked for.
- *
- * These are source scans for the same reason [dev.claudefleet.mobile.net.ToolsTheAppMayCallTest]
- * is one: what they guard is a property of the whole app rather than of a
- * function, and three tasks have now checked the same properties by hand and
- * written the answer in a report. A report is not a gate — it does not fire
- * when someone deletes the line next month.
- *
- * They live in `:shared`'s `jvmTest` because it is the only JVM test source set
- * in this build; `:androidApp` has none, and giving it one — a second test
- * framework, a JUnit dependency and a new Gradle task — to hold two file
- * assertions costs more than it buys. They fail loudly rather than silently
- * passing if the tree is not where they expect it.
- */
-private object Repo {
-    /**
-     * The repository root, found by climbing from the working directory until
-     * `settings.gradle.kts` turns up. Gradle runs a test with the project
-     * directory as its working directory, but that is a default rather than a
-     * promise.
-     */
-    val root: File by lazy {
-        var dir: File? = File(".").absoluteFile.normalize()
-        while (dir != null) {
-            if (File(dir, "settings.gradle.kts").isFile) return@lazy dir
-            dir = dir.parentFile
-        }
-        fail("could not find the repository root from ${File(".").absolutePath}")
-    }
-
-    fun file(path: String): File = File(root, path).also {
-        if (!it.isFile) fail("expected $path under $root")
-    }
-
-    /** Every Kotlin source that ships in the app: no test source sets. */
-    val shipped: List<File> by lazy {
-        listOf(File(root, "shared/src"), File(root, "androidApp/src"))
-            .flatMap { it.walkTopDown() }
-            .filter { it.isFile && it.extension == "kt" }
-            .filter { "commonTest" !in it.path && "jvmTest" !in it.path }
-            .toList()
-            .also { if (it.isEmpty()) fail("found no shipped Kotlin sources under $root") }
-    }
-
-}
-
 /** The scanner's own files — the camera is theirs and nobody else's. */
 private fun File.isScanner(): Boolean = "${File.separator}scan${File.separator}" in path
 
 /**
  * The camera permission is requested when the scanner opens, and at no other
  * moment — above all not when the app starts.
+ *
+ * **Android only.** Every sweep below walks [Repo.shipped], which is `.kt` files
+ * under `shared/src` and `androidApp/src`. The iOS host is Swift and outside
+ * both roots, so none of this covers it; the same property for iOS is in
+ * [IosHostTest].
  *
  * A fresh install opens on Pair, because there is no credential yet. If the
  * scanner were composed as that screen appeared, the first thing a new user saw
