@@ -4,6 +4,16 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!--
+      Pairing by QR. Declared by the app rather than by `:shared`, because the
+      permissions an app asks for are the app's own to declare — and `required="false"`
+      because the app must install and work on a device with no camera at all:
+      the pairing code can always be typed. See `ui/scan/QrScanner.kt`.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+
+    <!--
       The credential must not leave the device it was issued to, and cannot
       survive being restored onto another one anyway: the Keystore master key
       that decrypts `EncryptedSharedPreferences` is not restorable with the file.

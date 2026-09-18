@@ -103,6 +103,23 @@ data class PairTarget(val base: String?, val code: String) {
 /**
  * The scan or the typed entry was not a claude-fleet pairing code.
  *
- * Its message is written for a person and carries no part of the input.
+ * Its message is written for a person and carries no part of the input, which
+ * is the property that lets a screen show it — see `ui/Explain.kt`.
  */
-class NotAPairingCode(message: String) : Exception(message)
+class NotAPairingCode(message: String) : Exception(message) {
+    companion object {
+        /**
+         * A code that is a perfectly good code but names no hub.
+         *
+         * A constant rather than a string thrown at the point of failure,
+         * because the Pair screen refuses this case *before* it calls anything
+         * — a camera aimed at the right QR would otherwise post to nowhere
+         * thirty times a second — and two wordings for one condition is how a
+         * screen and its backing code start disagreeing.
+         */
+        const val NO_HUB: String =
+            "that code does not say which hub it belongs to. Scan the QR " +
+                "instead, or type the hub's address — starting http:// or " +
+                "https:// and with no user@ in it."
+    }
+}

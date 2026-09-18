@@ -68,6 +68,15 @@ kotlin {
             // EncryptedSharedPreferences, and the Keystore-backed master key
             // behind it. See `store/Secrets.android.kt` for the deprecation.
             implementation(libs.androidx.security.crypto)
+
+            // The QR scanner (`ui/scan/QrScanner.android.kt`). `activity-compose`
+            // is here for the permission launcher, not for an Activity: the
+            // camera permission is asked from inside the shared Pair screen.
+            implementation(libs.androidx.activity.compose)
+            implementation(libs.androidx.camera.camera2)
+            implementation(libs.androidx.camera.lifecycle)
+            implementation(libs.androidx.camera.view)
+            implementation(libs.zxing.core)
         }
 
         iosMain.dependencies {

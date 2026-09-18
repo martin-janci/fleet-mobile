@@ -9,6 +9,16 @@ serialization = "1.11.0"
 ktor = "3.6.0"
 androidx-activity-compose = "1.13.0"
 androidx-security-crypto = "1.1.0"
+# CameraX 1.7 is alpha-only; 1.6.2 is the newest stable final.
+androidx-camera = "1.6.2"
+# ZXing, not ML Kit. Measured on the debug runtime classpath:
+# com.google.mlkit:barcode-scanning:17.3.0 pulls play-services-basement, -base,
+# -tasks, play-services-mlkit-barcode-scanning, three Firebase encoder artifacts
+# and transport-backend-cct (Google's Cloud Client Telemetry uploader), and took
+# the debug APK from 14 MB to 40 MB. A phone paired to a self-hosted hub should
+# not have to carry a Google telemetry client to read one QR code, and may have
+# no Play Services at all. ZXing is pure Java and talks to nobody.
+zxing = "3.5.4"
 
 # 37 is forced by the current stable AndroidX/Compose/OkHttp artifacts, which
 # refuse a lower compileSdk. targetSdk stays at 35: the app is not yet tested
@@ -36,6 +46,12 @@ ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx
 
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity-compose" }
 androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "androidx-security-crypto" }
+
+# The QR scanner: CameraX for the preview and the frames, ZXing for the decode.
+androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "androidx-camera" }
+androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "androidx-camera" }
+androidx-camera-view = { module = "androidx.camera:camera-view", version.ref = "androidx-camera" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

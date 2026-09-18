@@ -20,6 +20,9 @@ android {
 
     buildFeatures {
         compose = true
+        // `BuildConfig.VERSION_NAME` is what the Settings screen shows as the
+        // app's version, so there is one place a release bumps it.
+        buildConfig = true
     }
 
     compileOptions {
@@ -31,4 +34,7 @@ android {
 dependencies {
     implementation(project(":shared"))
     implementation(libs.androidx.activity.compose)
+    // The host builds the Ktor engine and hands it to `AppContainer`, so it
+    // needs the engine itself; `:shared` depends on it only `implementation`.
+    implementation(libs.ktor.client.okhttp)
 }

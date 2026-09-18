@@ -40,9 +40,9 @@ sealed class AuthState {
 class AppSession(
     private val secrets: Secrets,
     private val http: HttpClient,
-) {
+) : AuthActions {
     private val _state = MutableStateFlow<AuthState>(AuthState.Unknown)
-    val state: StateFlow<AuthState> = _state.asStateFlow()
+    override val state: StateFlow<AuthState> = _state.asStateFlow()
 
     /** The credential in hand, or null. */
     fun credentials(): Credentials? = (_state.value as? AuthState.Paired)?.credentials
@@ -63,7 +63,7 @@ class AppSession(
      * stored unless the hub answers with a token, so a refused code leaves the
      * device exactly as it was.
      */
-    suspend fun pair(scanned: String, base: String? = null): Credentials {
+    override suspend fun pair(scanned: String, base: String?): Credentials {
         val target = PairTarget.require(scanned)
         // The typed address goes through the same check as a scanned one
         // (`hubBase`), rather than through `trim()` alone: it is the field an
@@ -71,11 +71,7 @@ class AppSession(
         // the easier of the two to get something wrong into, not the harder.
         val reached = target.base
             ?: base?.let { hubBase(it) }
-            ?: throw NotAPairingCode(
-                "that code does not say which hub it belongs to. Scan the QR " +
-                    "instead, or type the hub's address — starting http:// or " +
-                    "https:// and with no user@ in it.",
-            )
+            ?: throw NotAPairingCode(NotAPairingCode.NO_HUB)
 
         val result = HubClient(http, reached).pair(target.code)
         val credentials = Credentials(
@@ -89,8 +85,8 @@ class AppSession(
         return credentials
     }
 
-    /** Drop the credential. Does not revoke it; see the class comment. */
-    suspend fun forget() {
+    /** Drop the credential. Does not cancel it; see the class comment. */
+    override suspend fun forget() {
         secrets.clear()
         _state.value = AuthState.Unpaired
     }
