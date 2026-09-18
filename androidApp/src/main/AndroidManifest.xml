@@ -8,6 +8,12 @@
       permissions an app asks for are the app's own to declare — and `required="false"`
       because the app must install and work on a device with no camera at all:
       the pairing code can always be typed. See `ui/scan/QrScanner.kt`.
+
+      Declaring the permission is not asking for it. It is requested when the
+      scanner is opened by a tap on the Pair screen, and at no other moment, so
+      a fresh install does not greet anyone with a camera dialog and someone who
+      means to type the eight characters never sees one at all. `PairScreen` and
+      `PairViewModel` say why; `AndroidHostTest` is what stops it drifting back.
     -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
@@ -23,6 +29,8 @@
     -->
     <application
         android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.FleetMobile"
         android:allowBackup="false"

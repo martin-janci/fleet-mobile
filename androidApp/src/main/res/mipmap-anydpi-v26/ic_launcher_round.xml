@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The same icon. `android:roundIcon` exists for launchers that ask for a
+  round-specific drawable; an adaptive icon is already masked to whatever shape
+  the launcher wants, so there is nothing to draw differently — but a manifest
+  that names a `roundIcon` must have one.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

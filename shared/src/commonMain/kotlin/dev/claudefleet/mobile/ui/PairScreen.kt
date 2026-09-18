@@ -15,10 +15,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +35,14 @@ import dev.claudefleet.mobile.ui.scan.QrScannerView
  * camera, has to be able to pair, and reading a code down the phone to whoever
  * is at the terminal is an ordinary way to do it rather than a degraded one.
  *
+ * The camera starts **off**, behind a button. Composing the scanner is what
+ * makes Android ask for the permission, and this is the screen a fresh install
+ * opens on: a viewfinder that came up by itself would put a camera dialog in
+ * front of someone who has not been told what this app is yet, and in front of
+ * someone who was going to type the code regardless. Everything below the
+ * divider is reachable without the camera ever being touched — which is also
+ * all that is left once the permission has been permanently denied.
+ *
  * Stateless: it draws a [PairUiState] and reports taps. [PairViewModel] is what
  * is tested; this is what only a device can show.
  */
@@ -45,6 +52,7 @@ fun PairScreen(
     onAddressChange: (String) -> Unit,
     onCodeChange: (String) -> Unit,
     onSubmit: () -> Unit,
+    onScanningChange: (Boolean) -> Unit,
     onScanned: (String) -> Unit,
     onScannerUnavailable: (String) -> Unit,
     onDismissError: () -> Unit,
@@ -83,19 +91,21 @@ fun PairScreen(
                     modifier = Modifier.fillMaxSize(),
                 )
             }
-        } else if (state.cameraAvailable) {
-            // The camera was turned off or refused. Saying so is better than a
-            // blank space where a viewfinder was.
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
+        }
+
+        if (state.cameraAvailable) {
+            // The button the camera permission hangs off. Tapping it is the
+            // only thing in the app that can make Android ask for the camera,
+            // which is why it says what it will do before it does it.
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
-                Text(
-                    text = "The camera is off. Type the code instead.",
-                    style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                )
+                OutlinedButton(
+                    onClick = { onScanningChange(!state.scanning) },
+                    enabled = !state.pairing,
+                ) {
+                    Text(if (state.scanning) "Stop the camera" else "Scan the QR code")
+                }
             }
         }
 

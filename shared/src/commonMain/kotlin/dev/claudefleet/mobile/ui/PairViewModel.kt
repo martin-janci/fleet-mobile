@@ -26,7 +26,10 @@ data class PairUiState(
     /** The hub address, typed. Only consulted for a code that names no hub. */
     val address: String = "",
     val code: String = "",
-    /** Whether the camera view is up. Never true without [cameraAvailable]. */
+    /**
+     * Whether the camera view is up. Never true without [cameraAvailable], and
+     * never true until someone has asked for it — see [PairViewModel.setScanning].
+     */
     val scanning: Boolean = false,
     /** Whether this build can scan at all — see `ui/scan/QrScanner.kt`. */
     val cameraAvailable: Boolean = false,
@@ -66,6 +69,16 @@ data class PairUiState(
  *  2. **A code that names no hub is refused here, not at the hub.** Otherwise
  *     the same camera posts to nowhere at the same rate.
  *
+ * A third rule is about the permission rather than the camera: **the scanner
+ * starts closed.** Composing it is what makes Android ask for the camera, and
+ * this screen is what a fresh install opens on, so a scanner that came up by
+ * itself would make a permission dialog the first thing the app ever showed —
+ * before it had said what it was for, and in front of someone who may have been
+ * intending to type the eight characters all along. On Android 11+ two
+ * reflexive dismissals deny the permission for good, and at that point the
+ * manual field stops being the alternative and becomes the only way in. So the
+ * camera is opened by a tap, and by nothing else.
+ *
  * Plain Kotlin, not an `androidx.lifecycle.ViewModel`, for the reason the other
  * view models give: the same class runs on iOS.
  */
@@ -74,9 +87,7 @@ class PairViewModel(
     private val scope: CoroutineScope,
     cameraAvailable: Boolean = false,
 ) {
-    private val _state = MutableStateFlow(
-        PairUiState(cameraAvailable = cameraAvailable, scanning = cameraAvailable),
-    )
+    private val _state = MutableStateFlow(PairUiState(cameraAvailable = cameraAvailable))
     val state: StateFlow<PairUiState> = _state.asStateFlow()
 
     /**
@@ -94,9 +105,19 @@ class PairViewModel(
         _state.update { it.copy(code = text) }
     }
 
-    /** Show or hide the camera. Hiding it never hides the fields underneath. */
+    /**
+     * Show or hide the camera. The only thing that opens the scanner, and so
+     * the only thing that can make Android ask for the camera permission.
+     *
+     * Hiding it never hides the fields underneath. Opening it clears whatever
+     * the last attempt left on screen — a new deliberate act deserves a clean
+     * screen, and "the camera permission was refused" sitting above a live
+     * viewfinder reads as a lie. Closing it clears nothing: a hub's refusal is
+     * still worth reading after the camera has gone.
+     */
     fun setScanning(on: Boolean) {
-        _state.update { it.copy(scanning = on && it.cameraAvailable) }
+        val open = on && _state.value.cameraAvailable
+        _state.update { it.copy(scanning = open, error = if (open) null else it.error) }
     }
 
     /**

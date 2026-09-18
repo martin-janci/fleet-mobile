@@ -197,6 +197,7 @@ class PairViewModelTest {
     fun a_camera_that_will_not_start_leaves_manual_entry_in_place() = runTest {
         val auth = FakeAuth()
         val vm = PairViewModel(auth, backgroundScope, cameraAvailable = true)
+        vm.setScanning(true)
         assertTrue(vm.state.value.scanning)
 
         vm.onScannerUnavailable("the camera permission was refused")
@@ -206,6 +207,137 @@ class PairViewModelTest {
         vm.onAddressChange(HUB)
         vm.onCodeChange("ABCD1234")
         assertTrue(vm.state.value.canSubmit)
+    }
+
+    // -----------------------------------------------------------------------
+    // The camera is opened by a tap, never by arriving on the screen
+    // -----------------------------------------------------------------------
+
+    /**
+     * On Android the permission dialog appears when the scanner composable is
+     * first composed — so if the scanner were up the moment the Pair screen
+     * appeared, a fresh install's *first* screen would be a camera prompt, from
+     * an app that has not yet said what it is for. It also means someone who
+     * intends to type the code has to dismiss a dialog about a camera they were
+     * never going to use, and on Android 11+ two reflexive dismissals deny the
+     * permission permanently.
+     *
+     * So the screen opens closed. [PairViewModel.setScanning] is the only thing
+     * that opens it, and only the button calls it.
+     */
+    @Test
+    fun the_camera_is_not_open_when_the_pair_screen_appears() = runTest {
+        val vm = PairViewModel(FakeAuth(), backgroundScope, cameraAvailable = true)
+
+        assertTrue(vm.state.value.cameraAvailable, "this device can scan")
+        assertFalse(vm.state.value.scanning, "but nothing has asked it to yet")
+    }
+
+    @Test
+    fun the_scanner_opens_only_when_someone_asks_for_it() = runTest {
+        val vm = PairViewModel(FakeAuth(), backgroundScope, cameraAvailable = true)
+
+        vm.setScanning(true)
+        assertTrue(vm.state.value.scanning)
+
+        vm.setScanning(false)
+        assertFalse(vm.state.value.scanning, "and it closes again on the second tap")
+    }
+
+    /** No camera, no scanner — whatever the screen asks for. */
+    @Test
+    fun asking_for_a_scanner_this_build_does_not_have_changes_nothing() = runTest {
+        val vm = PairViewModel(FakeAuth(), backgroundScope, cameraAvailable = false)
+
+        vm.setScanning(true)
+
+        assertFalse(vm.state.value.scanning)
+    }
+
+    /**
+     * The whole typed path, start to finish, with every state it passed through
+     * checked rather than only the last one: a single frame in which `scanning`
+     * went true is a frame in which Android would have asked for the camera.
+     */
+    @Test
+    fun the_manual_path_never_opens_the_camera() = runTest {
+        val auth = FakeAuth()
+        val vm = PairViewModel(auth, backgroundScope, cameraAvailable = true)
+        val seen = mutableListOf<Boolean>()
+        seen += vm.state.value.scanning
+
+        vm.onAddressChange(HUB)
+        seen += vm.state.value.scanning
+        vm.onCodeChange("ABCD1234")
+        seen += vm.state.value.scanning
+        vm.submit()
+        seen += vm.state.value.scanning
+        runCurrent()
+        seen += vm.state.value.scanning
+
+        assertNotNull(vm.state.value.paired, "typing the code has to be enough to pair")
+        assertEquals(listOf(false, false, false, false, false), seen, "the camera was opened on the typed path")
+    }
+
+    /**
+     * The permission permanently denied — two refusals on Android 11+, after
+     * which `launch` returns denied without showing anything. The platform layer
+     * reports it the same way it reports any other camera failure, and what has
+     * to survive is the rest of the screen.
+     */
+    @Test
+    fun a_permanently_denied_camera_still_pairs_by_hand() = runTest {
+        val auth = FakeAuth()
+        val vm = PairViewModel(auth, backgroundScope, cameraAvailable = true)
+
+        vm.setScanning(true)
+        // What the Android layer calls back with when `launch` returns denied.
+        vm.onScannerUnavailable(
+            "the camera permission was refused. Type the 8-character code instead — " +
+                "it is printed under the QR.",
+        )
+        assertFalse(vm.state.value.scanning)
+
+        vm.onAddressChange(HUB)
+        vm.onCodeChange("ABCD1234")
+        vm.submit()
+        runCurrent()
+
+        assertNotNull(vm.state.value.paired)
+        assertFalse(vm.state.value.scanning, "a refused camera must not reopen itself")
+        assertEquals(1, auth.pairs.size)
+    }
+
+    /** Reopening the camera is a new attempt; the last one's message goes. */
+    @Test
+    fun opening_the_scanner_clears_what_the_last_attempt_said() = runTest {
+        val vm = PairViewModel(FakeAuth(), backgroundScope, cameraAvailable = true)
+
+        vm.setScanning(true)
+        vm.onScannerUnavailable("the camera could not be started")
+        assertNotNull(vm.state.value.error)
+
+        vm.setScanning(true)
+
+        assertNull(vm.state.value.error)
+        assertTrue(vm.state.value.scanning)
+    }
+
+    /** Closing it is not an attempt at anything, so it says nothing. */
+    @Test
+    fun closing_the_scanner_leaves_the_message_alone() = runTest {
+        val auth = FakeAuth()
+        auth.failWith = HubError.Http(404, "no such pairing code")
+        val vm = PairViewModel(auth, backgroundScope, cameraAvailable = true)
+
+        vm.setScanning(true)
+        vm.onScanned(PAIR_URL)
+        runCurrent()
+        val refusal = assertNotNull(vm.state.value.error)
+
+        vm.setScanning(false)
+
+        assertEquals(refusal, vm.state.value.error)
     }
 
     // -----------------------------------------------------------------------

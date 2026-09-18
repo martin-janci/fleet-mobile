@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The launcher icon's backdrop, behind the white prompt glyph. -->
+    <color name="ic_launcher_background">#FF1B2430</color>
+</resources>

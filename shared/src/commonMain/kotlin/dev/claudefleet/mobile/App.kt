@@ -1,8 +1,11 @@
 package dev.claudefleet.mobile
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -10,7 +13,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -20,6 +22,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.LifecycleStartEffect
 import dev.claudefleet.mobile.data.AppSession
 import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.data.FleetRepository
@@ -98,28 +101,39 @@ class AppContainer(
 fun App(container: AppContainer) {
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
-            val auth by container.session.state.collectAsState()
+            // Every screen is inset once, here, rather than each one insetting
+            // itself. An app targeting SDK 35 is drawn edge to edge by the
+            // system whether or not it asked to be, so without this the Pair
+            // screen's heading sits under the status bar and the prompt box
+            // under the gesture handle. `windowInsetsPadding` *consumes* what it
+            // applies, so the `Scaffold` further down adds nothing a second
+            // time.
+            Box(
+                modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
+            ) {
+                val auth by container.session.state.collectAsState()
 
-            LaunchedEffect(container) { container.session.restore() }
+                LaunchedEffect(container) { container.session.restore() }
 
-            // What the hub answered on the pair that just happened, held so the
-            // confirmation can be read rather than flashed past. Null on a cold
-            // start with a stored credential, which is why that case goes
-            // straight in.
-            var justPaired by remember(container) { mutableStateOf<PairedHub?>(null) }
+                // What the hub answered on the pair that just happened, held so
+                // the confirmation can be read rather than flashed past. Null on
+                // a cold start with a stored credential, which is why that case
+                // goes straight in.
+                var justPaired by remember(container) { mutableStateOf<PairedHub?>(null) }
 
-            when (val state = auth) {
-                AuthState.Unknown -> Splash()
-                AuthState.Unpaired -> {
-                    justPaired = null
-                    PairRoute(container) { justPaired = it }
-                }
-                is AuthState.Paired -> {
-                    val paired = justPaired
-                    if (paired != null) {
-                        PairedScreen(paired, onContinue = { justPaired = null })
-                    } else {
-                        FleetRoute(container, state.credentials)
+                when (val state = auth) {
+                    AuthState.Unknown -> Splash()
+                    AuthState.Unpaired -> {
+                        justPaired = null
+                        PairRoute(container) { justPaired = it }
+                    }
+                    is AuthState.Paired -> {
+                        val paired = justPaired
+                        if (paired != null) {
+                            PairedScreen(paired, onContinue = { justPaired = null })
+                        } else {
+                            FleetRoute(container, state.credentials)
+                        }
                     }
                 }
             }
@@ -151,6 +165,7 @@ private fun PairRoute(container: AppContainer, onPaired: (PairedHub) -> Unit) {
         onAddressChange = vm::onAddressChange,
         onCodeChange = vm::onCodeChange,
         onSubmit = { vm.submit() },
+        onScanningChange = vm::setScanning,
         onScanned = vm::onScanned,
         onScannerUnavailable = vm::onScannerUnavailable,
         onDismissError = vm::dismissError,
@@ -160,19 +175,25 @@ private fun PairRoute(container: AppContainer, onPaired: (PairedHub) -> Unit) {
 /**
  * The paired app: three tabs, and a session pushed over the first.
  *
- * The repository is started with the composition and stopped when it leaves, so
- * the event stream follows the screen rather than the process. That is the
- * design's "subscribe on resume, drop on background" only insofar as the host
- * tears the composition down — see the task report; nothing here listens to a
- * lifecycle directly.
+ * The event stream follows the **lifecycle**, not the composition. A
+ * backgrounded Android activity keeps its composition, so a `DisposableEffect`
+ * here — which is what this was — held the SSE connection open for as long as
+ * the app was installed and had been opened once: a phone in a pocket keeping a
+ * socket alive, spending battery and data, while the hub counted a subscriber
+ * that nobody was watching. The design says subscribe on resume and drop on
+ * background, and `LifecycleStartEffect` is that sentence.
+ *
+ * `start()` is idempotent and `stop()` leaves the snapshot alone, so coming back
+ * to the foreground re-subscribes and redraws the fleet as it was last seen,
+ * with the refetch on `ready` filling in what changed while the app was away.
  */
 @Composable
 private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     val scope = rememberCoroutineScope()
     val repository = remember(credentials) { container.repository(credentials, scope) }
-    DisposableEffect(repository) {
+    LifecycleStartEffect(repository) {
         repository.start()
-        onDispose { repository.stop() }
+        onStopOrDispose { repository.stop() }
     }
 
     val nav = remember(credentials) { Navigator() }
