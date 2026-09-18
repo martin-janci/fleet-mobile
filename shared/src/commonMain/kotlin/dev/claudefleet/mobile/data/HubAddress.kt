@@ -67,7 +67,17 @@ private fun isThisMachine(rawHost: String): Boolean {
     if (host == "localhost" || host.endsWith(".localhost")) return true
     // IPv4: the whole 127/8 loopback block, and the unspecified address, which
     // is what an operator who pasted a bind address will have.
+    //
+    // Kept as a prefix test as well as the numeric parse below, because it also
+    // catches `127.0.0.1.evil.com` — a hostname, not an address. That is a false
+    // positive and it fails SAFE: the echo loses and the address the phone
+    // actually reached is kept, which is the outcome nobody is harmed by.
+    // Leaving that behaviour alone is deliberate.
     if (host.startsWith("127.") || host == "0.0.0.0") return true
+    // Every other spelling of the same address. `2130706433`, `0177.0.0.1`,
+    // `0x7f.0.0.1` and `127.1` are all 127.0.0.1 to `inet_aton`, and therefore
+    // to `InetAddress.getByName` and to the HTTP clients built on it.
+    inetAton(host)?.let { return (it ushr 24) == 127L || it == 0L }
     // `::ffff:127.0.0.1` — the same IPv4 addresses, wearing an IPv6 hat.
     if (host.startsWith("::ffff:") && '.' in host) return isThisMachine(host.removePrefix("::ffff:"))
     val groups = expandIpv6(host) ?: return false
@@ -79,6 +89,46 @@ private fun isThisMachine(rawHost: String): Boolean {
     val v4 = mappedIpv4(groups) ?: return false
     return v4[0] == 127 || v4.all { it == 0 }
 }
+
+/**
+ * The 32-bit address a host spells as IPv4, in every form `inet_aton` accepts,
+ * or null when it is not an IPv4 address at all.
+ *
+ * Written out rather than matched against the spellings someone thought of,
+ * which is how `::ffff:7f00:1` was missed in the first place. `inet_aton` takes
+ * one to four parts — the last one covering every byte the earlier ones did not
+ * name, so `127.1` is 127.0.0.1 and `2130706433` is the whole thing — and reads
+ * each part as hex with `0x`, octal with a leading `0`, and decimal otherwise.
+ *
+ * Over-matching here is the safe direction. A host this says yes to loses to the
+ * address the phone actually reached; a host it says no to is stored and dialled.
+ */
+private fun inetAton(host: String): Long? {
+    val parts = host.split('.')
+    if (parts.size > 4) return null
+    val values = parts.map { numericPart(it) ?: return null }
+    // 1 part covers 32 bits, 2 parts 24, 3 parts 16, 4 parts 8.
+    val tailBits = (5 - values.size) * 8
+    var address = 0L
+    for ((index, value) in values.withIndex()) {
+        if (index == values.lastIndex) {
+            if (value >= (1L shl tailBits)) return null
+            address = address or value
+        } else {
+            if (value > 255) return null
+            address = address or (value shl (32 - 8 * (index + 1)))
+        }
+    }
+    return address
+}
+
+/** One `inet_aton` part: `0x` hex, leading-zero octal, else decimal. */
+private fun numericPart(part: String): Long? = when {
+    part.isEmpty() -> null
+    part.startsWith("0x") -> part.drop(2).takeIf { it.isNotEmpty() }?.toLongOrNull(16)
+    part.length > 1 && part[0] == '0' -> part.drop(1).toLongOrNull(8)
+    else -> part.toLongOrNull(10)
+}?.takeIf { it >= 0 }
 
 /** The four IPv4 octets inside an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`), or null. */
 private fun mappedIpv4(groups: List<Int>): List<Int>? {

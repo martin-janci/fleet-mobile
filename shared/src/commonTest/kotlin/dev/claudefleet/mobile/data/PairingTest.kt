@@ -272,6 +272,17 @@ class AppSessionTest {
             "http://[0:0:0:0:0:ffff:7f00:1]:8899",
             // Mapped 0.0.0.0, which is a pasted bind address wearing the same hat.
             "http://[::ffff:0:0]:8899",
+            // The other two spellings the review named, plus the two neighbours
+            // of each. All are what `inet_aton` accepts and what
+            // `InetAddress.getByName` still resolves, so an HTTP client reaches
+            // the phone through every one of them.
+            "http://2130706433:8899", // 0x7F000001, the whole address as one decimal
+            "http://2130706432:8899", // 0x7F000000 — 127.0.0.0, the block's first
+            "http://0177.0.0.1:8899", // octal first octet
+            "http://0x7f.0.0.1:8899", // hex first octet
+            "http://0x7f000001:8899", // the whole address in hex
+            "http://127.0.1:8899", // three parts
+            "http://0:8899", // 0.0.0.0 as one decimal
         )
 
         for (echo in meansThisMachine) {
@@ -289,6 +300,14 @@ class AppSessionTest {
         for (echo in listOf(
             "https://fleet.example.com",
             "http://10.0.0.7:8899",
+            // Neighbours of the numeric forms above, so the parser cannot pass
+            // by saying yes to anything made of digits. 2130706431 is
+            // 0x7EFFFFFF — 126.255.255.255, the address one below the loopback
+            // block, which is the boundary worth pinning — and 167772161 and
+            // 0x0a000001 are both 10.0.0.1.
+            "http://2130706431:8899",
+            "http://167772161:8899",
+            "http://0x0a000001:8899",
             "http://[2001:db8::1]:8899",
             "http://[::ffff:8f00:1]:8899",
         )) {
