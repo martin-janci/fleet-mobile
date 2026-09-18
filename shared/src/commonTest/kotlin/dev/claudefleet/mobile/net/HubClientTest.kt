@@ -1,0 +1,344 @@
+package dev.claudefleet.mobile.net
+
+import dev.claudefleet.mobile.model.ConvItem
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.client.request.HttpRequestData
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.TextContent
+import io.ktor.http.headersOf
+import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+/**
+ * The hub answers `POST /mcp` SSE-framed, so every reply in these tests is
+ * wrapped the way `rmcp`'s streamable-HTTP transport wraps it: an `event:`
+ * line, one `data:` line carrying the JSON-RPC body, and a blank line.
+ */
+private fun sse(body: String): String = "event: message\ndata: $body\n\n"
+
+private val sseHeaders = headersOf(HttpHeaders.ContentType, "text/event-stream")
+private val jsonHeaders = headersOf(HttpHeaders.ContentType, "application/json")
+
+/** A successful `tools/call` reply: the payload rides as a JSON text block. */
+private fun okResult(payloadJson: String): String {
+    val text = Json.encodeToString(kotlinx.serialization.json.JsonPrimitive.serializer(), kotlinx.serialization.json.JsonPrimitive(payloadJson))
+    return """{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":$text}]}}"""
+}
+
+private const val BASE = "https://fleet.example.com"
+
+/** Records every request the client made, so headers and bodies can be asserted. */
+private class Calls {
+    val requests = mutableListOf<HttpRequestData>()
+    fun path(i: Int) = requests[i].url.encodedPath
+    fun bodyText(i: Int) = (requests[i].body as TextContent).text
+}
+
+private fun client(
+    token: String? = "tok-phone",
+    calls: Calls = Calls(),
+    handler: (HttpRequestData) -> Pair<String, HttpStatusCode>,
+): Pair<HubClient, Calls> {
+    val engine = MockEngine { request ->
+        calls.requests += request
+        val (body, status) = handler(request)
+        val headers = if (body.startsWith("event:")) sseHeaders else jsonHeaders
+        respond(body, status, headers)
+    }
+    return HubClient(HttpClient(engine), BASE, token) to calls
+}
+
+class HubClientTest {
+
+    @Test
+    fun a_tool_result_on_an_sse_data_line_is_parsed() = runTest {
+        val (hub, calls) = client { sse(okResult("""{"ok":true,"n":3}""")) to HttpStatusCode.OK }
+
+        val n = hub.call("fleet_health", JsonObject(emptyMap())) {
+            it.jsonObject["n"]!!.jsonPrimitive.content.toInt()
+        }
+
+        assertEquals(3, n)
+        assertEquals("/mcp", calls.path(0))
+        val sent = Json.parseToJsonElement(calls.bodyText(0)).jsonObject
+        assertEquals("2.0", sent["jsonrpc"]!!.jsonPrimitive.content)
+        assertEquals("tools/call", sent["method"]!!.jsonPrimitive.content)
+        assertEquals("fleet_health", sent["params"]!!.jsonObject["name"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun a_result_flagged_isError_becomes_a_tool_error_with_its_code() = runTest {
+        val rpc = """
+            {"jsonrpc":"2.0","id":1,"result":{
+              "content":[{"type":"text","text":"E_NO_TRANSCRIPT: nothing written yet"}],
+              "structuredContent":{"code":"E_NO_TRANSCRIPT","message":"nothing written yet","details":null},
+              "isError":true}}
+        """.trimIndent().replace("\n", "")
+
+        val (hub, _) = client { sse(rpc) to HttpStatusCode.OK }
+
+        val e = assertFailsWith<HubError.Tool> {
+            hub.call("session_conversation", buildJsonObject { put("session_id", 1) }) { it }
+        }
+        assertEquals("E_NO_TRANSCRIPT", e.code)
+        assertEquals("nothing written yet", e.message)
+    }
+
+    @Test
+    fun a_jsonrpc_error_object_becomes_a_tool_error_too() = runTest {
+        val rpc = """{"jsonrpc":"2.0","id":1,"error":{"code":-32603,""" +
+            """"message":"E_FORBIDDEN: a client token may not call add_host",""" +
+            """"data":{"code":"E_FORBIDDEN","details":null}}}"""
+
+        val (hub, _) = client { sse(rpc) to HttpStatusCode.OK }
+
+        val e = assertFailsWith<HubError.Tool> { hub.call("add_host", JsonObject(emptyMap())) { it } }
+        assertEquals("E_FORBIDDEN", e.code)
+        assertTrue(e.message.contains("may not call add_host"), e.message)
+    }
+
+    @Test
+    fun a_401_becomes_unauthorized() = runTest {
+        val (hub, _) = client { "" to HttpStatusCode.Unauthorized }
+
+        assertFailsWith<HubError.Unauthorized> { hub.listSessions() }
+    }
+
+    @Test
+    fun a_403_becomes_forbidden_carrying_the_body() = runTest {
+        val (hub, _) = client { "Host header not allowed" to HttpStatusCode.Forbidden }
+
+        val e = assertFailsWith<HubError.Forbidden> { hub.listSessions() }
+        assertEquals("Host header not allowed", e.body)
+    }
+
+    @Test
+    fun a_connection_failure_becomes_transport() = runTest {
+        val engine = MockEngine { throw RuntimeException("connection refused") }
+        val hub = HubClient(HttpClient(engine), BASE, "tok-phone")
+
+        val e = assertFailsWith<HubError.Transport> { hub.listSessions() }
+        assertEquals("connection refused", e.cause.message)
+    }
+
+    @Test
+    fun any_other_http_status_becomes_an_http_error() = runTest {
+        val (hub, _) = client { "bad gateway" to HttpStatusCode.BadGateway }
+
+        val e = assertFailsWith<HubError.Http> { hub.listSessions() }
+        assertEquals(502, e.status)
+        assertEquals("bad gateway", e.body)
+    }
+
+    @Test
+    fun pair_posts_the_code_and_reads_back_the_token_and_the_hub_url() = runTest {
+        val (hub, calls) = client(token = null) {
+            """{"token":"tok-new","name":"phone","mode":"full","hub":"https://fleet.example.com"}""" to
+                HttpStatusCode.OK
+        }
+
+        val paired = hub.pair("ABCD1234")
+
+        assertEquals("tok-new", paired.token)
+        assertEquals("phone", paired.name)
+        assertEquals("full", paired.mode)
+        assertEquals("https://fleet.example.com", paired.hub)
+        assertEquals("/pair", calls.path(0))
+        assertEquals(
+            "ABCD1234",
+            Json.parseToJsonElement(calls.bodyText(0)).jsonObject["code"]!!.jsonPrimitive.content,
+        )
+    }
+
+    @Test
+    fun the_bearer_token_is_sent_to_mcp_and_never_to_pair() = runTest {
+        val calls = Calls()
+        val (hub, _) = client(token = "tok-phone", calls = calls) { request ->
+            if (request.url.encodedPath == "/pair") {
+                """{"token":"t","name":"phone","mode":"full","hub":"$BASE"}""" to HttpStatusCode.OK
+            } else {
+                sse(okResult("[]")) to HttpStatusCode.OK
+            }
+        }
+
+        hub.listSessions()
+        hub.pair("ABCD1234")
+
+        assertEquals("Bearer tok-phone", calls.requests[0].headers[HttpHeaders.Authorization])
+        assertTrue(
+            calls.requests[0].headers[HttpHeaders.Accept].orEmpty().contains("text/event-stream"),
+            "the hub's streamable-HTTP transport requires the Accept pair",
+        )
+        assertNull(
+            calls.requests[1].headers[HttpHeaders.Authorization],
+            "/pair is how a client gets its FIRST credential — it must not present one",
+        )
+    }
+
+    @Test
+    fun a_client_without_a_token_sends_no_authorization_header() = runTest {
+        val (hub, calls) = client(token = null) { sse(okResult("[]")) to HttpStatusCode.OK }
+
+        hub.listSessions()
+
+        assertNull(calls.requests[0].headers[HttpHeaders.Authorization])
+    }
+
+    @Test
+    fun list_sessions_asks_for_full_rows_and_parses_them() = runTest {
+        // Exactly the shape `ok_json_compact` emits: compact, nulls stripped,
+        // `is_controller` flattened onto the row, plus usage fields the app
+        // does not model (which must not break the parse).
+        val row = """[{"is_controller":false,"id":12,"tmux_name":"fleet-abc",""" +
+            """"host_alias":"trn","project_id":3,"created_at":1758100000,""" +
+            """"last_activity_at":1758200000,"status":"running","kind":"work",""" +
+            """"claude_status":"blocked","stuck_kind":"press_enter",""" +
+            """"current_activity":"waiting on a prompt","friendly_name":"hub client",""" +
+            """"turn_seq":7,"tags":["mobile"],"usage_input_tokens":10,"usage_cost_micros":42}]"""
+
+        val (hub, calls) = client { sse(okResult(row)) to HttpStatusCode.OK }
+
+        val sessions = hub.listSessions()
+
+        assertEquals(1, sessions.size)
+        val s = sessions[0]
+        assertEquals(12L, s.id)
+        assertEquals("fleet-abc", s.tmuxName)
+        assertEquals("hub client", s.friendlyName)
+        assertEquals("trn", s.hostAlias)
+        assertEquals(3L, s.projectId)
+        assertEquals("blocked", s.claudeStatus)
+        assertEquals("press_enter", s.stuckKind)
+        assertEquals("waiting on a prompt", s.currentActivity)
+        assertEquals(1758200000L, s.lastActivityAt)
+        assertEquals(listOf("mobile"), s.tags)
+
+        val args = Json.parseToJsonElement(calls.bodyText(0))
+            .jsonObject["params"]!!.jsonObject["arguments"]!!.jsonObject
+        assertEquals(
+            "false",
+            args["summary"]!!.jsonPrimitive.content,
+            "summary=true drops friendly_name, current_activity and last_activity_at",
+        )
+    }
+
+    @Test
+    fun list_hosts_parses_the_host_rows() = runTest {
+        val rows = """[{"alias":"trn","ssh_alias":"claude-fleet-trn","reachable":true,""" +
+            """"claude_version":"2.1.0","tmux_version":"3.4","hidden":false,""" +
+            """"last_pinged_at":1758200000,"account_uuid":null,"provisioned":true,"transport":"ssh"}]"""
+
+        val (hub, _) = client { sse(okResult(rows)) to HttpStatusCode.OK }
+
+        val hosts = hub.listHosts()
+
+        assertEquals(1, hosts.size)
+        assertEquals("trn", hosts[0].alias)
+        assertTrue(hosts[0].reachable)
+        assertEquals("2.1.0", hosts[0].claudeVersion)
+        assertEquals("ssh", hosts[0].transport)
+        assertNull(hosts[0].accountUuid)
+    }
+
+    @Test
+    fun a_conversation_parses_its_kind_tagged_items() = runTest {
+        val conv = """{"turns":[{"prompt":"run the tests","at":"2026-09-18T10:00:00Z",""" +
+            """"ended_at":"2026-09-18T10:00:09Z","items":[{"kind":"text","text":"On it."},""" +
+            """{"kind":"tool","summary":"Bash(./gradlew test)","error":true}]},""" +
+            """{"prompt":null,"at":null,"ended_at":null,"items":[]}],"truncated":true}"""
+
+        val (hub, calls) = client { sse(okResult(conv)) to HttpStatusCode.OK }
+
+        val result = hub.conversation(sessionId = 12, turns = 5)
+
+        assertTrue(result.truncated)
+        assertEquals(2, result.turns.size)
+        assertEquals("run the tests", result.turns[0].prompt)
+        assertEquals("2026-09-18T10:00:09Z", result.turns[0].endedAt)
+        assertEquals(ConvItem.Text("On it."), result.turns[0].items[0])
+        assertEquals(ConvItem.Tool("Bash(./gradlew test)", error = true), result.turns[0].items[1])
+        assertNull(result.turns[1].prompt)
+
+        val args = Json.parseToJsonElement(calls.bodyText(0))
+            .jsonObject["params"]!!.jsonObject["arguments"]!!.jsonObject
+        assertEquals("12", args["session_id"]!!.jsonPrimitive.content)
+        assertEquals("5", args["turns"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun conversation_omits_turns_when_the_caller_does_not_choose_one() = runTest {
+        val (hub, calls) = client { sse(okResult("""{"turns":[],"truncated":false}""")) to HttpStatusCode.OK }
+
+        hub.conversation(sessionId = 12)
+
+        val args = Json.parseToJsonElement(calls.bodyText(0))
+            .jsonObject["params"]!!.jsonObject["arguments"]!!.jsonObject
+        assertNull(args["turns"], "the hub's own default (10) must stand")
+    }
+
+    @Test
+    fun send_prompt_posts_the_text_and_parses_the_receipt() = runTest {
+        val (hub, calls) = client {
+            sse(okResult("""{"delivered":true,"session_id":12,"turn_seq_before":7}""")) to HttpStatusCode.OK
+        }
+
+        val receipt = hub.sendPrompt(sessionId = 12, text = "carry on")
+
+        assertTrue(receipt.delivered)
+        assertEquals(12L, receipt.sessionId)
+        assertEquals(7L, receipt.turnSeqBefore)
+
+        val params = Json.parseToJsonElement(calls.bodyText(0)).jsonObject["params"]!!.jsonObject
+        assertEquals("send_prompt", params["name"]!!.jsonPrimitive.content)
+        val args = params["arguments"]!!.jsonObject
+        assertEquals("12", args["session_id"]!!.jsonPrimitive.content)
+        assertEquals("carry on", args["prompt"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun a_plain_json_reply_without_sse_framing_is_parsed_too() = runTest {
+        // `json_response` is a server switch; the client must not care.
+        val (hub, _) = client { okResult("[]") to HttpStatusCode.OK }
+
+        assertEquals(emptyList(), hub.listSessions())
+    }
+
+    @Test
+    fun sse_keep_alive_comments_between_frames_are_ignored() = runTest {
+        // Long polls (`wait_for_session`, `run_prompt`) keep the connection
+        // warm with SSE comment lines before the real frame arrives.
+        val framed = ": keep-alive\n\n: keep-alive\n\n" + sse(okResult("[]"))
+        val (hub, _) = client { framed to HttpStatusCode.OK }
+
+        assertEquals(emptyList(), hub.listSessions())
+    }
+
+    @Test
+    fun a_reply_that_is_neither_a_result_nor_an_error_is_a_transport_failure() = runTest {
+        val (hub, _) = client { sse("""{"jsonrpc":"2.0","id":1}""") to HttpStatusCode.OK }
+
+        assertFailsWith<HubError.Transport> { hub.listSessions() }
+    }
+
+    @Test
+    fun a_pair_code_the_hub_refuses_surfaces_as_an_http_error() = runTest {
+        val (hub, _) = client(token = null) { """{"error":"invalid code"}""" to HttpStatusCode.NotFound }
+
+        val e = assertFailsWith<HubError.Http> { hub.pair("ZZZZZZZZ") }
+        assertEquals(404, e.status)
+        assertTrue(e.body.contains("invalid code"))
+    }
+}
