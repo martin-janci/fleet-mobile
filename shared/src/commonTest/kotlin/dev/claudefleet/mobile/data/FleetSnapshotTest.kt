@@ -98,7 +98,7 @@ class FleetSnapshotTest {
 
     private val two = FleetSnapshot(
         sessions = listOf(SessionRow(id = 1, tmuxName = "one"), SessionRow(id = 2, tmuxName = "two")),
-        hosts = listOf(HostRow(alias = "box"), HostRow(alias = "trn")),
+        hosts = listOf(HostRow(alias = "box"), HostRow(alias = "pine")),
     )
 
     @Test
@@ -163,9 +163,9 @@ class FleetSnapshotTest {
 
     @Test
     fun a_host_probed_frame_replaces_the_host_with_that_alias() {
-        val after = two.applying(row("host:probed", hostPayload("trn", reachable = true)))
+        val after = two.applying(row("host:probed", hostPayload("pine", reachable = true)))
 
-        assertEquals(listOf("box", "trn"), after.hosts.map { it.alias })
+        assertEquals(listOf("box", "pine"), after.hosts.map { it.alias })
         assertTrue(after.hosts[1].reachable)
         assertEquals("2.0.1", after.hosts[1].claudeVersion)
     }
@@ -174,14 +174,14 @@ class FleetSnapshotTest {
     fun a_host_added_frame_adds_it() {
         val after = two.applying(row("host:added", hostPayload("mac")))
 
-        assertEquals(listOf("box", "trn", "mac"), after.hosts.map { it.alias })
+        assertEquals(listOf("box", "pine", "mac"), after.hosts.map { it.alias })
     }
 
     @Test
     fun a_host_removed_frame_removes_it_by_alias() {
         val after = two.applying(row("host:removed", """{"alias":"box"}"""))
 
-        assertEquals(listOf("trn"), after.hosts.map { it.alias })
+        assertEquals(listOf("pine"), after.hosts.map { it.alias })
     }
 
     /**

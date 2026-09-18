@@ -67,11 +67,51 @@ not revoke it, it cannot revoke it, and the screen says so.
   address, which on a phone means the phone. The app ignores an echoed loopback
   and keeps the address it actually reached, so this should not bite — but if
   the hub is reachable under several names, the app keeps the one in the QR.
-- **A hub on the LAN, over plain `http://`.** Works on Android. On iOS it needs
-  the two Info.plist keys described under *iOS* below, and nobody has yet
-  watched that permission dialog appear.
+- **A hub on the LAN, over plain `http://`.** Read *Transport* below before
+  trying this. The short version: use HTTPS. Android blocks cleartext outright
+  at this `targetSdk`, and the app now refuses plain `http` to anything that is
+  not on your own network.
 
 ---
+
+## Transport
+
+**Use HTTPS.** Everything below is about the cases where you cannot.
+
+The app imposes its own rule, rather than relying on whatever the two platforms
+happen to default to: plain `http://` is permitted only to a destination that is
+plausibly this machine or this network — loopback in any spelling, the RFC 1918
+private ranges, CGNAT and link-local, IPv6 unique-local and link-local, a
+single-label name like `fleethub`, or anything under `.local`. Plain `http` to
+anything else is refused when the address is entered or scanned, because a
+bearer token in the clear on the open internet is not a trade worth making.
+It fails closed, with a message.
+
+Then the platform has its own say, and on Android it is stricter than the app:
+
+- **Android.** `targetSdk` is 35, so the platform blocks cleartext for every
+  destination unless the app ships an exception. **This app ships none**, so a
+  plain-`http` hub does not work on Android as built — including on the LAN.
+  The fix is HTTPS on the hub.
+
+  If you genuinely need cleartext to one LAN host, add a
+  [network security configuration](https://developer.android.com/privacy-and-security/security-config)
+  naming that host and wire it up in the manifest. Note that the format matches
+  domains and IP *literals*, not CIDR ranges, so "all of 192.168/16" cannot be
+  expressed — you name the host you actually use. **Do not set
+  `android:usesCleartextTraffic="true"`**: that is a blanket exception for every
+  destination, which is precisely what the iOS side refuses, and a test fails if
+  it appears.
+
+- **iOS.** `NSAllowsLocalNetworking` permits cleartext to the local network and
+  `NSLocalNetworkUsageDescription` lets the system ask permission for it, both in
+  `iosApp/iosApp/Info.plist`. `NSAllowsArbitraryLoads` is deliberately absent and
+  a test keeps it absent. Nobody has yet watched that permission dialog appear —
+  see *What a Mac still has to check*.
+
+The asymmetry is real and is not a bug in this document: a LAN hub over plain
+http can work on iOS and cannot on Android, until someone adds the Android
+configuration for their own host.
 
 ## What it does
 

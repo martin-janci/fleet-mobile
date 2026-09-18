@@ -33,7 +33,7 @@ private fun row(
     id = ID,
     tmuxName = "fleet-api",
     friendlyName = "API work",
-    hostAlias = "trn",
+    hostAlias = "pine",
     projectId = 1,
     claudeStatus = status,
     stuckKind = stuck,
@@ -47,7 +47,7 @@ private fun text(s: String) = ConvItem.Text(s)
 
 private class FakeFleetState(rows: List<SessionRow> = listOf(row())) : FleetState {
     override val sessions = MutableStateFlow(rows)
-    override val hosts = MutableStateFlow(listOf(HostRow(alias = "trn", reachable = true)))
+    override val hosts = MutableStateFlow(listOf(HostRow(alias = "pine", reachable = true)))
     override val projects = MutableStateFlow(listOf(ProjectRow(id = 1, owner = "o", repo = "r")))
     override val status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Connected("0.9.3"))
     override suspend fun refresh() = Unit
@@ -290,7 +290,7 @@ class SessionViewModelTest {
         val fleet = FakeFleetState()
         val vm = SessionViewModel(ID, fleet, FakeActions(), backgroundScope)
         assertEquals("working", vm.state.value.session?.claudeStatus)
-        assertEquals("trn", vm.state.value.session?.hostAlias)
+        assertEquals("pine", vm.state.value.session?.hostAlias)
 
         fleet.sessions.value = listOf(row(status = "blocked", stuck = "press_enter", activity = "waiting"))
         runCurrent()

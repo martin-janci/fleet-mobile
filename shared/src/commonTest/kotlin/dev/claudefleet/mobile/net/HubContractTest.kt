@@ -77,7 +77,7 @@ class HubErrorIsAClosedSetTest {
     @Test
     fun a_session_row_missing_its_id_is_a_hub_error_not_a_missing_field_exception() = runTest {
         val hub = hubClient(
-            okResult("""[{"tmux_name":"api","host_alias":"trn"}]"""),
+            okResult("""[{"tmux_name":"api","host_alias":"pine"}]"""),
             HttpStatusCode.OK,
         )
 

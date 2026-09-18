@@ -85,10 +85,10 @@ class SessionsViewModelTest {
             rows = listOf(
                 session(1, host = "box", project = 1),
                 session(2, host = "box", project = 2),
-                session(3, host = "trn", project = 1),
+                session(3, host = "pine", project = 1),
                 session(4, host = "box", project = 1),
             ),
-            hostRows = listOf(HostRow(alias = "box", reachable = true), HostRow("trn")),
+            hostRows = listOf(HostRow(alias = "box", reachable = true), HostRow("pine")),
             projectRows = listOf(
                 ProjectRow(id = 1, owner = "martin-janci", repo = "claude-fleet"),
                 ProjectRow(id = 2, owner = "martin-janci", repo = "fleet-mobile"),
@@ -97,7 +97,7 @@ class SessionsViewModelTest {
         val vm = SessionsViewModel(fleet, backgroundScope)
 
         val groups = vm.state.value.groups
-        assertEquals(listOf("box", "trn"), groups.map { it.alias })
+        assertEquals(listOf("box", "pine"), groups.map { it.alias })
         assertEquals(
             listOf("martin-janci/claude-fleet", "martin-janci/fleet-mobile"),
             groups[0].projects.map { it.label },
@@ -141,8 +141,8 @@ class SessionsViewModelTest {
             rows = listOf(
                 session(1, host = "box", claudeStatus = "working"),
                 session(2, host = "box", claudeStatus = "blocked"),
-                session(3, host = "trn", claudeStatus = "working", stuckKind = "press_enter"),
-                session(4, host = "trn", claudeStatus = "completed"),
+                session(3, host = "pine", claudeStatus = "working", stuckKind = "press_enter"),
+                session(4, host = "pine", claudeStatus = "completed"),
             ),
         )
         val vm = SessionsViewModel(fleet, backgroundScope)
@@ -156,7 +156,7 @@ class SessionsViewModelTest {
         assertEquals(listOf(2L, 3L), state.groups.flatMap { g -> g.projects.flatMap { it.sessions } }.map { it.id })
         // Both hosts keep a group because both had a row that matched; a host
         // whose rows all filtered out must disappear rather than show empty.
-        assertEquals(listOf("box", "trn"), state.groups.map { it.alias })
+        assertEquals(listOf("box", "pine"), state.groups.map { it.alias })
     }
 
     @Test
@@ -164,7 +164,7 @@ class SessionsViewModelTest {
         val fleet = FakeFleet(
             rows = listOf(
                 session(1, host = "box", claudeStatus = "working"),
-                session(2, host = "trn", claudeStatus = "blocked"),
+                session(2, host = "pine", claudeStatus = "blocked"),
             ),
         )
         val vm = SessionsViewModel(fleet, backgroundScope)
@@ -172,7 +172,7 @@ class SessionsViewModelTest {
         vm.setNeedsAttentionOnly(true)
         runCurrent()
 
-        assertEquals(listOf("trn"), vm.state.value.groups.map { it.alias })
+        assertEquals(listOf("pine"), vm.state.value.groups.map { it.alias })
     }
 
     /** The toggle's badge counts the whole fleet, not what the filter left. */

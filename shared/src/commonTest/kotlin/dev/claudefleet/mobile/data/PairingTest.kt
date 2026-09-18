@@ -305,11 +305,17 @@ class AppSessionTest {
             // 0x7EFFFFFF — 126.255.255.255, the address one below the loopback
             // block, which is the boundary worth pinning — and 167772161 and
             // 0x0a000001 are both 10.0.0.1.
-            "http://2130706431:8899",
+            // `https` on the two PUBLIC ones on purpose. The cleartext policy
+            // added later refuses plain http to a public address, so leaving
+            // these as http would make them lose for a transport reason and
+            // this test would keep passing even if the loopback check started
+            // over-matching — which is the single thing it exists to catch.
+            // The addresses are unchanged; only the scheme is.
+            "https://2130706431:8899",
             "http://167772161:8899",
             "http://0x0a000001:8899",
-            "http://[2001:db8::1]:8899",
-            "http://[::ffff:8f00:1]:8899",
+            "https://[2001:db8::1]:8899",
+            "https://[::ffff:8f00:1]:8899",
         )) {
             val (app, _, secrets) = session { pairOk(hub = echo) to HttpStatusCode.OK }
             app.pair("https://10.0.0.4:8899/pair#$CODE")

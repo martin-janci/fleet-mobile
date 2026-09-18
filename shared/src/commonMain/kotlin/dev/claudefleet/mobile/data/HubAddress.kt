@@ -52,7 +52,12 @@ internal fun hubBase(url: String): String? {
     if ('@' in authority) return null
     if (!authority.hasUsablePort()) return null
 
-    return "$scheme://$rest"
+    // The app's own transport policy, rather than whatever the platform happens
+    // to default to. See [permitsCleartext].
+    val candidate = "$scheme://$rest"
+    if (!permitsCleartext(candidate)) return null
+
+    return candidate
 }
 
 /**
@@ -99,16 +104,98 @@ private fun Char.isControl(): Boolean = this < ' ' || this in ''..''
  * bind address into `hub.public_url` is precisely the operator this rule exists
  * to protect. Re-pairing never recovers, because the echo wins every time.
  */
-internal fun isLoopbackUrl(url: String): Boolean {
-    val authority = url.substringAfter("://", "").substringBefore('/')
-    val host = when {
-        authority.startsWith("[") -> authority.substringAfter('[').substringBefore(']')
-        // An IPv6 literal without brackets has more than one colon; a host:port
-        // has exactly one.
-        authority.count { it == ':' } > 1 -> authority
-        else -> authority.substringBefore(':')
+internal fun isLoopbackUrl(url: String): Boolean =
+    isThisMachine(hostOf(url.substringAfter("://", "").substringBefore('/')))
+
+/**
+ * The bare host inside an authority, with any port and brackets removed.
+ *
+ * Shared by [isLoopbackUrl] and [permitsCleartext] rather than written twice.
+ * Duplicated host parsing in this file is not a hypothetical risk: it is the
+ * documented root cause of the four separate occasions [isThisMachine] was
+ * wrong.
+ */
+private fun hostOf(authority: String): String = when {
+    authority.startsWith("[") -> authority.substringAfter('[').substringBefore(']')
+    // An IPv6 literal without brackets has more than one colon; a host:port
+    // has exactly one.
+    authority.count { it == ':' } > 1 -> authority
+    else -> authority.substringBefore(':')
+}
+
+/**
+ * May this URL be spoken over plain `http://`?
+ *
+ * The app's own transport policy, rather than two platforms' defaults. Android
+ * at `targetSdk` 35 blocks cleartext unless an app opts in, and iOS's App
+ * Transport Security blocks it except to the local network, so today both
+ * platforms refuse a plaintext hub on the public internet before this function
+ * is consulted. That is exactly why it exists: the app was relying on a default
+ * it does not control and never stated, and a single edit to either platform's
+ * configuration — the one thing an operator who wants a LAN hub is most likely
+ * to reach for — would have exposed it with nothing here objecting.
+ *
+ * `https` is always fine. `http` is permitted only to a destination that is
+ * plausibly this machine or this network:
+ *
+ *  - anything [isThisMachine] already recognises, in all of its spellings;
+ *  - the RFC 1918 private ranges, CGNAT (100.64/10) and link-local (169.254/16);
+ *  - IPv6 unique-local (`fc00::/7`) and link-local (`fe80::/10`);
+ *  - a single-label name (`fleethub`) or one under `.local`, which is how an
+ *    mDNS or short-name LAN host is written and cannot be a public name.
+ *
+ * **This fails CLOSED, and that is a deliberate trade.** An operator running a
+ * hub over plain http at a public-looking DNS name that resolves privately —
+ * `http://hub.mycompany.internal` — is refused and has to use https. They see a
+ * refusal with a reason, which is recoverable; the alternative is a bearer token
+ * on the open internet in the clear, which is not. Every other failure this file
+ * has had failed *open*, so this is the first one worth taking in the other
+ * direction.
+ */
+internal fun permitsCleartext(url: String): Boolean {
+    val scheme = url.substringBefore("://", "").trim().lowercase()
+    if (scheme != "http") return true
+
+    val host = hostOf(url.substringAfter("://", "").substringBefore('/'))
+        .trim().trim('[', ']').lowercase().trimEnd('.')
+    if (host.isEmpty()) return false
+    if (isThisMachine(host)) return true
+
+    // A name rather than an address. A single label cannot be a public FQDN, and
+    // `.local` is reserved for mDNS by RFC 6762.
+    if (host.endsWith(".local")) return true
+
+    inetAton(host)?.let { return it.isPrivateIpv4() }
+
+    val groups = expandIpv6(host)
+    if (groups != null) {
+        // `fc00::/7` unique-local, `fe80::/10` link-local.
+        if ((groups[0] and 0xFE00) == 0xFC00) return true
+        if ((groups[0] and 0xFFC0) == 0xFE80) return true
+        embeddedIpv4(groups)?.let { v4 ->
+            val packed = (v4[0].toLong() shl 24) or (v4[1].toLong() shl 16) or
+                (v4[2].toLong() shl 8) or v4[3].toLong()
+            return packed.isPrivateIpv4()
+        }
+        return false
     }
-    return isThisMachine(host)
+
+    // Not an address at all. One label with no dot is a LAN short name.
+    return '.' !in host
+}
+
+/** RFC 1918, CGNAT and link-local, on a 32-bit address. */
+private fun Long.isPrivateIpv4(): Boolean {
+    val a = (this ushr 24) and 0xFF
+    val b = (this ushr 16) and 0xFF
+    return when {
+        a == 10L -> true
+        a == 172L && b in 16..31 -> true
+        a == 192L && b == 168L -> true
+        a == 100L && b in 64..127 -> true  // 100.64/10, carrier-grade NAT
+        a == 169L && b == 254L -> true     // 169.254/16, link-local
+        else -> false
+    }
 }
 
 /**

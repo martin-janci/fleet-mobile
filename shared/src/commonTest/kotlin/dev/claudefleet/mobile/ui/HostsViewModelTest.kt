@@ -64,13 +64,13 @@ class HostsViewModelTest {
     @Test
     fun hosts_are_ordered_with_the_hubs_own_machine_first_then_alphabetically() = runTest {
         val fleet = FakeFleetForHosts(
-            hostRows = listOf(HostRow("zebra"), HostRow("mefistos"), HostRow("local"), HostRow("alpha")),
+            hostRows = listOf(HostRow("zebra"), HostRow("willow"), HostRow("local"), HostRow("alpha")),
         )
         val vm = HostsViewModel(fleet, backgroundScope)
         runCurrent()
 
         assertEquals(
-            listOf("local", "alpha", "mefistos", "zebra"),
+            listOf("local", "alpha", "willow", "zebra"),
             vm.state.value.hosts.map { it.alias },
         )
     }
@@ -78,13 +78,13 @@ class HostsViewModelTest {
     @Test
     fun a_host_carries_its_session_count() = runTest {
         val fleet = FakeFleetForHosts(
-            hostRows = listOf(HostRow("box"), HostRow("trn")),
-            sessionRows = listOf(sessionOn("box", 1), sessionOn("box", 2), sessionOn("trn", 3)),
+            hostRows = listOf(HostRow("box"), HostRow("pine")),
+            sessionRows = listOf(sessionOn("box", 1), sessionOn("box", 2), sessionOn("pine", 3)),
         )
         val vm = HostsViewModel(fleet, backgroundScope)
         runCurrent()
 
-        assertEquals(mapOf("box" to 2, "trn" to 1), vm.state.value.hosts.associate { it.alias to it.sessions })
+        assertEquals(mapOf("box" to 2, "pine" to 1), vm.state.value.hosts.associate { it.alias to it.sessions })
     }
 
     @Test

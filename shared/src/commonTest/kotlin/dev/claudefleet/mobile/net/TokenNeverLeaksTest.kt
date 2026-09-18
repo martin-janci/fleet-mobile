@@ -7,6 +7,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
+import dev.claudefleet.mobile.model.PairResult
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
@@ -262,5 +263,54 @@ class RedactionIsCaseInsensitiveTest {
     fun text_that_is_not_the_token_survives() {
         val safe = redacted("upstream timed out after 30s", hexToken)
         assertEquals("upstream timed out after 30s", safe)
+    }
+
+    /**
+     * `PairResult` does not print its token.
+     *
+     * It was the last `data class` in the app whose first property is the
+     * plaintext token, and a generated `toString()` prints all of them — the
+     * exact shape `Credentials` was deliberately written around. One string
+     * interpolation (`"pair failed: $result"`) would have been the third leak.
+     */
+    @Test
+    fun a_pair_result_never_prints_its_token() {
+        val result = PairResult(
+            token = hexToken,
+            name = "phone",
+            mode = "full",
+            hub = "https://fleet.example.com",
+        )
+
+        val rendered = result.toString()
+
+        assertFalse(hexToken in rendered, "the token reached PairResult.toString(): $rendered")
+        assertTrue("<redacted>" in rendered, rendered)
+        // The fields that are not secret stay legible: this is a redaction, not
+        // an opaque type nobody can debug with.
+        assertTrue("phone" in rendered && "https://fleet.example.com" in rendered, rendered)
+    }
+
+    /**
+     * More than one secret can be in scope, and all of them are scrubbed.
+     *
+     * The pairing code is the second: on the `/pair` path there is no token yet,
+     * and the code is the credential.
+     */
+    @Test
+    fun every_secret_in_scope_is_scrubbed_not_just_the_first() {
+        val safe = redacted("proxy echoed $hexToken and ABCD1234", hexToken, "ABCD1234")
+
+        assertFalse(hexToken in safe, safe)
+        assertFalse("ABCD1234" in safe, safe)
+    }
+
+    /** A null or blank secret is skipped rather than scrubbing everything. */
+    @Test
+    fun a_null_secret_among_others_does_not_break_the_scrub() {
+        val safe = redacted("proxy echoed ABCD1234", null, "ABCD1234", "")
+
+        assertFalse("ABCD1234" in safe, safe)
+        assertTrue("<redacted>" in safe, safe)
     }
 }

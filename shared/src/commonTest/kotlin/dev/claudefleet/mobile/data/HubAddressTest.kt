@@ -165,7 +165,69 @@ class HubBaseTest {
     @Test
     fun the_scheme_is_normalised_rather_than_echoed_back_in_whatever_case_it_arrived() {
         assertEquals("https://fleet.example.com", hubBase("HTTPS://fleet.example.com"))
-        assertEquals("http://fleet.example.com", hubBase("Http://fleet.example.com"))
+        // A LAN address for the http case: the cleartext policy refuses plain
+        // http to a public name, and this test is about the SCHEME's case.
+        assertEquals("http://192.168.1.5:8899", hubBase("Http://192.168.1.5:8899"))
+    }
+
+    /**
+     * The app's own transport policy: plain `http` only to this machine or this
+     * network. Previously the app imposed none and relied on two platforms'
+     * defaults — Android's cleartext block and iOS's ATS — which it does not
+     * control and never stated.
+     *
+     * This is the one rule in this file that fails CLOSED. A hub over plain http
+     * at a public-looking name is refused with a reason, which is recoverable;
+     * a bearer token sent over the open internet in the clear is not.
+     */
+    @Test
+    fun plain_http_is_refused_to_a_public_host() {
+        assertNull(hubBase("http://fleet.example.com"))
+        assertNull(hubBase("http://fleet.example.com:8899"))
+        assertNull(hubBase("http://8.8.8.8"))
+        assertNull(hubBase("http://[2001:db8::1]:8899"))
+        // 126.255.255.255, one below the loopback block — public, so http is out.
+        assertNull(hubBase("http://2130706431:8899"))
+        // https to the same hosts is fine.
+        assertEquals("https://fleet.example.com", hubBase("https://fleet.example.com"))
+        assertEquals("https://8.8.8.8", hubBase("https://8.8.8.8"))
+    }
+
+    @Test
+    fun plain_http_is_permitted_to_this_machine_and_this_network() {
+        for (url in listOf(
+            "http://127.0.0.1:8899",
+            "http://localhost:8899",
+            "http://[::1]:8899",
+            "http://10.0.0.7:8899",
+            "http://192.168.1.5:8899",
+            "http://172.16.0.1:8899",
+            "http://172.31.255.254:8899",
+            "http://169.254.1.1:8899",   // link-local
+            "http://100.64.0.1:8899",    // carrier-grade NAT
+            "http://[fd00::1]:8899",     // IPv6 unique-local
+            "http://[fe80::1]:8899",     // IPv6 link-local
+            "http://fleethub:8899",      // a single-label LAN name
+            "http://fleethub.local:8899",
+            // The numeric spellings of 10.0.0.1 the address parser already knows.
+            "http://167772161:8899",
+            "http://0x0a000001:8899",
+        )) {
+            assertEquals(url, hubBase(url), "http should be permitted to $url")
+        }
+    }
+
+    /** 172.16/12 has edges, and neither of them is 172.anything. */
+    @Test
+    fun the_private_ranges_have_the_right_edges() {
+        assertNull(hubBase("http://172.15.0.1:8899"))
+        assertNull(hubBase("http://172.32.0.1:8899"))
+        assertNull(hubBase("http://100.63.0.1:8899"))
+        assertNull(hubBase("http://100.128.0.1:8899"))
+        assertNull(hubBase("http://11.0.0.1:8899"))
+        assertNull(hubBase("http://192.169.1.5:8899"))
+        // And an IPv6 neighbour of the unique-local block.
+        assertNull(hubBase("http://[fb00::1]:8899"))
     }
 
     @Test

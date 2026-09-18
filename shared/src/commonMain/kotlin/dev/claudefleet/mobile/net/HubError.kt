@@ -142,14 +142,18 @@ private const val MAX_ERROR_BODY = 1_000
  * markup would still slip through, and no `replace` can fix that. Read the name
  * as "token-scrubbed", not "safe".
  */
-internal fun redacted(body: String, secret: String?): String {
+internal fun redacted(body: String, vararg secrets: String?): String {
     // `ignoreCase` because a hub token is 32 bytes rendered as **lowercase hex**
     // (`mcp/mod.rs`), and an upper-cased echo of it is still the token — not a
     // re-encoding but the same 64 characters, which a case-sensitive `replace`
     // walks straight past. Plenty of proxies upper-case what they quote back in
     // a header dump. Measured before the fix: 64 of 64 characters survived.
-    val scrubbed =
-        if (secret.isNullOrBlank()) body else body.replace(secret, "<redacted>", ignoreCase = true)
+    var scrubbed = body
+    for (secret in secrets) {
+        if (!secret.isNullOrBlank()) {
+            scrubbed = scrubbed.replace(secret, "<redacted>", ignoreCase = true)
+        }
+    }
     return if (scrubbed.length > MAX_ERROR_BODY) {
         scrubbed.take(MAX_ERROR_BODY) + "… (truncated)"
     } else {

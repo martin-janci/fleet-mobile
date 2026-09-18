@@ -18,7 +18,9 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import dev.claudefleet.mobile.ui.explain
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -181,6 +183,51 @@ class HubClientTest {
         )
     }
 
+    /**
+     * **A pairing code is a credential, and it must not survive into an error a
+     * person can read.**
+     *
+     * On `/pair` there is no token yet — `AppSession.pair` builds the client
+     * with `token = null` — so `redacted` had nothing to scrub and only capped.
+     * The code was in scope the whole time and simply never passed. A reverse
+     * proxy or WAF that answers `POST /pair` with an error page echoing the
+     * request body therefore put a live pairing code verbatim into
+     * `HubError.Http.body`, through `explain()`, onto the banner a person reads
+     * and screenshots. A live code mints a token.
+     *
+     * That undoes the entire reason the code travels in the URL *fragment*,
+     * which no browser puts on the wire and no access log ever sees.
+     */
+    @Test
+    fun a_proxy_that_echoes_the_pairing_code_does_not_put_it_on_the_screen() = runTest {
+        val code = "ABCD1234"
+        val (hub, _) = client(token = null) {
+            """<html><body>400 Bad Request<pre>{"code":"$code"}</pre></body></html>""" to
+                HttpStatusCode.BadRequest
+        }
+
+        val e = assertFailsWith<HubError.Http> { hub.pair(code) }
+
+        assertFalse(code in e.body, "the pairing code reached the error body: ${e.body}")
+        assertFalse(code in explain(e), "the pairing code reached the banner: ${explain(e)}")
+        assertFalse(code in e.toString(), e.toString())
+        assertFalse(code in e.stackTraceToString(), "the code reached a stack trace")
+    }
+
+    /** The same on the 403 path, which takes a different branch of `throwForStatus`. */
+    @Test
+    fun a_403_echoing_the_pairing_code_does_not_carry_it_either() = runTest {
+        val code = "WXYZ9999"
+        val (hub, _) = client(token = null) {
+            "forbidden: code=$code" to HttpStatusCode.Forbidden
+        }
+
+        val e = assertFailsWith<HubError.Forbidden> { hub.pair(code) }
+
+        assertFalse(code in e.body, "the pairing code reached the 403 body: ${e.body}")
+        assertFalse(code in explain(e), explain(e))
+    }
+
     @Test
     fun the_bearer_token_is_sent_to_mcp_and_never_to_pair() = runTest {
         val calls = Calls()
@@ -221,7 +268,7 @@ class HubClientTest {
         // `is_controller` flattened onto the row, plus usage fields the app
         // does not model (which must not break the parse).
         val row = """[{"is_controller":false,"id":12,"tmux_name":"fleet-abc",""" +
-            """"host_alias":"trn","project_id":3,"created_at":1758100000,""" +
+            """"host_alias":"pine","project_id":3,"created_at":1758100000,""" +
             """"last_activity_at":1758200000,"status":"running","kind":"work",""" +
             """"claude_status":"blocked","stuck_kind":"press_enter",""" +
             """"current_activity":"waiting on a prompt","friendly_name":"hub client",""" +
@@ -236,7 +283,7 @@ class HubClientTest {
         assertEquals(12L, s.id)
         assertEquals("fleet-abc", s.tmuxName)
         assertEquals("hub client", s.friendlyName)
-        assertEquals("trn", s.hostAlias)
+        assertEquals("pine", s.hostAlias)
         assertEquals(3L, s.projectId)
         assertEquals("blocked", s.claudeStatus)
         assertEquals("press_enter", s.stuckKind)
@@ -255,7 +302,7 @@ class HubClientTest {
 
     @Test
     fun list_hosts_parses_the_host_rows() = runTest {
-        val rows = """[{"alias":"trn","ssh_alias":"claude-fleet-trn","reachable":true,""" +
+        val rows = """[{"alias":"pine","ssh_alias":"fleet-pine","reachable":true,""" +
             """"claude_version":"2.1.0","tmux_version":"3.4","hidden":false,""" +
             """"last_pinged_at":1758200000,"account_uuid":null,"provisioned":true,"transport":"ssh"}]"""
 
@@ -264,7 +311,7 @@ class HubClientTest {
         val hosts = hub.listHosts()
 
         assertEquals(1, hosts.size)
-        assertEquals("trn", hosts[0].alias)
+        assertEquals("pine", hosts[0].alias)
         assertTrue(hosts[0].reachable)
         assertEquals("2.1.0", hosts[0].claudeVersion)
         assertEquals("ssh", hosts[0].transport)

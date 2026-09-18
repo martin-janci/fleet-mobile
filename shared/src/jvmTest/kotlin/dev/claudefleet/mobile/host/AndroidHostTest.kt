@@ -217,6 +217,43 @@ class TheAndroidManifestTest {
         }
     }
 
+    /**
+     * No blanket cleartext exception — the Android counterpart of the iOS test
+     * that keeps `NSAllowsArbitraryLoads` out of the Info.plist.
+     *
+     * `android:usesCleartextTraffic="true"` permits plain HTTP to **every**
+     * destination, which on an app whose only stored secret is a bearer token
+     * means that token can go over the open internet in the clear. It is the
+     * obvious thing to reach for when a LAN hub over `http://` does not work,
+     * and it is the wrong one: the narrow fix is a network security
+     * configuration naming the host actually used.
+     *
+     * `targetSdk` is 35, so the platform default is already cleartext-blocked
+     * and this test is about the app not opting back out of it.
+     */
+    @Test
+    fun the_app_does_not_allow_cleartext_to_every_host() {
+        assertTrue(
+            """android:usesCleartextTraffic="true"""" !in manifest,
+            "a blanket cleartext exception would put the bearer token on the wire in the clear",
+        )
+
+        // A network security config is allowed — it is the narrow fix — but if
+        // one is ever added it must not simply re-enable cleartext for
+        // everything through a base-config, which is the same mistake wearing a
+        // different hat.
+        val configured = Regex("""android:networkSecurityConfig="@xml/([A-Za-z0-9_]+)"""")
+            .find(manifest)?.groupValues?.get(1)
+        if (configured != null) {
+            val xml = Repo.file("androidApp/src/main/res/xml/$configured.xml").readText()
+            val base = xml.substringAfter("<base-config", "").substringBefore(">", "")
+            assertTrue(
+                "cleartextTrafficPermitted=\"true\"" !in base,
+                "the base-config re-enables cleartext for every destination",
+            )
+        }
+    }
+
     private companion object {
         val PERMISSION = Regex("""<uses-permission\s+android:name="([^"]+)"""")
         val FEATURE = Regex("""<uses-feature\s+android:name="([^"]+)"\s+android:required="([^"]+)"""")

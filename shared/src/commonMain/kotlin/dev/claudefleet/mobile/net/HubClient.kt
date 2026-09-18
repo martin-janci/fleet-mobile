@@ -112,7 +112,18 @@ class HubClient(
             buildJsonObject { put("code", code) },
         )
         val (status, text) = send("$base/pair", body, authenticated = false)
-        throwForStatus(status, text, base, token)
+        // The CODE is passed as well as the token, and on this path it is the
+        // only one that exists: `AppSession.pair` builds the client with no
+        // token, so scrubbing `token` alone scrubbed nothing at all and
+        // `redacted` merely capped the body.
+        //
+        // A pairing code is a credential — it mints a token — and a reverse
+        // proxy or WAF that answers `POST /pair` with an error page echoing the
+        // request body would otherwise put a live one verbatim into
+        // `HubError.Http.body`, through `explain()`, onto a banner someone reads
+        // and screenshots. That undoes the whole reason the code travels in the
+        // URL *fragment*, which no browser sends and no access log records.
+        throwForStatus(status, text, base, token, code)
         return try {
             json.decodeFromString(PairResult.serializer(), text)
         } catch (e: Exception) {

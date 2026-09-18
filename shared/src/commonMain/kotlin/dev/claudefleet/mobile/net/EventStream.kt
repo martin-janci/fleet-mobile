@@ -258,13 +258,13 @@ class HubEventStream(
  * is this client's bearer token, which is what a proxy's error page is liable
  * to quote back at us.
  */
-internal fun throwForStatus(status: Int, body: String, hub: String, secret: String? = null) {
+internal fun throwForStatus(status: Int, body: String, hub: String, vararg secrets: String?) {
     when {
         // The 401 body does not come in at all: nothing reads it, and it is the
         // single most likely place for the token to be echoed. See [Unauthorized].
         status == 401 -> throw HubError.Unauthorized()
-        status == 403 -> throw HubError.Forbidden(redacted(body, secret), hub)
+        status == 403 -> throw HubError.Forbidden(redacted(body, *secrets), hub)
         status in 200..299 -> Unit
-        else -> throw HubError.Http(status, redacted(body, secret))
+        else -> throw HubError.Http(status, redacted(body, *secrets))
     }
 }
