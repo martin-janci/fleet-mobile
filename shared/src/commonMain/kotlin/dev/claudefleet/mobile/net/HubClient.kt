@@ -74,7 +74,7 @@ class HubClient(
             }
         }
         val (status, body) = send("$base/mcp", json.encodeToString(JsonObject.serializer(), envelope), authenticated = true)
-        throwForStatus(status, body)
+        throwForStatus(status, body, base)
 
         val reply = parseObject(extractJsonRpcPayload(body))
         (reply["error"] as? JsonObject)?.let { throw rpcError(it) }
@@ -111,7 +111,7 @@ class HubClient(
             buildJsonObject { put("code", code) },
         )
         val (status, text) = send("$base/pair", body, authenticated = false)
-        throwForStatus(status, text)
+        throwForStatus(status, text, base)
         return try {
             json.decodeFromString(PairResult.serializer(), text)
         } catch (e: Exception) {
@@ -176,15 +176,6 @@ class HubClient(
         throw e
     } catch (t: Throwable) {
         throw HubError.Transport(t)
-    }
-
-    private fun throwForStatus(status: Int, body: String) {
-        when {
-            status == 401 -> throw HubError.Unauthorized(body)
-            status == 403 -> throw HubError.Forbidden(body, base)
-            status in 200..299 -> Unit
-            else -> throw HubError.Http(status, body)
-        }
     }
 
     private fun parseObject(text: String): JsonObject = try {
