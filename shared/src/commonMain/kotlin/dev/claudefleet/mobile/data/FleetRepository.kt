@@ -172,7 +172,7 @@ class FleetRepository(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: HubError.Unauthorized) {
-                _status.value = ConnectionStatus.Offline(REVOKED)
+                _status.value = ConnectionStatus.Offline(REVOKED_CREDENTIAL_REASON)
                 try {
                     onRevoked()
                 } catch (_: Exception) {
@@ -207,8 +207,6 @@ class FleetRepository(
         const val NOT_STARTED = "not connected yet"
         const val STOPPED = "not connected"
         const val STREAM_CLOSED = "the hub closed the stream"
-        const val REVOKED =
-            "the hub no longer accepts this device's credential. Pair again to carry on."
     }
 }
 

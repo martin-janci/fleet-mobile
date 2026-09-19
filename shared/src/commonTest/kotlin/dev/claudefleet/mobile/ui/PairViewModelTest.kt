@@ -609,7 +609,7 @@ class PairViewModelTest {
     }
 
     // -----------------------------------------------------------------------
-    // Issue #3: a 401 that dropped this device's credential explains itself
+    // A 401 that dropped this device's credential explains itself
     // -----------------------------------------------------------------------
 
     @Test

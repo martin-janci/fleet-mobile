@@ -10,10 +10,9 @@ import kotlinx.serialization.json.put
  * What this device needs to talk to one hub, and the only thing the app ever
  * persists.
  *
- * The design also promises a small cache of the last session list for a cold
- * start; issue #3 looked at adding it here and chose not to — see the
- * "no cold-start cache" entry in the design appendix
- * (`docs/2026-09-18-fleet-mobile-design.md`) for why.
+ * This store holds only the credential. The fleet list is deliberately not
+ * cached here or anywhere else — see the "no cold-start cache" entry in the
+ * design appendix (`docs/2026-09-18-fleet-mobile-design.md`).
  *
  * Not a `data class`, and that is the point: a generated `toString()` would
  * print [token], and the whole file exists to keep that from happening. The

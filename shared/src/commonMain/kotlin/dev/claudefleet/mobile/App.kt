@@ -94,7 +94,7 @@ class AppContainer(
             // be routed back to the same rule by hand (review N4). Without this
             // the app sat on a revoked token behind a banner, while the identical
             // 401 through `HubSessionActions` returned it to Pair. `revoke()`,
-            // not `forget()`, so the Pair screen can say why (issue #3).
+            // not `forget()`, so the Pair screen can say why.
             onRevoked = { session.revoke() },
         )
 }

@@ -228,16 +228,20 @@ installed. This is why the iOS host must embed the UI through
 a lifecycle owner on iOS.
 
 **There is no cold-start cache.** The design promises "a small cache of the
-last session list, so a cold start draws something immediately." Task 3 (issue
-#3) looked at building it and did not: the only persistence seam in the app is
-`Secrets` (`EncryptedSharedPreferences` on Android, the Keychain on iOS), sized
-and hardened for exactly one thing — a bearer credential — with `allowBackup`
-disabled, the API 31+ data-extraction rules excluding it from every backup and
-transfer path, and `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` on iOS.
-A session row carries a project path and a host alias; putting fleet data
-through that credential store, or standing up a second, unencrypted seam next
-to it, is a decision about what that hardened boundary protects, not a small
-addition to it — the kind of call this task's scope did not extend to making
-unilaterally. `FleetRepository` still starts from `emptyList()`; the fleet list
+last session list, so a cold start draws something immediately." The app's
+only persistence seam is `Secrets` (`EncryptedSharedPreferences` on Android,
+the Keychain on iOS), sized and hardened for exactly one thing — a bearer
+credential — with `allowBackup` disabled, the API 31+ data-extraction rules
+excluding it from every backup and transfer path, and
+`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` on iOS. A session row
+carries a project path and a host alias, so writing it through that credential
+store, or beside it in a second, unencrypted seam, changes what that hardened
+boundary protects. `FleetRepository` starts from `emptyList()`; the fleet list
 is blank until the first `refresh()`/`ready` resync lands, same as any other
 cold start once the event stream connects.
+
+**Send is gated on the `/events` stream, not a live probe of `/mcp`.**
+`ConnectionStatus.Connected` — the one state `SessionViewModel.canSend`
+requires — comes entirely from the SSE follower in `FleetRepository`, so if
+`/events` is unavailable while `/mcp` still answers, Send stays disabled until
+the stream reconnects.

@@ -503,7 +503,7 @@ class AppSessionTest {
         assertTrue(calls.requests.isEmpty())
     }
 
-    // ---- issue #3: a 401 explains itself on the way back to Pair ----
+    // ---- a 401 explains itself on the way back to Pair ----
 
     /**
      * The `REVOKED` sentence used to live only on `FleetRepository`, which is

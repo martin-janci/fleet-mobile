@@ -341,7 +341,7 @@ class SessionViewModelTest {
         assertTrue(vm.state.value.readOnly)
     }
 
-    // ---- issue #3: Send is disabled while the hub is unreachable ----
+    // ---- Send is disabled while the hub is unreachable ----
 
     @Test
     fun send_is_disabled_while_reconnecting_and_does_not_call_the_hub() = runTest {

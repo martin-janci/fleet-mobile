@@ -9,6 +9,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/**
+ * What a 401 means, for whoever is showing it: the Pair screen once
+ * [AppSession.revoke] has run, or [FleetRepository]'s own connection banner in
+ * the moment before it does. Defined once, here, since `AppSession` is the
+ * class this file's own KDoc calls "the one place a credential is created or
+ * destroyed."
+ */
+internal const val REVOKED_CREDENTIAL_REASON =
+    "the hub no longer accepts this device's credential. Pair again to carry on."
+
 /** Whether this device holds a credential for a hub. */
 sealed class AuthState {
     /** The store has not been read yet — the state at a cold start. */
@@ -117,7 +127,7 @@ class AppSession(
      */
     suspend fun revoke() {
         secrets.clear()
-        _unpairReason.value = REVOKED_REASON
+        _unpairReason.value = REVOKED_CREDENTIAL_REASON
         _state.value = AuthState.Unpaired
     }
 
@@ -155,10 +165,6 @@ class AppSession(
     }
 
     private companion object {
-        /** [unpairReason]'s text after a 401. Matches the wording `FleetRepository` used to show alone. */
-        const val REVOKED_REASON =
-            "the hub no longer accepts this device's credential. Pair again to carry on."
-
         /**
          * Which base URL to keep after pairing.
          *
