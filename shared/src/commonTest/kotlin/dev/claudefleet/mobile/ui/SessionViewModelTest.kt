@@ -80,11 +80,23 @@ private class FakeActions : SessionActions {
     var sendFails: Throwable? = null
     var readFails: Throwable? = null
 
+    /** How many `conversation()` calls are in flight right now, and the peak seen. */
+    var inFlightReads = 0
+        private set
+    var maxInFlightReads = 0
+        private set
+
     override suspend fun conversation(sessionId: Long, turns: Int?): Conversation {
         reads += 1
-        readGate?.await()
-        readFails?.let { throw it }
-        return answer
+        inFlightReads += 1
+        maxInFlightReads = maxOf(maxInFlightReads, inFlightReads)
+        try {
+            readGate?.await()
+            readFails?.let { throw it }
+            return answer
+        } finally {
+            inFlightReads -= 1
+        }
     }
 
     override suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult {
@@ -444,6 +456,96 @@ class SessionViewModelTest {
             listOf("t1", "t2"),
             vm.state.value.conversation.turns.map { it.at },
             "a failed event-triggered refetch must not stop the next one",
+        )
+    }
+
+    // ---- single-flight reads: review finding on task 2 ----
+    //
+    // `load()`, `refresh()`, a send's follow-up read, and the event-triggered
+    // refetch above each call the same private `read()`, but each used to do
+    // so from its own independently launched coroutine. Two in flight at once
+    // could apply out of request order through `Conversation.appending`'s own
+    // overlap-prone merge. `read()` now serializes the actual hub call through
+    // a `Mutex`: every requested read still runs (none is dropped or
+    // coalesced), one at a time, and — because the next one cannot even start
+    // its call until the previous has finished and applied its own result —
+    // whichever was requested later always applies later.
+
+    /** The reviewer's own scenario: an event refetch in flight, then a manual Refresh. */
+    @Test
+    fun a_refresh_requested_while_an_event_refetch_is_in_flight_queues_rather_than_races_it() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "a")))
+        val fleet = FakeFleetState()
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+        assertEquals(1, actions.reads)
+
+        val gate = CompletableDeferred<Unit>()
+        actions.readGate = gate
+        actions.answer = Conversation(listOf(turn("t1", "a"), turn("t2", "from the event")))
+        fleet.sessionChanges.tryEmit(ID)
+        pastDebounce()
+        runCurrent()
+        assertEquals(2, actions.reads, "the event-triggered read has started and is gated open")
+
+        actions.answer = Conversation(
+            listOf(turn("t1", "a"), turn("t2", "from the event"), turn("t3", "from refresh")),
+        )
+        val refreshJob = vm.refresh()
+        runCurrent()
+        assertEquals(2, actions.reads, "a manual refresh must queue behind the in-flight read, not call the hub too")
+        assertFalse(vm.state.value.loading, "refresh never showed a loading spinner before this change either")
+
+        gate.complete(Unit)
+        refreshJob.join()
+        runCurrent()
+
+        assertEquals(3, actions.reads)
+        assertEquals(1, actions.maxInFlightReads, "the two calls must never overlap")
+        assertEquals(
+            listOf("t1", "t2", "t3"),
+            vm.state.value.conversation.turns.map { it.at },
+            "the later request (refresh) must be the one the screen ends up showing",
+        )
+        assertFalse(vm.state.value.loading, "the flag the queued refresh set must still clear once it is done")
+    }
+
+    /** `load()` is the entry point that actually sets `loading`; a queued one must too. */
+    @Test
+    fun a_load_queued_behind_an_in_flight_event_refetch_still_shows_and_clears_loading() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "a")))
+        val fleet = FakeFleetState()
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+        assertEquals(1, actions.reads)
+
+        val gate = CompletableDeferred<Unit>()
+        actions.readGate = gate
+        actions.answer = Conversation(listOf(turn("t1", "a"), turn("t2", "from the event")))
+        fleet.sessionChanges.tryEmit(ID)
+        pastDebounce()
+        runCurrent()
+        assertEquals(2, actions.reads, "the event-triggered read has started and is gated open")
+
+        actions.answer = Conversation(listOf(turn("t1", "a"), turn("t2", "from the event"), turn("t3", "reloaded")))
+        val loadJob = vm.load()
+        runCurrent()
+        assertEquals(2, actions.reads, "the reload must queue rather than race the in-flight event read")
+        assertTrue(vm.state.value.loading, "loading must show immediately, even while the call itself is queued")
+
+        gate.complete(Unit)
+        loadJob.join()
+        runCurrent()
+
+        assertEquals(3, actions.reads)
+        assertEquals(1, actions.maxInFlightReads, "the two calls must never overlap")
+        assertFalse(vm.state.value.loading, "loading must clear once the queued call finally runs")
+        assertEquals(
+            listOf("t1", "t2", "t3"),
+            vm.state.value.conversation.turns.map { it.at },
+            "the later request (the reload) must be the one the screen ends up showing",
         )
     }
 }

@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.time.Duration.Companion.milliseconds
 
 /** One session's screen: its row, its conversation, and what is being typed. */
@@ -67,6 +69,8 @@ data class SessionUiState(
  * A refresh — pull-to-refresh, after a send, or event-triggered — **appends**.
  * The hub answers a rolling window of the tail, so a second read overlaps the
  * first rather than continuing it; see [dev.claudefleet.mobile.model.appending].
+ * Those four callers never race each other's hub call, either: [fetchLock]
+ * serializes it, so results still apply in the order they were asked for.
  *
  * @param canSendPrompts false for a `readonly` credential. `send_prompt` is not
  *   in the hub's readonly allow-list (`READONLY_TOOLS` in `mcp/guard.rs`), so a
@@ -101,6 +105,22 @@ class SessionViewModel(
 
     private val local = MutableStateFlow(Local())
     private val readOnly = !canSendPrompts
+
+    /**
+     * Serializes the hub call inside [read] across its four callers —
+     * `load()`, `refresh()`, a send's follow-up, and the event-triggered
+     * refetch above — none of which otherwise know about each other's
+     * coroutines.
+     *
+     * Without it, two could be in flight at once and apply out of request
+     * order — whichever `session_conversation` reply happened to land last,
+     * not whichever was asked for last — onto [Conversation.appending], whose
+     * own overlap heuristic is already documented as able to reorder or
+     * duplicate turns. Every requested read still runs; this only makes them
+     * queue rather than race, so the one applied last is always the one asked
+     * for last.
+     */
+    private val fetchLock = Mutex()
 
     val state: StateFlow<SessionUiState> = combine(fleet.sessions, local) { rows, l ->
         assemble(rows.firstOrNull { it.id == sessionId }, l)
@@ -179,7 +199,7 @@ class SessionViewModel(
     private suspend fun read(first: Boolean) {
         local.update { it.copy(loading = first, error = null) }
         try {
-            val fresh = actions.conversation(sessionId)
+            val fresh = fetchLock.withLock { actions.conversation(sessionId) }
             local.update { it.copy(
                 conversation = local.value.conversation.appending(fresh),
                 loaded = true,
