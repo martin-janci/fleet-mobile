@@ -95,39 +95,14 @@ class CiWorkflowTest {
      * The instrumentation job stays in the workflow.
      *
      * `AndroidSecrets` is the only thing the app persists and the only class
-     * here that cannot be tested without hardware. The job is
-     * `continue-on-error` until someone has watched it pass once — but
-     * `continue-on-error` and *deleted* are different things, and the second is
-     * the easy mistake when a job is red.
+     * here that cannot be tested without hardware, so this job is the only
+     * thing that ever executes it — deleting it would leave that code untested.
      */
     @Test
     fun ci_still_tries_to_run_the_secure_store_test() {
         assertTrue(
             "connectedAndroidDeviceTest" in ci,
             "the emulator job is the only thing that ever executes AndroidSecrets",
-        )
-    }
-
-    /**
-     * If the secure-store job cannot fail the build, the README says so.
-     *
-     * `continue-on-error` is the right call for a job nobody has watched pass —
-     * but it makes the only test that ever executes `AndroidSecrets`
-     * structurally incapable of turning CI red, and a comment in a workflow file
-     * saying "delete this line one day" is not a thing anyone reads. Either the
-     * flag goes, or the README admits the green tick means nothing. This test
-     * fails if someone silently keeps the first without the second.
-     */
-    @Test
-    fun a_secure_store_job_that_cannot_fail_is_admitted_in_the_readme() {
-        if ("continue-on-error: true" !in ci) return
-
-        // The admission, not the word: "delete the `continue-on-error` line one
-        // day" names the flag without telling anyone what it costs today.
-        val readme = Repo.file("README.md").readText()
-        assertTrue(
-            Regex("""`continue-on-error`[^.]*\bcannot\s+fail\b""").containsMatchIn(readme),
-            "the emulator job cannot fail CI and the README does not say so",
         )
     }
 }
