@@ -197,6 +197,26 @@ interface EventStream {
 }
 
 /**
+ * How long `/events` may go without receiving a byte before the connection is
+ * presumed dead.
+ *
+ * The hub writes a comment-only heartbeat (`:`) every 15 s, which this reader
+ * discards without counting it as a frame; 45 s tolerates two missed
+ * heartbeats before giving up, so an ordinary GC pause or a slow network hop
+ * does not flap the connection, but a genuinely half-open TCP stream — one
+ * where the OS still thinks the socket is up but nothing is arriving — is
+ * caught within three heartbeat intervals rather than never. Nothing else
+ * detects this: there is no OkHttp `pingInterval`, and the request's own
+ * deadline is infinite because a live stream has no natural end.
+ *
+ * The timeout surfaces the same way any other dropped connection does: the
+ * engine throws, [HubEventStream.connect]'s catch-all wraps it in
+ * [HubError.Transport], and [dev.claudefleet.mobile.data.FleetRepository.follow]
+ * reconnects with its existing backoff.
+ */
+internal const val EVENTS_IDLE_TIMEOUT_MS = 45_000L
+
+/**
  * `GET /events` over HTTP, frame by frame.
  *
  * No `Logging` plugin is installed here and none may be: this request carries
@@ -230,13 +250,16 @@ class HubEventStream(
             http.prepareGet(url) {
                 header(HttpHeaders.Accept, ContentType.Text.EventStream.toString())
                 if (token != null) header(HttpHeaders.Authorization, "Bearer $token")
-                // A live stream has no natural end, so it gets no timeout: the
-                // client-wide default from `withHubTimeouts()` would otherwise
-                // tear this down the first time the hub goes quiet for longer
-                // than a call is normally allowed to take.
+                // A live stream has no natural end, so the request itself gets
+                // no deadline — the client-wide default from `withHubTimeouts()`
+                // would otherwise tear this down the first time the hub goes
+                // quiet for longer than a call is normally allowed to take.
+                // The socket timeout stays bounded, though: it is the only
+                // thing that notices a connection gone half-open (a dead TCP
+                // stream nothing else here detects — see [EVENTS_IDLE_TIMEOUT_MS]).
                 timeout {
                     requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
-                    socketTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+                    socketTimeoutMillis = EVENTS_IDLE_TIMEOUT_MS
                 }
             }.execute { response ->
                 val status = response.status.value

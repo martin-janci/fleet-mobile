@@ -188,14 +188,14 @@ class EventStreamTest {
     }
 
     /**
-     * The bug this guards against: OkHttp's default read timeout (10 s) is
-     * shorter than the hub's 15 s `/events` keep-alive comment, so an idle
-     * stream would be torn down mid-silence before the fix. A real-time
-     * reproduction would need to sit through that wait (or longer, to prove
-     * the *old* default no longer applies) on every test run; asserting on
-     * the resolved [HttpTimeoutConfig] instead proves the same property —
-     * no client-side deadline exists to expire — deterministically and
-     * instantly. `an_ordinary_call_keeps_a_finite_deadline_above_the_keep_alive_interval`
+     * `/events` has no request deadline — a live stream has no natural end —
+     * but it does have a bounded idle-socket timeout: nothing else notices a
+     * half-open TCP connection (no OkHttp `pingInterval`, the hub's 15 s
+     * keep-alive comment is consumed and discarded by [SseFrameReader]), so
+     * without one, a dead stream would report [ConnectionStatus.Connected]
+     * forever. Asserting on the resolved [HttpTimeoutConfig] proves both
+     * halves deterministically and instantly, with no real-time wait needed to
+     * prove either bound applies. `an_ordinary_call_keeps_a_finite_deadline_above_the_keep_alive_interval`
      * in `HubClientTest` covers the other half: this override does not leak
      * into calls that should still time out.
      *
@@ -217,7 +217,7 @@ class EventStreamTest {
      * catch a later refactor silently breaking that merge.
      */
     @Test
-    fun the_events_request_carries_no_client_side_timeout() = runTest {
+    fun the_events_request_has_no_deadline_but_a_bounded_idle_socket_timeout() = runTest {
         val recorder = Recorder()
         val engine = MockEngine { request ->
             recorder.requests.add(request)
@@ -229,7 +229,8 @@ class EventStreamTest {
 
         val timeout = recorder.requests.single().getCapabilityOrNull(HttpTimeoutCapability)
         assertEquals(HttpTimeoutConfig.INFINITE_TIMEOUT_MS, timeout?.requestTimeoutMillis)
-        assertEquals(HttpTimeoutConfig.INFINITE_TIMEOUT_MS, timeout?.socketTimeoutMillis)
+        assertEquals(EVENTS_IDLE_TIMEOUT_MS, timeout?.socketTimeoutMillis)
         assertEquals(HUB_CONNECT_TIMEOUT_MS, timeout?.connectTimeoutMillis)
+        assertTrue(EVENTS_IDLE_TIMEOUT_MS > 15_000L, "shorter than the hub's own keep-alive would flap a healthy stream")
     }
 }

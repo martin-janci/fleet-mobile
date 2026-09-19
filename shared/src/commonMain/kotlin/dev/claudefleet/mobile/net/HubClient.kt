@@ -327,8 +327,10 @@ internal val json = Json {
  * [HUB_CALL_TIMEOUT_MS] is generous-but-finite — comfortably above the
  * keep-alive interval, so one missed heartbeat does not fail a call, but a
  * hub that has actually gone away still surfaces as an error rather than
- * hanging forever. `/events` itself has no natural end and overrides this
- * per request — see [HubEventStream.connect].
+ * hanging forever. `/events` itself has no natural end and overrides the
+ * request deadline to infinite per request, while keeping its own bounded
+ * idle-socket timeout — see [HubEventStream.connect] and
+ * `EVENTS_IDLE_TIMEOUT_MS`.
  */
 internal fun HttpClient.withHubTimeouts(): HttpClient = config {
     install(HttpTimeout) {
