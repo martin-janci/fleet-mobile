@@ -24,16 +24,24 @@ class ReleaseWorkflowTest {
     private val ci: String by lazy { Repo.file(".github/workflows/ci.yml").readText() }
 
     /**
-     * The text of one step, from a marker found inside it up to (but not
-     * including) the next top-level step. Several tests below need to assert
-     * something is true *within* a specific step rather than anywhere in the
-     * file — the missing-secret branch actually failing, apksigner actually
-     * being resolved a particular way — and a whole-file substring search
-     * cannot tell two steps' worth of similar-looking shell apart.
+     * The text of one step, from its own `- name: <marker>` line up to (but
+     * not including) the next top-level step. Several tests below need to
+     * assert something is true *within* a specific step rather than anywhere
+     * in the file — the missing-secret branch actually failing, apksigner
+     * actually being resolved a particular way — and a whole-file substring
+     * search cannot tell two steps' worth of similar-looking shell apart.
+     *
+     * Anchored on `- name: ` rather than on the bare marker text: a comment
+     * above a step is free to mention that step's name (or any other step's)
+     * in prose — `./gradlew build` names itself in the comment immediately
+     * above its own step, for instance — and a bare `indexOf(marker)` would
+     * find that comment instead of the step, silently inspecting three lines
+     * of prose rather than the step's actual body.
      */
     private fun stepAt(marker: String): String {
-        val start = release.indexOf(marker)
-        assertTrue(start >= 0, "expected to find '$marker' in release.yml")
+        val needle = "- name: $marker"
+        val start = release.indexOf(needle)
+        assertTrue(start >= 0, "expected to find a step named '$marker' in release.yml")
         val nextStep = release.indexOf("\n      - ", start)
         return if (nextStep >= 0) release.substring(start, nextStep) else release.substring(start)
     }
@@ -276,19 +284,38 @@ class ReleaseWorkflowTest {
      * The tag is validated against a strict pattern before `VERSION_NAME` is
      * derived from it, and that derived value is what everything downstream
      * uses — never the raw tag.
+     *
+     * `[[ "$TAG" =~ PATTERN ]]` is a **substring** test in bash: with no
+     * anchors, it accepts a match anywhere in `$TAG`, not only a match of the
+     * whole string. `Regex.matches()` does not reproduce that — it always
+     * requires the *entire* input to match, regardless of whether the
+     * pattern itself carries `^`/`$`, so a workflow edit that dropped the
+     * anchors would still show this test green while the real bash check
+     * turned dangerously permissive. `containsMatchIn` is the faithful
+     * stand-in for bash's actual behaviour, and the explicit anchor check
+     * below catches the same regression more directly, by name.
      */
     @Test
     fun the_tag_is_validated_against_a_strict_pattern_before_use() {
-        val pattern = tagValidationPattern()
+        val patternText = tagValidationPatternText()
+        assertTrue(patternText.startsWith("^"), "the tag pattern must anchor its start — bash's =~ is a substring test without one: $patternText")
+        assertTrue(patternText.endsWith("$"), "the tag pattern must anchor its end — bash's =~ is a substring test without one: $patternText")
+        val pattern = Regex(patternText)
 
         for (tag in listOf("v1.2.3", "v1.2.3-rc.1", "v0.1.0", "v12.34.56-beta.2")) {
-            assertTrue(pattern.matches(tag), "expected '$tag' to be accepted by the workflow's own tag pattern")
+            assertTrue(pattern.containsMatchIn(tag), "expected '$tag' to be accepted by the workflow's own tag pattern")
         }
         // A hostile tag is attacker-controlled: anyone who can push a tag
         // chooses this string. This test fails if the workflow's pattern ever
         // accepts one of these, regardless of how its source text is spelled.
-        for (tag in listOf("v1.2.3; rm -rf /", "v\$(id)", "", "1.2.3", "v1.2.3\n", "va.b.c", "v1.2.3 ", "v")) {
-            assertFalse(pattern.matches(tag), "expected '$tag' to be REJECTED by the workflow's own tag pattern")
+        // A trailing-newline tag is deliberately not in this list: Java's `$`
+        // matches just before one trailing line terminator even without
+        // MULTILINE, which POSIX ERE (what bash's =~ actually uses) does
+        // not — that is a difference between the two regex engines, not a
+        // property of the workflow's pattern, so it is not a case this test
+        // can exercise faithfully either way.
+        for (tag in listOf("v1.2.3; rm -rf /", "v\$(id)", "", "1.2.3", "va.b.c", "v1.2.3 ", "v")) {
+            assertFalse(pattern.containsMatchIn(tag), "expected '$tag' to be REJECTED by the workflow's own tag pattern")
         }
 
         // Ordering, without pinning the shell local the derived version is
@@ -300,16 +327,19 @@ class ReleaseWorkflowTest {
     }
 
     /**
-     * The regex the workflow actually checks `$TAG` against, read out of its
-     * `[[ "$TAG" =~ PATTERN ]]` test rather than duplicated here by hand — so
-     * a change to the workflow's own pattern is what this test exercises, not
-     * a second copy of it that could quietly drift from the real one.
+     * The regex text the workflow actually checks `$TAG` against, read out of
+     * its `[[ "$TAG" =~ PATTERN ]]` test rather than duplicated here by hand —
+     * so a change to the workflow's own pattern is what this test exercises,
+     * not a second copy of it that could quietly drift from the real one.
+     * Returned as text rather than a compiled `Regex` so a caller can inspect
+     * the source (e.g. whether it still carries its anchors) before deciding
+     * how to evaluate it.
      */
-    private fun tagValidationPattern(): Regex {
+    private fun tagValidationPatternText(): String {
         val match = checkNotNull(Regex("""=~\s*(\S+)\s*\]\]""").find(release)) {
             "expected to find a `[[ ... =~ PATTERN ]]` tag-validation test in release.yml"
         }
-        return Regex(match.groupValues[1])
+        return match.groupValues[1]
     }
 
     /**

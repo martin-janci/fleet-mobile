@@ -158,12 +158,13 @@ class SessionViewModel(
     /**
      * One coalesced request for a fresh read. [first] starts as whatever
      * created this generation and may be upgraded to `true` later — never
-     * downgraded — if a `load()` is folded into an already-running or
-     * -queued non-first generation; once anything needs the first-load
-     * indicator, this generation needs it until it is done. [done] resolves
-     * once this generation's read has applied or failed — both complete it
-     * normally, matching the rule that a read's failure is reported through
-     * [Local.error] rather than thrown to its callers.
+     * downgraded — if a `load()` is folded into an already-*queued*
+     * non-first generation (never a running one — see [queued]); once
+     * anything needs the first-load indicator, this generation needs it
+     * until it is done. [done] resolves once this generation's read has
+     * applied or failed — both complete it normally, matching the rule that
+     * a read's failure is reported through [Local.error] rather than thrown
+     * to its callers.
      */
     private class Generation(var first: Boolean) {
         val done = CompletableDeferred<Unit>()

@@ -250,14 +250,19 @@ outside the working tree, so there is nothing here for a `.gitignore` pattern
 to have to catch:
 
 ```bash
-keytool -genkeypair -v -keystore "$TMPDIR/release.jks" -alias <your-alias> \
+keytool -genkeypair -v -keystore "${TMPDIR:-/tmp}/release.jks" -alias <your-alias> \
   -keyalg RSA -keysize 2048 -validity 10000
-base64 -i "$TMPDIR/release.jks" | tr -d '\n' > "$TMPDIR/release.jks.base64"
+base64 -i "${TMPDIR:-/tmp}/release.jks" | tr -d '\n' > "${TMPDIR:-/tmp}/release.jks.base64"
 ```
 
-Put `$TMPDIR/release.jks.base64`'s contents in the `ANDROID_KEYSTORE_BASE64`
-secret and the three passwords/alias you chose in the other three, then
-delete both files from `$TMPDIR`. **Never commit a keystore or its base64
+`TMPDIR` is commonly unset on Linux (it is a macOS default); a bare `$TMPDIR`
+would then expand to nothing and leave these commands writing to `/release.jks`.
+`${TMPDIR:-/tmp}` falls back to `/tmp` instead, so the files still land
+outside the working tree rather than at the filesystem root.
+
+Put `${TMPDIR:-/tmp}/release.jks.base64`'s contents in the
+`ANDROID_KEYSTORE_BASE64` secret and the three passwords/alias you chose in
+the other three, then delete both files. **Never commit a keystore or its base64
 form** — `.gitignore` excludes `*.jks`, `*.jks.base64`, `*.keystore`,
 `*.keystore.base64` and `*.p12`, but that is a second line of defense, not a
 reason to create the file inside the repo in the first place.
