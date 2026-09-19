@@ -453,6 +453,7 @@ class HubClientTest {
         val timeout = calls.requests.single().getCapabilityOrNull(HttpTimeoutCapability)
         assertEquals(HUB_CALL_TIMEOUT_MS, timeout?.requestTimeoutMillis)
         assertEquals(HUB_CALL_TIMEOUT_MS, timeout?.socketTimeoutMillis)
+        assertEquals(HUB_CONNECT_TIMEOUT_MS, timeout?.connectTimeoutMillis)
         assertTrue(HUB_CALL_TIMEOUT_MS > 15_000L, "shorter than the hub's own keep-alive would defeat the point")
     }
 }

@@ -203,6 +203,18 @@ class EventStreamTest {
      * it before handing the client to [HubEventStream] — so this proves the
      * per-request override on `/events` wins over the client-wide default,
      * not merely that an unconfigured client has no timeout to begin with.
+     *
+     * `connectTimeoutMillis` is asserted too, on purpose: `/events`' own
+     * `timeout {}` block only touches `requestTimeoutMillis` and
+     * `socketTimeoutMillis`, leaving `connectTimeoutMillis` unset so it falls
+     * through to `withHubTimeouts()`'s client-wide 15 s default — an unbounded
+     * *connect* would leave a phone hung dialing a hub that never answers at
+     * all, which is a different failure from the one this fix targets. That
+     * fallthrough is `HttpTimeout`'s own merge behaviour (`on(Send)` fills
+     * only the capability's `null` fields from the plugin's installed
+     * defaults, mutating the same `HttpTimeoutConfig` the request carries),
+     * not something this file implements — asserting it here is what would
+     * catch a later refactor silently breaking that merge.
      */
     @Test
     fun the_events_request_carries_no_client_side_timeout() = runTest {
@@ -218,5 +230,6 @@ class EventStreamTest {
         val timeout = recorder.requests.single().getCapabilityOrNull(HttpTimeoutCapability)
         assertEquals(HttpTimeoutConfig.INFINITE_TIMEOUT_MS, timeout?.requestTimeoutMillis)
         assertEquals(HttpTimeoutConfig.INFINITE_TIMEOUT_MS, timeout?.socketTimeoutMillis)
+        assertEquals(HUB_CONNECT_TIMEOUT_MS, timeout?.connectTimeoutMillis)
     }
 }
