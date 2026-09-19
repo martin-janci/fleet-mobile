@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** One machine, as the Hosts screen draws it. */
@@ -82,18 +83,18 @@ class HostsViewModel(
      * not do.
      */
     fun dismissError() {
-        local.value = local.value.copy(error = null)
+        local.update { it.copy(error = null) }
     }
     /** Re-list. The rows stay put if it fails; the last picture is still the best one. */
     fun refresh(): Job = scope.launch {
-        local.value = Local(refreshing = true)
+        local.update { Local(refreshing = true) }
         try {
             fleet.refresh()
-            local.value = Local()
+            local.update { Local() }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.value = Local(error = explain(t))
+            local.update { Local(error = explain(t)) }
         }
     }
 
