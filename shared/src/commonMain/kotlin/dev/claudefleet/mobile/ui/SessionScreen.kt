@@ -64,22 +64,21 @@ fun SessionScreen(
         val listState = rememberLazyListState()
         val newest = newestItemIndex(turns.size, state.conversation.truncated)
         // Newest at the bottom, so new output should bring the view with it —
-        // but only for someone who was already at the bottom. Review S1: this
-        // used to fire unconditionally and yank the view down while a person was
-        // scrolled up reading, and it keyed on `turns.size`, so the live bottom
-        // turn growing — the usual case, since the agent appends items to it
-        // while it works — did not scroll at all.
+        // but only for someone who was already at the bottom. This used to fire
+        // unconditionally and yank the view down while a person was scrolled up
+        // reading, and it keyed on `turns.size`, so the live bottom turn growing
+        // — the usual case, since the agent appends items to it while it works —
+        // did not scroll at all.
         //
-        // Review S-2: the key has to include `newest`. `remember(listState)`
-        // alone allocated the lambda once and closed over the `newest` of the
-        // FIRST composition — which is null, because `SessionRoute` composes
-        // this with `SessionUiState`'s initial empty `Conversation` and only
-        // then runs `vm.load()`. `newest == null` is the second disjunct, so
+        // The key has to include `newest`. `remember(listState)` alone
+        // allocated the lambda once and closed over the `newest` of the FIRST
+        // composition — which is null, because `SessionRoute` composes this
+        // with `SessionUiState`'s initial empty `Conversation` and only then
+        // runs `vm.load()`. `newest == null` is the second disjunct, so
         // `atBottom` was permanently true and the effect below fired
         // unconditionally: exactly the behaviour it was written to replace.
         // `listState` comes from `rememberLazyListState()` and never changes, so
-        // the key could never have invalidated on its own. The off-by-one half
-        // of S1 worked; this half was dead code that read like a fix.
+        // the key could never have invalidated on its own.
         val atBottom by remember(listState, newest) {
             derivedStateOf {
                 val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()
@@ -268,8 +267,8 @@ private fun PromptBox(state: SessionUiState, onDraftChange: (String) -> Unit, on
 /**
  * Which **LazyColumn item** holds the newest turn, or null when there are none.
  *
- * Not `turns.lastIndex`, and that was review S1: `scrollToItem` takes an item
- * index, and the truncation note occupies index 0 whenever `truncated` is set —
+ * Not `turns.lastIndex`: `scrollToItem` takes an item index, and the
+ * truncation note occupies index 0 whenever `truncated` is set —
  * which is the normal case, since the hub sets it on any conversation longer
  * than its window. The target was one short, so the screen settled on the
  * second-to-last turn with the newest one below the fold: exactly the turn the

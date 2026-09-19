@@ -107,7 +107,7 @@ class SessionsViewModel(
 
 
     /**
-     * Clear the banner (review N-B1).
+     * Clear the banner.
      *
      * Two of five screens had one and three did not, and the three without are
      * where an error can sit longest: a refresh that failed leaves its sentence

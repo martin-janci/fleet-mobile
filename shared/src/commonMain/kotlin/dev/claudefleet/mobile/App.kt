@@ -91,10 +91,10 @@ class AppContainer(
             scope = scope,
             // The repository is the one caller holding a raw `HubClient` rather
             // than going through `AppSession.withClient`, so a 401 there has to
-            // be routed back to the same rule by hand (review N4). Without this
-            // the app sat on a revoked token behind a banner, while the identical
-            // 401 through `HubSessionActions` returned it to Pair. `revoke()`,
-            // not `forget()`, so the Pair screen can say why.
+            // be routed back to the same rule by hand. Without this the app sat
+            // on a revoked token behind a banner, while the identical 401
+            // through `HubSessionActions` returned it to Pair. `revoke()`, not
+            // `forget()`, so the Pair screen can say why.
             onRevoked = { session.revoke() },
         )
 }
@@ -134,13 +134,12 @@ fun App(container: AppContainer) {
                 when (val state = auth) {
                     AuthState.Unknown -> Splash()
                     AuthState.Unpaired -> {
-                        // Not `justPaired = null` in the composable body (review
-                        // N-D1). Writing Compose state during composition happens
-                        // to converge here, because the write is idempotent once
-                        // it has landed — but it is the shape that produces
-                        // endless recomposition the moment someone makes it
-                        // conditional, and it costs nothing to say it in an
-                        // effect instead.
+                        // Not `justPaired = null` in the composable body. Writing
+                        // Compose state during composition happens to converge
+                        // here, because the write is idempotent once it has
+                        // landed — but it is the shape that produces endless
+                        // recomposition the moment someone makes it conditional,
+                        // and it costs nothing to say it in an effect instead.
                         LaunchedEffect(state) { justPaired = null }
                         PairRoute(container) { justPaired = it }
                     }
@@ -223,7 +222,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     val screen by nav.screen.collectAsState()
     val tab by nav.tab.collectAsState()
 
-    // Review S-3. `Navigator.back()` returns false on a tab specifically so the
+    // `Navigator.back()` returns false on a tab specifically so the
     // platform can have the gesture instead, `NavigatorTest` pins that, and a
     // mutation guards it — and until now the only caller was the Back *button*
     // on the session bar, which discards the Boolean. There was no `BackHandler`

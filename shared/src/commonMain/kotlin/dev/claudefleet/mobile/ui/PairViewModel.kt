@@ -147,10 +147,10 @@ class PairViewModel(
 
     /** One decoded QR. Called per frame; see the class comment. */
     fun onScanned(text: String) {
-        // Review S-1. A frame arriving while an attempt is already in flight is
-        // not acted on, so its key must NOT be recorded. The old order set
-        // `lastScan` first and `redeem` then returned early on `pairing`, which
-        // burned a good QR that had never been sent anywhere.
+        // A frame arriving while an attempt is already in flight is not acted
+        // on, so its key must NOT be recorded. The old order set `lastScan`
+        // first and `redeem` then returned early on `pairing`, which burned a
+        // good QR that had never been sent anywhere.
         //
         // The scenario is the ordinary one: the first code is spent, the
         // operator runs `fleet-hub pair` again, and the person moves the phone

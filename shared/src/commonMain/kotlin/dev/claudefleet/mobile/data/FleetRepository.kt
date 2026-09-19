@@ -33,11 +33,11 @@ sealed interface ConnectionStatus {
      * screen that says "reconnecting" should read the attempt, not the name.
      * [reason] is why the last one ended, and is null before the first.
      *
-     * [reason] is drawn by `ConnectionBanner`. It was not, for three tasks: the
-     * field was computed on every failure and read by nothing, so a person
-     * watching the app retry saw a rising counter and never what it was
-     * retrying from. It is a sentence from `explain`, not a raw throwable
-     * message, for the same reason every other string that reaches a screen is.
+     * [reason] is drawn by `ConnectionBanner` — if it were computed but never
+     * read, a person watching the app retry would see a rising counter and
+     * never what it was retrying from. It is a sentence from `explain`, not a
+     * raw throwable message, for the same reason every other string that
+     * reaches a screen is.
      */
     data class Reconnecting(val attempt: Int, val reason: String?) : ConnectionStatus
 
@@ -72,7 +72,7 @@ class FleetRepository(
     private val backoff: (Int) -> Duration = ::reconnectDelay,
     /**
      * What to do when the hub answers 401 — drop the credential and return to
-     * Pair (review N4).
+     * Pair.
      *
      * This repository is the one caller that holds a raw [HubClient] rather than
      * going through `AppSession.withClient`, which is where "a 401 drops the

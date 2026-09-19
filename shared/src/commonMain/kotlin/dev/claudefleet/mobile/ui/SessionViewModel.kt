@@ -99,11 +99,11 @@ class SessionViewModel(
      * The screen state this class owns, as opposed to what the fleet owns.
      *
      * Every mutation goes through `MutableStateFlow.update {}` rather than
-     * `local.value = local.value.copy(...)` — review N5. The latter is a
-     * read-modify-write, and two coroutines in this scope really can interleave
-     * across one: a pull-to-refresh while a send's follow-up read is in flight,
-     * or a double tap, would lose one merge or clear `loading` while the other
-     * call was still running.
+     * `local.value = local.value.copy(...)`. The latter is a read-modify-write,
+     * and two coroutines in this scope really can interleave across one: a
+     * pull-to-refresh while a send's follow-up read is in flight, or a double
+     * tap, would lose one merge or clear `loading` while the other call was
+     * still running.
      */
     private data class Local(
         val conversation: Conversation = Conversation(),

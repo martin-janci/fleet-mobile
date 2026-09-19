@@ -365,7 +365,7 @@ private fun expandIpv6(raw: String): List<Int>? {
  * address as two hex groups. Unchanged when there is no dotted tail, null when
  * the tail is present but is not an IPv4 address.
  *
- * **Known gap, review N-L1:** a zone-scoped literal — `[::1%25eth0]`, the
+ * **Known gap:** a zone-scoped literal — `[::1%25eth0]`, the
  * percent-encoded RFC 6874 form — is not recognised as this machine, and fails
  * OPEN: the hub's echoed base would win. Nothing in `fleet-hub` emits a scoped
  * loopback literal; it would take an operator configuring `hub.public_url` to

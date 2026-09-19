@@ -11,8 +11,8 @@ import kotlinx.coroutines.flow.StateFlow
  *
  * [FleetRepository] is the one implementation; this exists so a view model can
  * be tested against four flows and a counter instead of a mock HTTP engine and
- * a fake event stream. It is the same seam Task 4 put under `EventStream` for
- * the same reason: the thing being tested here is how rows become groups, not
+ * a fake event stream — the same seam `EventStream` puts under itself for the
+ * same reason: the thing being tested here is how rows become groups, not
  * how bytes become rows.
  *
  * It is also a narrowing. A screen gets no `HubClient` through this interface
