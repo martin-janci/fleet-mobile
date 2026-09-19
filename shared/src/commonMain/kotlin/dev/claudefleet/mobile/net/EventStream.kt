@@ -2,6 +2,8 @@ package dev.claudefleet.mobile.net
 
 import dev.claudefleet.mobile.data.SNAPSHOT_EVENT_KINDS
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.HttpTimeoutConfig
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.header
 import io.ktor.client.request.prepareGet
 import io.ktor.client.statement.bodyAsChannel
@@ -228,6 +230,14 @@ class HubEventStream(
             http.prepareGet(url) {
                 header(HttpHeaders.Accept, ContentType.Text.EventStream.toString())
                 if (token != null) header(HttpHeaders.Authorization, "Bearer $token")
+                // A live stream has no natural end, so it gets no timeout: the
+                // client-wide default from `withHubTimeouts()` would otherwise
+                // tear this down the first time the hub goes quiet for longer
+                // than a call is normally allowed to take.
+                timeout {
+                    requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+                    socketTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+                }
             }.execute { response ->
                 val status = response.status.value
                 if (status !in 200..299) throwForStatus(status, response.bodyAsText(), base, token)

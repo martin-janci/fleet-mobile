@@ -32,6 +32,7 @@ import dev.claudefleet.mobile.data.HubSessionActions
 import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.net.HubEventStream
+import dev.claudefleet.mobile.net.withHubTimeouts
 import dev.claudefleet.mobile.store.Credentials
 import dev.claudefleet.mobile.store.Secrets
 import dev.claudefleet.mobile.ui.HostsScreen
@@ -62,9 +63,15 @@ import kotlinx.coroutines.CoroutineScope
  */
 class AppContainer(
     secrets: Secrets,
-    private val http: HttpClient,
+    http: HttpClient,
     val appVersion: String,
 ) {
+    // The platform hands in a bare engine (`HttpClient(OkHttp)` on Android,
+    // `HttpClient(Darwin)` on iOS); this is the one shared place that gives
+    // every call the app's timeout policy so both platforms get it the same
+    // way. See `withHubTimeouts()`.
+    private val http: HttpClient = http.withHubTimeouts()
+
     val session: AppSession = AppSession(secrets, http)
 
     /** The two calls a session screen may make, through the 401 rule. */

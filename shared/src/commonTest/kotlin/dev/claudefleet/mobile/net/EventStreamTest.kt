@@ -3,6 +3,8 @@ package dev.claudefleet.mobile.net
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.plugins.HttpTimeoutCapability
+import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -183,5 +185,38 @@ class EventStreamTest {
 
         assertEquals(1, events.size)
         assertEquals("session:killed", (events[0] as HubEvent.Row).name)
+    }
+
+    /**
+     * The bug this guards against: OkHttp's default read timeout (10 s) is
+     * shorter than the hub's 15 s `/events` keep-alive comment, so an idle
+     * stream would be torn down mid-silence before the fix. A real-time
+     * reproduction would need to sit through that wait (or longer, to prove
+     * the *old* default no longer applies) on every test run; asserting on
+     * the resolved [HttpTimeoutConfig] instead proves the same property —
+     * no client-side deadline exists to expire — deterministically and
+     * instantly. `an_ordinary_call_keeps_a_finite_deadline_above_the_keep_alive_interval`
+     * in `HubClientTest` covers the other half: this override does not leak
+     * into calls that should still time out.
+     *
+     * `withHubTimeouts()` is applied first, exactly as `AppContainer` applies
+     * it before handing the client to [HubEventStream] — so this proves the
+     * per-request override on `/events` wins over the client-wide default,
+     * not merely that an unconfigured client has no timeout to begin with.
+     */
+    @Test
+    fun the_events_request_carries_no_client_side_timeout() = runTest {
+        val recorder = Recorder()
+        val engine = MockEngine { request ->
+            recorder.requests.add(request)
+            respond("", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
+        }
+        val http = HttpClient(engine).withHubTimeouts()
+
+        HubEventStream(http, HUB, TOKEN).connect().toList()
+
+        val timeout = recorder.requests.single().getCapabilityOrNull(HttpTimeoutCapability)
+        assertEquals(HttpTimeoutConfig.INFINITE_TIMEOUT_MS, timeout?.requestTimeoutMillis)
+        assertEquals(HttpTimeoutConfig.INFINITE_TIMEOUT_MS, timeout?.socketTimeoutMillis)
     }
 }
