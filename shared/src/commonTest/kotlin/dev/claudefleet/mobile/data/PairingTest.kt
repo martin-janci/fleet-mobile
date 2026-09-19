@@ -522,7 +522,7 @@ class AppSessionTest {
 
         assertFailsWith<HubError.Unauthorized> { app.withClient { it.listSessions() } }
 
-        assertEquals("the hub no longer accepts this device's credential. Pair again to carry on.", app.unpairReason.value)
+        assertEquals(REVOKED_CREDENTIAL_REASON, app.unpairReason.value)
     }
 
     /** A first launch with nothing stored has no story to tell. */

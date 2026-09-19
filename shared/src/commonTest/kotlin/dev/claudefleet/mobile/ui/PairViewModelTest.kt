@@ -5,6 +5,7 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.AuthActions
 import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.data.NotAPairingCode
+import dev.claudefleet.mobile.data.REVOKED_CREDENTIAL_REASON
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.store.Credentials
 import kotlinx.coroutines.CompletableDeferred
@@ -615,11 +616,11 @@ class PairViewModelTest {
     @Test
     fun a_standing_reason_is_shown_when_the_screen_opens() = runTest {
         val auth = FakeAuth()
-        auth.unpairReason.value = "the hub no longer accepts this device's credential. Pair again to carry on."
+        auth.unpairReason.value = REVOKED_CREDENTIAL_REASON
         val vm = PairViewModel(auth, backgroundScope, cameraAvailable = false)
 
         assertEquals(
-            "the hub no longer accepts this device's credential. Pair again to carry on.",
+            REVOKED_CREDENTIAL_REASON,
             vm.state.value.reason,
         )
     }
@@ -635,7 +636,7 @@ class PairViewModelTest {
     @Test
     fun dismissing_the_reason_clears_it_here_and_in_the_session() = runTest {
         val auth = FakeAuth()
-        auth.unpairReason.value = "the hub no longer accepts this device's credential. Pair again to carry on."
+        auth.unpairReason.value = REVOKED_CREDENTIAL_REASON
         val vm = PairViewModel(auth, backgroundScope, cameraAvailable = false)
 
         vm.dismissReason()
@@ -648,7 +649,7 @@ class PairViewModelTest {
     @Test
     fun starting_a_pair_attempt_clears_a_standing_reason() = runTest {
         val auth = FakeAuth()
-        auth.unpairReason.value = "the hub no longer accepts this device's credential. Pair again to carry on."
+        auth.unpairReason.value = REVOKED_CREDENTIAL_REASON
         val vm = PairViewModel(auth, backgroundScope, cameraAvailable = false)
         vm.onAddressChange(HUB)
         vm.onCodeChange("ABCD1234")
