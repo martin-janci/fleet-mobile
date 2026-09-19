@@ -93,17 +93,14 @@ jobs:
     name: AndroidSecrets on an emulator
     runs-on: ubuntu-latest
 
-    # NEVER RUN. This job exists because `AndroidSecrets` — the only thing the
-    # app persists, `EncryptedSharedPreferences` over a Keystore master key —
-    # has never executed a line on real hardware, and the box the project was
-    # written on has no KVM device and so cannot start an emulator at all.
-    #
-    # Until someone has watched this job pass once, a red here is far more
-    # likely to be the emulator than the code, and a first push that goes red
-    # for a reason nobody can reproduce teaches people to ignore CI. DELETE THIS
-    # LINE the first time it is seen to pass; from then on a failure means the
-    # secure store broke, which is worth stopping for.
-    continue-on-error: true
+    # `AndroidSecrets` — the only thing the app persists,
+    # `EncryptedSharedPreferences` over a Keystore master key — first executed
+    # here on 2026-09-19 (run 35427316725, API 34): 4 tests green, including
+    # that neither the key nor the token is stored in the clear. Before that it
+    # had never run a line on real hardware, and this job was allowed to fail
+    # without failing CI, so that a first red would not be mistaken for a code
+    # fault. It has now been seen to pass, so that allowance is gone: a failure
+    # here means the secure store broke, and is worth stopping for.
 
     steps:
       - uses: actions/checkout@v4

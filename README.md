@@ -284,17 +284,16 @@ And the parts that need a **device or emulator on either platform**, or a
   list scrolls, whether the prompt box clears a soft keyboard, whether
   auto-scroll behaves when someone has scrolled up, and whether the status chip
   colours are legible in both themes are all open.
-- **`AndroidSecrets` has never executed.** `AndroidSecretsTest` exists and
-  compiles into `shared-androidTest.apk`; the machine it was written on has no
-  `/dev/kvm` and cannot start an emulator. The CI job that would run it has
-  never run either — **and that job is `continue-on-error`, so it cannot fail
-  the build.** Read that plainly: the only test that ever executes the app's
-  secure storage is currently incapable of turning CI red. It is deliberate,
-  because a job nobody has watched pass is more likely to be red for emulator
-  reasons than for code reasons, and a first push that goes red for an
-  unreproducible reason teaches people to ignore CI. **Delete the
-  `continue-on-error` line the first time the job is seen to pass.** Until then
-  the secure store is guarded by a green tick that means nothing.
+- **`AndroidSecrets` now executes on every push.** It is the only thing the app
+  persists — `EncryptedSharedPreferences` over a Keystore master key — and until
+  2026-09-19 it had never run a line on real hardware, because the machine it was
+  written on has no `/dev/kvm` and cannot start an emulator. It first ran in CI
+  on an API 34 emulator that day: **4 tests green**, including that neither the
+  key nor the token is stored in the clear, inside a device run of 278 tests with
+  no failures. The job was previously allowed to fail without failing CI, so that
+  a first red would not be mistaken for a code fault; that allowance has been
+  removed now it has been seen to pass. A red there now means the secure store
+  broke.
 - **The Android camera path.** Two mutations in `task-7-mutations.py` survive on
   purpose — deleting the permission request, and wiring the Scan button to
   nothing — because no headless JVM test can render a composable or grant a
