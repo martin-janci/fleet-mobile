@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -86,14 +87,51 @@ private class FakeActions : SessionActions {
     var maxInFlightReads = 0
         private set
 
+    /**
+     * Per-call gates and answers, consumed in call order ahead of [readGate] /
+     * [answer]. [readGate] is one gate shared by every call, which is enough to
+     * prove "no two calls overlap" but not "which call's answer lands where" —
+     * a test that needs to hold call N open independently of call N+1, or make
+     * them answer differently, queues one of these per call instead.
+     */
+    private val queuedGates = ArrayDeque<CompletableDeferred<Unit>>()
+    private val queuedAnswers = ArrayDeque<Conversation>()
+
+    /**
+     * Invoked the instant each `conversation()` call begins, before it awaits
+     * its gate — lets a test capture state (e.g. what the screen shows) at
+     * exactly the moment a later call's hub round trip starts.
+     */
+    var onReadStart: (() -> Unit)? = null
+
+    /** Queues a gated call: the next `conversation()` call answers [answer] once the returned gate completes. */
+    fun queueRead(answer: Conversation): CompletableDeferred<Unit> {
+        val gate = CompletableDeferred<Unit>()
+        queuedGates += gate
+        queuedAnswers += answer
+        return gate
+    }
+
     override suspend fun conversation(sessionId: Long, turns: Int?): Conversation {
         reads += 1
         inFlightReads += 1
         maxInFlightReads = maxOf(maxInFlightReads, inFlightReads)
+        // `yield()` before the hook, not after: `vm.state` is a `combine(...)`
+        // of `local` with the fleet's own flows, `stateIn`'d eagerly, so a
+        // caller's `local.update` needs a further dispatched turn beyond
+        // whatever woke this call up (the mutex's own release can resume a
+        // queued caller before that turn runs) to be visible on `vm.state`.
+        // Without this, `onReadStart` could read a stale `vm.state.value` even
+        // when `local` itself was already updated, which would pin a false
+        // failure rather than the one this hook exists to catch.
+        yield()
+        onReadStart?.invoke()
+        val gate = queuedGates.removeFirstOrNull() ?: readGate
+        val queuedAnswer = queuedAnswers.removeFirstOrNull()
         try {
-            readGate?.await()
+            gate?.await()
             readFails?.let { throw it }
-            return answer
+            return queuedAnswer ?: answer
         } finally {
             inFlightReads -= 1
         }
@@ -481,28 +519,41 @@ class SessionViewModelTest {
         vm.load().join()
         assertEquals(1, actions.reads)
 
-        val gate = CompletableDeferred<Unit>()
-        actions.readGate = gate
-        actions.answer = Conversation(listOf(turn("t1", "a"), turn("t2", "from the event")))
+        // Read #1 (the event-triggered refetch) and read #2 (a manual refresh)
+        // each get their own gate and answer, so the test can hold #1 open
+        // independently of #2 and tell the two answers apart — a single shared
+        // `readGate`/`answer` can only prove "the calls did not overlap", not
+        // "the screen showed #1's result before #2's hub call even began".
+        val gate1 = actions.queueRead(Conversation(listOf(turn("t1", "a"), turn("t2", "from the event"))))
         fleet.sessionChanges.tryEmit(ID)
         pastDebounce()
         runCurrent()
         assertEquals(2, actions.reads, "the event-triggered read has started and is gated open")
 
-        actions.answer = Conversation(
-            listOf(turn("t1", "a"), turn("t2", "from the event"), turn("t3", "from refresh")),
+        var conversationWhenRead2Started: List<String?>? = null
+        actions.onReadStart = { conversationWhenRead2Started = vm.state.value.conversation.turns.map { it.at } }
+        val gate2 = actions.queueRead(
+            Conversation(listOf(turn("t1", "a"), turn("t2", "from the event"), turn("t3", "from refresh"))),
         )
         val refreshJob = vm.refresh()
         runCurrent()
         assertEquals(2, actions.reads, "a manual refresh must queue behind the in-flight read, not call the hub too")
         assertFalse(vm.state.value.loading, "refresh never showed a loading spinner before this change either")
 
-        gate.complete(Unit)
+        gate1.complete(Unit)
+        runCurrent()
+        gate2.complete(Unit)
         refreshJob.join()
         runCurrent()
 
         assertEquals(3, actions.reads)
         assertEquals(1, actions.maxInFlightReads, "the two calls must never overlap")
+        assertEquals(
+            listOf("t1", "t2"),
+            conversationWhenRead2Started,
+            "read #2's hub call must not start until read #1's result was already applied " +
+                "-- fetch and apply have to be one critical section, not two",
+        )
         assertEquals(
             listOf("t1", "t2", "t3"),
             vm.state.value.conversation.turns.map { it.at },

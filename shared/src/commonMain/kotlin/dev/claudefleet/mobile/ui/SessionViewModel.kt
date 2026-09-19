@@ -107,18 +107,23 @@ class SessionViewModel(
     private val readOnly = !canSendPrompts
 
     /**
-     * Serializes the hub call inside [read] across its four callers —
-     * `load()`, `refresh()`, a send's follow-up, and the event-triggered
-     * refetch above — none of which otherwise know about each other's
-     * coroutines.
+     * Makes the hub call **and** the `local.update` that applies its reply one
+     * critical section, across [read]'s four callers — `load()`, `refresh()`,
+     * a send's follow-up, and the event-triggered refetch above — none of
+     * which otherwise know about each other's coroutines.
      *
-     * Without it, two could be in flight at once and apply out of request
-     * order — whichever `session_conversation` reply happened to land last,
-     * not whichever was asked for last — onto [Conversation.appending], whose
-     * own overlap heuristic is already documented as able to reorder or
-     * duplicate turns. Every requested read still runs; this only makes them
-     * queue rather than race, so the one applied last is always the one asked
-     * for last.
+     * Both have to be inside the lock, not just the call: locking only
+     * `actions.conversation(sessionId)` would still let a second caller
+     * acquire the lock, fetch, and even apply its own result the instant the
+     * first caller's *fetch* returns — before that first caller has applied
+     * its own — which is the same out-of-order-apply race under a different
+     * name. With both inside, a caller cannot start its fetch until every
+     * earlier caller has fetched *and* applied, so whichever reply is applied
+     * last is always the one that was asked for last, onto
+     * [Conversation.appending], whose own overlap heuristic is already
+     * documented as able to reorder or duplicate turns if fed out of order.
+     * Every requested read still runs — this only makes them queue rather
+     * than race.
      */
     private val fetchLock = Mutex()
 
@@ -199,15 +204,26 @@ class SessionViewModel(
     private suspend fun read(first: Boolean) {
         local.update { it.copy(loading = first, error = null) }
         try {
-            val fresh = fetchLock.withLock { actions.conversation(sessionId) }
-            local.update { it.copy(
-                conversation = local.value.conversation.appending(fresh),
-                loaded = true,
-                loading = false,
-            ) }
+            // The fetch AND the apply are one critical section: releasing the
+            // lock between them would let a second caller's fetch start (and
+            // even finish and apply) before this one's own apply has run,
+            // which is the same out-of-order-apply race the lock exists to
+            // rule out — see [fetchLock].
+            fetchLock.withLock {
+                val fresh = actions.conversation(sessionId)
+                local.update { it.copy(
+                    conversation = local.value.conversation.appending(fresh),
+                    loaded = true,
+                    loading = false,
+                ) }
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
+            // Outside the lock: a failed read writes no conversation, so it has
+            // nothing to serialize against another caller's apply, and letting
+            // it fall out of the lock immediately is what lets a queued caller
+            // proceed without waiting on this one's error bookkeeping too.
             // The conversation on screen stays: a failed read is not evidence
             // that what was already said has stopped being true.
             local.update { it.copy(loading = false, error = explain(t)) }
