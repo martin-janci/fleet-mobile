@@ -228,6 +228,50 @@ Intel Mac cannot run the simulator locally.
 
 ---
 
+## Releasing
+
+A signed release build needs four repository secrets (Settings → Secrets and
+variables → Actions):
+
+- `ANDROID_KEYSTORE_BASE64` — the upload keystore, base64-encoded
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+Create a keystore, if there isn't one yet, with the JDK's own `keytool`:
+
+```bash
+keytool -genkeypair -v -keystore release.jks -alias <your-alias> \
+  -keyalg RSA -keysize 2048 -validity 10000
+base64 -i release.jks | tr -d '\n' > release.jks.base64
+```
+
+Put `release.jks.base64`'s contents in the `ANDROID_KEYSTORE_BASE64` secret
+and the three passwords/alias you chose in the other three. **Never commit
+`release.jks` or its base64 form** — `.gitignore` already excludes `*.jks`.
+
+Cut a release by pushing a tag:
+
+```bash
+git tag vX.Y.Z && git push origin vX.Y.Z
+```
+
+`.github/workflows/release.yml` then builds `:androidApp:assembleRelease`
+with the tag (minus its leading `v`) as `versionName` and the workflow run
+number as `versionCode`, verifies the resulting APK is actually signed, and
+attaches it to a GitHub release for that tag. `versionCode` must only ever
+increase for a given signing key — the Play Store and most installers refuse
+an update with a `versionCode` that has gone backwards.
+
+The workflow refuses to run rather than publish something it shouldn't:
+- Any of the four secrets missing → it fails before building. There is no
+  fallback to a debug key and no unsigned release is ever published.
+- A tag that isn't `vX.Y.Z` (with an optional `-suffix`) → rejected before the
+  tag is used for anything.
+- The decoded keystore lives only under the runner's temp directory, never in
+  the checked-out workspace, and is deleted at the end of the job regardless
+  of whether it succeeded.
+
 ## What a Mac still has to check
 
 **Nothing in this repository has ever run on iOS, and no Compose has ever been
