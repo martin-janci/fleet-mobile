@@ -291,10 +291,37 @@ The workflow refuses to run rather than publish something it shouldn't:
 
 ## What a Mac still has to check
 
-**Nothing in this repository has ever run on iOS, and no Compose has ever been
-rendered on any platform.** This is the list, in the order a Mac should work
-through it. The first two are not polish: get either wrong and the app does not
-work at all.
+**The shared code now runs on iOS. Nothing that needs a screen, a camera or an
+app bundle does, and no Compose has ever been rendered on any platform.**
+
+What changed: the `macos` job runs `:shared:iosSimulatorArm64Test` on a booted
+simulator, so the whole shared suite — **313 tests** — executes on
+Kotlin/Native on every push rather than only on the JVM. That is the app's
+entire logic layer: the address and transport rules, the SSE framing, the
+conversation merge, every view model, and the token-hygiene rules. All 313 pass
+on Kotlin/Native exactly as they do on the JVM, which is the first evidence
+that the two platforms agree about any of it. Before this they were only ever
+*compiled* for iOS.
+
+One gap is worth naming precisely, because it looks like it should have closed
+with the rest:
+
+- **The Keychain round trip still has not happened.** The Kotlin plugin runs a
+  Kotlin/Native test through `simctl spawn`, so the binary is not an installed
+  app, holds no `keychain-access-group` entitlement, and `securityd` refuses
+  every request with `errSecNotAvailable` (-25291). `KeychainSecretsTest`
+  therefore asserts the **refusal** path: that an unreadable store reads as
+  "not paired" rather than crashing the app on every cold start, and that a
+  write or a clear that cannot land throws rather than lying about it. That
+  half had no coverage anywhere and is a real production case — a background
+  wake before the device's first unlock is exactly what
+  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` invites. Storing and
+  reading a real item back needs an XCTest target hosted by `iosApp`. This is
+  why Android has the round trip and iOS does not: an Android instrumentation
+  test *is* installed as an app, and a `simctl spawn`-ed executable is not.
+
+This is the list, in the order a Mac should work through it. The first two are
+not polish: get either wrong and the app does not work at all.
 
 1. **`NSCameraUsageDescription` reaches the built app.** It is in
    `iosApp/iosApp/Info.plist`, and `GENERATE_INFOPLIST_FILE` is `NO` in both
@@ -311,12 +338,16 @@ work at all.
    `WindowInsets.safeDrawing`. Confirm it further: background the app and watch
    the hub drop a subscriber, foreground it and watch the list refill. Nothing
    here can test that CMP's iOS lifecycle actually fires.
-3. **The Keychain round trip.** `KeychainSecrets` compiles into the iOS klib and
-   has never executed. Write, read back, clear, and confirm `SecItemDelete`'s
-   status is checked rather than discarded. Then the two that matter:
+3. **The Keychain round trip.** `KeychainSecrets` now executes in CI, but only
+   its refusal path — see above for why a `simctl spawn`-ed binary cannot hold
+   a Keychain item. So the storing half is still unrun: write, read back,
+   clear, and confirm `SecItemDelete`'s status is checked rather than
+   discarded. Then the two that matter:
    `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` is readable on a
    locked-screen background wake, and the item is **absent** after restoring a
    backup onto a second device. The second is the security-relevant half.
+   Adding an XCTest target to `iosApp` would move the first three of these into
+   CI and leave only the last two needing a person.
 4. **Core Foundation retain/release.** `Secrets.ios.kt` calls `CFRelease` by
    hand on every `Create`d object and on the `+1` reference `kSecReturnData`
    hands back. The compiler checks none of it. Run it under Instruments'

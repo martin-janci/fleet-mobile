@@ -2,51 +2,57 @@ package dev.claudefleet.mobile.store
 
 import dev.claudefleet.mobile.ui.explain
 import kotlinx.coroutines.test.runTest
-import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * The iOS secure store, executed.
+ * `KeychainSecrets` **when the Keychain refuses** — which, on this test host, is
+ * always, and that turns out to be the useful half.
  *
- * Until this file, `KeychainSecrets` had never run a line. Its own KDoc said so
- * — *"Linked, never run"* — and that was the whole of what stood behind the one
- * thing this app persists on iOS. Android had the same hole and closed it with
- * an emulator job (`AndroidSecretsTest`); this is the other half, and it needs
- * the same thing that job needed: somewhere the platform's real API exists.
- * That is `iosSimulatorArm64Test`, which CI now runs.
+ * Until this file the class had never run a line; its own KDoc said so
+ * ("Linked, never run"). It now runs, under `iosSimulatorArm64Test`, and the
+ * first thing running it established is a limit worth writing down rather than
+ * working around:
  *
- * Every test uses its own service and account so the cases cannot see each
- * other's items, and `@AfterTest` deletes them — a Keychain item outlives the
- * process that wrote it, so a leftover one would make the next run read a value
- * it did not write. That is the same rule `AndroidSecretsTest` follows for the
- * same reason.
+ * **A Kotlin/Native test binary gets no Keychain.** The Kotlin plugin launches
+ * it with `simctl spawn`, so it is a bare Mach-O executable rather than an
+ * installed app: no bundle identifier, no `keychain-access-group` entitlement,
+ * and `securityd` answers every request with `errSecNotAvailable` (**-25291**).
+ * That is not a bug in `KeychainSecrets` and no amount of care in it would
+ * change the answer — covering the happy-path round trip needs an XCTest target
+ * hosted by `iosApp`, which is the one piece of iOS coverage still missing.
+ * `AndroidSecretsTest` has the round trip because an instrumentation test *is*
+ * installed as an app; this is the difference between the two platforms' test
+ * hosts, not between the two stores.
  *
- * What is asserted here is the contract `Secrets` states and nothing about
- * Apple's implementation: a credential survives the round trip, `write`
- * replaces rather than accumulates, `clear` actually removes, and a `clear`
- * with nothing to remove is not an error.
+ * So these tests assert what a refusing Keychain is supposed to produce, and
+ * that turns out to be the half that had no coverage anywhere and the half that
+ * matters most when it is wrong. A store that refuses is not hypothetical in
+ * production either: the class chooses
+ * `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` precisely so a background
+ * wake can read the token, which makes *a background wake before the device's
+ * first unlock* — `errSecInteractionNotAllowed` — a case the design invites.
+ * Every claim below holds for that case exactly as it does for this one: they
+ * are both "the Keychain said no".
+ *
+ * The three rules under test are the ones the app is built on:
+ *
+ *  1. **A store that cannot be read reads as "not paired"** rather than
+ *     throwing. `AppSession.restore()` has no catch, so anything else here is a
+ *     crash on every cold start with no way out but a reinstall. Android was
+ *     given this degrade by review finding S2; nothing had ever checked that
+ *     iOS behaves the same way.
+ *  2. **A store that will not write or clear says so, loudly.** `Secrets.clear`
+ *     throws by contract because `AppSession.forget()` publishes `Unpaired` on
+ *     the strength of it returning — review finding S3 — and a silent no-op
+ *     there leaves the token on disk while the operator believes it is gone.
+ *  3. **The refusal is a sentence a person can read**, carrying an `OSStatus`
+ *     and never the value it failed to store.
  */
 class KeychainSecretsTest {
-
-    private val service = "dev.claudefleet.mobile.test"
-    private val accounts = mutableListOf<String>()
-
-    private fun store(): KeychainSecrets {
-        val account = "case-${accounts.size}-${randomSuffix()}"
-        accounts += account
-        return KeychainSecrets(service = service, account = account)
-    }
-
-    @AfterTest
-    fun tearDown() = runTest {
-        for (account in accounts) {
-            runCatching { KeychainSecrets(service = service, account = account).clear() }
-        }
-    }
 
     private val credential = Credentials(
         hub = "https://fleet.example.com",
@@ -55,168 +61,175 @@ class KeychainSecretsTest {
         mode = Credentials.FULL,
     )
 
-    /** The round trip the whole class exists for. */
-    @Test
-    fun a_written_credential_comes_back() = runTest {
-        val secrets = store()
-        secrets.write(credential)
-
-        val read = assertNotNull(secrets.read(), "the item was written, so it must read back")
-        assertEquals(credential.hub, read.hub)
-        assertEquals(credential.token, read.token)
-        assertEquals(credential.name, read.name)
-        assertEquals(credential.mode, read.mode)
-        assertEquals(credential, read)
-    }
-
-    /** An account with no item is not an error and is not a credential. */
-    @Test
-    fun an_empty_store_reads_as_unpaired() = runTest {
-        assertNull(store().read(), "nothing was ever written under this account")
-    }
+    private fun store() = KeychainSecrets(
+        service = "dev.claudefleet.mobile.test",
+        account = "keychain-secrets-test",
+    )
 
     /**
-     * `write` replaces.
+     * The precondition every other test here rests on, asserted rather than
+     * assumed — and written to fail **loudly and usefully** if it ever stops
+     * being true.
      *
-     * The implementation deletes and then adds rather than branching on whether
-     * an item exists, precisely so there is no path where a failed update leaves
-     * the *old* token in place. This is that claim: after re-pairing against a
-     * different hub, reading gives the new credential and not the first one.
+     * If this test starts failing, the environment gained a Keychain: someone
+     * has given the iOS side a bundled test host. That is good news and the
+     * right response is not to relax this test but to replace this whole file
+     * with the round trip `AndroidSecretsTest` already has — write, read back,
+     * replace, clear — because at that point it can finally be written.
      */
     @Test
-    fun writing_twice_keeps_only_the_second() = runTest {
-        val secrets = store()
-        secrets.write(credential)
+    fun this_test_host_has_no_keychain_and_that_is_why_the_rest_of_this_file_reads_as_it_does() =
+        runTest {
+            val refusal = assertFailsWith<KeychainFailure>(
+                "a `simctl spawn`-ed test binary is not an installed app, so it holds no " +
+                    "keychain-access-group entitlement and securityd refuses it",
+            ) { store().write(credential) }
 
-        val replacement = Credentials(
-            hub = "https://other.example.com",
-            token = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-            name = "kiosk",
-            mode = Credentials.READONLY,
+            assertEquals(
+                ERR_SEC_NOT_AVAILABLE,
+                refusal.status,
+                "if the Keychain now answers something else — or succeeds — this file is " +
+                    "testing the wrong thing and should become the round trip instead",
+            )
+        }
+
+    /**
+     * Rule 1. An unreadable store reads as "not paired", and does not throw.
+     *
+     * `AppSession.restore()` is called from a `LaunchedEffect` with no catch, so
+     * a throw here is a crash on the first frame of every cold start. The app
+     * showing Pair is recoverable; the app not starting is not.
+     */
+    @Test
+    fun a_refusing_keychain_reads_as_unpaired_rather_than_throwing() = runTest {
+        assertNull(
+            store().read(),
+            "an unreadable store is the same as an empty one — anything else crashes the app " +
+                "on every cold start, which is the degrade `decodeCredentials` already makes",
         )
-        secrets.write(replacement)
-
-        assertEquals(replacement, secrets.read(), "the second write must replace the first")
     }
 
-    /**
-     * `clear` removes the item rather than reporting success and leaving it.
-     *
-     * This is the failure `Secrets.clear`'s contract is written around: the app
-     * publishes `Unpaired` on the strength of this call returning, so a silent
-     * no-op would leave the token on disk for the next cold start to find while
-     * the operator believes it was forgotten.
-     */
+    /** And it keeps doing so, rather than failing differently the second time. */
     @Test
-    fun clearing_really_removes_the_item() = runTest {
+    fun reading_a_refusing_keychain_is_repeatable() = runTest {
         val secrets = store()
-        secrets.write(credential)
-        assertNotNull(secrets.read())
-
-        secrets.clear()
-
-        assertNull(secrets.read(), "clear() must remove the item, not merely claim to")
-    }
-
-    /** `errSecItemNotFound` is benign: there was nothing to delete. */
-    @Test
-    fun clearing_an_empty_store_is_not_an_error() = runTest {
-        store().clear()
+        assertNull(secrets.read())
+        assertNull(secrets.read())
     }
 
     /**
-     * Two accounts under one service do not share an item.
+     * Rule 2, the write half. A credential that was not stored must not look
+     * stored.
      *
-     * The query is `kSecClass` + `kSecAttrService` + `kSecAttrAccount`, so this
-     * is really a check that the account is part of the identity rather than
-     * decoration — if it were dropped from the query, every store in the process
-     * would be the same store.
+     * `AppSession.pair()` writes and then publishes `Paired` on the next line.
+     * If the write failed quietly, the app would show the fleet, work until it
+     * was next launched, and come back unpaired with nothing having said why.
      */
     @Test
-    fun two_accounts_hold_separate_items() = runTest {
-        val first = store()
-        val second = store()
-        first.write(credential)
-
-        assertNull(second.read(), "a different account must not see the first one's item")
-        assertEquals(credential, first.read())
+    fun a_write_that_cannot_land_throws_rather_than_claiming_success() = runTest {
+        assertFailsWith<SecretsUnavailable>("a failed write must not look like a stored credential") {
+            store().write(credential)
+        }
     }
 
     /**
-     * The stored form is the shared JSON, so a value written on one platform has
-     * the same shape as on the other.
+     * Rule 2, the clear half — the more dangerous of the two, and the one review
+     * finding S3 names.
      *
-     * Read back through `decodeCredentials`, which is the function both stores
-     * use, rather than by inspecting bytes: what matters is that the encoding
-     * this platform writes is the encoding the shared decoder expects.
+     * `AppSession.forget()` publishes `Unpaired` when this returns. A silent
+     * no-op would tell someone who has just lost their phone that the credential
+     * is gone while it is still on disk. `SettingsViewModel` is built around
+     * this throwing: it reports the failure and *stays paired*.
      */
     @Test
-    fun the_stored_form_is_the_shared_encoding() = runTest {
+    fun a_clear_that_cannot_land_throws_rather_than_silently_doing_nothing() = runTest {
+        assertFailsWith<SecretsUnavailable>(
+            "forget() publishes Unpaired on the strength of this returning",
+        ) { store().clear() }
+    }
+
+    /**
+     * Rule 3. The refusal reaches the screen as a sentence, with the status and
+     * without the value.
+     *
+     * `explain()` repeats a message only for the app's own exceptions that
+     * promise to carry nothing from outside, and [KeychainFailure] is a
+     * [SecretsUnavailable] so that it qualifies — as a bare `Exception` it fell
+     * through to "something went wrong (KeychainFailure)" while the identical
+     * Android failure read as a sentence.
+     */
+    @Test
+    fun the_refusal_is_shown_as_words_and_never_as_the_stored_value() = runTest {
+        val refusal = assertFailsWith<KeychainFailure> { store().clear() }
+        val shown = explain(refusal)
+
+        assertTrue(credential.token !in shown, "an OSStatus, never the value it failed to store")
+        assertTrue("${refusal.status}" in shown, "the status is what an operator greps for")
+        assertTrue(
+            "something went wrong" !in shown,
+            "a KeychainFailure is a SecretsUnavailable precisely so explain() shows it",
+        )
+    }
+
+    /**
+     * The status this class's own KDoc names as the reachable production case
+     * gets the same treatment as the one this host happens to produce.
+     *
+     * Constructed rather than provoked — no test can put a simulator into
+     * "before first unlock" — but the point is that nothing branches on *which*
+     * refusal it was, so covering one covers the other.
+     */
+    @Test
+    fun the_before_first_unlock_refusal_reads_the_same_way() {
+        val shown = explain(KeychainFailure(ERR_SEC_INTERACTION_NOT_ALLOWED))
+
+        assertTrue("$ERR_SEC_INTERACTION_NOT_ALLOWED" in shown)
+        assertTrue("something went wrong" !in shown)
+        assertTrue("Keychain" in shown, "the sentence should say which store refused")
+    }
+
+    /**
+     * The stored form is the shared encoding, so what this platform writes is
+     * what the shared decoder reads.
+     *
+     * Pure, and therefore the one thing here a missing Keychain cannot affect —
+     * which is also why it is worth having: it is the half of the round trip
+     * that *can* be checked on this host.
+     */
+    @Test
+    fun the_stored_form_round_trips_through_the_shared_encoding() {
         assertEquals(credential, decodeCredentials(credential.encode()))
     }
 
     /**
-     * A credential with awkward text survives.
+     * Including a credential whose text is not ASCII.
      *
-     * The value crosses a C boundary as UTF-8 bytes (`encodeToByteArray` out,
-     * `readBytes(...).decodeToString()` back), and a length taken in the wrong
-     * units is the classic way that goes wrong — invisibly, for anyone whose
-     * client name is ASCII.
+     * The value crosses a C boundary as UTF-8 (`encodeToByteArray` out,
+     * `readBytes(...).decodeToString()` back) and a length taken in the wrong
+     * units is the classic way that breaks — invisibly, for everyone whose
+     * client name happens to be ASCII. The encoding half is checkable here; the
+     * C boundary itself is part of what still needs a bundled host.
      */
     @Test
-    fun a_credential_with_non_ascii_text_survives() = runTest {
-        val secrets = store()
+    fun a_credential_with_non_ascii_text_survives_the_shared_encoding() {
         val awkward = Credentials(
             hub = "https://fleet.example.com",
-            token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            token = credential.token,
             name = "Martin's iPhone — kuchyňa 🛰",
             mode = Credentials.FULL,
         )
-        secrets.write(awkward)
-
-        val read = assertNotNull(secrets.read())
-        assertEquals(awkward.name, read.name, "the name crosses a C boundary as UTF-8")
-        assertEquals(awkward, read)
+        assertEquals(awkward, decodeCredentials(awkward.encode()))
     }
 
-    /**
-     * The token never appears in what [KeychainFailure] says, and what it says
-     * is what a screen shows.
-     *
-     * Two claims in one, because they pull against each other. The message has
-     * to be specific enough to be worth showing — `explain()` repeats it rather
-     * than falling back to "something went wrong", which it does only for the
-     * app's own exceptions that promise to carry nothing from outside — and it
-     * has to carry an `OSStatus` and never the value it failed to store. This
-     * is the one class on this platform that holds the token in the clear.
-     */
-    @Test
-    fun a_keychain_failure_says_the_status_and_never_the_value() {
-        val failure = KeychainFailure(errSecInteractionNotAllowedStatus)
-        val shown = explain(failure)
+    private companion object {
+        /** `errSecNotAvailable` — no keychain for this process at all. */
+        const val ERR_SEC_NOT_AVAILABLE = -25291
 
-        assertTrue(credential.token !in shown, "an OSStatus, never the value")
-        assertTrue("$errSecInteractionNotAllowedStatus" in shown, "the status is what an operator greps for")
-        assertTrue(
-            "something went wrong" !in shown,
-            "a KeychainFailure is a SecretsUnavailable, so explain() shows it rather than the fallback " +
-                "— the identical Android failure already reads as a sentence",
-        )
-    }
-
-    /**
-     * The status `KeychainSecrets`' own KDoc names as the reachable one: a
-     * background wake before the device's first unlock, which is exactly the
-     * situation `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` invites.
-     */
-    private val errSecInteractionNotAllowedStatus = -25308
-
-    /** Distinct per run, so a leftover item from a crashed run cannot be read as this one's. */
-    private fun randomSuffix(): String = buildString {
-        var seed = kotlin.random.Random.nextInt(0, Int.MAX_VALUE)
-        repeat(8) {
-            append(('a' + (seed % 26)))
-            seed /= 26
-        }
+        /**
+         * `errSecInteractionNotAllowed` — the device has not been unlocked since
+         * boot. The production case `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`
+         * invites, named in `KeychainSecrets`' own KDoc.
+         */
+        const val ERR_SEC_INTERACTION_NOT_ALLOWED = -25308
     }
 }

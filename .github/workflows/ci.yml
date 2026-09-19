@@ -176,7 +176,12 @@ jobs:
     #    was asserted against the JVM's Kotlin stdlib, its coroutines and its
     #    serialization, and merely *compiled* for the platform half the users
     #    are on. It is also the only thing that has ever executed
-    #    `KeychainSecrets`, which is the one thing this app persists on iOS.
+    #    `KeychainSecrets`, though only its refusal path: the Kotlin plugin
+    #    launches the test binary with `simctl spawn`, so it is not an
+    #    installed app, holds no keychain entitlement, and securityd answers
+    #    `errSecNotAvailable` to everything. `KeychainSecretsTest` says so in
+    #    full; the happy-path round trip needs an XCTest target hosted by
+    #    `iosApp` and is the one piece of iOS coverage still missing.
     #
     # Neither one runs the app's UI. See README.md → "What a Mac still has to
     # check" for what still needs a human and a real device.

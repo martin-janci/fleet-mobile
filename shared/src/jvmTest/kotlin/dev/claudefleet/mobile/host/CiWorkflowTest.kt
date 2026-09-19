@@ -112,9 +112,10 @@ class CiWorkflowTest {
      * merge, the view models' coroutine behaviour, the token-hygiene rules —
      * held for the JVM alone, while the platform with the other string, regex,
      * coroutine and memory implementations was merely compiled. It is also the
-     * only thing that ever executes `KeychainSecrets`, the one thing this app
-     * persists on iOS, and it is the exact counterpart of the emulator job that
-     * exists to execute `AndroidSecrets`.
+     * only thing that ever executes `KeychainSecrets` — its refusal path, which
+     * is all a `simctl spawn`-ed binary can reach; `KeychainSecretsTest` says
+     * why at length. It is the counterpart of the emulator job that exists to
+     * execute `AndroidSecrets`.
      *
      * Asserted on the command rather than anywhere in the file, for the reason
      * [ci_runs_the_whole_build] gives: a step keeps its name while the command

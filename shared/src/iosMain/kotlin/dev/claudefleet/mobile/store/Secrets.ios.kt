@@ -62,10 +62,16 @@ import platform.Security.kSecValueData
  * Nothing here logs, and [KeychainFailure] carries an `OSStatus` — never the
  * value it failed to store.
  *
- * **Linked, never run.** This file compiles for `iosArm64` and
- * `iosSimulatorArm64` and is linked into `iosApp` by both a local `xcodebuild`
- * and the `macos` CI job — the Keychain calls themselves have never executed.
- * See `README.md` → *What a Mac still has to check*.
+ * **Half run.** `KeychainSecretsTest` executes this class on a simulator in CI,
+ * but a Kotlin/Native test binary is launched with `simctl spawn` rather than
+ * installed, so it holds no `keychain-access-group` entitlement and `securityd`
+ * answers `errSecNotAvailable` to everything. What that covers is the refusal
+ * path — an unreadable store reading as "not paired" rather than crashing the
+ * app, and a write or clear that cannot land throwing rather than lying — which
+ * is the half nothing covered before and is also the production case this
+ * accessibility choice invites (see [requireDeleted]). What it does not cover is
+ * a real item surviving a write and a read, which needs an XCTest target hosted
+ * by `iosApp`. See `README.md` → *What a Mac still has to check*.
  */
 @OptIn(ExperimentalForeignApi::class)
 class KeychainSecrets(

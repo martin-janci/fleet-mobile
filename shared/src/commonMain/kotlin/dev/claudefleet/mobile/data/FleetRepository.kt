@@ -144,8 +144,15 @@ class FleetRepository(
     private suspend fun follow() {
         var failures = 0
         var reason: String? = null
+        // The first attempt, announced once. Every later one is announced by
+        // the line at the foot of the loop, before the wait — which is where it
+        // has to be, so the banner names the attempt a person is waiting
+        // *through* rather than only after the wait is over. This used to be
+        // published at the head of the loop as well, with the same `failures`
+        // and the same `reason`: an identical value into a `StateFlow`, which
+        // conflates it, on every iteration but the first.
+        _status.value = ConnectionStatus.Reconnecting(1, null)
         while (true) {
-            _status.value = ConnectionStatus.Reconnecting(failures + 1, reason)
             try {
                 events.connect().collect { event ->
                     when (event) {
