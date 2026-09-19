@@ -129,7 +129,10 @@ class HubClient(
         // URL *fragment*, which no browser sends and no access log records.
         throwForStatus(status, text, base, token, code)
         return try {
+            requireShallow(text, PAIR_REPLY)
             json.decodeFromString(PairResult.serializer(), text)
+        } catch (e: HubError) {
+            throw e
         } catch (e: Exception) {
             throw HubError.Transport(e)
         }
@@ -216,7 +219,12 @@ class HubClient(
     }
 
     private fun parseObject(text: String): JsonObject = try {
-        json.parseToJsonElement(text) as JsonObject
+        parseWire(text) as JsonObject
+    } catch (e: HubError) {
+        // A depth refusal is not "the hub answered something unintelligible" —
+        // nothing was read at all. Wrapping it would report a reachability
+        // problem for a shape problem, and hide which ceiling was hit.
+        throw e
     } catch (e: Exception) {
         throw HubError.Transport(e)
     }
@@ -241,7 +249,7 @@ class HubClient(
         if (trimmed.startsWith("{")) return parseObject(trimmed)
         for (frame in sseFrames(raw)) {
             val reply = try {
-                json.parseToJsonElement(frame.data) as? JsonObject
+                parseWire(frame.data) as? JsonObject
             } catch (_: Exception) {
                 null
             } ?: continue
@@ -266,7 +274,14 @@ class HubClient(
             ?.let { (it["text"] as? JsonPrimitive)?.content }
             ?: return result["structuredContent"] ?: JsonNull
         return try {
-            json.parseToJsonElement(text)
+            parseWire(text, HUB_PAYLOAD)
+        } catch (e: HubError) {
+            // The fallback below is for a tool that answers *prose* — text that
+            // was never meant to be JSON. A document refused for its depth is
+            // the opposite: it is JSON, and the refusal is the answer. Handing
+            // it on as a `JsonPrimitive` would turn a ceiling into a confusing
+            // deserialization failure two frames later.
+            throw e
         } catch (_: Exception) {
             JsonPrimitive(text)
         }
@@ -380,6 +395,12 @@ internal const val MAX_RESPONSE_BYTES: Int = 8 * 1024 * 1024
 
 /** What an overrunning reply is called on the banner. See [HubError.TooLarge]. */
 internal const val HUB_REPLY = "a reply from the hub"
+
+/** The JSON a tool's answer is wrapped in, inside the envelope's text block. */
+internal const val HUB_PAYLOAD = "the nesting in a tool's answer"
+
+/** The `POST /pair` reply — the one document carrying a token in the clear. */
+internal const val PAIR_REPLY = "the nesting in the pairing reply"
 
 /**
  * The reply's text, refusing anything past [limit].

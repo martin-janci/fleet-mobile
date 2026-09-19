@@ -131,6 +131,25 @@ phone that means the process being killed rather than the app being slow.
 | One line on `/events` | 256 KiB | A stream that never sends `\n`. Ktor's `readLine` takes no limit at all; `readLineStrict` is the one that does. |
 | One event frame | 512 Ki chars | A frame whose `data:` never ends. SSE terminates a frame with a blank line and nothing guarantees one arrives. |
 | Turns kept on a session screen | 200 | The screen holding every turn of a session that has been running for hours, while the hub's own window stays at ten. Oldest go first and the screen says *Older turns are not shown*. |
+| JSON nesting, anywhere off the wire | 64 | A document deep enough to exhaust the parser's stack. `kotlinx.serialization` parses by recursive descent, so nesting depth *is* stack depth. |
+
+That last one is the only ceiling whose failure is not merely a big allocation,
+and it is worth spelling out because the two platforms fail differently.
+Measured on a background dispatcher, which is where the app actually parses —
+Ktor delivers on one, and a secondary thread gets a fraction of a main thread's
+stack:
+
+- **Android** throws `StackOverflowError` at around ten thousand levels. That
+  is an `Error`, not an `Exception`, and every parse site in the app guarded
+  with `catch (e: Exception)` — so it went straight past all of them.
+- **iOS** does not throw anything. The process is killed with signal 10,
+  `SIGBUS`. Confirmed in CI, where it took the test binary down mid-run.
+
+Widening those catches to `Throwable` would have fixed neither: catching a
+`StackOverflowError` is unreliable wherever it is possible at all, and on
+Kotlin/Native the signal never becomes a Kotlin exception. So the depth is
+checked *before* the parser is handed anything, in one linear non-recursive
+pass. Worth remembering for anything else here that recurses over wire data.
 
 None of these is a guess at the largest legitimate payload — they are the point
 past which nothing legitimate is happening, which is why they can be generous.

@@ -216,7 +216,15 @@ sealed interface HubEvent {
 internal fun frameToEvent(frame: SseFrame): HubEvent? {
     val name = frame.event ?: return null
     val fields = try {
-        json.parseToJsonElement(frame.data) as? JsonObject ?: return null
+        parseWire(frame.data, SSE_FRAME) as? JsonObject ?: return null
+    } catch (e: HubError) {
+        // Dropping an unparseable frame is deliberate policy — see this
+        // function's KDoc, and the captive portal it was written for. A frame
+        // refused for its *depth* is not that: it is the same class of fault as
+        // one refused for its size, and gets the same recovery, a reconnect
+        // and a `ready` resync. Returning null here would leave the row quietly
+        // stale instead, for as long as the connection lasted.
+        throw e
     } catch (_: Exception) {
         return null
     }
