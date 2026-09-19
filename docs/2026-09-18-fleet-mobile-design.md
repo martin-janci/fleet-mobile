@@ -245,3 +245,19 @@ cold start once the event stream connects.
 requires — comes entirely from the SSE follower in `FleetRepository`, so if
 `/events` is unavailable while `/mcp` still answers, Send stays disabled until
 the stream reconnects.
+
+**`/events` has a bounded idle-socket timeout, not an unbounded one.** The
+request itself has no deadline (a live stream has no natural end), but a read
+that receives no bytes for `EVENTS_IDLE_TIMEOUT_MS` (45 s — two missed
+15 s heartbeats) ends the connection. The engine's timeout surfaces as
+`HubError.Transport`, the same shape any other dropped connection arrives in,
+so `FleetRepository.follow()` reconnects with its existing backoff exactly as
+it would for a severed socket.
+
+**A session screen's conversation reads coalesce.** `load()`, `refresh()`, a
+send's follow-up, and the event-triggered refetch all go through one queue: a
+request folds into whatever read is already registered but has not started
+its hub call yet, so a burst of taps or event frames costs at most one hub
+call beyond whichever is already running. `SessionUiState.loading` tracks the
+first-ever read; `refreshing` tracks every later one, queued or in flight, and
+the Refresh button is disabled while either is true.
