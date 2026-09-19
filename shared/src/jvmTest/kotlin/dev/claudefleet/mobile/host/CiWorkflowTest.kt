@@ -79,16 +79,25 @@ class CiWorkflowTest {
     }
 
     /**
-     * There is no macOS runner here and there must not be a step that pretends.
+     * The `macos` job builds `iosApp` for real now that it links, and pins the
+     * three things that would otherwise let it drift into claiming more than a
+     * build: no signing identity, no team, no device.
      *
-     * A workflow running `xcodebuild` on Linux fails for a reason that has
-     * nothing to do with the code, and a step that fails for a reason nobody can
-     * fix is a step someone eventually deletes — taking whatever it also
-     * guarded with it.
+     * A `DEVELOPMENT_TEAM` or an `iphoneos` SDK would imply a signed,
+     * device-capable build that does not exist on this runner — nobody has a
+     * signing identity here, and there is deliberately no simulator runtime
+     * either, only the SDK.
      */
     @Test
-    fun ci_does_not_claim_to_build_ios() {
-        assertTrue("xcodebuild" !in ci, "CI runs on Linux and cannot build iOS")
+    fun ci_builds_ios_for_the_simulator_only_and_unsigned() {
+        assertTrue("xcodebuild" in ci, "the macos job must actually build iosApp now that it links")
+        assertTrue(
+            "generic/platform=iOS Simulator" in ci,
+            "the generic Simulator destination is the one that needs no simulator runtime installed",
+        )
+        assertTrue("CODE_SIGNING_ALLOWED=NO" in ci, "nobody has a signing identity on the runner")
+        assertTrue("DEVELOPMENT_TEAM" !in ci, "a team id would imply a signed, device-capable build")
+        assertTrue("-sdk iphoneos" !in ci, "this job builds for the Simulator, never a device SDK")
     }
 
     /**
