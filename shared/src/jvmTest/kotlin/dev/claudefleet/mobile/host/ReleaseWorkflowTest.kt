@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.host
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -78,6 +79,11 @@ class ReleaseWorkflowTest {
      * `contents: write` is the only elevated scope anywhere in the file, and it
      * belongs to the one job that creates the release — not to the workflow as
      * a whole, where every other job (if one is ever added) would inherit it.
+     *
+     * This does not require *exactly* two permission entries: a later, more
+     * cautious addition (say, `id-token: none`) must not fail this test on its
+     * own. What may never be true is some scope other than `contents` reaching
+     * `write`.
      */
     @Test
     fun permissions_are_contents_write_on_the_release_job_only() {
@@ -90,13 +96,13 @@ class ReleaseWorkflowTest {
             "the release job must escalate to contents: write to create the release",
         )
 
-        val scopeLines = release.lineSequence()
-            .filter { Regex("""^\s*[a-z-]+:\s*(read|write|none)\s*$""").matches(it) }
+        val writeScopes = release.lineSequence()
+            .filter { Regex("""^\s*[a-z-]+:\s*write\s*$""").matches(it) }
             .toList()
-        assertEquals(
-            2,
-            scopeLines.size,
-            "exactly two permission entries are expected (workflow read, job write); found $scopeLines",
+        assertTrue(writeScopes.isNotEmpty(), "expected at least one write scope (contents: write) on the release job")
+        assertTrue(
+            writeScopes.all { it.trim().startsWith("contents:") },
+            "no permission scope other than contents may be write; found $writeScopes",
         )
     }
 
@@ -139,6 +145,46 @@ class ReleaseWorkflowTest {
         val secretsCheckIndex = release.indexOf("missing=()")
         val buildIndex = release.indexOf("gradlew :androidApp:assembleRelease")
         assertTrue(secretsCheckIndex in 0 until buildIndex, "the secrets check must run before the build")
+    }
+
+    /**
+     * Finding #9: a tag on an untested commit must not publish. The full
+     * `./gradlew build` — the same one ci.yml runs — has to run, be gated on
+     * its own raw `e:` count exactly like ci.yml's, and finish before
+     * `assembleRelease` ever starts; and it must not receive any of the four
+     * signing secrets, since verifying the source has nothing to do with
+     * signing it.
+     */
+    @Test
+    fun the_full_build_runs_and_is_gated_on_raw_compiler_errors_before_the_signed_apk_is_built() {
+        assertTrue(
+            release.lineSequence().any { Regex("""\./gradlew build(\s|$)""").containsMatchIn(it) },
+            "release.yml must run the full ./gradlew build, not just assembleRelease",
+        )
+        assertTrue("""grep -c '^e: '""" in release, "the build step must count raw e: lines exactly like ci.yml does")
+        val fails = """test "${'$'}errors" -eq 0"""
+        assertTrue(
+            release.lineSequence().any { it.trim() == fails },
+            "counting the errors is not a gate unless a non-zero count fails the job",
+        )
+
+        val buildIndex = release.indexOf("./gradlew build")
+        val gateIndex = release.indexOf(fails)
+        val assembleIndex = release.indexOf("gradlew :androidApp:assembleRelease")
+        assertTrue(
+            buildIndex in 0 until gateIndex && gateIndex in 0 until assembleIndex,
+            "the build must run, then be gated, then (only then) the signed APK is built",
+        )
+
+        val buildStep = stepAt("./gradlew build")
+        for (secret in listOf(
+            "ANDROID_KEYSTORE_BASE64",
+            "ANDROID_KEYSTORE_PASSWORD",
+            "ANDROID_KEY_ALIAS",
+            "ANDROID_KEY_PASSWORD",
+        )) {
+            assertTrue(secret !in buildStep, "the build/test step must not receive $secret — it only verifies the source")
+        }
     }
 
     /**
@@ -233,13 +279,37 @@ class ReleaseWorkflowTest {
      */
     @Test
     fun the_tag_is_validated_against_a_strict_pattern_before_use() {
-        assertTrue(
-            "^v[0-9]+(\\.[0-9]+)*(-[0-9A-Za-z.-]+)?\$" in release,
-            "the tag must be checked against a digits-and-dots pattern with an optional bounded suffix",
-        )
-        val validateIndex = release.indexOf("[0-9A-Za-z.-]")
-        val deriveIndex = release.indexOf("version=\"\${TAG#v}\"")
-        assertTrue(validateIndex in 0 until deriveIndex, "validation must run before the version name is derived from the tag")
+        val pattern = tagValidationPattern()
+
+        for (tag in listOf("v1.2.3", "v1.2.3-rc.1", "v0.1.0", "v12.34.56-beta.2")) {
+            assertTrue(pattern.matches(tag), "expected '$tag' to be accepted by the workflow's own tag pattern")
+        }
+        // A hostile tag is attacker-controlled: anyone who can push a tag
+        // chooses this string. This test fails if the workflow's pattern ever
+        // accepts one of these, regardless of how its source text is spelled.
+        for (tag in listOf("v1.2.3; rm -rf /", "v\$(id)", "", "1.2.3", "v1.2.3\n", "va.b.c", "v1.2.3 ", "v")) {
+            assertFalse(pattern.matches(tag), "expected '$tag' to be REJECTED by the workflow's own tag pattern")
+        }
+
+        // Ordering, without pinning the shell local the derived version is
+        // assigned to: only that the strip-`v` expansion happens after the
+        // pattern check, whatever the assignment's left-hand side is called.
+        val validateIndex = release.indexOf("=~")
+        val deriveIndex = release.indexOf("\${TAG#v}")
+        assertTrue(validateIndex in 0 until deriveIndex, "validation must run before the version is derived from the tag")
+    }
+
+    /**
+     * The regex the workflow actually checks `$TAG` against, read out of its
+     * `[[ "$TAG" =~ PATTERN ]]` test rather than duplicated here by hand — so
+     * a change to the workflow's own pattern is what this test exercises, not
+     * a second copy of it that could quietly drift from the real one.
+     */
+    private fun tagValidationPattern(): Regex {
+        val match = checkNotNull(Regex("""=~\s*(\S+)\s*\]\]""").find(release)) {
+            "expected to find a `[[ ... =~ PATTERN ]]` tag-validation test in release.yml"
+        }
+        return Regex(match.groupValues[1])
     }
 
     /**

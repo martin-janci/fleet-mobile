@@ -101,6 +101,21 @@ class CiWorkflowTest {
     }
 
     /**
+     * `macos` is the last job in the file, so everything from its own `macos:`
+     * key to the end of the file is this job's block and nothing else's.
+     * `continue-on-error` would let a broken iOS link go green on every PR.
+     */
+    @Test
+    fun the_macos_job_never_continues_on_error() {
+        val macosJob = ci.substringAfter("\n  macos:")
+        assertTrue(macosJob.isNotBlank(), "expected to find the macos: job block")
+        assertTrue(
+            "continue-on-error" !in macosJob,
+            "the macos job must not be allowed to fail silently",
+        )
+    }
+
+    /**
      * The instrumentation job stays in the workflow.
      *
      * `AndroidSecrets` is the only thing the app persists and the only class

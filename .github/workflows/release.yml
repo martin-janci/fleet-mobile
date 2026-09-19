@@ -85,6 +85,25 @@ jobs:
       - name: Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # A tag on an untested commit must not publish. This is the same
+      # `./gradlew build` ci.yml runs on every push — it receives none of the
+      # four signing secrets, since verifying the source has nothing to do
+      # with signing it.
+      - name: ./gradlew build
+        run: |
+          set -euo pipefail
+          ./gradlew build --stacktrace 2>&1 | tee build.log
+
+      # Belt and braces, same as ci.yml: the shell wrapper in front of
+      # `gradlew` on some machines strips `e:` lines, so a failing compile can
+      # print a clean-looking log. Nothing strips anything here.
+      - name: No compiler errors in the raw output
+        run: |
+          set -euo pipefail
+          errors=$(grep -c '^e: ' build.log || true)
+          echo "e: lines in the raw Gradle output: $errors"
+          test "$errors" -eq 0
+
       # Decoded under $RUNNER_TEMP, never inside the workspace: the workspace
       # is what `actions/checkout` populated and is not a safe place for a
       # signing key, however briefly. Removed again in the always()-guarded

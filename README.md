@@ -245,17 +245,22 @@ variables → Actions):
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
-Create a keystore, if there isn't one yet, with the JDK's own `keytool`:
+Create a keystore, if there isn't one yet, with the JDK's own `keytool` —
+outside the working tree, so there is nothing here for a `.gitignore` pattern
+to have to catch:
 
 ```bash
-keytool -genkeypair -v -keystore release.jks -alias <your-alias> \
+keytool -genkeypair -v -keystore "$TMPDIR/release.jks" -alias <your-alias> \
   -keyalg RSA -keysize 2048 -validity 10000
-base64 -i release.jks | tr -d '\n' > release.jks.base64
+base64 -i "$TMPDIR/release.jks" | tr -d '\n' > "$TMPDIR/release.jks.base64"
 ```
 
-Put `release.jks.base64`'s contents in the `ANDROID_KEYSTORE_BASE64` secret
-and the three passwords/alias you chose in the other three. **Never commit
-`release.jks` or its base64 form** — `.gitignore` already excludes `*.jks`.
+Put `$TMPDIR/release.jks.base64`'s contents in the `ANDROID_KEYSTORE_BASE64`
+secret and the three passwords/alias you chose in the other three, then
+delete both files from `$TMPDIR`. **Never commit a keystore or its base64
+form** — `.gitignore` excludes `*.jks`, `*.jks.base64`, `*.keystore`,
+`*.keystore.base64` and `*.p12`, but that is a second line of defense, not a
+reason to create the file inside the repo in the first place.
 
 Cut a release by pushing a tag:
 

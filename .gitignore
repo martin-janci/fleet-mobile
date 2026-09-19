@@ -7,9 +7,14 @@ local.properties
 
 # Signing material and service credentials. Nothing here is in the repo today;
 # the rule exists so that a later `git add -A` — the incantation every task in
-# this plan uses — cannot commit an upload key to a public repository.
+# this plan uses — cannot commit an upload key to a public repository. The
+# base64 forms are separate patterns, not covered by the ones above: a
+# `.jks.base64` file has no `.jks` suffix.
 *.jks
+*.jks.base64
 *.keystore
+*.keystore.base64
+*.p12
 keystore.properties
 google-services.json
 
