@@ -110,8 +110,11 @@ class CiWorkflowTest {
      * the Kotlin plugin only warns. So until this step existed, every assertion
      * in `commonTest` — the address parser, the SSE framing, the conversation
      * merge, the view models' coroutine behaviour, the token-hygiene rules —
-     * held for the JVM alone, while the platform with the other string, regex,
-     * coroutine and memory implementations was merely compiled. It is also the
+     * were asserted on a JVM alone — twice over, in fact, since the emulator
+     * job's source-set tree runs `commonTest` as well, but an emulator is
+     * still a JVM — while the toolchain iOS actually ships, with its other
+     * string, regex, coroutine and memory implementations, was only ever
+     * compiled for. It is also the
      * only thing that ever executes `KeychainSecrets` — its refusal path, which
      * is all a `simctl spawn`-ed binary can reach; `KeychainSecretsTest` says
      * why at length. It is the counterpart of the emulator job that exists to

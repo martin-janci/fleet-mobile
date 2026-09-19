@@ -19,6 +19,7 @@ import io.ktor.http.contentType
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -248,7 +249,7 @@ class HubClient(
      * instead, which arrives as a JSON string.
      */
     private fun payloadOf(result: JsonObject): JsonElement {
-        val text = (result["content"] as? kotlinx.serialization.json.JsonArray)
+        val text = (result["content"] as? JsonArray)
             ?.asSequence()
             ?.mapNotNull { it as? JsonObject }
             ?.firstOrNull { (it["type"] as? JsonPrimitive)?.content == "text" }
@@ -275,7 +276,7 @@ class HubClient(
         val structured = result["structuredContent"] as? JsonObject
         val code = (structured?.get("code") as? JsonPrimitive)?.content
         val message = (structured?.get("message") as? JsonPrimitive)?.content
-            ?: (result["content"] as? kotlinx.serialization.json.JsonArray)
+            ?: (result["content"] as? JsonArray)
                 ?.asSequence()
                 ?.mapNotNull { it as? JsonObject }
                 ?.firstNotNullOfOrNull { (it["text"] as? JsonPrimitive)?.content }

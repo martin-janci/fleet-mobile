@@ -296,12 +296,16 @@ app bundle does, and no Compose has ever been rendered on any platform.**
 
 What changed: the `macos` job runs `:shared:iosSimulatorArm64Test` on a booted
 simulator, so the whole shared suite — **313 tests** — executes on
-Kotlin/Native on every push rather than only on the JVM. That is the app's
+Kotlin/Native on every push. That is the app's
 entire logic layer: the address and transport rules, the SSE framing, the
-conversation merge, every view model, and the token-hygiene rules. All 313 pass
-on Kotlin/Native exactly as they do on the JVM, which is the first evidence
-that the two platforms agree about any of it. Before this they were only ever
-*compiled* for iOS.
+conversation merge, every view model, and the token-hygiene rules.
+
+Those tests already ran twice — under `jvmTest`, and again on the emulator,
+because the device-test source-set tree pulls `commonTest` into the Android run
+— but both of those are a JVM. Kotlin/Native has its own string, regex,
+coroutine and memory implementations, and the shared code had only ever been
+*compiled* for it. All 313 pass there exactly as they do on the JVM, which is
+the first evidence that the two platforms agree about any of it.
 
 One gap is worth naming precisely, because it looks like it should have closed
 with the rest:
@@ -357,7 +361,30 @@ not polish: get either wrong and the app does not work at all.
    never run, and there is no camera on the machine it was written on. Check
    that it decodes a real `fleet-hub pair` QR, that denying the permission
    leaves the manual field usable, and that the preview layer is oriented and
-   sized correctly.
+   sized correctly. Three specific things to watch for, found by reading and
+   deliberately **not** changed, because unrun camera code is the worst thing
+   to edit on faith:
+
+   - **`startRunning()` is called on the main thread.** The whole capture graph
+     is built and started inside `UIKitView`'s `factory`, which Compose runs on
+     the main queue, and Apple documents `startRunning()` as a blocking call
+     that should be made on a serial queue "so that the main queue isn't
+     blocked". Expect the UI to freeze for as long as the camera takes to come
+     up after tapping Scan — a fraction of a second to well over one. The same
+     goes for `stopRunning()` in `onDispose` and `onRelease`, on the way out.
+     The fix is the standard one — a dedicated serial `dispatch_queue` for the
+     session — but it wants a device to confirm the preview still attaches.
+   - **`unavailable(...)` is called from inside `factory`**, i.e. synchronously
+     during composition, when the capture graph refuses to start. It writes a
+     `StateFlow` that this composition reads. It converges — the Pair screen
+     simply stops composing the scanner — so this is a smell rather than a
+     loop, but it is the shape `App.kt` avoids on purpose one file over, and a
+     device is the only thing that can say whether the frame it produces is
+     clean. The Android actual does not have this: its equivalent arrives on a
+     later main-loop turn through a CameraX listener.
+   - **The session is stopped twice**, by `DisposableEffect(session)` and again
+     by `UIKitView(onRelease = …)`. Harmless as written — both are guarded by
+     `isRunning()` — and worth collapsing to one once someone can watch it.
 6. **Layout.** `ContentView` passes `.ignoresSafeArea(.all)` so the Compose view
    owns the window and insets itself, matching `enableEdgeToEdge()` on Android.
    Check the notch, the home indicator, and that the prompt box rises with the

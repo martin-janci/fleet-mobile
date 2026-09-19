@@ -172,16 +172,20 @@ jobs:
     #
     # 2. `iosSimulatorArm64Test` RUNS the shared test suite on Kotlin/Native,
     #    on a booted simulator. Until it was added, every one of those tests
-    #    had only ever executed on the JVM — so the app's whole logic layer
-    #    was asserted against the JVM's Kotlin stdlib, its coroutines and its
-    #    serialization, and merely *compiled* for the platform half the users
-    #    are on. It is also the only thing that has ever executed
-    #    `KeychainSecrets`, though only its refusal path: the Kotlin plugin
-    #    launches the test binary with `simctl spawn`, so it is not an
-    #    installed app, holds no keychain entitlement, and securityd answers
-    #    `errSecNotAvailable` to everything. `KeychainSecretsTest` says so in
-    #    full; the happy-path round trip needs an XCTest target hosted by
-    #    `iosApp` and is the one piece of iOS coverage still missing.
+    #    had only ever executed on a JVM: `jvmTest`, and again on the
+    #    emulator, because `withDeviceTestBuilder`'s `test` source-set tree
+    #    pulls `commonTest` into the Android device run too. Both of those are
+    #    a JVM. The one toolchain the shared code had never RUN on was the one
+    #    iOS actually ships — different string, regex, coroutine and memory
+    #    implementations — which was only ever compiled for.
+    #
+    #    It is also the only thing that has ever executed `KeychainSecrets`,
+    #    and only its refusal path: the Kotlin plugin launches the test binary
+    #    with `simctl spawn`, so it is not an installed app, holds no
+    #    keychain-access-group entitlement, and securityd answers
+    #    `errSecNotAvailable` to everything. `KeychainSecretsTest` says so at
+    #    length. The round trip needs an XCTest target hosted by `iosApp` and
+    #    is the one piece of iOS coverage still missing.
     #
     # Neither one runs the app's UI. See README.md → "What a Mac still has to
     # check" for what still needs a human and a real device.
@@ -234,9 +238,9 @@ jobs:
       # off macOS, and Gradle says so in a warning that is easy to read as
       # routine. So every assertion about the address parser, the SSE framing,
       # the conversation merge, the view models' coroutine behaviour and the
-      # token-hygiene rules held for the JVM only, and the platform with the
-      # different string, regex, coroutine and memory implementations was the
-      # one nothing checked.
+      # token-hygiene rules were asserted on a JVM only — twice over, since
+      # the emulator job runs `commonTest` too, but both are a JVM — and the
+      # toolchain iOS actually ships was the one nothing ever ran.
       #
       # `:shared:iosSimulatorArm64Test` is listed by name rather than reached
       # through `check`: the Xcode build above is this job's other half and
