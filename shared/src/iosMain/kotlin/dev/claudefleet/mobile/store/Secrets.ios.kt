@@ -62,9 +62,10 @@ import platform.Security.kSecValueData
  * Nothing here logs, and [KeychainFailure] carries an `OSStatus` — never the
  * value it failed to store.
  *
- * **Unverified.** This file compiles for `iosArm64` and `iosSimulatorArm64`, but
- * nothing here has been linked into a framework or run: that needs a Mac. See
- * the task report for exactly what a Mac should check.
+ * **Linked, never run.** This file compiles for `iosArm64` and
+ * `iosSimulatorArm64` and is linked into `iosApp` by both a local `xcodebuild`
+ * and the `macos` CI job — the Keychain calls themselves have never executed.
+ * See `README.md` → *What a Mac still has to check*.
  */
 @OptIn(ExperimentalForeignApi::class)
 class KeychainSecrets(

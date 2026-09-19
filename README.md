@@ -226,6 +226,13 @@ Multiplatform stopped publishing that variant after 1.10.3, and declaring it
 breaks the *common* metadata compile for every platform. The cost is that an
 Intel Mac cannot run the simulator locally.
 
+CI now builds this too, on a macOS runner (`.github/workflows/ci.yml` →
+`macos`): the same unsigned `xcodebuild … build` against the Simulator SDK,
+`ARCHS=arm64` for the same reason there is no `iosX64` target, no
+`DEVELOPMENT_TEAM`, no device destination, and no simulator runtime installed
+on the runner. It proves the link and nothing more — see *What a Mac still
+has to check* for everything it does not prove.
+
 ---
 
 ## Releasing
@@ -304,8 +311,9 @@ work at all.
    hand on every `Create`d object and on the `+1` reference `kSecReturnData`
    hands back. The compiler checks none of it. Run it under Instruments'
    Leaks and Zombies templates.
-5. **The camera.** `QrScanner.ios.kt` is `AVCaptureMetadataOutput`. Never run,
-   never linked, and there is no camera on the machine it was written on. Check
+5. **The camera.** `QrScanner.ios.kt` is `AVCaptureMetadataOutput`. It links now
+   — confirmed by both a local `xcodebuild` and the `macos` CI job — but has
+   never run, and there is no camera on the machine it was written on. Check
    that it decodes a real `fleet-hub pair` QR, that denying the permission
    leaves the manual field usable, and that the preview layer is oriented and
    sized correctly.
