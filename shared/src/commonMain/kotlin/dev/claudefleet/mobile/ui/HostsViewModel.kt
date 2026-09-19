@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** One machine, as the Hosts screen draws it. */
@@ -70,30 +71,29 @@ class HostsViewModel(
         )
 
 
-    /**
-     * Clear the banner (review N-B1).
-     *
-     * Two of five screens had one and three did not, and the three without are
-     * where an error can sit longest: a refresh that failed leaves its sentence
-     * on screen until the *next* refresh succeeds, and on a hub that is down
-     * that is never. The banner is not dangerous — the rows behind it are still
-     * the last good picture — but an error a person has read and cannot put away
-     * teaches them to stop reading the banner, which is the one thing it must
-     * not do.
-     */
+    /** Clear the banner. See [SessionsViewModel.dismissError]. */
     fun dismissError() {
-        local.value = local.value.copy(error = null)
+        local.update { it.copy(error = null) }
     }
-    /** Re-list. The rows stay put if it fails; the last picture is still the best one. */
+    /**
+     * Re-list. The rows stay put if it fails; the last picture is still the best one.
+     *
+     * Its three `update {}` calls each construct a fresh `Local(...)` rather
+     * than `it.copy(...)`: `refresh()` is the only writer for the whole span
+     * between its first update and its last, so there is nothing in `it` worth
+     * preserving. [dismissError] is the one read-modify-write in this class,
+     * because it can land in the middle of that span and must not clobber
+     * whichever of these three just ran.
+     */
     fun refresh(): Job = scope.launch {
-        local.value = Local(refreshing = true)
+        local.update { Local(refreshing = true) }
         try {
             fleet.refresh()
-            local.value = Local()
+            local.update { Local() }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.value = Local(error = explain(t))
+            local.update { Local(error = explain(t)) }
         }
     }
 

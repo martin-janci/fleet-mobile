@@ -79,55 +79,54 @@ class CiWorkflowTest {
     }
 
     /**
-     * There is no macOS runner here and there must not be a step that pretends.
+     * The `macos` job builds `iosApp` for real now that it links, and pins the
+     * three things that would otherwise let it drift into claiming more than a
+     * build: no signing identity, no team, no device.
      *
-     * A workflow running `xcodebuild` on Linux fails for a reason that has
-     * nothing to do with the code, and a step that fails for a reason nobody can
-     * fix is a step someone eventually deletes — taking whatever it also
-     * guarded with it.
+     * A `DEVELOPMENT_TEAM` or an `iphoneos` SDK would imply a signed,
+     * device-capable build that does not exist on this runner — nobody has a
+     * signing identity here, and there is deliberately no simulator runtime
+     * either, only the SDK.
      */
     @Test
-    fun ci_does_not_claim_to_build_ios() {
-        assertTrue("xcodebuild" !in ci, "CI runs on Linux and cannot build iOS")
+    fun ci_builds_ios_for_the_simulator_only_and_unsigned() {
+        assertTrue("xcodebuild" in ci, "the macos job must actually build iosApp now that it links")
+        assertTrue(
+            "generic/platform=iOS Simulator" in ci,
+            "the generic Simulator destination is the one that needs no simulator runtime installed",
+        )
+        assertTrue("CODE_SIGNING_ALLOWED=NO" in ci, "nobody has a signing identity on the runner")
+        assertTrue("DEVELOPMENT_TEAM" !in ci, "a team id would imply a signed, device-capable build")
+        assertTrue("-sdk iphoneos" !in ci, "this job builds for the Simulator, never a device SDK")
+    }
+
+    /**
+     * `macos` is the last job in the file, so everything from its own `macos:`
+     * key to the end of the file is this job's block and nothing else's.
+     * `continue-on-error` would let a broken iOS link go green on every PR.
+     */
+    @Test
+    fun the_macos_job_never_continues_on_error() {
+        val macosJob = ci.substringAfter("\n  macos:")
+        assertTrue(macosJob.isNotBlank(), "expected to find the macos: job block")
+        assertTrue(
+            "continue-on-error" !in macosJob,
+            "the macos job must not be allowed to fail silently",
+        )
     }
 
     /**
      * The instrumentation job stays in the workflow.
      *
      * `AndroidSecrets` is the only thing the app persists and the only class
-     * here that cannot be tested without hardware. The job is
-     * `continue-on-error` until someone has watched it pass once — but
-     * `continue-on-error` and *deleted* are different things, and the second is
-     * the easy mistake when a job is red.
+     * here that cannot be tested without hardware, so this job is the only
+     * thing that ever executes it — deleting it would leave that code untested.
      */
     @Test
     fun ci_still_tries_to_run_the_secure_store_test() {
         assertTrue(
             "connectedAndroidDeviceTest" in ci,
             "the emulator job is the only thing that ever executes AndroidSecrets",
-        )
-    }
-
-    /**
-     * If the secure-store job cannot fail the build, the README says so.
-     *
-     * `continue-on-error` is the right call for a job nobody has watched pass —
-     * but it makes the only test that ever executes `AndroidSecrets`
-     * structurally incapable of turning CI red, and a comment in a workflow file
-     * saying "delete this line one day" is not a thing anyone reads. Either the
-     * flag goes, or the README admits the green tick means nothing. This test
-     * fails if someone silently keeps the first without the second.
-     */
-    @Test
-    fun a_secure_store_job_that_cannot_fail_is_admitted_in_the_readme() {
-        if ("continue-on-error: true" !in ci) return
-
-        // The admission, not the word: "delete the `continue-on-error` line one
-        // day" names the flag without telling anyone what it costs today.
-        val readme = Repo.file("README.md").readText()
-        assertTrue(
-            Regex("""`continue-on-error`[^.]*\bcannot\s+fail\b""").containsMatchIn(readme),
-            "the emulator job cannot fail CI and the README does not say so",
         )
     }
 }

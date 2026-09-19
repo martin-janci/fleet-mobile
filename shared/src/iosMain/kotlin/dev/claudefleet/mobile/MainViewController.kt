@@ -25,11 +25,12 @@ import platform.UIKit.UIViewController
  * exactly as `MainActivity` does on Android: the secure store (the Keychain, no
  * context needed) and the Ktor engine (Darwin).
  *
- * **Unbuilt.** Nothing in this file has been compiled into a framework or run.
- * Kotlin/Native cross-compiles `iosMain` to a klib on Linux, so the code is
- * type-checked against the real UIKit and Foundation headers, but linking the
- * framework and running it need a Mac. See `README.md` → *What a Mac still has
- * to check*.
+ * **Linked, never run.** This file is compiled into `Shared.framework` and
+ * linked into `iosApp` by both a local `xcodebuild … build` and the `macos`
+ * job in `.github/workflows/ci.yml` — neither one launches the result, and
+ * there is deliberately no simulator runtime in CI, only the SDK. See
+ * `README.md` → *What a Mac still has to check* for everything that still
+ * needs a real run.
  */
 fun MainViewController(): UIViewController = ComposeUIViewController {
     App(iosContainer)

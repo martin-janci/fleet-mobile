@@ -3,6 +3,8 @@ package dev.claudefleet.mobile.net
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.plugins.HttpTimeoutCapability
+import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -183,5 +185,52 @@ class EventStreamTest {
 
         assertEquals(1, events.size)
         assertEquals("session:killed", (events[0] as HubEvent.Row).name)
+    }
+
+    /**
+     * `/events` has no request deadline — a live stream has no natural end —
+     * but it does have a bounded idle-socket timeout: nothing else notices a
+     * half-open TCP connection (no OkHttp `pingInterval`, the hub's 15 s
+     * keep-alive comment is consumed and discarded by [SseFrameReader]), so
+     * without one, a dead stream would report [ConnectionStatus.Connected]
+     * forever. Asserting on the resolved [HttpTimeoutConfig] proves both
+     * halves deterministically and instantly, with no real-time wait needed to
+     * prove either bound applies. `an_ordinary_call_keeps_a_finite_deadline_above_the_keep_alive_interval`
+     * in `HubClientTest` covers the other half: this override does not leak
+     * into calls that should still time out.
+     *
+     * `withHubTimeouts()` is applied first, exactly as `AppContainer` applies
+     * it before handing the client to [HubEventStream] — so this proves the
+     * per-request override on `/events` wins over the client-wide default,
+     * not merely that an unconfigured client has no timeout to begin with.
+     *
+     * `connectTimeoutMillis` is asserted too, on purpose: `/events`' own
+     * `timeout {}` block only touches `requestTimeoutMillis` and
+     * `socketTimeoutMillis`, leaving `connectTimeoutMillis` unset so it falls
+     * through to `withHubTimeouts()`'s client-wide 15 s default — an unbounded
+     * *connect* would leave a phone hung dialing a hub that never answers at
+     * all, which is a different failure from the one this fix targets. That
+     * fallthrough is `HttpTimeout`'s own merge behaviour (`on(Send)` fills
+     * only the capability's `null` fields from the plugin's installed
+     * defaults, mutating the same `HttpTimeoutConfig` the request carries),
+     * not something this file implements — asserting it here is what would
+     * catch a later refactor silently breaking that merge.
+     */
+    @Test
+    fun the_events_request_has_no_deadline_but_a_bounded_idle_socket_timeout() = runTest {
+        val recorder = Recorder()
+        val engine = MockEngine { request ->
+            recorder.requests.add(request)
+            respond("", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
+        }
+        val http = HttpClient(engine).withHubTimeouts()
+
+        HubEventStream(http, HUB, TOKEN).connect().toList()
+
+        val timeout = recorder.requests.single().getCapabilityOrNull(HttpTimeoutCapability)
+        assertEquals(HttpTimeoutConfig.INFINITE_TIMEOUT_MS, timeout?.requestTimeoutMillis)
+        assertEquals(EVENTS_IDLE_TIMEOUT_MS, timeout?.socketTimeoutMillis)
+        assertEquals(HUB_CONNECT_TIMEOUT_MS, timeout?.connectTimeoutMillis)
+        assertTrue(EVENTS_IDLE_TIMEOUT_MS > 15_000L, "shorter than the hub's own keep-alive would flap a healthy stream")
     }
 }

@@ -226,7 +226,68 @@ Multiplatform stopped publishing that variant after 1.10.3, and declaring it
 breaks the *common* metadata compile for every platform. The cost is that an
 Intel Mac cannot run the simulator locally.
 
+CI now builds this too, on a macOS runner (`.github/workflows/ci.yml` →
+`macos`): the same unsigned `xcodebuild … build` against the Simulator SDK,
+`ARCHS=arm64` for the same reason there is no `iosX64` target, no
+`DEVELOPMENT_TEAM`, no device destination, and no simulator runtime installed
+on the runner. It proves the link and nothing more — see *What a Mac still
+has to check* for everything it does not prove.
+
 ---
+
+## Releasing
+
+A signed release build needs four repository secrets (Settings → Secrets and
+variables → Actions):
+
+- `ANDROID_KEYSTORE_BASE64` — the upload keystore, base64-encoded
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+Create a keystore, if there isn't one yet, with the JDK's own `keytool` —
+outside the working tree, so there is nothing here for a `.gitignore` pattern
+to have to catch:
+
+```bash
+keytool -genkeypair -v -keystore "${TMPDIR:-/tmp}/release.jks" -alias <your-alias> \
+  -keyalg RSA -keysize 2048 -validity 10000
+base64 -i "${TMPDIR:-/tmp}/release.jks" | tr -d '\n' > "${TMPDIR:-/tmp}/release.jks.base64"
+```
+
+`TMPDIR` is commonly unset on Linux (it is a macOS default); a bare `$TMPDIR`
+would then expand to nothing and leave these commands writing to `/release.jks`.
+`${TMPDIR:-/tmp}` falls back to `/tmp` instead, so the files still land
+outside the working tree rather than at the filesystem root.
+
+Put `${TMPDIR:-/tmp}/release.jks.base64`'s contents in the
+`ANDROID_KEYSTORE_BASE64` secret and the three passwords/alias you chose in
+the other three, then delete both files. **Never commit a keystore or its base64
+form** — `.gitignore` excludes `*.jks`, `*.jks.base64`, `*.keystore`,
+`*.keystore.base64` and `*.p12`, but that is a second line of defense, not a
+reason to create the file inside the repo in the first place.
+
+Cut a release by pushing a tag:
+
+```bash
+git tag vX.Y.Z && git push origin vX.Y.Z
+```
+
+`.github/workflows/release.yml` then builds `:androidApp:assembleRelease`
+with the tag (minus its leading `v`) as `versionName` and the workflow run
+number as `versionCode`, verifies the resulting APK is actually signed, and
+attaches it to a GitHub release for that tag. `versionCode` must only ever
+increase for a given signing key — the Play Store and most installers refuse
+an update with a `versionCode` that has gone backwards.
+
+The workflow refuses to run rather than publish something it shouldn't:
+- Any of the four secrets missing → it fails before building. There is no
+  fallback to a debug key and no unsigned release is ever published.
+- A tag that isn't `vX.Y.Z` (with an optional `-suffix`) → rejected before the
+  tag is used for anything.
+- The decoded keystore lives only under the runner's temp directory, never in
+  the checked-out workspace, and is deleted at the end of the job regardless
+  of whether it succeeded.
 
 ## What a Mac still has to check
 
@@ -260,8 +321,9 @@ work at all.
    hand on every `Create`d object and on the `+1` reference `kSecReturnData`
    hands back. The compiler checks none of it. Run it under Instruments'
    Leaks and Zombies templates.
-5. **The camera.** `QrScanner.ios.kt` is `AVCaptureMetadataOutput`. Never run,
-   never linked, and there is no camera on the machine it was written on. Check
+5. **The camera.** `QrScanner.ios.kt` is `AVCaptureMetadataOutput`. It links now
+   — confirmed by both a local `xcodebuild` and the `macos` CI job — but has
+   never run, and there is no camera on the machine it was written on. Check
    that it decodes a real `fleet-hub pair` QR, that denying the permission
    leaves the manual field usable, and that the preview layer is oriented and
    sized correctly.
@@ -294,10 +356,10 @@ And the parts that need a **device or emulator on either platform**, or a
   a first red would not be mistaken for a code fault; that allowance has been
   removed now it has been seen to pass. A red there now means the secure store
   broke.
-- **The Android camera path.** Two mutations in `task-7-mutations.py` survive on
-  purpose — deleting the permission request, and wiring the Scan button to
+- **The Android camera path.** Two mutations survive an ad-hoc mutation sweep
+  on purpose — deleting the permission request, and wiring the Scan button to
   nothing — because no headless JVM test can render a composable or grant a
-  permission.
+  permission. The sweep's own script was never checked in.
 - **No live hub has ever been contacted, by anyone, at any point.** Every wire
   format in this app was read out of the `claude-fleet` Rust source and pinned
   with a `MockEngine`. "Matches the source" is not "matches the server".

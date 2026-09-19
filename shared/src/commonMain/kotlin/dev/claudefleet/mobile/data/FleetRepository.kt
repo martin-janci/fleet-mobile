@@ -11,9 +11,13 @@ import dev.claudefleet.mobile.net.HubEvent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlin.time.Duration
@@ -29,11 +33,11 @@ sealed interface ConnectionStatus {
      * screen that says "reconnecting" should read the attempt, not the name.
      * [reason] is why the last one ended, and is null before the first.
      *
-     * [reason] is drawn by `ConnectionBanner`. It was not, for three tasks: the
-     * field was computed on every failure and read by nothing, so a person
-     * watching the app retry saw a rising counter and never what it was
-     * retrying from. It is a sentence from `explain`, not a raw throwable
-     * message, for the same reason every other string that reaches a screen is.
+     * [reason] is drawn by `ConnectionBanner` — if it were computed but never
+     * read, a person watching the app retry would see a rising counter and
+     * never what it was retrying from. It is a sentence from `explain`, not a
+     * raw throwable message, for the same reason every other string that
+     * reaches a screen is.
      */
     data class Reconnecting(val attempt: Int, val reason: String?) : ConnectionStatus
 
@@ -68,7 +72,7 @@ class FleetRepository(
     private val backoff: (Int) -> Duration = ::reconnectDelay,
     /**
      * What to do when the hub answers 401 — drop the credential and return to
-     * Pair (review N4).
+     * Pair.
      *
      * This repository is the one caller that holds a raw [HubClient] rather than
      * going through `AppSession.withClient`, which is where "a 401 drops the
@@ -83,6 +87,9 @@ class FleetRepository(
      */
     private val onRevoked: suspend () -> Unit = {},
 ) : FleetState {
+    // Starts empty rather than from a cache: see the "no cold-start cache"
+    // deviation in the design appendix — the app's one persistence seam is
+    // sized for a credential, not fleet data.
     private val _sessions = MutableStateFlow<List<SessionRow>>(emptyList())
     override val sessions: StateFlow<List<SessionRow>> = _sessions.asStateFlow()
 
@@ -94,6 +101,14 @@ class FleetRepository(
 
     private val _status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Offline(NOT_STARTED))
     override val status: StateFlow<ConnectionStatus> = _status.asStateFlow()
+
+    // Buffered rather than rendezvous: emitting must never suspend `follow()`
+    // waiting on a session screen that may not be open at all. `DROP_OLDEST`
+    // is fine because this is a hint to refetch, not the fact itself — a
+    // dropped id just means the next one (or the caller's own `ready`/`lagged`
+    // resync) carries the same signal.
+    private val _sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val sessionChanges: Flow<Long> = _sessionChanges.asSharedFlow()
 
     private var job: Job? = null
 
@@ -145,16 +160,23 @@ class FleetRepository(
                             refresh()
                             failures = 0
                             _status.value = ConnectionStatus.Connected(event.version)
+                            _sessionChanges.tryEmit(ALL_SESSIONS_CHANGED)
                         }
-                        is HubEvent.Lagged -> refresh()
-                        is HubEvent.Row -> publish(snapshot().applying(event))
+                        is HubEvent.Lagged -> {
+                            refresh()
+                            _sessionChanges.tryEmit(ALL_SESSIONS_CHANGED)
+                        }
+                        is HubEvent.Row -> {
+                            publish(snapshot().applying(event))
+                            event.sessionId()?.let { _sessionChanges.tryEmit(it) }
+                        }
                     }
                 }
                 reason = STREAM_CLOSED
             } catch (e: CancellationException) {
                 throw e
             } catch (e: HubError.Unauthorized) {
-                _status.value = ConnectionStatus.Offline(REVOKED)
+                _status.value = ConnectionStatus.Offline(REVOKED_CREDENTIAL_REASON)
                 try {
                     onRevoked()
                 } catch (_: Exception) {
@@ -189,10 +211,23 @@ class FleetRepository(
         const val NOT_STARTED = "not connected yet"
         const val STOPPED = "not connected"
         const val STREAM_CLOSED = "the hub closed the stream"
-        const val REVOKED =
-            "the hub no longer accepts this device's credential. Pair again to carry on."
     }
 }
+
+/**
+ * Not a real session id: the signal a `ready` or `lagged` resync emits on
+ * [FleetRepository.sessionChanges] once its `refresh()` has landed, since a
+ * full snapshot has no per-row events of its own for a screen to key on.
+ *
+ * A resync can touch far more rows than `sessionChanges`'s 16-slot buffer
+ * holds, so `tryEmit`-ing every id in the fresh snapshot could have that
+ * buffer's own `DROP_OLDEST` silently drop the one id an open session screen
+ * is actually filtering for. One sentinel per resync avoids that: it never
+ * scales with the snapshot's size, and dropping an *older*, undelivered copy
+ * of it changes nothing, since a newer one carries the identical instruction.
+ * `SessionViewModel` treats it as "refetch me too," alongside its own id.
+ */
+internal const val ALL_SESSIONS_CHANGED: Long = Long.MIN_VALUE
 
 /** The first wait, after one failure. */
 internal val BASE_RECONNECT_DELAY = 1.seconds

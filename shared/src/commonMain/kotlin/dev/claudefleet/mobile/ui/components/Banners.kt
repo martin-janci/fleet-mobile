@@ -64,8 +64,8 @@ fun ErrorBanner(message: String?, onDismiss: (() -> Unit)? = null, modifier: Mod
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            // Review S4. `explain(HubError.Http)` is "the hub answered HTTP
-            // $status: $body" with the body capped at 1 000 characters plus an
+            // `explain(HubError.Http)` is "the hub answered HTTP $status:
+            // $body" with the body capped at 1 000 characters plus an
             // ellipsis — 1 040 measured — and a reverse proxy's error page is
             // exactly that shape. Unbounded, it pushed Dismiss off the row and
             // swallowed the list behind it. Three lines is enough to read what

@@ -7,6 +7,7 @@ import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -311,6 +312,36 @@ internal val json = Json {
     explicitNulls = false
     encodeDefaults = true
 }
+
+/**
+ * The one place a platform's bare engine (`HttpClient(OkHttp)`, `HttpClient(Darwin)`)
+ * gets the app's timeout policy, so both pick it up the same way.
+ *
+ * Ktor's `HttpTimeout` plugin has to be installed explicitly — without it, an
+ * engine's own defaults apply, and OkHttp's default read timeout (10 s) is
+ * shorter than the hub's 15 s `/events` keep-alive comment. [HubClient.call]
+ * is exposed to the same clock: its `/mcp` replies keep the identical SSE
+ * framing so a keep-alive flows during a long poll, so a plain per-engine
+ * tweak would leave tool calls exposed even after fixing the stream.
+ *
+ * [HUB_CALL_TIMEOUT_MS] is generous-but-finite — comfortably above the
+ * keep-alive interval, so one missed heartbeat does not fail a call, but a
+ * hub that has actually gone away still surfaces as an error rather than
+ * hanging forever. `/events` itself has no natural end and overrides the
+ * request deadline to infinite per request, while keeping its own bounded
+ * idle-socket timeout — see [HubEventStream.connect] and
+ * `EVENTS_IDLE_TIMEOUT_MS`.
+ */
+internal fun HttpClient.withHubTimeouts(): HttpClient = config {
+    install(HttpTimeout) {
+        requestTimeoutMillis = HUB_CALL_TIMEOUT_MS
+        connectTimeoutMillis = HUB_CONNECT_TIMEOUT_MS
+        socketTimeoutMillis = HUB_CALL_TIMEOUT_MS
+    }
+}
+
+internal const val HUB_CALL_TIMEOUT_MS = 45_000L
+internal const val HUB_CONNECT_TIMEOUT_MS = 15_000L
 
 private fun JsonElement.asBooleanOrNull(): Boolean? =
     (this as? JsonPrimitive)?.content?.toBooleanStrictOrNull()

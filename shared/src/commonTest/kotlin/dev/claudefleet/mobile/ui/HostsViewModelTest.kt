@@ -10,6 +10,7 @@ import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -27,6 +28,7 @@ private class FakeFleetForHosts(
     override val hosts = MutableStateFlow(hostRows)
     override val projects = MutableStateFlow<List<ProjectRow>>(emptyList())
     override val status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Connected("0.9.3"))
+    override val sessionChanges = emptyFlow<Long>()
 
     var refreshes = 0
         private set

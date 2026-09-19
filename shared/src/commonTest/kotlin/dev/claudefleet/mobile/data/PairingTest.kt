@@ -18,6 +18,7 @@ import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -500,6 +501,90 @@ class AppSessionTest {
         assertFailsWith<HubError.Unauthorized> { app.withClient { it.listSessions() } }
 
         assertTrue(calls.requests.isEmpty())
+    }
+
+    // ---- a 401 explains itself on the way back to Pair ----
+
+    /**
+     * The `REVOKED` sentence used to live only on `FleetRepository`, which is
+     * discarded the moment auth flips to `Unpaired` — so by the time the Pair
+     * screen could ask why, nothing remembered. [AppSession] is the one place
+     * both routes back to `Unpaired` (`withClient`'s own 401, and
+     * `FleetRepository`'s `onRevoked`) go through, so it is the one place that
+     * can carry the reason forward.
+     */
+    @Test
+    fun a_401_leaves_an_explanation_behind() = runTest {
+        val secrets = FakeSecrets(Credentials(BASE, "tok-secret-value", "phone", "full"))
+        val (app, _, _) = session(secrets) { "" to HttpStatusCode.Unauthorized }
+        app.restore()
+        assertNull(app.unpairReason.value, "nothing to explain yet")
+
+        assertFailsWith<HubError.Unauthorized> { app.withClient { it.listSessions() } }
+
+        assertEquals(REVOKED_CREDENTIAL_REASON, app.unpairReason.value)
+    }
+
+    /** A first launch with nothing stored has no story to tell. */
+    @Test
+    fun a_fresh_install_carries_no_reason() = runTest {
+        val (app, _, _) = session(FakeSecrets()) { "" to HttpStatusCode.OK }
+
+        app.restore()
+
+        assertNull(app.unpairReason.value)
+    }
+
+    /** Forgetting on purpose, from Settings, is not the hub's doing and must say nothing. */
+    @Test
+    fun a_user_initiated_forget_carries_no_reason() = runTest {
+        val secrets = FakeSecrets(Credentials(BASE, "tok-secret-value", "phone", "full"))
+        val (app, _, _) = session(secrets) { pairOk() to HttpStatusCode.OK }
+        app.restore()
+
+        app.forget()
+
+        assertNull(app.unpairReason.value)
+    }
+
+    /** A leftover reason from an earlier revoke must not survive a deliberate forget. */
+    @Test
+    fun forget_clears_a_reason_a_401_had_left_behind() = runTest {
+        val secrets = FakeSecrets(Credentials(BASE, "tok-secret-value", "phone", "full"))
+        val (app, _, _) = session(secrets) { "" to HttpStatusCode.Unauthorized }
+        app.restore()
+        assertFailsWith<HubError.Unauthorized> { app.withClient { it.listSessions() } }
+        assertNotNull(app.unpairReason.value)
+
+        app.forget()
+
+        assertNull(app.unpairReason.value)
+    }
+
+    @Test
+    fun clearUnpairReason_can_be_called_directly() = runTest {
+        val secrets = FakeSecrets(Credentials(BASE, "tok-secret-value", "phone", "full"))
+        val (app, _, _) = session(secrets) { "" to HttpStatusCode.Unauthorized }
+        app.restore()
+        assertFailsWith<HubError.Unauthorized> { app.withClient { it.listSessions() } }
+        assertNotNull(app.unpairReason.value)
+
+        app.clearUnpairReason()
+
+        assertNull(app.unpairReason.value)
+    }
+
+    /** A 403 or a flat tyre is not a revocation and must not manufacture a reason. */
+    @Test
+    fun a_non_401_failure_leaves_no_reason_either() = runTest {
+        val stored = Credentials(BASE, "tok-secret-value", "phone", "full")
+        val secrets = FakeSecrets(stored)
+        val (app, _, _) = session(secrets) { """{"error":"bad host"}""" to HttpStatusCode.Forbidden }
+        app.restore()
+
+        assertFailsWith<HubError.Forbidden> { app.withClient { it.listSessions() } }
+
+        assertNull(app.unpairReason.value)
     }
 }
 

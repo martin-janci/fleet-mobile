@@ -59,8 +59,8 @@ fun Conversation.appending(fresh: Conversation): Conversation {
             break
         }
     }
-    // Review N1. With no overlap at all, one of two things happened: the
-    // windows are genuinely disjoint (a long gap between reads), or the identity
+    // With no overlap at all, one of two things happened: the windows are
+    // genuinely disjoint (a long gap between reads), or the identity
     // of some held turn *drifted* and the overlap was missed. The second is not
     // exotic — `at` for a headless turn is its first surviving assistant entry's
     // timestamp, which moves forward as the hub's 1 MB tail slides off it, and
@@ -75,16 +75,16 @@ fun Conversation.appending(fresh: Conversation): Conversation {
     // which turns "the whole window is duplicated" into "one turn is", and
     // leaves a genuinely disjoint older window untouched.
     //
-    // Deliberately *not* the time-boundary test the review suggested (drop held
-    // turns stamped at or after the first arrived turn). A drifted headless turn
-    // is re-stamped to its first surviving entry, which can be **later** than the
+    // Deliberately *not* a time-boundary test (drop held turns stamped at or
+    // after the first arrived turn). A drifted headless turn is re-stamped
+    // to its first surviving entry, which can be **later** than the
     // prompts that follow it in the same window, so the boundary lands in the
     // wrong place and the turns after it are kept and duplicated anyway. It also
     // dropped a genuine second turn in the same second, which is a case with a
     // test of its own.
     //
-    // Review N-C1, the price of that: with `overlap == 0` this drops ANY held
-    // turn whose identity appears in `fresh`, including one in the middle of
+    // The price of that: with `overlap == 0` this drops ANY held turn whose
+    // identity appears in `fresh`, including one in the middle of
     // the held list, so held [A, B, C] against a genuinely disjoint fresh
     // [B', D] where B' has B's identity yields [A, C, B, D] — C now precedes B.
     // It takes two turns sharing an `(at, prompt)` across non-overlapping

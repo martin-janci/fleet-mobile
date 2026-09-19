@@ -4,6 +4,7 @@ import dev.claudefleet.mobile.model.ConvItem
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.plugins.HttpTimeoutCapability
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -427,5 +428,32 @@ class HubClientTest {
         val e = assertFailsWith<HubError.Http> { hub.pair("ZZZZZZZZ") }
         assertEquals(404, e.status)
         assertTrue(e.body.contains("invalid code"))
+    }
+
+    /**
+     * `HubClient`'s calls are also `/mcp` POSTs the hub keeps warm with the
+     * same SSE keep-alive `sse_keep_alive_comments_between_frames_are_ignored`
+     * above relies on, so they need a deadline comfortably above the hub's
+     * 15 s interval too — but, unlike `/events`, a finite one: nothing here
+     * polls forever, and a hub that has genuinely gone away should surface as
+     * an error rather than hang. `withHubTimeouts()` is the one shared place
+     * both `AppContainer` and this test apply it from.
+     */
+    @Test
+    fun an_ordinary_call_keeps_a_finite_deadline_above_the_keep_alive_interval() = runTest {
+        val calls = Calls()
+        val engine = MockEngine { request ->
+            calls.requests += request
+            respond(sse(okResult("[]")), HttpStatusCode.OK, sseHeaders)
+        }
+        val hub = HubClient(HttpClient(engine).withHubTimeouts(), BASE, "tok-phone")
+
+        hub.listSessions()
+
+        val timeout = calls.requests.single().getCapabilityOrNull(HttpTimeoutCapability)
+        assertEquals(HUB_CALL_TIMEOUT_MS, timeout?.requestTimeoutMillis)
+        assertEquals(HUB_CALL_TIMEOUT_MS, timeout?.socketTimeoutMillis)
+        assertEquals(HUB_CONNECT_TIMEOUT_MS, timeout?.connectTimeoutMillis)
+        assertTrue(HUB_CALL_TIMEOUT_MS > 15_000L, "shorter than the hub's own keep-alive would defeat the point")
     }
 }

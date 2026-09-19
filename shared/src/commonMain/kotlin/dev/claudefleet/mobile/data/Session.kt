@@ -9,6 +9,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/**
+ * What a 401 means, for whoever is showing it: the Pair screen once
+ * [AppSession.revoke] has run, or [FleetRepository]'s own connection banner in
+ * the moment before it does. Defined once, here, since `AppSession` is the
+ * class this file's own KDoc calls "the one place a credential is created or
+ * destroyed."
+ */
+internal const val REVOKED_CREDENTIAL_REASON =
+    "the hub no longer accepts this device's credential. Pair again to carry on."
+
 /** Whether this device holds a credential for a hub. */
 sealed class AuthState {
     /** The store has not been read yet — the state at a cold start. */
@@ -43,6 +53,13 @@ class AppSession(
 ) : AuthActions {
     private val _state = MutableStateFlow<AuthState>(AuthState.Unknown)
     override val state: StateFlow<AuthState> = _state.asStateFlow()
+
+    private val _unpairReason = MutableStateFlow<String?>(null)
+    override val unpairReason: StateFlow<String?> = _unpairReason.asStateFlow()
+
+    override fun clearUnpairReason() {
+        _unpairReason.value = null
+    }
 
     /** The credential in hand, or null. */
     fun credentials(): Credentials? = (_state.value as? AuthState.Paired)?.credentials
@@ -85,9 +102,32 @@ class AppSession(
         return credentials
     }
 
-    /** Drop the credential. Does not cancel it; see the class comment. */
+    /**
+     * Drop the credential. Does not cancel it; see the class comment.
+     *
+     * User-initiated — Settings' *Forget this hub* is the one caller — so any
+     * [unpairReason] a 401 left standing is cleared rather than carried: this
+     * flip was not the hub's doing, and the Pair screen must not explain itself
+     * with the wrong reason.
+     */
     override suspend fun forget() {
         secrets.clear()
+        _unpairReason.value = null
+        _state.value = AuthState.Unpaired
+    }
+
+    /**
+     * Drop the credential because the hub itself refused it, and record why.
+     *
+     * The one difference from [forget]: [unpairReason] is set rather than
+     * cleared, so the Pair screen can say more than "you are signed out."
+     * [withClient]'s own 401 handling and [FleetRepository]'s `onRevoked`
+     * (wired up in `AppContainer`) are the only two 401 paths in the app, and
+     * both go through here rather than through [forget].
+     */
+    suspend fun revoke() {
+        secrets.clear()
+        _unpairReason.value = REVOKED_CREDENTIAL_REASON
         _state.value = AuthState.Unpaired
     }
 
@@ -107,14 +147,16 @@ class AppSession(
         return try {
             block(HubClient(http, credentials.hub, credentials.token))
         } catch (e: HubError.Unauthorized) {
-            // `clear()` now throws rather than failing quietly (review S3), and
-            // that must not swallow the 401: the 401 is what routes the app back
-            // to Pair, and a store that refused to forget is the lesser problem
-            // of the two. The state deliberately stays `Paired` in that case —
-            // publishing `Unpaired` while the token is still on disk is exactly
-            // the lie S3 exists to stop.
+            // `clear()` throws rather than failing quietly, and that must not
+            // swallow the 401: the 401 is what routes the app back to Pair, and
+            // a store that refused to forget is the lesser problem of the two.
+            // The state deliberately stays `Paired` in that case — publishing
+            // `Unpaired` while the token is still on disk is exactly the lie
+            // that would tell. `revoke()` mirrors that: `unpairReason` is set
+            // only after `secrets.clear()` returns, so a store that refuses to
+            // forget leaves neither the state nor the reason behind.
             try {
-                forget()
+                revoke()
             } catch (_: Exception) {
                 // Nothing to add: the caller is about to be told about the 401.
             }
@@ -141,9 +183,9 @@ class AppSession(
          * that demonstrably just worked.
          */
         fun preferredBase(echoed: String, reached: String): String {
-            // Review S3: this was the THIRD door into `Credentials.hub` and the
-            // one the "both now go through one `hubBase`" commit did not touch.
-            // A hub that echoes `https://someone:secret@evil.example.com` had it
+            // This was the THIRD door into `Credentials.hub` and the one the
+            // "both now go through one `hubBase`" commit did not touch. A hub
+            // that echoes `https://someone:secret@evil.example.com` had it
             // stored verbatim and printed unredacted by `Credentials.toString()`,
             // which is the exact failure the userinfo rule exists to prevent —
             // arriving through the entry point nobody checked.
@@ -153,12 +195,12 @@ class AppSession(
             // someone who can rewrite the pair response cannot mint a token
             // anyway. It is defence in depth on a field this app has decided
             // matters, and leaving one of three doors open reads as closed.
-            // THE ORDER OF THESE TWO LINES IS LOAD-BEARING, and the Task 6
-            // review found it undocumented. `hubBase` runs FIRST, and the only
-            // value this function can return other than `reached` is `hubBase`'s
-            // output — never `echoed` itself. That is the whole of what keeps
-            // `https://user:pw@evil.example.com` out of `Credentials.hub`, since
-            // refusing userinfo is `hubBase`'s job and not `isLoopbackUrl`'s.
+            // THE ORDER OF THESE TWO LINES IS LOAD-BEARING. `hubBase` runs
+            // FIRST, and the only value this function can return other than
+            // `reached` is `hubBase`'s output — never `echoed` itself. That is
+            // the whole of what keeps `https://user:pw@evil.example.com` out of
+            // `Credentials.hub`, since refusing userinfo is `hubBase`'s job and
+            // not `isLoopbackUrl`'s.
             //
             // A rewrite that tested `isLoopbackUrl(echoed)` first and returned
             // the raw `echoed` on the other branch would look equivalent, pass a

@@ -226,3 +226,38 @@ implementation held the SSE connection open for as long as the app was
 installed. This is why the iOS host must embed the UI through
 `ComposeUIViewController` — it is the only place Compose Multiplatform provides
 a lifecycle owner on iOS.
+
+**There is no cold-start cache.** The design promises "a small cache of the
+last session list, so a cold start draws something immediately." The app's
+only persistence seam is `Secrets` (`EncryptedSharedPreferences` on Android,
+the Keychain on iOS), sized and hardened for exactly one thing — a bearer
+credential — with `allowBackup` disabled, the API 31+ data-extraction rules
+excluding it from every backup and transfer path, and
+`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` on iOS. A session row
+carries a project path and a host alias, so writing it through that credential
+store, or beside it in a second, unencrypted seam, changes what that hardened
+boundary protects. `FleetRepository` starts from `emptyList()`; the fleet list
+is blank until the first `refresh()`/`ready` resync lands, same as any other
+cold start once the event stream connects.
+
+**Send is gated on the `/events` stream, not a live probe of `/mcp`.**
+`ConnectionStatus.Connected` — the one state `SessionViewModel.canSend`
+requires — comes entirely from the SSE follower in `FleetRepository`, so if
+`/events` is unavailable while `/mcp` still answers, Send stays disabled until
+the stream reconnects.
+
+**`/events` has a bounded idle-socket timeout, not an unbounded one.** The
+request itself has no deadline (a live stream has no natural end), but a read
+that receives no bytes for `EVENTS_IDLE_TIMEOUT_MS` (45 s — two missed
+15 s heartbeats) ends the connection. The engine's timeout surfaces as
+`HubError.Transport`, the same shape any other dropped connection arrives in,
+so `FleetRepository.follow()` reconnects with its existing backoff exactly as
+it would for a severed socket.
+
+**A session screen's conversation reads coalesce.** `load()`, `refresh()`, a
+send's follow-up, and the event-triggered refetch all go through one queue: a
+request folds into whatever read is already registered but has not started
+its hub call yet, so a burst of taps or event frames costs at most one hub
+call beyond whichever is already running. `SessionUiState.loading` tracks the
+first-ever read; `refreshing` tracks every later one, queued or in flight, and
+the Refresh button is disabled while either is true.

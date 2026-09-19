@@ -37,6 +37,12 @@ data class PairUiState(
     val error: String? = null,
     /** Non-null once the hub has answered. The screen leaves when it is set. */
     val paired: PairedHub? = null,
+    /**
+     * Why this screen is up rather than the fleet — set only when a 401 drops
+     * the credential. Shown once; a first launch or a user-initiated forget
+     * carries none. See [AuthActions.unpairReason].
+     */
+    val reason: String? = null,
 ) {
     /** Whether the manual-entry button does anything. */
     val canSubmit: Boolean get() = !pairing && paired == null && code.isNotBlank()
@@ -87,7 +93,14 @@ class PairViewModel(
     private val scope: CoroutineScope,
     cameraAvailable: Boolean = false,
 ) {
-    private val _state = MutableStateFlow(PairUiState(cameraAvailable = cameraAvailable))
+    // A snapshot, not a live `combine` with `auth.unpairReason`: this view model
+    // is recreated fresh each time the app lands back on Pair (`App.kt` keys it
+    // on the composable's own scope), so reading the value once at construction
+    // is already "show it once" — and it means `dismissReason` can clear the
+    // local copy without the flow it came from racing straight back in.
+    private val _state = MutableStateFlow(
+        PairUiState(cameraAvailable = cameraAvailable, reason = auth.unpairReason.value),
+    )
     val state: StateFlow<PairUiState> = _state.asStateFlow()
 
     /**
@@ -134,10 +147,10 @@ class PairViewModel(
 
     /** One decoded QR. Called per frame; see the class comment. */
     fun onScanned(text: String) {
-        // Review S-1. A frame arriving while an attempt is already in flight is
-        // not acted on, so its key must NOT be recorded. The old order set
-        // `lastScan` first and `redeem` then returned early on `pairing`, which
-        // burned a good QR that had never been sent anywhere.
+        // A frame arriving while an attempt is already in flight is not acted
+        // on, so its key must NOT be recorded. The old order set `lastScan`
+        // first and `redeem` then returned early on `pairing`, which burned a
+        // good QR that had never been sent anywhere.
         //
         // The scenario is the ordinary one: the first code is spent, the
         // operator runs `fleet-hub pair` again, and the person moves the phone
@@ -163,6 +176,12 @@ class PairViewModel(
         _state.update { it.copy(error = null) }
     }
 
+    /** Put away a standing [PairUiState.reason] — read once, either explicitly or by dismissal. */
+    fun dismissReason() {
+        _state.update { it.copy(reason = null) }
+        auth.clearUnpairReason()
+    }
+
     private fun redeem(input: String): Job? {
         val current = _state.value
         if (current.pairing || current.paired != null) return null
@@ -180,7 +199,10 @@ class PairViewModel(
             return null
         }
 
-        _state.value = current.copy(pairing = true, error = null)
+        // A deliberate new attempt is itself a reason to stop showing why the
+        // old credential was dropped.
+        _state.value = current.copy(pairing = true, error = null, reason = null)
+        auth.clearUnpairReason()
         return scope.launch {
             try {
                 // The raw input goes down, not `target`: parsing it twice is

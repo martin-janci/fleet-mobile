@@ -5,6 +5,7 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.AuthActions
 import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.data.NotAPairingCode
+import dev.claudefleet.mobile.data.REVOKED_CREDENTIAL_REASON
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.store.Credentials
 import kotlinx.coroutines.CompletableDeferred
@@ -31,11 +32,15 @@ private const val PAIR_URL = "$HUB/pair#ABCD1234"
  */
 private class FakeAuth : AuthActions {
     override val state = MutableStateFlow<AuthState>(AuthState.Unpaired)
+    override val unpairReason = MutableStateFlow<String?>(null)
 
     /** Every `(scanned, base)` this was asked to redeem, in order. */
     val pairs = mutableListOf<Pair<String, String?>>()
 
     var forgets = 0
+        private set
+
+    var reasonClears = 0
         private set
 
     /** Held open, a pair stays in flight so a second camera frame can arrive. */
@@ -58,6 +63,11 @@ private class FakeAuth : AuthActions {
     override suspend fun forget() {
         forgets += 1
         state.value = AuthState.Unpaired
+    }
+
+    override fun clearUnpairReason() {
+        reasonClears += 1
+        unpairReason.value = null
     }
 }
 
@@ -597,5 +607,58 @@ class PairViewModelTest {
         vm.submit()
         runCurrent()
         assertEquals(0, auth.pairs.size)
+    }
+
+    // -----------------------------------------------------------------------
+    // A 401 that dropped this device's credential explains itself
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun a_standing_reason_is_shown_when_the_screen_opens() = runTest {
+        val auth = FakeAuth()
+        auth.unpairReason.value = REVOKED_CREDENTIAL_REASON
+        val vm = PairViewModel(auth, backgroundScope, cameraAvailable = false)
+
+        assertEquals(
+            REVOKED_CREDENTIAL_REASON,
+            vm.state.value.reason,
+        )
+    }
+
+    /** A first launch, or a screen reached by a user-initiated forget, has nothing to explain. */
+    @Test
+    fun no_reason_is_shown_on_an_ordinary_visit() = runTest {
+        val vm = PairViewModel(FakeAuth(), backgroundScope, cameraAvailable = false)
+
+        assertNull(vm.state.value.reason)
+    }
+
+    @Test
+    fun dismissing_the_reason_clears_it_here_and_in_the_session() = runTest {
+        val auth = FakeAuth()
+        auth.unpairReason.value = REVOKED_CREDENTIAL_REASON
+        val vm = PairViewModel(auth, backgroundScope, cameraAvailable = false)
+
+        vm.dismissReason()
+
+        assertNull(vm.state.value.reason)
+        assertEquals(1, auth.reasonClears)
+    }
+
+    /** Starting a new attempt is itself a reason to stop showing the old one. */
+    @Test
+    fun starting_a_pair_attempt_clears_a_standing_reason() = runTest {
+        val auth = FakeAuth()
+        auth.unpairReason.value = REVOKED_CREDENTIAL_REASON
+        val vm = PairViewModel(auth, backgroundScope, cameraAvailable = false)
+        vm.onAddressChange(HUB)
+        vm.onCodeChange("ABCD1234")
+
+        vm.submit()
+        runCurrent()
+
+        assertNull(vm.state.value.reason)
+        assertEquals(1, auth.reasonClears)
+        assertNotNull(vm.state.value.paired)
     }
 }
