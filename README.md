@@ -116,6 +116,29 @@ The asymmetry is real and is not a bug in this document: a LAN hub over plain
 http can work on iOS and cannot on Android, until someone adds the Android
 configuration for their own host.
 
+### How much it will read
+
+The app bounds what arrives, not just how long it waits for it. The hub is
+trusted for *what* it says — you paired with it — but nothing between the phone
+and the hub is: a reverse proxy, whatever the operator put in front of it, and
+on a LAN hub reached over plain `http`, anything on the network able to write
+into the connection. A read with no ceiling is a phone that stops, and on a
+phone that means the process being killed rather than the app being slow.
+
+| Ceiling | Value | What it stops |
+|---|---|---|
+| One reply to a tool call | 8 MiB | A body read whole into memory before anything parses it. The hub bounds `session_conversation` at roughly a megabyte of transcript tail, so this is several times more than it can produce. |
+| One line on `/events` | 256 KiB | A stream that never sends `\n`. Ktor's `readLine` takes no limit at all; `readLineStrict` is the one that does. |
+| One event frame | 512 Ki chars | A frame whose `data:` never ends. SSE terminates a frame with a blank line and nothing guarantees one arrives. |
+| Turns kept on a session screen | 200 | The screen holding every turn of a session that has been running for hours, while the hub's own window stays at ten. Oldest go first and the screen says *Older turns are not shown*. |
+
+None of these is a guess at the largest legitimate payload — they are the point
+past which nothing legitimate is happening, which is why they can be generous.
+Passing one fails the *connection*, not the app: it becomes an ordinary
+`HubError`, and the reconnect-with-backoff and `ready` resync that already
+handle every other dropped connection handle this one. Overshooting a ceiling
+costs one reconnect.
+
 ## What it does
 
 - **Sessions** — every session across every host, grouped by host and then by

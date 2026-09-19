@@ -12,11 +12,13 @@ import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
-import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
+import io.ktor.utils.io.readBuffer
 import kotlinx.coroutines.CancellationException
+import kotlinx.io.readByteArray
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -198,8 +200,16 @@ class HubClient(
             }
             setBody(body)
         }
-        response.status.value to response.bodyAsText()
+        response.status.value to response.textWithin(MAX_RESPONSE_BYTES)
     } catch (e: CancellationException) {
+        throw e
+    } catch (e: HubError) {
+        // [textWithin] raises one, and without this line it would be wrapped
+        // into a `Transport` saying the hub could not be reached — when it was
+        // reached and simply said more than this app will read. Every other
+        // `catch (t: Throwable)` in this file is already preceded by this
+        // guard; this one was not, because until now nothing inside the block
+        // could raise a [HubError].
         throw e
     } catch (t: Throwable) {
         throw HubError.Transport(t)
@@ -343,6 +353,49 @@ internal fun HttpClient.withHubTimeouts(): HttpClient = config {
 
 internal const val HUB_CALL_TIMEOUT_MS = 45_000L
 internal const val HUB_CONNECT_TIMEOUT_MS = 15_000L
+
+/**
+ * How much of one reply this app will read, in bytes.
+ *
+ * The timeouts above bound how long a call may take; this bounds how much it
+ * may deliver, and the reasoning is the same. A reply is read whole into a
+ * `String` before anything looks at it, so without a ceiling the phone's memory
+ * is whatever the far end decides to send — and on a phone the failure is not a
+ * slow screen but the process being killed.
+ *
+ * **Why this size.** `session_conversation` is much the largest thing the app
+ * asks for, and the hub bounds it server-side at roughly a megabyte of
+ * transcript tail — which is why `Conversation.appending` has to cope with
+ * turns sliding off the top at all. Eight megabytes is therefore several times
+ * more than a hub doing its job can produce, which is the property that
+ * matters: the ceiling is not an estimate of the largest legitimate reply, it
+ * is the point past which nothing legitimate is happening.
+ *
+ * It is also not the hub this defends against so much as everything between:
+ * the reverse proxy the design assumes, whatever the operator put in front of
+ * it, and — on a LAN hub reached over plain `http` — anything on the network
+ * able to write into the connection.
+ */
+internal const val MAX_RESPONSE_BYTES: Int = 8 * 1024 * 1024
+
+/** What an overrunning reply is called on the banner. See [HubError.TooLarge]. */
+internal const val HUB_REPLY = "a reply from the hub"
+
+/**
+ * The reply's text, refusing anything past [limit].
+ *
+ * Reads at most `limit + 1` bytes and fails on the extra one, rather than
+ * asking how long the body claims to be. A `Content-Length` is a promise from
+ * whoever wrote the headers and the body is written by whoever holds the
+ * socket: a chunked reply carries no length at all, and one that understates
+ * itself is the cheapest possible way past a check that believes it. What is
+ * counted here is what actually arrived.
+ */
+internal suspend fun HttpResponse.textWithin(limit: Int): String {
+    val bytes = bodyAsChannel().readBuffer(limit.toLong() + 1).readByteArray()
+    if (bytes.size > limit) throw HubError.TooLarge(HUB_REPLY, limit)
+    return bytes.decodeToString()
+}
 
 private fun JsonElement.asBooleanOrNull(): Boolean? =
     (this as? JsonPrimitive)?.content?.toBooleanStrictOrNull()

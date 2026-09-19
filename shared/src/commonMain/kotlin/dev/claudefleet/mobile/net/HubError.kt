@@ -79,6 +79,30 @@ sealed class HubError(message: String, cause: Throwable? = null) : Exception(mes
         HubError("the hub answered HTTP $status: $body")
 
     /**
+     * Something on the wire went past a ceiling the app sets for itself: a
+     * response body, an event frame, or a line inside one.
+     *
+     * **Not a `Transport`, and the distinction is the point.** "Could not reach
+     * the hub" is false here — the hub was reached and is talking; it is saying
+     * more than this app will listen to. Folding the two together would put the
+     * wrong sentence on the banner and, worse, would make a reachability
+     * problem and a payload problem look the same to whoever is trying to work
+     * out why their fleet will not load.
+     *
+     * [what] names the thing that overran, in the app's own words, and [limit]
+     * the ceiling it passed. Neither is wire text, so neither needs scrubbing:
+     * the one piece of information deliberately *not* carried here is any part
+     * of the oversized payload itself, which is exactly the data least worth
+     * copying into an error that reaches a screen.
+     */
+    data class TooLarge(val what: String, val limit: Int) :
+        HubError(
+            "the hub sent more than this app will read: $what went past $limit. " +
+                "That is a ceiling the app sets for itself, so a hub behaving normally " +
+                "never reaches it — suspect whatever sits in front of it.",
+        )
+
+    /**
      * The hub could not be reached, or answered something unintelligible.
      *
      * Deliberately **not** a `data class`, and deliberately silent about the

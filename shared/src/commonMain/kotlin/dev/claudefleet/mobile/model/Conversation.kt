@@ -46,9 +46,15 @@ data class Conversation(
  * may be a gap, and once set it stays set.
  */
 fun Conversation.appending(fresh: Conversation): Conversation {
-    // An empty read says nothing at all, including about truncation.
+    // An empty read says nothing at all, including about truncation. `this` is
+    // already inside the ceiling — every conversation on a screen got there
+    // through this function — so it needs no second look.
     if (fresh.turns.isEmpty()) return this
-    if (turns.isEmpty()) return fresh
+    // The first read of a screen, which takes the fresh window wholesale and so
+    // has to be capped as much as a merged one: `turns` can be asked for
+    // explicitly, and a ceiling that only applied once two reads had been
+    // merged is one that an opening screen walks straight past.
+    if (turns.isEmpty()) return fresh.withinCeiling()
 
     val held = turns.map { it.identity() }
     val arrived = fresh.turns.map { it.identity() }
@@ -100,8 +106,51 @@ fun Conversation.appending(fresh: Conversation): Conversation {
     return Conversation(
         turns = kept + fresh.turns,
         truncated = truncated || fresh.truncated,
-    )
+    ).withinCeiling()
 }
+
+/**
+ * The most turns one screen will hold.
+ *
+ * The merge above exists because the hub sends a **rolling window**: it re-reads
+ * the last few turns each time, so the app has to keep the ones that have
+ * scrolled off the hub's end but are still on the screen. The consequence, which
+ * follows directly and which nothing had looked at, is that the app keeps *all*
+ * of them — for as long as the screen is open — while the hub's own memory of
+ * the session stays the same ten turns it always was.
+ *
+ * These are Claude Code sessions. They run for hours and produce hundreds of
+ * turns, each carrying a prompt and every tool line under it, and the screen
+ * showing one is precisely the screen somebody leaves open to watch. Nothing
+ * bounded that but how long the agent worked.
+ *
+ * **Why this many.** The hub's default window is ten turns, so two hundred is
+ * twenty windows of scrollback — far more than anyone scrolls on a phone — and
+ * at a few kilobytes a turn it is comfortably under a megabyte held. The point
+ * is not to guess how far back someone might look; it is that the number is
+ * fixed rather than proportional to how long the session has been running.
+ */
+internal const val MAX_RETAINED_TURNS: Int = 200
+
+/**
+ * Drop the oldest turns once there are more than [MAX_RETAINED_TURNS].
+ *
+ * The oldest, because they are the ones furthest from what is happening now —
+ * and the newest must never be the one dropped, since the live turn is what the
+ * screen exists to show.
+ *
+ * [Conversation.truncated] is set when anything goes, which is not a new state
+ * to draw: the screen already renders that flag as "Older turns are not shown",
+ * and it is already how the hub says the same thing about its own window. A
+ * conversation that lost turns here and one that lost them at the hub are the
+ * same thing to a reader.
+ */
+private fun Conversation.withinCeiling(): Conversation =
+    if (turns.size <= MAX_RETAINED_TURNS) {
+        this
+    } else {
+        Conversation(turns = turns.takeLast(MAX_RETAINED_TURNS), truncated = true)
+    }
 
 private fun ConvTurn.identity(): Pair<String?, String?> = at to prompt
 
