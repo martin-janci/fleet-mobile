@@ -2,6 +2,7 @@
 
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.model.Conversation
@@ -39,16 +40,26 @@ data class SessionUiState(
     val sending: Boolean = false,
     /** True when this device's credential is `readonly` and may not send. */
     val readOnly: Boolean = false,
+    /**
+     * True only when the fleet's connection is [ConnectionStatus.Connected].
+     * Reconnecting and fully offline both disable sending — a prompt typed
+     * while the hub is unreachable has nowhere to go, and the design says
+     * actions are disabled rather than hidden while the last snapshot stays on
+     * screen.
+     */
+    val connected: Boolean = true,
     val error: String? = null,
 ) {
     /**
      * Whether the send button does anything. Blank drafts are not prompts, a
      * second prompt while the first is in flight would race the hub's turn
-     * counter, a dead session has no REPL to type into, and a readonly token is
-     * refused `send_prompt` by the hub.
+     * counter, a dead session has no REPL to type into, a readonly token is
+     * refused `send_prompt` by the hub, and an unreachable hub has nowhere to
+     * deliver it. The draft itself is untouched by any of this — only the
+     * button goes dark.
      */
     val canSend: Boolean
-        get() = !sending && !readOnly && session != null && draft.isNotBlank()
+        get() = !sending && !readOnly && connected && session != null && draft.isNotBlank()
 }
 
 /**
@@ -127,9 +138,9 @@ class SessionViewModel(
      */
     private val fetchLock = Mutex()
 
-    val state: StateFlow<SessionUiState> = combine(fleet.sessions, local) { rows, l ->
-        assemble(rows.firstOrNull { it.id == sessionId }, l)
-    }.stateIn(scope, SharingStarted.Eagerly, assemble(row(), local.value))
+    val state: StateFlow<SessionUiState> = combine(fleet.sessions, fleet.status, local) { rows, status, l ->
+        assemble(rows.firstOrNull { it.id == sessionId }, status, l)
+    }.stateIn(scope, SharingStarted.Eagerly, assemble(row(), fleet.status.value, local.value))
 
     init {
         // Started here rather than from `load()`: `state` above is already
@@ -195,7 +206,9 @@ class SessionViewModel(
     }
 
     private fun canSendNow(l: Local): Boolean =
-        !l.sending && !readOnly && l.draft.isNotBlank() && row() != null
+        !l.sending && !readOnly && connected() && l.draft.isNotBlank() && row() != null
+
+    private fun connected(): Boolean = fleet.status.value is ConnectionStatus.Connected
 
     private fun row(): SessionRow? = fleet.sessions.value.firstOrNull { it.id == sessionId }
 
@@ -230,7 +243,7 @@ class SessionViewModel(
         }
     }
 
-    private fun assemble(row: SessionRow?, l: Local) = SessionUiState(
+    private fun assemble(row: SessionRow?, status: ConnectionStatus, l: Local) = SessionUiState(
         session = row,
         conversation = l.conversation,
         loaded = l.loaded,
@@ -238,6 +251,7 @@ class SessionViewModel(
         loading = l.loading,
         sending = l.sending,
         readOnly = readOnly,
+        connected = status is ConnectionStatus.Connected,
         error = l.error,
     )
 }

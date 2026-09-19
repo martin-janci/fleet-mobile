@@ -341,6 +341,57 @@ class SessionViewModelTest {
         assertTrue(vm.state.value.readOnly)
     }
 
+    // ---- issue #3: Send is disabled while the hub is unreachable ----
+
+    @Test
+    fun send_is_disabled_while_reconnecting_and_does_not_call_the_hub() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.onDraftChange("ship it")
+        runCurrent()
+        assertTrue(vm.state.value.canSend, "connected — the draft alone should be enough")
+
+        fleet.status.value = ConnectionStatus.Reconnecting(attempt = 2, reason = "the hub closed the stream")
+        runCurrent()
+
+        assertFalse(vm.state.value.canSend, "a reconnecting hub must disable Send")
+        vm.send().join()
+        assertTrue(actions.prompts.isEmpty(), "send must not even try while offline")
+        assertEquals("ship it", vm.state.value.draft, "the draft must survive being disabled")
+    }
+
+    @Test
+    fun send_is_disabled_while_fully_offline() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        fleet.status.value = ConnectionStatus.Offline("not connected")
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.onDraftChange("ship it")
+        runCurrent()
+
+        assertFalse(vm.state.value.canSend)
+        vm.send().join()
+        assertTrue(actions.prompts.isEmpty())
+    }
+
+    @Test
+    fun send_re_enables_once_the_hub_is_reachable_again() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        fleet.status.value = ConnectionStatus.Reconnecting(attempt = 1, reason = null)
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.onDraftChange("ship it")
+        runCurrent()
+        assertFalse(vm.state.value.canSend)
+
+        fleet.status.value = ConnectionStatus.Connected("0.9.3")
+        runCurrent()
+
+        assertTrue(vm.state.value.canSend)
+        assertEquals("ship it", vm.state.value.draft)
+    }
+
     @Test
     fun the_bar_follows_the_live_row() = runTest {
         val fleet = FakeFleetState()
