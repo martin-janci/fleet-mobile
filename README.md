@@ -335,4 +335,4 @@ a process to live in.
 
 ## Licence
 
-Not yet chosen. Treat it as all rights reserved until it is.
+MIT — see [LICENSE](LICENSE). Same as `claude-fleet`, which this app is a client of.
