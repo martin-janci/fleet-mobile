@@ -23,6 +23,21 @@ class ReleaseWorkflowTest {
     private val ci: String by lazy { Repo.file(".github/workflows/ci.yml").readText() }
 
     /**
+     * The text of one step, from a marker found inside it up to (but not
+     * including) the next top-level step. Several tests below need to assert
+     * something is true *within* a specific step rather than anywhere in the
+     * file — the missing-secret branch actually failing, apksigner actually
+     * being resolved a particular way — and a whole-file substring search
+     * cannot tell two steps' worth of similar-looking shell apart.
+     */
+    private fun stepAt(marker: String): String {
+        val start = release.indexOf(marker)
+        assertTrue(start >= 0, "expected to find '$marker' in release.yml")
+        val nextStep = release.indexOf("\n      - ", start)
+        return if (nextStep >= 0) release.substring(start, nextStep) else release.substring(start)
+    }
+
+    /**
      * Nothing else may kick off a release. In particular not `pull_request` —
      * a fork's PR would otherwise reach the signing secrets — and not
      * `workflow_dispatch`, which would let a run publish without a tag whose
@@ -37,6 +52,26 @@ class ReleaseWorkflowTest {
         assertTrue("branches:" !in onBlock, "a branch push must not cut a release")
         assertTrue("pull_request" !in release, "a fork's PR must never reach the signing secrets")
         assertTrue("workflow_dispatch" !in release, "manual dispatch would publish without a validated tag")
+    }
+
+    /**
+     * Two tags pushed close together must not race each other's build/sign/
+     * publish steps against the same `$RUNNER_TEMP` keystore path or the same
+     * GitHub release, but a release already running must not be cancelled
+     * out from under it by a later push either — `cancel-in-progress` stays
+     * `false`, unlike `ci.yml`'s.
+     */
+    @Test
+    fun releases_for_different_tags_do_not_race_and_an_in_flight_one_is_never_cancelled() {
+        assertTrue(
+            Regex("""(?m)^concurrency:\s*$""").containsMatchIn(release),
+            "expected a top-level concurrency block",
+        )
+        assertTrue("cancel-in-progress: false" in release, "an in-flight release build must never be cancelled")
+        assertTrue(
+            "group: release-\${{ github.ref_name }}" in release,
+            "the concurrency group must incorporate github.ref_name so releases for different tags don't serialize behind each other",
+        )
     }
 
     /**
@@ -81,10 +116,24 @@ class ReleaseWorkflowTest {
             assertTrue(secret in release, "the workflow must reference $secret")
         }
 
-        assertTrue("missing=()" in release, "must collect the names of absent secrets")
+        val step = stepAt("Require the signing secrets")
+        assertTrue("missing=()" in step, "must collect the names of absent secrets")
         assertTrue(
-            "\${#missing[@]} -gt 0" in release,
+            "\${#missing[@]} -gt 0" in step,
             "must branch on whether any secret was found missing",
+        )
+
+        // The scaffolding above is not the guarantee by itself: a version that
+        // still collects and branches on the missing names but drops `exit 1`
+        // would pass both assertions while silently continuing to build an
+        // unsigned release. Scoped to this step — `exit 1` appears elsewhere
+        // in the file (tag validation, the APK-not-found guard) for reasons
+        // that have nothing to do with secrets being absent.
+        val gtIndex = step.indexOf("-gt 0")
+        val exitIndex = step.indexOf("exit 1", gtIndex)
+        assertTrue(
+            gtIndex >= 0 && exitIndex > gtIndex,
+            "the missing-secret branch must actually `exit 1`, not just log — step body:\n$step",
         )
 
         val secretsCheckIndex = release.indexOf("missing=()")
@@ -94,17 +143,20 @@ class ReleaseWorkflowTest {
 
     /**
      * Decoded under `$RUNNER_TEMP` — never under the checked-out workspace —
-     * and removed by a step that runs even when an earlier step in the job
-     * failed.
+     * with owner-only permissions, and removed by a step that runs even when
+     * an earlier step in the job failed.
      */
     @Test
     fun the_keystore_lives_under_runner_temp_and_is_always_removed() {
         assertTrue("RUNNER_TEMP" in release, "the keystore file must be written under RUNNER_TEMP")
 
-        val cleanupIndex = release.indexOf("Remove the decoded keystore")
-        assertTrue(cleanupIndex >= 0, "expected a dedicated step that removes the keystore")
+        val decodeStep = stepAt("Decode the keystore")
+        assertTrue(
+            "chmod 600" in decodeStep,
+            "the decoded keystore must be restricted to owner-only permissions",
+        )
 
-        val cleanupStep = release.substring(cleanupIndex, minOf(release.length, cleanupIndex + 150))
+        val cleanupStep = stepAt("Remove the decoded keystore")
         assertTrue("if: always()" in cleanupStep, "cleanup must run even if an earlier step in the job failed")
         assertTrue(
             Regex("""rm -f "\${'$'}RUNNER_TEMP/[\w.-]+"""").containsMatchIn(cleanupStep),
@@ -114,24 +166,64 @@ class ReleaseWorkflowTest {
 
     /**
      * `github.ref_name` is the pushed tag — chosen by whoever can push a tag,
-     * not by this repository's owners. Every line naming it must be an `env:`
-     * mapping (`KEY: ${{ github.ref_name }}`); none may sit inside a `run:`
-     * body, where it would be shell-interpolated before validation ever runs.
+     * not by this repository's owners. It is used elsewhere in the file (an
+     * `env:` mapping, and the `concurrency:` group name) — this test is
+     * specifically about `run:` bodies, where a raw `${{ github.ref_name }}`
+     * would be shell-interpolated before validation ever runs, rather than
+     * about every appearance of the string in the file.
      */
     @Test
-    fun the_tag_reaches_shell_only_through_env_never_interpolated_into_a_run_body() {
-        val refNameLines = release.lineSequence()
-            .filter { "github.ref_name" in it }
-            .filterNot { it.trim().startsWith("#") }
-            .toList()
+    fun the_tag_is_never_interpolated_directly_into_a_run_body() {
+        assertTrue("github.ref_name" in release, "expected the workflow to read github.ref_name somewhere")
 
-        assertTrue(refNameLines.isNotEmpty(), "expected the workflow to read github.ref_name somewhere")
-        for (line in refNameLines) {
+        val runBodies = runBlockBodies(release)
+        assertTrue(runBodies.isNotEmpty(), "expected at least one run: block in the workflow")
+        for (body in runBodies) {
             assertTrue(
-                Regex("""^\s*\w+:\s*\${'$'}\{\{\s*github\.ref_name\s*}}\s*$""").matches(line),
-                "github.ref_name must only appear as an env: mapping value, never inline in a run: body — found: $line",
+                "github.ref_name" !in body,
+                "github.ref_name must never be interpolated directly into a run: body — found in:\n$body",
             )
         }
+    }
+
+    /**
+     * Every `run:` block's script content, keyed by nothing but indentation —
+     * the same rule YAML's block scalars use. A line more indented than its
+     * `run:` key belongs to the block; the first line at or below that
+     * indentation ends it. Blank lines don't end a block on their own.
+     */
+    private fun runBlockBodies(text: String): List<String> {
+        val lines = text.lines()
+        val bodies = mutableListOf<String>()
+        var i = 0
+        while (i < lines.size) {
+            val line = lines[i]
+            val trimmed = line.trimStart()
+            if (trimmed.startsWith("run:")) {
+                val indent = line.length - trimmed.length
+                val body = StringBuilder()
+                val inline = trimmed.removePrefix("run:").trim()
+                if (inline.isNotEmpty() && inline != "|" && inline != ">") body.appendLine(inline)
+                var j = i + 1
+                while (j < lines.size) {
+                    val l = lines[j]
+                    if (l.isBlank()) {
+                        body.appendLine(l)
+                        j++
+                        continue
+                    }
+                    val lIndent = l.length - l.trimStart().length
+                    if (lIndent <= indent) break
+                    body.appendLine(l)
+                    j++
+                }
+                bodies += body.toString()
+                i = j
+            } else {
+                i++
+            }
+        }
+        return bodies
     }
 
     /**
@@ -163,6 +255,40 @@ class ReleaseWorkflowTest {
         val verifyIndex = release.indexOf("apksigner")
         val publishIndex = release.indexOf("gh release create")
         assertTrue(verifyIndex >= 0 && publishIndex >= 0 && verifyIndex < publishIndex, "signing must be verified before the release is published")
+    }
+
+    /**
+     * Which of `ANDROID_HOME` / `ANDROID_SDK_ROOT` the setup-android action
+     * exports to later steps isn't documented as stable, so `apksigner` must
+     * be resolved rather than assumed to live at one hard-coded path — and
+     * the resolution must fail closed, not silently run `apksigner verify`
+     * with an empty binary path.
+     */
+    @Test
+    fun apksigner_is_resolved_robustly_and_fails_closed_if_missing() {
+        val step = stepAt("Verify the APK is signed")
+
+        assertTrue(
+            "apksigner_bin" in step && "verify --print-certs" in step,
+            "must actually invoke the resolved apksigner binary with verify --print-certs",
+        )
+        assertTrue(
+            "ANDROID_HOME" in step && "ANDROID_SDK_ROOT" in step && "command -v apksigner" in step,
+            "must try ANDROID_HOME, then ANDROID_SDK_ROOT, then PATH — not just one hard-coded location",
+        )
+        assertTrue("sort -V" in step, "must pick the newest build-tools version rather than one pinned in this step")
+        assertTrue(
+            Regex("""build-tools[/;]\d""").containsMatchIn(step).not(),
+            "the build-tools version must not be hard-coded in this step — found a version-looking path",
+        )
+
+        // Fail-closed: a resolution that silently produced an empty path
+        // would still let `"$apksigner_bin" verify` run as bare `verify`
+        // with no APK argument instead of stopping the job outright.
+        val notFoundIndex = step.indexOf("apksigner not found")
+        assertTrue(notFoundIndex >= 0, "must print a clear message when apksigner cannot be resolved")
+        val exitIndex = step.indexOf("exit 1", notFoundIndex)
+        assertTrue(exitIndex > notFoundIndex, "must exit non-zero when apksigner cannot be resolved")
     }
 
     /**

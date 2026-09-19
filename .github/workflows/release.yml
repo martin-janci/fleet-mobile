@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*'
 
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -91,6 +95,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          chmod 600 "$RUNNER_TEMP/release.jks"
 
       # The four signing values reach Gradle through `env:` on this one step,
       # not as `-P` command-line arguments — a process list and the Gradle
@@ -116,6 +121,12 @@ jobs:
       # DSL slip) would still leave `hasReleaseSigning` producing an unsigned
       # APK that built successfully. This is the check that turns that into a
       # failed release rather than a published one.
+      #
+      # `apksigner`'s location isn't hard-coded: which of ANDROID_HOME /
+      # ANDROID_SDK_ROOT the setup-android action actually exports isn't
+      # documented as stable, so this tries both, then falls back to PATH,
+      # and picks the newest build-tools version under whichever root has
+      # one rather than assuming 37.0.0 stays the only one installed.
       - name: Verify the APK is signed
         run: |
           set -euo pipefail
@@ -124,7 +135,31 @@ jobs:
             echo "::error::expected APK not found at $apk" >&2
             exit 1
           fi
-          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs "$apk"
+
+          find_apksigner() {
+            local root newest
+            for root in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}"; do
+              if [[ -n "$root" && -d "$root/build-tools" ]]; then
+                newest=$(ls -d "$root"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
+                if [[ -n "$newest" ]]; then
+                  echo "$newest"
+                  return 0
+                fi
+              fi
+            done
+            if command -v apksigner >/dev/null 2>&1; then
+              command -v apksigner
+              return 0
+            fi
+            return 1
+          }
+
+          apksigner_bin="$(find_apksigner)" || {
+            echo "::error::apksigner not found under ANDROID_HOME, ANDROID_SDK_ROOT, or PATH" >&2
+            exit 1
+          }
+
+          "$apksigner_bin" verify --print-certs "$apk"
 
       # `gh` is preinstalled on the runner and uses `GITHUB_TOKEN` — no
       # third-party release action needed.
