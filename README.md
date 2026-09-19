@@ -294,10 +294,10 @@ And the parts that need a **device or emulator on either platform**, or a
   a first red would not be mistaken for a code fault; that allowance has been
   removed now it has been seen to pass. A red there now means the secure store
   broke.
-- **The Android camera path.** Two mutations in `task-7-mutations.py` survive on
-  purpose — deleting the permission request, and wiring the Scan button to
+- **The Android camera path.** Two mutations survive an ad-hoc mutation sweep
+  on purpose — deleting the permission request, and wiring the Scan button to
   nothing — because no headless JVM test can render a composable or grant a
-  permission.
+  permission. The sweep's own script was never checked in.
 - **No live hub has ever been contacted, by anyone, at any point.** Every wire
   format in this app was read out of the `claude-fleet` Rust source and pinned
   with a `MockEngine`. "Matches the source" is not "matches the server".

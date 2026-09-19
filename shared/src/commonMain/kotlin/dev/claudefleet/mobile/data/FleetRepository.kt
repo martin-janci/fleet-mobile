@@ -87,6 +87,9 @@ class FleetRepository(
      */
     private val onRevoked: suspend () -> Unit = {},
 ) : FleetState {
+    // Starts empty rather than from a cache: see the "no cold-start cache"
+    // deviation in the design appendix — the app's one persistence seam is
+    // sized for a credential, not fleet data.
     private val _sessions = MutableStateFlow<List<SessionRow>>(emptyList())
     override val sessions: StateFlow<List<SessionRow>> = _sessions.asStateFlow()
 
