@@ -139,8 +139,9 @@ private fun SessionBar(state: SessionUiState, onBack: () -> Unit, onRefresh: () 
                 stuckKind = state.session?.stuckKind,
             )
             Spacer(Modifier.width(4.dp))
-            TextButton(onClick = onRefresh, enabled = !state.loading) {
-                Text(if (state.loading) "…" else "Refresh")
+            val busy = state.loading || state.refreshing
+            TextButton(onClick = onRefresh, enabled = !busy) {
+                Text(if (busy) "…" else "Refresh")
             }
         }
     }

@@ -28,7 +28,9 @@ interface FleetState {
     /**
      * The id of a session the hub just reported a row change for —
      * `session:created`, `session:updated` or `session:killed` — one at a time,
-     * as they arrive.
+     * as they arrive. A `ready` or `lagged` resync also emits
+     * [dev.claudefleet.mobile.data.ALL_SESSIONS_CHANGED] once its own refetch
+     * has landed, since a resync has no per-row events for a screen to key on.
      *
      * A hot flow, not a `StateFlow`: there is no "current" changed session, only
      * a sequence of them, and a screen that was not collecting when one fired

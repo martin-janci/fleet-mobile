@@ -75,7 +75,16 @@ class HostsViewModel(
     fun dismissError() {
         local.update { it.copy(error = null) }
     }
-    /** Re-list. The rows stay put if it fails; the last picture is still the best one. */
+    /**
+     * Re-list. The rows stay put if it fails; the last picture is still the best one.
+     *
+     * Its three `update {}` calls each construct a fresh `Local(...)` rather
+     * than `it.copy(...)`: `refresh()` is the only writer for the whole span
+     * between its first update and its last, so there is nothing in `it` worth
+     * preserving. [dismissError] is the one read-modify-write in this class,
+     * because it can land in the middle of that span and must not clobber
+     * whichever of these three just ran.
+     */
     fun refresh(): Job = scope.launch {
         local.update { Local(refreshing = true) }
         try {

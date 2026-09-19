@@ -210,6 +210,10 @@ class FleetRepositoryTest {
      * A session screen needs to know *which* session changed, not just that the
      * snapshot did, so it can refetch its own conversation and leave every other
      * open screen alone.
+     *
+     * `READY` itself now also publishes [ALL_SESSIONS_CHANGED] (see below), so
+     * it is the first thing this test's collector sees — that is a separate,
+     * deliberately over-inclusive signal, not this test's own subject.
      */
     @Test
     fun a_session_row_event_publishes_its_id_on_sessionChanges() = runTest {
@@ -237,14 +241,14 @@ class FleetRepositoryTest {
         // other flow's collector yet.
         runCurrent()
 
-        assertEquals(listOf(2L, 1L), seen)
+        assertEquals(listOf(ALL_SESSIONS_CHANGED, 2L, 1L), seen)
         collector.cancel()
         repository.stop()
     }
 
     /** `host:probed` and `project:updated` are not about any session. */
     @Test
-    fun a_non_session_row_event_does_not_touch_sessionChanges() = runTest {
+    fun a_non_session_row_event_adds_nothing_beyond_the_readys_own_resync_signal() = runTest {
         val hub = FakeHub(sessionsJson = sessionRows(1))
         val stream = FakeStream {
             emit(READY)
@@ -258,8 +262,63 @@ class FleetRepositoryTest {
 
         repository.start()
         repository.hosts.first { it.isNotEmpty() }
+        runCurrent()
 
-        assertTrue(seen.isEmpty())
+        assertEquals(listOf(ALL_SESSIONS_CHANGED), seen, "only READY's own resync signal — host:probed names no session")
+        collector.cancel()
+        repository.stop()
+    }
+
+    /**
+     * Finding #4: a reconnect resync used to publish nothing on
+     * [dev.claudefleet.mobile.data.FleetRepository.sessionChanges] at all, so a
+     * reply that landed during the gap never appeared on an open session
+     * screen until a manual Refresh. `READY` now also emits
+     * [ALL_SESSIONS_CHANGED] once its own `refresh()` has landed — a resync
+     * has no per-row event of its own for a screen to key on, so this is the
+     * one signal every open session screen treats as "refetch me too."
+     */
+    @Test
+    fun a_ready_frame_publishes_the_resync_sentinel_once_its_refetch_has_landed() = runTest {
+        val hub = FakeHub(sessionsJson = sessionRows(1))
+        val stream = FakeStream { emit(READY); awaitCancellation() }
+        val repository = repo(hub, stream, backgroundScope)
+        val seen = mutableListOf<Long>()
+        val collector = backgroundScope.launch { repository.sessionChanges.collect { seen += it } }
+        runCurrent()
+
+        repository.start()
+        repository.status.first { it is ConnectionStatus.Connected }
+        runCurrent()
+
+        assertEquals(listOf(ALL_SESSIONS_CHANGED), seen)
+        collector.cancel()
+        repository.stop()
+    }
+
+    /** Same rule for a `lagged` resync as for a `ready` one. */
+    @Test
+    fun a_lagged_frame_also_publishes_the_resync_sentinel() = runTest {
+        val hub = FakeHub(sessionsJson = sessionRows(1))
+        val refetched = CompletableDeferred<Unit>()
+        val stream = FakeStream { attempt ->
+            if (attempt > 1) awaitCancellation()
+            emit(READY)
+            hub.sessionsJson = sessionRows(1, 2)
+            emit(HubEvent.Lagged(3))
+            refetched.complete(Unit)
+            awaitCancellation()
+        }
+        val repository = repo(hub, stream, backgroundScope)
+        val seen = mutableListOf<Long>()
+        val collector = backgroundScope.launch { repository.sessionChanges.collect { seen += it } }
+        runCurrent()
+
+        repository.start()
+        refetched.await()
+        runCurrent()
+
+        assertEquals(listOf(ALL_SESSIONS_CHANGED, ALL_SESSIONS_CHANGED), seen, "once for ready, once for the lag")
         collector.cancel()
         repository.stop()
     }
@@ -305,6 +364,48 @@ class FleetRepositoryTest {
 
         // 1 s, 2 s, 4 s, 8 s between attempts.
         assertEquals(listOf(0L, 1_000L, 3_000L, 7_000L, 15_000L), stream.openedAt)
+    }
+
+    /**
+     * `/events` has no request deadline (a live stream has no natural end),
+     * so the idle-socket timeout is the only thing that notices a half-open
+     * connection. `HubEventStream.connect()`'s catch-all wraps whatever the
+     * engine throws once that timeout fires in [HubError.Transport] — the
+     * same shape any other dropped connection arrives in — so this proves a
+     * stream that goes silent ends up `Reconnecting` and a later connection
+     * still recovers to `Connected`, rather than, say, being read as a clean
+     * end of stream (no error at all) or routed to `Offline` the way a 401 is.
+     */
+    @Test
+    fun a_stream_that_goes_idle_past_the_socket_timeout_reconnects_and_recovers() = runTest {
+        val hub = FakeHub(sessionsJson = sessionRows(1))
+        val reconnected = CompletableDeferred<Unit>()
+        val stream = FakeStream { attempt ->
+            if (attempt == 1) {
+                // What HubEventStream.connect()'s catch-all produces once the
+                // idle-socket timeout fires on a stream gone silent.
+                throw HubError.Transport(RuntimeException("Read timed out"))
+            }
+            emit(READY)
+            reconnected.complete(Unit)
+            awaitCancellation()
+        }
+        stream.clock = this
+        val repository = repo(hub, stream, backgroundScope)
+
+        repository.start()
+        val reconnecting = repository.status.first { it is ConnectionStatus.Reconnecting && it.attempt == 2 }
+                as ConnectionStatus.Reconnecting
+        assertTrue(
+            reconnecting.reason.orEmpty().contains("RuntimeException"),
+            "an idle timeout should explain the drop like any other transport failure: ${reconnecting.reason}",
+        )
+
+        reconnected.await()
+        val status = repository.status.first { it is ConnectionStatus.Connected }
+
+        assertEquals(ConnectionStatus.Connected("0.9.3"), status)
+        repository.stop()
     }
 
     @Test

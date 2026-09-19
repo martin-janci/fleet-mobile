@@ -160,8 +160,12 @@ class FleetRepository(
                             refresh()
                             failures = 0
                             _status.value = ConnectionStatus.Connected(event.version)
+                            _sessionChanges.tryEmit(ALL_SESSIONS_CHANGED)
                         }
-                        is HubEvent.Lagged -> refresh()
+                        is HubEvent.Lagged -> {
+                            refresh()
+                            _sessionChanges.tryEmit(ALL_SESSIONS_CHANGED)
+                        }
                         is HubEvent.Row -> {
                             publish(snapshot().applying(event))
                             event.sessionId()?.let { _sessionChanges.tryEmit(it) }
@@ -209,6 +213,21 @@ class FleetRepository(
         const val STREAM_CLOSED = "the hub closed the stream"
     }
 }
+
+/**
+ * Not a real session id: the signal a `ready` or `lagged` resync emits on
+ * [FleetRepository.sessionChanges] once its `refresh()` has landed, since a
+ * full snapshot has no per-row events of its own for a screen to key on.
+ *
+ * A resync can touch far more rows than `sessionChanges`'s 16-slot buffer
+ * holds, so `tryEmit`-ing every id in the fresh snapshot could have that
+ * buffer's own `DROP_OLDEST` silently drop the one id an open session screen
+ * is actually filtering for. One sentinel per resync avoids that: it never
+ * scales with the snapshot's size, and dropping an *older*, undelivered copy
+ * of it changes nothing, since a newer one carries the identical instruction.
+ * `SessionViewModel` treats it as "refetch me too," alongside its own id.
+ */
+internal const val ALL_SESSIONS_CHANGED: Long = Long.MIN_VALUE
 
 /** The first wait, after one failure. */
 internal val BASE_RECONNECT_DELAY = 1.seconds

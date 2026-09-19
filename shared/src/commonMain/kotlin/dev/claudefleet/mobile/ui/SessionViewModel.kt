@@ -2,6 +2,7 @@
 
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.data.ALL_SESSIONS_CHANGED
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.SessionActions
@@ -9,8 +10,10 @@ import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.appending
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +25,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.milliseconds
 
 /** One session's screen: its row, its conversation, and what is being typed. */
@@ -36,7 +40,15 @@ data class SessionUiState(
     /** True once a read has answered, even with nothing in it. */
     val loaded: Boolean = false,
     val draft: String = "",
+    /** True while the first-ever read (opening the screen) is outstanding. */
     val loading: Boolean = false,
+    /**
+     * True while any later read — Refresh, a send's follow-up, or an
+     * event-triggered refetch — is outstanding: queued or actually fetching.
+     * Distinct from [loading] so the two never clobber each other when one
+     * kind lands while the other is still in flight.
+     */
+    val refreshing: Boolean = false,
     val sending: Boolean = false,
     /** True when this device's credential is `readonly` and may not send. */
     val readOnly: Boolean = false,
@@ -72,7 +84,9 @@ data class SessionUiState(
  * whenever the hub reports a row change for *this* session — a reply landing
  * updates `claude_status` and `current_activity` on the same row the bar
  * already follows, so the same signal that moves the bar is the cue to pull
- * the reply in. That subscription is debounced ([SESSION_EVENT_DEBOUNCE]) so a
+ * the reply in — and after a reconnect resync (a `ready` or `lagged` frame),
+ * which carries no per-row event of its own for anything that changed during
+ * the gap. That subscription is debounced ([SESSION_EVENT_DEBOUNCE]) so a
  * burst of frames during one turn costs one read, and it runs for as long as
  * this view model does: the screen owns [scope], so closing the screen stops
  * it the same way it stops everything else here.
@@ -82,6 +96,8 @@ data class SessionUiState(
  * first rather than continuing it; see [dev.claudefleet.mobile.model.appending].
  * Those four callers never race each other's hub call, either: [fetchLock]
  * serializes it, so results still apply in the order they were asked for.
+ * [requestRead] also coalesces them — see its KDoc — so a burst of taps or
+ * events costs at most one extra hub call beyond whichever is already running.
  *
  * @param canSendPrompts false for a `readonly` credential. `send_prompt` is not
  *   in the hub's readonly allow-list (`READONLY_TOOLS` in `mcp/guard.rs`), so a
@@ -110,6 +126,7 @@ class SessionViewModel(
         val loaded: Boolean = false,
         val draft: String = "",
         val loading: Boolean = false,
+        val refreshing: Boolean = false,
         val sending: Boolean = false,
         val error: String? = null,
     )
@@ -119,9 +136,9 @@ class SessionViewModel(
 
     /**
      * Makes the hub call **and** the `local.update` that applies its reply one
-     * critical section, across [read]'s four callers — `load()`, `refresh()`,
-     * a send's follow-up, and the event-triggered refetch above — none of
-     * which otherwise know about each other's coroutines.
+     * critical section, across [requestRead]'s four callers — `load()`,
+     * `refresh()`, a send's follow-up, and the event-triggered refetch above —
+     * none of which otherwise know about each other's coroutines.
      *
      * Both have to be inside the lock, not just the call: locking only
      * `actions.conversation(sessionId)` would still let a second caller
@@ -138,6 +155,40 @@ class SessionViewModel(
      */
     private val fetchLock = Mutex()
 
+    /**
+     * One coalesced request for a fresh read. [first] starts as whatever
+     * created this generation and may be upgraded to `true` later — never
+     * downgraded — if a `load()` is folded into an already-running or
+     * -queued non-first generation; once anything needs the first-load
+     * indicator, this generation needs it until it is done. [done] resolves
+     * once this generation's read has applied or failed — both complete it
+     * normally, matching the rule that a read's failure is reported through
+     * [Local.error] rather than thrown to its callers.
+     */
+    private class Generation(var first: Boolean) {
+        val done = CompletableDeferred<Unit>()
+    }
+
+    /**
+     * Guards [running] and [queued] alone — a short, non-suspending decision,
+     * never the hub call itself (that stays [fetchLock]'s job).
+     */
+    private val queueGate = Mutex()
+
+    /** The generation currently inside [fetchLock], fetching and applying. */
+    private var running: Generation? = null
+
+    /**
+     * The next generation, registered but not yet fetching. A request that
+     * arrives while this is non-null is folded into it: that read has not
+     * started its hub call yet, so it will still answer for whatever
+     * prompted the new request too. A request that arrives once nothing is
+     * queued — whether or not one is [running] — starts a fresh generation,
+     * because a generation already fetching cannot retroactively cover a
+     * request made after its fetch began.
+     */
+    private var queued: Generation? = null
+
     val state: StateFlow<SessionUiState> = combine(fleet.sessions, fleet.status, local) { rows, status, l ->
         assemble(rows.firstOrNull { it.id == sessionId }, status, l)
     }.stateIn(scope, SharingStarted.Eagerly, assemble(row(), fleet.status.value, local.value))
@@ -148,17 +199,21 @@ class SessionViewModel(
         // explicit call would miss an event racing that call.
         scope.launch {
             fleet.sessionChanges
-                .filter { it == sessionId }
+                // `ALL_SESSIONS_CHANGED` is the resync sentinel a `ready` or
+                // `lagged` frame emits once its own refetch has landed — the
+                // open session's reply may have arrived during the gap, so
+                // this screen refetches too, the same as it would for its own id.
+                .filter { it == sessionId || it == ALL_SESSIONS_CHANGED }
                 .debounce(SESSION_EVENT_DEBOUNCE)
-                .collect { read(first = false) }
+                .collect { requestRead(first = false) }
         }
     }
 
     /** The first read, when the screen opens. */
-    fun load(): Job = fetch(first = true)
+    fun load(): Job = scope.launch { requestRead(first = true) }
 
     /** A later read, which folds any new turns onto what is already shown. */
-    fun refresh(): Job = fetch(first = false)
+    fun refresh(): Job = scope.launch { requestRead(first = false) }
 
     fun onDraftChange(text: String) {
         local.update { it.copy(draft = text) }
@@ -191,7 +246,7 @@ class SessionViewModel(
         try {
             actions.sendPrompt(sessionId, text)
             local.update { it.copy(sending = false, draft = "") }
-            read(first = false)
+            requestRead(first = false)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -206,10 +261,44 @@ class SessionViewModel(
 
     private fun row(): SessionRow? = fleet.sessions.value.firstOrNull { it.id == sessionId }
 
-    private fun fetch(first: Boolean): Job = scope.launch { read(first) }
+    /**
+     * Ask for a fresh conversation read, coalescing with whatever is already
+     * queued. Every caller — `load()`, `refresh()`, a send's follow-up, and
+     * the event-triggered subscription — goes through this rather than
+     * calling the hub itself.
+     *
+     * Coalescing exists because none of the four callers know about each
+     * other: without it, a burst of taps or event frames each launches its
+     * own coroutine, and every one of them queues its own hub call behind
+     * [fetchLock] — a call that can take up to the hub's own call timeout —
+     * even though only the *last* one's result will end up on screen. Here, a
+     * request folds into [queued] when one exists (its read has not started
+     * yet, so it will still answer for this request too); otherwise it starts
+     * a new [Generation]. A request is never dropped: whichever generation it
+     * joins, [Generation.done] only resolves once that generation's read has
+     * actually run.
+     */
+    private suspend fun requestRead(first: Boolean) {
+        var created: Generation? = null
+        val target = withQueueGate {
+            val existing = queued
+            if (existing != null) {
+                if (first) existing.first = true
+                existing
+            } else {
+                Generation(first).also {
+                    queued = it
+                    created = it
+                }
+            }
+        }
+        local.update { it.copy(error = null) }
+        if (created != null) scope.launch { runGeneration(target) }
+        target.done.await()
+    }
 
-    private suspend fun read(first: Boolean) {
-        local.update { it.copy(loading = first, error = null) }
+    /** Runs one [Generation]'s hub call and apply, then completes it. */
+    private suspend fun runGeneration(generation: Generation) {
         try {
             // The fetch AND the apply are one critical section: releasing the
             // lock between them would let a second caller's fetch start (and
@@ -217,11 +306,18 @@ class SessionViewModel(
             // which is the same out-of-order-apply race the lock exists to
             // rule out — see [fetchLock].
             fetchLock.withLock {
+                // Committed to fetching now: a request arriving after this
+                // point must get its own successor generation rather than
+                // being folded into a read whose snapshot cannot reflect it.
+                withQueueGate {
+                    if (queued === generation) queued = null
+                    running = generation
+                }
                 val fresh = actions.conversation(sessionId)
                 local.update { it.copy(
-                    conversation = local.value.conversation.appending(fresh),
+                    conversation = it.conversation.appending(fresh),
                     loaded = true,
-                    loading = false,
+                    error = null,
                 ) }
             }
         } catch (e: CancellationException) {
@@ -233,8 +329,32 @@ class SessionViewModel(
             // proceed without waiting on this one's error bookkeeping too.
             // The conversation on screen stays: a failed read is not evidence
             // that what was already said has stopped being true.
-            local.update { it.copy(loading = false, error = explain(t)) }
+            local.update { it.copy(error = explain(t)) }
+        } finally {
+            // `NonCancellable`: this must clear the outstanding flags and
+            // release anything waiting on `done` even when the coroutine
+            // running this generation was itself cancelled (the screen
+            // closing cancels `scope`, which cancels this along with every
+            // other in-flight read) — otherwise a cancelled generation would
+            // leave `loading`/`refreshing` stuck and a coalesced caller's
+            // `done.await()` would hang forever.
+            withContext(NonCancellable) {
+                withQueueGate { if (running === generation) running = null }
+                generation.done.complete(Unit)
+            }
         }
+    }
+
+    /** Mutates [running]/[queued] under [queueGate] and republishes the flags they derive. */
+    private suspend fun <T> withQueueGate(block: () -> T): T = queueGate.withLock {
+        val result = block()
+        local.update {
+            it.copy(
+                loading = running?.first == true || queued?.first == true,
+                refreshing = running?.first == false || queued?.first == false,
+            )
+        }
+        result
     }
 
     private fun assemble(row: SessionRow?, status: ConnectionStatus, l: Local) = SessionUiState(
@@ -243,6 +363,7 @@ class SessionViewModel(
         loaded = l.loaded,
         draft = l.draft,
         loading = l.loading,
+        refreshing = l.refreshing,
         sending = l.sending,
         readOnly = readOnly,
         connected = status is ConnectionStatus.Connected,
