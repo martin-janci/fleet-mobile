@@ -158,16 +158,28 @@ jobs:
           if-no-files-found: warn
 
   macos:
-    name: iOS simulator build
+    name: iOS simulator build and test
     runs-on: macos-15
 
-    # This proves one thing: the Kotlin framework and the Swift host still
-    # link, unsigned, for the iOS Simulator SDK. It proves nothing else —
-    # there is deliberately no simulator RUNTIME on this runner, only the
-    # SDK, so nothing here ever launches the app; no Apple Developer team
-    # identifier is configured, so this is not a signed or device-capable
-    # build; and it never touches the `iphoneos` SDK. See README.md → "What
-    # a Mac still has to check" for everything that still needs a real Mac.
+    # Two things, and it is worth being precise about which is which.
+    #
+    # 1. `xcodebuild` proves the Kotlin framework and the Swift host still
+    #    LINK, unsigned, for the iOS Simulator SDK. It launches nothing: the
+    #    `generic/platform=iOS Simulator` destination needs no simulator
+    #    runtime, no Apple Developer team identifier is configured, so this is
+    #    not a signed or device-capable build, and it never touches the
+    #    `iphoneos` SDK.
+    #
+    # 2. `iosSimulatorArm64Test` RUNS the shared test suite on Kotlin/Native,
+    #    on a booted simulator. Until it was added, every one of those tests
+    #    had only ever executed on the JVM — so the app's whole logic layer
+    #    was asserted against the JVM's Kotlin stdlib, its coroutines and its
+    #    serialization, and merely *compiled* for the platform half the users
+    #    are on. It is also the only thing that has ever executed
+    #    `KeychainSecrets`, which is the one thing this app persists on iOS.
+    #
+    # Neither one runs the app's UI. See README.md → "What a Mac still has to
+    # check" for what still needs a human and a real device.
     steps:
       - uses: actions/checkout@v4
 
@@ -207,3 +219,39 @@ jobs:
           xcodebuild -project iosApp.xcodeproj -scheme iosApp -configuration Debug \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
             ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build
+
+      # The shared suite, on Kotlin/Native rather than on the JVM.
+      #
+      # This is the job that makes the iOS half of "one codebase, two platforms"
+      # a tested claim instead of a compiled one. `./gradlew build` on the Linux
+      # runner compiles the iOS targets — that is what catches a JVM-only API in
+      # commonMain — but it cannot RUN them: `iosSimulatorArm64Test` is disabled
+      # off macOS, and Gradle says so in a warning that is easy to read as
+      # routine. So every assertion about the address parser, the SSE framing,
+      # the conversation merge, the view models' coroutine behaviour and the
+      # token-hygiene rules held for the JVM only, and the platform with the
+      # different string, regex, coroutine and memory implementations was the
+      # one nothing checked.
+      #
+      # `:shared:iosSimulatorArm64Test` is listed by name rather than reached
+      # through `check`: the Xcode build above is this job's other half and
+      # `check` would drag the JVM and Android work onto a macOS runner for
+      # nothing, since the `build` job already did it.
+      #
+      # The Kotlin Gradle plugin boots and shuts a simulator itself (standalone
+      # mode); the runner image carries the runtimes.
+      - name: Shared test suite on Kotlin/Native
+        run: |
+          set -euo pipefail
+          xcrun simctl list runtimes
+          ./gradlew :shared:iosSimulatorArm64Test --stacktrace
+
+      - name: Kotlin/Native test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-reports
+          path: |
+            shared/build/reports/tests/
+            shared/build/test-results/
+          if-no-files-found: warn

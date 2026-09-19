@@ -85,19 +85,78 @@ class CiWorkflowTest {
      *
      * A `DEVELOPMENT_TEAM` or an `iphoneos` SDK would imply a signed,
      * device-capable build that does not exist on this runner — nobody has a
-     * signing identity here, and there is deliberately no simulator runtime
-     * either, only the SDK.
+     * signing identity here. `generic/platform=iOS Simulator` is the
+     * destination that builds without an *installed* runtime, which is why the
+     * build step uses it; the Kotlin/Native test step below is a separate
+     * claim and does boot one.
      */
     @Test
     fun ci_builds_ios_for_the_simulator_only_and_unsigned() {
         assertTrue("xcodebuild" in ci, "the macos job must actually build iosApp now that it links")
         assertTrue(
             "generic/platform=iOS Simulator" in ci,
-            "the generic Simulator destination is the one that needs no simulator runtime installed",
+            "the generic Simulator destination is the one that builds without an installed runtime",
         )
         assertTrue("CODE_SIGNING_ALLOWED=NO" in ci, "nobody has a signing identity on the runner")
         assertTrue("DEVELOPMENT_TEAM" !in ci, "a team id would imply a signed, device-capable build")
         assertTrue("-sdk iphoneos" !in ci, "this job builds for the Simulator, never a device SDK")
+    }
+
+    /**
+     * The shared suite actually RUNS on Kotlin/Native.
+     *
+     * `./gradlew build` on the Linux runner compiles the iOS targets and
+     * **cannot run them**: `iosSimulatorArm64Test` is disabled off macOS and
+     * the Kotlin plugin only warns. So until this step existed, every assertion
+     * in `commonTest` — the address parser, the SSE framing, the conversation
+     * merge, the view models' coroutine behaviour, the token-hygiene rules —
+     * held for the JVM alone, while the platform with the other string, regex,
+     * coroutine and memory implementations was merely compiled. It is also the
+     * only thing that ever executes `KeychainSecrets`, the one thing this app
+     * persists on iOS, and it is the exact counterpart of the emulator job that
+     * exists to execute `AndroidSecrets`.
+     *
+     * Asserted on the command rather than anywhere in the file, for the reason
+     * [ci_runs_the_whole_build] gives: a step keeps its name while the command
+     * under it is replaced by one that proves less.
+     */
+    @Test
+    fun ci_runs_the_shared_suite_on_kotlin_native() {
+        val commands = ci.lineSequence()
+            .filterNot { it.trimStart().startsWith("- name:") }
+            .filterNot { it.trimStart().startsWith("name:") }
+            .filterNot { it.trimStart().startsWith("#") }
+            .filter { "./gradlew" in it }
+            .toList()
+
+        assertTrue(
+            commands.any { "iosSimulatorArm64Test" in it },
+            "the macos job must run :shared:iosSimulatorArm64Test — compiling the iOS targets " +
+                "is not running them; found $commands",
+        )
+    }
+
+    /**
+     * And it runs in the job that has a Mac.
+     *
+     * The same line in the `build` job would not fail: the Kotlin plugin
+     * *disables* the task off macOS and prints a warning, so it would read as
+     * coverage while asserting nothing whatsoever. That is precisely the hole
+     * this pair of tests closes, so it is worth refusing to let it reopen one
+     * job higher up.
+     */
+    @Test
+    fun the_native_suite_runs_on_the_macos_runner() {
+        val macosJob = ci.substringAfter("\n  macos:")
+        assertTrue(macosJob.isNotBlank(), "expected to find the macos: job block")
+        assertTrue(
+            "iosSimulatorArm64Test" in macosJob,
+            "the Kotlin/Native test task is silently disabled anywhere but macOS",
+        )
+        assertTrue(
+            "iosSimulatorArm64Test" !in ci.substringBefore("\n  macos:"),
+            "a disabled task in an earlier job would read as coverage while proving nothing",
+        )
     }
 
     /**
