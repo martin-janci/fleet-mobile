@@ -233,6 +233,25 @@ class FleetSnapshotTest {
         assertSame(two, two.applying(row("project:updated", """{"owner":"o","repo":"r"}""")))
     }
 
+    /** The id a session screen needs in order to know it is the one that changed. */
+    @Test
+    fun sessionId_reads_the_id_off_a_session_row_event() {
+        assertEquals(2L, row("session:updated", sessionPayload(id = 2)).sessionId())
+        assertEquals(1L, row("session:created", sessionPayload(id = 1)).sessionId())
+        assertEquals(9L, row("session:killed", """{"id":9}""").sessionId())
+    }
+
+    @Test
+    fun sessionId_is_null_for_a_row_event_that_is_not_about_a_session() {
+        assertEquals(null, row("host:probed", hostPayload("box")).sessionId())
+        assertEquals(null, row("project:updated", """{"id":1,"owner":"o","repo":"r"}""").sessionId())
+    }
+
+    @Test
+    fun sessionId_is_null_when_the_payload_has_no_id() {
+        assertEquals(null, row("session:killed", """{"no-id-here":true}""").sessionId())
+    }
+
     /**
      * What the stream asks the hub for (`?kinds=`) has to be what the snapshot
      * applies. Subscribe to too little and rows go stale in silence; subscribe

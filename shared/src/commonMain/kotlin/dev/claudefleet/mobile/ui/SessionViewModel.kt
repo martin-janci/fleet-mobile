@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.coroutines.FlowPreview::class)
+
 package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.FleetState
@@ -12,9 +14,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
 
 /** One session's screen: its row, its conversation, and what is being typed. */
 data class SessionUiState(
@@ -49,12 +54,19 @@ data class SessionUiState(
  *
  * The row in the bar comes from the live fleet picture, so the status and the
  * one-line activity follow the event stream with no polling. The conversation
- * does not: `session_conversation` is a tool call, and it is fetched when the
- * screen opens and whenever it is refreshed.
+ * is fetched by a tool call, `session_conversation`, but it is not merely
+ * polled either: this class also refetches on [FleetState.sessionChanges]
+ * whenever the hub reports a row change for *this* session — a reply landing
+ * updates `claude_status` and `current_activity` on the same row the bar
+ * already follows, so the same signal that moves the bar is the cue to pull
+ * the reply in. That subscription is debounced ([SESSION_EVENT_DEBOUNCE]) so a
+ * burst of frames during one turn costs one read, and it runs for as long as
+ * this view model does: the screen owns [scope], so closing the screen stops
+ * it the same way it stops everything else here.
  *
- * A refresh **appends**. The hub answers a rolling window of the tail, so a
- * second read overlaps the first rather than continuing it; see
- * [dev.claudefleet.mobile.model.appending].
+ * A refresh — pull-to-refresh, after a send, or event-triggered — **appends**.
+ * The hub answers a rolling window of the tail, so a second read overlaps the
+ * first rather than continuing it; see [dev.claudefleet.mobile.model.appending].
  *
  * @param canSendPrompts false for a `readonly` credential. `send_prompt` is not
  *   in the hub's readonly allow-list (`READONLY_TOOLS` in `mcp/guard.rs`), so a
@@ -93,6 +105,18 @@ class SessionViewModel(
     val state: StateFlow<SessionUiState> = combine(fleet.sessions, local) { rows, l ->
         assemble(rows.firstOrNull { it.id == sessionId }, l)
     }.stateIn(scope, SharingStarted.Eagerly, assemble(row(), local.value))
+
+    init {
+        // Started here rather than from `load()`: `state` above is already
+        // eager, and a subscription that only exists after the screen's first
+        // explicit call would miss an event racing that call.
+        scope.launch {
+            fleet.sessionChanges
+                .filter { it == sessionId }
+                .debounce(SESSION_EVENT_DEBOUNCE)
+                .collect { read(first = false) }
+        }
+    }
 
     /** The first read, when the screen opens. */
     fun load(): Job = fetch(first = true)
@@ -181,3 +205,14 @@ class SessionViewModel(
         error = l.error,
     )
 }
+
+/**
+ * How long to let `session:*` frames for the open session settle before
+ * refetching its conversation.
+ *
+ * Long enough that the several row updates one turn can produce — working,
+ * then idle, then a final `current_activity` — coalesce into the one read
+ * that actually shows the reply; short enough that the screen still feels
+ * live rather than polled.
+ */
+internal val SESSION_EVENT_DEBOUNCE = 500.milliseconds

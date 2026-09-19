@@ -11,9 +11,13 @@ import dev.claudefleet.mobile.net.HubEvent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlin.time.Duration
@@ -95,6 +99,14 @@ class FleetRepository(
     private val _status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Offline(NOT_STARTED))
     override val status: StateFlow<ConnectionStatus> = _status.asStateFlow()
 
+    // Buffered rather than rendezvous: emitting must never suspend `follow()`
+    // waiting on a session screen that may not be open at all. `DROP_OLDEST`
+    // is fine because this is a hint to refetch, not the fact itself — a
+    // dropped id just means the next one (or the caller's own `ready`/`lagged`
+    // resync) carries the same signal.
+    private val _sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val sessionChanges: Flow<Long> = _sessionChanges.asSharedFlow()
+
     private var job: Job? = null
 
     /** Subscribe, and keep subscribing. Idempotent: a second call is a no-op. */
@@ -147,7 +159,10 @@ class FleetRepository(
                             _status.value = ConnectionStatus.Connected(event.version)
                         }
                         is HubEvent.Lagged -> refresh()
-                        is HubEvent.Row -> publish(snapshot().applying(event))
+                        is HubEvent.Row -> {
+                            publish(snapshot().applying(event))
+                            event.sessionId()?.let { _sessionChanges.tryEmit(it) }
+                        }
                     }
                 }
                 reason = STREAM_CLOSED

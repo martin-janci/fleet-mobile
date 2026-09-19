@@ -14,7 +14,12 @@ import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -50,6 +55,7 @@ private class FakeFleetState(rows: List<SessionRow> = listOf(row())) : FleetStat
     override val hosts = MutableStateFlow(listOf(HostRow(alias = "pine", reachable = true)))
     override val projects = MutableStateFlow(listOf(ProjectRow(id = 1, owner = "o", repo = "r")))
     override val status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Connected("0.9.3"))
+    override val sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override suspend fun refresh() = Unit
 }
 
@@ -333,5 +339,111 @@ class SessionViewModelTest {
 
         val items = vm.state.value.conversation.turns.single().items
         assertTrue((items.first() as ConvItem.Tool).error)
+    }
+
+    // ---- event-driven refresh: issue #2, "conversation does not update live" ----
+
+    private fun TestScope.pastDebounce() =
+        testScheduler.advanceTimeBy(SESSION_EVENT_DEBOUNCE.inWholeMilliseconds + 1)
+
+    @Test
+    fun an_event_for_the_open_session_triggers_one_refetch_after_the_debounce() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "do it")))
+        val fleet = FakeFleetState()
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+        assertEquals(1, actions.reads)
+
+        actions.answer = Conversation(listOf(turn("t1", "do it"), turn("t2", "the reply")))
+        fleet.sessionChanges.tryEmit(ID)
+        runCurrent()
+        assertEquals(1, actions.reads, "the debounce has not elapsed yet")
+
+        pastDebounce()
+        runCurrent()
+
+        assertEquals(2, actions.reads)
+        assertEquals(listOf("do it", "the reply"), vm.state.value.conversation.turns.map { it.prompt })
+    }
+
+    /** Several frames during one turn — working, then idle — must cost one read, not several. */
+    @Test
+    fun a_burst_of_events_for_the_open_session_triggers_one_refetch() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+        assertEquals(1, actions.reads)
+
+        repeat(5) { fleet.sessionChanges.tryEmit(ID) }
+        pastDebounce()
+        runCurrent()
+
+        assertEquals(2, actions.reads, "a burst must coalesce into a single refetch")
+    }
+
+    @Test
+    fun an_event_for_a_different_session_triggers_no_refetch() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+        assertEquals(1, actions.reads)
+
+        fleet.sessionChanges.tryEmit(ID + 1)
+        pastDebounce()
+        runCurrent()
+
+        assertEquals(1, actions.reads, "a change to a session this screen is not open on must not refetch")
+    }
+
+    /** The screen closing cancels the scope it owns; the subscription goes with it. */
+    @Test
+    fun no_refetch_after_the_view_model_is_closed() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        val job = Job()
+        val scope = CoroutineScope(coroutineContext + job)
+        val vm = SessionViewModel(ID, fleet, actions, scope)
+        vm.load().join()
+        assertEquals(1, actions.reads)
+
+        job.cancel()
+        fleet.sessionChanges.tryEmit(ID)
+        pastDebounce()
+        runCurrent()
+
+        assertEquals(1, actions.reads, "a closed screen must not keep refetching")
+    }
+
+    @Test
+    fun a_refetch_the_event_triggers_fails_the_same_way_refresh_does_and_a_later_one_still_works() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "a")))
+        val fleet = FakeFleetState()
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+
+        actions.readFails = HubError.Tool("E_NOTFOUND", "session 42 is gone")
+        fleet.sessionChanges.tryEmit(ID)
+        pastDebounce()
+        runCurrent()
+
+        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error)
+        assertEquals(listOf("t1"), vm.state.value.conversation.turns.map { it.at }, "the turns stay")
+
+        actions.readFails = null
+        actions.answer = Conversation(listOf(turn("t1", "a"), turn("t2", "b")))
+        fleet.sessionChanges.tryEmit(ID)
+        pastDebounce()
+        runCurrent()
+
+        assertNull(vm.state.value.error)
+        assertEquals(
+            listOf("t1", "t2"),
+            vm.state.value.conversation.turns.map { it.at },
+            "a failed event-triggered refetch must not stop the next one",
+        )
     }
 }

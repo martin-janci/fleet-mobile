@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.data
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -23,6 +24,19 @@ interface FleetState {
     val hosts: StateFlow<List<HostRow>>
     val projects: StateFlow<List<ProjectRow>>
     val status: StateFlow<ConnectionStatus>
+
+    /**
+     * The id of a session the hub just reported a row change for —
+     * `session:created`, `session:updated` or `session:killed` — one at a time,
+     * as they arrive.
+     *
+     * A hot flow, not a `StateFlow`: there is no "current" changed session, only
+     * a sequence of them, and a screen that was not collecting when one fired
+     * simply missed it, same as it would miss the row event itself. A session
+     * screen uses this to know when to refetch its conversation; it is *not* the
+     * conversation, which stays a `session_conversation` call.
+     */
+    val sessionChanges: Flow<Long>
 
     /** Re-list everything. Raises rather than swallowing, so a pull-to-refresh can say it failed. */
     suspend fun refresh()

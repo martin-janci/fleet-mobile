@@ -53,6 +53,17 @@ fun FleetSnapshot.applying(event: HubEvent.Row): FleetSnapshot = when (event.nam
     else -> this
 }
 
+/**
+ * The id of the session a `session:*` row event names, or null for any other
+ * kind — `host:probed`, `project:updated` — and for a `session:*` frame whose
+ * payload does not carry one.
+ *
+ * What lets a session screen tell "the hub reported a change for the session
+ * I have open" from every other row event on the same stream, without
+ * decoding the row into a [dev.claudefleet.mobile.model.SessionRow] first.
+ */
+fun HubEvent.Row.sessionId(): Long? = if (name.startsWith("session:")) payload.number("id") else null
+
 private fun FleetSnapshot.upsertSession(payload: JsonElement): FleetSnapshot {
     val incoming = decode(SessionRow.serializer(), payload) ?: return this
     val at = sessions.indexOfFirst { it.id == incoming.id }

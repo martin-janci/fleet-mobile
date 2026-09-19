@@ -21,7 +21,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
@@ -201,6 +203,64 @@ class FleetRepositoryTest {
 
         assertEquals(listOf(1L, 2L), repository.sessions.value.map { it.id })
         assertEquals("s1", repository.sessions.value[0].tmuxName)
+        repository.stop()
+    }
+
+    /**
+     * A session screen needs to know *which* session changed, not just that the
+     * snapshot did, so it can refetch its own conversation and leave every other
+     * open screen alone.
+     */
+    @Test
+    fun a_session_row_event_publishes_its_id_on_sessionChanges() = runTest {
+        val hub = FakeHub(sessionsJson = sessionRows(1, 2))
+        val stream = FakeStream {
+            emit(READY)
+            emit(rowEvent("session:updated", """{"id":2,"tmux_name":"renamed","host_alias":"box"}"""))
+            emit(rowEvent("session:killed", """{"id":1}"""))
+            awaitCancellation()
+        }
+        val repository = repo(hub, stream, backgroundScope)
+        val seen = mutableListOf<Long>()
+        // Subscribed and suspended in `collect` before a single event is sent:
+        // `sessionChanges` has no replay, so a collector that starts after the
+        // fact — like a screen opened after the row already changed — is not
+        // meant to see it, and neither would this test's assertion.
+        val collector = backgroundScope.launch { repository.sessionChanges.collect { seen += it } }
+        runCurrent()
+
+        repository.start()
+        repository.sessions.first { it.size == 1 }
+        // `sessions` and `sessionChanges` are two independent collectors, each
+        // resumed through its own dispatched continuation; the row's removal
+        // from `sessions` is not proof the same event's id has reached the
+        // other flow's collector yet.
+        runCurrent()
+
+        assertEquals(listOf(2L, 1L), seen)
+        collector.cancel()
+        repository.stop()
+    }
+
+    /** `host:probed` and `project:updated` are not about any session. */
+    @Test
+    fun a_non_session_row_event_does_not_touch_sessionChanges() = runTest {
+        val hub = FakeHub(sessionsJson = sessionRows(1))
+        val stream = FakeStream {
+            emit(READY)
+            emit(rowEvent("host:probed", """{"alias":"box"}"""))
+            awaitCancellation()
+        }
+        val repository = repo(hub, stream, backgroundScope)
+        val seen = mutableListOf<Long>()
+        val collector = backgroundScope.launch { repository.sessionChanges.collect { seen += it } }
+        runCurrent()
+
+        repository.start()
+        repository.hosts.first { it.isNotEmpty() }
+
+        assertTrue(seen.isEmpty())
+        collector.cancel()
         repository.stop()
     }
 
