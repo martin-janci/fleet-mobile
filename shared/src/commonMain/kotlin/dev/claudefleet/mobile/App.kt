@@ -93,8 +93,9 @@ class AppContainer(
             // than going through `AppSession.withClient`, so a 401 there has to
             // be routed back to the same rule by hand (review N4). Without this
             // the app sat on a revoked token behind a banner, while the identical
-            // 401 through `HubSessionActions` returned it to Pair.
-            onRevoked = { session.forget() },
+            // 401 through `HubSessionActions` returned it to Pair. `revoke()`,
+            // not `forget()`, so the Pair screen can say why (issue #3).
+            onRevoked = { session.revoke() },
         )
 }
 
@@ -185,6 +186,7 @@ private fun PairRoute(container: AppContainer, onPaired: (PairedHub) -> Unit) {
         onScanned = vm::onScanned,
         onScannerUnavailable = vm::onScannerUnavailable,
         onDismissError = vm::dismissError,
+        onDismissReason = vm::dismissReason,
     )
 }
 

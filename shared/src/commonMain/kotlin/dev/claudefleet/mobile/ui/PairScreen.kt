@@ -56,6 +56,7 @@ fun PairScreen(
     onScanned: (String) -> Unit,
     onScannerUnavailable: (String) -> Unit,
     onDismissError: () -> Unit,
+    onDismissReason: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -74,6 +75,9 @@ fun PairScreen(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         )
 
+        // Why this screen is up rather than the fleet — a 401 dropped the
+        // credential. Absent on a first launch or a user-initiated forget.
+        ErrorBanner(state.reason, onDismiss = onDismissReason)
         ErrorBanner(state.error, onDismiss = onDismissError)
 
         if (state.scanning) {

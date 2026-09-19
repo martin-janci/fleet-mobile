@@ -44,6 +44,13 @@ class AppSession(
     private val _state = MutableStateFlow<AuthState>(AuthState.Unknown)
     override val state: StateFlow<AuthState> = _state.asStateFlow()
 
+    private val _unpairReason = MutableStateFlow<String?>(null)
+    override val unpairReason: StateFlow<String?> = _unpairReason.asStateFlow()
+
+    override fun clearUnpairReason() {
+        _unpairReason.value = null
+    }
+
     /** The credential in hand, or null. */
     fun credentials(): Credentials? = (_state.value as? AuthState.Paired)?.credentials
 
@@ -85,9 +92,32 @@ class AppSession(
         return credentials
     }
 
-    /** Drop the credential. Does not cancel it; see the class comment. */
+    /**
+     * Drop the credential. Does not cancel it; see the class comment.
+     *
+     * User-initiated — Settings' *Forget this hub* is the one caller — so any
+     * [unpairReason] a 401 left standing is cleared rather than carried: this
+     * flip was not the hub's doing, and the Pair screen must not explain itself
+     * with the wrong reason.
+     */
     override suspend fun forget() {
         secrets.clear()
+        _unpairReason.value = null
+        _state.value = AuthState.Unpaired
+    }
+
+    /**
+     * Drop the credential because the hub itself refused it, and record why.
+     *
+     * The one difference from [forget]: [unpairReason] is set rather than
+     * cleared, so the Pair screen can say more than "you are signed out."
+     * [withClient]'s own 401 handling and [FleetRepository]'s `onRevoked`
+     * (wired up in `AppContainer`) are the only two 401 paths in the app, and
+     * both go through here rather than through [forget].
+     */
+    suspend fun revoke() {
+        secrets.clear()
+        _unpairReason.value = REVOKED_REASON
         _state.value = AuthState.Unpaired
     }
 
@@ -112,9 +142,11 @@ class AppSession(
             // to Pair, and a store that refused to forget is the lesser problem
             // of the two. The state deliberately stays `Paired` in that case —
             // publishing `Unpaired` while the token is still on disk is exactly
-            // the lie S3 exists to stop.
+            // the lie S3 exists to stop. `revoke()` mirrors that: `unpairReason`
+            // is set only after `secrets.clear()` returns, so a store that
+            // refuses to forget leaves neither the state nor the reason behind.
             try {
-                forget()
+                revoke()
             } catch (_: Exception) {
                 // Nothing to add: the caller is about to be told about the 401.
             }
@@ -123,6 +155,10 @@ class AppSession(
     }
 
     private companion object {
+        /** [unpairReason]'s text after a 401. Matches the wording `FleetRepository` used to show alone. */
+        const val REVOKED_REASON =
+            "the hub no longer accepts this device's credential. Pair again to carry on."
+
         /**
          * Which base URL to keep after pairing.
          *

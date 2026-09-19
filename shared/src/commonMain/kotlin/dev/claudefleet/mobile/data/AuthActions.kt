@@ -25,6 +25,20 @@ interface AuthActions {
     val state: StateFlow<AuthState>
 
     /**
+     * Why the Pair screen is up instead of the fleet, or null when nothing
+     * explains it — a first launch, a user-initiated [forget], or a reason
+     * already shown and cleared. Only a 401 dropping the credential out from
+     * under the app sets this; [forget] never does.
+     *
+     * Not persisted: it lives for as long as this device's [AppSession] does,
+     * which is exactly as long as the explanation stays true.
+     */
+    val unpairReason: StateFlow<String?>
+
+    /** Clear [unpairReason] once it has been shown, or a new pairing attempt starts. */
+    fun clearUnpairReason()
+
+    /**
      * Redeem [scanned] — a full pair URL or a bare code — for this client's own
      * token. [base] names the hub, and is consulted only when the input does
      * not name one itself.
