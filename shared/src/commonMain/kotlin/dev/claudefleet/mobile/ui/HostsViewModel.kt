@@ -71,17 +71,7 @@ class HostsViewModel(
         )
 
 
-    /**
-     * Clear the banner (review N-B1).
-     *
-     * Two of five screens had one and three did not, and the three without are
-     * where an error can sit longest: a refresh that failed leaves its sentence
-     * on screen until the *next* refresh succeeds, and on a hub that is down
-     * that is never. The banner is not dangerous — the rows behind it are still
-     * the last good picture — but an error a person has read and cannot put away
-     * teaches them to stop reading the banner, which is the one thing it must
-     * not do.
-     */
+    /** Clear the banner. See [SessionsViewModel.dismissError]. */
     fun dismissError() {
         local.update { it.copy(error = null) }
     }

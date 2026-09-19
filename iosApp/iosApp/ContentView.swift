@@ -4,15 +4,9 @@ import Shared
 
 /// The shared Compose UI, wrapped so SwiftUI can place it.
 ///
-/// **`ComposeUIViewController` is not one way of doing this — it is the only
-/// one.** On iOS, Compose Multiplatform installs `LocalLifecycleOwner`, the
-/// window insets and the frame clock from inside the controller that
-/// `MainViewController()` returns. The shared `App` uses `LifecycleStartEffect`
-/// to subscribe to the hub's event stream on resume and drop it on background,
-/// and `WindowInsets.safeDrawing` to clear the notch and the home indicator, so
-/// a host that reached the composables by any other route would not merely look
-/// wrong: there would be no lifecycle owner to resolve, and the app would fail
-/// where it tried.
+/// Wrapping `MainViewController()`'s return value is not optional — see that
+/// function's doc comment in `MainViewController.kt` for why any other route
+/// would fail outright rather than merely look wrong.
 ///
 /// `updateUIViewController` is empty on purpose. Compose keeps its own state
 /// inside the controller and observes the shared flows itself; there is no
