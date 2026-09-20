@@ -34,6 +34,11 @@ import platform.AVFoundation.requestAccessForMediaType
 import platform.CoreGraphics.CGRectZero
 import platform.UIKit.UIView
 import platform.darwin.NSObject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import platform.darwin.DISPATCH_QUEUE_PRIORITY_DEFAULT
+import platform.darwin.dispatch_async
+import platform.darwin.dispatch_get_global_queue
 import platform.darwin.dispatch_get_main_queue
 
 /** Every iPhone this app runs on has a camera; the permission is asked at use. */
@@ -65,8 +70,17 @@ actual fun QrScannerView(
     val delegate = remember { QrMetadataDelegate { code -> scanned(code) } }
     val session = remember { AVCaptureSession() }
 
+    // The one place the session is stopped. `UIKitView`'s `onRelease` is the
+    // other candidate and was doing it too, which was not harmful -- the second
+    // call is a no-op -- but two owners of a teardown is how one of them later
+    // grows a condition the other does not have. This one is the reliable
+    // half: it runs whenever the composable leaves, including on the paths
+    // where the view is never released.
+    //
+    // Off the main queue for the same reason as `startRunning` below:
+    // `stopRunning` blocks until the graph has torn down.
     DisposableEffect(session) {
-        onDispose { if (session.isRunning()) session.stopRunning() }
+        onDispose { session.stopInBackground() }
     }
 
     // Null while the answer is not yet known, which is the state the very first
@@ -106,15 +120,36 @@ actual fun QrScannerView(
     // while the sheet is up would start a session that cannot see anything.
     if (permitted != true) return
 
+    // Why the start is not in `factory`, where it reads more naturally:
+    //
+    //  - `AVCaptureSession.startRunning` is documented as a *blocking* call, and
+    //    `factory` runs on the main thread during layout. On a cold camera it
+    //    takes long enough to drop frames, and the person sees the app freeze
+    //    at the moment they tapped "Scan the QR code".
+    //  - the failure path called `unavailable(...)` from inside `factory`,
+    //    which writes Compose state during composition. That is the recipe for
+    //    a recomposition loop, and it is reached exactly when something is
+    //    already wrong -- another app holding the camera -- so the bug would
+    //    have shown up only on the unhappy path.
+    //
+    // So the composable does the cheap part and the effect does the slow part.
+    var failed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(session) {
+        val started = withContext(Dispatchers.Default) { session.startCapturing(delegate) }
+        if (!started) failed = true
+    }
+
+    LaunchedEffect(failed) {
+        if (failed) unavailable(CAMERA_UNAVAILABLE)
+    }
+
     UIKitView(
         modifier = modifier,
         factory = {
             val view = UIView(frame = CGRectZero.readValue())
-            val started = session.startCapturing(delegate)
-            if (!started) {
-                unavailable(CAMERA_UNAVAILABLE)
-                return@UIKitView view
-            }
+            // The preview layer can be built before the session runs -- it
+            // shows nothing until there are frames, and then it shows them.
             val layer = AVCaptureVideoPreviewLayer(session = session)
             layer.videoGravity = AVLayerVideoGravityResizeAspectFill
             view.layer.addSublayer(layer)
@@ -126,10 +161,14 @@ actual fun QrScannerView(
         update = { view ->
             (view.layer.sublayers?.firstOrNull() as? AVCaptureVideoPreviewLayer)?.setFrame(view.bounds)
         },
-        onRelease = {
-            if (session.isRunning()) session.stopRunning()
-        },
     )
+}
+
+/** `stopRunning` blocks, so it does not belong on the queue that draws. */
+private fun AVCaptureSession.stopInBackground() {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT.toLong(), 0uL)) {
+        if (isRunning()) stopRunning()
+    }
 }
 
 /**
@@ -140,8 +179,15 @@ actual fun QrScannerView(
  * rather than forced. `canAddInput`/`canAddOutput` before `addInput`/`addOutput`
  * is not defensive style: adding an output a session will not take raises an
  * Objective-C exception, which on Kotlin/Native is not catchable.
+ *
+ * `internal` rather than private so `QrScannerCaptureTest` can run it on the
+ * simulator, which has no camera and therefore takes the very first `return
+ * false` -- the only branch here that can be reached without hardware, and
+ * enough to prove the AVFoundation binding links and does not trap.
+ *
+ * Callers must be off the main queue: `startRunning` blocks.
  */
-private fun AVCaptureSession.startCapturing(
+internal fun AVCaptureSession.startCapturing(
     delegate: AVCaptureMetadataOutputObjectsDelegateProtocol,
 ): Boolean {
     val device = AVCaptureDevice.defaultDeviceWithMediaType(AVMediaTypeVideo) ?: return false
