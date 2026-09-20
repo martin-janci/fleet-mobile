@@ -218,19 +218,39 @@ costs one reconnect.
 
 ## Building
 
-You need a JDK 21 and the Android SDK. Point Gradle at the SDK with a
-`local.properties` in the repository root (it is git-ignored):
+You need a JDK 21. Everything else:
 
-```
-sdk.dir=/path/to/Android/Sdk
+```bash
+scripts/bootstrap.sh
 ```
 
-or export `ANDROID_HOME`. The SDK needs **platform `android-37.0`** and
-**build-tools `37.0.0`**:
+It installs the Android command-line tools if they are missing, accepts the
+licences, installs the two SDK packages this build needs, writes
+`local.properties`, and finishes by running the test suite — so a green run
+means the machine is actually ready rather than merely furnished. Re-running it
+is a no-op. `--sdk-dir DIR` puts the SDK somewhere other than
+`$ANDROID_HOME`/`~/Android/Sdk`.
+
+```bash
+scripts/doctor.sh
+```
+
+says what this machine can and cannot run, and what each gap costs. Most
+machines are missing something on purpose — there is no Mac on the box this was
+written on, and no `/dev/kvm` either — and the point is to know which checks
+therefore only ever run in CI, so "it passed locally" is read with the right
+amount of confidence.
+
+By hand, if you would rather: the SDK needs **platform `android-37.0`** and
+**build-tools `37.0.0`**, and `local.properties` needs `sdk.dir=…` (or export
+`ANDROID_HOME`).
 
 ```bash
 sdkmanager --install "platforms;android-37.0" "build-tools;37.0.0"
 ```
+
+Note the minor version. `platforms;android-37` does not exist, and sdkmanager
+reports that by naming the package rather than the mistake.
 
 `compileSdk` is 37 and that is not a preference: Compose Multiplatform 1.12's
 own androidx artifacts and `okhttp-android` 5.5 (which arrives through Ktor)

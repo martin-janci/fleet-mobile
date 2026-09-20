@@ -53,8 +53,14 @@ tasks.matching { it.name == "jvmTest" }.configureEach {
             "androidApp/src/main/AndroidManifest.xml",
             "androidApp/build.gradle.kts",
             "androidApp/src/main/res/xml/data_extraction_rules.xml",
+            // `SetupScriptsTest` reads these two as well: the scripts, and the
+            // versions catalogue it checks them against.
+            "gradle/libs.versions.toml",
+            "README.md",
         ),
     ).withPropertyName("scannedHostFiles").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(rootProject.file("scripts"))
+        .withPropertyName("scannedScripts").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir(rootProject.file(".github/workflows"))
         .withPropertyName("scannedWorkflows").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir(rootProject.file("iosApp/iosApp"))
