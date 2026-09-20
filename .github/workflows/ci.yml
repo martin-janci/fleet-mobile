@@ -255,9 +255,26 @@ jobs:
           print(next(x['udid'] for k in sorted(d) if 'iOS' in k for x in d[k] if x.get('isAvailable')))")
           echo "simulator: $device"
           set -o pipefail
+          # Signed ad-hoc, unlike the build-only step above, and that is the
+          # whole difference between this working and not.
+          #
+          # Keychain access needs an `application-identifier` entitlement, and
+          # entitlements come from signing. Built with `CODE_SIGNING_ALLOWED=NO`
+          # the app launches fine and every Keychain call returns
+          # `errSecMissingEntitlement` (**-34018**) — measured, in the run before
+          # this line existed. A simulator needs no developer identity for this:
+          # `-` is the ad-hoc identity, and the entitlement it synthesises is the
+          # bundle id, which is exactly what a signed app gets on a device. So
+          # this is representative rather than a special case.
+          #
+          # `DEVELOPMENT_TEAM` stays empty and no profile is specified: still no
+          # signed, device-capable build here, and `CiWorkflowTest` still refuses
+          # a team identifier anywhere in this file.
           xcodebuild test -project iosApp.xcodeproj -scheme iosApp -configuration Debug \
             -destination "platform=iOS Simulator,id=$device" \
-            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="-" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
             2>&1 | tee "$RUNNER_TEMP/xcodebuild-test.log"
 
       # Uploaded whether or not the step above passed. An `xcodebuild test`
