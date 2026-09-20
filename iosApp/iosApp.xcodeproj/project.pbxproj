@@ -7,12 +7,25 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5FE0A10000000000000000C3 /* KeychainRoundTripTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FE0A10000000000000000C2 /* KeychainRoundTripTests.swift */; };
 		5FE0A10000000000000000B5 /* iOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FE0A10000000000000000B1 /* iOSApp.swift */; };
 		5FE0A10000000000000000B6 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FE0A10000000000000000B2 /* ContentView.swift */; };
 		5FE0A10000000000000000B7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5FE0A10000000000000000B3 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		5FE0A10000000000000000C9 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5FE0A10000000000000000A1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5FE0A10000000000000000A5;
+			remoteInfo = iosApp;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		5FE0A10000000000000000C1 /* iosAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = iosAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		5FE0A10000000000000000C2 /* KeychainRoundTripTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainRoundTripTests.swift; sourceTree = "<group>"; };
 		5FE0A10000000000000000A6 /* iosApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iosApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5FE0A10000000000000000B1 /* iOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp.swift; sourceTree = "<group>"; };
 		5FE0A10000000000000000B2 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -21,6 +34,13 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		5FE0A10000000000000000C6 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		5FE0A10000000000000000AE /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -31,10 +51,19 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		5FE0A10000000000000000C4 /* iosAppTests */ = {
+			isa = PBXGroup;
+			children = (
+				5FE0A10000000000000000C2 /* KeychainRoundTripTests.swift */,
+			);
+			path = iosAppTests;
+			sourceTree = "<group>";
+		};
 		5FE0A10000000000000000A2 = {
 			isa = PBXGroup;
 			children = (
 				5FE0A10000000000000000A4 /* iosApp */,
+				5FE0A10000000000000000C4 /* iosAppTests */,
 				5FE0A10000000000000000A3 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -43,6 +72,7 @@
 			isa = PBXGroup;
 			children = (
 				5FE0A10000000000000000A6 /* iosApp.app */,
+				5FE0A10000000000000000C1 /* iosAppTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -61,6 +91,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		5FE0A10000000000000000C8 /* iosAppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5FE0A10000000000000000CD /* Build configuration list for PBXNativeTarget "iosAppTests" */;
+			buildPhases = (
+				5FE0A10000000000000000C5 /* Sources */,
+				5FE0A10000000000000000C6 /* Frameworks */,
+				5FE0A10000000000000000C7 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				5FE0A10000000000000000CA /* PBXTargetDependency */,
+			);
+			name = iosAppTests;
+			productName = iosAppTests;
+			productReference = 5FE0A10000000000000000C1 /* iosAppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		5FE0A10000000000000000A5 /* iosApp */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 5FE0A10000000000000000A8 /* Build configuration list for PBXNativeTarget "iosApp" */;
@@ -92,6 +140,10 @@
 					5FE0A10000000000000000A5 = {
 						CreatedOnToolsVersion = 16.0;
 					};
+					5FE0A10000000000000000C8 = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = 5FE0A10000000000000000A5;
+					};
 				};
 			};
 			buildConfigurationList = 5FE0A10000000000000000A7 /* Build configuration list for PBXProject "iosApp" */;
@@ -108,11 +160,19 @@
 			projectRoot = "";
 			targets = (
 				5FE0A10000000000000000A5 /* iosApp */,
+				5FE0A10000000000000000C8 /* iosAppTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		5FE0A10000000000000000C7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		5FE0A10000000000000000AF /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -147,6 +207,14 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		5FE0A10000000000000000C5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5FE0A10000000000000000C3 /* KeychainRoundTripTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		5FE0A10000000000000000AD /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -158,7 +226,63 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		5FE0A10000000000000000CA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5FE0A10000000000000000A5 /* iosApp */;
+			targetProxy = 5FE0A10000000000000000C9 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		5FE0A10000000000000000CB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.claudefleet.mobile.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/iosApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/iosApp";
+			};
+			name = Debug;
+		};
+		5FE0A10000000000000000CC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.claudefleet.mobile.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/iosApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/iosApp";
+			};
+			name = Release;
+		};
 		5FE0A10000000000000000A9 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -276,6 +400,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		5FE0A10000000000000000CD /* Build configuration list for PBXNativeTarget "iosAppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5FE0A10000000000000000CB /* Debug */,
+				5FE0A10000000000000000CC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		5FE0A10000000000000000A7 /* Build configuration list for PBXProject "iosApp" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

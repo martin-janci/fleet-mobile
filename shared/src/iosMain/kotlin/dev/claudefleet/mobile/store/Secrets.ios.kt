@@ -62,16 +62,24 @@ import platform.Security.kSecValueData
  * Nothing here logs, and [KeychainFailure] carries an `OSStatus` — never the
  * value it failed to store.
  *
- * **Half run.** `KeychainSecretsTest` executes this class on a simulator in CI,
- * but a Kotlin/Native test binary is launched with `simctl spawn` rather than
- * installed, so it holds no `keychain-access-group` entitlement and `securityd`
- * answers `errSecNotAvailable` to everything. What that covers is the refusal
- * path — an unreadable store reading as "not paired" rather than crashing the
- * app, and a write or clear that cannot land throwing rather than lying — which
- * is the half nothing covered before and is also the production case this
- * accessibility choice invites (see [requireDeleted]). What it does not cover is
- * a real item surviving a write and a read, which needs an XCTest target hosted
- * by `iosApp`. See `README.md` → *What a Mac still has to check*.
+ * **Run, both halves.** Two suites in CI cover this class from opposite ends.
+ *
+ * `KeychainSecretsTest` (`shared/src/iosTest`) runs under `simctl spawn`, so the
+ * binary is not an installed app, holds no entitlement, and `securityd` answers
+ * `errSecNotAvailable` to everything. That makes it a good test of the
+ * **refusal** path — an unreadable store reading as "not paired" rather than
+ * crashing the app, and a write or clear that cannot land throwing rather than
+ * lying — which is the production case this accessibility choice invites (see
+ * [requireDeleted]).
+ *
+ * `KeychainRoundTripTests` (`iosApp/iosAppTests`) is an XCTest bundle hosted by
+ * the app, so it runs inside the app's process, under its bundle identifier and
+ * its entitlements, and does the **real** round trip: write, read back, replace,
+ * clear, two accounts kept apart, and a non-ASCII name across the C boundary.
+ * It needs the app to be *signed* — ad-hoc is enough on a simulator, and the
+ * entitlement that synthesises is the bundle id, the same one a signed app gets
+ * on a device. Without signing every call returns `errSecMissingEntitlement`
+ * (-34018), which is measured, not assumed.
  */
 @OptIn(ExperimentalForeignApi::class)
 class KeychainSecrets(

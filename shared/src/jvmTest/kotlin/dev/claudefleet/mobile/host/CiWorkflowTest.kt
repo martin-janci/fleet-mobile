@@ -1,6 +1,8 @@
 package dev.claudefleet.mobile.host
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -97,9 +99,33 @@ class CiWorkflowTest {
             "generic/platform=iOS Simulator" in ci,
             "the generic Simulator destination is the one that builds without an installed runtime",
         )
-        assertTrue("CODE_SIGNING_ALLOWED=NO" in ci, "nobody has a signing identity on the runner")
-        assertTrue("DEVELOPMENT_TEAM" !in ci, "a team id would imply a signed, device-capable build")
+        assertTrue("CODE_SIGNING_ALLOWED=NO" in ci, "the build-only step stays unsigned")
         assertTrue("-sdk iphoneos" !in ci, "this job builds for the Simulator, never a device SDK")
+
+        // An *assignment*, not a mention. The test step signs ad-hoc so that
+        // the Keychain has an `application-identifier` entitlement to work
+        // from, and the comment explaining that necessarily names
+        // `DEVELOPMENT_TEAM` to say it stays empty. A bare `in ci` check reads
+        // that prose as a violation — the same trap `ToolsTheAppMayCallTest`
+        // avoids by matching quoted names rather than any occurrence.
+        //
+        // What must stay true is that no team identifier is ever *set*, which
+        // is what would imply a signed, device-capable build.
+        val assignsTeam = ci.lineSequence()
+            .filterNot { it.trimStart().startsWith("#") }
+            .any { Regex("""DEVELOPMENT_TEAM\s*[=:]\s*\S""").containsMatchIn(it) }
+        assertFalse(assignsTeam, "a team id would imply a signed, device-capable build")
+
+        // And ad-hoc is the only identity allowed: `-` needs no developer
+        // account and synthesises the bundle id as the entitlement, which is
+        // what a real signed app gets. Anything else would be a real identity.
+        val identities = Regex("""CODE_SIGN_IDENTITY="?([^"\s]*)"?""")
+            .findAll(ci).map { it.groupValues[1] }.toList()
+        assertEquals(
+            identities.filterNot { it == "-" },
+            emptyList(),
+            "only the ad-hoc identity may appear; found $identities",
+        )
     }
 
     /**

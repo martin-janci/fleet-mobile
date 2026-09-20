@@ -24,6 +24,43 @@ plugins {
 tasks.matching { it.name == "copyAndroidDeviceTestComposeResourcesToAndroidAssets" }
     .configureEach { enabled = false }
 
+/**
+ * The host tests read files Gradle does not otherwise know about.
+ *
+ * `IosHostTest`, `AndroidHostTest`, `CiWorkflowTest` and `ReleaseWorkflowTest`
+ * scan the repository itself — `Info.plist`, `project.pbxproj`, the manifest,
+ * the workflows — through `Repo.file(...)` at run time. None of that is a
+ * declared input, so `jvmTest` stays UP-TO-DATE when one of those files
+ * changes and the scan silently does not re-run.
+ *
+ * That is not theoretical: deleting `CADisableMinimumFrameDurationOnPhone`
+ * from `Info.plist` and running `./gradlew :shared:jvmTest` reported success,
+ * because the task never executed. CI is a fresh checkout and always runs, so
+ * this only ever misleads someone working locally — which is exactly who is
+ * editing those files and asking whether they got it right.
+ *
+ * Declaring them makes the answer honest without `--rerun-tasks`.
+ */
+// `matching { }.configureEach { }`, not `named(...)`: the Kotlin Multiplatform
+// plugin registers `jvmTest` after this file is evaluated, so looking it up by
+// name here fails with "Task with name 'jvmTest' not found". Same idiom as the
+// Compose-resources workaround above.
+tasks.matching { it.name == "jvmTest" }.configureEach {
+    inputs.files(
+        rootProject.files(
+            "iosApp/iosApp/Info.plist",
+            "iosApp/iosApp.xcodeproj/project.pbxproj",
+            "androidApp/src/main/AndroidManifest.xml",
+            "androidApp/build.gradle.kts",
+            "androidApp/src/main/res/xml/data_extraction_rules.xml",
+        ),
+    ).withPropertyName("scannedHostFiles").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(rootProject.file(".github/workflows"))
+        .withPropertyName("scannedWorkflows").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(rootProject.file("iosApp/iosApp"))
+        .withPropertyName("scannedSwiftHost").withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
 kotlin {
     jvmToolchain(21)
 

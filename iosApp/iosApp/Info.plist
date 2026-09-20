@@ -67,6 +67,32 @@
 		<true/>
 	</dict>
 
+	<!--
+	  THE OTHER KEY THIS APP CANNOT SHIP WITHOUT, and the one that was missing.
+
+	  Compose Multiplatform's iOS runtime REFUSES TO START without it: it throws
+	  `IllegalStateException: Info.plist doesn't have a valid
+	  CADisableMinimumFrameDurationOnPhone entry, or has it set to false`, which
+	  on iOS is an uncaught Kotlin exception and a dead app. Not a degraded
+	  frame rate — no first frame at all.
+
+	  It had been absent since the host was written, and nothing noticed, because
+	  nothing had ever LAUNCHED the app. The macOS CI job builds `iosApp` and
+	  never runs it; `iosSimulatorArm64Test` runs a bare binary with no UI. The
+	  XCTest bundle added alongside this change is the first thing that starts
+	  the app, and it found this on its first run — before it got as far as the
+	  Keychain it was written for.
+
+	  What the key actually does: it opts the app out of the 60 Hz frame-duration
+	  cap on ProMotion displays, so Compose can drive 120 Hz. Apple gates that
+	  behind an explicit opt-in; Compose requires the opt-in rather than adapting
+	  to its absence.
+
+	  `IosHostTest` fails if this key is removed or set to false.
+	-->
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
