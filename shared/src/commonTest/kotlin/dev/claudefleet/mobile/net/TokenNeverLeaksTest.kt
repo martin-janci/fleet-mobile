@@ -8,6 +8,8 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
 import dev.claudefleet.mobile.model.PairResult
+import kotlinx.serialization.SerializationException
+import kotlin.test.assertNull
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
@@ -342,3 +344,82 @@ class RedactionIsCaseInsensitiveTest {
         assertTrue("<redacted>" in safe, safe)
     }
 }
+
+/**
+ * The scrubbing rules, at the edges mutation found unguarded.
+ *
+ * Each of these was a mutation that survived the whole suite: the code was
+ * right, and nothing said so.
+ */
+class ScrubbingEdgesTest {
+
+    /**
+     * A `SerializationException` **wrapped in something else** still costs the
+     * cause.
+     *
+     * `safeCause` walks the whole chain with `.any { it is SerializationException }`,
+     * and `.all { … }` passed every test — because every test threw a bare one,
+     * where `any` and `all` agree. They disagree precisely when the parser's
+     * exception arrives inside another, which is the ordinary case: Ktor wraps,
+     * and so does anything between. Under `all`, the cause is kept, and a
+     * `SerializationException` quotes the document it failed on — which for the
+     * pair reply is the token, as the first field.
+     */
+    @Test
+    fun a_nested_serialization_failure_still_loses_its_cause() {
+        val quoting = SerializationException("""Unexpected JSON token at offset 9: {"token":"$TOKEN"}""")
+
+        val wrapped = HubError.Transport(IllegalStateException("reading the reply", quoting))
+
+        assertNull(wrapped.cause, "a chain containing one is enough to drop the whole chain")
+        assertSilentAbout(TOKEN, wrapped)
+    }
+
+    /** The bare case still behaves, so the rule is not simply inverted. */
+    @Test
+    fun a_bare_serialization_failure_loses_its_cause_too() {
+        val failure = HubError.Transport(SerializationException("""{"token":"$TOKEN"}"""))
+
+        assertNull(failure.cause)
+        assertSilentAbout(TOKEN, failure)
+    }
+
+    /** And an unrelated cause is kept, because a stack trace is worth having. */
+    @Test
+    fun an_ordinary_failure_keeps_its_cause() {
+        val cause = IllegalStateException("connection reset")
+
+        assertEquals(cause, HubError.Transport(cause).cause, "only the quoting kind is dropped")
+    }
+
+    /**
+     * The body cap keeps the **start** of the page, and admits exactly its
+     * stated length.
+     *
+     * Two mutations survived here. `.take(MAX)` to `.takeLast(MAX)` passed
+     * because the only test asserted the *length* of what survived and never
+     * which end — and the end that matters is the first, where a proxy puts its
+     * status line and its reason. And `length > MAX` to `>=` passed because no
+     * body was ever exactly `MAX` long, so a page of precisely that size would
+     * have been marked truncated and had a character removed for nothing.
+     */
+    @Test
+    fun the_body_cap_keeps_the_beginning_and_admits_exactly_its_length() {
+        val page = "502 Bad Gateway from proxy" + "x".repeat(4000)
+
+        val capped = redacted(page)
+
+        assertTrue(capped.startsWith("502 Bad Gateway from proxy"), "the useful end is the first one")
+        assertTrue(capped.endsWith("… (truncated)"))
+
+        val exact = "y".repeat(MAX_ERROR_BODY_FOR_TEST)
+        assertEquals(exact, redacted(exact), "a body of exactly the cap is not truncated")
+        assertTrue(
+            redacted("z".repeat(MAX_ERROR_BODY_FOR_TEST + 1)).endsWith("… (truncated)"),
+            "one character more is",
+        )
+    }
+}
+
+/** Mirrors the private cap in `HubError.kt`; the test above pins the boundary. */
+private const val MAX_ERROR_BODY_FOR_TEST = 1_000

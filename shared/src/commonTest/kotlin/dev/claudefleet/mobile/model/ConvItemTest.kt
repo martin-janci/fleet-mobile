@@ -90,3 +90,47 @@ class ConvItemTest {
         assertTrue(ConvItem.Unsupported("thinking").label.isNotBlank())
     }
 }
+
+/**
+ * What the list and the session bar actually print.
+ *
+ * `SessionRow.displayName` and `ProjectRow.label` are the two strings a person
+ * reads on every screen, and mutation found both unpinned: `isNotBlank` could
+ * become `isBlank` in either, and `&&` could become `||` in the project label,
+ * with the whole suite green. Only the project *fallback* ("project #7") was
+ * ever asserted — the two branches above it were not.
+ */
+class RowLabelTest {
+
+    private fun row(friendly: String?, tmux: String) =
+        SessionRow(id = 1, tmuxName = tmux, friendlyName = friendly)
+
+    @Test
+    fun a_session_shows_the_agents_own_name_when_it_has_one() {
+        assertEquals("fixing the parser", row("fixing the parser", "sess-1").displayName)
+    }
+
+    @Test
+    fun and_falls_back_to_the_tmux_name_when_it_does_not() {
+        assertEquals("sess-1", row(null, "sess-1").displayName, "null friendly name")
+        assertEquals("sess-1", row("", "sess-1").displayName, "empty is not a name")
+        assertEquals("sess-1", row("   ", "sess-1").displayName, "nor is whitespace")
+    }
+
+    @Test
+    fun a_project_is_owner_slash_repo_when_it_has_both() {
+        assertEquals("martin-janci/fleet-mobile", ProjectRow(1, "martin-janci", "fleet-mobile").label)
+    }
+
+    @Test
+    fun a_project_with_only_a_repo_is_named_by_it() {
+        assertEquals("fleet-mobile", ProjectRow(1, "", "fleet-mobile").label, "no owner")
+        assertEquals("fleet-mobile", ProjectRow(1, "   ", "fleet-mobile").label, "blank owner")
+    }
+
+    @Test
+    fun a_project_with_neither_falls_back_to_its_id() {
+        assertEquals("project #7", ProjectRow(7, "", "").label)
+        assertEquals("project #7", ProjectRow(7, "owner", "").label, "an owner alone is not a name")
+    }
+}

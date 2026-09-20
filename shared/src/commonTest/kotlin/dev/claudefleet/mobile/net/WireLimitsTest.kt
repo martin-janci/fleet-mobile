@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.net
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.request.get
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
@@ -314,4 +315,53 @@ class WireLimitsTest {
 
     @Suppress("unused")
     private fun unusedJsonElement(e: JsonElement) = e
+}
+
+/**
+ * The reply ceiling's own boundary, tested against a small limit.
+ *
+ * [textWithin] reads `limit + 1` bytes and fails on the extra one, so the
+ * interesting inputs are exactly `limit` and exactly `limit + 1`. The test
+ * above uses `MAX_RESPONSE_BYTES + 4096`, which proves refusal but never the
+ * other side, and `bytes.size > limit` survived as `>=` — a ceiling that
+ * refuses a reply of precisely its stated size.
+ *
+ * Driven through [textWithin] with a tiny limit rather than through
+ * `HubClient` with an eight-megabyte body: the boundary is the same one, and
+ * allocating 8 MiB twice to prove an off-by-one is a slow way to learn it.
+ */
+class ReplyCeilingBoundaryTest {
+
+    private suspend fun readWithin(body: String, limit: Int): String {
+        val client = HttpClient(MockEngine { respond(body, HttpStatusCode.OK) })
+        return client.get("https://fleet.example.com/x").textWithin(limit)
+    }
+
+    @Test
+    fun a_reply_of_exactly_the_ceiling_is_read_whole() = runTest {
+        val exact = "a".repeat(64)
+
+        assertEquals(exact, readWithin(exact, 64), "exactly the ceiling is allowed")
+    }
+
+    @Test
+    fun one_byte_past_the_ceiling_is_refused() = runTest {
+        val over = "a".repeat(65)
+
+        val refusal = assertFailsWith<HubError.TooLarge> { readWithin(over, 64) }
+        assertEquals(64, refusal.limit)
+        assertEquals(HUB_REPLY, refusal.what)
+    }
+
+    /** The ceiling counts bytes, not characters. */
+    @Test
+    fun the_ceiling_counts_bytes_rather_than_characters() = runTest {
+        // Four characters, ten bytes of UTF-8.
+        val multibyte = "🛰kuchyňa".take(4)
+        val bytes = multibyte.encodeToByteArray().size
+        assertTrue(bytes > multibyte.length, "the fixture must actually be multi-byte")
+
+        assertEquals(multibyte, readWithin(multibyte, bytes), "its byte length is the measure")
+        assertFailsWith<HubError.TooLarge> { readWithin(multibyte, bytes - 1) }
+    }
 }
