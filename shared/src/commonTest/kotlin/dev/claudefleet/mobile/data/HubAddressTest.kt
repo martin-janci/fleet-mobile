@@ -425,3 +425,104 @@ class ZoneIdTest {
         assertTrue(permitsCleartext("http://[fe80::1%25en0]:8899"), "link-local is this network")
     }
 }
+
+/**
+ * The address rules at the edges mutation found unguarded.
+ *
+ * Every case here is one where the code was right and no test said so. Two of
+ * them decide whether a bearer token may cross a plain `http` connection, which
+ * is the one decision in this file worth being pedantic about.
+ */
+class AddressEdgesTest {
+
+    /**
+     * Link-local is `169.254/16` — **both** octets, not either.
+     *
+     * `a == 169L && b == 254L` survived as `||`, which would have read every
+     * `169.x.x.x` and every `x.254.x.x` as this network and let plain http
+     * reach them. `169.1.1.1` is ordinary public space; `8.254.0.1` is Level 3.
+     * The existing range test covers the `172.16/12` and `100.64/10` edges and
+     * stops short of this one.
+     */
+    @Test
+    fun link_local_needs_both_octets() {
+        assertEquals("http://169.254.1.1:8899", hubBase("http://169.254.1.1:8899"), "169.254/16 is link-local")
+        assertNull(hubBase("http://169.1.1.1:8899"), "169.anything is not")
+        assertNull(hubBase("http://8.254.0.1:8899"), "anything.254 is not either")
+        assertNull(hubBase("http://169.253.1.1:8899"))
+        assertNull(hubBase("http://169.255.1.1:8899"))
+    }
+
+    /**
+     * A bracketed IPv6 literal still has to carry a *port*, not merely a colon.
+     *
+     * `after.startsWith(":") && after.drop(1).isPort()` survived as `||`, which
+     * accepts `[::1]:notaport` — the two halves only disagree when there is a
+     * colon followed by something that is not a number. The existing
+     * port test uses an unbracketed host, so the bracket branch was never
+     * exercised with a bad port.
+     */
+    @Test
+    fun a_bracketed_address_with_a_bad_port_is_refused() {
+        assertNull(hubBase("http://[::1]:notaport"))
+        assertNull(hubBase("http://[::1]:99999"))
+        assertNull(hubBase("http://[::1]:"))
+        assertEquals("http://[::1]:8899", hubBase("http://[::1]:8899"), "and a good one is kept")
+        assertEquals("http://[::1]", hubBase("http://[::1]"), "as is no port at all")
+    }
+
+    /**
+     * The last part of an `inet_aton` address has to fit the bits it covers.
+     *
+     * `value >= (1L shl tailBits)` survived as `>`, admitting exactly one value
+     * too many — `256` where the tail covers eight bits.
+     *
+     * The first draft of this test asserted it through [isLoopbackUrl] and
+     * failed, for a reason worth keeping: `127.0.0.256` is caught by the
+     * deliberate `startsWith("127.")` over-match long before the numeric
+     * parser, and that over-match fails *safe*. Where the ceiling actually
+     * decides something is [permitsCleartext], where the same parser answers a
+     * question that fails **open**: accept the oversized part and
+     * `10.0.0.256` parses as `0x0A000100`, whose first octet is 10 — so a
+     * bearer token would be allowed over plain http to a name that is not an
+     * address at all.
+     */
+    @Test
+    fun an_oversized_part_is_not_a_private_address() {
+        assertEquals(
+            "http://10.0.0.255:8899",
+            hubBase("http://10.0.0.255:8899"),
+            "255 fits the last octet, so this is 10/8 and cleartext is fine",
+        )
+        assertNull(hubBase("http://10.0.0.256:8899"), "256 does not fit, so this is not an address")
+        assertFalse(permitsCleartext("http://10.0.0.256:8899"))
+        assertFalse(permitsCleartext("http://192.168.1.256:8899"))
+        // Deliberately NOT asserted here: `http://4294967296` IS permitted, and
+        // correctly so — it has no dots, so it is a single label, and the rule
+        // is that a single label cannot be a public name. The ceiling decides
+        // dotted forms; the label rule decides that one.
+    }
+
+    /**
+     * A hub mounted under a path prefix is judged on its host, not its path.
+     *
+     * `substringBefore('/')` survived as `substringAfter('/')` because every
+     * test address stops at the port. The two agree exactly when there is no
+     * path — which was every case — and disagree the moment a hub is mounted
+     * behind a reverse proxy at `/fleet`, which the design explicitly supports.
+     */
+    @Test
+    fun a_path_prefix_does_not_change_which_host_is_judged() {
+        assertTrue(isLoopbackUrl("http://127.0.0.1:8899/fleet"), "the host is still loopback")
+        assertTrue(permitsCleartext("http://192.168.1.5:8899/fleet"), "and still this network")
+        assertFalse(isLoopbackUrl("https://hub.example.com/127.0.0.1"), "a path is not a host")
+        assertFalse(permitsCleartext("http://hub.example.com/fleethub"), "nor is it a single label")
+    }
+
+    /** An IPv6 literal with an empty group is not an address. */
+    @Test
+    fun an_ipv6_literal_with_an_empty_group_is_refused() {
+        assertFalse(isLoopbackUrl("http://[1:::1]:8899"))
+        assertFalse(isLoopbackUrl("http://[:1:2:3:4:5:6:7]:8899"))
+    }
+}

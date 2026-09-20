@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -199,4 +200,68 @@ class JsonDepthTest {
         HUB,
         TOKEN,
     )
+}
+
+/**
+ * The scanner's own state, which the depth guard rests on entirely.
+ *
+ * [nestsWithin] is a hand-rolled scanner, and a scanner is only as good as the
+ * flags it starts with. Mutation found that `escaped` could start `true` with
+ * the whole suite green — and that is not a cosmetic difference. With `escaped`
+ * true, the first character *inside the first string* is consumed as an escape;
+ * for an empty string `""` that character is the closing quote, so the string
+ * never ends, the entire rest of the document is read as string content, and
+ * nothing after it is counted as structure.
+ *
+ * Measured: `{"":` followed by five hundred nested arrays reads as **depth 1**
+ * under that mutation and is waved through. The guard exists to stop exactly
+ * that document, and `{"…"}` — an empty string early in the payload — is
+ * unremarkable JSON that a hub could send any day.
+ *
+ * So these pin the scanner rather than the ceiling: the thing the ceiling is
+ * computed from has to survive the string cases first.
+ */
+class JsonScannerTest {
+
+    private fun deep(depth: Int = MAX_JSON_DEPTH + 50) = "[".repeat(depth) + "]".repeat(depth)
+
+    /** An empty string must not swallow the rest of the document. */
+    @Test
+    fun an_empty_string_does_not_blind_the_scanner() {
+        assertFalse(nestsWithin("""{"":${deep()}}""", MAX_JSON_DEPTH), "the nesting is still there")
+        assertFalse(nestsWithin("""{"a":"","b":${deep()}}""", MAX_JSON_DEPTH))
+        assertFalse(nestsWithin("""["","","",${deep()}]""", MAX_JSON_DEPTH))
+    }
+
+    /** Nor may an escape sequence at the very start of a string. */
+    @Test
+    fun an_escape_at_the_start_of_a_string_does_not_blind_the_scanner() {
+        assertFalse(nestsWithin("""{"\"":${deep()}}""", MAX_JSON_DEPTH), "an escaped quote opens nothing")
+        assertFalse(nestsWithin("""{"\\":${deep()}}""", MAX_JSON_DEPTH), "an escaped backslash ends there")
+    }
+
+    /** And the ordinary shapes those cases are carved out of still pass. */
+    @Test
+    fun the_same_documents_without_the_nesting_are_fine() {
+        assertTrue(nestsWithin("""{"":1}""", MAX_JSON_DEPTH))
+        assertTrue(nestsWithin("""{"\"":"he said \"hi\""}""", MAX_JSON_DEPTH))
+        assertTrue(nestsWithin("""{"a":"","b":[1,2,3]}""", MAX_JSON_DEPTH))
+    }
+
+    /** The guard is reached through a real reply, not only by calling it directly. */
+    @Test
+    fun a_reply_whose_nesting_hides_behind_an_empty_string_is_still_refused() = runTest {
+        val envelope = """{"jsonrpc":"2.0","id":1,"result":{"":${deep()}}}"""
+        val client = HubClient(
+            HttpClient(
+                MockEngine {
+                    respond(envelope, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
+                },
+            ),
+            "https://fleet.example.com",
+            "clt_5f3a9c1e7b2d4a86",
+        )
+
+        assertFailsWith<HubError.TooLarge> { client.listSessions() }
+    }
 }

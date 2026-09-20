@@ -752,3 +752,38 @@ class SpentCodeTest {
         assertFalse("spent" in explain(failure), "nothing was issued, so nothing was spent")
     }
 }
+
+/**
+ * One wrong character is enough to refuse a code.
+ *
+ * `cleaned.any { it !in ALPHABET }` survived as `.all { … }`, which refuses a
+ * code only when **every** character is outside Crockford's alphabet. One bad
+ * character — the ordinary way a dictated code goes wrong — would have been
+ * accepted and posted to the hub, which is precisely the "find out from an
+ * error" the app is built to avoid, and it spends a rate-limiter attempt to
+ * learn what the alphabet already said.
+ */
+class CodeAlphabetTest {
+
+    @Test
+    fun a_single_character_outside_the_alphabet_refuses_the_whole_code() {
+        for (bad in listOf("ABCDEFG!", "ABCDEF#H", "$ BCDEFGH".trim().padEnd(8, 'H'), "ABCDEFGU")) {
+            assertNull(PairTarget.normalizeCode(bad), "\"$bad\" is not a code the hub can have minted")
+        }
+    }
+
+    /** `U` in particular: Crockford excludes it and it folds to nothing. */
+    @Test
+    fun u_is_refused_rather_than_folded() {
+        assertNull(PairTarget.normalizeCode("ABCDEFGU"))
+        assertEquals("ABCDEFG1", PairTarget.normalizeCode("ABCDEFGI"), "I folds to 1")
+        assertEquals("ABCDEFG0", PairTarget.normalizeCode("ABCDEFGO"), "O folds to 0")
+    }
+
+    /** And a wholly good code still passes, so the rule is not simply inverted. */
+    @Test
+    fun a_good_code_is_still_a_good_code() {
+        assertEquals("ABCDEFGH", PairTarget.normalizeCode("abcdefgh"))
+        assertEquals("ABCDEFGH", PairTarget.normalizeCode("ABCD-EFGH"), "separators come out")
+    }
+}
