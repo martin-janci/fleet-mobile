@@ -53,13 +53,31 @@ tasks.matching { it.name == "jvmTest" }.configureEach {
     // path "survived" by never running. A directory cannot be forgotten the
     // next time somebody scans one more file inside it.
     //
-    // `shared/src` needs no entry: it is already the compilation's own input.
-    for (dir in listOf("androidApp/src", "iosApp", "scripts", ".github/workflows")) {
+    // `shared/src` is here too, and the fourth instance of the same bug is why.
+    // It was left out on the reasoning that it is "already the compilation's own
+    // input" — which is true of `commonMain` and `jvmMain`, and false of
+    // `iosMain` and `androidMain`, neither of which a JVM test compiles. But
+    // `Repo.shipped` walks all of `shared/src`, and `IosHostTest` reads
+    // `MainViewController.kt` by name, so edits there changed what the tests
+    // should say while the task reported UP-TO-DATE. `HostScanInputsTest` now
+    // checks this list against the paths the tests actually read.
+    for (dir in listOf("shared/src", "androidApp/src", "iosApp", "scripts", ".github/workflows")) {
         inputs.dir(rootProject.file(dir))
             .withPropertyName("scanned-$dir")
             .withPathSensitivity(PathSensitivity.RELATIVE)
     }
-    inputs.files(rootProject.files("gradle/libs.versions.toml", "README.md"))
+    // The files with no directory of their own to name. `.gitignore` is read
+    // by `RepoHygieneTest` and this build script by `IosHostTest`; both were
+    // missing, which is what `HostScanInputsTest` was written to find and
+    // found on its first run.
+    inputs.files(
+        rootProject.files(
+            "gradle/libs.versions.toml",
+            "README.md",
+            ".gitignore",
+            "shared/build.gradle.kts",
+        ),
+    )
         .withPropertyName("scannedRootFiles")
         .withPathSensitivity(PathSensitivity.RELATIVE)
 }
