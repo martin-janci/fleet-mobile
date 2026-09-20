@@ -110,6 +110,25 @@ class SetupScriptsTest {
         assertTrue("./gradlew" in bootstrap, "bootstrap.sh must finish by actually building")
     }
 
+    /**
+     * The command-line tools are fetched for the host actually running.
+     *
+     * The archives are published per OS and are not interchangeable: the Linux
+     * one unpacks happily on a Mac and then fails with a missing-binary error a
+     * long way from the cause. The first version of this script hard-coded
+     * `-linux-`, which would have been a puzzle for the first person to run it
+     * on the Mac this project keeps needing.
+     */
+    @Test
+    fun bootstrap_downloads_the_tools_for_this_host() {
+        assertTrue("uname -s" in bootstrap, "the archive has to match the host OS")
+        assertTrue("Darwin" in bootstrap && "Linux" in bootstrap, "both hosts handled")
+        assertTrue(
+            Regex("""commandlinetools-\$\{CMDLINE_TOOLS_OS\}""").containsMatchIn(bootstrap),
+            "the URL must be built from the detected host, not hard-coded",
+        )
+    }
+
     /** Both are committed executable, or nobody can run them as documented. */
     @Test
     fun the_scripts_are_executable() {

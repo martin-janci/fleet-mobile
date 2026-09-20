@@ -30,7 +30,18 @@ while [ $# -gt 0 ]; do
 done
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CMDLINE_TOOLS_URL="https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip"
+
+# The command-line tools are published per host OS and the archives are not
+# interchangeable — the Linux one on a Mac unpacks fine and then fails with a
+# missing-binary error a long way from the cause. The build number is pinned so
+# a machine set up today and one set up next month get the same tools.
+CMDLINE_TOOLS_BUILD="13114758"
+case "$(uname -s)" in
+  Darwin) CMDLINE_TOOLS_OS="mac" ;;
+  Linux)  CMDLINE_TOOLS_OS="linux" ;;
+  *)      echo "unsupported host: $(uname -s). Install the Android command-line tools by hand." >&2; exit 1 ;;
+esac
+CMDLINE_TOOLS_URL="https://dl.google.com/android/repository/commandlinetools-${CMDLINE_TOOLS_OS}-${CMDLINE_TOOLS_BUILD}_latest.zip"
 
 # The two package names this build needs. `compileSdk` is 37 because Compose
 # Multiplatform 1.12's androidx artifacts and okhttp-android 5.5 both fail
