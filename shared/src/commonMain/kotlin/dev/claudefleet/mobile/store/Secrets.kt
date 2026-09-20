@@ -48,11 +48,44 @@ class Credentials(
     }
 
     /** True when this client may send prompts rather than only read. */
-    val canWrite: Boolean get() = mode != READONLY
+    val canWrite: Boolean get() = grantsWrite(mode)
 
     companion object {
         const val READONLY: String = "readonly"
         const val FULL: String = "full"
+
+        /**
+         * Whether a mode string grants write, decided **exactly as the hub
+         * decides it**.
+         *
+         * `TokenMode::parse` in `crates/fleet-core/src/mcp/auth.rs` is:
+         *
+         * ```rust
+         * match s { "full" => TokenMode::Full, _ => TokenMode::Readonly }
+         * ```
+         *
+         * — anything that is not the literal `full` is refused write, and
+         * `store/clients.rs` says why in as many words: "a typo would silently
+         * downgrade a client rather than fail."
+         *
+         * This used to be `mode != READONLY`, which is the **opposite rule on
+         * every input that is neither literal**. `Full`, `READONLY`,
+         * `read-only`, a truncated value, or a mode a later hub grows all read
+         * as "may write" here and as "may not" there. The consequence is not a
+         * security hole — the hub is the one enforcing, and it refuses — but it
+         * breaks the promise this app is built on and states in three places:
+         * that it only ever calls tools its token may use, rather than finding
+         * out from an error. The prompt box would be enabled, the send would go
+         * out, and `E_FORBIDDEN` would come back on a button the app had just
+         * promised would work.
+         *
+         * Mirroring the hub is also why an unknown mode is *stored* rather than
+         * refused: a mode a later hub grows should leave this app reading the
+         * fleet and declining to send, which is exactly what the hub would do
+         * with it. Refusing the credential outright would break against a
+         * newer hub; guessing that it grants write would break against this one.
+         */
+        fun grantsWrite(mode: String): Boolean = mode == FULL
     }
 }
 
@@ -127,7 +160,23 @@ internal fun decodeCredentials(raw: String?): Credentials? {
     val hub = field("hub")?.takeIf { it.isNotBlank() } ?: return null
     val token = field("token")?.takeIf { it.isNotBlank() } ?: return null
     val name = field("name")?.takeIf { it.isNotBlank() } ?: return null
-    return Credentials(hub, token, name, field("mode") ?: Credentials.FULL)
+    // Required, like the other three, where it used to default to `FULL`.
+    //
+    // That default was the third way a credential could come to claim write it
+    // had not been granted — after `canWrite` and `SettingsUiState.readOnly`,
+    // and the quietest of the three, since it invents the permission at the
+    // moment the credential is read rather than misreading one that is there.
+    // A blob with no mode is not something the hub can produce: `/pair` always
+    // answers `"mode": row.mode`, and the row is validated to `full` or
+    // `readonly` at insert. So it means the file was truncated, hand-edited, or
+    // written by something else — none of which is a reason to assume the most
+    // permissive answer.
+    //
+    // An *unknown* mode is treated quite differently and deliberately so: it is
+    // kept, and [Credentials.grantsWrite] declines to write with it, which is
+    // what the hub would do too. Missing is corruption; unknown is a newer hub.
+    val mode = field("mode")?.takeIf { it.isNotBlank() } ?: return null
+    return Credentials(hub, token, name, mode)
 }
 
 /**

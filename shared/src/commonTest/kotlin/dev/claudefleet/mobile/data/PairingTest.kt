@@ -14,9 +14,11 @@ import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
+import dev.claudefleet.mobile.ui.explain
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -641,5 +643,112 @@ class CredentialSecrecyTest {
         val failure = assertFailsWith<HubError.Unauthorized> { app.withClient { it.listSessions() } }
 
         assertTrue("tok-secret-value" !in failure.toString())
+    }
+}
+
+/**
+ * What happens after the code has already been spent.
+ *
+ * `POST /pair` calls `PairingRegistry::consume` **before** it mints anything,
+ * and the hub's own comment on its failure branch is "the code is spent either
+ * way — mint a new one". So every step the app takes after the hub answers
+ * happens with the code already gone, and a failure there is not the same
+ * failure as one before it.
+ *
+ * The step in question is the store write, and it is reachable on the worst day
+ * for it: `AndroidSecrets.prefs` is null when the Keystore master key has gone
+ * but the preferences file survived — the state a phone is in after being
+ * restored from a backup, which is precisely when someone is setting the app up
+ * and pairing for the first time.
+ */
+class SpentCodeTest {
+
+    private class RefusingSecrets(private val why: String) : Secrets {
+        override suspend fun read(): Credentials? = null
+        override suspend fun write(credentials: Credentials) = throw SecretsUnavailable(why)
+        override suspend fun clear() = Unit
+    }
+
+    /**
+     * The message names the thing the person has to do something about.
+     *
+     * Reporting only the store — "the credential could not be written" — leaves
+     * the obvious next move being to try the same code again, which the screen
+     * invites by keeping it in the field, and which answers with a *different*
+     * error that reads like a typo. Two contradictory messages and two trips to
+     * the terminal for one failure.
+     */
+    @Test
+    fun a_store_that_will_not_keep_the_credential_says_the_code_is_spent() = runTest {
+        val (session, _, _) = session(RefusingSecrets("the secure store could not be opened")) {
+            pairOk() to HttpStatusCode.OK
+        }
+
+        val failure = assertFailsWith<CredentialNotKept> { session.pair("$BASE/pair#ABCDEFGH") }
+        val shown = explain(failure)
+
+        assertContains(shown, "spent")
+        assertContains(shown, "fleet-hub pair")
+        assertTrue("the secure store could not be opened" in shown, "keep the store's own reason too")
+    }
+
+    /** And it is still a `SecretsUnavailable`, so `explain()` shows it rather than the fallback. */
+    @Test
+    fun the_refusal_reaches_the_screen_as_words() = runTest {
+        val (session, _, _) = session(RefusingSecrets("nope")) { pairOk() to HttpStatusCode.OK }
+
+        val failure = assertFailsWith<CredentialNotKept> { session.pair("$BASE/pair#ABCDEFGH") }
+
+        // Not `failure is SecretsUnavailable` — that is true by declaration and
+        // the compiler says so. The claim worth making is the one the type
+        // exists to buy: `explain()` repeats a message only for the app's own
+        // exceptions that promise to carry nothing from outside, so a type
+        // outside that set would reach the screen as the bare fallback.
+        assertFalse("something went wrong" in explain(failure), "must not read as an unknown failure")
+        assertTrue(explain(failure) == failure.message, "shown verbatim, as SecretsUnavailable is")
+    }
+
+    /**
+     * The token is not in it. `CredentialNotKept` is built from the store's own
+     * app-authored sentence and from nothing else — the value it failed to save
+     * is the one thing in this app that must never reach a screen or a log.
+     */
+    @Test
+    fun the_refusal_never_repeats_the_credential_it_could_not_save() = runTest {
+        val token = "tok-SECRET-value"
+        val (session, _, _) = session(RefusingSecrets("disk is full")) {
+            """{"token":"$token","name":"phone","mode":"full","hub":"$BASE"}""" to HttpStatusCode.OK
+        }
+
+        val failure = assertFailsWith<CredentialNotKept> { session.pair("$BASE/pair#ABCDEFGH") }
+
+        assertFalse(token in failure.message.orEmpty(), "leaked into the message")
+        assertFalse(token in failure.toString(), "leaked into toString")
+        assertFalse(token in explain(failure), "leaked onto the screen")
+    }
+
+    /** The device stays unpaired: nothing was kept, so nothing may claim it was. */
+    @Test
+    fun the_device_is_left_unpaired_rather_than_half_paired() = runTest {
+        val (session, _, _) = session(RefusingSecrets("no store")) {
+            pairOk() to HttpStatusCode.OK
+        }
+
+        assertFailsWith<CredentialNotKept> { session.pair("$BASE/pair#ABCDEFGH") }
+
+        assertTrue(session.state.value !is AuthState.Paired, "a credential that was not kept is not held")
+        assertNull(session.credentials())
+    }
+
+    /** A failure *before* the hub answers is untouched: that code was never spent. */
+    @Test
+    fun a_refused_code_does_not_claim_anything_was_spent() = runTest {
+        val (session, _, _) = session(FakeSecrets()) {
+            """{"error":"no such pairing code"}""" to HttpStatusCode.NotFound
+        }
+
+        val failure = assertFailsWith<HubError> { session.pair("$BASE/pair#ABCDEFGH") }
+
+        assertFalse("spent" in explain(failure), "nothing was issued, so nothing was spent")
     }
 }

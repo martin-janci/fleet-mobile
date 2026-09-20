@@ -26,7 +26,18 @@ data class SettingsUiState(
     val forgetting: Boolean = false,
     val error: String? = null,
 ) {
-    val readOnly: Boolean get() = mode == Credentials.READONLY
+    /**
+     * The same question [Credentials.canWrite] asks, answered by the same rule.
+     *
+     * It used to be `mode == Credentials.READONLY`, which is not the negation
+     * of the permission the session screen enforces — the two agreed only on
+     * the two literal modes. On anything else this screen showed the raw mode
+     * string, as though it were an access level in good standing, *while* the
+     * prompt box was enabled. So the one screen whose job is to tell a person
+     * what this device may do was wrong in the same direction as the bug it
+     * ought to have exposed.
+     */
+    val readOnly: Boolean get() = !Credentials.grantsWrite(mode)
 
     /** Nothing to forget once there is no credential, and not twice at once. */
     val canForget: Boolean get() = !forgetting && hub.isNotBlank()

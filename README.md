@@ -49,6 +49,32 @@ fleet-hub pair --name phone --ttl 120         # seconds the code stays valid (30
 A `readonly` client can watch everything and send nothing; the app knows this
 and disables the prompt box rather than making a call it knows would be refused.
 
+It decides that the way the hub decides it, which is worth stating because the
+two used to disagree. `TokenMode::parse` in the hub is
+`match s { "full" => Full, _ => Readonly }` — **only the literal `full` grants
+write** — and `store/clients.rs` gives the reason: "a typo would silently
+downgrade a client rather than fail." So a mode this app does not recognise, a
+future one or a value that got mangled, leaves the phone reading the fleet and
+declining to send, exactly as the hub would treat it. A stored credential with
+no mode at all is not treated as a credential: the hub always sends one, so its
+absence means the file was truncated or written by something else, which is not
+a reason to assume the most permissive answer.
+
+### If the app cannot keep the credential
+
+The pairing code is spent the moment the hub answers — `POST /pair` consumes it
+before it mints anything, and the hub's own comment on its failure branch is
+"the code is spent either way — mint a new one". So if the phone's secure store
+then refuses the write, the credential exists on the hub and nowhere else, and
+the app says so: *that pairing code is spent — run `fleet-hub pair` again*.
+Retrying the same code cannot work.
+
+The likeliest way to see this is a phone restored from a backup: the
+`EncryptedSharedPreferences` file comes back but the Keystore master key that
+decrypts it does not, so the store will not open — and that is exactly when
+someone is setting the app up for the first time. The client row left on the hub
+is the operator's to clear with `fleet-hub client revoke`.
+
 **Losing the phone is the operator's problem to solve, from the terminal:**
 
 ```bash

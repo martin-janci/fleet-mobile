@@ -4,6 +4,7 @@ import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.store.Credentials
 import dev.claudefleet.mobile.store.Secrets
+import dev.claudefleet.mobile.store.SecretsUnavailable
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +19,29 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 internal const val REVOKED_CREDENTIAL_REASON =
     "the hub no longer accepts this device's credential. Pair again to carry on."
+
+/**
+ * The hub issued a credential and this device could not keep it.
+ *
+ * A [SecretsUnavailable], so `explain()` shows its message and so it keeps that
+ * type's promise: what it repeats is the store's own app-authored sentence and
+ * never the credential. The token it failed to save is **not** mentioned, and
+ * cannot be — that is the one value in this app worth a rule of its own.
+ *
+ * It exists because the two halves of this failure mean different things to the
+ * person holding the phone. "The credential could not be written" describes the
+ * store. It does not say that a pairing code was spent to get here, that the
+ * hub now holds a client row nothing can use, or that trying the same code
+ * again — the obvious next move, and the one the screen invites by keeping the
+ * code in the field — will fail with a different error that reads like a typo.
+ */
+class CredentialNotKept(reason: String?) : SecretsUnavailable(
+    buildString {
+        append("the hub issued this device's credential, but it could not be saved")
+        if (!reason.isNullOrBlank()) append(": ").append(reason)
+        append(". That pairing code is spent — run `fleet-hub pair` again for a new one.")
+    },
+)
 
 /** Whether this device holds a credential for a hub. */
 sealed class AuthState {
@@ -97,7 +121,27 @@ class AppSession(
             name = result.name,
             mode = result.mode,
         )
-        secrets.write(credentials)
+        // Everything from here on happens *after* the code has been spent, and
+        // the message has to say so. `POST /pair` calls
+        // `PairingRegistry::consume` before it mints anything, and the hub's own
+        // comment on the failure branch is "the code is spent either way — mint
+        // a new one". So a store that will not write leaves the person holding
+        // a code that can never work again, and the honest thing is to tell
+        // them that rather than to report only the write.
+        //
+        // Reachable, and on the worst day for it: `AndroidSecrets.prefs` is
+        // null when the Keystore master key is gone but the preferences file
+        // survived — the state a phone is in after being restored from a
+        // backup, which is exactly when somebody is setting the app up and
+        // pairing for the first time. Without this they read "the secure store
+        // could not be opened", try the same code again, and get "that code
+        // was refused" — a second, contradictory error that reads like a typo
+        // and costs them another trip to the terminal.
+        try {
+            secrets.write(credentials)
+        } catch (e: SecretsUnavailable) {
+            throw CredentialNotKept(e.message)
+        }
         _state.value = AuthState.Paired(credentials)
         return credentials
     }
