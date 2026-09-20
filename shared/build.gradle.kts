@@ -61,7 +61,7 @@ tasks.matching { it.name == "jvmTest" }.configureEach {
     // `MainViewController.kt` by name, so edits there changed what the tests
     // should say while the task reported UP-TO-DATE. `HostScanInputsTest` now
     // checks this list against the paths the tests actually read.
-    for (dir in listOf("shared/src", "androidApp/src", "iosApp", "scripts", ".github/workflows")) {
+    for (dir in listOf("shared/src", "androidApp/src", "iosApp", "scripts", ".github/workflows", "skills")) {
         inputs.dir(rootProject.file(dir))
             .withPropertyName("scanned-$dir")
             .withPathSensitivity(PathSensitivity.RELATIVE)
