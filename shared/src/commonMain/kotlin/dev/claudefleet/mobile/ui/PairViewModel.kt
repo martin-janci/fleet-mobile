@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.AuthActions
 import dev.claudefleet.mobile.data.NotAPairingCode
 import dev.claudefleet.mobile.data.PairTarget
+import dev.claudefleet.mobile.data.pairLinkPayload
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -171,6 +172,48 @@ class PairViewModel(
 
     /** The manual-entry button. Deliberately bypasses the per-frame dedupe. */
     fun submit(): Job? = redeem(_state.value.code)
+
+    /**
+     * A `claudefleet:` link arrived — from `adb`, from `simctl openurl`, or
+     * from somebody tapping the URL the hub printed.
+     *
+     * **It fills the fields; it does not pair.** The person taps, exactly as
+     * they would after typing the code themselves. A link is something anyone
+     * can send: it cannot reach the credential this device already holds, but a
+     * silent pair would re-point the app at a hub of the sender's choosing and
+     * the next prompt typed would go there. Filling the fields is the whole of
+     * what a stranger's link is allowed to do.
+     *
+     * [autoSubmit] is the exception, and it is wired to the *build* rather than
+     * to anything in the link — `BuildConfig.DEBUG` on Android, `#if DEBUG` on
+     * iOS. A debug build submits, because the reason a debug build exists on a
+     * dev machine is that something other than a person is driving it, and a
+     * setup that stops for one tap is a setup nobody automated.
+     *
+     * A link that is not a pairing code at all is reported the same way a bad
+     * scan is, rather than silently ignored: an agent that built the URL wrong
+     * should be able to see that from the screen.
+     */
+    fun onPairLink(uri: String, autoSubmit: Boolean = false): Job? {
+        val payload = pairLinkPayload(uri) ?: return null
+        val target = try {
+            PairTarget.require(payload)
+        } catch (e: NotAPairingCode) {
+            _state.update { it.copy(error = explain(e)) }
+            return null
+        }
+        _state.update {
+            it.copy(
+                // A link that names no hub leaves whatever was typed alone,
+                // rather than blanking a field the person filled in by hand.
+                address = target.base ?: it.address,
+                code = target.code,
+                error = null,
+                scanning = false,
+            )
+        }
+        return if (autoSubmit) submit() else null
+    }
 
     fun dismissError() {
         _state.update { it.copy(error = null) }

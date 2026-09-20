@@ -75,6 +75,35 @@ decrypts it does not, so the store will not open — and that is exactly when
 someone is setting the app up for the first time. The client row left on the hub
 is the operator's to clear with `fleet-hub client revoke`.
 
+### Pairing from a link
+
+The eight characters can arrive without a camera. A `claudefleet:` URL carries
+the same string the QR encodes, so the pair URL the hub prints becomes a link
+by putting the scheme in front of it:
+
+```bash
+# Android
+adb shell am start -a android.intent.action.VIEW \
+  -d "claudefleet:https://fleet.example.com/pair#ABCDEFGH"
+
+# iOS simulator
+xcrun simctl openurl booted "claudefleet:https://fleet.example.com/pair#ABCDEFGH"
+```
+
+**A link fills the two fields and stops.** Somebody taps, exactly as they would
+after typing the code. That is deliberate: a link is something anyone can send,
+and while it cannot reach the credential this device already holds, a silent
+pair would re-point the app at a hub of the sender's choosing and the next
+prompt typed would go there.
+
+**A debug build submits on its own**, so a dev machine can be set up with no
+hands — which is the whole point of the scheme. The difference is wired to the
+build (`BuildConfig.DEBUG`, `Platform.isDebugBinary`) and never to anything in
+the link.
+
+A link goes through exactly the checks a scan does — the same parser, so the
+same rules about userinfo, cleartext and the code alphabet.
+
 **Losing the phone is the operator's problem to solve, from the terminal:**
 
 ```bash
@@ -218,19 +247,39 @@ costs one reconnect.
 
 ## Building
 
-You need a JDK 21 and the Android SDK. Point Gradle at the SDK with a
-`local.properties` in the repository root (it is git-ignored):
+You need a JDK 21. Everything else:
 
-```
-sdk.dir=/path/to/Android/Sdk
+```bash
+scripts/bootstrap.sh
 ```
 
-or export `ANDROID_HOME`. The SDK needs **platform `android-37.0`** and
-**build-tools `37.0.0`**:
+It installs the Android command-line tools if they are missing, accepts the
+licences, installs the two SDK packages this build needs, writes
+`local.properties`, and finishes by running the test suite — so a green run
+means the machine is actually ready rather than merely furnished. Re-running it
+is a no-op. `--sdk-dir DIR` puts the SDK somewhere other than
+`$ANDROID_HOME`/`~/Android/Sdk`.
+
+```bash
+scripts/doctor.sh
+```
+
+says what this machine can and cannot run, and what each gap costs. Most
+machines are missing something on purpose — there is no Mac on the box this was
+written on, and no `/dev/kvm` either — and the point is to know which checks
+therefore only ever run in CI, so "it passed locally" is read with the right
+amount of confidence.
+
+By hand, if you would rather: the SDK needs **platform `android-37.0`** and
+**build-tools `37.0.0`**, and `local.properties` needs `sdk.dir=…` (or export
+`ANDROID_HOME`).
 
 ```bash
 sdkmanager --install "platforms;android-37.0" "build-tools;37.0.0"
 ```
+
+Note the minor version. `platforms;android-37` does not exist, and sdkmanager
+reports that by naming the package rather than the mistake.
 
 `compileSdk` is 37 and that is not a preference: Compose Multiplatform 1.12's
 own androidx artifacts and `okhttp-android` 5.5 (which arrives through Ktor)

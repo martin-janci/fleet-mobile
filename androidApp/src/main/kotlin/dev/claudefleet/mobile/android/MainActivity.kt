@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.android
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -28,7 +29,31 @@ class MainActivity : ComponentActivity() {
             secrets = AndroidSecrets(applicationContext),
             http = HttpClient(OkHttp),
             appVersion = BuildConfig.VERSION_NAME,
+            // The build decides, not the link. A release build fills the Pair
+            // screen's fields and waits for a tap; a debug build submits, so a
+            // dev machine can be set up with no hands. See `data/PairLink.kt`.
+            autoPairFromLink = BuildConfig.DEBUG,
         )
+    }
+
+    /**
+     * A `claudefleet:` URL, from a cold start or from an already-running app.
+     *
+     * Both are needed and they are different callbacks: `am start` on a dead
+     * process delivers the URL to `onCreate`'s intent, and on a live one to
+     * `onNewIntent`. Handling only the first works right up until somebody
+     * pairs a second time.
+     */
+    private fun deliver(intent: Intent?) {
+        intent?.takeIf { it.action == Intent.ACTION_VIEW }?.data?.let {
+            container.onPairLink(it.toString())
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        deliver(intent)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,6 +63,7 @@ class MainActivity : ComponentActivity() {
         // then applied once, in `App`.
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        deliver(intent)
         setContent { App(container) }
     }
 }

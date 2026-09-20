@@ -93,6 +93,32 @@
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 
+	<!--
+	  Pairing from a link instead of a camera. `claudefleet:` carries the same
+	  URL the QR encodes, so the hub's printed pair URL becomes a link by
+	  prefixing it — see `data/PairLink.kt`.
+
+	    xcrun simctl openurl booted "claudefleet:https://fleet.example.com/pair#ABCDEFGH"
+
+	  A link never pairs a release build on its own: it fills the two fields on
+	  the Pair screen and somebody taps, because a link is something anyone can
+	  send and a silent pair would re-point the app at a hub of the sender's
+	  choosing.
+	-->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>dev.claudefleet.mobile.pair</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>claudefleet</string>
+			</array>
+		</dict>
+	</array>
+
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

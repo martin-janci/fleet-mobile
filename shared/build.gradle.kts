@@ -46,19 +46,22 @@ tasks.matching { it.name == "copyAndroidDeviceTestComposeResourcesToAndroidAsset
 // name here fails with "Task with name 'jvmTest' not found". Same idiom as the
 // Compose-resources workaround above.
 tasks.matching { it.name == "jvmTest" }.configureEach {
-    inputs.files(
-        rootProject.files(
-            "iosApp/iosApp/Info.plist",
-            "iosApp/iosApp.xcodeproj/project.pbxproj",
-            "androidApp/src/main/AndroidManifest.xml",
-            "androidApp/build.gradle.kts",
-            "androidApp/src/main/res/xml/data_extraction_rules.xml",
-        ),
-    ).withPropertyName("scannedHostFiles").withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.dir(rootProject.file(".github/workflows"))
-        .withPropertyName("scannedWorkflows").withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.dir(rootProject.file("iosApp/iosApp"))
-        .withPropertyName("scannedSwiftHost").withPathSensitivity(PathSensitivity.RELATIVE)
+    // Declared as DIRECTORIES, not a list of files, and that is the lesson
+    // rather than a style preference. This started as an enumeration and was
+    // wrong three separate times — each time a new host test read a path
+    // nobody had added, the task stayed UP-TO-DATE, and every mutation of that
+    // path "survived" by never running. A directory cannot be forgotten the
+    // next time somebody scans one more file inside it.
+    //
+    // `shared/src` needs no entry: it is already the compilation's own input.
+    for (dir in listOf("androidApp/src", "iosApp", "scripts", ".github/workflows")) {
+        inputs.dir(rootProject.file(dir))
+            .withPropertyName("scanned-$dir")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+    }
+    inputs.files(rootProject.files("gradle/libs.versions.toml", "README.md"))
+        .withPropertyName("scannedRootFiles")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 kotlin {

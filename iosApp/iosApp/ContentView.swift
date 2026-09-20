@@ -34,5 +34,13 @@ struct ContentView: View {
             // prompt box itself. If SwiftUI moved the whole view up as well,
             // the box would travel twice as far as the keyboard.
             .ignoresSafeArea(.all)
+            // Pairing from a link. The URL goes straight to the shared
+            // container, which holds it until the Pair screen asks — a cold
+            // launch from `simctl openurl` delivers it before Compose has built
+            // any screen. Whether it then pairs on its own is the *build's*
+            // decision and is made in `MainViewController.kt`, not here.
+            .onOpenURL { url in
+                MainViewControllerKt.onPairLink(uri: url.absoluteString)
+            }
     }
 }
