@@ -359,8 +359,9 @@ The workflow refuses to run rather than publish something it shouldn't:
 
 ## What a Mac still has to check
 
-**The shared code now runs on iOS. Nothing that needs a screen, a camera or an
-app bundle does, and no Compose has ever been rendered on any platform.**
+**The shared code runs on iOS, and so does the app itself — far enough to
+launch, and far enough to use the Keychain. What still needs a person is a
+screen, a camera, and a real device.**
 
 What changed: the `macos` job runs `:shared:iosSimulatorArm64Test` on a booted
 simulator, so the whole shared suite — **313 tests** — executes on
@@ -375,22 +376,26 @@ coroutine and memory implementations, and the shared code had only ever been
 *compiled* for it. All 313 pass there exactly as they do on the JVM, which is
 the first evidence that the two platforms agree about any of it.
 
-One gap is worth naming precisely, because it looks like it should have closed
-with the rest:
+What that leaves, and what it no longer does:
 
-- **The Keychain round trip still has not happened.** The Kotlin plugin runs a
-  Kotlin/Native test through `simctl spawn`, so the binary is not an installed
-  app, holds no `keychain-access-group` entitlement, and `securityd` refuses
-  every request with `errSecNotAvailable` (-25291). `KeychainSecretsTest`
-  therefore asserts the **refusal** path: that an unreadable store reads as
-  "not paired" rather than crashing the app on every cold start, and that a
-  write or a clear that cannot land throws rather than lying about it. That
-  half had no coverage anywhere and is a real production case — a background
-  wake before the device's first unlock is exactly what
-  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` invites. Storing and
-  reading a real item back needs an XCTest target hosted by `iosApp`. This is
-  why Android has the round trip and iOS does not: an Android instrumentation
-  test *is* installed as an app, and a `simctl spawn`-ed executable is not.
+- **The Keychain round trip now happens**, in `iosApp/iosAppTests` — an XCTest
+  bundle hosted by the app, so it runs inside the app's process under its own
+  bundle identifier and entitlements. Eight cases: write and read back,
+  replace, clear, clearing nothing, two accounts kept apart, a non-ASCII name
+  across the C boundary, and a diagnostic that reports the `OSStatus` if the
+  Keychain ever refuses again.
+
+  It needs the app to be **signed**, which is the part that is easy to get
+  wrong and was: unsigned, the app launches perfectly well and every Keychain
+  call returns `errSecMissingEntitlement` (-34018), because entitlements come
+  from signing. Ad-hoc (`CODE_SIGN_IDENTITY="-"`) is enough on a simulator and
+  needs no developer account; the entitlement it synthesises is the bundle id,
+  the same one a signed app gets on a device.
+
+  `KeychainSecretsTest` in `shared/src/iosTest` still runs and still asserts the
+  **refusal** path, because `simctl spawn` gives it no entitlement — which makes
+  it a good test of the case the design invites: a background wake before the
+  device's first unlock. The two suites cover the class from opposite ends.
 
 This is the list, in the order a Mac should work through it. The first two are
 not polish: get either wrong and the app does not work at all.
@@ -410,16 +415,13 @@ not polish: get either wrong and the app does not work at all.
    `WindowInsets.safeDrawing`. Confirm it further: background the app and watch
    the hub drop a subscriber, foreground it and watch the list refill. Nothing
    here can test that CMP's iOS lifecycle actually fires.
-3. **The Keychain round trip.** `KeychainSecrets` now executes in CI, but only
-   its refusal path — see above for why a `simctl spawn`-ed binary cannot hold
-   a Keychain item. So the storing half is still unrun: write, read back,
-   clear, and confirm `SecItemDelete`'s status is checked rather than
-   discarded. Then the two that matter:
+3. **The Keychain on real hardware.** Write, read back, clear and the status
+   check all run in CI now (see above), so what is left is the two a simulator
+   cannot answer: that
    `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` is readable on a
-   locked-screen background wake, and the item is **absent** after restoring a
-   backup onto a second device. The second is the security-relevant half.
-   Adding an XCTest target to `iosApp` would move the first three of these into
-   CI and leave only the last two needing a person.
+   locked-screen background wake, and that the item is **absent** after
+   restoring a backup onto a second device. The second is the
+   security-relevant half.
 4. **Core Foundation retain/release.** `Secrets.ios.kt` calls `CFRelease` by
    hand on every `Create`d object and on the `+1` reference `kSecReturnData`
    hands back. The compiler checks none of it. Run it under Instruments'
