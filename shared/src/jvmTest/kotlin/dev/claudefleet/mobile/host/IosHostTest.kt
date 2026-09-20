@@ -33,6 +33,39 @@ class TheIosHostInfoPlistTest {
     private val plist: String by lazy { Repo.file("iosApp/iosApp/Info.plist").readText() }
 
     /**
+     * The key without which Compose refuses to start at all.
+     *
+     * Compose Multiplatform's iOS runtime throws
+     * `IllegalStateException: Info.plist doesn't have a valid
+     * CADisableMinimumFrameDurationOnPhone entry, or has it set to false` —
+     * on iOS an uncaught Kotlin exception, so a dead app rather than a slow one.
+     * There is no first frame.
+     *
+     * It was missing from the day the host was written, and no scan here caught
+     * it, because a scan can only look for what somebody thought to look for.
+     * What found it was the XCTest bundle in `iosApp`, the first thing in this
+     * repository ever to LAUNCH the app: the macOS job builds and never runs,
+     * and `iosSimulatorArm64Test` runs a bare binary with no UI. It crashed on
+     * its first run, before reaching the Keychain it was written for.
+     *
+     * So this test is the belt to that braces, and it checks the *value* and
+     * not only the key: `<false/>` satisfies a presence check and fails at
+     * launch exactly as absence does.
+     */
+    @Test
+    fun the_frame_duration_opt_in_is_present_and_true() {
+        // The `<key>` element, not the first mention of the name: the comment
+        // above it explains the key at length and names it several times, so a
+        // plain `substringAfter` on the bare name reads the prose instead.
+        val element = "<key>CADisableMinimumFrameDurationOnPhone</key>"
+        assertTrue(element in plist, "Compose Multiplatform will not start without this key")
+        assertTrue(
+            plist.substringAfter(element).substringBefore("<key>").contains("<true/>"),
+            "the key must be true; <false/> fails at launch exactly as absence does",
+        )
+    }
+
+    /**
      * The key without which the app is terminated rather than refused.
      *
      * The string is checked for content as well as presence: an empty
@@ -194,7 +227,19 @@ class TheIosHostEmbedsComposeCorrectlyTest {
             "the target needs a run-script phase invoking Gradle",
         )
 
-        val phases = project.substringAfter("buildPhases = (").substringBefore(");")
+        // Scoped to the application target rather than to the first
+        // `buildPhases` in the file. There is more than one target now — the
+        // XCTest bundle has its own Sources phase and, correctly, no Kotlin
+        // build phase, since it depends on the app and gets the framework from
+        // it. Reading whichever block came first made this test assert
+        // something about the wrong target the moment a second one existed.
+        val targets = project
+            .substringAfter("/* Begin PBXNativeTarget section */")
+            .substringBefore("/* End PBXNativeTarget section */")
+            .split("};")
+        val app = targets.single { "com.apple.product-type.application" in it }
+
+        val phases = app.substringAfter("buildPhases = (").substringBefore(");")
         val script = phases.indexOf("Compile Kotlin Framework")
         val sources = phases.indexOf("Sources")
         assertTrue(script in 0 until sources, "the framework must be built before the Swift sources compile")

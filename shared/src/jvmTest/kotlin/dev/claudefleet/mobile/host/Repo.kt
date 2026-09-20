@@ -65,6 +65,13 @@ internal object Repo {
     val shippedSwift: List<File> by lazy {
         File(root, "iosApp").walkTopDown()
             .filter { it.isFile && it.extension == "swift" }
+            // `shipped`, so the XCTest bundle is out — the same exclusion
+            // [shipped] already makes for `commonTest` and `jvmTest`. The rule
+            // these lists serve is "app logic lives in :shared, not in the
+            // host", and a test that exercises the host is not app logic. It
+            // has its own gate below rather than being swept in with the two
+            // files that do ship.
+            .filterNot { "iosAppTests" in it.path }
             .toList()
             .also { if (it.isEmpty()) fail("found no Swift sources under $root/iosApp") }
     }
