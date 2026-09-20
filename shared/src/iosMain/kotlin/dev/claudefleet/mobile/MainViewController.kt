@@ -4,6 +4,7 @@ import androidx.compose.ui.window.ComposeUIViewController
 import dev.claudefleet.mobile.store.KeychainSecrets
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.darwin.Darwin
+import kotlin.native.Platform
 import platform.Foundation.NSBundle
 import platform.UIKit.UIViewController
 
@@ -37,6 +38,20 @@ fun MainViewController(): UIViewController = ComposeUIViewController {
 }
 
 /**
+ * A `claudefleet:` URL from SwiftUI's `onOpenURL`.
+ *
+ * Top-level so Swift reaches it as `MainViewControllerKt.onPairLink(uri:)`,
+ * the same shape `ContentView` already uses for the controller itself. It goes
+ * to the one container rather than to a screen, because the URL can arrive
+ * before any screen exists — a cold launch from `simctl openurl` delivers it
+ * while Compose is still starting — and [AppContainer] holds it until the Pair
+ * screen asks.
+ */
+fun onPairLink(uri: String) {
+    iosContainer.onPairLink(uri)
+}
+
+/**
  * Built once for the process, not once per controller.
  *
  * SwiftUI may make and discard a `UIViewControllerRepresentable`'s controller
@@ -44,11 +59,20 @@ fun MainViewController(): UIViewController = ComposeUIViewController {
  * handle, a second Ktor engine and — because `AppContainer` owns `AppSession` —
  * a second copy of the paired state, which would then disagree with the first.
  */
+@OptIn(kotlin.experimental.ExperimentalNativeApi::class)
 private val iosContainer: AppContainer by lazy {
     AppContainer(
         secrets = KeychainSecrets(),
         http = HttpClient(Darwin),
         appVersion = iosAppVersion(),
+        // The build decides, not the link. `Platform.isDebugBinary` is
+        // Kotlin/Native's own answer to `BuildConfig.DEBUG`, so this needs no
+        // flag passed down from Swift — and it is opted into on this one
+        // property rather than repo-wide, the same rule `App.kt` follows for
+        // `BackHandler`: an opt-in is a promise to re-read the call when the
+        // API changes, and a module-wide flag is a promise nobody is reminded
+        // of. A release build fills the Pair screen's fields and waits.
+        autoPairFromLink = Platform.isDebugBinary,
     )
 }
 

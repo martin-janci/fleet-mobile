@@ -53,6 +53,10 @@ import dev.claudefleet.mobile.ui.Tab
 import dev.claudefleet.mobile.ui.scan.qrScannerSupported
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 
 /**
  * The things a platform has to supply, in one object the shared UI can hold.
@@ -65,7 +69,40 @@ class AppContainer(
     secrets: Secrets,
     http: HttpClient,
     val appVersion: String,
+    /**
+     * Whether a `claudefleet:` link may pair without somebody tapping.
+     *
+     * Wired to the **build** — `BuildConfig.DEBUG` on Android, `#if DEBUG` on
+     * iOS — and never to anything in the link itself. A release build fills the
+     * Pair screen's fields and stops, because a link is something anyone can
+     * send and a silent pair would re-point the app at a hub of the sender's
+     * choosing. A debug build submits, because the reason a debug build is on a
+     * dev machine is that something other than a person is driving it.
+     */
+    val autoPairFromLink: Boolean = false,
 ) {
+    /**
+     * The last `claudefleet:` link the platform handed over, if the Pair screen
+     * has not consumed it yet.
+     *
+     * A flow rather than a call, because the link can arrive before the screen
+     * exists: a cold start from `adb shell am start -d …` delivers the URL in
+     * `onCreate`, well before Compose has built a `PairViewModel`. Holding it
+     * here means the screen picks it up whenever it appears, and a link that
+     * arrives while the app is already paired simply sits unread — which is the
+     * right outcome, since pairing again is not something a link may decide.
+     */
+    private val _pairLink = MutableStateFlow<String?>(null)
+    val pairLink: StateFlow<String?> = _pairLink.asStateFlow()
+
+    /** The platform's entry point for an incoming URL. */
+    fun onPairLink(uri: String) {
+        _pairLink.value = uri
+    }
+
+    /** Taken exactly once, so a link cannot be re-applied on every recomposition. */
+    fun consumePairLink(): String? = _pairLink.getAndUpdate { null }
+
     // The platform hands in a bare engine (`HttpClient(OkHttp)` on Android,
     // `HttpClient(Darwin)` on iOS); this is the one shared place that gives
     // every call the app's timeout policy so both platforms get it the same
@@ -175,6 +212,14 @@ private fun PairRoute(container: AppContainer, onPaired: (PairedHub) -> Unit) {
     // The view model publishes `paired` a beat before `AuthState` reaches this
     // composable; reporting it here is what lets the confirmation name the hub.
     LaunchedEffect(state.paired) { state.paired?.let(onPaired) }
+
+    // A `claudefleet:` link, if one is waiting. Keyed on the flow's value so a
+    // link delivered while this screen is already up is picked up too, not only
+    // one that arrived before it existed. `consumePairLink` takes it once.
+    val pending by container.pairLink.collectAsState()
+    LaunchedEffect(pending) {
+        container.consumePairLink()?.let { vm.onPairLink(it, container.autoPairFromLink) }
+    }
 
     PairScreen(
         state = state,

@@ -43,6 +43,27 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!--
+              Pairing from a link instead of a camera: `claudefleet:` carries
+              the same URL the QR encodes, so a hub's printed pair URL becomes a
+              link by prefixing it. See `data/PairLink.kt`.
+
+                adb shell am start -a android.intent.action.VIEW \
+                  -d "claudefleet:https://fleet.example.com/pair#ABCDEFGH"
+
+              A link never pairs a release build on its own — it fills the two
+              fields on the Pair screen and somebody taps. A link is something
+              anyone can send, and a silent pair would re-point the app at a hub
+              of the sender's choosing. `BROWSABLE` is deliberately absent: this
+              is for tooling and for a tap on a link the operator already has,
+              not for arbitrary web pages to launch.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="claudefleet" />
+            </intent-filter>
         </activity>
     </application>
 

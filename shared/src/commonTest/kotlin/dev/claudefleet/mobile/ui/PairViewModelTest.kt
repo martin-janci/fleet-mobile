@@ -662,3 +662,144 @@ class PairViewModelTest {
         assertNotNull(vm.state.value.paired)
     }
 }
+
+/**
+ * Pairing from a `claudefleet:` link — the seam that lets something other than
+ * a person set this app up.
+ *
+ * The link carries the same string the QR encodes, so everything about *what is
+ * a valid code* is [PairTarget]'s answer and is tested there. What is tested
+ * here is the part that is this class's: which fields get filled, whether it
+ * submits, and that a stranger's link cannot pair a release build on its own.
+ */
+class PairLinkTest {
+
+    private val hub = "https://fleet.example.com"
+    private val link = "claudefleet:$hub/pair#ABCDEFGH"
+
+    @Test
+    fun a_link_fills_both_fields_and_waits() = runTest {
+        val auth = FakeAuth()
+        val vm = PairViewModel(auth, backgroundScope)
+
+        vm.onPairLink(link)
+        runCurrent()
+
+        assertEquals(hub, vm.state.value.address, "the hub the link named")
+        assertEquals("ABCDEFGH", vm.state.value.code)
+        assertEquals(0, auth.pairs.size, "a link must not pair on its own")
+        assertNull(vm.state.value.paired)
+    }
+
+    /**
+     * And then the ordinary button works on what the link left behind — the
+     * point being that a link is a typing shortcut, not a second way in.
+     */
+    @Test
+    fun the_button_then_pairs_what_the_link_filled_in() = runTest {
+        val auth = FakeAuth()
+        val vm = PairViewModel(auth, backgroundScope)
+
+        vm.onPairLink(link)
+        runCurrent()
+        vm.submit()
+        runCurrent()
+
+        assertEquals(1, auth.pairs.size)
+        assertNotNull(vm.state.value.paired)
+    }
+
+    /**
+     * A debug build submits. This is the only difference, and it is decided by
+     * the build rather than by anything in the link.
+     */
+    @Test
+    fun a_debug_build_submits_so_nobody_has_to_tap() = runTest {
+        val auth = FakeAuth()
+        val vm = PairViewModel(auth, backgroundScope)
+
+        vm.onPairLink(link, autoSubmit = true)
+        runCurrent()
+
+        assertEquals(1, auth.pairs.size)
+        assertNotNull(vm.state.value.paired)
+    }
+
+    /** Both spellings of the scheme, because tooling normalises one to the other. */
+    @Test
+    fun the_scheme_is_accepted_with_and_without_slashes() = runTest {
+        for (uri in listOf("claudefleet:$hub/pair#ABCDEFGH", "claudefleet://$hub/pair#ABCDEFGH")) {
+            val vm = PairViewModel(FakeAuth(), backgroundScope)
+            vm.onPairLink(uri)
+            runCurrent()
+            assertEquals("ABCDEFGH", vm.state.value.code, "$uri should be read")
+        }
+    }
+
+    /** Anything that is not our scheme is not ours, and is left alone entirely. */
+    @Test
+    fun another_scheme_is_ignored_without_touching_the_screen() = runTest {
+        val vm = PairViewModel(FakeAuth(), backgroundScope)
+        vm.onAddressChange("https://typed.example.com")
+
+        vm.onPairLink("https://fleet.example.com/pair#ABCDEFGH")
+        vm.onPairLink("otherapp:https://fleet.example.com/pair#ABCDEFGH")
+        runCurrent()
+
+        assertEquals("https://typed.example.com", vm.state.value.address, "untouched")
+        assertEquals("", vm.state.value.code)
+        assertNull(vm.state.value.error, "not our link is not an error")
+    }
+
+    /**
+     * A malformed link says so rather than failing silently, because the thing
+     * that built it is usually a script and the screen is where it finds out.
+     */
+    @Test
+    fun a_link_that_is_not_a_pairing_code_is_reported() = runTest {
+        val vm = PairViewModel(FakeAuth(), backgroundScope)
+
+        vm.onPairLink("claudefleet:not-a-pair-url")
+        runCurrent()
+
+        assertNotNull(vm.state.value.error)
+        assertEquals("", vm.state.value.code, "nothing half-filled")
+    }
+
+    /**
+     * The link goes through exactly the checks a scan does.
+     *
+     * Spot-checked rather than re-tested: `PairTarget` owns these rules and has
+     * its own suite. What matters here is that the link path did not route
+     * around them.
+     */
+    @Test
+    fun a_link_gets_the_same_refusals_a_scan_gets() = runTest {
+        val refused = listOf(
+            "claudefleet:https://user:pw@evil.example.com/pair#ABCDEFGH", // userinfo
+            "claudefleet:http://hub.example.com/pair#ABCDEFGH",           // cleartext to a public name
+            "claudefleet:$hub/pair#ABCDEFGU",                             // U is not in the alphabet
+            "claudefleet:$hub/pair#ABCDEFG",                              // too short
+        )
+
+        for (uri in refused) {
+            val vm = PairViewModel(FakeAuth(), backgroundScope)
+            vm.onPairLink(uri, autoSubmit = true)
+            runCurrent()
+            assertEquals("", vm.state.value.code, "$uri must be refused as a scan would be")
+            assertNull(vm.state.value.paired)
+        }
+    }
+
+    /** A link closes the camera: the answer arrived by another route. */
+    @Test
+    fun a_link_puts_the_scanner_away() = runTest {
+        val vm = PairViewModel(FakeAuth(), backgroundScope, cameraAvailable = true)
+        vm.setScanning(true)
+
+        vm.onPairLink(link)
+        runCurrent()
+
+        assertFalse(vm.state.value.scanning)
+    }
+}
