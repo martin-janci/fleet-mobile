@@ -26,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -36,6 +37,9 @@ import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.StatusChip
 import dev.claudefleet.mobile.data.ConnectionStatus
+
+/** The conversation list, for the device test that checks it follows new output. */
+const val CONVERSATION_LIST: String = "conversation-list"
 
 /**
  * One session: what has been said, newest at the bottom, and a box to answer.
@@ -89,7 +93,15 @@ fun SessionScreen(
             if (newest != null && atBottom) listState.scrollToItem(newest)
         }
 
-        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
+        // Tagged so a device test can address this list rather than guessing
+        // which of the screen's scrollable nodes it meant. `atBottom` above is
+        // derived from measurement, so it only means anything where there is
+        // measurement, and the test that checks it has to run on a device —
+        // see `ConversationScrollTest`.
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f).fillMaxWidth().testTag(CONVERSATION_LIST),
+        ) {
             if (state.conversation.truncated) {
                 item(key = "truncated") { TruncationNote() }
             }
