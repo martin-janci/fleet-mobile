@@ -574,3 +574,18 @@ a process to live in.
 ## Licence
 
 MIT — see [LICENSE](LICENSE). Same as `claude-fleet`, which this app is a client of.
+
+## Working on this repo with an AI assistant
+
+`skills/fleet-mobile-repo/SKILL.md` is a Claude Code skill holding the things
+that are not in this README: which test host proves what, how to get CI to run
+without opening a pull request, the traps that have cost real time here, and the
+conventions a change has to keep. Install it with
+
+```bash
+cp -r skills/fleet-mobile-repo ~/.claude/skills/
+```
+
+It is kept in the repository rather than only in a home directory so that it is
+reviewed with the code it describes — a skill that drifts from the build is
+worse than none, because it is believed.
