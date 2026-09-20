@@ -311,6 +311,13 @@ class SessionViewModel(
                 // point must get its own successor generation rather than
                 // being folded into a read whose snapshot cannot reflect it.
                 withQueueGate {
+                    // The identity test cannot currently fail, and it stays.
+                    // `queued` is only ever set to a new generation when it is
+                    // null, and only this line sets it back to null, so from
+                    // the moment this generation was registered until here it
+                    // is either this generation or nothing. The guard is what
+                    // makes that argument local instead of something a reader
+                    // has to reconstruct from the other two call sites.
                     if (queued === generation) queued = null
                     running = generation
                 }
@@ -340,6 +347,16 @@ class SessionViewModel(
             // leave `loading`/`refreshing` stuck and a coalesced caller's
             // `done.await()` would hang forever.
             withContext(NonCancellable) {
+                // Unlike the one above, this identity test *is* reachable,
+                // and only off the test scheduler. This runs after
+                // `fetchLock` has been released, so on a real dispatcher a
+                // waiting generation can take the lock and publish itself as
+                // `running` on another thread before this line executes;
+                // clearing unconditionally would then drop the flags for a
+                // read that is still in flight, and the screen would stop
+                // saying it is fetching while it is. `runTest`'s single
+                // thread cannot produce that interleaving, which is why a
+                // mutation of this line survives every test in the suite.
                 withQueueGate { if (running === generation) running = null }
                 generation.done.complete(Unit)
             }
