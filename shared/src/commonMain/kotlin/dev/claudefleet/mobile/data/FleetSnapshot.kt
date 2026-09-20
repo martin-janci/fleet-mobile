@@ -64,18 +64,43 @@ fun FleetSnapshot.applying(event: HubEvent.Row): FleetSnapshot = when (event.nam
  */
 fun HubEvent.Row.sessionId(): Long? = if (name.startsWith("session:")) payload.number("id") else null
 
+/**
+ * Replace the row [sameRow] picks out, or append [incoming] when there is none.
+ *
+ * The three upserts below were the same eleven lines three times, differing
+ * only in which field identifies a row — and in the one place where a row needs
+ * something carried over from the copy it replaces, which is the whole reason
+ * [merge] exists. Writing it once is what makes that exception visible: two
+ * callers take the default and one does not, and the one that does not says
+ * why on the spot.
+ *
+ * **Not in the list** is an append rather than a drop: a session created while
+ * the app was backgrounded, or one whose `session:created` never arrived, is
+ * still a session.
+ */
+private inline fun <T> List<T>.upserted(
+    incoming: T,
+    merge: (existing: T) -> T = { incoming },
+    sameRow: (T) -> Boolean,
+): List<T> {
+    val at = indexOfFirst(sameRow)
+    if (at < 0) return this + incoming
+    return toMutableList().also { it[at] = merge(this[at]) }
+}
+
 private fun FleetSnapshot.upsertSession(payload: JsonElement): FleetSnapshot {
     val incoming = decode(SessionRow.serializer(), payload) ?: return this
-    val at = sessions.indexOfFirst { it.id == incoming.id }
-    // Not in the list: a session created while the app was backgrounded, or one
-    // whose `session:created` we missed. Appending beats dropping it.
-    if (at < 0) return copy(sessions = sessions + incoming)
-    val rows = sessions.toMutableList()
-    // `is_controller` is flattened onto each row by `list_sessions` and is not
-    // a column, so no event payload can carry it. Taking the incoming row
-    // wholesale would silently clear it on the first update after a refresh.
-    rows[at] = incoming.copy(isController = sessions[at].isController)
-    return copy(sessions = rows)
+    return copy(
+        sessions = sessions.upserted(
+            incoming,
+            // `is_controller` is flattened onto each row by `list_sessions` and
+            // is not a column, so no event payload can carry it. Taking the
+            // incoming row wholesale would silently clear it on the first
+            // update after a refresh. This is the only row with anything to
+            // carry, which is why the other two take the default.
+            merge = { existing -> incoming.copy(isController = existing.isController) },
+        ) { it.id == incoming.id },
+    )
 }
 
 private fun FleetSnapshot.removeSession(payload: JsonElement): FleetSnapshot {
@@ -86,9 +111,7 @@ private fun FleetSnapshot.removeSession(payload: JsonElement): FleetSnapshot {
 
 private fun FleetSnapshot.upsertHost(payload: JsonElement): FleetSnapshot {
     val incoming = decode(HostRow.serializer(), payload) ?: return this
-    val at = hosts.indexOfFirst { it.alias == incoming.alias }
-    if (at < 0) return copy(hosts = hosts + incoming)
-    return copy(hosts = hosts.toMutableList().also { it[at] = incoming })
+    return copy(hosts = hosts.upserted(incoming) { it.alias == incoming.alias })
 }
 
 private fun FleetSnapshot.removeHost(payload: JsonElement): FleetSnapshot {
@@ -105,9 +128,7 @@ private fun FleetSnapshot.removeHost(payload: JsonElement): FleetSnapshot {
  */
 private fun FleetSnapshot.upsertProject(payload: JsonElement): FleetSnapshot {
     val incoming = decode(ProjectRow.serializer(), payload) ?: return this
-    val at = projects.indexOfFirst { it.id == incoming.id }
-    if (at < 0) return copy(projects = projects + incoming)
-    return copy(projects = projects.toMutableList().also { it[at] = incoming })
+    return copy(projects = projects.upserted(incoming) { it.id == incoming.id })
 }
 
 private fun <T> decode(serializer: DeserializationStrategy<T>, payload: JsonElement): T? = try {

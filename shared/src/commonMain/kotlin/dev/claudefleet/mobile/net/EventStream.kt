@@ -108,9 +108,6 @@ internal class SseFrameReader {
     private val data = StringBuilder()
     private var hasData = false
 
-    /** True while a frame has been started but not yet terminated. */
-    val partial: Boolean get() = hasData || event != null
-
     /**
      * The frame [line] completed, or null if it did not complete one.
      *

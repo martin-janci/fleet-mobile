@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.data
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -345,5 +346,82 @@ class HubBaseTest {
         assertNull(hubBase("   "))
         assertNull(hubBase("https:///pair"))
         assertNull(hubBase("https://a b"))
+    }
+}
+
+
+/**
+ * A zone-scoped IPv6 literal, and the careless fix for it.
+ *
+ * `HubAddress.kt` carried this as a written-down "known gap": `[::1%25eth0]` —
+ * the RFC 6874 percent-encoded form of an RFC 4007 zone id — was not recognised
+ * as this machine, and failed **open**, so a hub echoing one would have had it
+ * stored and dialled forever with re-pairing unable to recover. The comment
+ * also said where the fix belonged: "the next change here should be the
+ * normalisation, not another branch."
+ *
+ * The second half of this class is the reason it was worth writing carefully.
+ * Cutting at the first `%` unconditionally closes the gap and opens a worse
+ * one, because `%` outside an IPv6 literal is the start of a percent-encoding
+ * rather than a zone id.
+ */
+class ZoneIdTest {
+
+    /** Both spellings of a scoped loopback name this machine. */
+    @Test
+    fun a_zone_scoped_loopback_is_this_machine() {
+        for (url in listOf(
+            "http://[::1%eth0]:8899",     // RFC 4007, as a person types it
+            "http://[::1%25eth0]:8899",   // RFC 6874, percent-encoded for a URL
+            "http://[::1%25lo0]:8899",
+            "http://[::%25eth0]:8899",    // the unspecified address, scoped
+        )) {
+            assertTrue(isLoopbackUrl(url), "$url names this machine and must lose to the address reached")
+        }
+        // NOT here, and the first draft of this test had it wrong: `fe80::1` is
+        // link-local, which is this *network* and not this *machine*. A hub
+        // genuinely reachable at a link-local address is a hub whose echoed
+        // base should win, so `isThisMachine` is right to refuse it. Where a
+        // scoped link-local address does matter is the transport rule, below.
+        assertFalse(isLoopbackUrl("http://[fe80::1%25en0]:8899"), "link-local is not loopback")
+    }
+
+    /**
+     * And a zone does not turn a real address into this machine.
+     *
+     * Over-matching is the safe direction here, but not infinitely so: a rule
+     * that swallowed everything after a `%` would throw away the hub's own
+     * public URL, which is the one thing it knows and the phone does not.
+     */
+    @Test
+    fun a_zone_on_a_real_address_is_still_a_real_address() {
+        assertFalse(isLoopbackUrl("https://[2001:db8::1%25eth0]:8899"))
+        assertFalse(isLoopbackUrl("https://hub.example.com:8899"))
+    }
+
+    /**
+     * **The careless version of this fix opens cleartext to a public name.**
+     *
+     * A zone id is defined for IPv6 and nothing else. In any other host a `%`
+     * begins a percent-encoding, so cutting at the first one would read
+     * `ev%il.com` as the single label `ev` — and a single label is exactly what
+     * [permitsCleartext] permits plain `http` to, on the grounds that it cannot
+     * be a public name. The colon test is what keeps the strip to the addresses
+     * a zone id can legally appear on.
+     */
+    @Test
+    fun a_percent_in_a_name_is_not_a_zone_id() {
+        assertNull(hubBase("http://ev%il.com:8899"), "still a dotted public name, so still refused http")
+        assertFalse(permitsCleartext("http://ev%il.com:8899"))
+        assertFalse(permitsCleartext("http://%2e%2eevil.com:8899"))
+        // …and it is not this machine either.
+        assertFalse(isLoopbackUrl("http://127%2e0%2e0%2e1.evil.com:8899"))
+    }
+
+    /** A scoped literal is still a usable base, not something the parser refuses. */
+    @Test
+    fun a_scoped_literal_survives_hub_base() {
+        assertEquals("http://[fe80::1%25en0]:8899", hubBase("http://[fe80::1%25en0]:8899"))
+        assertTrue(permitsCleartext("http://[fe80::1%25en0]:8899"), "link-local is this network")
     }
 }

@@ -63,7 +63,7 @@ data class SessionsUiState(
  *
  * It reads [FleetState] and never a `HubClient`: the rows arrive through the
  * event stream and are already in hand, so grouping and filtering cost nothing
- * and, in particular, [setNeedsAttentionOnly] does not talk to the hub.
+ * and, in particular, [toggleNeedsAttentionOnly] does not talk to the hub.
  */
 class SessionsViewModel(
     private val fleet: FleetState,
@@ -98,13 +98,25 @@ class SessionsViewModel(
             ),
         )
 
-    /** Show only the rows that want a person. A view over rows already held. */
-    fun setNeedsAttentionOnly(on: Boolean) {
-        local.update { it.copy(needsAttentionOnly = on) }
+    /**
+     * Show only the rows that want a person, or stop. A view over rows already
+     * held: this never talks to the hub.
+     *
+     * One method where there were two. The other — `setNeedsAttentionOnly(on)`
+     * — had no caller in the app at all; the bar is wired to this one. Its only
+     * callers were tests, so the path being exercised was not the path that
+     * ships, which is the arrangement that lets a bug live in the difference
+     * between them.
+     *
+     * The flip is one `update {}` rather than a read of `local.value` followed
+     * by a write. Two taps cannot then read the same value and both write the
+     * same answer, losing one — the rule `SessionViewModel`'s own KDoc states
+     * for this exact shape, and the one `HostsViewModel` was already changed
+     * for.
+     */
+    fun toggleNeedsAttentionOnly() {
+        local.update { it.copy(needsAttentionOnly = !it.needsAttentionOnly) }
     }
-
-    fun toggleNeedsAttentionOnly() = setNeedsAttentionOnly(!local.value.needsAttentionOnly)
-
 
     /**
      * Clear the banner.

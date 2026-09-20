@@ -122,7 +122,57 @@ class SseFrameReaderTest {
 
         assertNull(reader.accept("event: session:updated"))
         assertNull(reader.accept("""data: {"id":"""), "no blank line yet, so no frame")
-        assertTrue(reader.partial, "and what is buffered is known to be incomplete")
+
+        // This line used to read a `partial` flag on the reader. Nothing in the
+        // app ever did: it was a property on production code that existed for
+        // one assertion, and since that assertion only ever saw it while
+        // `hasData` was true, half of it (`event != null`) was never the
+        // deciding term — a mutation of it survived the whole suite.
+        //
+        // Replacing it turned up something worth writing down. The obvious
+        // replacement — "the half-frame must not be glued onto the next one" —
+        // FAILS, and it should: SSE has no way to abandon a frame part-way
+        // through. `data:` accumulates until a blank line, so within one
+        // connection a missing blank line means "keep going", not "start
+        // over", and the reader is right to join them. A frame is only
+        // abandoned when the *connection* ends, and then the reader ends with
+        // it (`HubEventStream` builds a new one per connect).
+        //
+        // The glued result is harmless because it is not valid JSON:
+        // `frameToEvent` returns null and the frame is dropped, which is the
+        // same fate as any other malformed frame.
+        assertNull(reader.accept("""data: {"alias":"local"}"""), "still accumulating")
+        val joined = reader.accept("")
+        assertEquals(
+            """{"id":
+{"alias":"local"}""",
+            joined?.data,
+            "SSE joins several data: lines with newlines; a blank line is the only terminator",
+        )
+        assertNull(frameToEvent(joined!!), "and the join is not valid JSON, so nothing is dispatched")
+    }
+
+    /**
+     * A field with a colon and nothing after it.
+     *
+     * `data:` with no value is legal SSE — it means an empty line of data — and
+     * it is the input that makes the length guard load-bearing: `text.length >
+     * colon + 1` is what stops `text[colon + 1]` reading off the end of the
+     * string. Mutated to `>=`, this line throws `IndexOutOfBoundsException`
+     * from inside the read loop, which `HubEventStream` would turn into a
+     * dropped connection and a reconnect, on every frame of a hub that sends
+     * one. Nothing exercised it, because every other test gives every field a
+     * value.
+     */
+    @Test
+    fun a_field_with_no_value_at_all_is_read_as_empty() {
+        val reader = SseFrameReader()
+
+        assertNull(reader.accept("event:"), "an empty event name is not a name")
+        assertNull(reader.accept("data:"), "no value, and no exception either")
+        val frame = reader.accept("")
+
+        assertEquals(SseFrame(null, ""), frame, "an empty data line still makes a frame")
     }
 
     /** `id:` and `retry:` are framing fields this client has no use for. */

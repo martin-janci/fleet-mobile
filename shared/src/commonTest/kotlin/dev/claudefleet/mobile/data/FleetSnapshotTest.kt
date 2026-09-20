@@ -170,6 +170,59 @@ class FleetSnapshotTest {
         assertEquals("2.0.1", after.hosts[1].claudeVersion)
     }
 
+    /**
+     * The same frame, for the row that happens to be **first**.
+     *
+     * Every upsert here was tested only against a row in the middle of a list —
+     * `pine` at index 1, session `2` at index 1 — so `indexOfFirst` never
+     * returned 0 in any test, and `if (at < 0)` could have been `if (at <= 0)`
+     * with the whole suite still green. Found by mutation, not by reading: the
+     * two branches differ on exactly one input and no test supplied it.
+     *
+     * What the mutant did is worth naming, because it is the shape of a real
+     * bug rather than a wrong number. Appending instead of replacing leaves
+     * **both** copies of the host in the snapshot, so the fleet list grows a
+     * duplicate entry every time the first host is probed — and `host:probed`
+     * is one of the three kinds this app subscribes to, so it arrives on a
+     * timer forever.
+     */
+    @Test
+    fun a_host_probed_frame_replaces_the_first_host_too() {
+        val after = two.applying(row("host:probed", hostPayload("box", reachable = true)))
+
+        assertEquals(listOf("box", "pine"), after.hosts.map { it.alias }, "replaced in place")
+        assertEquals(2, after.hosts.size, "replaced, not appended")
+        assertTrue(after.hosts[0].reachable)
+        assertEquals("2.0.1", after.hosts[0].claudeVersion)
+    }
+
+    /** The same boundary on the session list, which has the extra carry-over. */
+    @Test
+    fun a_session_updated_frame_replaces_the_first_row_too() {
+        val after = two.applying(row("session:updated", sessionPayload(id = 1, tmux = "renamed")))
+
+        assertEquals(2, after.sessions.size, "replaced, not appended")
+        assertEquals(listOf(1L, 2L), after.sessions.map { it.id })
+        assertEquals("renamed", after.sessions[0].tmuxName)
+        assertEquals("two", after.sessions[1].tmuxName, "the other row is untouched")
+    }
+
+    /** And on the project list. */
+    @Test
+    fun a_project_frame_replaces_the_first_row_too() {
+        val before = FleetSnapshot(
+            projects = listOf(ProjectRow(id = 1, owner = "a", repo = "one"), ProjectRow(id = 2)),
+        )
+
+        val after = before.applying(
+            row("project:updated", """{"id":1,"owner":"a","repo":"renamed","last_session_at":9}"""),
+        )
+
+        assertEquals(2, after.projects.size, "replaced, not appended")
+        assertEquals(listOf(1L, 2L), after.projects.map { it.id })
+        assertEquals("renamed", after.projects[0].repo)
+    }
+
     @Test
     fun a_host_added_frame_adds_it() {
         val after = two.applying(row("host:added", hostPayload("mac")))
