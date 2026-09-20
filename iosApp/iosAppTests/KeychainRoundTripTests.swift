@@ -57,6 +57,10 @@ final class KeychainRoundTripTests: XCTestCase {
         try await secrets.write(credentials: written)
         let read = try await secrets.read()
 
+        // Hoisted out of the assertion: XCTest's macros take autoclosures, and
+        // an `await` inside one is a compile error ("'async' call in an
+        // autoclosure that does not support concurrency"). Every assertion in
+        // this file reads its value first for that reason.
         let got = try XCTUnwrap(read, "the item was written, so it must read back")
         XCTAssertEqual(got.hub, written.hub)
         XCTAssertEqual(got.token, written.token)
@@ -89,7 +93,8 @@ final class KeychainRoundTripTests: XCTestCase {
         )
         try await secrets.write(credentials: replacement)
 
-        let read = try XCTUnwrap(try await secrets.read())
+        let stored = try await secrets.read()
+        let read = try XCTUnwrap(stored)
         XCTAssertEqual(read.token, replacement.token, "the second write must replace the first")
         XCTAssertEqual(read.mode, "readonly")
     }
@@ -104,11 +109,13 @@ final class KeychainRoundTripTests: XCTestCase {
     func testClearingReallyRemovesTheItem() async throws {
         let secrets = store("clear")
         try await secrets.write(credentials: credential())
-        XCTAssertNotNil(try await secrets.read())
+        let before = try await secrets.read()
+        XCTAssertNotNil(before)
 
         try await secrets.clear()
 
-        XCTAssertNil(try await secrets.read(), "clear() must remove the item, not merely claim to")
+        let after = try await secrets.read()
+        XCTAssertNil(after, "clear() must remove the item, not merely claim to")
     }
 
     /// `errSecItemNotFound` is benign: there was nothing to delete.
@@ -126,8 +133,10 @@ final class KeychainRoundTripTests: XCTestCase {
         let second = store("b")
         try await first.write(credentials: credential())
 
-        XCTAssertNil(try await second.read(), "a different account must not see the first one's item")
-        XCTAssertNotNil(try await first.read())
+        let other = try await second.read()
+        let mine = try await first.read()
+        XCTAssertNil(other, "a different account must not see the first one's item")
+        XCTAssertNotNil(mine)
     }
 
     /// A credential whose text is not ASCII survives the C boundary.
@@ -142,7 +151,8 @@ final class KeychainRoundTripTests: XCTestCase {
 
         try await secrets.write(credentials: awkward)
 
-        let read = try XCTUnwrap(try await secrets.read())
+        let stored = try await secrets.read()
+        let read = try XCTUnwrap(stored)
         XCTAssertEqual(read.name, awkward.name, "the name crosses a C boundary as UTF-8")
     }
 }
