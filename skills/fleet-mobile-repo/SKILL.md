@@ -45,7 +45,8 @@ below it.
 | `:shared:jvmTest` | JVM | commonTest + the `jvmTest` source scans (`IosHostTest`, `AndroidHostTest`, `CiWorkflowTest`, …) |
 | `:shared:connectedAndroidDeviceTest` | Android emulator | commonTest **again** (the device-test source-set tree pulls it in), plus `AndroidSecrets` and `QrDecodeTest` |
 | `:shared:iosSimulatorArm64Test` | Kotlin/Native | commonTest on the toolchain iOS actually ships, plus `KeychainSecretsTest` |
-| `xcodebuild test` (iosApp) | iOS app process | `KeychainRoundTripTests` — the only thing that **launches the app** |
+| `:androidApp:connectedAndroidTest` | Android emulator | the only tests that **launch the app**: manifest intent routing, deep-link delivery, the platform cleartext policy, and the one rendered Compose screen |
+| `xcodebuild test` (iosApp) | iOS app process | `KeychainRoundTripTests` — the only thing that launches the app on iOS |
 
 The first two are both a JVM. Kotlin/Native is the one with different string,
 regex, coroutine and memory implementations, and
@@ -151,6 +152,13 @@ parser:
 adb shell am start -a android.intent.action.VIEW -d "claudefleet:https://hub/pair#ABCDEFGH"
 xcrun simctl openurl booted "claudefleet:https://hub/pair#ABCDEFGH"
 ```
+
+`MainActivity` is `launchMode="singleTop"`, and it must stay that way. Under
+the default `standard` mode the *second* `am start` never reaches
+`onNewIntent`: Android stacks a fresh activity and the one on screen keeps the
+first URL. That is precisely the case an agent hits when it re-runs a setup
+script, and it was live until the emulator caught it. If a link seems to be
+ignored, check that attribute first.
 
 **Release fills the two fields and waits for a tap; a debug build submits.** The
 difference is wired to the build (`BuildConfig.DEBUG`, `Platform.isDebugBinary`)
