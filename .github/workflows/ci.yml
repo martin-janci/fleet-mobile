@@ -229,6 +229,35 @@ jobs:
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
             ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build
 
+      # The Keychain round trip, in an app bundle.
+      #
+      # `iosSimulatorArm64Test` below runs the shared suite but CANNOT do this
+      # one: the Kotlin plugin launches that binary with `simctl spawn`, so it
+      # is not an installed app, holds no keychain-access-group entitlement, and
+      # securityd answers `errSecNotAvailable` (-25291) to every request.
+      # `KeychainSecretsTest` asserts that refusal and says so at length.
+      #
+      # An XCTest bundle hosted by `iosApp` is loaded into the app's process and
+      # runs under the app's identifier and entitlements, which is the same
+      # difference that lets Android's instrumentation test do the round trip.
+      # This is the only thing that has ever stored and read back a real
+      # Keychain item for this app.
+      #
+      # A concrete destination, not `generic/`: this one boots a simulator and
+      # runs. The device is discovered rather than named, because the set
+      # installed on the runner image changes.
+      - name: Keychain round trip on a booted simulator
+        working-directory: iosApp
+        run: |
+          set -euo pipefail
+          device=$(xcrun simctl list devices available --json \
+            | python3 -c "import json,sys;d=json.load(sys.stdin)['devices'];\
+          print(next(x['udid'] for k in sorted(d) if 'iOS' in k for x in d[k] if x.get('isAvailable')))")
+          echo "simulator: $device"
+          xcodebuild test -project iosApp.xcodeproj -scheme iosApp -configuration Debug \
+            -destination "platform=iOS Simulator,id=$device" \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO
+
       # The shared suite, on Kotlin/Native rather than on the JVM.
       #
       # This is the job that makes the iOS half of "one codebase, two platforms"
