@@ -49,6 +49,33 @@ final class KeychainRoundTripTests: XCTestCase {
         Credentials(hub: hub, token: token, name: name, mode: mode)
     }
 
+    /// A diagnostic, deliberately first and deliberately loud.
+    ///
+    /// The whole premise of this bundle is that being hosted by `iosApp` buys a
+    /// real Keychain where `simctl spawn` does not. If that premise is wrong,
+    /// every other test here fails as "threw an error" and says nothing about
+    /// *which* error — and the OSStatus is the entire content of the answer.
+    /// `-25291` is `errSecNotAvailable` (no keychain for this process at all);
+    /// `-34018` is `errSecMissingEntitlement`. So this one catches, reports,
+    /// and only then fails.
+    func testAWriteIsPermittedAtAll() async throws {
+        let secrets = store("premise")
+        do {
+            try await secrets.write(credentials: credential())
+        } catch {
+            XCTFail("""
+                the Keychain refused a write from inside the app's own process: \(error)
+
+                If this is errSecNotAvailable (-25291) or errSecMissingEntitlement
+                (-34018), hosting the bundle in iosApp is not enough on its own and
+                the target needs a keychain-access-group entitlement.
+                """)
+            return
+        }
+        let read = try await secrets.read()
+        XCTAssertNotNil(read, "the write was accepted, so the read must find it")
+    }
+
     /// The claim the whole file exists for.
     func testAWrittenCredentialComesBack() async throws {
         let secrets = store("round-trip")

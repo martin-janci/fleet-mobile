@@ -254,9 +254,22 @@ jobs:
             | python3 -c "import json,sys;d=json.load(sys.stdin)['devices'];\
           print(next(x['udid'] for k in sorted(d) if 'iOS' in k for x in d[k] if x.get('isAvailable')))")
           echo "simulator: $device"
+          set -o pipefail
           xcodebuild test -project iosApp.xcodeproj -scheme iosApp -configuration Debug \
             -destination "platform=iOS Simulator,id=$device" \
-            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee "$RUNNER_TEMP/xcodebuild-test.log"
+
+      # Uploaded whether or not the step above passed. An `xcodebuild test`
+      # failure is most legible as its own output, and an artifact is cheaper to
+      # fetch than a job log.
+      - name: iOS test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-xctest-log
+          path: ${{ runner.temp }}/xcodebuild-test.log
+          if-no-files-found: warn
 
       # The shared suite, on Kotlin/Native rather than on the JVM.
       #
