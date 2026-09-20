@@ -124,6 +124,34 @@ class TokenNeverLeaksTest {
         assertContains(failure.body, "redacted")
     }
 
+    /**
+     * A body too large to read never becomes a message at all.
+     *
+     * [HubError.TooLarge] is the one variant that carries no wire text by
+     * construction — its two fields are an app-authored phrase and an `Int` —
+     * and this is the stronger half of why: the ceiling is enforced while the
+     * body is still being *read*, before the status is even looked at, so an
+     * oversized error page is not scrubbed and capped, it is never assembled.
+     * `redacted()` removes the one secret it knows about and says so in its own
+     * comment ("read the name as token-scrubbed, not safe"); a page that is
+     * simply not read cannot leak anything, including secrets nobody thought of.
+     *
+     * The token is planted right at the front, where a straddling cut cannot be
+     * the reason it fails to appear.
+     */
+    @Test
+    fun a_body_past_the_ceiling_is_not_read_into_an_error_at_all() = runTest {
+        val enormous = TOKEN + "x".repeat(MAX_RESPONSE_BYTES + 4096)
+
+        val failure = assertFailsWith<HubError.TooLarge> {
+            hub(enormous, HttpStatusCode.BadGateway).listSessions()
+        }
+
+        assertSilentAbout(TOKEN, failure)
+        assertEquals(HUB_REPLY, failure.what)
+        assertFalse("x" in failure.message.orEmpty(), "no part of the body may survive into the message")
+    }
+
     /** A proxy that answers with a megabyte of HTML must not become the message. */
     @Test
     fun a_very_long_error_body_is_capped() = runTest {

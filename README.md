@@ -116,6 +116,48 @@ The asymmetry is real and is not a bug in this document: a LAN hub over plain
 http can work on iOS and cannot on Android, until someone adds the Android
 configuration for their own host.
 
+### How much it will read
+
+The app bounds what arrives, not just how long it waits for it. The hub is
+trusted for *what* it says — you paired with it — but nothing between the phone
+and the hub is: a reverse proxy, whatever the operator put in front of it, and
+on a LAN hub reached over plain `http`, anything on the network able to write
+into the connection. A read with no ceiling is a phone that stops, and on a
+phone that means the process being killed rather than the app being slow.
+
+| Ceiling | Value | What it stops |
+|---|---|---|
+| One reply to a tool call | 8 MiB | A body read whole into memory before anything parses it. The hub bounds `session_conversation` at roughly a megabyte of transcript tail, so this is several times more than it can produce. |
+| One line on `/events` | 256 KiB | A stream that never sends `\n`. Ktor's `readLine` takes no limit at all; `readLineStrict` is the one that does. |
+| One event frame | 512 Ki chars | A frame whose `data:` never ends. SSE terminates a frame with a blank line and nothing guarantees one arrives. |
+| Turns kept on a session screen | 200 | The screen holding every turn of a session that has been running for hours, while the hub's own window stays at ten. Oldest go first and the screen says *Older turns are not shown*. |
+| JSON nesting, anywhere off the wire | 64 | A document deep enough to exhaust the parser's stack. `kotlinx.serialization` parses by recursive descent, so nesting depth *is* stack depth. |
+
+That last one is the only ceiling whose failure is not merely a big allocation,
+and it is worth spelling out because the two platforms fail differently.
+Measured on a background dispatcher, which is where the app actually parses —
+Ktor delivers on one, and a secondary thread gets a fraction of a main thread's
+stack:
+
+- **Android** throws `StackOverflowError` at around ten thousand levels. That
+  is an `Error`, not an `Exception`, and every parse site in the app guarded
+  with `catch (e: Exception)` — so it went straight past all of them.
+- **iOS** does not throw anything. The process is killed with signal 10,
+  `SIGBUS`. Confirmed in CI, where it took the test binary down mid-run.
+
+Widening those catches to `Throwable` would have fixed neither: catching a
+`StackOverflowError` is unreliable wherever it is possible at all, and on
+Kotlin/Native the signal never becomes a Kotlin exception. So the depth is
+checked *before* the parser is handed anything, in one linear non-recursive
+pass. Worth remembering for anything else here that recurses over wire data.
+
+None of these is a guess at the largest legitimate payload — they are the point
+past which nothing legitimate is happening, which is why they can be generous.
+Passing one fails the *connection*, not the app: it becomes an ordinary
+`HubError`, and the reconnect-with-backoff and `ready` resync that already
+handle every other dropped connection handle this one. Overshooting a ceiling
+costs one reconnect.
+
 ## What it does
 
 - **Sessions** — every session across every host, grouped by host and then by
@@ -291,10 +333,41 @@ The workflow refuses to run rather than publish something it shouldn't:
 
 ## What a Mac still has to check
 
-**Nothing in this repository has ever run on iOS, and no Compose has ever been
-rendered on any platform.** This is the list, in the order a Mac should work
-through it. The first two are not polish: get either wrong and the app does not
-work at all.
+**The shared code now runs on iOS. Nothing that needs a screen, a camera or an
+app bundle does, and no Compose has ever been rendered on any platform.**
+
+What changed: the `macos` job runs `:shared:iosSimulatorArm64Test` on a booted
+simulator, so the whole shared suite — **313 tests** — executes on
+Kotlin/Native on every push. That is the app's
+entire logic layer: the address and transport rules, the SSE framing, the
+conversation merge, every view model, and the token-hygiene rules.
+
+Those tests already ran twice — under `jvmTest`, and again on the emulator,
+because the device-test source-set tree pulls `commonTest` into the Android run
+— but both of those are a JVM. Kotlin/Native has its own string, regex,
+coroutine and memory implementations, and the shared code had only ever been
+*compiled* for it. All 313 pass there exactly as they do on the JVM, which is
+the first evidence that the two platforms agree about any of it.
+
+One gap is worth naming precisely, because it looks like it should have closed
+with the rest:
+
+- **The Keychain round trip still has not happened.** The Kotlin plugin runs a
+  Kotlin/Native test through `simctl spawn`, so the binary is not an installed
+  app, holds no `keychain-access-group` entitlement, and `securityd` refuses
+  every request with `errSecNotAvailable` (-25291). `KeychainSecretsTest`
+  therefore asserts the **refusal** path: that an unreadable store reads as
+  "not paired" rather than crashing the app on every cold start, and that a
+  write or a clear that cannot land throws rather than lying about it. That
+  half had no coverage anywhere and is a real production case — a background
+  wake before the device's first unlock is exactly what
+  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` invites. Storing and
+  reading a real item back needs an XCTest target hosted by `iosApp`. This is
+  why Android has the round trip and iOS does not: an Android instrumentation
+  test *is* installed as an app, and a `simctl spawn`-ed executable is not.
+
+This is the list, in the order a Mac should work through it. The first two are
+not polish: get either wrong and the app does not work at all.
 
 1. **`NSCameraUsageDescription` reaches the built app.** It is in
    `iosApp/iosApp/Info.plist`, and `GENERATE_INFOPLIST_FILE` is `NO` in both
@@ -311,12 +384,16 @@ work at all.
    `WindowInsets.safeDrawing`. Confirm it further: background the app and watch
    the hub drop a subscriber, foreground it and watch the list refill. Nothing
    here can test that CMP's iOS lifecycle actually fires.
-3. **The Keychain round trip.** `KeychainSecrets` compiles into the iOS klib and
-   has never executed. Write, read back, clear, and confirm `SecItemDelete`'s
-   status is checked rather than discarded. Then the two that matter:
+3. **The Keychain round trip.** `KeychainSecrets` now executes in CI, but only
+   its refusal path — see above for why a `simctl spawn`-ed binary cannot hold
+   a Keychain item. So the storing half is still unrun: write, read back,
+   clear, and confirm `SecItemDelete`'s status is checked rather than
+   discarded. Then the two that matter:
    `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` is readable on a
    locked-screen background wake, and the item is **absent** after restoring a
    backup onto a second device. The second is the security-relevant half.
+   Adding an XCTest target to `iosApp` would move the first three of these into
+   CI and leave only the last two needing a person.
 4. **Core Foundation retain/release.** `Secrets.ios.kt` calls `CFRelease` by
    hand on every `Create`d object and on the `+1` reference `kSecReturnData`
    hands back. The compiler checks none of it. Run it under Instruments'
@@ -326,7 +403,30 @@ work at all.
    never run, and there is no camera on the machine it was written on. Check
    that it decodes a real `fleet-hub pair` QR, that denying the permission
    leaves the manual field usable, and that the preview layer is oriented and
-   sized correctly.
+   sized correctly. Three specific things to watch for, found by reading and
+   deliberately **not** changed, because unrun camera code is the worst thing
+   to edit on faith:
+
+   - **`startRunning()` is called on the main thread.** The whole capture graph
+     is built and started inside `UIKitView`'s `factory`, which Compose runs on
+     the main queue, and Apple documents `startRunning()` as a blocking call
+     that should be made on a serial queue "so that the main queue isn't
+     blocked". Expect the UI to freeze for as long as the camera takes to come
+     up after tapping Scan — a fraction of a second to well over one. The same
+     goes for `stopRunning()` in `onDispose` and `onRelease`, on the way out.
+     The fix is the standard one — a dedicated serial `dispatch_queue` for the
+     session — but it wants a device to confirm the preview still attaches.
+   - **`unavailable(...)` is called from inside `factory`**, i.e. synchronously
+     during composition, when the capture graph refuses to start. It writes a
+     `StateFlow` that this composition reads. It converges — the Pair screen
+     simply stops composing the scanner — so this is a smell rather than a
+     loop, but it is the shape `App.kt` avoids on purpose one file over, and a
+     device is the only thing that can say whether the frame it produces is
+     clean. The Android actual does not have this: its equivalent arrives on a
+     later main-loop turn through a CameraX listener.
+   - **The session is stopped twice**, by `DisposableEffect(session)` and again
+     by `UIKitView(onRelease = …)`. Harmless as written — both are guarded by
+     `isRunning()` — and worth collapsing to one once someone can watch it.
 6. **Layout.** `ContentView` passes `.ignoresSafeArea(.all)` so the Compose view
    owns the window and insets itself, matching `enableEdgeToEdge()` on Android.
    Check the notch, the home indicator, and that the prompt box rises with the

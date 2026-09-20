@@ -10,7 +10,9 @@ import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
-import io.ktor.utils.io.readLine
+import io.ktor.utils.io.charsets.TooLongLineException
+import io.ktor.utils.io.readLineStrict
+import kotlinx.io.EOFException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
@@ -20,6 +22,64 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.long
+
+/**
+ * How much of one frame's joined `data:` the reader will hold, in UTF-16 code
+ * units — which is what a `StringBuilder` actually costs, so it is what the
+ * ceiling counts.
+ *
+ * **Why there is a ceiling at all.** SSE ends a frame with a blank line, and
+ * nothing on the wire guarantees one ever arrives. A hub wedged mid-write, a
+ * proxy that buffers and dies, or anything at all writing into a LAN `http`
+ * stream produces `data:` lines that keep coming, and the reader joins them
+ * into one buffer. Unbounded, the phone's memory is whatever the other end
+ * feels like sending — and on a phone that is not a slow app, it is the process
+ * being killed while an agent waits for an answer. The rest of this file
+ * already bounds *time* for the same reason ([EVENTS_IDLE_TIMEOUT_MS],
+ * [HUB_CALL_TIMEOUT_MS]); this bounds bytes.
+ *
+ * **Why this size.** The largest thing this route carries is one serialized
+ * store row — a `SessionRow` with a long `current_activity` is a few kilobytes
+ * — so 512 Ki is about two orders of magnitude of headroom. Being generous
+ * costs nothing: the limit is not a guess at the largest legitimate frame, it
+ * is the point past which no legitimate hub can be talking, and overshooting it
+ * costs one reconnect.
+ */
+internal const val MAX_SSE_FRAME_CHARS: Int = 512 * 1024
+
+/**
+ * How long one line on `/events` may be, in bytes.
+ *
+ * A separate ceiling from [MAX_SSE_FRAME_CHARS] because it binds *earlier* and
+ * on a different failure. The frame reader never sees a byte until a line ends,
+ * so a stream that simply never sends `\n` is buffered by the line reader
+ * underneath it and the frame ceiling is never consulted. Ktor's `readLine` has
+ * no limit parameter at all; `readLineStrict` is the one that takes a ceiling,
+ * and reaching for the wrong one is exactly how this goes unnoticed — the code
+ * reads correctly and the limit is simply absent.
+ *
+ * Smaller than the frame ceiling on purpose: one line is one `data:` field,
+ * and a frame may legitimately be several of them.
+ */
+internal const val MAX_SSE_LINE_BYTES: Int = 256 * 1024
+
+/**
+ * What an overrunning frame is called on the banner. See [HubError.TooLarge].
+ *
+ * An oversized frame is deliberately *not* treated like the unparseable frames
+ * this reader tolerates. Those are dropped — "a malformed frame is not worth
+ * tearing a live connection down for" — because a captive portal's HTML is
+ * transient and the next frame is fine. A frame with no end is not that: the
+ * stream is no longer carrying what the app thinks it is carrying, and the
+ * honest recovery is the one
+ * [dev.claudefleet.mobile.data.FleetRepository.follow] already implements for
+ * every other dropped connection — back off, reconnect, and let `ready` force
+ * the refetch that repairs whatever the abandoned frame would have said.
+ */
+internal const val SSE_FRAME = "an event frame"
+
+/** What an overrunning line is called on the banner. See [HubError.TooLarge]. */
+internal const val SSE_LINE = "a line on the event stream"
 
 /**
  * One server-sent-event frame: the `event:` name and the joined `data:` lines.
@@ -51,7 +111,13 @@ internal class SseFrameReader {
     /** True while a frame has been started but not yet terminated. */
     val partial: Boolean get() = hasData || event != null
 
-    /** The frame [line] completed, or null if it did not complete one. */
+    /**
+     * The frame [line] completed, or null if it did not complete one.
+     *
+     * @throws HubError.TooLarge if this line would take the frame past
+     *   [MAX_SSE_FRAME_CHARS]. The buffer is cleared first, so the reader is
+     *   usable again and the refused frame cannot bleed into the next one.
+     */
     fun accept(line: String): SseFrame? {
         // A CRLF proxy leaves the carriage return on a line the reader split on
         // '\n'; it is framing, not payload, and a stray \r inside JSON is the
@@ -69,6 +135,14 @@ internal class SseFrameReader {
         when (field) {
             "event" -> event = value.ifEmpty { null }
             "data" -> {
+                // Before appending, not after: the point is never to hold the
+                // oversized string, so a check that runs once it is already in
+                // the buffer would be a report rather than a limit.
+                val joined = if (hasData) 1 else 0
+                if (data.length + joined + value.length > MAX_SSE_FRAME_CHARS) {
+                    reset()
+                    throw HubError.TooLarge(SSE_FRAME, MAX_SSE_FRAME_CHARS)
+                }
                 if (hasData) data.append('\n')
                 data.append(value)
                 hasData = true
@@ -142,7 +216,15 @@ sealed interface HubEvent {
 internal fun frameToEvent(frame: SseFrame): HubEvent? {
     val name = frame.event ?: return null
     val fields = try {
-        json.parseToJsonElement(frame.data) as? JsonObject ?: return null
+        parseWire(frame.data, SSE_FRAME) as? JsonObject ?: return null
+    } catch (e: HubError) {
+        // Dropping an unparseable frame is deliberate policy — see this
+        // function's KDoc, and the captive portal it was written for. A frame
+        // refused for its *depth* is not that: it is the same class of fault as
+        // one refused for its size, and gets the same recovery, a reconnect
+        // and a `ready` resync. Returning null here would leave the row quietly
+        // stale instead, for as long as the connection lasted.
+        throw e
     } catch (_: Exception) {
         return null
     }
@@ -267,7 +349,33 @@ class HubEventStream(
                 val body = response.bodyAsChannel()
                 val reader = SseFrameReader()
                 while (true) {
-                    val line = body.readLine() ?: break
+                    // `readLineStrict`, not `readLine`: the latter takes no
+                    // limit at all and will assemble a line as long as whatever
+                    // is on the other end cares to send. See [MAX_SSE_LINE_BYTES].
+                    //
+                    // Its two failures are deliberately NOT treated alike.
+                    // Collapsing them would have changed what a cut connection
+                    // means as a side effect of adding a size limit, which is
+                    // the sort of thing that goes unnoticed because both
+                    // outcomes happen to reconnect.
+                    val line = try {
+                        body.readLineStrict(MAX_SSE_LINE_BYTES.toLong())
+                    } catch (_: TooLongLineException) {
+                        // One line past the ceiling: a fault. Nothing that
+                        // belongs on this route is remotely this long.
+                        throw HubError.TooLarge(SSE_LINE, MAX_SSE_LINE_BYTES)
+                    } catch (_: EOFException) {
+                        // The body ended part-way through a line — the stream
+                        // was cut, not closed. Every complete frame before it
+                        // has already been sent; the half-line is dropped for
+                        // the same reason the half-frame below is, and the flow
+                        // ends the way a clean close ends it, leaving `follow()`
+                        // to reconnect and `ready` to refetch. That is what
+                        // `readLine` did for free, and it is kept on purpose —
+                        // `a_body_cut_off_mid_frame_yields_only_the_complete_frames`
+                        // is the test that says so.
+                        break
+                    } ?: break
                     val frame = reader.accept(line) ?: continue
                     frameToEvent(frame)?.let { send(it) }
                 }

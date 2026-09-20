@@ -70,6 +70,52 @@ class ThisMachineTest {
     }
 
     /**
+     * The transport rule normalises its host too — on the branches that are its
+     * own, not `isThisMachine`'s.
+     *
+     * `isLoopbackUrl` and `permitsCleartext` each have to get from a URL to a
+     * bare, normalised host, and each used to write the same four-step
+     * normalisation out at its own call site. Two copies of a rule are two
+     * things that can drift, and drift in *this* rule is the documented root
+     * cause of the four separate occasions [isThisMachine] was wrong, so they
+     * now share one `hostOfUrl`.
+     *
+     * The spellings below are chosen to make that shared step load-bearing.
+     * Asserting it with loopback spellings proves nothing — `permitsCleartext`
+     * asks `isThisMachine` first, and that function normalises again on its own
+     * account, so it would paper over a missing step. These four get past that
+     * question and land on `permitsCleartext`'s own branches — `.local`, the
+     * private-range parse, and the single-label name — where nothing else will
+     * fold the case or drop the root label.
+     *
+     * Each one fails **closed** if the normalisation is missing: an operator
+     * with a perfectly good LAN hub is told to use HTTPS for no reason they can
+     * see.
+     */
+    @Test
+    fun the_cleartext_rule_normalises_the_host_on_its_own_branches_too() {
+        for (url in listOf(
+            // A root label on a private address: `inet_aton` sees a fifth,
+            // empty part and gives up, and the address is refused.
+            "http://192.168.1.5.:8899",
+            "http://10.0.0.7.:8899",
+            // `.local` is reserved for mDNS by RFC 6762 whatever case it is
+            // typed in, and an operator dictating a hostname over the phone is
+            // exactly who types it in the wrong one.
+            "http://FLEETHUB.LOCAL:8899",
+            "http://Fleethub.Local:8899",
+            // A single-label LAN name with a root label.
+            "http://fleethub.:8899",
+        )) {
+            assertTrue(
+                permitsCleartext(url),
+                "$url is on this network however it is spelled — the transport rule must " +
+                    "normalise the host on its own branches, not only inside isThisMachine",
+            )
+        }
+    }
+
+    /**
      * The rule must not become "always ignore what the hub says". A `true` here
      * fails **safe** — the address the phone reached is kept — but a rule that
      * matched everything would throw away the hub's own public URL, which is

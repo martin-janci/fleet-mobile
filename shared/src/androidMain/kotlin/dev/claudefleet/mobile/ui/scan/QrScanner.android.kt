@@ -32,6 +32,7 @@ import com.google.zxing.NotFoundException
 import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.qrcode.QRCodeReader
+import java.nio.ByteBuffer
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 
@@ -188,9 +189,6 @@ private class QrAnalyzer(private val onCode: (String) -> Unit) : ImageAnalysis.A
     /**
      * The Y plane as a tightly packed `width * height` buffer.
      *
-     * The array is reused across frames — this runs thirty times a second and a
-     * fresh megabyte each time is work the garbage collector does not need.
-     *
      * **`pixelStride` is deliberately not read** (review N-A1). `YUV_420_888`
      * guarantees the Y plane's pixel stride is 1, which is the whole reason the
      * Y plane can be handed to ZXing as a luminance buffer at all; if it could
@@ -199,44 +197,18 @@ private class QrAnalyzer(private val onCode: (String) -> Unit) : ImageAnalysis.A
      * exists and is not read" looks like an oversight, and the next person
      * should be able to tell that it was considered.
      *
-     * `rowStride`, by contrast, is genuinely not the width on many devices, and
-     * treating the buffer as tightly packed shears the image and silently never
-     * decodes.
+     * The packing itself is [packLuminance], which is where the stride and
+     * short-buffer rules live and where they are tested. This method is only
+     * the part that needs an [ImageProxy] to exist.
      */
     private fun ImageProxy.luminanceSource(): PlanarYUVLuminanceSource? {
         val plane = planes.firstOrNull() ?: return null
-        val buffer = plane.buffer
-        val rowStride = plane.rowStride
         val needed = width * height
         if (needed <= 0) return null
+        // The array is reused across frames — this runs thirty times a second
+        // and a fresh megabyte each time is work the collector does not need.
         if (luminance.size != needed) luminance = ByteArray(needed)
-
-        // Review N-A2: a short buffer must not leave the PREVIOUS frame's rows
-        // in the reused array. Whatever is not filled from this frame is zeroed,
-        // so a truncated frame decodes as a black band rather than as a stale
-        // image — the same failure shape as the stride bug, and the same fix:
-        // never show ZXing pixels that did not come from the frame it is
-        // looking at.
-        val filled: Int
-
-        if (rowStride == width) {
-            filled = minOf(needed, buffer.remaining())
-            buffer.get(luminance, 0, filled)
-        } else {
-            // A padded buffer: take `width` bytes from the start of each row and
-            // skip the padding.
-            val row = ByteArray(rowStride)
-            var rows = 0
-            for (y in 0 until height) {
-                val take = minOf(rowStride, buffer.remaining())
-                if (take < width) break
-                buffer.get(row, 0, take)
-                row.copyInto(luminance, y * width, 0, width)
-                rows = y + 1
-            }
-            filled = rows * width
-        }
-        if (filled < needed) luminance.fill(0, filled, needed)
+        packLuminance(plane.buffer, width, height, plane.rowStride, luminance)
 
         return PlanarYUVLuminanceSource(
             luminance,
@@ -249,6 +221,57 @@ private class QrAnalyzer(private val onCode: (String) -> Unit) : ImageAnalysis.A
             false,
         )
     }
+}
+
+/**
+ * Copy one frame's Y plane out of [buffer] into [into] as a tightly packed
+ * `width * height` luminance image.
+ *
+ * Split out of [QrAnalyzer] and made `internal` so it can be executed by a test.
+ * Both of the rules below are ones whose failure mode is a viewfinder that
+ * simply never decodes — no crash, no message, nothing to debug from — which is
+ * the kind of thing that has to be asserted rather than read:
+ *
+ *  - **[rowStride] is honoured rather than assumed equal to [width].** On plenty
+ *    of devices the Y plane is padded to a multiple of 16 or 64, and treating a
+ *    padded buffer as tightly packed shears the image by a few pixels per row.
+ *    ZXing then finds no finder patterns and reports nothing, frame after frame.
+ *  - **[into] is reused across frames, so whatever this frame does not fill is
+ *    zeroed** (review N-A2). A short buffer would otherwise leave the *previous*
+ *    frame's rows in place and hand ZXing a composite of two images. A black
+ *    band is an honest half-frame; a stale one is not.
+ *
+ * [into] must be at least `width * height` long; the caller sizes it.
+ */
+internal fun packLuminance(
+    buffer: ByteBuffer,
+    width: Int,
+    height: Int,
+    rowStride: Int,
+    into: ByteArray,
+) {
+    val needed = width * height
+    val filled: Int
+    if (rowStride == width) {
+        filled = minOf(needed, buffer.remaining())
+        buffer.get(into, 0, filled)
+    } else {
+        // A padded buffer: take `width` bytes from the start of each row and
+        // skip the padding. The last row of a `YUV_420_888` plane is commonly
+        // `width` bytes rather than `rowStride`, which is why the amount taken
+        // is whatever is left rather than a full stride.
+        val row = ByteArray(rowStride)
+        var rows = 0
+        for (y in 0 until height) {
+            val take = minOf(rowStride, buffer.remaining())
+            if (take < width) break
+            buffer.get(row, 0, take)
+            row.copyInto(into, y * width, 0, width)
+            rows = y + 1
+        }
+        filled = rows * width
+    }
+    if (filled < needed) into.fill(0, filled, needed)
 }
 
 /** `Context.getMainExecutor` is API 28; `minSdk` here is 26. */

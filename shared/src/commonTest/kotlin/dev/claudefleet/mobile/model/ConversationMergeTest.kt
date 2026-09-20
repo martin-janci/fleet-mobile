@@ -130,3 +130,114 @@ class ConversationMergeTest {
         assertEquals(1, have.appending(conversation(orphan)).turns.size)
     }
 }
+
+/**
+ * What the screen keeps, and what it lets go.
+ *
+ * The merge above is written around the hub sending a *rolling window*: it
+ * re-reads the last N turns every time, so the app has to hold the ones that
+ * have scrolled off the hub's end but are still on the screen. The consequence
+ * nobody had looked at is that the app holds **all** of them, for as long as the
+ * screen is open, while the hub's own memory of the session stays the same ten
+ * turns it always was.
+ *
+ * These are Claude Code sessions. They run for hours and produce hundreds of
+ * turns, each carrying its prompt and every tool line under it — and the screen
+ * that shows one is the screen someone leaves open to watch. Growth is bounded
+ * by nothing but how long the agent works.
+ *
+ * So the retained conversation has a ceiling, and the turns that go are the
+ * oldest — the ones furthest from what is happening now. `truncated` is how the
+ * screen already says there is more above ("Older turns are not shown"), so
+ * dropping a turn and setting that flag is a thing the UI can already express
+ * rather than a new state to draw.
+ */
+class ConversationCeilingTest {
+
+    /** Enough reads to outrun any plausible ceiling, one new turn at a time. */
+    private fun longSession(turns: Int): Conversation {
+        var held = Conversation()
+        for (n in 1..turns) {
+            // A rolling window of ten, exactly as the hub answers: the newest
+            // turn plus the nine before it.
+            val window = ((n - 9).coerceAtLeast(1)..n).map { turn("t$it", "prompt $it", "line $it") }
+            held = held.appending(Conversation(turns = window))
+        }
+        return held
+    }
+
+    @Test
+    fun a_long_session_does_not_grow_without_bound() {
+        val held = longSession(MAX_RETAINED_TURNS * 3)
+
+        assertEquals(
+            MAX_RETAINED_TURNS,
+            held.turns.size,
+            "the screen holds every turn it has ever seen unless something stops it",
+        )
+    }
+
+    /** The turns that survive are the newest ones, in order. */
+    @Test
+    fun the_newest_turns_are_the_ones_kept() {
+        val total = MAX_RETAINED_TURNS * 2
+        val held = longSession(total)
+
+        assertEquals("t${total - MAX_RETAINED_TURNS + 1}", held.turns.first().at)
+        assertEquals("t$total", held.turns.last().at, "the live turn must never be the one dropped")
+        assertEquals(
+            held.turns.map { it.at },
+            held.turns.sortedBy { it.at?.removePrefix("t")?.toInt() }.map { it.at },
+            "dropping from the head must not reorder what is left",
+        )
+    }
+
+    /** And the screen is told, in the one way it already knows how to show. */
+    @Test
+    fun dropping_a_turn_marks_the_conversation_truncated() {
+        val held = longSession(MAX_RETAINED_TURNS + 1)
+
+        assertTrue(held.truncated, "`Older turns are not shown` is exactly what has happened")
+    }
+
+    /**
+     * A session below the ceiling is untouched — no drops, and no truncation
+     * flag invented for a conversation that is complete.
+     */
+    @Test
+    fun a_short_session_is_not_truncated_by_the_ceiling() {
+        val held = longSession(MAX_RETAINED_TURNS - 1)
+
+        assertEquals(MAX_RETAINED_TURNS - 1, held.turns.size)
+        assertFalse(held.truncated, "nothing was dropped, so nothing should claim it was")
+    }
+
+    /**
+     * A single read larger than the ceiling is cut too.
+     *
+     * `conversation(turns = n)` lets a caller ask for more than the default ten,
+     * and the ceiling has to hold for the first read as much as the hundredth —
+     * a cap that only applies to *merged* turns is one an opening screen walks
+     * straight past.
+     */
+    @Test
+    fun one_oversized_read_is_cut_to_the_ceiling() {
+        val huge = Conversation(turns = (1..MAX_RETAINED_TURNS + 50).map { turn("t$it", "p$it") })
+
+        val held = Conversation().appending(huge)
+
+        assertEquals(MAX_RETAINED_TURNS, held.turns.size)
+        assertEquals("t${MAX_RETAINED_TURNS + 50}", held.turns.last().at)
+        assertTrue(held.truncated)
+    }
+
+    /** Truncation already reported by the hub still survives the merge. */
+    @Test
+    fun the_hubs_own_truncation_flag_is_not_lost() {
+        val held = Conversation().appending(
+            Conversation(turns = listOf(turn("t1", "a")), truncated = true),
+        )
+
+        assertTrue(held.truncated)
+    }
+}

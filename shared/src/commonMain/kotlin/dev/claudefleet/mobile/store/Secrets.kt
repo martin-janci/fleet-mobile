@@ -1,6 +1,8 @@
 package dev.claudefleet.mobile.store
 
+import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.json
+import dev.claudefleet.mobile.net.parseWire
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -115,7 +117,7 @@ internal fun Credentials.encode(): String = json.encodeToString(
 internal fun decodeCredentials(raw: String?): Credentials? {
     if (raw.isNullOrBlank()) return null
     val fields = try {
-        json.parseToJsonElement(raw) as? JsonObject ?: return null
+        parseWire(raw, STORED_CREDENTIAL) as? JsonObject ?: return null
     } catch (_: Exception) {
         // Unreadable stored state is the same as none: the app re-pairs rather
         // than crashing on a store some earlier version wrote.
@@ -127,6 +129,16 @@ internal fun decodeCredentials(raw: String?): Credentials? {
     val name = field("name")?.takeIf { it.isNotBlank() } ?: return null
     return Credentials(hub, token, name, field("mode") ?: Credentials.FULL)
 }
+
+/**
+ * What an over-nested stored credential is called. See [HubError.TooLarge].
+ *
+ * The store is this device's own file rather than the wire, so this is the
+ * least exposed of the parse sites — but it is written from a `PairResult`
+ * that *did* come off the wire, and the cost of routing it through the same
+ * check as everything else is one linear scan of a few hundred bytes at start-up.
+ */
+internal const val STORED_CREDENTIAL = "the nesting in the stored credential"
 
 /** The store's identity, kept identical across platforms. */
 internal const val SECRETS_SERVICE: String = "dev.claudefleet.mobile"

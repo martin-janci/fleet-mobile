@@ -190,18 +190,31 @@ class PairViewModel(
         val target = try {
             PairTarget.require(input)
         } catch (e: NotAPairingCode) {
-            _state.value = current.copy(error = explain(e))
+            _state.update { it.copy(error = explain(e)) }
             return null
         }
         val typed = current.address.takeIf { it.isNotBlank() }
         if (target.base == null && typed == null) {
-            _state.value = current.copy(error = NotAPairingCode.NO_HUB)
+            _state.update { it.copy(error = NotAPairingCode.NO_HUB) }
             return null
         }
 
         // A deliberate new attempt is itself a reason to stop showing why the
         // old credential was dropped.
-        _state.value = current.copy(pairing = true, error = null, reason = null)
+        //
+        // `update {}` rather than `_state.value = current.copy(...)`, which is
+        // what these three writes were. `current` is a snapshot taken at the
+        // top of this function, before the parse; writing `current.copy(...)`
+        // several branches later rewrites the *whole* state from it, so a
+        // keystroke that landed in between — `onCodeChange` and
+        // `onAddressChange` write this same flow — would be silently undone.
+        // Nothing interleaves today, because every caller of this class is on
+        // the UI thread on both platforms, but that is the dispatcher's
+        // guarantee rather than this code's, and the rest of the app has
+        // already settled on `update {}` for exactly this reason — see
+        // `SessionViewModel.local`, whose KDoc states the rule, and the same
+        // change already made to `HostsViewModel`.
+        _state.update { it.copy(pairing = true, error = null, reason = null) }
         auth.clearUnpairReason()
         return scope.launch {
             try {

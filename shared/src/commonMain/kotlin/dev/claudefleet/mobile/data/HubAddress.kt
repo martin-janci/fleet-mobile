@@ -104,17 +104,24 @@ private fun Char.isControl(): Boolean = this < ' ' || this in ''..''
  * bind address into `hub.public_url` is precisely the operator this rule exists
  * to protect. Re-pairing never recovers, because the echo wins every time.
  */
-internal fun isLoopbackUrl(url: String): Boolean =
-    isThisMachine(hostOf(url.substringAfter("://", "").substringBefore('/')))
+internal fun isLoopbackUrl(url: String): Boolean = isThisMachine(hostOfUrl(url))
 
 /**
- * The bare host inside an authority, with any port and brackets removed.
+ * The bare host a URL names, normalised — the one way this file gets from a URL
+ * to something worth deciding about.
  *
- * Shared by [isLoopbackUrl] and [permitsCleartext] rather than written twice.
- * Duplicated host parsing in this file is not a hypothetical risk: it is the
- * documented root cause of the four separate occasions [isThisMachine] was
- * wrong.
+ * Both halves used to be written out at each call site: [isLoopbackUrl] and
+ * [permitsCleartext] each carved the authority out of the URL, and
+ * [permitsCleartext] and [isThisMachine] each applied the same four-step
+ * normalisation to it. That is precisely the shape this file has been burned by
+ * — duplicated host parsing is the documented root cause of the four separate
+ * occasions [isThisMachine] was wrong — and two copies of a rule are two things
+ * that can drift, whatever they happen to say today.
  */
+private fun hostOfUrl(url: String): String =
+    normalizedHost(hostOf(url.substringAfter("://", "").substringBefore('/')))
+
+/** The bare host inside an authority, with any port and brackets removed. */
 private fun hostOf(authority: String): String = when {
     authority.startsWith("[") -> authority.substringAfter('[').substringBefore(']')
     // An IPv6 literal without brackets has more than one colon; a host:port
@@ -122,6 +129,20 @@ private fun hostOf(authority: String): String = when {
     authority.count { it == ':' } > 1 -> authority
     else -> authority.substringBefore(':')
 }
+
+/**
+ * A host reduced to the one spelling everything here compares against: no
+ * surrounding space, no IPv6 brackets, lower case, and no root label.
+ *
+ * Every one of those is *notation* rather than identity, and [isThisMachine]'s
+ * KDoc explains at length why this has to happen before any decision rather
+ * than as a list of special cases — `localhost.` is `localhost`, and
+ * `2130706433.` was the form that beat the previous fix by one character.
+ * Idempotent, so applying it to an already-normalised host costs nothing and
+ * keeps [isThisMachine] safe to call with a raw one.
+ */
+private fun normalizedHost(rawHost: String): String =
+    rawHost.trim().trim('[', ']').lowercase().trimEnd('.')
 
 /**
  * May this URL be spoken over plain `http://`?
@@ -156,8 +177,7 @@ internal fun permitsCleartext(url: String): Boolean {
     val scheme = url.substringBefore("://", "").trim().lowercase()
     if (scheme != "http") return true
 
-    val host = hostOf(url.substringAfter("://", "").substringBefore('/'))
-        .trim().trim('[', ']').lowercase().trimEnd('.')
+    val host = hostOfUrl(url)
     if (host.isEmpty()) return false
     if (isThisMachine(host)) return true
 
@@ -236,7 +256,7 @@ private fun isThisMachine(rawHost: String): Boolean {
     // `HubBase::public` accepts it because axum's `Authority` parses it. Not
     // stripping it defeated the numeric parser too — `2130706433.` is the form
     // the previous commit had just fixed, beaten by one character.
-    val host = rawHost.trim().trim('[', ']').lowercase().trimEnd('.')
+    val host = normalizedHost(rawHost)
     if (host.isEmpty()) return false
     // `localhost` and, per RFC 6761, anything under it.
     if (host == "localhost" || host.endsWith(".localhost")) return true
