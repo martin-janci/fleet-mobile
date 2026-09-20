@@ -142,7 +142,29 @@ private fun hostOf(authority: String): String = when {
  * keeps [isThisMachine] safe to call with a raw one.
  */
 private fun normalizedHost(rawHost: String): String =
-    rawHost.trim().trim('[', ']').lowercase().trimEnd('.')
+    rawHost.trim().trim('[', ']').lowercase().trimEnd('.').withoutZoneId()
+
+/**
+ * An IPv6 literal without its RFC 4007 zone id: `::1%eth0` and the RFC 6874
+ * percent-encoded `::1%25eth0` both become `::1`.
+ *
+ * This is the "known gap" [isThisMachine] used to carry, closed where that
+ * comment said it should be — "the next change here should be the
+ * normalisation, not another branch". A scoped loopback failed **open**: it was
+ * not recognised as this machine, so a hub echoing one would have had it stored
+ * and dialled forever.
+ *
+ * **Only when the host is an IPv6 literal, and that condition is load-bearing
+ * rather than tidiness.** A zone id is defined for IPv6 and nothing else, while
+ * `%` in any other host is the start of a percent-encoding — so cutting at the
+ * first `%` unconditionally would read `ev%il.com` as the single label `ev`,
+ * and a single label is one of the things [permitsCleartext] lets plain `http`
+ * reach. The careless version of this fix opens cleartext to a public name; the
+ * colon test is what keeps it to the addresses a zone id can legally appear on.
+ * `ZoneIdTest` pins both directions.
+ */
+private fun String.withoutZoneId(): String =
+    if (':' in this) substringBefore('%') else this
 
 /**
  * May this URL be spoken over plain `http://`?

@@ -70,6 +70,30 @@ class WireLimitsTest {
         assertEquals(SSE_FRAME, refusal.what, "…and what it was that overran")
     }
 
+    /**
+     * Exactly at the ceiling, and exactly one past it.
+     *
+     * The `>` was mutable to `>=` with the suite green: the test below uses
+     * `MAX - 16`, so nothing ever sat on the edge, and a ceiling that refuses
+     * *at* its stated value rather than beyond it would have dropped a frame
+     * the documentation says is allowed — and dropped the connection with it,
+     * since an oversized frame is a fault rather than a skip.
+     */
+    @Test
+    fun the_frame_ceiling_is_exactly_where_it_says_it_is() {
+        val atLimit = SseFrameReader()
+        atLimit.accept("event: session:updated")
+        val exact = "y".repeat(MAX_SSE_FRAME_CHARS)
+        atLimit.accept("data: $exact")
+        assertEquals(exact, atLimit.accept("")?.data, "a frame of exactly the ceiling is allowed")
+
+        val oneOver = SseFrameReader()
+        oneOver.accept("event: session:updated")
+        assertFailsWith<HubError.TooLarge>("one character past it is not") {
+            oneOver.accept("data: " + "y".repeat(MAX_SSE_FRAME_CHARS + 1))
+        }
+    }
+
     /** A frame right up against the ceiling is still delivered. */
     @Test
     fun a_large_but_bounded_frame_still_arrives() {

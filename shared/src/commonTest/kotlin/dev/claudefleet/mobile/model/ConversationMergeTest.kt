@@ -201,6 +201,32 @@ class ConversationCeilingTest {
     }
 
     /**
+     * Exactly at the ceiling: nothing dropped, so nothing claimed.
+     *
+     * The `<=` in `withinCeiling` was mutable to `<` with the whole suite still
+     * green, because the tests either side of it used `MAX - 1` and `MAX * 3`
+     * and never the boundary itself. Under `<`, a conversation of exactly 200
+     * turns takes the drop path — `takeLast(200)` returns the same 200 turns,
+     * so nothing is lost and nothing looks wrong — and sets `truncated`, which
+     * the screen renders as "Older turns are not shown" over a conversation
+     * that is complete. A lie the size of one turn, and invisible in any test
+     * that does not sit exactly on the edge.
+     */
+    @Test
+    fun a_session_exactly_at_the_ceiling_is_not_truncated() {
+        val held = longSession(MAX_RETAINED_TURNS)
+
+        assertEquals(MAX_RETAINED_TURNS, held.turns.size)
+        assertFalse(held.truncated, "nothing was dropped at exactly the ceiling")
+    }
+
+    /** And one turn past it is. */
+    @Test
+    fun one_turn_past_the_ceiling_is_truncated() {
+        assertTrue(longSession(MAX_RETAINED_TURNS + 1).truncated)
+    }
+
+    /**
      * A session below the ceiling is untouched — no drops, and no truncation
      * flag invented for a conversation that is complete.
      */

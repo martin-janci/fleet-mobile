@@ -150,7 +150,7 @@ class SessionsViewModelTest {
         val vm = SessionsViewModel(fleet, backgroundScope)
         assertEquals(4, vm.state.value.groups.sumOf { it.sessionCount })
 
-        vm.setNeedsAttentionOnly(true)
+        vm.toggleNeedsAttentionOnly()
         runCurrent()
 
         val state = vm.state.value
@@ -171,7 +171,7 @@ class SessionsViewModelTest {
         )
         val vm = SessionsViewModel(fleet, backgroundScope)
 
-        vm.setNeedsAttentionOnly(true)
+        vm.toggleNeedsAttentionOnly()
         runCurrent()
 
         assertEquals(listOf("pine"), vm.state.value.groups.map { it.alias })
@@ -190,7 +190,7 @@ class SessionsViewModelTest {
         val vm = SessionsViewModel(fleet, backgroundScope)
         assertEquals(2, vm.state.value.attentionCount)
 
-        vm.setNeedsAttentionOnly(true)
+        vm.toggleNeedsAttentionOnly()
         runCurrent()
 
         assertEquals(2, vm.state.value.attentionCount)
@@ -202,8 +202,8 @@ class SessionsViewModelTest {
         val fleet = FakeFleet(rows = listOf(session(1)))
         val vm = SessionsViewModel(fleet, backgroundScope)
 
-        vm.setNeedsAttentionOnly(true)
-        vm.setNeedsAttentionOnly(false)
+        vm.toggleNeedsAttentionOnly()
+        vm.toggleNeedsAttentionOnly()
         runCurrent()
 
         assertEquals(0, fleet.refreshes)
@@ -356,5 +356,81 @@ class SessionsViewModelTest {
         assertEquals(true, groups.getValue("box").reachable)
         // Not in `list_hosts` at all: unknown, which is not the same as "down".
         assertNull(groups.getValue("ghost").reachable)
+    }
+}
+
+
+/**
+ * The needs-attention filter, through the method the bar is actually wired to.
+ *
+ * `SessionsScreen` calls `toggleNeedsAttentionOnly`, and nothing in the app ever
+ * called `setNeedsAttentionOnly(on)` — but every test did. So the path being
+ * exercised was not the path that ships, which is the arrangement that lets a
+ * bug live in the gap between them. The setter is gone and these go through the
+ * toggle.
+ */
+class NeedsAttentionToggleTest {
+
+    @Test
+    fun the_toggle_turns_the_filter_on_and_off_again() = runTest {
+        val fleet = FakeFleet(listOf(session(1, claudeStatus = "blocked"), session(2)))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        assertEquals(2, vm.state.value.groups.sumOf { it.sessionCount })
+
+        vm.toggleNeedsAttentionOnly()
+        runCurrent()
+        assertTrue(vm.state.value.needsAttentionOnly)
+        assertEquals(
+            listOf(1L),
+            vm.state.value.groups.flatMap { g -> g.projects.flatMap { it.sessions } }.map { it.id },
+        )
+
+        vm.toggleNeedsAttentionOnly()
+        runCurrent()
+        assertFalse(vm.state.value.needsAttentionOnly)
+        assertEquals(2, vm.state.value.groups.sumOf { it.sessionCount })
+    }
+
+    /**
+     * Two taps in a row land on two different answers.
+     *
+     * The flip reads and writes in one `update {}` rather than reading
+     * `local.value` and then writing, so two calls cannot both observe the same
+     * value and both write the same result — which would swallow one tap and
+     * leave the switch disagreeing with the list under it.
+     */
+    @Test
+    fun every_tap_moves_the_filter() = runTest {
+        val fleet = FakeFleet(listOf(session(1, claudeStatus = "blocked"), session(2)))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        // Two taps with nothing in between — no `runCurrent()`, so the `stateIn`
+        // collector has not run and `state` still reads false throughout. That
+        // is the whole point: a toggle that decided from `state.value` would
+        // see false twice, write true twice, and swallow the second tap. One
+        // `update {}` reads the value it is writing against, so the pair
+        // cancels out.
+        vm.toggleNeedsAttentionOnly()
+        vm.toggleNeedsAttentionOnly()
+        runCurrent()
+
+        assertFalse(vm.state.value.needsAttentionOnly, "two taps cancel; neither may be lost")
+
+        vm.toggleNeedsAttentionOnly()
+        runCurrent()
+        assertTrue(vm.state.value.needsAttentionOnly, "and a third still flips it")
+    }
+
+    /** The count in the bar is the whole fleet's, filtered or not. */
+    @Test
+    fun the_attention_count_ignores_the_filter() = runTest {
+        val fleet = FakeFleet(listOf(session(1, claudeStatus = "blocked"), session(2)))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        assertEquals(1, vm.state.value.attentionCount)
+        vm.toggleNeedsAttentionOnly()
+        runCurrent()
+        assertEquals(1, vm.state.value.attentionCount, "it counts the fleet, not the filtered view")
     }
 }
