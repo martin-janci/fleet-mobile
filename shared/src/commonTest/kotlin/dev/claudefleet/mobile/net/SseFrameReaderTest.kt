@@ -68,6 +68,37 @@ class SseFrameReaderTest {
         assertEquals(emptyList(), read(":", "", ": ping", ""))
     }
 
+    /**
+     * A comment *inside* a frame does not end it.
+     *
+     * Between frames a heartbeat is harmless either way — dispatching there
+     * finds no data and produces nothing, so the two behaviours are
+     * indistinguishable, which is why the existing heartbeat tests cannot tell
+     * them apart. Between two `data:` lines they differ completely: treating
+     * the comment as a terminator cuts the frame in half and hands the first
+     * half to the parser as if it were whole, so half a JSON object arrives as
+     * a fact. The spec says a comment is ignored; this is that, pinned.
+     *
+     * It takes a keep-alive landing mid-frame, which needs a frame large enough
+     * to still be arriving 15 seconds in — a big `session:updated` on a slow
+     * link. Rare, and the failure would be a parse error nobody could
+     * reproduce.
+     */
+    @Test
+    fun a_comment_inside_a_frame_does_not_split_it() {
+        val frames = read(
+            "event: session:updated",
+            """data: {"id":7,""",
+            ": keep-alive, mid-frame",
+            """data:  "tail":"x"}""",
+            "",
+        )
+
+        assertEquals(1, frames.size, "the comment must not have ended the frame: $frames")
+        assertEquals("session:updated", frames[0].event)
+        assertEquals("{\"id\":7,\n \"tail\":\"x\"}", frames[0].data)
+    }
+
     @Test
     fun a_comment_between_two_frames_does_not_disturb_them() {
         val frames = read(
