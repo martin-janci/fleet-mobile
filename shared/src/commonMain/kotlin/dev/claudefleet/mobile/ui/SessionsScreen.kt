@@ -1,24 +1,29 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Badge
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -27,15 +32,20 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.StatusChip
+import dev.claudefleet.mobile.ui.components.StatusDot
 import dev.claudefleet.mobile.ui.theme.FleetIcons
+import dev.claudefleet.mobile.ui.theme.LocalStatusColors
+import dev.claudefleet.mobile.ui.theme.StatusTone
 
 /**
  * The home screen: every session in the fleet, grouped by host and then by
@@ -44,6 +54,7 @@ import dev.claudefleet.mobile.ui.theme.FleetIcons
  * Stateless by design — it draws a [SessionsUiState] and reports taps. The view
  * model is what is tested; this is what only a device can show.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SessionsScreen(
     state: SessionsUiState,
@@ -71,7 +82,7 @@ fun SessionsScreen(
         PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 for (host in state.groups) {
-                    item(key = "host-${host.alias}") {
+                    stickyHeader(key = "host-${host.alias}") {
                         HostHeader(alias = host.alias, reachable = host.reachable, sessions = host.sessionCount)
                     }
                     for (project in host.projects) {
@@ -79,7 +90,7 @@ fun SessionsScreen(
                             ProjectHeader(project.label)
                         }
                         items(project.sessions, key = { it.id }) { row ->
-                            SessionRowItem(row = row, onClick = { onOpenSession(row.id) })
+                            SessionRowItem(row = row, nowSeconds = state.nowSeconds, onClick = { onOpenSession(row.id) })
                         }
                     }
                 }
@@ -129,9 +140,9 @@ private fun SessionsBar(
 
 @Composable
 private fun HostHeader(alias: String, reachable: Boolean?, sessions: Int) {
-    Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+            modifier = Modifier.fillMaxWidth().height(40.dp).padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
@@ -158,40 +169,48 @@ private fun HostHeader(alias: String, reachable: Boolean?, sessions: Int) {
 private fun ProjectHeader(label: String) {
     Text(
         text = label,
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 2.dp),
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.secondary,
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
     )
 }
 
 @Composable
-private fun SessionRowItem(row: SessionRow, onClick: () -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(16.dp, 10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = row.displayName,
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(8.dp))
-            StatusChip(claudeStatus = row.claudeStatus, stuckKind = row.stuckKind)
-        }
-        // The hub already writes a one-line summary of what the session is
-        // doing; this screen does not second-guess it.
-        val activity = row.currentActivity
-        if (!activity.isNullOrBlank()) {
-            Text(
-                text = activity,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-    HorizontalDivider()
+private fun SessionRowItem(row: SessionRow, nowSeconds: Long, onClick: () -> Unit) {
+    ListItem(
+        modifier = Modifier.clickable(onClick = onClick),
+        leadingContent = { StatusDot(row.claudeStatus, row.stuckKind) },
+        headlineContent = {
+            Column {
+                Text(row.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val pct = row.contextPct
+                if (pct != null) {
+                    LinearProgressIndicator(
+                        progress = { (pct / 100.0).toFloat().coerceIn(0f, 1f) },
+                        modifier = Modifier.width(60.dp).height(2.dp).padding(top = 2.dp),
+                        color = if (pct >= 80) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        },
+        supportingContent = {
+            val line = row.supportingLine(nowSeconds)
+            if (line != null) Text(line, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        },
+        trailingContent = {
+            Column(horizontalAlignment = Alignment.End) {
+                StatusChip(claudeStatus = row.claudeStatus, stuckKind = row.stuckKind)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    relativeTime(row.lastActivityAt, nowSeconds)?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
+                    row.ciStatus?.let { ci ->
+                        val tone = when (ci) { "passing" -> StatusTone.COMPLETED; "failing" -> StatusTone.FAILED; else -> StatusTone.IDLE }
+                        Box(Modifier.padding(start = 4.dp).size(6.dp).clip(CircleShape).background(LocalStatusColors.current(tone).dot))
+                    }
+                }
+            }
+        },
+    )
+    HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
 }
 
 @Composable
