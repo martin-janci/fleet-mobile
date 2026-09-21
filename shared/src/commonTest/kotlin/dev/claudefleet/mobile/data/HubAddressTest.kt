@@ -424,6 +424,80 @@ class ZoneIdTest {
         assertEquals("http://[fe80::1%25en0]:8899", hubBase("http://[fe80::1%25en0]:8899"))
         assertTrue(permitsCleartext("http://[fe80::1%25en0]:8899"), "link-local is this network")
     }
+
+    // ---- the five branches a sweep of `permitsCleartext` found unguarded ----
+
+    /**
+     * `.local` has to be a **suffix**, and the difference fails open.
+     *
+     * `endsWith` refuses `evil.local.attacker.com`; `contains` permits it, and
+     * `attacker.com` is a perfectly ordinary public name that anyone can put a
+     * `.local.` label in front of. That is the whole exploit: one relaxation
+     * from suffix to substring and the bearer token goes to a public host over
+     * plain http.
+     */
+    @Test
+    fun a_local_label_in_the_middle_is_not_a_local_name() {
+        assertFalse(permitsCleartext("http://evil.local.attacker.com:8899"))
+        assertFalse(permitsCleartext("http://.local.evil.com:8899"))
+        assertTrue(permitsCleartext("http://fleethub.local:8899"), "a real mDNS name still passes")
+    }
+
+    /**
+     * The scheme is compared lower-cased, and that also fails open.
+     *
+     * `HTTP://evil.com` is the same URL to every client that will fetch it. If
+     * the comparison were case-sensitive, `scheme != "http"` would be true for
+     * this spelling and the function would take its *`https` is always fine*
+     * branch — permitting cleartext to anywhere, for the price of a shift key.
+     *
+     * `hubBase` happens to lower-case the scheme before calling, so today this
+     * is reached only directly. `permitsCleartext` is `internal` and is the
+     * app's transport policy; it does not get to assume its one caller.
+     */
+    @Test
+    fun the_scheme_is_matched_without_regard_to_case() {
+        assertFalse(permitsCleartext("HTTP://evil.com:8899"))
+        assertFalse(permitsCleartext("Http://evil.com:8899"))
+        assertTrue(permitsCleartext("HTTPS://evil.com:8899"), "https is fine in any spelling")
+    }
+
+    /** No host is not a host, and an `http` URL without one is refused. */
+    @Test
+    fun a_url_with_no_host_is_refused_cleartext() {
+        assertFalse(permitsCleartext("http://:8899"))
+        assertFalse(permitsCleartext("http://"))
+    }
+
+    /**
+     * `fe80::/10` is a /10, not a /16.
+     *
+     * The mask is `0xFFC0`, so the range is `fe80::`–`febf::` — every address a
+     * phone's own interface can hold. Tightening it to an exact `fe80` match
+     * would refuse the rest of the range, which fails closed rather than open
+     * but still breaks a hub reached over link-local on an interface that
+     * numbered itself higher.
+     */
+    @Test
+    fun the_whole_link_local_range_is_this_network() {
+        for (address in listOf("fe80::1", "fe81::1", "febf::1")) {
+            assertTrue(permitsCleartext("http://[$address]:8899"), "$address is within fe80::/10")
+        }
+        assertFalse(permitsCleartext("http://[fec0::1]:8899"), "fec0:: is outside it")
+    }
+
+    /**
+     * An IPv4-mapped address is read as the IPv4 address it carries.
+     *
+     * `::ffff:192.168.1.1` is how a dual-stack client writes a v4 LAN hub, and
+     * it has to reach the same verdict as `192.168.1.1` — otherwise the same
+     * machine is permitted or refused depending on which stack resolved it.
+     */
+    @Test
+    fun an_ipv4_mapped_address_is_judged_as_its_ipv4() {
+        assertTrue(permitsCleartext("http://[::ffff:192.168.1.1]:8899"), "a private v4 address")
+        assertFalse(permitsCleartext("http://[::ffff:8.8.8.8]:8899"), "a public one is still public")
+    }
 }
 
 /**
