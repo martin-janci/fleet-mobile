@@ -398,6 +398,7 @@ private fun SessionRoute(
     val state by vm.state.collectAsState()
     val status by repository.status.collectAsState()
     SessionScreen(
+        sessionId = sessionId,
         state = state,
         status = status,
         onDraftChange = vm::onDraftChange,
@@ -405,5 +406,6 @@ private fun SessionRoute(
         onRefresh = { vm.refresh() },
         onBack = onBack,
         onDismissError = vm::dismissError,
+        onAtBottom = vm::onAtBottom,
     )
 }

@@ -8,7 +8,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,10 +18,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -36,12 +37,17 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontFamily
@@ -57,16 +63,25 @@ import dev.claudefleet.mobile.ui.components.MarkdownText
 import dev.claudefleet.mobile.ui.components.StatusChip
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.data.ConnectionStatus
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 
 /**
  * One session: what has been said, newest at the bottom, and a box to answer.
  *
- * Stateless — it draws a [SessionUiState] and reports typing and taps. Only a
- * device can show whether this reads well; the behaviour behind it is in
- * [SessionViewModel] and is tested there.
+ * Reports typing and taps like any other screen, but it also owns its own
+ * scroll — [ScrollMemory] round-trips a scroll position across a visit to
+ * this screen keyed on [sessionId], and [onAtBottom] tells [SessionViewModel]
+ * whether the reader is at the newest turn, which is what decides the "↓
+ * Latest" / "↓ New reply" pill and (through [SessionUiState.newReply])
+ * its label. Only a device can show whether any of this reads well; what
+ * *should* happen for a given state is in [SessionViewModel] and tested
+ * there, and the pure index arithmetic behind the pill and the turn-stepping
+ * buttons is in [newestItemIndex] and [adjacentTurn].
  */
 @Composable
 fun SessionScreen(
+    sessionId: Long,
     state: SessionUiState,
     status: ConnectionStatus,
     onDraftChange: (String) -> Unit,
@@ -74,50 +89,123 @@ fun SessionScreen(
     onRefresh: () -> Unit,
     onBack: () -> Unit,
     onDismissError: () -> Unit,
+    onAtBottom: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val turns = state.conversation.turns
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val newest = newestItemIndex(turns.size, state.conversation.truncated)
+    // Newest at the bottom, so new output should bring the view with it —
+    // but only for someone who was already at the bottom. This used to fire
+    // unconditionally and yank the view down while a person was scrolled up
+    // reading, and it keyed on `turns.size`, so the live bottom turn growing
+    // — the usual case, since the agent appends items to it while it works —
+    // did not scroll at all.
+    //
+    // The key has to include `newest`. `remember(listState)` alone
+    // allocated the lambda once and closed over the `newest` of the FIRST
+    // composition — which is null, because `SessionRoute` composes this
+    // with `SessionUiState`'s initial empty `Conversation` and only then
+    // runs `vm.load()`. `newest == null` is the second disjunct, so
+    // `atBottom` was permanently true and the effect below fired
+    // unconditionally: exactly the behaviour it was written to replace.
+    // `listState` comes from `rememberLazyListState()` and never changes, so
+    // the key could never have invalidated on its own.
+    val atBottom by remember(listState, newest) {
+        derivedStateOf {
+            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()
+            last == null || newest == null || last.index >= newest - 1
+        }
+    }
+
+    // The view model's own copy of `atBottom` — used for `newReply` and the
+    // pill's label — follows the screen's, not the other way round: the
+    // screen is the one thing that can actually see the list.
+    LaunchedEffect(atBottom) { onAtBottom(atBottom) }
+
+    // Remembers where this session was scrolled to across a visit to this
+    // screen — closing it (navigating away; the composable leaving
+    // composition) is the only place that can see the final position, so
+    // that is where it is captured. Keyed on `sessionId` rather than `Unit`:
+    // going from session A's screen straight to session B's re-enters this
+    // composable at the same call site, and without the key the dispose here
+    // would fire for A only when the WHOLE screen (both A's and B's) leaves
+    // composition, which is too late to have recorded A's position at all.
+    DisposableEffect(sessionId) {
+        onDispose {
+            ScrollMemory.remember(
+                sessionId,
+                ScrollAnchor(
+                    firstVisibleIndex = listState.firstVisibleItemIndex,
+                    firstVisibleOffset = listState.firstVisibleItemScrollOffset,
+                    atBottom = atBottom,
+                ),
+            )
+        }
+    }
+
+    // Whether this screen's one shot at applying a recalled anchor has
+    // already been taken. Keyed on `sessionId` for the same reason as the
+    // `DisposableEffect` above: a straight A-to-B navigation must get its own
+    // fresh consideration for B rather than inheriting "already considered"
+    // from A's.
+    var recallConsidered by remember(sessionId) { mutableStateOf(false) }
+
+    LaunchedEffect(turns.size, turns.lastOrNull()?.endedAt, newest, state.loaded) {
+        // On the first `loaded` this screen ever sees, a remembered anchor
+        // — one the reader was NOT at the bottom of when it was taken, see
+        // [ScrollMemory.remember] — wins over the newest turn: that is
+        // "open where you left off". Every other pass through this effect
+        // (a later turn arriving, a recall that came back empty or at the
+        // bottom) falls through to the ordinary stick-to-the-newest rule.
+        if (!recallConsidered && state.loaded) {
+            recallConsidered = true
+            val recalled = ScrollMemory.recall(sessionId)
+            if (recalled != null && !recalled.atBottom) {
+                listState.scrollToItem(recalled.firstVisibleIndex, recalled.firstVisibleOffset)
+                return@LaunchedEffect
+            }
+        }
+        if (newest != null && atBottom) listState.scrollToItem(newest)
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
-        SessionBar(state = state, onBack = onBack, onRefresh = onRefresh)
+        SessionBar(
+            state = state,
+            onBack = onBack,
+            onRefresh = onRefresh,
+            listState = listState,
+            turnCount = turns.size,
+            truncated = state.conversation.truncated,
+            scope = scope,
+        )
         ConnectionBanner(status, state.hubReachable)
         ErrorBanner(state.error, onDismiss = onDismissError)
 
-        val turns = state.conversation.turns
-        val listState = rememberLazyListState()
-        val newest = newestItemIndex(turns.size, state.conversation.truncated)
-        // Newest at the bottom, so new output should bring the view with it —
-        // but only for someone who was already at the bottom. This used to fire
-        // unconditionally and yank the view down while a person was scrolled up
-        // reading, and it keyed on `turns.size`, so the live bottom turn growing
-        // — the usual case, since the agent appends items to it while it works —
-        // did not scroll at all.
-        //
-        // The key has to include `newest`. `remember(listState)` alone
-        // allocated the lambda once and closed over the `newest` of the FIRST
-        // composition — which is null, because `SessionRoute` composes this
-        // with `SessionUiState`'s initial empty `Conversation` and only then
-        // runs `vm.load()`. `newest == null` is the second disjunct, so
-        // `atBottom` was permanently true and the effect below fired
-        // unconditionally: exactly the behaviour it was written to replace.
-        // `listState` comes from `rememberLazyListState()` and never changes, so
-        // the key could never have invalidated on its own.
-        val atBottom by remember(listState, newest) {
-            derivedStateOf {
-                val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()
-                last == null || newest == null || last.index >= newest - 1
-            }
-        }
-        LaunchedEffect(turns.size, turns.lastOrNull()?.endedAt, newest) {
-            if (newest != null && atBottom) listState.scrollToItem(newest)
-        }
-
-        if (state.loaded && turns.isEmpty()) {
-            EmptyConversation(state)
-        } else {
-            LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
-                if (state.conversation.truncated) {
-                    item(key = "truncated") { TruncationNote() }
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            if (state.loaded && turns.isEmpty()) {
+                EmptyConversation(state)
+            } else {
+                LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                    if (state.conversation.truncated) {
+                        item(key = "truncated") { TruncationNote() }
+                    }
+                    turnItems(turns)
                 }
-                turnItems(turns)
+            }
+            // The fast way back down, for whoever scrolled up to read
+            // something and either wants the bottom again or just got a
+            // fresh reply while they were up there — see `SessionUiState.newReply`.
+            if (!atBottom) {
+                AssistChip(
+                    onClick = {
+                        newest?.let { target -> scope.launch { listState.animateScrollToItem(target) } }
+                        onAtBottom(true)
+                    },
+                    label = { Text(if (state.newReply) "↓ New reply" else "↓ Latest") },
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
+                )
             }
         }
 
@@ -138,9 +226,27 @@ private fun LazyListScope.turnItems(turns: List<ConvTurn>) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SessionBar(state: SessionUiState, onBack: () -> Unit, onRefresh: () -> Unit) {
+private fun SessionBar(
+    state: SessionUiState,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit,
+    listState: LazyListState,
+    turnCount: Int,
+    truncated: Boolean,
+    scope: CoroutineScope,
+) {
     val busy = state.loading || state.refreshing
     val angle = refreshAngle(busy)
+    // Recomputed from `listState.firstVisibleItemIndex` — a snapshot-backed
+    // read — whenever it moves, same as `atBottom` above it in the file; see
+    // [adjacentTurn] for what "adjacent" means once the truncation note is
+    // in the count.
+    val prevTurn by remember(listState, turnCount, truncated) {
+        derivedStateOf { adjacentTurn(listState.firstVisibleItemIndex, turnCount, truncated, -1) }
+    }
+    val nextTurn by remember(listState, turnCount, truncated) {
+        derivedStateOf { adjacentTurn(listState.firstVisibleItemIndex, turnCount, truncated, 1) }
+    }
     TopAppBar(
         navigationIcon = {
             IconButton(onClick = onBack) {
@@ -170,6 +276,26 @@ private fun SessionBar(state: SessionUiState, onBack: () -> Unit, onRefresh: () 
                 stuckKind = state.session?.stuckKind,
             )
             Spacer(Modifier.width(4.dp))
+            IconButton(
+                onClick = { prevTurn?.let { target -> scope.launch { listState.animateScrollToItem(target) } } },
+                enabled = prevTurn != null,
+            ) {
+                Icon(
+                    FleetIcons.ArrowBack,
+                    contentDescription = "Previous turn",
+                    modifier = Modifier.rotate(90f),
+                )
+            }
+            IconButton(
+                onClick = { nextTurn?.let { target -> scope.launch { listState.animateScrollToItem(target) } } },
+                enabled = nextTurn != null,
+            ) {
+                Icon(
+                    FleetIcons.ArrowBack,
+                    contentDescription = "Next turn",
+                    modifier = Modifier.rotate(-90f),
+                )
+            }
             IconButton(onClick = onRefresh, enabled = !busy) {
                 Icon(
                     FleetIcons.Refresh,
@@ -299,12 +425,12 @@ private fun Item(item: ConvItem) {
  * ([SessionUiState.silent] — `E_NO_TRANSCRIPT`, not a failure), or, failing all
  * of those, an empty read.
  *
- * A `ColumnScope` extension rather than a free function: `Modifier.weight` is a
- * `ColumnScope` member, and this fills the same space the `LazyColumn` it
- * replaces would have.
+ * A plain composable, not a `ColumnScope` extension: its caller already wraps
+ * it in the `Box` that also anchors the jump pill, and that `Box` — not this
+ * one — carries the `Modifier.weight` that gives it the `LazyColumn`'s space.
  */
 @Composable
-private fun ColumnScope.EmptyConversation(state: SessionUiState) {
+private fun EmptyConversation(state: SessionUiState) {
     val text = when {
         state.session == null -> "This session was killed."
         state.session.kind == "shell" -> "Shell session — no conversation to show."
@@ -312,7 +438,7 @@ private fun ColumnScope.EmptyConversation(state: SessionUiState) {
         else -> "No turns yet."
     }
     Box(
-        modifier = Modifier.weight(1f).fillMaxWidth(),
+        modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
         Text(
