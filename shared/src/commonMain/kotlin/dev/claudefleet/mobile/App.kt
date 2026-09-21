@@ -51,6 +51,7 @@ import dev.claudefleet.mobile.ui.SettingsScreen
 import dev.claudefleet.mobile.ui.SettingsViewModel
 import dev.claudefleet.mobile.ui.Tab
 import dev.claudefleet.mobile.ui.scan.qrScannerSupported
+import dev.claudefleet.mobile.ui.theme.FleetTheme
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -146,7 +147,7 @@ class AppContainer(
  */
 @Composable
 fun App(container: AppContainer) {
-    MaterialTheme {
+    FleetTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             // Every screen is inset once, here, rather than each one insetting
             // itself. An app targeting SDK 35 is drawn edge to edge by the
