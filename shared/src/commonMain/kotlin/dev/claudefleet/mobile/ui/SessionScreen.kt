@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -223,6 +224,51 @@ private fun Item(item: ConvItem) {
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        // A subagent gets a block rather than a line: it is a whole piece of
+        // work, and its result is the part somebody scrolls back for.
+        is ConvItem.Subagent -> Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            shape = MaterialTheme.shapes.small,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Text(
+                    text = buildString {
+                        append(item.agentType?.takeIf { it.isNotBlank() } ?: item.name.ifBlank { "subagent" })
+                        if (!item.done) append(" — running")
+                        if (item.error) append(" — failed")
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (item.error) MaterialTheme.colorScheme.error else LocalContentColor.current,
+                    fontWeight = FontWeight.Bold,
+                )
+                item.description?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                item.result?.takeIf { it.isNotBlank() }?.let {
+                    Spacer(Modifier.height(4.dp))
+                    Text(it, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        // A background job reporting in. Before the hub parsed these they
+        // arrived as raw XML in a text item; the point of drawing them is that
+        // they stay on the screen now they arrive tagged.
+        is ConvItem.Notification -> Note(
+            marker = "◆",
+            text = item.label,
+            detail = item.result?.takeIf { it.isNotBlank() && it != item.summary },
+        )
+        // Quiet by design: what matters is that it happened and roughly where.
+        is ConvItem.Compact -> Note(marker = "⋯", text = item.label)
+        is ConvItem.Interrupt -> Note(marker = "■", text = item.label)
+        is ConvItem.Command -> Note(
+            marker = "›",
+            text = item.label,
+            detail = item.output?.takeIf { it.isNotBlank() },
+            monospace = true,
+        )
         // A kind this build does not know: say so rather than drop it.
         is ConvItem.Unsupported -> Text(
             text = item.label,
@@ -230,6 +276,53 @@ private fun Item(item: ConvItem) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(vertical = 4.dp),
         )
+    }
+}
+
+/**
+ * One quiet line, optionally with a second under it.
+ *
+ * The transcript's shape is prompts and answers; compactions, interrupts,
+ * slash commands and task notifications are none of those. They are markers —
+ * they say something happened without claiming the reader's attention the way
+ * a turn does — so they share one understated treatment rather than each
+ * inventing their own.
+ */
+@Composable
+private fun Note(
+    marker: String,
+    text: String,
+    detail: String? = null,
+    monospace: Boolean = false,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            text = marker,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(8.dp))
+        Column {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = if (monospace) FontFamily.Monospace else null,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            detail?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = if (monospace) FontFamily.Monospace else null,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 6,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 

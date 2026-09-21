@@ -201,6 +201,93 @@ sealed class ConvItem {
     }
 
     /**
+     * A `Task` / `Agent` call, which the hub keeps apart from other tools so
+     * its final text can be shown without cramming a subagent transcript into
+     * a one-liner. This fleet runs subagents constantly, so these are common.
+     */
+    @Serializable
+    @SerialName("subagent")
+    @JsonIgnoreUnknownKeys
+    data class Subagent(
+        val name: String = "",
+        @SerialName("agent_type") val agentType: String? = null,
+        val description: String? = null,
+        val result: String? = null,
+        val error: Boolean = false,
+        val done: Boolean = true,
+    ) : ConvItem() {
+        /** What it was asked to do, else what it is. */
+        override val label: String
+            get() = description?.takeIf { it.isNotBlank() }
+                ?: agentType?.takeIf { it.isNotBlank() }
+                ?: name.ifBlank { "subagent" }
+    }
+
+    /** A context compaction. [summary] is there when the read tail still has it. */
+    @Serializable
+    @SerialName("compact")
+    @JsonIgnoreUnknownKeys
+    data class Compact(
+        val trigger: String? = null,
+        @SerialName("pre_tokens") val preTokens: Long? = null,
+        val summary: String? = null,
+    ) : ConvItem() {
+        override val label: String get() = summary?.takeIf { it.isNotBlank() } ?: "Context compacted"
+    }
+
+    /** A slash command the person ran, and what it printed. */
+    @Serializable
+    @SerialName("command")
+    @JsonIgnoreUnknownKeys
+    data class Command(
+        val name: String = "",
+        val args: String? = null,
+        val output: String? = null,
+    ) : ConvItem() {
+        override val label: String
+            get() = buildString {
+                append('/').append(name.ifBlank { "command" })
+                args?.takeIf { it.isNotBlank() }?.let { append(' ').append(it) }
+            }
+    }
+
+    /**
+     * A task notification: a background job or a dispatched subagent reporting
+     * in.
+     *
+     * Before the hub learned to parse these (`74c82b3`, 2026-09-20) they
+     * arrived as [Text] carrying raw XML — ugly, and readable. Modelling them
+     * is what keeps them on the screen at all now that they arrive tagged.
+     */
+    @Serializable
+    @SerialName("notification")
+    @JsonIgnoreUnknownKeys
+    data class Notification(
+        val status: String? = null,
+        val summary: String? = null,
+        val result: String? = null,
+        val event: String? = null,
+    ) : ConvItem() {
+        override val label: String
+            get() = summary?.takeIf { it.isNotBlank() }
+                ?: result?.takeIf { it.isNotBlank() }
+                ?: event?.takeIf { it.isNotBlank() }
+                ?: status?.takeIf { it.isNotBlank() }
+                ?: "task notification"
+    }
+
+    /** `[Request interrupted by user]` — somebody pressed escape. */
+    @Serializable
+    @SerialName("interrupt")
+    @JsonIgnoreUnknownKeys
+    data class Interrupt(
+        @SerialName("during_tool") val duringTool: Boolean = false,
+    ) : ConvItem() {
+        override val label: String
+            get() = if (duringTool) "Interrupted during a tool call" else "Interrupted"
+    }
+
+    /**
      * An item whose `kind` this build of the app does not know — a variant the
      * hub grew after this app shipped, or an item with no discriminator at all.
      *
@@ -231,6 +318,11 @@ internal object ConvItemSerializer : JsonContentPolymorphicSerializer<ConvItem>(
         when ((element as? JsonObject)?.get("kind").let { it as? JsonPrimitive }?.content) {
             "text" -> ConvItem.Text.serializer()
             "tool" -> ConvItem.Tool.serializer()
+            "subagent" -> ConvItem.Subagent.serializer()
+            "compact" -> ConvItem.Compact.serializer()
+            "command" -> ConvItem.Command.serializer()
+            "notification" -> ConvItem.Notification.serializer()
+            "interrupt" -> ConvItem.Interrupt.serializer()
             else -> ConvItem.Unsupported.serializer()
         }
 }
