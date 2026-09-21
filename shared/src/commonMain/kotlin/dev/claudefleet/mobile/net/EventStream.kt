@@ -183,8 +183,14 @@ sealed interface HubEvent {
      * The first frame of every stream: the hub's version and the kinds this
      * subscription will actually carry. It is also the signal to resync — the
      * snapshot may have missed anything that happened while the app was away.
+     *
+     * [contract] is the hub's wire-contract revision, or null when it names
+     * none at all (every hub released before the mechanism existed) — see
+     * [contractVerdict], which is what turns this into a trust decision.
+     * [dev.claudefleet.mobile.data.FleetRepository.follow] is where that
+     * decision is made; this class only carries the raw number.
      */
-    data class Ready(val version: String?, val kinds: List<String>) : HubEvent
+    data class Ready(val version: String?, val kinds: List<String>, val contract: Int? = null) : HubEvent
 
     /**
      * The hub's subscriber ring overflowed and [skipped] events were lost. The
@@ -231,6 +237,14 @@ internal fun frameToEvent(frame: SseFrame): HubEvent? {
             kinds = (fields["kinds"] as? JsonArray)
                 ?.mapNotNull { (it as? JsonPrimitive)?.content }
                 .orEmpty(),
+            // A key that is absent stays null — every hub released before the
+            // contract mechanism sends none, and null is what
+            // [contractVerdict] trusts. A key that is PRESENT and unreadable
+            // is the opposite fact and must not collapse into the same
+            // value, so it becomes [UNREADABLE_CONTRACT] and is refused.
+            contract = fields["contract"]?.let {
+                (it as? JsonPrimitive)?.content?.toIntOrNull() ?: UNREADABLE_CONTRACT
+            },
         )
         LAGGED -> HubEvent.Lagged(
             fields["skipped"]?.let { runCatching { (it as JsonPrimitive).long }.getOrNull() } ?: 0L,

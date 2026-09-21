@@ -77,8 +77,15 @@ fun PairScreen(
 
         // Why this screen is up rather than the fleet — a 401 dropped the
         // credential. Absent on a first launch or a user-initiated forget.
-        ErrorBanner(state.reason, onDismiss = onDismissReason)
-        ErrorBanner(state.error, onDismiss = onDismissError)
+        //
+        // This screen's own state still carries a plain `String?` — see
+        // `PairUiState` — so it is wrapped into a [Friendly] only here, at the
+        // point `ErrorBanner` needs one, rather than pulling `PairViewModel`
+        // into this task's scope.
+        val reasonAsFriendly = state.reason?.asGenericFriendly()
+        val errorAsFriendly = state.error?.asGenericFriendly()
+        ErrorBanner(reasonAsFriendly, onDismiss = onDismissReason)
+        ErrorBanner(errorAsFriendly, onDismiss = onDismissError)
 
         if (state.scanning) {
             Box(

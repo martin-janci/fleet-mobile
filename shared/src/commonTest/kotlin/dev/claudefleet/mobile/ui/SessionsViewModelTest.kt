@@ -11,6 +11,8 @@ import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -234,7 +236,7 @@ class SessionsViewModelTest {
 
         val state = vm.state.value
         assertFalse(state.refreshing)
-        assertEquals("E_NOTFOUND: no such session", state.error)
+        assertEquals("E_NOTFOUND: no such session", state.error?.details)
         assertEquals(1, state.groups.sumOf { it.sessionCount })
     }
 
@@ -254,7 +256,7 @@ class SessionsViewModelTest {
         val vm = SessionsViewModel(fleet, backgroundScope)
         vm.refresh().join()
         runCurrent()
-        assertEquals("E_NOTFOUND: no such session", vm.state.value.error)
+        assertEquals("E_NOTFOUND: no such session", vm.state.value.error?.details)
 
         vm.dismissError()
         // The screen's state is assembled from `local` and the fleet flows by a
@@ -356,6 +358,23 @@ class SessionsViewModelTest {
         assertEquals(true, groups.getValue("box").reachable)
         // Not in `list_hosts` at all: unknown, which is not the same as "down".
         assertNull(groups.getValue("ghost").reachable)
+    }
+
+    /**
+     * `nowSeconds` is what the row's age and every `relativeTime` on screen are
+     * computed against. It has to be injectable — a real clock would make this
+     * test flaky and slow — and it has to tick on its own, every 30s, so a row
+     * left open gets visibly older without a refresh.
+     */
+    @Test
+    fun the_state_carries_a_clock_that_ticks() = runTest {
+        var now = 1_000L
+        val vm = SessionsViewModel(FakeFleet(), backgroundScope, clock = { now })
+        val first = vm.state.first { it.nowSeconds > 0 }
+        assertEquals(1_000L, first.nowSeconds)
+        now = 1_040L
+        advanceTimeBy(31_000)
+        assertEquals(1_040L, vm.state.value.nowSeconds)
     }
 }
 

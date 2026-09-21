@@ -6,6 +6,8 @@ import dev.claudefleet.mobile.net.EventStream
 import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.HubEvent
+import dev.claudefleet.mobile.net.contractVerdict
+import dev.claudefleet.mobile.net.sentence
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -147,6 +149,44 @@ class FleetRepositoryTest {
         assertEquals(listOf(1L, 2L), repository.sessions.value.map { it.id })
         assertEquals(listOf("box"), repository.hosts.value.map { it.alias })
         assertEquals(1, hub.sessionCalls)
+        repository.stop()
+    }
+
+    /**
+     * A hub naming a contract revision this build does not understand is not
+     * a transport failure — it answered fine — so it gets its own status
+     * rather than a reconnect: [ConnectionStatus.Refused] with the sentence
+     * [contractVerdict] hands back, no resync, and every later frame on this
+     * same connection dropped. The reconnect/backoff loop itself is
+     * unchanged: an upgraded hub (or app) is picked up on the next attempt,
+     * this test just never drives the stream that far.
+     *
+     * `Refused` rather than `Offline`, and the difference is behaviour rather
+     * than wording: a screen probes an offline hub and re-enables Send when it
+     * answers, which for a refused hub means a live Send button pointed at a
+     * hub this build has already decided it cannot read. See
+     * `ConnectionStatus.Refused`.
+     */
+    @Test
+    fun a_ready_frame_naming_a_too_new_contract_is_refused_and_applies_no_rows() = runTest {
+        val hub = FakeHub(sessionsJson = sessionRows(1, 2))
+        val stream = FakeStream {
+            emit(HubEvent.Ready("0.9.9", listOf("session", "host"), contract = 2))
+            emit(rowEvent("session:updated", """{"id":1,"tmux_name":"renamed","host_alias":"box"}"""))
+            awaitCancellation()
+        }
+        val repository = repo(hub, stream, backgroundScope)
+        val expected = ConnectionStatus.Refused(contractVerdict(2).sentence()!!)
+
+        repository.start()
+        // Matching the exact refusal, not merely `it is Refused`: the
+        // sentence is the whole content of this status, and a test that only
+        // checked the type would pass on a refusal naming the wrong side.
+        val status = repository.status.first { it == expected }
+
+        assertEquals(expected, status)
+        assertEquals(emptyList<Long>(), repository.sessions.value.map { it.id }, "no rows applied from a refused connection")
+        assertEquals(0, hub.sessionCalls, "the resync must be skipped")
         repository.stop()
     }
 

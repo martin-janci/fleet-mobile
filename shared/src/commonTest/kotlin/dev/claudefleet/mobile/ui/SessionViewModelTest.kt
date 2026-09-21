@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.data.ALL_SESSIONS_CHANGED
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.SessionActions
+import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.Conversation
@@ -20,7 +21,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
@@ -81,6 +84,18 @@ private class FakeActions : SessionActions {
     var readGate: CompletableDeferred<Unit>? = null
     var sendFails: Throwable? = null
     var readFails: Throwable? = null
+
+    /** What [ping] answers — the hub itself, independent of whether the stream is up. */
+    var pingAnswer: Boolean = false
+
+    /** How many times [ping] was called, so a test can bound the probe's own call count. */
+    var pings = 0
+        private set
+
+    override suspend fun ping(): Boolean {
+        pings += 1
+        return pingAnswer
+    }
 
     /** How many `conversation()` calls are in flight right now, and the peak seen. */
     var inFlightReads = 0
@@ -210,7 +225,26 @@ class SessionViewModelTest {
         runCurrent()
 
         assertEquals(listOf("t1"), vm.state.value.conversation.turns.map { it.at })
-        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error)
+        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error?.details)
+    }
+
+    /**
+     * `E_NO_TRANSCRIPT` is the hub's way of saying a session has nothing said
+     * yet — not a failure. A read that fails this way must mark the screen
+     * [SessionUiState.silent] rather than raise the error banner.
+     */
+    @Test
+    fun a_no_transcript_read_is_silent_not_an_error() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+
+        actions.readFails = HubError.Tool(NO_TRANSCRIPT, "no transcript for claude session 0b63c561-66fd on htz")
+        vm.load().join()
+        runCurrent()
+
+        assertTrue(vm.state.value.silent)
+        assertNull(vm.state.value.error)
+        assertTrue(vm.state.value.loaded, "a silent session is still a loaded one")
     }
 
 
@@ -231,7 +265,7 @@ class SessionViewModelTest {
         actions.readFails = HubError.Tool("E_NOTFOUND", "session 42 is gone")
         vm.refresh().join()
         runCurrent()
-        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error)
+        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error?.details)
 
         vm.dismissError()
         // The screen's state is assembled from `local` and the fleet flows by a
@@ -289,7 +323,7 @@ class SessionViewModelTest {
         vm.send().join()
         runCurrent()
 
-        assertEquals("E_BUSY: the session is mid-turn", vm.state.value.error)
+        assertEquals("E_BUSY: the session is mid-turn", vm.state.value.error?.details)
         assertEquals("ship it", vm.state.value.draft, "a refused prompt must not be thrown away")
         assertFalse(vm.state.value.sending)
     }
@@ -306,8 +340,8 @@ class SessionViewModelTest {
         runCurrent()
 
         val error = vm.state.value.error
-        assertTrue(error != null && error.isNotBlank())
-        assertFalse(error.contains("socket"), "the cause's text never reaches a person")
+        assertTrue(error != null && error.body.isNotBlank())
+        assertFalse(error.body.contains("socket"), "the cause's text never reaches a person")
     }
 
     @Test
@@ -391,6 +425,203 @@ class SessionViewModelTest {
 
         assertTrue(vm.state.value.canSend)
         assertEquals("ship it", vm.state.value.draft)
+    }
+
+    /**
+     * A dropped stream is not the same fact as an unreachable hub: `/events`
+     * can flap for reasons that have nothing to do with the hub itself (a
+     * backgrounded phone's radio, a flaky Wi-Fi hop), and disabling Send on
+     * that alone would refuse a prompt the hub was perfectly able to take. So
+     * while `fleet.status` is anything but `Connected`, the screen probes the
+     * hub directly (`fleet_health`, via [SessionActions.ping]) and `canSend`
+     * follows *that* answer too.
+     */
+    @Test
+    fun send_is_allowed_while_the_stream_is_down_but_the_hub_answers() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        fleet.status.value = ConnectionStatus.Reconnecting(attempt = 3, reason = "stream dropped")
+        actions.pingAnswer = true
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.load().join()
+        vm.onDraftChange("go on")
+        runCurrent()
+
+        assertTrue(vm.state.first { it.loaded }.canSend)
+    }
+
+    /** The other half: a stream down AND a hub that does not answer either must still refuse Send. */
+    @Test
+    fun send_is_refused_when_the_hub_itself_does_not_answer() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        fleet.status.value = ConnectionStatus.Reconnecting(attempt = 3, reason = "stream dropped")
+        actions.pingAnswer = false
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.load().join()
+        vm.onDraftChange("go on")
+        runCurrent()
+
+        assertFalse(vm.state.first { it.loaded }.canSend)
+    }
+
+    // ---- The probe is bounded: it stops, and it does not start when it cannot help ----
+
+    /**
+     * A `true` probe ends the probing.
+     *
+     * The loop used to ask again every [PROBE_DEBOUNCE] for as long as the
+     * screen existed: a `fleet_health` call every two seconds, forever, on a
+     * phone's radio, for an answer already in hand and unchanged. It is not a
+     * fact that decays — only a change in `fleet.status` can make it stale,
+     * and that is what re-arms it.
+     */
+    @Test
+    fun a_hub_that_answers_is_not_asked_again_until_the_status_moves() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        fleet.status.value = ConnectionStatus.Reconnecting(attempt = 3, reason = "stream dropped")
+        actions.pingAnswer = true
+        SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+
+        val afterFirstAnswer = actions.pings
+        assertEquals(1, afterFirstAnswer, "one probe is enough to know the hub is up")
+
+        advanceTimeBy(10_000)
+        runCurrent()
+
+        assertEquals(afterFirstAnswer, actions.pings, "a true probe must not be repeated on a timer")
+    }
+
+    /** And the status moving is what re-arms it — the old answer was about the old state. */
+    @Test
+    fun a_status_change_re_arms_the_probe() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        fleet.status.value = ConnectionStatus.Reconnecting(attempt = 3, reason = "stream dropped")
+        actions.pingAnswer = true
+        SessionViewModel(ID, fleet, actions, backgroundScope)
+        // Past the debounce the first probe holds, so the loop is parked on
+        // the status rather than merely between two ticks of a timer.
+        advanceTimeBy(10_000)
+        runCurrent()
+        assertEquals(1, actions.pings)
+
+        fleet.status.value = ConnectionStatus.Reconnecting(attempt = 4, reason = "stream dropped")
+        runCurrent()
+        assertEquals(2, actions.pings, "a new connection state deserves its own answer")
+
+        // And the second answer bounds it again, rather than leaving a loop
+        // that re-armed once and then ran forever.
+        advanceTimeBy(10_000)
+        runCurrent()
+        assertEquals(2, actions.pings)
+    }
+
+    /**
+     * A readonly screen never probes at all. `canSend` is false for it
+     * whatever the hub says, so every call it made was a call made for
+     * nothing — and the app's rule is that it only calls tools it has a use
+     * for.
+     */
+    @Test
+    fun a_readonly_screen_never_probes_the_hub() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        fleet.status.value = ConnectionStatus.Reconnecting(attempt = 2, reason = "stream dropped")
+        actions.pingAnswer = true
+        SessionViewModel(ID, fleet, actions, backgroundScope, canSendPrompts = false)
+
+        runCurrent()
+        advanceTimeBy(10_000)
+        runCurrent()
+
+        assertEquals(0, actions.pings, "a screen that cannot send has no use for the answer")
+    }
+
+    /**
+     * A repository the lifecycle stopped is not reconnecting and is not going
+     * to: nothing is waiting on "is the hub up", so nothing asks. This is the
+     * exact `Offline` value `FleetRepository.stop()` publishes.
+     */
+    @Test
+    fun a_stopped_repository_is_never_probed() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        fleet.status.value = ConnectionStatus.Offline(STOPPED)
+        actions.pingAnswer = true
+        SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        runCurrent()
+        advanceTimeBy(10_000)
+        runCurrent()
+
+        assertEquals(0, actions.pings, "the app put the stream down; there is nobody to answer for")
+    }
+
+    // ---- A refused hub is answering, and still must not be used ----
+
+    /**
+     * The one case where a reachable hub disables Send.
+     *
+     * `Refused` means the hub named a wire contract this build will not read.
+     * A probe of such a hub answers `true` perfectly happily — it is up — so
+     * a `connected` rule that looked only at the probe handed a person a live
+     * Send button pointed at a hub whose replies the repository was already
+     * dropping on the floor.
+     */
+    @Test
+    fun a_refused_hub_keeps_send_disabled_however_healthy_the_probe() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        actions.pingAnswer = true
+        fleet.status.value = ConnectionStatus.Refused("This app is too old for this hub (contract 2). Update the app.")
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.onDraftChange("ship it")
+        runCurrent()
+        advanceTimeBy(10_000)
+        runCurrent()
+
+        assertFalse(vm.state.value.connected, "a refused hub is not a hub this screen may talk to")
+        assertFalse(vm.state.value.canSend)
+        assertEquals(0, actions.pings, "and it is not even asked")
+
+        vm.send().join()
+        assertTrue(actions.prompts.isEmpty(), "send must not try against a refused hub")
+        assertEquals("ship it", vm.state.value.draft)
+    }
+
+    /** No read either: `session_conversation` would decode the same refused shape. */
+    @Test
+    fun a_refused_hub_gets_no_conversation_read() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        fleet.status.value = ConnectionStatus.Refused("This hub is too old for this app (contract 0). Update the hub.")
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.load().join()
+        vm.refresh().join()
+        runCurrent()
+
+        assertEquals(0, actions.reads, "no tool call against a hub this build refuses")
+        assertFalse(vm.state.value.loaded, "and the screen does not claim to have read an empty conversation")
+    }
+
+    /** The probe answer is exposed, so the banner can draw the third connection state. */
+    @Test
+    fun the_screen_publishes_what_its_probe_found() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        fleet.status.value = ConnectionStatus.Reconnecting(attempt = 2, reason = "stream dropped")
+        actions.pingAnswer = true
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        runCurrent()
+
+        assertEquals(true, vm.state.value.hubReachable)
     }
 
     @Test
@@ -612,7 +843,7 @@ class SessionViewModelTest {
         pastDebounce()
         runCurrent()
 
-        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error)
+        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error?.details)
         assertEquals(listOf("t1"), vm.state.value.conversation.turns.map { it.at }, "the turns stay")
 
         actions.readFails = null
@@ -780,7 +1011,7 @@ class SessionViewModelTest {
         runCurrent()
 
         assertFalse(vm.state.value.refreshing, "a failure must clear refreshing exactly like a success does")
-        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error)
+        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error?.details)
     }
 
     /** The reviewer's own scenario, named: five taps behind one held read cost exactly one extra hub call. */
@@ -909,7 +1140,7 @@ class SessionViewModelTest {
         actions.readFails = HubError.Tool("E_DOWN", "temporarily unavailable")
         gate1.complete(Unit)
         runCurrent()
-        assertEquals("E_DOWN: temporarily unavailable", vm.state.value.error, "the first, failed read's error is shown")
+        assertEquals("E_DOWN: temporarily unavailable", vm.state.value.error?.details, "the first, failed read's error is shown")
 
         actions.readFails = null
         gate2.complete(Unit)

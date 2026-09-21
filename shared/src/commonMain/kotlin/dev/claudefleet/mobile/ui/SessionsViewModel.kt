@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
+import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
@@ -9,12 +10,14 @@ import dev.claudefleet.mobile.model.unnamedProject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /** The sessions of one project on one host. */
@@ -47,8 +50,10 @@ data class SessionsUiState(
     /** How many rows in the **whole** fleet want a person, filtered or not. */
     val attentionCount: Int = 0,
     val refreshing: Boolean = false,
-    /** The last refresh's failure, in the hub's own words. */
-    val error: String? = null,
+    /** The last refresh's failure, in plain language with the hub's own words behind it. */
+    val error: Friendly? = null,
+    /** Unix seconds, refreshed every 30s by a ticker — what every row's age is computed against. */
+    val nowSeconds: Long = 0,
 ) {
     val isEmpty: Boolean get() = groups.isEmpty()
 }
@@ -68,22 +73,39 @@ data class SessionsUiState(
 class SessionsViewModel(
     private val fleet: FleetState,
     private val scope: CoroutineScope,
+    private val clock: () -> Long = { epochSeconds() },
 ) {
+    /** The four fleet flows combined into one value, so a second `combine` can fold in [local] and [now]. */
+    private data class FleetSnapshot(
+        val sessions: List<SessionRow>,
+        val hosts: List<HostRow>,
+        val projects: List<ProjectRow>,
+        val status: ConnectionStatus,
+    )
+
     private data class Local(
         val needsAttentionOnly: Boolean = false,
         val refreshing: Boolean = false,
-        val error: String? = null,
+        val error: Friendly? = null,
     )
 
     private val local = MutableStateFlow(Local())
+    private val now = MutableStateFlow(clock())
+
+    init {
+        scope.launch {
+            while (isActive) {
+                delay(30_000)
+                now.value = clock()
+            }
+        }
+    }
 
     val state: StateFlow<SessionsUiState> = combine(
-        fleet.sessions,
-        fleet.hosts,
-        fleet.projects,
-        fleet.status,
+        combine(fleet.sessions, fleet.hosts, fleet.projects, fleet.status, ::FleetSnapshot),
         local,
-    ) { sessions, hosts, projects, status, l -> assemble(sessions, hosts, projects, status, l) }
+        now,
+    ) { snapshot, l, nowSeconds -> assemble(snapshot.sessions, snapshot.hosts, snapshot.projects, snapshot.status, l, nowSeconds) }
         .stateIn(
             scope,
             SharingStarted.Eagerly,
@@ -95,6 +117,7 @@ class SessionsViewModel(
                 fleet.projects.value,
                 fleet.status.value,
                 local.value,
+                now.value,
             ),
         )
 
@@ -135,8 +158,16 @@ class SessionsViewModel(
     /**
      * Re-list the fleet. The rows on screen stay put if it fails — the last
      * snapshot is still the best picture there is — and the failure is shown.
+     *
+     * A [ConnectionStatus.Refused] hub is not re-listed at all. The
+     * repository already refuses to apply that hub's row events, so calling
+     * its list tools would decode the very shape this build has said it
+     * cannot read — and a spinner over three calls that end in the same
+     * refusal is worse than a pull that does nothing behind a banner already
+     * saying why.
      */
     fun refresh(): Job = scope.launch {
+        if (fleet.status.value is ConnectionStatus.Refused) return@launch
         local.update { it.copy(refreshing = true, error = null) }
         try {
             fleet.refresh()
@@ -144,7 +175,7 @@ class SessionsViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(refreshing = false, error = explain(t)) }
+            local.update { it.copy(refreshing = false, error = friendly(t)) }
         }
     }
 
@@ -154,6 +185,7 @@ class SessionsViewModel(
         projects: List<ProjectRow>,
         status: ConnectionStatus,
         l: Local,
+        nowSeconds: Long,
     ) = SessionsUiState(
         groups = groupSessions(sessions, hosts, projects, l.needsAttentionOnly),
         status = status,
@@ -161,6 +193,7 @@ class SessionsViewModel(
         attentionCount = sessions.count { it.needsAttention },
         refreshing = l.refreshing,
         error = l.error,
+        nowSeconds = nowSeconds,
     )
 }
 
