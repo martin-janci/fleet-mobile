@@ -11,6 +11,8 @@ import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -234,7 +236,7 @@ class SessionsViewModelTest {
 
         val state = vm.state.value
         assertFalse(state.refreshing)
-        assertEquals("E_NOTFOUND: no such session", state.error)
+        assertEquals("E_NOTFOUND: no such session", state.error?.details)
         assertEquals(1, state.groups.sumOf { it.sessionCount })
     }
 
@@ -254,7 +256,7 @@ class SessionsViewModelTest {
         val vm = SessionsViewModel(fleet, backgroundScope)
         vm.refresh().join()
         runCurrent()
-        assertEquals("E_NOTFOUND: no such session", vm.state.value.error)
+        assertEquals("E_NOTFOUND: no such session", vm.state.value.error?.details)
 
         vm.dismissError()
         // The screen's state is assembled from `local` and the fleet flows by a
@@ -335,6 +337,64 @@ class SessionsViewModelTest {
         )
     }
 
+    /** The pure grouping function, filtered to one host directly — no view model involved. */
+    @Test
+    fun grouping_can_be_filtered_to_one_host() {
+        val groups = groupSessions(
+            sessions = listOf(session(1, host = "box"), session(2, host = "pine")),
+            hosts = emptyList(),
+            projects = emptyList(),
+            needsAttentionOnly = false,
+            hostFilter = "pine",
+        )
+        assertEquals(listOf("pine"), groups.map { it.alias })
+    }
+
+    /** A host with no sessions of its own is simply not there, same as any other empty group. */
+    @Test
+    fun grouping_filtered_to_a_host_with_nothing_on_it_is_empty() {
+        val groups = groupSessions(
+            sessions = listOf(session(1, host = "box")),
+            hosts = emptyList(),
+            projects = emptyList(),
+            needsAttentionOnly = false,
+            hostFilter = "pine",
+        )
+        assertTrue(groups.isEmpty())
+    }
+
+    /**
+     * Tapping a host row shows only that host's groups, but the badge in the
+     * bar still counts the whole fleet — matching how [toggleNeedsAttentionOnly]
+     * already treats [SessionsUiState.attentionCount].
+     */
+    @Test
+    fun a_host_filter_keeps_only_that_hosts_groups_while_the_attention_count_stays_fleetwide() = runTest {
+        val fleet = FakeFleet(
+            rows = listOf(
+                session(1, host = "box", claudeStatus = "blocked"),
+                session(2, host = "pine", claudeStatus = "working"),
+            ),
+        )
+        val vm = SessionsViewModel(fleet, backgroundScope)
+        assertEquals(1, vm.state.value.attentionCount)
+
+        vm.setHostFilter("pine")
+        runCurrent()
+
+        val filtered = vm.state.value
+        assertEquals(listOf("pine"), filtered.groups.map { it.alias })
+        assertEquals("pine", filtered.hostFilter)
+        assertEquals(1, filtered.attentionCount, "fleet-wide, unaffected by the host filter")
+
+        vm.setHostFilter(null)
+        runCurrent()
+
+        val cleared = vm.state.value
+        assertEquals(listOf("box", "pine"), cleared.groups.map { it.alias })
+        assertNull(cleared.hostFilter)
+    }
+
     @Test
     fun a_fleet_with_no_sessions_says_so_rather_than_drawing_an_empty_group() = runTest {
         val vm = SessionsViewModel(FakeFleet(hostRows = listOf(HostRow("box"))), backgroundScope)
@@ -356,6 +416,23 @@ class SessionsViewModelTest {
         assertEquals(true, groups.getValue("box").reachable)
         // Not in `list_hosts` at all: unknown, which is not the same as "down".
         assertNull(groups.getValue("ghost").reachable)
+    }
+
+    /**
+     * `nowSeconds` is what the row's age and every `relativeTime` on screen are
+     * computed against. It has to be injectable — a real clock would make this
+     * test flaky and slow — and it has to tick on its own, every 30s, so a row
+     * left open gets visibly older without a refresh.
+     */
+    @Test
+    fun the_state_carries_a_clock_that_ticks() = runTest {
+        var now = 1_000L
+        val vm = SessionsViewModel(FakeFleet(), backgroundScope, clock = { now })
+        val first = vm.state.first { it.nowSeconds > 0 }
+        assertEquals(1_000L, first.nowSeconds)
+        now = 1_040L
+        advanceTimeBy(31_000)
+        assertEquals(1_040L, vm.state.value.nowSeconds)
     }
 }
 

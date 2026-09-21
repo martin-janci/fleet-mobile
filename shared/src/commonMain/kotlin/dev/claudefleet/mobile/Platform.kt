@@ -5,3 +5,6 @@ package dev.claudefleet.mobile
  * wired up. Secure storage and the camera scanner follow the same shape.
  */
 internal expect fun platformName(): String
+
+/** Unix seconds, so a UI clock can be read without pulling in a date library. */
+internal expect fun epochSeconds(): Long

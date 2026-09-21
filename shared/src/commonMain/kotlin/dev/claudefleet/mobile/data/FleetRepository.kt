@@ -8,6 +8,8 @@ import dev.claudefleet.mobile.net.EventStream
 import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.HubEvent
+import dev.claudefleet.mobile.net.contractVerdict
+import dev.claudefleet.mobile.net.sentence
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -43,6 +45,21 @@ sealed interface ConnectionStatus {
 
     /** Not streaming, and not going to without a nudge. */
     data class Offline(val reason: String) : ConnectionStatus
+
+    /**
+     * The hub answered, and this build will not talk to it: its `ready` frame
+     * named a wire contract outside
+     * [dev.claudefleet.mobile.net.MIN_HUB_CONTRACT]..[dev.claudefleet.mobile.net.MAX_HUB_CONTRACT].
+     *
+     * Its own state rather than an [Offline] carrying a different sentence,
+     * because the two call for opposite behaviour. Offline means "the hub may
+     * well be there, keep trying": a session screen probes it, and Send
+     * follows that probe. Refused means "the hub is there and must not be
+     * used" — a probe would answer `true` and hand a person a Send button for
+     * a hub whose shape this build has already decided it cannot read. So
+     * [reason] is drawn, nothing is probed, and no tool is called.
+     */
+    data class Refused(val reason: String) : ConnectionStatus
 }
 
 /**
@@ -154,9 +171,32 @@ class FleetRepository(
         _status.value = ConnectionStatus.Reconnecting(1, null)
         while (true) {
             try {
+                // Set once this connection's `ready` names a contract this
+                // build does not trust, and never cleared for the rest of
+                // this `collect` — every later frame on the SAME connection
+                // is then a no-op. Reset to false on every new attempt
+                // (declared inside the loop body, not above it) so a fresh
+                // connection — one that might carry an upgraded hub, or run
+                // against an upgraded app — gets its own fair verdict rather
+                // than inheriting the last one's refusal.
+                var contractRefused = false
                 events.connect().collect { event ->
+                    if (contractRefused) return@collect
                     when (event) {
                         is HubEvent.Ready -> {
+                            val refusal = contractVerdict(event.contract).sentence()
+                            if (refusal != null) {
+                                // Not a transport failure — the hub answered
+                                // fine, just with a contract this build (or
+                                // that hub) is on the wrong side of. Skip the
+                                // resync and ignore every later frame of this
+                                // connection; the reconnect/backoff loop below
+                                // is untouched, so an upgrade on either side
+                                // is picked up the next time it connects.
+                                contractRefused = true
+                                _status.value = ConnectionStatus.Refused(refusal)
+                                return@collect
+                            }
                             // Reset AFTER the refetch, not before. A connection
                             // is not a success until the resync it exists for
                             // has worked: a hub whose `/events` answers and
@@ -216,10 +256,21 @@ class FleetRepository(
 
     private companion object {
         const val NOT_STARTED = "not connected yet"
-        const val STOPPED = "not connected"
         const val STREAM_CLOSED = "the hub closed the stream"
     }
 }
+
+/**
+ * The reason [FleetRepository.stop] publishes — the lifecycle put the stream
+ * down on purpose, so nothing is coming and nothing should be tried.
+ *
+ * Out here rather than in the repository's private companion because a screen
+ * has to be able to tell this Offline apart from the ones worth probing
+ * through: `SessionViewModel` does not ping a hub the app itself has stopped
+ * talking to. One constant, compared against, rather than the same four words
+ * written down twice.
+ */
+internal const val STOPPED = "not connected"
 
 /**
  * Not a real session id: the signal a `ready` or `lagged` resync emits on

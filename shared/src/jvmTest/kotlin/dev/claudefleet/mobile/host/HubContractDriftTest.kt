@@ -1,0 +1,78 @@
+package dev.claudefleet.mobile.host
+
+import dev.claudefleet.mobile.net.MAX_HUB_CONTRACT
+import dev.claudefleet.mobile.net.MIN_HUB_CONTRACT
+import java.io.File
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.fail
+
+/**
+ * The app's hub-contract range against the desktop's own.
+ *
+ * `MIN_HUB_CONTRACT` and `MAX_HUB_CONTRACT` are copied out of claude-fleet's
+ * `src-tauri/src/backend/contract.rs`, and a copy with nothing watching it is
+ * the whole problem: when the desktop raises its maximum, this app keeps
+ * refusing a hub it should accept, and when the desktop raises its *minimum*,
+ * this app keeps trusting a hub whose rows it can no longer read — silently,
+ * because both sides still compile and every test here still passes.
+ *
+ * The check is a source scan of the sibling checkout, which is where that
+ * repository sits on a machine that has both. It is a **soft** gate by
+ * necessity: CI checks out this repository alone, and a test that fails
+ * whenever claude-fleet is absent would fail on every run that matters and be
+ * deleted within a week. So it skips with a printed note instead — which is
+ * honest about what it can see, and still fires on the machine where the two
+ * constants are actually being changed.
+ *
+ * It does NOT stand alone. `HubContractVerdictTest` pins the literals `0` and
+ * `1` inside this repository, so a change to the app's own constants is caught
+ * by a test that always runs; this one is what catches a change to the *other*
+ * side.
+ */
+class HubContractDriftTest {
+
+    @Test
+    fun the_range_matches_the_desktops_contract_rs_when_it_is_next_door() {
+        val contract = desktopContract()
+        if (contract == null) {
+            println(
+                "HubContractDriftTest: skipped — no $DESKTOP checkout beside ${Repo.root.name}, " +
+                    "so the desktop's $MIN/$MAX could not be read. " +
+                    "HubContractVerdictTest still pins this app's own literals.",
+            )
+            return
+        }
+        val text = contract.readText()
+
+        assertEquals(
+            constant(text, MIN),
+            MIN_HUB_CONTRACT,
+            "$MIN drifted: ${contract.path} and this app no longer agree on the oldest hub to trust",
+        )
+        assertEquals(
+            constant(text, MAX),
+            MAX_HUB_CONTRACT,
+            "$MAX drifted: ${contract.path} and this app no longer agree on the newest hub to trust",
+        )
+    }
+
+    /** The desktop's `contract.rs`, or null when there is no checkout beside this one. */
+    private fun desktopContract(): File? =
+        Repo.root.resolveSibling(DESKTOP)
+            .resolve("src-tauri/src/backend/contract.rs")
+            .takeIf { it.isFile }
+
+    /** `pub const NAME: u32 = N;` — the literal, not whatever Rust computes from it. */
+    private fun constant(text: String, name: String): Int {
+        val match = Regex("""pub const $name:\s*u32\s*=\s*(\d+)\s*;""").find(text)
+            ?: fail("$name is no longer a `pub const … u32` literal in the desktop's contract.rs")
+        return match.groupValues[1].toInt()
+    }
+
+    private companion object {
+        const val DESKTOP = "claude-fleet"
+        const val MIN = "MIN_HUB_CONTRACT"
+        const val MAX = "MAX_HUB_CONTRACT"
+    }
+}

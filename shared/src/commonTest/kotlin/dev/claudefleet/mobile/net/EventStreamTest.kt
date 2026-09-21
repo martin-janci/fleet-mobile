@@ -21,6 +21,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 private const val HUB = "https://fleet.example.com"
@@ -61,6 +62,62 @@ class EventStreamTest {
         assertEquals(HubEvent.Ready("0.9.3", listOf("session")), events[0])
         assertEquals("session:updated", (events[1] as HubEvent.Row).name)
         assertEquals("session:killed", (events[2] as HubEvent.Row).name)
+    }
+
+    /**
+     * The `ready` frame's `contract` field, read straight from the wire
+     * through [frameToEvent] rather than the live `connect()` path — it is
+     * `internal`, and [SseFrameReaderTest] already tests it this way. A hub
+     * that names no `contract` at all (every hub released before the
+     * mechanism existed) must decode to `null`, not `0` — that distinction is
+     * [HubContractVerdictTest]'s to make, not this parser's.
+     */
+    @Test
+    fun ready_carries_the_contract_revision_when_the_hub_names_one() {
+        val ready = frameToEvent(SseFrame("ready", """{"version":"0.2.31","kinds":["session"],"contract":7}"""))
+        assertEquals(HubEvent.Ready(version = "0.2.31", kinds = listOf("session"), contract = 7), ready)
+
+        val old = frameToEvent(SseFrame("ready", """{"version":"0.2.20","kinds":["session"]}"""))
+        assertNull((old as HubEvent.Ready).contract)
+    }
+
+    /**
+     * A `contract` that is PRESENT and unreadable is not the same fact as one
+     * that is absent, and must not decode to the same `null`.
+     *
+     * `toIntOrNull()` alone collapsed both into `null`, which is the one value
+     * [contractVerdict] trusts unconditionally — so `"contract": "next"`, a
+     * float, a bool, an object, or a `u32` past `Int.MAX_VALUE` (which the
+     * desktop can send and this app cannot hold) all read as "a hub from
+     * before contracts existed" and were trusted outright. They become
+     * [UNREADABLE_CONTRACT], which classifies as `AppTooOld`.
+     */
+    @Test
+    fun a_contract_that_cannot_be_read_is_refused_rather_than_trusted() {
+        val unreadable = listOf(
+            """"x"""",
+            "1.5",
+            "true",
+            "{}",
+            // Past Int.MAX_VALUE: a perfectly good u32 on the desktop's side.
+            "3000000000",
+        )
+
+        for (value in unreadable) {
+            val ready = frameToEvent(SseFrame("ready", """{"version":"0.9.9","contract":$value}"""))
+
+            assertEquals(UNREADABLE_CONTRACT, (ready as HubEvent.Ready).contract, "contract:$value")
+            assertEquals(ContractVerdict.AppTooOld(UNREADABLE_CONTRACT), contractVerdict(ready.contract), "contract:$value")
+        }
+    }
+
+    /** And the absent key still means "a hub from before contracts", which is trusted. */
+    @Test
+    fun an_absent_contract_is_still_null_and_still_trusted() {
+        val ready = frameToEvent(SseFrame("ready", """{"version":"0.2.20"}""")) as HubEvent.Ready
+
+        assertNull(ready.contract)
+        assertEquals(ContractVerdict.Ok, contractVerdict(ready.contract))
     }
 
     @Test

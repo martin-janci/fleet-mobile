@@ -15,7 +15,7 @@ class NavigatorTest {
     @Test
     fun the_app_opens_on_the_fleet_list() {
         val nav = Navigator()
-        assertEquals(Screen.Sessions, nav.screen.value)
+        assertEquals(Screen.Sessions(), nav.screen.value)
         assertEquals(Tab.Sessions, nav.tab.value)
     }
 
@@ -36,7 +36,7 @@ class NavigatorTest {
         nav.open(7)
 
         assertTrue(nav.back(), "the app handled it")
-        assertEquals(Screen.Sessions, nav.screen.value)
+        assertEquals(Screen.Sessions(), nav.screen.value)
     }
 
     /**
@@ -48,7 +48,7 @@ class NavigatorTest {
     fun back_on_a_tab_is_not_the_apps_to_handle() {
         val nav = Navigator()
         assertFalse(nav.back())
-        assertEquals(Screen.Sessions, nav.screen.value)
+        assertEquals(Screen.Sessions(), nav.screen.value)
 
         nav.select(Tab.Hosts)
         assertFalse(nav.back())
@@ -68,14 +68,14 @@ class NavigatorTest {
         // remembered session is a rule with an expiry date on it — the session
         // can be killed from the desktop while the Settings tab is showing.
         nav.select(Tab.Sessions)
-        assertEquals(Screen.Sessions, nav.screen.value)
+        assertEquals(Screen.Sessions(), nav.screen.value)
     }
 
     @Test
     fun selecting_the_tab_already_showing_changes_nothing() {
         val nav = Navigator()
         nav.select(Tab.Sessions)
-        assertEquals(Screen.Sessions, nav.screen.value)
+        assertEquals(Screen.Sessions(), nav.screen.value)
     }
 
     /**
@@ -88,7 +88,111 @@ class NavigatorTest {
         val nav = Navigator()
         nav.select(Tab.Settings)
 
-        assertEquals(Screen.Sessions, Navigator().screen.value)
+        assertEquals(Screen.Sessions(), Navigator().screen.value)
         assertEquals(Screen.Settings, nav.screen.value)
+    }
+
+    /** Tapping a host row jumps straight to Sessions, filtered to that host. */
+    @Test
+    fun tapping_a_host_shows_sessions_filtered_to_it() {
+        val nav = Navigator()
+        nav.select(Tab.Hosts)
+
+        nav.showSessionsFor("mefistos")
+
+        assertEquals(Screen.Sessions(hostAlias = "mefistos"), nav.screen.value)
+        assertEquals(Tab.Sessions, nav.tab.value)
+    }
+
+    /**
+     * Reselecting the Sessions tab clears the host filter, the same
+     * "leave state behind" rule [select] already applies to an open session.
+     */
+    @Test
+    fun reselecting_the_sessions_tab_clears_the_host_filter() {
+        val nav = Navigator()
+        nav.showSessionsFor("mefistos")
+
+        nav.select(Tab.Sessions)
+
+        assertEquals(Screen.Sessions(), nav.screen.value)
+    }
+
+    /**
+     * Review fix round 1: `back()` used to build a bare `Screen.Sessions()`,
+     * so opening a session from a host-filtered list and coming back dropped
+     * the filter. `open()` now remembers the Sessions screen it was called
+     * from, filter and all, and `back()` restores exactly that.
+     */
+    @Test
+    fun back_from_a_session_opened_from_a_filtered_list_keeps_the_filter() {
+        val nav = Navigator()
+        nav.showSessionsFor("mefistos")
+
+        nav.open(7)
+        assertTrue(nav.back())
+
+        assertEquals(Screen.Sessions(hostAlias = "mefistos"), nav.screen.value)
+    }
+
+    /** The unfiltered case still works the same as before this fix. */
+    @Test
+    fun back_from_a_session_opened_from_the_unfiltered_list_stays_unfiltered() {
+        val nav = Navigator()
+        nav.open(7)
+
+        assertTrue(nav.back())
+
+        assertEquals(Screen.Sessions(), nav.screen.value)
+    }
+
+    /**
+     * A restored filter is still just a [select]'d Sessions screen underneath
+     * — reselecting the tab clears it exactly as it would if the filter had
+     * come from a host tap moments before.
+     */
+    @Test
+    fun reselecting_after_a_filtered_back_still_clears_the_filter() {
+        val nav = Navigator()
+        nav.showSessionsFor("mefistos")
+        nav.open(7)
+        nav.back()
+
+        nav.select(Tab.Sessions)
+
+        assertEquals(Screen.Sessions(), nav.screen.value)
+    }
+
+    /**
+     * Final review fix wave, I1: the chip used to clear the filter by calling
+     * `setHostFilter(null)` straight on the view model, leaving
+     * `Navigator.screen` still holding `Screen.Sessions("mefistos")`. `open()`
+     * captures `returnTo` from `screen.value`, so it captured the stale
+     * filter, and `back()` restored it — clearing the chip and then visiting
+     * a session brought the filter right back. `clearHostFilter()` fixes
+     * this by being the one thing that changes `screen`, so there is nothing
+     * stale left for `open()` to capture.
+     */
+    @Test
+    fun clearing_the_filter_then_opening_a_session_and_coming_back_stays_cleared() {
+        val nav = Navigator()
+        nav.showSessionsFor("mefistos")
+
+        nav.clearHostFilter()
+        nav.open(1)
+        assertTrue(nav.back())
+
+        assertEquals(Screen.Sessions(), nav.screen.value)
+    }
+
+    /** Nothing to clear from a session, Hosts, or Settings — the chip only exists on Sessions. */
+    @Test
+    fun clearHostFilter_on_a_non_sessions_screen_is_a_no_op() {
+        val nav = Navigator()
+        nav.select(Tab.Hosts)
+
+        nav.clearHostFilter()
+
+        assertEquals(Screen.Hosts, nav.screen.value)
     }
 }

@@ -6,6 +6,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -16,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -51,6 +55,8 @@ import dev.claudefleet.mobile.ui.SettingsScreen
 import dev.claudefleet.mobile.ui.SettingsViewModel
 import dev.claudefleet.mobile.ui.Tab
 import dev.claudefleet.mobile.ui.scan.qrScannerSupported
+import dev.claudefleet.mobile.ui.theme.FleetIcons
+import dev.claudefleet.mobile.ui.theme.FleetTheme
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -146,7 +152,7 @@ class AppContainer(
  */
 @Composable
 fun App(container: AppContainer) {
-    MaterialTheme {
+    FleetTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             // Every screen is inset once, here, rather than each one insetting
             // itself. An app targeting SDK 35 is drawn edge to edge by the
@@ -290,11 +296,25 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     Scaffold(
         bottomBar = {
             NavigationBar {
+                val attention by sessions.state.collectAsState()
                 for (entry in Tab.entries) {
                     NavigationBarItem(
                         selected = tab == entry,
                         onClick = { nav.select(entry) },
-                        icon = { Text(entry.name.take(1)) },
+                        icon = {
+                            val icon = when (entry) {
+                                Tab.Sessions -> FleetIcons.Sessions
+                                Tab.Hosts -> FleetIcons.Hosts
+                                Tab.Settings -> FleetIcons.Settings
+                            }
+                            if (entry == Tab.Sessions && attention.attentionCount > 0) {
+                                BadgedBox(badge = { Badge { Text("${attention.attentionCount}") } }) {
+                                    Icon(icon, contentDescription = entry.name)
+                                }
+                            } else {
+                                Icon(icon, contentDescription = entry.name)
+                            }
+                        },
                         label = { Text(entry.name) },
                     )
                 }
@@ -303,29 +323,50 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when (val current = screen) {
-                Screen.Sessions -> {
+                is Screen.Sessions -> {
+                    // The screen's own filter drives the view model, not the
+                    // other way round: `Navigator.showSessionsFor` (a host
+                    // tap), the plain tab tap, and `back()` restoring a
+                    // filtered screen all change `current`, and this is what
+                    // applies whichever one just happened. A structurally
+                    // equal `Screen.Sessions` — the clear chip below calling
+                    // `setHostFilter` directly, with no navigation involved —
+                    // does NOT re-fire this effect, which is fine: the view
+                    // model already holds the filter the chip just set.
+                    LaunchedEffect(current) { sessions.setHostFilter(current.hostAlias) }
                     val state by sessions.state.collectAsState()
                     SessionsScreen(
                         state = state,
                         onOpenSession = nav::open,
                         onToggleNeedsAttention = sessions::toggleNeedsAttentionOnly,
+                        // Through the navigator, not `sessions.setHostFilter(null)`
+                        // directly: `Screen.Sessions.hostAlias` is the one source of
+                        // truth for the filter, and `open()` reads `nav.screen.value`
+                        // to build `returnTo`. Clearing the view model alone left
+                        // that screen value stale, so opening a session and coming
+                        // back resurrected the filter the chip had just cleared. See
+                        // `Navigator.clearHostFilter`.
+                        onClearHostFilter = { nav.clearHostFilter() },
                         onRefresh = { sessions.refresh() },
                         onDismissError = sessions::dismissError,
                     )
                 }
-                is Screen.Session -> SessionRoute(
-                    sessionId = current.id,
-                    container = container,
-                    repository = repository,
-                    credentials = credentials,
-                    onBack = { nav.back() },
-                )
+                is Screen.Session -> key(current.id) {
+                    SessionRoute(
+                        sessionId = current.id,
+                        container = container,
+                        repository = repository,
+                        credentials = credentials,
+                        onBack = { nav.back() },
+                    )
+                }
                 Screen.Hosts -> {
                     val state by hosts.state.collectAsState()
                     HostsScreen(
                         state = state,
                         onRefresh = { hosts.refresh() },
                         onDismissError = hosts::dismissError,
+                        onOpenHost = { nav.showSessionsFor(it) },
                     )
                 }
                 Screen.Settings -> {
@@ -367,6 +408,7 @@ private fun SessionRoute(
     val state by vm.state.collectAsState()
     val status by repository.status.collectAsState()
     SessionScreen(
+        sessionId = sessionId,
         state = state,
         status = status,
         onDraftChange = vm::onDraftChange,
@@ -374,5 +416,6 @@ private fun SessionRoute(
         onRefresh = { vm.refresh() },
         onBack = onBack,
         onDismissError = vm::dismissError,
+        onAtBottom = vm::onAtBottom,
     )
 }
