@@ -12,6 +12,19 @@
 
 ## Global Constraints
 
+> **Controller amendment (2026-09-21, before execution):** the hub's wire-contract
+> revision does NOT move for additive changes (`wire_contract.rs`: bump only on
+> remove/rename), so `keys` support cannot be gated on `contract`. Gate it on the
+> hub **version** instead: `HubEvent.Ready.version` (semver string, e.g. `0.2.32`)
+> compared with `HUB_VERSION_KEYS` (the release that ships `send_prompt { keys }`;
+> fill in when it is tagged). Everywhere this plan says `hubContract: Int?` /
+> `HUB_CONTRACT_KEYS`, read `hubVersion: String?` / `HUB_VERSION_KEYS` with a
+> small `semverAtLeast(version, floor): Boolean` helper (null or unparsable →
+> false). `FleetState.hubVersion` already exists as
+> `ConnectionStatus.Connected.hubVersion`; expose it as a `StateFlow<String?>`
+> that keeps the last seen value across reconnects.
+
+
 Same as Phase 0 (no new dependency except the markdown renderer; token rule; one rule one place; `update {}`; `ToolsTheAppMayCallTest`; Conventional Commits; `./gradlew :shared:jvmTest` green before every commit; `:androidApp:assembleDebug` after UI tasks; branch `feat/ux-pager`; never push from a task). Additionally:
 
 - Every write tool call is gated on `Credentials.canWrite` exactly as `send_prompt` is; a read-only device sees no chip, menu item or button that would be refused.
