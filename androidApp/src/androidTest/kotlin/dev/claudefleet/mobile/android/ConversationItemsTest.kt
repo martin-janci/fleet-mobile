@@ -12,6 +12,7 @@ import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.ui.CONVERSATION_LIST
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.SessionUiState
+import dev.claudefleet.mobile.ui.theme.FleetTheme
 import org.junit.Rule
 import org.junit.Test
 
@@ -61,18 +62,23 @@ class ConversationItemsTest {
 
     @Test
     fun every_item_kind_puts_something_on_the_screen() {
+        // Wrapped, because the bar's `StatusChip` reads `LocalStatusColors`
+        // and `FleetTheme` is the only thing that provides it — composing
+        // the screen bare throws "FleetTheme is not applied".
         compose.setContent {
-            SessionScreen(
-                sessionId = 11L,
-                state = SessionUiState(conversation = everything, loaded = true),
-                status = ConnectionStatus.Connected(hubVersion = "test"),
-                onDraftChange = {},
-                onSend = {},
-                onRefresh = {},
-                onBack = {},
-                onDismissError = {},
-                onAtBottom = {},
-            )
+            FleetTheme {
+                SessionScreen(
+                    sessionId = 11L,
+                    state = SessionUiState(conversation = everything, loaded = true),
+                    status = ConnectionStatus.Connected(hubVersion = "test"),
+                    onDraftChange = {},
+                    onSend = {},
+                    onRefresh = {},
+                    onBack = {},
+                    onDismissError = {},
+                    onAtBottom = {},
+                )
+            }
         }
         compose.waitForIdle()
 
@@ -106,18 +112,23 @@ class ConversationItemsTest {
      */
     @Test
     fun an_unknown_kind_names_itself_on_the_screen() {
+        // Wrapped, because the bar's `StatusChip` reads `LocalStatusColors`
+        // and `FleetTheme` is the only thing that provides it — composing
+        // the screen bare throws "FleetTheme is not applied".
         compose.setContent {
-            SessionScreen(
-                sessionId = 12L,
-                state = SessionUiState(conversation = everything, loaded = true),
-                status = ConnectionStatus.Connected(hubVersion = "test"),
-                onDraftChange = {},
-                onSend = {},
-                onRefresh = {},
-                onBack = {},
-                onDismissError = {},
-                onAtBottom = {},
-            )
+            FleetTheme {
+                SessionScreen(
+                    sessionId = 12L,
+                    state = SessionUiState(conversation = everything, loaded = true),
+                    status = ConnectionStatus.Connected(hubVersion = "test"),
+                    onDraftChange = {},
+                    onSend = {},
+                    onRefresh = {},
+                    onBack = {},
+                    onDismissError = {},
+                    onAtBottom = {},
+                )
+            }
         }
         compose.waitForIdle()
 
