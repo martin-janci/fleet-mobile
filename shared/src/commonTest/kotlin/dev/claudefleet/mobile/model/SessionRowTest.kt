@@ -1,0 +1,55 @@
+package dev.claudefleet.mobile.model
+
+import dev.claudefleet.mobile.net.json
+import kotlin.test.Test
+import kotlin.test.assertEquals
+
+class SessionRowTest {
+    private val now = 1_790_000_000L
+
+    @Test
+    fun a_background_row_is_named_from_friendly_name_then_last_prompt_then_a_short_id() {
+        val base = SessionRow(id = 1, tmuxName = "bg:44366faf-ae97-426a-91cd-beaf3c74f1d7")
+        assertEquals("Background · 4436", base.displayName)
+        assertEquals("fix the tenant header", base.copy(lastPrompt = "fix the tenant header").displayName)
+        assertEquals("ADR", base.copy(friendlyName = "ADR", lastPrompt = "x").displayName)
+        assertEquals("a".repeat(60), base.copy(lastPrompt = "a".repeat(80)).displayName)
+    }
+
+    @Test
+    fun a_tmux_row_keeps_its_tmux_name() {
+        assertEquals("trust-test", SessionRow(id = 1, tmuxName = "trust-test").displayName)
+    }
+
+    @Test
+    fun the_supporting_line_is_the_sanitised_activity_or_time_and_kind() {
+        val row = SessionRow(id = 1, tmuxName = "s", lastActivityAt = now - 240, kind = "shell")
+        assertEquals("4 min · shell", row.supportingLine(now))
+        assertEquals("4 min", row.copy(kind = "work").supportingLine(now))
+        assertEquals(
+            "4 min",
+            row.copy(kind = "work", currentActivity = "⏵⏵ bypass permissions on (shift+tab to cycle)").supportingLine(now),
+        )
+        assertEquals("Reading a.kt", row.copy(currentActivity = "Reading a.kt").supportingLine(now))
+        assertEquals("☐ Recreate turanga?", row.copy(currentActivity = "waiting for input: ☐ Recreate turanga?").supportingLine(now))
+    }
+
+    @Test
+    fun the_new_fields_parse_and_default() {
+        val row = json.decodeFromString(
+            SessionRow.serializer(),
+            """{"id":7,"tmux_name":"s","last_prompt":"go on","usage_cost_micros":1840000,"usage_model":"sonnet","branch":"feat/x","last_turn_at":10,"started_at":5,"last_stop_at":11,"parent_session_id":3}""",
+        )
+        assertEquals("go on", row.lastPrompt)
+        assertEquals(1_840_000L, row.usageCostMicros)
+        assertEquals("sonnet", row.usageModel)
+        assertEquals("feat/x", row.branch)
+        assertEquals(10L, row.lastTurnAt)
+        assertEquals(5L, row.startedAt)
+        assertEquals(11L, row.lastStopAt)
+        assertEquals(3L, row.parentSessionId)
+        val bare = json.decodeFromString(SessionRow.serializer(), """{"id":8}""")
+        assertEquals(null, bare.lastPrompt)
+        assertEquals(null, bare.usageCostMicros)
+    }
+}

@@ -43,10 +43,37 @@ data class SessionRow(
     @SerialName("ci_status") val ciStatus: String? = null,
     @SerialName("is_controller") val isController: Boolean = false,
     val tags: List<String> = emptyList(),
+    @SerialName("last_prompt") val lastPrompt: String? = null,
+    @SerialName("last_stop_at") val lastStopAt: Long? = null,
+    @SerialName("last_turn_at") val lastTurnAt: Long? = null,
+    @SerialName("started_at") val startedAt: Long? = null,
+    @SerialName("usage_cost_micros") val usageCostMicros: Long? = null,
+    @SerialName("usage_model") val usageModel: String? = null,
+    @SerialName("parent_session_id") val parentSessionId: Long? = null,
+    val branch: String? = null,
 ) {
-    /** What the sidebar shows: the agent's own label, else the tmux name. */
-    val displayName: String get() = friendlyName?.takeIf { it.isNotBlank() } ?: tmuxName
+    val isBackground: Boolean get() = tmuxName.startsWith("bg:")
+
+    /** The agent's own label; for a background agent its prompt; else the tmux name. */
+    val displayName: String
+        get() {
+            friendlyName?.takeIf { it.isNotBlank() }?.let { return it }
+            if (!isBackground) return tmuxName
+            lastPrompt?.takeIf { it.isNotBlank() }?.let { return it.take(60) }
+            return "Background · ${tmuxName.removePrefix("bg:").take(4)}"
+        }
 
     /** The rows the "needs attention" filter keeps. */
     val needsAttention: Boolean get() = claudeStatus == "blocked" || stuckKind != null
+
+    /**
+     * The row's second line: the sanitised activity when there is one, else
+     * how long ago the session did anything and what kind of session it is.
+     */
+    fun supportingLine(nowSeconds: Long): String? {
+        Activity.sanitize(currentActivity)?.let { return it }
+        val age = relativeTime(lastActivityAt, nowSeconds)
+        val kindLabel = kind?.takeIf { it != "work" && it.isNotBlank() }
+        return listOfNotNull(age, kindLabel).joinToString(" · ").ifEmpty { null }
+    }
 }
