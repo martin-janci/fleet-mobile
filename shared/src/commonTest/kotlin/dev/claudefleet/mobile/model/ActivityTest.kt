@@ -20,9 +20,9 @@ class ActivityTest {
     @Test
     fun ansi_and_mouse_report_residue_is_stripped() {
         assertNull(Activity.sanitize("❯ 0;16;27M0;16;27m"))
-        assertEquals("Running tests", Activity.sanitize("[32mRunning tests[0m"))
+        assertEquals("Running tests", Activity.sanitize("\u001B[32mRunning tests\u001B[0m"))
         assertEquals("build ok", Activity.sanitize(" build ok "))
-        assertEquals("tail", Activity.sanitize("tail"))
+        assertEquals("tail", Activity.sanitize("\u0007tail\u0000"))
     }
 
     @Test
