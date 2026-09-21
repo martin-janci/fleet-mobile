@@ -13,14 +13,17 @@ import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -28,6 +31,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 /** One session's screen: its row, its conversation, and what is being typed. */
 data class SessionUiState(
@@ -54,11 +58,16 @@ data class SessionUiState(
     /** True when this device's credential is `readonly` and may not send. */
     val readOnly: Boolean = false,
     /**
-     * True only when the fleet's connection is [ConnectionStatus.Connected].
-     * Reconnecting and fully offline both disable sending — a prompt typed
-     * while the hub is unreachable has nowhere to go, and the design says
-     * actions are disabled rather than hidden while the last snapshot stays on
-     * screen.
+     * True when the fleet's connection is [ConnectionStatus.Connected], OR
+     * this screen's own probe of the hub (`fleet_health`, via
+     * [SessionActions.ping]) last answered true.
+     *
+     * A dropped `/events` stream is not the same fact as an unreachable hub —
+     * the stream can flap for reasons that have nothing to do with the hub
+     * (a backgrounded phone's radio, a flaky Wi-Fi hop) — so Send follows the
+     * hub, not the stream. Fully offline (never paired, or a revoked
+     * credential) still disables sending: the design says actions are
+     * disabled rather than hidden while the last snapshot stays on screen.
      */
     val connected: Boolean = true,
     val error: Friendly? = null,
@@ -139,6 +148,16 @@ class SessionViewModel(
     private val readOnly = !canSendPrompts
 
     /**
+     * The last answer from probing the hub directly, while [fleet]'s stream
+     * is not [ConnectionStatus.Connected] — null before the first probe, and
+     * cleared back to null the moment the stream itself reconnects (see
+     * [state]'s [ConnectionStatus.Connected] doc and the loop launched in
+     * `init`). [SessionUiState.connected] and [canSendNow] both read this
+     * alongside [FleetState.status], never in place of it.
+     */
+    private val probe = MutableStateFlow<Boolean?>(null)
+
+    /**
      * Makes the hub call **and** the `local.update` that applies its reply one
      * critical section, across [requestRead]'s four callers — `load()`,
      * `refresh()`, a send's follow-up, and the event-triggered refetch above —
@@ -194,14 +213,45 @@ class SessionViewModel(
      */
     private var queued: Generation? = null
 
-    val state: StateFlow<SessionUiState> = combine(fleet.sessions, fleet.status, local) { rows, status, l ->
-        assemble(rows.firstOrNull { it.id == sessionId }, status, l)
-    }.stateIn(scope, SharingStarted.Eagerly, assemble(row(), fleet.status.value, local.value))
+    val state: StateFlow<SessionUiState> = combine(fleet.sessions, fleet.status, local, probe) { rows, status, l, probed ->
+        assemble(rows.firstOrNull { it.id == sessionId }, status, l, probed)
+    }.stateIn(scope, SharingStarted.Eagerly, assemble(row(), fleet.status.value, local.value, probe.value))
 
     init {
         // Started here rather than from `load()`: `state` above is already
         // eager, and a subscription that only exists after the screen's first
         // explicit call would miss an event racing that call.
+        //
+        // Whenever the stream is not Connected, probe the hub directly and
+        // keep probing (one in flight, [PROBE_DEBOUNCE] apart) until it
+        // either answers true or the stream reconnects on its own —
+        // whichever comes first makes Send usable again. One coroutine, not a
+        // collector that launches a second one per disconnect: `fleet.status`
+        // is a `StateFlow`, so reading `.value` directly here (rather than
+        // `collect`ing it) needs no extra hop before the very first probe of
+        // an already-disconnected screen can land.
+        //
+        // `CoroutineStart.UNDISPATCHED`: a screen constructed while already
+        // disconnected must have that first probe *in flight the instant the
+        // constructor returns*, not merely scheduled — otherwise `load()`'s
+        // own coroutine, racing this one for the shared test/UI dispatcher,
+        // could apply its "loaded" state before this one has ever run, and
+        // `canSend` would read a probe result that has not happened yet.
+        // Ordinary (dispatched) `launch` only queues the body; UNDISPATCHED
+        // runs it synchronously up to its first real suspension point (here,
+        // [actions.ping]'s own suspension, or — on a fake with none — the
+        // `delay` below), which is exactly "started", not "about to start".
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            while (true) {
+                if (fleet.status.value is ConnectionStatus.Connected) {
+                    probe.value = null
+                    fleet.status.first { it !is ConnectionStatus.Connected }
+                } else {
+                    probe.value = actions.ping()
+                    delay(PROBE_DEBOUNCE)
+                }
+            }
+        }
         scope.launch {
             fleet.sessionChanges
                 // `ALL_SESSIONS_CHANGED` is the resync sentinel a `ready` or
@@ -262,7 +312,9 @@ class SessionViewModel(
     private fun canSendNow(l: Local): Boolean =
         !l.sending && !readOnly && connected() && l.draft.isNotBlank() && row() != null
 
-    private fun connected(): Boolean = fleet.status.value is ConnectionStatus.Connected
+    /** The same rule [SessionUiState.connected] assembles from [state] — see its KDoc. */
+    private fun connected(): Boolean =
+        fleet.status.value is ConnectionStatus.Connected || probe.value == true
 
     private fun row(): SessionRow? = fleet.sessions.value.firstOrNull { it.id == sessionId }
 
@@ -375,7 +427,7 @@ class SessionViewModel(
         result
     }
 
-    private fun assemble(row: SessionRow?, status: ConnectionStatus, l: Local) = SessionUiState(
+    private fun assemble(row: SessionRow?, status: ConnectionStatus, l: Local, probed: Boolean?) = SessionUiState(
         session = row,
         conversation = l.conversation,
         loaded = l.loaded,
@@ -384,11 +436,20 @@ class SessionViewModel(
         refreshing = l.refreshing,
         sending = l.sending,
         readOnly = readOnly,
-        connected = status is ConnectionStatus.Connected,
+        connected = status is ConnectionStatus.Connected || probed == true,
         error = l.error,
         silent = l.silent,
     )
 }
+
+/**
+ * How long to wait between probes of the hub while `/events` is down. Long
+ * enough that a flapping stream does not turn into a `fleet_health` call on
+ * every `Reconnecting(attempt = …)` tick; short enough that a hub which comes
+ * back is noticed within a couple of seconds rather than left showing Send
+ * disabled long after it would have worked.
+ */
+internal val PROBE_DEBOUNCE = 2.seconds
 
 /**
  * How long to let `session:*` frames for the open session settle before

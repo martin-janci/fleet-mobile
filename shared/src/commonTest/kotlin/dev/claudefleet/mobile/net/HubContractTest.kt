@@ -150,3 +150,23 @@ class ForbiddenExplainsItselfTest {
 // the old function is gone and with it the behaviour these tests pinned.
 // `JsonRpcFramingTest` is the replacement, and it asserts more: every frame, its
 // name, and the first frame that actually *carries* a result or an error.
+
+/**
+ * [contractVerdict] against the desktop's own range
+ * (`claude-fleet` `src-tauri/src/backend/contract.rs`, commit 5fa119f7,
+ * `MIN_HUB_CONTRACT = 0`, `MAX_HUB_CONTRACT = 1`). One revision below the
+ * minimum is a hub too old for this app; one above the maximum is this app
+ * too old for the hub; everything in between, including a hub that names no
+ * contract at all, is trusted.
+ */
+class HubContractVerdictTest {
+
+    @Test
+    fun the_verdict_matches_the_desktops_range() {
+        assertEquals(ContractVerdict.Ok, contractVerdict(null))
+        assertEquals(ContractVerdict.Ok, contractVerdict(MIN_HUB_CONTRACT))
+        assertEquals(ContractVerdict.Ok, contractVerdict(MAX_HUB_CONTRACT))
+        assertEquals(ContractVerdict.HubTooOld(MIN_HUB_CONTRACT - 1), contractVerdict(MIN_HUB_CONTRACT - 1))
+        assertEquals(ContractVerdict.AppTooOld(MAX_HUB_CONTRACT + 1), contractVerdict(MAX_HUB_CONTRACT + 1))
+    }
+}

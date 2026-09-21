@@ -21,6 +21,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 private const val HUB = "https://fleet.example.com"
@@ -61,6 +62,23 @@ class EventStreamTest {
         assertEquals(HubEvent.Ready("0.9.3", listOf("session")), events[0])
         assertEquals("session:updated", (events[1] as HubEvent.Row).name)
         assertEquals("session:killed", (events[2] as HubEvent.Row).name)
+    }
+
+    /**
+     * The `ready` frame's `contract` field, read straight from the wire
+     * through [frameToEvent] rather than the live `connect()` path — it is
+     * `internal`, and [SseFrameReaderTest] already tests it this way. A hub
+     * that names no `contract` at all (every hub released before the
+     * mechanism existed) must decode to `null`, not `0` — that distinction is
+     * [HubContractVerdictTest]'s to make, not this parser's.
+     */
+    @Test
+    fun ready_carries_the_contract_revision_when_the_hub_names_one() {
+        val ready = frameToEvent(SseFrame("ready", """{"version":"0.2.31","kinds":["session"],"contract":7}"""))
+        assertEquals(HubEvent.Ready(version = "0.2.31", kinds = listOf("session"), contract = 7), ready)
+
+        val old = frameToEvent(SseFrame("ready", """{"version":"0.2.20","kinds":["session"]}"""))
+        assertNull((old as HubEvent.Ready).contract)
     }
 
     @Test

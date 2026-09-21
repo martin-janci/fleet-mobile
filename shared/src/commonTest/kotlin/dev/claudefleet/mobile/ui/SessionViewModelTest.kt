@@ -20,6 +20,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -81,6 +82,18 @@ private class FakeActions : SessionActions {
     var readGate: CompletableDeferred<Unit>? = null
     var sendFails: Throwable? = null
     var readFails: Throwable? = null
+
+    /** What [ping] answers — the hub itself, independent of whether the stream is up. */
+    var pingAnswer: Boolean = false
+
+    /** How many times [ping] was called, so a test can bound the probe's own call count. */
+    var pings = 0
+        private set
+
+    override suspend fun ping(): Boolean {
+        pings += 1
+        return pingAnswer
+    }
 
     /** How many `conversation()` calls are in flight right now, and the peak seen. */
     var inFlightReads = 0
@@ -410,6 +423,46 @@ class SessionViewModelTest {
 
         assertTrue(vm.state.value.canSend)
         assertEquals("ship it", vm.state.value.draft)
+    }
+
+    /**
+     * A dropped stream is not the same fact as an unreachable hub: `/events`
+     * can flap for reasons that have nothing to do with the hub itself (a
+     * backgrounded phone's radio, a flaky Wi-Fi hop), and disabling Send on
+     * that alone would refuse a prompt the hub was perfectly able to take. So
+     * while `fleet.status` is anything but `Connected`, the screen probes the
+     * hub directly (`fleet_health`, via [SessionActions.ping]) and `canSend`
+     * follows *that* answer too.
+     */
+    @Test
+    fun send_is_allowed_while_the_stream_is_down_but_the_hub_answers() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        fleet.status.value = ConnectionStatus.Reconnecting(attempt = 3, reason = "stream dropped")
+        actions.pingAnswer = true
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.load().join()
+        vm.onDraftChange("go on")
+        runCurrent()
+
+        assertTrue(vm.state.first { it.loaded }.canSend)
+    }
+
+    /** The other half: a stream down AND a hub that does not answer either must still refuse Send. */
+    @Test
+    fun send_is_refused_when_the_hub_itself_does_not_answer() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        fleet.status.value = ConnectionStatus.Reconnecting(attempt = 3, reason = "stream dropped")
+        actions.pingAnswer = false
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.load().join()
+        vm.onDraftChange("go on")
+        runCurrent()
+
+        assertFalse(vm.state.first { it.loaded }.canSend)
     }
 
     @Test
