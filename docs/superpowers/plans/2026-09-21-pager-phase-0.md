@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - `compileSdk = 37`, `minSdk = 26`, `targetSdk = 35` (from `gradle/libs.versions.toml`); do not change them.
-- No new runtime dependency except `compose.materialIconsCore` (Task 5). The repo chose ZXing over ML Kit to keep the APK small; keep that stance.
+- No new runtime dependency. (The plan first allowed `compose.materialIconsCore` for Task 5; it does not exist for CMP 1.12 and `material-icons-core` stopped at 1.7.3, so every icon is hand-drawn in `ui/theme/FleetIcons.kt` — controller ruling, 2026-09-21.) The repo chose ZXing over ML Kit to keep the APK small; keep that stance.
 - The token never reaches a screen, a log or an exception message (`HubError`, `Explain.kt`). Any new error text goes through `explain()`/`friendly()`, never `t.message` of an unknown throwable.
 - One rule, one place: a rule used by two screens is a pure function in `commonMain` with a `commonTest`.
 - `MutableStateFlow.update {}`; never `value = value.copy(...)`.
