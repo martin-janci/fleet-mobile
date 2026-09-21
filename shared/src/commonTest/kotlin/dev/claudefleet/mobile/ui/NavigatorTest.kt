@@ -162,4 +162,37 @@ class NavigatorTest {
 
         assertEquals(Screen.Sessions(), nav.screen.value)
     }
+
+    /**
+     * Final review fix wave, I1: the chip used to clear the filter by calling
+     * `setHostFilter(null)` straight on the view model, leaving
+     * `Navigator.screen` still holding `Screen.Sessions("mefistos")`. `open()`
+     * captures `returnTo` from `screen.value`, so it captured the stale
+     * filter, and `back()` restored it — clearing the chip and then visiting
+     * a session brought the filter right back. `clearHostFilter()` fixes
+     * this by being the one thing that changes `screen`, so there is nothing
+     * stale left for `open()` to capture.
+     */
+    @Test
+    fun clearing_the_filter_then_opening_a_session_and_coming_back_stays_cleared() {
+        val nav = Navigator()
+        nav.showSessionsFor("mefistos")
+
+        nav.clearHostFilter()
+        nav.open(1)
+        assertTrue(nav.back())
+
+        assertEquals(Screen.Sessions(), nav.screen.value)
+    }
+
+    /** Nothing to clear from a session, Hosts, or Settings — the chip only exists on Sessions. */
+    @Test
+    fun clearHostFilter_on_a_non_sessions_screen_is_a_no_op() {
+        val nav = Navigator()
+        nav.select(Tab.Hosts)
+
+        nav.clearHostFilter()
+
+        assertEquals(Screen.Hosts, nav.screen.value)
+    }
 }

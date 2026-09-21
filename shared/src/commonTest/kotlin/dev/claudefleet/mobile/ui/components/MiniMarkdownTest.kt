@@ -144,6 +144,62 @@ class MiniMarkdownTest {
         assertTrue(paragraph.spanStyles.none { it.item.fontWeight == FontWeight.Bold })
     }
 
+    /** The single-backtick counterpart to the never-closing `**` case above. */
+    @Test
+    fun a_stray_single_backtick_stays_literal() {
+        val blocks = parseMarkdown("a `b without a close")
+
+        val paragraph = assertIs<MdBlock.Paragraph>(blocks.single()).text
+        assertEquals("a `b without a close", paragraph.text)
+        assertTrue(paragraph.spanStyles.none { it.item.fontFamily == FontFamily.Monospace })
+    }
+
+    /** And the single-`*` (italic) counterpart. */
+    @Test
+    fun a_stray_single_star_stays_literal() {
+        val blocks = parseMarkdown("a *b without a close")
+
+        val paragraph = assertIs<MdBlock.Paragraph>(blocks.single()).text
+        assertEquals("a *b without a close", paragraph.text)
+        assertTrue(paragraph.spanStyles.none { it.item.fontStyle == FontStyle.Italic })
+    }
+
+    /**
+     * Review finding: `parseInline` searched for each marker's close with
+     * `source.indexOf(marker, i)`, walking the rest of the string from the
+     * current position every time. A transcript heavy with un-escaped `*`
+     * (a bullet-like diff, a glob pattern) put the same tail of the string
+     * under the microscope once per marker, which is quadratic in how many
+     * there are. The fix precomputes, in one forward pass, where the next
+     * occurrence of each marker sits, so every lookup in the scan itself is
+     * O(1). This does not assert on wall-clock time -- that is flaky across
+     * machines and CI runners -- the test itself timing out (or the suite
+     * hanging) is what the old, quadratic scan would have done here; the
+     * point is that it returns at all, promptly.
+     *
+     * A run of `*` this long always pairs up under the shared matching rule
+     * (any two identical, un-escaped markers find each other, nearest first)
+     * -- there is no input shape that leaves *many* identical single-character
+     * markers simultaneously stray, since any earlier one finds a later one.
+     * Genuinely stray behaviour is what the two single-occurrence tests above
+     * pin; this one pins the large-input performance the fix exists for, and
+     * the exact (paired, mostly-empty) text a run of adjacent `*` produces --
+     * unchanged from what the un-fixed scan already returned, just returned
+     * fast rather than quadratically.
+     */
+    @Test
+    fun five_thousand_adjacent_stars_complete_quickly_and_deterministically() {
+        val input = "*".repeat(5000)
+
+        val blocks = parseMarkdown(input)
+
+        val paragraph = assertIs<MdBlock.Paragraph>(blocks.single())
+        // Every `*` pairs with its immediate neighbour as an (empty) bold
+        // span -- 5000 is a multiple of 4, so the whole run is consumed and
+        // nothing is left over to fall back to a literal, unmatched `*`.
+        assertEquals("", paragraph.text.text)
+    }
+
     @Test
     fun blank_lines_separate_paragraphs() {
         val blocks = parseMarkdown("first paragraph\n\nsecond paragraph")

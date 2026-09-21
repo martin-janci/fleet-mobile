@@ -86,7 +86,9 @@ fun HostsScreen(
 @Composable
 private fun HostLineItem(host: HostLine, onClick: () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth()
+            .clickable(onClickLabel = "Show sessions on ${host.alias}", onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(

@@ -150,16 +150,32 @@ fun parseMarkdown(text: String): List<MdBlock> {
  * nesting between the three. An opening marker with no matching close (an
  * unterminated `**`, a stray `` ` ``) is emitted as literal text rather than
  * silently dropped or left to swallow the rest of the line.
+ *
+ * Three lookup tables -- [nextMarker] -- are built in one forward pass before
+ * the scan starts, one each for `` ` ``, `**` and a lone `*`, so every
+ * "where is this marker's close" question below is an O(1) array read rather
+ * than an `indexOf` that walks the rest of the string. `indexOf` from the
+ * current position was the shape a stray marker made expensive: a review
+ * finding on a transcript heavy with un-escaped `` ` ``/`*` (a diff, a shell
+ * one-liner) put the same tail of the string under the microscope once per
+ * stray character, which is quadratic in the number of them. The table read
+ * back is exactly what `source.indexOf(marker, from)` would have returned --
+ * this changes nothing about *which* marker closes which, only how fast the
+ * answer comes back.
  */
 private fun parseInline(source: String): AnnotatedString = buildAnnotatedString {
-    var i = 0
     val n = source.length
+    val nextBacktick = nextMarker(n) { j -> source[j] == '`' }
+    val nextDoubleStar = nextMarker(n) { j -> source[j] == '*' && j + 1 < n && source[j + 1] == '*' }
+    val nextStar = nextMarker(n) { j -> source[j] == '*' }
+
+    var i = 0
     while (i < n) {
         val c = source[i]
         when {
             c == '`' -> {
-                val close = source.indexOf('`', i + 1)
-                if (close == -1) {
+                val close = nextBacktick[i + 1]
+                if (close == n) {
                     append(c)
                     i++
                 } else {
@@ -170,8 +186,8 @@ private fun parseInline(source: String): AnnotatedString = buildAnnotatedString 
                 }
             }
             c == '*' && i + 1 < n && source[i + 1] == '*' -> {
-                val close = source.indexOf("**", i + 2)
-                if (close == -1) {
+                val close = nextDoubleStar[i + 2]
+                if (close == n) {
                     append("**")
                     i += 2
                 } else {
@@ -182,8 +198,8 @@ private fun parseInline(source: String): AnnotatedString = buildAnnotatedString 
                 }
             }
             c == '*' -> {
-                val close = source.indexOf('*', i + 1)
-                if (close == -1) {
+                val close = nextStar[i + 1]
+                if (close == n) {
                     append(c)
                     i++
                 } else {
@@ -202,6 +218,22 @@ private fun parseInline(source: String): AnnotatedString = buildAnnotatedString 
 }
 
 /**
+ * `table[k]` is the smallest `j >= k` with `at(j)` true, or `n` (one past the
+ * end -- `source.indexOf`'s `-1`, in an index this array can hold) when there
+ * is none. Built backwards in one pass, `n` down to `0`, so every entry is
+ * either `k` itself or copied from `table[k + 1]` -- O(n) total, filled once
+ * per [parseInline] call and read from thereafter.
+ */
+private inline fun nextMarker(n: Int, at: (Int) -> Boolean): IntArray {
+    val table = IntArray(n + 1)
+    table[n] = n
+    for (k in n - 1 downTo 0) {
+        table[k] = if (at(k)) k else table[k + 1]
+    }
+    return table
+}
+
+/**
  * Renders [text] as Markdown: paragraphs and bullets as native `Text`, a
  * fenced code block as a horizontally scrollable monospace block with a
  * copy button. `style` is the paragraph/bullet text style; headings are
@@ -214,7 +246,7 @@ fun MarkdownText(
     style: TextStyle = MaterialTheme.typography.bodyMedium,
 ) {
     val blocks = remember(text) { parseMarkdown(text) }
-    Column(modifier = modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         for (block in blocks) {
             when (block) {
                 is MdBlock.Paragraph -> Text(text = block.text, style = style)

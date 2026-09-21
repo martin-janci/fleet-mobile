@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -338,18 +339,27 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         state = state,
                         onOpenSession = nav::open,
                         onToggleNeedsAttention = sessions::toggleNeedsAttentionOnly,
-                        onClearHostFilter = { sessions.setHostFilter(null) },
+                        // Through the navigator, not `sessions.setHostFilter(null)`
+                        // directly: `Screen.Sessions.hostAlias` is the one source of
+                        // truth for the filter, and `open()` reads `nav.screen.value`
+                        // to build `returnTo`. Clearing the view model alone left
+                        // that screen value stale, so opening a session and coming
+                        // back resurrected the filter the chip had just cleared. See
+                        // `Navigator.clearHostFilter`.
+                        onClearHostFilter = { nav.clearHostFilter() },
                         onRefresh = { sessions.refresh() },
                         onDismissError = sessions::dismissError,
                     )
                 }
-                is Screen.Session -> SessionRoute(
-                    sessionId = current.id,
-                    container = container,
-                    repository = repository,
-                    credentials = credentials,
-                    onBack = { nav.back() },
-                )
+                is Screen.Session -> key(current.id) {
+                    SessionRoute(
+                        sessionId = current.id,
+                        container = container,
+                        repository = repository,
+                        credentials = credentials,
+                        onBack = { nav.back() },
+                    )
+                }
                 Screen.Hosts -> {
                     val state by hosts.state.collectAsState()
                     HostsScreen(

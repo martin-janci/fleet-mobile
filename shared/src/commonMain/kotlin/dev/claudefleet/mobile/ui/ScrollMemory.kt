@@ -9,6 +9,21 @@ package dev.claudefleet.mobile.ui
  * model needs to know about `LazyListState` at all, and this is testable with
  * no Compose runtime in the picture. It is app-lifetime and in-memory only —
  * a process restart forgets it, the same as which tab was open.
+ *
+ * Anchors are **index-based** ([ScrollAnchor.firstVisibleIndex] is a
+ * `LazyColumn` item position, not a turn id — turns have none on the wire).
+ * `SessionScreen` only ever shows the truncation-note item at index 0 when
+ * [dev.claudefleet.mobile.model.Conversation.truncated] is set, so a session
+ * that toggles that flag between the visit that stored an anchor and the one
+ * that recalls it — the window sliding a turn off the hub's own tail while
+ * the screen was away — can land the recall one turn off from where the
+ * reader actually left it. That is the cost of an index rather than a turn
+ * identity, and cheaper than the identity `Conversation.appending` already
+ * has to guess at for the same reason.
+ *
+ * Main-thread-only: every caller is a composable's effect or a test on the
+ * default (single) test dispatcher, and [anchors] is a bare `MutableMap`
+ * with no lock of its own.
  */
 internal object ScrollMemory {
     private val anchors = mutableMapOf<Long, ScrollAnchor>()
@@ -33,7 +48,11 @@ internal object ScrollMemory {
     /** The session's remembered position, or null when there is none — go to the newest. */
     fun recall(sessionId: Long): ScrollAnchor? = anchors[sessionId]
 
-    /** Drops everything remembered. Mainly for tests: this object outlives any one of them. */
+    /**
+     * Drops everything remembered. Test support: this object outlives any one
+     * test, so [ScrollMemoryTest] clears it in an `@AfterTest` rather than
+     * letting one test's anchors leak into the next.
+     */
     fun clear() {
         anchors.clear()
     }

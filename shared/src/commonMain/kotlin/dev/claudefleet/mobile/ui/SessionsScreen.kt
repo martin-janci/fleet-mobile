@@ -145,7 +145,7 @@ private fun SessionsBar(
                 InputChip(
                     selected = true,
                     onClick = onClearHostFilter,
-                    label = { Text("host: $hostFilter") },
+                    label = { Text("host: $hostFilter", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     trailingIcon = {
                         Icon(
                             FleetIcons.Close,
@@ -259,6 +259,10 @@ private fun EmptyFleet(needsAttentionOnly: Boolean, hostFilter: String?, modifie
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Text(
             text = when {
+                // Both filters on and nothing matches: name what is actually
+                // being asked for, rather than the host-only message that
+                // used to win here and said nothing about attention at all.
+                hostFilter != null && needsAttentionOnly -> "Nothing on $hostFilter needs you"
                 hostFilter != null -> "No sessions on $hostFilter"
                 needsAttentionOnly -> "Nothing needs you right now."
                 else -> "No sessions. Start one from the desktop app or the terminal."

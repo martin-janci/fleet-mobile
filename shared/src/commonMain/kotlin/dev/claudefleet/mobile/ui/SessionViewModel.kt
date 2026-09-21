@@ -10,6 +10,7 @@ import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.appending
+import dev.claudefleet.mobile.model.tailMarker
 import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -462,9 +463,9 @@ class SessionViewModel(
                     // own auto-scroll effect keys on: turn count alone misses
                     // the ordinary case of the live turn growing new items
                     // while the agent keeps working, without a new turn ever
-                    // starting.
-                    val tailGrew = appended.turns.size != current.conversation.turns.size ||
-                        appended.turns.lastOrNull()?.endedAt != current.conversation.turns.lastOrNull()?.endedAt
+                    // starting. One rule, `Conversation.tailMarker()`, rather
+                    // than the pair being spelled out by hand in both places.
+                    val tailGrew = appended.tailMarker() != current.conversation.tailMarker()
                     current.copy(
                         conversation = appended,
                         loaded = true,

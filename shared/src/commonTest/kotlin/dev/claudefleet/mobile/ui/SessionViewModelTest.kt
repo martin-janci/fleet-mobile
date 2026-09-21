@@ -1259,4 +1259,47 @@ class SessionViewModelTest {
 
         assertFalse(vm.state.value.newReply)
     }
+
+    /**
+     * Final review fix wave, I2: the live-turn-grows case — a refetch that
+     * answers the SAME turn (same `at`/`prompt`, so `Conversation.appending`
+     * merges it rather than appending a new one) with a later `endedAt` and
+     * one more item, because the agent is still working. `tailGrew` has to
+     * notice this via `endedAt` alone; turn count does not move.
+     */
+    @Test
+    fun a_refetch_that_grows_the_live_turn_via_a_later_endedAt_sets_newReply() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "a", text("working"))))
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        vm.onAtBottom(false)
+
+        actions.answer = Conversation(
+            listOf(ConvTurn(prompt = "a", at = "t1", endedAt = "t1-later", items = listOf(text("working"), text("done")))),
+        )
+        vm.refresh().join()
+        runCurrent()
+
+        assertEquals(1, vm.state.value.conversation.turns.size, "setup: still the same turn, not a new one")
+        assertTrue(vm.state.value.newReply)
+    }
+
+    /** The counterpart: an identical tail (same size, same `endedAt`) is not a new reply. */
+    @Test
+    fun a_refetch_with_an_identical_tail_leaves_newReply_false() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "a", text("working"))))
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        vm.onAtBottom(false)
+
+        // The hub answers the exact same window again — same `at`, same
+        // `prompt`, same `endedAt`, same items.
+        actions.answer = Conversation(listOf(turn("t1", "a", text("working"))))
+        vm.refresh().join()
+        runCurrent()
+
+        assertFalse(vm.state.value.newReply)
+    }
 }

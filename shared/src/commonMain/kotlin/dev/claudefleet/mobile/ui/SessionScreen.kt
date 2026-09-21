@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
+import dev.claudefleet.mobile.model.tailMarker
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.MarkdownText
@@ -152,7 +153,11 @@ fun SessionScreen(
     // from A's.
     var recallConsidered by remember(sessionId) { mutableStateOf(false) }
 
-    LaunchedEffect(turns.size, turns.lastOrNull()?.endedAt, newest, state.loaded) {
+    // `state.conversation.tailMarker()` — turn count and the last turn's
+    // `endedAt` together — is the one rule for "did the tail move", shared
+    // with `SessionViewModel.runGeneration`'s own `tailGrew`, rather than
+    // spelling the same pair of keys out by hand in both places.
+    LaunchedEffect(state.conversation.tailMarker(), newest, state.loaded) {
         // On the first `loaded` this screen ever sees, a remembered anchor
         // — one the reader was NOT at the bottom of when it was taken, see
         // [ScrollMemory.remember] — wins over the newest turn: that is
@@ -201,6 +206,11 @@ fun SessionScreen(
                 AssistChip(
                     onClick = {
                         newest?.let { target -> scope.launch { listState.animateScrollToItem(target) } }
+                        // Optimistic: this fires before `animateScrollToItem`
+                        // has actually finished, on the assumption that the
+                        // animation it just started will land there. The
+                        // `atBottom` derived above will confirm it once the
+                        // list settles; nothing here waits for that.
                         onAtBottom(true)
                     },
                     label = { Text(if (state.newReply) "↓ New reply" else "↓ Latest") },

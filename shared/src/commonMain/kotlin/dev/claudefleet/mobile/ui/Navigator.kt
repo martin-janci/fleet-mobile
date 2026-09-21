@@ -111,6 +111,25 @@ class Navigator {
         go(Screen.Sessions(hostAlias = alias))
     }
 
+    /**
+     * Clear the current host filter — the Sessions bar's own clear-chip
+     * action. A no-op unless the current screen actually is a Sessions
+     * screen; there is nothing to clear from an open session, Hosts, or
+     * Settings.
+     *
+     * This is [Screen] itself, not [SessionsViewModel]'s filter: the review
+     * fix this closes found that the chip used to call `setHostFilter(null)`
+     * directly on the view model, leaving [screen] still holding the old
+     * `Screen.Sessions(alias)`. [open] reads `_screen.value` to build
+     * [returnTo], so it captured the stale filter, and [back] restored it —
+     * the filter came back the moment a session was opened and closed. With
+     * one source of truth for the filter (this screen, not a second copy in
+     * the view model), [open] can only ever capture what this actually set.
+     */
+    fun clearHostFilter() {
+        if (_screen.value is Screen.Sessions) go(Screen.Sessions())
+    }
+
     private fun go(screen: Screen) {
         _screen.value = screen
         _tab.value = tabOf(screen)
