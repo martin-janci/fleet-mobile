@@ -54,6 +54,7 @@ class ToolsTheAppMayCallTest {
         "list_projects",
         "session_conversation",
         "send_prompt",
+        "fleet_health",
     )
 
     @Test

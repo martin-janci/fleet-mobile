@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,11 +13,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,11 +35,13 @@ import dev.claudefleet.mobile.ui.components.ErrorBanner
  * administration, which the hub refuses a client token, so the screen does not
  * draw a button the app would only be told no about.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HostsScreen(
     state: HostsUiState,
     onRefresh: () -> Unit,
     onDismissError: () -> Unit,
+    onOpenHost: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -47,36 +51,45 @@ fun HostsScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("Hosts", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = onRefresh, enabled = !state.refreshing) {
-                    Text(if (state.refreshing) "Refreshing…" else "Refresh")
-                }
             }
         }
         ConnectionBanner(state.status)
         ErrorBanner(state.error, onDismiss = onDismissError)
 
-        if (state.isEmpty) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    text = "No hosts. Add one from the desktop app or the terminal.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(32.dp),
-                )
+        // Inside the pull-to-refresh, not instead of it: an empty host list is
+        // exactly when a person pulls to ask whether the hub is answering, and
+        // an early return made that gesture do nothing. `PullToRefreshBox`
+        // takes the drag through a scrollable child, so the message is a
+        // single item filling the viewport rather than a bare `Box`.
+        PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                if (state.isEmpty) {
+                    item(key = "empty") {
+                        Box(modifier = Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "No hosts. Add one from the desktop app or the terminal.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(32.dp),
+                            )
+                        }
+                    }
+                }
+                items(state.hosts, key = { it.alias }) { host ->
+                    HostLineItem(host, onClick = { onOpenHost(host.alias) })
+                }
             }
-            return@Column
-        }
-
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(state.hosts, key = { it.alias }) { host -> HostLineItem(host) }
         }
     }
 }
 
 @Composable
-private fun HostLineItem(host: HostLine) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+private fun HostLineItem(host: HostLine, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+            .clickable(onClickLabel = "Show sessions on ${host.alias}", onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = host.alias,

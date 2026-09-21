@@ -26,7 +26,10 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 
@@ -185,6 +188,17 @@ class HubClient(
                 put("prompt", text)
             },
         ) { json.decodeFromJsonElement(SendPromptResult.serializer(), it) }
+
+    /**
+     * Is this hub reachable and its store open, right now.
+     *
+     * `fleet_health` is in the hub's readonly allow-list — a paired client
+     * may always ask, even one that cannot `send_prompt` — which is what
+     * makes it the probe [dev.claudefleet.mobile.data.SessionActions.ping]
+     * uses to tell an unreachable hub from a merely-dropped `/events` stream.
+     */
+    suspend fun fleetHealth(): Boolean =
+        call("fleet_health") { it.jsonObject["db_ready"]?.jsonPrimitive?.booleanOrNull == true }
 
     // ---- the wire ----
 

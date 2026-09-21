@@ -50,11 +50,19 @@ class ConversationScrollTest {
         },
     )
 
-    /** Renders the screen over a state the test can replace, as the view model would. */
-    private fun show(initial: Int): (Int) -> Unit {
+    /**
+     * Renders the screen over a state the test can replace, as the view model would.
+     *
+     * Each test passes its own [sessionId]: `ScrollMemory` is a process-wide
+     * object that outlives any one test and is `internal` to the shared module,
+     * so this source set cannot clear it. Distinct ids keep one test's
+     * remembered anchor from being recalled by the next.
+     */
+    private fun show(sessionId: Long, initial: Int): (Int) -> Unit {
         var state by mutableStateOf(SessionUiState(conversation = conversation(initial), loaded = true))
         compose.setContent {
             SessionScreen(
+                sessionId = sessionId,
                 state = state,
                 status = ConnectionStatus.Connected(hubVersion = "test"),
                 onDraftChange = {},
@@ -62,6 +70,7 @@ class ConversationScrollTest {
                 onRefresh = {},
                 onBack = {},
                 onDismissError = {},
+                onAtBottom = {},
             )
         }
         // On the UI thread, as the view model's own collector would be. A
@@ -77,7 +86,7 @@ class ConversationScrollTest {
      */
     @Test
     fun the_newest_turn_is_shown_when_the_conversation_grows() {
-        val grow = show(initial = 30)
+        val grow = show(sessionId = 1L, initial = 30)
         compose.waitForIdle()
         compose.onNodeWithText("answer-30").assertIsDisplayed()
 
@@ -97,7 +106,7 @@ class ConversationScrollTest {
      */
     @Test
     fun a_reader_scrolled_up_is_not_dragged_to_the_bottom() {
-        val grow = show(initial = 30)
+        val grow = show(sessionId = 2L, initial = 30)
         compose.waitForIdle()
 
         compose.onNodeWithTag(CONVERSATION_LIST).performScrollToIndex(0)
@@ -121,7 +130,7 @@ class ConversationScrollTest {
      */
     @Test
     fun scrolling_back_to_the_bottom_resumes_following() {
-        val grow = show(initial = 30)
+        val grow = show(sessionId = 3L, initial = 30)
         compose.waitForIdle()
 
         compose.onNodeWithTag(CONVERSATION_LIST).performScrollToIndex(0)

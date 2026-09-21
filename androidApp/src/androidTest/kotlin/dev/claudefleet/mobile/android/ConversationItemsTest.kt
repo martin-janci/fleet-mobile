@@ -63,6 +63,7 @@ class ConversationItemsTest {
     fun every_item_kind_puts_something_on_the_screen() {
         compose.setContent {
             SessionScreen(
+                sessionId = 11L,
                 state = SessionUiState(conversation = everything, loaded = true),
                 status = ConnectionStatus.Connected(hubVersion = "test"),
                 onDraftChange = {},
@@ -70,6 +71,7 @@ class ConversationItemsTest {
                 onRefresh = {},
                 onBack = {},
                 onDismissError = {},
+                onAtBottom = {},
             )
         }
         compose.waitForIdle()
@@ -106,6 +108,7 @@ class ConversationItemsTest {
     fun an_unknown_kind_names_itself_on_the_screen() {
         compose.setContent {
             SessionScreen(
+                sessionId = 12L,
                 state = SessionUiState(conversation = everything, loaded = true),
                 status = ConnectionStatus.Connected(hubVersion = "test"),
                 onDraftChange = {},
@@ -113,6 +116,7 @@ class ConversationItemsTest {
                 onRefresh = {},
                 onBack = {},
                 onDismissError = {},
+                onAtBottom = {},
             )
         }
         compose.waitForIdle()

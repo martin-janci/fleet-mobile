@@ -154,6 +154,17 @@ private fun Conversation.withinCeiling(): Conversation =
 
 private fun ConvTurn.identity(): Pair<String?, String?> = at to prompt
 
+/**
+ * The one rule for "did the tail move": how many turns there are, and when
+ * the last one's assistant output was last updated. Turn count alone misses
+ * the ordinary case of the live turn growing new items while the agent keeps
+ * working, without a new turn ever starting — [SessionViewModel.runGeneration]
+ * (`tailGrew`) and [dev.claudefleet.mobile.ui.SessionScreen]'s own
+ * auto-scroll `LaunchedEffect` both need that same fact, and used to compute
+ * it by hand in two places that had to agree and nothing made them.
+ */
+fun Conversation.tailMarker(): Pair<Int, String?> = turns.size to turns.lastOrNull()?.endedAt
+
 /** One turn: the human prompt that opened it and what the agent said or did. */
 @Serializable
 data class ConvTurn(
