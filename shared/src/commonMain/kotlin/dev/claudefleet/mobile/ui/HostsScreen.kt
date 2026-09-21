@@ -12,11 +12,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +34,7 @@ import dev.claudefleet.mobile.ui.components.ErrorBanner
  * administration, which the hub refuses a client token, so the screen does not
  * draw a button the app would only be told no about.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HostsScreen(
     state: HostsUiState,
@@ -47,10 +49,6 @@ fun HostsScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("Hosts", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = onRefresh, enabled = !state.refreshing) {
-                    Text(if (state.refreshing) "Refreshing…" else "Refresh")
-                }
             }
         }
         ConnectionBanner(state.status)
@@ -68,8 +66,10 @@ fun HostsScreen(
             return@Column
         }
 
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(state.hosts, key = { it.alias }) { host -> HostLineItem(host) }
+        PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                items(state.hosts, key = { it.alias }) { host -> HostLineItem(host) }
+            }
         }
     }
 }

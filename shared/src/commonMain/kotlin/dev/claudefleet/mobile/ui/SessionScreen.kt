@@ -1,5 +1,11 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,12 +21,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -28,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,6 +47,7 @@ import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.StatusChip
+import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.data.ConnectionStatus
 
 /**
@@ -117,15 +128,27 @@ private fun LazyListScope.turnItems(turns: List<ConvTurn>) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SessionBar(state: SessionUiState, onBack: () -> Unit, onRefresh: () -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = onBack) { Text("Back") }
-            Column(modifier = Modifier.weight(1f)) {
+    val busy = state.loading || state.refreshing
+    val transition = rememberInfiniteTransition()
+    val angle by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+    )
+    TopAppBar(
+        navigationIcon = {
+            IconButton(onClick = onBack) {
+                Icon(FleetIcons.ArrowBack, contentDescription = "Back")
+            }
+        },
+        title = {
+            Column {
                 Text(
                     text = state.session?.displayName ?: "Session",
                     style = MaterialTheme.typography.titleSmall,
@@ -140,17 +163,22 @@ private fun SessionBar(state: SessionUiState, onBack: () -> Unit, onRefresh: () 
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        },
+        actions = {
             StatusChip(
                 claudeStatus = state.session?.claudeStatus,
                 stuckKind = state.session?.stuckKind,
             )
             Spacer(Modifier.width(4.dp))
-            val busy = state.loading || state.refreshing
-            TextButton(onClick = onRefresh, enabled = !busy) {
-                Text(if (busy) "…" else "Refresh")
+            IconButton(onClick = onRefresh, enabled = !busy) {
+                Icon(
+                    FleetIcons.Refresh,
+                    contentDescription = "Refresh",
+                    modifier = Modifier.rotate(if (busy) angle else 0f),
+                )
             }
-        }
-    }
+        },
+    )
 }
 
 @Composable

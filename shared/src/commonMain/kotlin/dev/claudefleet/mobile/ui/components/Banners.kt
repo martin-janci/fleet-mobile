@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -23,6 +24,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.ui.Friendly
+import dev.claudefleet.mobile.ui.theme.FleetIcons
 
 /**
  * What the event stream is doing, when it is doing anything worth saying.
@@ -78,12 +80,9 @@ fun ErrorBanner(error: Friendly?, onDismiss: (() -> Unit)? = null, modifier: Mod
     ) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth()) {
             Row(verticalAlignment = Alignment.Top) {
-                // `Icons.Outlined.Warning` needs `compose.materialIconsCore`,
-                // which Task 5 adds. A bare "!" keeps this task's build green
-                // without pulling in a new dependency early.
-                Text(
-                    text = "!",
-                    style = MaterialTheme.typography.titleSmall,
+                Icon(
+                    FleetIcons.Warning,
+                    contentDescription = null,
                     modifier = Modifier.padding(end = 8.dp),
                 )
                 Column(modifier = Modifier.weight(1f)) {

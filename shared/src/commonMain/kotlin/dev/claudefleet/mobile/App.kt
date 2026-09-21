@@ -6,6 +6,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -51,6 +54,7 @@ import dev.claudefleet.mobile.ui.SettingsScreen
 import dev.claudefleet.mobile.ui.SettingsViewModel
 import dev.claudefleet.mobile.ui.Tab
 import dev.claudefleet.mobile.ui.scan.qrScannerSupported
+import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.FleetTheme
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
@@ -291,11 +295,25 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     Scaffold(
         bottomBar = {
             NavigationBar {
+                val attention by sessions.state.collectAsState()
                 for (entry in Tab.entries) {
                     NavigationBarItem(
                         selected = tab == entry,
                         onClick = { nav.select(entry) },
-                        icon = { Text(entry.name.take(1)) },
+                        icon = {
+                            val icon = when (entry) {
+                                Tab.Sessions -> FleetIcons.Sessions
+                                Tab.Hosts -> FleetIcons.Hosts
+                                Tab.Settings -> FleetIcons.Settings
+                            }
+                            if (entry == Tab.Sessions && attention.attentionCount > 0) {
+                                BadgedBox(badge = { Badge { Text("${attention.attentionCount}") } }) {
+                                    Icon(icon, contentDescription = entry.name)
+                                }
+                            } else {
+                                Icon(icon, contentDescription = entry.name)
+                            }
+                        },
                         label = { Text(entry.name) },
                     )
                 }
