@@ -85,6 +85,13 @@ Builds and bare-binary tests cannot see that class of failure.
 - **Measure on the dispatcher the app really uses.** The same stack probe on the
   test's *main* thread parsed 10,000 levels happily; only
   `withContext(Dispatchers.Default)`, where Ktor delivers, reproduced the crash.
+- **`compileKotlinIosSimulatorArm64` green on Linux does not mean it links.**
+  The klib step runs here; the LLVM step (`linkDebugTestIosSimulatorArm64`) is
+  macOS-only and rejects things the compiler accepted. A Kotlin `object`
+  extending an Objective-C class is one: it fails with *"Allocation of Obj-C
+  class … should have been lowered"* at link time and compiles cleanly at every
+  step before that. Use a `class`. Anything touching `iosMain`/`iosTest` and
+  cinterop needs a CI round before you believe it.
 
 ## No Mac and no `/dev/kvm` here
 

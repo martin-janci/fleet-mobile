@@ -27,7 +27,16 @@ import kotlin.test.assertTrue
  */
 class QrScannerCaptureTest {
 
-    private object NoopDelegate : NSObject(), AVCaptureMetadataOutputObjectsDelegateProtocol
+    /**
+     * A `class`, not an `object`, and that is not a style choice.
+     *
+     * A Kotlin singleton extending an Objective-C class fails in the
+     * Kotlin/Native backend — "Allocation of Obj-C class … should have been
+     * lowered" — and it fails at **link** time, not compile time. Building the
+     * klib on Linux says nothing about it; only the macOS
+     * `linkDebugTestIosSimulatorArm64` does.
+     */
+    private class NoopDelegate : NSObject(), AVCaptureMetadataOutputObjectsDelegateProtocol
 
     /** Every iPhone has a camera; this is a constant and it should stay one. */
     @Test
@@ -47,7 +56,7 @@ class QrScannerCaptureTest {
         val session = AVCaptureSession()
 
         assertFalse(
-            session.startCapturing(NoopDelegate),
+            session.startCapturing(NoopDelegate()),
             "with no capture device available, startCapturing must answer false",
         )
         assertFalse(session.isRunning(), "a session that never started must not be running")
@@ -66,7 +75,7 @@ class QrScannerCaptureTest {
     fun declining_twice_leaves_the_session_usable() {
         val session = AVCaptureSession()
 
-        repeat(2) { assertFalse(session.startCapturing(NoopDelegate)) }
+        repeat(2) { assertFalse(session.startCapturing(NoopDelegate())) }
         assertTrue(session.inputs.isEmpty(), "a failed start must not leave inputs attached")
     }
 }
