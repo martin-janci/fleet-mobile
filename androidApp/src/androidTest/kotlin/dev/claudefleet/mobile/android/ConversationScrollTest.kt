@@ -64,7 +64,12 @@ class ConversationScrollTest {
                 onDismissError = {},
             )
         }
-        return { total -> state = state.copy(conversation = conversation(total)) }
+        // On the UI thread, as the view model's own collector would be. A
+        // snapshot write from the test thread usually lands, and "usually" in
+        // a device test is a flake nobody can reproduce.
+        return { total ->
+            compose.runOnUiThread { state = state.copy(conversation = conversation(total)) }
+        }
     }
 
     /**

@@ -134,7 +134,8 @@ not revoke it, it cannot revoke it, and the screen says so.
   gives for itself, not the one you scanned, so set `hub.public_url` to the
   name you want phones to use.
 - **A hub on the LAN, over plain `http://`.** Read *Transport* below before
-  trying this. The short version: use HTTPS. Android blocks cleartext outright
+  trying this. The short version: use HTTPS — loopback is the only cleartext
+  exception the Android build ships. Android blocks cleartext outright
   at this `targetSdk`, and the app now refuses plain `http` to anything that is
   not on your own network.
 
@@ -156,15 +157,28 @@ It fails closed, with a message.
 Then the platform has its own say, and on Android it is stricter than the app:
 
 - **Android.** `targetSdk` is 35, so the platform blocks cleartext for every
-  destination unless the app ships an exception. **This app ships none**, so a
-  plain-`http` hub does not work on Android as built — including on the LAN.
-  The fix is HTTPS on the hub.
+  destination unless the app ships an exception. The app now ships exactly one,
+  in `res/xml/network_security_config.xml`, and it is three hosts wide:
+  `127.0.0.1`, `localhost`, and `10.0.2.2` (the emulator's alias for the host
+  machine's loopback). **Everything else is still blocked, including the LAN.**
 
-  If you genuinely need cleartext to one LAN host, add a
+  That exception exists because the emulator was asked and said no.
+  `NetworkSecurityPolicy.isCleartextTrafficPermitted("127.0.0.1")` answered
+  **false**, which meant pairing to a hub on the dev machine over `http` —
+  the documented way to set one up, and the one `scripts/bootstrap.sh` builds —
+  could not work and never had. `permitsCleartext` in the shared code was
+  approving an address the platform then refused, and the failure surfaced as a
+  connection error with no explanation. `CleartextPolicyTest` in
+  `androidApp/src/androidTest` is that experiment, and it now pins both halves:
+  loopback permitted, LAN and the public internet not.
+
+  For a hub on the **LAN** over plain `http`, the answer is still HTTPS. Add a
   [network security configuration](https://developer.android.com/privacy-and-security/security-config)
-  naming that host and wire it up in the manifest. Note that the format matches
-  domains and IP *literals*, not CIDR ranges, so "all of 192.168/16" cannot be
-  expressed — you name the host you actually use. **Do not set
+  entry naming that host if you must. The format matches domains and IP
+  *literals*, not CIDR ranges, so "all of 192.168/16" cannot be expressed —
+  which is why the shipped exception stops at loopback, and why the shared
+  `permitsCleartext` is deliberately wider than what Android can enforce. **Do
+  not set
   `android:usesCleartextTraffic="true"`**: that is a blanket exception for every
   destination, which is precisely what the iOS side refuses, and a test fails if
   it appears.
@@ -177,7 +191,8 @@ Then the platform has its own say, and on Android it is stricter than the app:
 
 The asymmetry is real and is not a bug in this document: a LAN hub over plain
 http can work on iOS and cannot on Android, until someone adds the Android
-configuration for their own host.
+configuration for their own host. A hub on **this machine** over plain http now
+works on both.
 
 ### How much it will read
 

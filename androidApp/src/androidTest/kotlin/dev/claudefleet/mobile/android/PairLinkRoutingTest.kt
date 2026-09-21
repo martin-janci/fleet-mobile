@@ -117,13 +117,17 @@ class PairLinkRoutingTest {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val first = viewIntent(pairUrl).setClassName(context, MainActivity::class.java.name)
 
-        ActivityScenario.launch<MainActivity>(first).use { scenario ->
+        val scenario = ActivityScenario.launch<MainActivity>(first)
+        try {
             lateinit var original: MainActivity
             scenario.onActivity { original = it }
 
             // Through the platform, with no SINGLE_TOP flag of our own: exactly
-            // what `am start` does, so the launch mode is what decides.
-            scenario.onActivity { it.startActivity(viewIntent(second).setClassName(context, MainActivity::class.java.name)) }
+            // what `am start` does, so the manifest's launch mode is what
+            // decides where it lands.
+            scenario.onActivity {
+                it.startActivity(viewIntent(second).setClassName(context, MainActivity::class.java.name))
+            }
 
             awaitIntent(scenario, second)
             scenario.onActivity { current ->
@@ -133,6 +137,18 @@ class PairLinkRoutingTest {
                     current === original,
                 )
             }
+        } finally {
+            // Finished directly, and `close()` is never called.
+            //
+            // `ActivityScenario.close()` drives the activity to DESTROYED and
+            // waits for it; after a self-sent VIEW intent the task settles with
+            // the activity PAUSED rather than RESUMED, which the scenario
+            // cannot unwind — it spent 47 seconds failing to. Nothing about
+            // that is a property of the app: by the time this runs, the
+            // delivery the test is about has already been asserted. Finishing
+            // the activity is what actually ends it, and leaves nothing behind
+            // for the next test.
+            scenario.onActivity { it.finishAndRemoveTask() }
         }
     }
 

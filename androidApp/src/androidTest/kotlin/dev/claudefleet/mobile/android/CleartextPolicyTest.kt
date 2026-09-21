@@ -67,6 +67,29 @@ class CleartextPolicyTest {
         }
     }
 
+    /**
+     * And the gap that is left, pinned so it stays a known one.
+     *
+     * `permitsCleartext` allows plain http to the RFC 1918 ranges, and a
+     * network-security config can name hosts but not ranges, so that cannot be
+     * expressed on Android. A hub at `http://192.168.1.10:8899` is refused by
+     * the platform even though the app's own policy allows it. This test exists
+     * so that stays deliberate: if someone later opens cleartext to the LAN —
+     * by naming a host, or by widening the base-config — this fails and they
+     * have to say so in README.md too.
+     */
+    @Test
+    fun cleartext_to_a_lan_address_is_still_blocked_on_android() {
+        for (host in listOf("192.168.1.10", "10.1.2.3", "172.16.0.1")) {
+            assertFalse(
+                "$host is newly permitted cleartext. That may be right, but the README says " +
+                    "Android refuses LAN http and permitsCleartext's KDoc explains the mismatch; " +
+                    "both have to change with it",
+                policy.isCleartextTrafficPermitted(host),
+            )
+        }
+    }
+
     /** The blanket switch, asked of the platform rather than of the manifest. */
     @Test
     fun cleartext_is_not_permitted_by_default() {
