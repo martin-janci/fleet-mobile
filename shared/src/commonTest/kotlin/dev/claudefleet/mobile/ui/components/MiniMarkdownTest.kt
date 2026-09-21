@@ -38,6 +38,24 @@ class MiniMarkdownTest {
         assertEquals(null, code.lang)
     }
 
+    /**
+     * A streamed/truncated transcript can end mid-code-block, with no
+     * closing ` ``` ` at all. That must not swallow nothing (an empty code
+     * block, the rest of the message lost) or throw -- everything after the
+     * opening fence becomes the code block's text, ending at EOF.
+     */
+    @Test
+    fun a_fence_without_a_closing_marker_runs_to_the_end() {
+        val blocks = parseMarkdown("before\n```kotlin\nval x = 1\nval y = 2")
+
+        assertEquals(2, blocks.size)
+        val before = assertIs<MdBlock.Paragraph>(blocks[0])
+        assertEquals("before", before.text.text)
+        val code = assertIs<MdBlock.Code>(blocks[1])
+        assertEquals("val x = 1\nval y = 2", code.text)
+        assertEquals("kotlin", code.lang)
+    }
+
     @Test
     fun markdown_inside_a_fence_is_left_alone() {
         // `- not a bullet` and `**not bold**` inside the fence must survive
@@ -58,6 +76,26 @@ class MiniMarkdownTest {
         assertEquals("one", one.text.text)
         val two = assertIs<MdBlock.Bullet>(blocks[1])
         assertEquals("two", two.text.text)
+    }
+
+    /**
+     * The parser hands one logical bullet to the renderer regardless of its
+     * length; wrapping under the marker (see `MarkdownText`'s `Row` in
+     * `MiniMarkdown.kt`, which needs `Modifier.weight(1f)` on the body
+     * `Text` for this) is a layout concern, not a parsing one. This just
+     * pins the parser side of that: a single, very long line prefixed with
+     * `- ` stays exactly one `Bullet` block, not split by its own length.
+     */
+    @Test
+    fun a_long_bullet_stays_a_single_block() {
+        val long = "word ".repeat(50).trim() // 249 chars, no newline
+        assertTrue(long.length > 200)
+
+        val blocks = parseMarkdown("- $long")
+
+        assertEquals(1, blocks.size)
+        val bullet = assertIs<MdBlock.Bullet>(blocks.single())
+        assertEquals(long, bullet.text.text)
     }
 
     @Test
@@ -115,5 +153,32 @@ class MiniMarkdownTest {
         assertEquals("first paragraph", first.text.text)
         val second = assertIs<MdBlock.Paragraph>(blocks[1])
         assertEquals("second paragraph", second.text.text)
+    }
+
+    /**
+     * The hub is not guaranteed to send `\n`-only line endings. `\r\n` (and
+     * a lone `\r`) has to become `\n` before any line-based check runs, or a
+     * heading/bullet/fence match silently fails on the trailing `\r` and a
+     * stray `\r` ends up inside a rendered `Text`.
+     */
+    @Test
+    fun crlf_line_endings_are_normalized_to_a_single_newline() {
+        val blocks = parseMarkdown("# Title\r\nline")
+
+        assertEquals(2, blocks.size)
+        val heading = assertIs<MdBlock.Paragraph>(blocks[0])
+        assertEquals("Title", heading.text.text)
+        assertTrue(heading.text.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+        val paragraph = assertIs<MdBlock.Paragraph>(blocks[1])
+        assertEquals("line", paragraph.text.text)
+
+        assertTrue(blocks.none { block ->
+            val plain = when (block) {
+                is MdBlock.Paragraph -> block.text.text
+                is MdBlock.Bullet -> block.text.text
+                is MdBlock.Code -> block.text
+            }
+            '\r' in plain
+        })
     }
 }

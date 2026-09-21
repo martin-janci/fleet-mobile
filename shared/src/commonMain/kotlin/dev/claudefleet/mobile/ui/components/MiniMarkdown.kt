@@ -20,6 +20,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -75,7 +76,13 @@ private val HEADING = Regex("^(#{1,6})\\s+(.*)$")
  * Consecutive plain lines join into one paragraph, split on a blank line.
  */
 fun parseMarkdown(text: String): List<MdBlock> {
-    val lines = text.split("\n")
+    // `\r\n` -> `\n`, then a lone `\r` (old Mac line endings, or a stray
+    // carriage return) -> `\n` too, so every downstream line-based check
+    // (fence, bullet, heading, blank-line paragraph split) sees one newline
+    // convention regardless of what the hub sent, and no `\r` ever ends up
+    // inside a rendered `Text`.
+    val normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    val lines = normalized.split("\n")
     val blocks = mutableListOf<MdBlock>()
     val paragraph = StringBuilder()
 
@@ -211,9 +218,20 @@ fun MarkdownText(
         for (block in blocks) {
             when (block) {
                 is MdBlock.Paragraph -> Text(text = block.text, style = style)
-                is MdBlock.Bullet -> Row(modifier = Modifier.fillMaxWidth()) {
+                // `weight(1f)` on the body text, not just `fillMaxWidth()` on
+                // the Row: without it the body is measured against the
+                // Row's full width including the marker column, so a
+                // wrapped line starts back at the Row's left edge instead of
+                // hanging under the marker, and can overflow past it.
+                // `Alignment.Top` keeps the marker glyph aligned with the
+                // body's first line rather than the (taller, wrapped)
+                // block's vertical center.
+                is MdBlock.Bullet -> Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top,
+                ) {
                     Text(text = "• ", style = style)
-                    Text(text = block.text, style = style)
+                    Text(text = block.text, style = style, modifier = Modifier.weight(1f))
                 }
                 is MdBlock.Code -> CodeBlock(block, modifier = Modifier.padding(vertical = 2.dp))
             }
