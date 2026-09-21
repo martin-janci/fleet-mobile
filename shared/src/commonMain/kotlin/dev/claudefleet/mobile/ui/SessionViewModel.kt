@@ -9,6 +9,7 @@ import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.appending
+import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -344,7 +345,7 @@ class SessionViewModel(
             val f = friendly(t)
             local.update { it.copy(
                 loaded = true,
-                silent = !f.isError && f.title == "Nothing has been said yet",
+                silent = t is HubError.Tool && t.code == NO_TRANSCRIPT,
                 error = f.takeIf { e -> e.isError },
             ) }
         } finally {

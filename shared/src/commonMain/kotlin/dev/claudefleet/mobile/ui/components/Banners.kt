@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -109,9 +110,9 @@ fun ErrorBanner(error: Friendly?, onDismiss: (() -> Unit)? = null, modifier: Mod
                 }
                 if (onDismiss != null) TextButton(onClick = onDismiss) { Text("Dismiss") }
             }
-            if (showDetails && error.details != null) {
+            AnimatedVisibility(showDetails && error.details != null) {
                 Text(
-                    text = error.details,
+                    text = error.details.orEmpty(),
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.fillMaxWidth()

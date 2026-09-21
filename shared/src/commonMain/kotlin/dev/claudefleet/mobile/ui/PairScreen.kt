@@ -82,8 +82,8 @@ fun PairScreen(
         // `PairUiState` — so it is wrapped into a [Friendly] only here, at the
         // point `ErrorBanner` needs one, rather than pulling `PairViewModel`
         // into this task's scope.
-        val reasonAsFriendly = state.reason?.let { Friendly(title = "Something went wrong", body = it, isError = true) }
-        val errorAsFriendly = state.error?.let { Friendly(title = "Something went wrong", body = it, isError = true) }
+        val reasonAsFriendly = state.reason?.asGenericFriendly()
+        val errorAsFriendly = state.error?.asGenericFriendly()
         ErrorBanner(reasonAsFriendly, onDismiss = onDismissReason)
         ErrorBanner(errorAsFriendly, onDismiss = onDismissError)
 

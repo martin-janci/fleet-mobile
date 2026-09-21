@@ -29,3 +29,11 @@ fun friendly(t: Throwable): Friendly {
         else -> Friendly("Something went wrong", raw, isError = true)
     }
 }
+
+/**
+ * Wraps a plain-string error for a screen not yet migrated to carry [Friendly]
+ * itself — `PairUiState`/`SettingsUiState` still hold `String?`, so this is
+ * where their value becomes a [Friendly] only at the point `ErrorBanner` needs
+ * one, without pulling those view models into this migration.
+ */
+internal fun String.asGenericFriendly(): Friendly = Friendly(title = "Something went wrong", body = this, isError = true)

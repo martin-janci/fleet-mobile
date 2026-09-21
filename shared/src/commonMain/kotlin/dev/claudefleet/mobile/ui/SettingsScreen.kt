@@ -52,7 +52,7 @@ fun SettingsScreen(
         // `SettingsUiState.error` stays a plain `String?` — wrapped here only,
         // at the point `ErrorBanner` needs a [Friendly], rather than pulling
         // `SettingsViewModel` into this task's scope.
-        val errorAsFriendly = state.error?.let { Friendly(title = "Something went wrong", body = it, isError = true) }
+        val errorAsFriendly = state.error?.asGenericFriendly()
         ErrorBanner(errorAsFriendly, onDismiss = onDismissError)
 
         Field("Hub", state.hub)
