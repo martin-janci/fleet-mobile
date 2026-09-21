@@ -10,6 +10,7 @@ import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.appending
+import dev.claudefleet.mobile.model.tailMarker
 import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -87,6 +88,14 @@ data class SessionUiState(
     val error: Friendly? = null,
     /** True when the last read said [NO_TRANSCRIPT]: nothing has been said yet, not a failure. */
     val silent: Boolean = false,
+    /**
+     * True when a read grew the tail — a new turn, or the live turn growing
+     * new items — while the reader was scrolled away from the bottom (see
+     * [SessionViewModel.onAtBottom]). The jump pill reads this to choose
+     * between "↓ Latest" and "↓ New reply"; it clears once the reader is
+     * told to be back at the bottom.
+     */
+    val newReply: Boolean = false,
 ) {
     /**
      * Whether the send button does anything. Blank drafts are not prompts, a
@@ -156,6 +165,14 @@ class SessionViewModel(
         val sending: Boolean = false,
         val error: Friendly? = null,
         val silent: Boolean = false,
+        /**
+         * What the screen last reported through [onAtBottom]. Starts true:
+         * a screen that has not scrolled at all — including one that has
+         * not rendered its first frame yet — is at the newest turn, not
+         * away from it, so an early refetch has nothing to flag.
+         */
+        val atBottom: Boolean = true,
+        val newReply: Boolean = false,
     )
 
     private val local = MutableStateFlow(Local())
@@ -323,6 +340,16 @@ class SessionViewModel(
     }
 
     /**
+     * The screen's own report of whether the reader is at the newest turn —
+     * the truth [Local.atBottom] tracks for [newReply], and, on `true`, the
+     * signal that any pending new-reply flag is resolved: the reader just
+     * got there, whether by the jump pill or by scrolling there themselves.
+     */
+    fun onAtBottom(atBottom: Boolean) {
+        local.update { it.copy(atBottom = atBottom, newReply = if (atBottom) false else it.newReply) }
+    }
+
+    /**
      * Clear the banner. See [SessionsViewModel.dismissError]; here it is a send
      * or a read that failed, rather than a refresh.
      */
@@ -430,12 +457,23 @@ class SessionViewModel(
                     running = generation
                 }
                 val fresh = actions.conversation(sessionId)
-                local.update { it.copy(
-                    conversation = it.conversation.appending(fresh),
-                    loaded = true,
-                    error = null,
-                    silent = false,
-                ) }
+                local.update { current ->
+                    val appended = current.conversation.appending(fresh)
+                    // The same "did the tail move" signal `SessionScreen`'s
+                    // own auto-scroll effect keys on: turn count alone misses
+                    // the ordinary case of the live turn growing new items
+                    // while the agent keeps working, without a new turn ever
+                    // starting. One rule, `Conversation.tailMarker()`, rather
+                    // than the pair being spelled out by hand in both places.
+                    val tailGrew = appended.tailMarker() != current.conversation.tailMarker()
+                    current.copy(
+                        conversation = appended,
+                        loaded = true,
+                        error = null,
+                        silent = false,
+                        newReply = current.newReply || (tailGrew && !current.atBottom),
+                    )
+                }
             }
         } catch (e: CancellationException) {
             throw e
@@ -499,6 +537,7 @@ class SessionViewModel(
         hubReachable = probed,
         error = l.error,
         silent = l.silent,
+        newReply = l.newReply,
     )
 }
 

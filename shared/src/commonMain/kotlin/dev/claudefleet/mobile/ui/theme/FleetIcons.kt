@@ -187,4 +187,41 @@ object FleetIcons {
             }
         }.build()
     }
+
+    /**
+     * Two stroked overlapping rounded rectangles: the copy-to-clipboard
+     * glyph. Both paths are stroke-only, like [ArrowBack]/[Check]/[Close] --
+     * `Icon()` always tints through [androidx.compose.ui.graphics.ColorFilter.tint],
+     * which replaces color with coverage, so a filled "front sheet" (to
+     * visually occlude the back one) would buy nothing a plain outline
+     * doesn't already give at this size.
+     */
+    val Copy: ImageVector by lazy {
+        ImageVector.Builder("Copy", 24.dp, 24.dp, 24f, 24f).apply {
+            path(
+                fill = null,
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                // back sheet, top-right
+                moveTo(9f, 3f); lineTo(19f, 3f); quadTo(21f, 3f, 21f, 5f)
+                lineTo(21f, 15f); quadTo(21f, 17f, 19f, 17f); lineTo(9f, 17f)
+                quadTo(7f, 17f, 7f, 15f); lineTo(7f, 5f); quadTo(7f, 3f, 9f, 3f); close()
+            }
+            path(
+                fill = null,
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                // front sheet, bottom-left, overlapping the back one
+                moveTo(5f, 7f); lineTo(15f, 7f); quadTo(17f, 7f, 17f, 9f)
+                lineTo(17f, 19f); quadTo(17f, 21f, 15f, 21f); lineTo(5f, 21f)
+                quadTo(3f, 21f, 3f, 19f); lineTo(3f, 9f); quadTo(3f, 7f, 5f, 7f); close()
+            }
+        }.build()
+    }
 }

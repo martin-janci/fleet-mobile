@@ -1177,4 +1177,129 @@ class SessionViewModelTest {
         // to zero: the read did not leak as "still in flight" forever.
         assertEquals(0, actions.inFlightReads)
     }
+
+    // ---- newReply / onAtBottom: task 3, "open where you left off" ----
+
+    @Test
+    fun newReply_is_false_until_anything_says_otherwise() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "a")))
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+
+        vm.load().join()
+        runCurrent()
+
+        assertFalse(vm.state.value.newReply)
+    }
+
+    /**
+     * The screen calls `onAtBottom(false)` once the reader scrolls away from
+     * the newest turn. A refetch that grows the tail while that is true is
+     * exactly the case the pill's "↓ New reply" label exists for.
+     */
+    @Test
+    fun a_refetch_that_grows_the_tail_while_not_at_the_bottom_sets_newReply() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "a")))
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        vm.onAtBottom(false)
+
+        actions.answer = Conversation(listOf(turn("t1", "a"), turn("t2", "b")))
+        vm.refresh().join()
+        runCurrent()
+
+        assertTrue(vm.state.value.newReply)
+    }
+
+    /** The ordinary case: a reader sitting at the bottom sees new turns arrive with no pill at all. */
+    @Test
+    fun a_refetch_that_grows_the_tail_while_at_the_bottom_leaves_newReply_false() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "a")))
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        // No onAtBottom(false) — the reader is presumed at the bottom until told otherwise.
+
+        actions.answer = Conversation(listOf(turn("t1", "a"), turn("t2", "b")))
+        vm.refresh().join()
+        runCurrent()
+
+        assertFalse(vm.state.value.newReply)
+    }
+
+    @Test
+    fun onAtBottom_true_clears_a_pending_newReply() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "a")))
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        vm.onAtBottom(false)
+        actions.answer = Conversation(listOf(turn("t1", "a"), turn("t2", "b")))
+        vm.refresh().join()
+        runCurrent()
+        assertTrue(vm.state.value.newReply, "setup: newReply must be set before this test can check it clears")
+
+        vm.onAtBottom(true)
+        runCurrent()
+
+        assertFalse(vm.state.value.newReply)
+    }
+
+    /** `onAtBottom(false)` alone, with nothing new arriving, is not itself a new reply. */
+    @Test
+    fun onAtBottom_false_alone_does_not_set_newReply() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "a")))
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+
+        vm.onAtBottom(false)
+        runCurrent()
+
+        assertFalse(vm.state.value.newReply)
+    }
+
+    /**
+     * Final review fix wave, I2: the live-turn-grows case — a refetch that
+     * answers the SAME turn (same `at`/`prompt`, so `Conversation.appending`
+     * merges it rather than appending a new one) with a later `endedAt` and
+     * one more item, because the agent is still working. `tailGrew` has to
+     * notice this via `endedAt` alone; turn count does not move.
+     */
+    @Test
+    fun a_refetch_that_grows_the_live_turn_via_a_later_endedAt_sets_newReply() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "a", text("working"))))
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        vm.onAtBottom(false)
+
+        actions.answer = Conversation(
+            listOf(ConvTurn(prompt = "a", at = "t1", endedAt = "t1-later", items = listOf(text("working"), text("done")))),
+        )
+        vm.refresh().join()
+        runCurrent()
+
+        assertEquals(1, vm.state.value.conversation.turns.size, "setup: still the same turn, not a new one")
+        assertTrue(vm.state.value.newReply)
+    }
+
+    /** The counterpart: an identical tail (same size, same `endedAt`) is not a new reply. */
+    @Test
+    fun a_refetch_with_an_identical_tail_leaves_newReply_false() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "a", text("working"))))
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        vm.onAtBottom(false)
+
+        // The hub answers the exact same window again — same `at`, same
+        // `prompt`, same `endedAt`, same items.
+        actions.answer = Conversation(listOf(turn("t1", "a", text("working"))))
+        vm.refresh().join()
+        runCurrent()
+
+        assertFalse(vm.state.value.newReply)
+    }
 }

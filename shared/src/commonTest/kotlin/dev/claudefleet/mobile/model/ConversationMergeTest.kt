@@ -267,3 +267,52 @@ class ConversationCeilingTest {
         assertTrue(held.truncated)
     }
 }
+
+/**
+ * [Conversation.tailMarker] is the one "did the tail move" rule shared by
+ * `SessionViewModel`'s `tailGrew` and `SessionScreen`'s auto-scroll
+ * `LaunchedEffect` keys — final review fix wave, "one tail rule".
+ */
+class ConversationTailMarkerTest {
+
+    @Test
+    fun an_empty_conversation_has_no_turns_and_no_endedAt() {
+        assertEquals(0, Conversation().tailMarker().first)
+        assertEquals(null, Conversation().tailMarker().second)
+    }
+
+    @Test
+    fun the_marker_is_the_turn_count_and_the_last_turns_endedAt() {
+        val convo = conversation(turn("t1", "a"), turn("t2", "b"))
+
+        assertEquals(2 to "t2", convo.tailMarker())
+    }
+
+    /** A new turn changes the count half of the pair. */
+    @Test
+    fun a_new_turn_changes_the_marker() {
+        val before = conversation(turn("t1", "a"))
+        val after = conversation(turn("t1", "a"), turn("t2", "b"))
+
+        assertTrue(before.tailMarker() != after.tailMarker())
+    }
+
+    /** The live turn growing changes only `endedAt`, not the count — the case `tailGrew` exists for. */
+    @Test
+    fun the_live_turn_growing_changes_the_marker_without_changing_the_count() {
+        val before = conversation(ConvTurn(prompt = "a", at = "t1", endedAt = "t1"))
+        val after = conversation(ConvTurn(prompt = "a", at = "t1", endedAt = "t1-later"))
+
+        assertEquals(before.tailMarker().first, after.tailMarker().first)
+        assertTrue(before.tailMarker() != after.tailMarker())
+    }
+
+    /** The ordinary "nothing happened" case: an identical tail has an identical marker. */
+    @Test
+    fun an_identical_tail_has_an_identical_marker() {
+        val a = conversation(turn("t1", "a"), turn("t2", "b"))
+        val b = conversation(turn("t1", "a"), turn("t2", "b"))
+
+        assertEquals(a.tailMarker(), b.tailMarker())
+    }
+}
