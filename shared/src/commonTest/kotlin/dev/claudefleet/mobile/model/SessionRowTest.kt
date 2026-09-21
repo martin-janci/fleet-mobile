@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.model
 import dev.claudefleet.mobile.net.json
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 class SessionRowTest {
     private val now = 1_790_000_000L
@@ -21,17 +22,24 @@ class SessionRowTest {
         assertEquals("trust-test", SessionRow(id = 1, tmuxName = "trust-test").displayName)
     }
 
+    /**
+     * The age is NOT here. The row's trailing column already draws
+     * `relativeTime` from the same `last_activity_at`, so an idle session read
+     * `4 min · shell` on the left and `4 min` on the right — one fact, twice, in
+     * two different type styles. What is left is what the column cannot say:
+     * the activity, or failing that the kind, and nothing at all for the
+     * ordinary `work` kind.
+     */
     @Test
-    fun the_supporting_line_is_the_sanitised_activity_or_time_and_kind() {
+    fun the_supporting_line_is_the_sanitised_activity_or_the_kind_and_never_the_age() {
         val row = SessionRow(id = 1, tmuxName = "s", lastActivityAt = now - 240, kind = "shell")
-        assertEquals("4 min · shell", row.supportingLine(now))
-        assertEquals("4 min", row.copy(kind = "work").supportingLine(now))
-        assertEquals(
-            "4 min",
-            row.copy(kind = "work", currentActivity = "⏵⏵ bypass permissions on (shift+tab to cycle)").supportingLine(now),
+        assertEquals("shell", row.supportingLine)
+        assertNull(row.copy(kind = "work").supportingLine)
+        assertNull(
+            row.copy(kind = "work", currentActivity = "⏵⏵ bypass permissions on (shift+tab to cycle)").supportingLine,
         )
-        assertEquals("Reading a.kt", row.copy(currentActivity = "Reading a.kt").supportingLine(now))
-        assertEquals("☐ Recreate turanga?", row.copy(currentActivity = "waiting for input: ☐ Recreate turanga?").supportingLine(now))
+        assertEquals("Reading a.kt", row.copy(currentActivity = "Reading a.kt").supportingLine)
+        assertEquals("☐ Recreate turanga?", row.copy(currentActivity = "waiting for input: ☐ Recreate turanga?").supportingLine)
     }
 
     @Test

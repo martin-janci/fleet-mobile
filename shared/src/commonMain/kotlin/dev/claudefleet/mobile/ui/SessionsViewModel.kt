@@ -158,8 +158,16 @@ class SessionsViewModel(
     /**
      * Re-list the fleet. The rows on screen stay put if it fails — the last
      * snapshot is still the best picture there is — and the failure is shown.
+     *
+     * A [ConnectionStatus.Refused] hub is not re-listed at all. The
+     * repository already refuses to apply that hub's row events, so calling
+     * its list tools would decode the very shape this build has said it
+     * cannot read — and a spinner over three calls that end in the same
+     * refusal is worse than a pull that does nothing behind a banner already
+     * saying why.
      */
     fun refresh(): Job = scope.launch {
+        if (fleet.status.value is ConnectionStatus.Refused) return@launch
         local.update { it.copy(refreshing = true, error = null) }
         try {
             fleet.refresh()

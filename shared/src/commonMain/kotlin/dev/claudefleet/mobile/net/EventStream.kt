@@ -237,7 +237,14 @@ internal fun frameToEvent(frame: SseFrame): HubEvent? {
             kinds = (fields["kinds"] as? JsonArray)
                 ?.mapNotNull { (it as? JsonPrimitive)?.content }
                 .orEmpty(),
-            contract = (fields["contract"] as? JsonPrimitive)?.content?.toIntOrNull(),
+            // A key that is absent stays null — every hub released before the
+            // contract mechanism sends none, and null is what
+            // [contractVerdict] trusts. A key that is PRESENT and unreadable
+            // is the opposite fact and must not collapse into the same
+            // value, so it becomes [UNREADABLE_CONTRACT] and is refused.
+            contract = fields["contract"]?.let {
+                (it as? JsonPrimitive)?.content?.toIntOrNull() ?: UNREADABLE_CONTRACT
+            },
         )
         LAGGED -> HubEvent.Lagged(
             fields["skipped"]?.let { runCatching { (it as JsonPrimitive).long }.getOrNull() } ?: 0L,

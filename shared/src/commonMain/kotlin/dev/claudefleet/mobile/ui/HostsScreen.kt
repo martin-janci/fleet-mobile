@@ -54,20 +54,25 @@ fun HostsScreen(
         ConnectionBanner(state.status)
         ErrorBanner(state.error, onDismiss = onDismissError)
 
-        if (state.isEmpty) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    text = "No hosts. Add one from the desktop app or the terminal.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(32.dp),
-                )
-            }
-            return@Column
-        }
-
+        // Inside the pull-to-refresh, not instead of it: an empty host list is
+        // exactly when a person pulls to ask whether the hub is answering, and
+        // an early return made that gesture do nothing. `PullToRefreshBox`
+        // takes the drag through a scrollable child, so the message is a
+        // single item filling the viewport rather than a bare `Box`.
         PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
+                if (state.isEmpty) {
+                    item(key = "empty") {
+                        Box(modifier = Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "No hosts. Add one from the desktop app or the terminal.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(32.dp),
+                            )
+                        }
+                    }
+                }
                 items(state.hosts, key = { it.alias }) { host -> HostLineItem(host) }
             }
         }

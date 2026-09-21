@@ -68,12 +68,16 @@ data class SessionRow(
 
     /**
      * The row's second line: the sanitised activity when there is one, else
-     * how long ago the session did anything and what kind of session it is.
+     * what kind of session it is — and nothing at all for the ordinary
+     * `work` kind.
+     *
+     * The age used to lead this line, and the row's trailing column shows the
+     * same age from the same field, so an idle session read `4 min · shell`
+     * on the left and `4 min` on the right. One fact, drawn once: the column
+     * keeps the age, this line keeps what the column cannot say — which is
+     * why it no longer takes a clock at all.
      */
-    fun supportingLine(nowSeconds: Long): String? {
-        Activity.sanitize(currentActivity)?.let { return it }
-        val age = relativeTime(lastActivityAt, nowSeconds)
-        val kindLabel = kind?.takeIf { it != "work" && it.isNotBlank() }
-        return listOfNotNull(age, kindLabel).joinToString(" · ").ifEmpty { null }
-    }
+    val supportingLine: String?
+        get() = Activity.sanitize(currentActivity)
+            ?: kind?.takeIf { it != "work" && it.isNotBlank() }
 }

@@ -10,7 +10,8 @@ const val NO_TRANSCRIPT = "E_NO_TRANSCRIPT"
 /**
  * Plain language in front, the hub's own words behind "Details". Built on
  * [explain], which already decides what may be repeated at all, so the token
- * rule holds here by construction.
+ * rule holds here by construction — and `details` is [explain]'s output and
+ * nothing else, in every branch, which is what keeps that true.
  */
 fun friendly(t: Throwable): Friendly {
     val raw = explain(t)
@@ -23,10 +24,41 @@ fun friendly(t: Throwable): Friendly {
             "E_BG_SESSION" -> Friendly("Runs outside tmux", "This session has no terminal to type into.", isError = true, details = raw)
             else -> Friendly("The hub refused that", t.message, isError = true, details = raw)
         }
-        is HubError.Unauthorized -> Friendly("This device was signed out", raw, isError = true)
-        is HubError.Transport -> Friendly("Cannot reach the hub", raw, isError = true)
-        is HubError -> Friendly("The hub answered oddly", raw, isError = true)
-        else -> Friendly("Something went wrong", raw, isError = true)
+        // Every branch carries `details`, and these four used to carry none —
+        // so the four failures a person can do least about were the four with
+        // nothing behind the Details button to take to an operator, while a
+        // tool refusal (the one kind that explains itself in its own message)
+        // had it. The body is now the short thing to DO and `raw` is the
+        // evidence, which is also what stops `explain`'s longer sentences
+        // (`HubError.Http` carries up to a thousand characters of a proxy's
+        // error page) from being the banner's own summary line.
+        is HubError.Unauthorized -> Friendly(
+            "This device was signed out",
+            "Pair this device again to reach the hub.",
+            isError = true,
+            details = raw,
+        )
+        is HubError.Transport -> Friendly(
+            "Cannot reach the hub",
+            "Check the network and the hub address.",
+            isError = true,
+            details = raw,
+        )
+        is HubError -> Friendly(
+            "The hub answered oddly",
+            "The hub's reply is under Details.",
+            isError = true,
+            details = raw,
+        )
+        // `raw` for an unexpected throwable is `explain`'s fallback plus the
+        // class name and never its message, so Details stays inside the token
+        // rule here exactly as it does above.
+        else -> Friendly(
+            "Something went wrong",
+            "The failure is under Details.",
+            isError = true,
+            details = raw,
+        )
     }
 }
 

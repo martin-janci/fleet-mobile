@@ -74,13 +74,23 @@ fun SessionsScreen(
         ConnectionBanner(state.status)
         ErrorBanner(state.error, onDismiss = onDismissError)
 
-        if (state.isEmpty) {
-            EmptyFleet(needsAttentionOnly = state.needsAttentionOnly)
-            return@Column
-        }
-
+        // The empty state is INSIDE the pull-to-refresh, and inside the
+        // `LazyColumn` at that. It used to return early, so the one screen a
+        // person would most want to pull on — no sessions yet, is the hub
+        // really up? — was the one screen that did not respond to the
+        // gesture. `PullToRefreshBox` needs a scrollable child to receive the
+        // drag, which a bare `Box` is not, so the message rides as a single
+        // item filling the viewport.
         PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
+                if (state.isEmpty) {
+                    item(key = "empty") {
+                        EmptyFleet(
+                            needsAttentionOnly = state.needsAttentionOnly,
+                            modifier = Modifier.fillParentMaxSize(),
+                        )
+                    }
+                }
                 for (host in state.groups) {
                     stickyHeader(key = "host-${host.alias}") {
                         HostHeader(alias = host.alias, reachable = host.reachable, sessions = host.sessionCount)
@@ -115,6 +125,9 @@ private fun SessionsBar(
                     is ConnectionStatus.Connected -> "live"
                     is ConnectionStatus.Reconnecting -> "reconnecting…"
                     is ConnectionStatus.Offline -> "offline"
+                    // Not "offline": the hub is up and answering. The banner
+                    // under this bar says which side is behind.
+                    is ConnectionStatus.Refused -> "refused"
                 }
                 Text(live, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -187,14 +200,19 @@ private fun SessionRowItem(row: SessionRow, nowSeconds: Long, onClick: () -> Uni
                 if (pct != null) {
                     LinearProgressIndicator(
                         progress = { (pct / 100.0).toFloat().coerceIn(0f, 1f) },
-                        modifier = Modifier.width(60.dp).height(2.dp).padding(top = 2.dp),
+                        // Padding FIRST. `Modifier` applies left to right, so
+                        // `.height(2.dp).padding(top = 2.dp)` sized the bar to
+                        // 2 dp and then spent both of them on padding: a
+                        // context meter that measured to zero and drew
+                        // nothing. Padding first pads a 2 dp bar instead.
+                        modifier = Modifier.padding(top = 2.dp).width(60.dp).height(2.dp),
                         color = if (pct >= 80) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
                     )
                 }
             }
         },
         supportingContent = {
-            val line = row.supportingLine(nowSeconds)
+            val line = row.supportingLine
             if (line != null) Text(line, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         },
         trailingContent = {
@@ -214,8 +232,8 @@ private fun SessionRowItem(row: SessionRow, nowSeconds: Long, onClick: () -> Uni
 }
 
 @Composable
-private fun EmptyFleet(needsAttentionOnly: Boolean) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+private fun EmptyFleet(needsAttentionOnly: Boolean, modifier: Modifier = Modifier.fillMaxSize()) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Text(
             text = if (needsAttentionOnly) {
                 "Nothing needs you right now."

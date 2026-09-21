@@ -155,14 +155,20 @@ class FleetRepositoryTest {
     /**
      * A hub naming a contract revision this build does not understand is not
      * a transport failure — it answered fine — so it gets its own status
-     * rather than a reconnect: [ConnectionStatus.Offline] with the sentence
+     * rather than a reconnect: [ConnectionStatus.Refused] with the sentence
      * [contractVerdict] hands back, no resync, and every later frame on this
      * same connection dropped. The reconnect/backoff loop itself is
      * unchanged: an upgraded hub (or app) is picked up on the next attempt,
      * this test just never drives the stream that far.
+     *
+     * `Refused` rather than `Offline`, and the difference is behaviour rather
+     * than wording: a screen probes an offline hub and re-enables Send when it
+     * answers, which for a refused hub means a live Send button pointed at a
+     * hub this build has already decided it cannot read. See
+     * `ConnectionStatus.Refused`.
      */
     @Test
-    fun a_ready_frame_naming_a_too_new_contract_goes_offline_and_applies_no_rows() = runTest {
+    fun a_ready_frame_naming_a_too_new_contract_is_refused_and_applies_no_rows() = runTest {
         val hub = FakeHub(sessionsJson = sessionRows(1, 2))
         val stream = FakeStream {
             emit(HubEvent.Ready("0.9.9", listOf("session", "host"), contract = 2))
@@ -170,15 +176,12 @@ class FleetRepositoryTest {
             awaitCancellation()
         }
         val repository = repo(hub, stream, backgroundScope)
-        val expected = ConnectionStatus.Offline(contractVerdict(2).sentence()!!)
+        val expected = ConnectionStatus.Refused(contractVerdict(2).sentence()!!)
 
         repository.start()
-        // `status`'s own pre-`start()` value is ALSO `Offline` (`NOT_STARTED`),
-        // and `Reconnecting(1, null)` follows it the instant `start()` runs —
-        // both would satisfy a bare `it is Offline`, well before the stream
-        // ever gets to refuse anything. Matching the exact refusal is what
-        // proves this test saw the contract check, not a status this
-        // repository would report anyway.
+        // Matching the exact refusal, not merely `it is Refused`: the
+        // sentence is the whole content of this status, and a test that only
+        // checked the type would pass on a refusal naming the wrong side.
         val status = repository.status.first { it == expected }
 
         assertEquals(expected, status)

@@ -45,6 +45,21 @@ sealed interface ConnectionStatus {
 
     /** Not streaming, and not going to without a nudge. */
     data class Offline(val reason: String) : ConnectionStatus
+
+    /**
+     * The hub answered, and this build will not talk to it: its `ready` frame
+     * named a wire contract outside
+     * [dev.claudefleet.mobile.net.MIN_HUB_CONTRACT]..[dev.claudefleet.mobile.net.MAX_HUB_CONTRACT].
+     *
+     * Its own state rather than an [Offline] carrying a different sentence,
+     * because the two call for opposite behaviour. Offline means "the hub may
+     * well be there, keep trying": a session screen probes it, and Send
+     * follows that probe. Refused means "the hub is there and must not be
+     * used" — a probe would answer `true` and hand a person a Send button for
+     * a hub whose shape this build has already decided it cannot read. So
+     * [reason] is drawn, nothing is probed, and no tool is called.
+     */
+    data class Refused(val reason: String) : ConnectionStatus
 }
 
 /**
@@ -179,7 +194,7 @@ class FleetRepository(
                                 // is untouched, so an upgrade on either side
                                 // is picked up the next time it connects.
                                 contractRefused = true
-                                _status.value = ConnectionStatus.Offline(refusal)
+                                _status.value = ConnectionStatus.Refused(refusal)
                                 return@collect
                             }
                             // Reset AFTER the refetch, not before. A connection
@@ -241,10 +256,21 @@ class FleetRepository(
 
     private companion object {
         const val NOT_STARTED = "not connected yet"
-        const val STOPPED = "not connected"
         const val STREAM_CLOSED = "the hub closed the stream"
     }
 }
+
+/**
+ * The reason [FleetRepository.stop] publishes — the lifecycle put the stream
+ * down on purpose, so nothing is coming and nothing should be tried.
+ *
+ * Out here rather than in the repository's private companion because a screen
+ * has to be able to tell this Offline apart from the ones worth probing
+ * through: `SessionViewModel` does not ping a hub the app itself has stopped
+ * talking to. One constant, compared against, rather than the same four words
+ * written down twice.
+ */
+internal const val STOPPED = "not connected"
 
 /**
  * Not a real session id: the signal a `ready` or `lagged` resync emits on

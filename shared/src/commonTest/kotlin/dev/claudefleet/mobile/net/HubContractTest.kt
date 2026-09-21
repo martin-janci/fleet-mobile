@@ -161,6 +161,20 @@ class ForbiddenExplainsItselfTest {
  */
 class HubContractVerdictTest {
 
+    /**
+     * The literals, not just the relationships. Every other assertion in this
+     * class is written in terms of `MIN_HUB_CONTRACT`/`MAX_HUB_CONTRACT`
+     * themselves, so editing either constant moves the test with it and the
+     * whole class stays green against a range nobody chose. `HubContractDriftTest`
+     * checks these against the desktop's own `contract.rs` where that checkout
+     * is present; this is the half that runs everywhere, CI included.
+     */
+    @Test
+    fun the_range_is_zero_to_one() {
+        assertEquals(0, MIN_HUB_CONTRACT)
+        assertEquals(1, MAX_HUB_CONTRACT)
+    }
+
     @Test
     fun the_verdict_matches_the_desktops_range() {
         assertEquals(ContractVerdict.Ok, contractVerdict(null))
@@ -168,5 +182,27 @@ class HubContractVerdictTest {
         assertEquals(ContractVerdict.Ok, contractVerdict(MAX_HUB_CONTRACT))
         assertEquals(ContractVerdict.HubTooOld(MIN_HUB_CONTRACT - 1), contractVerdict(MIN_HUB_CONTRACT - 1))
         assertEquals(ContractVerdict.AppTooOld(MAX_HUB_CONTRACT + 1), contractVerdict(MAX_HUB_CONTRACT + 1))
+    }
+
+    /**
+     * A contract this app cannot read is refused as "the hub is ahead of me",
+     * and says so in words rather than printing 2147483647 at a person.
+     */
+    @Test
+    fun an_unreadable_contract_is_refused_without_naming_a_number() {
+        val sentence = contractVerdict(UNREADABLE_CONTRACT).sentence()
+
+        assertEquals("This hub reported a contract this app cannot read. Update the app.", sentence)
+        assertEquals(ContractVerdict.AppTooOld(UNREADABLE_CONTRACT), contractVerdict(UNREADABLE_CONTRACT))
+        assertTrue(UNREADABLE_CONTRACT > MAX_HUB_CONTRACT, "an unreadable contract must fall outside the range")
+    }
+
+    /** A readable one still names the revision, so an operator can compare the two sides. */
+    @Test
+    fun a_readable_out_of_range_contract_still_names_itself() {
+        assertEquals(
+            "This app is too old for this hub (contract 2). Update the app.",
+            contractVerdict(2).sentence(),
+        )
     }
 }

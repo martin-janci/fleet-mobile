@@ -10,6 +10,20 @@ package dev.claudefleet.mobile.net
 const val MIN_HUB_CONTRACT: Int = 0
 const val MAX_HUB_CONTRACT: Int = 1
 
+/**
+ * What a `contract` field that cannot be read as a revision counts as.
+ *
+ * `Int.MAX_VALUE`, mirroring the desktop's `u32::MAX`, and deliberately above
+ * [MAX_HUB_CONTRACT] so it classifies as [ContractVerdict.AppTooOld]. A hub
+ * that answers `"contract": "next"`, `1.5`, `true`, `{}` or a number past
+ * `Int` is speaking a shape this build has no reading of, and the safe
+ * reading of "I cannot parse this hub's version" is "this hub is ahead of
+ * me", not "never mind, carry on". The previous `toIntOrNull()` dropped
+ * straight to `null`, which is the one value [contractVerdict] trusts
+ * unconditionally — so the least readable hub got the most trust.
+ */
+const val UNREADABLE_CONTRACT: Int = Int.MAX_VALUE
+
 /** Where a hub's `ready`-frame `contract` stands against [MIN_HUB_CONTRACT]..[MAX_HUB_CONTRACT]. */
 sealed interface ContractVerdict {
     /** Inside range, or the hub named no `contract` at all — pre-contract, and trusted. */
@@ -41,5 +55,12 @@ fun contractVerdict(revision: Int?): ContractVerdict = when {
 fun ContractVerdict.sentence(): String? = when (this) {
     ContractVerdict.Ok -> null
     is ContractVerdict.HubTooOld -> "This hub is too old for this app (contract $revision). Update the hub."
-    is ContractVerdict.AppTooOld -> "This app is too old for this hub (contract $revision). Update the app."
+    is ContractVerdict.AppTooOld ->
+        if (revision == UNREADABLE_CONTRACT) {
+            // Naming the revision here would print 2147483647, which is not
+            // a number any hub sent — it is this app's word for "unreadable".
+            "This hub reported a contract this app cannot read. Update the app."
+        } else {
+            "This app is too old for this hub (contract $revision). Update the app."
+        }
 }

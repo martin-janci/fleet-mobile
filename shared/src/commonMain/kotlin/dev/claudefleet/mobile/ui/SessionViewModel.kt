@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.data.ALL_SESSIONS_CHANGED
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.SessionActions
+import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.appending
@@ -60,7 +61,8 @@ data class SessionUiState(
     /**
      * True when the fleet's connection is [ConnectionStatus.Connected], OR
      * this screen's own probe of the hub (`fleet_health`, via
-     * [SessionActions.ping]) last answered true.
+     * [SessionActions.ping]) last answered true and the hub is not
+     * [ConnectionStatus.Refused].
      *
      * A dropped `/events` stream is not the same fact as an unreachable hub —
      * the stream can flap for reasons that have nothing to do with the hub
@@ -68,8 +70,20 @@ data class SessionUiState(
      * hub, not the stream. Fully offline (never paired, or a revoked
      * credential) still disables sending: the design says actions are
      * disabled rather than hidden while the last snapshot stays on screen.
+     * A refused hub is the one case where a reachable hub still disables it:
+     * it answers, and this build has decided it must not be spoken to.
      */
     val connected: Boolean = true,
+    /**
+     * What this screen's last probe of the hub said, or null when it has not
+     * probed — connected streams and refused hubs never do.
+     *
+     * Drawn rather than merely used: a stream that is down while the hub
+     * itself answers is a third connection state, and without this the banner
+     * could only say "reconnecting" over a screen whose Send button was
+     * live, which reads as a contradiction. See `connectionNotice`.
+     */
+    val hubReachable: Boolean? = null,
     val error: Friendly? = null,
     /** True when the last read said [NO_TRANSCRIPT]: nothing has been said yet, not a failure. */
     val silent: Boolean = false,
@@ -148,12 +162,13 @@ class SessionViewModel(
     private val readOnly = !canSendPrompts
 
     /**
-     * The last answer from probing the hub directly, while [fleet]'s stream
-     * is not [ConnectionStatus.Connected] — null before the first probe, and
-     * cleared back to null the moment the stream itself reconnects (see
-     * [state]'s [ConnectionStatus.Connected] doc and the loop launched in
-     * `init`). [SessionUiState.connected] and [canSendNow] both read this
-     * alongside [FleetState.status], never in place of it.
+     * The last answer from probing the hub directly while [fleet]'s stream is
+     * not [ConnectionStatus.Connected] — null before the first probe of the
+     * current [FleetState.status], and reset to null every time that status
+     * changes, because an answer about one connection state says nothing
+     * about the next. [SessionUiState.connected] and [canSendNow] both read
+     * it alongside [FleetState.status], never in place of it, through the one
+     * [isConnected] rule.
      */
     private val probe = MutableStateFlow<Boolean?>(null)
 
@@ -222,14 +237,29 @@ class SessionViewModel(
         // eager, and a subscription that only exists after the screen's first
         // explicit call would miss an event racing that call.
         //
-        // Whenever the stream is not Connected, probe the hub directly and
-        // keep probing (one in flight, [PROBE_DEBOUNCE] apart) until it
-        // either answers true or the stream reconnects on its own —
-        // whichever comes first makes Send usable again. One coroutine, not a
-        // collector that launches a second one per disconnect: `fleet.status`
-        // is a `StateFlow`, so reading `.value` directly here (rather than
-        // `collect`ing it) needs no extra hop before the very first probe of
-        // an already-disconnected screen can land.
+        // Whenever the stream is not Connected AND the hub is worth asking
+        // ([worthProbing]), probe it directly — one call in flight,
+        // [PROBE_DEBOUNCE] apart — until it answers true, and then STOP. A
+        // `true` is not a fact that decays: it made Send usable, and asking
+        // again every two seconds for the rest of the screen's life was a
+        // `fleet_health` call per tick on a phone's radio, forever, for an
+        // answer already in hand. The loop re-arms — `probe` back to null,
+        // probing resumed — only when `fleet.status` changes, since that is
+        // the only thing that can make the last answer stale.
+        //
+        // It also stops outliving what it answers for. `readOnly` returns
+        // before the first call: `canSend` is false for such a screen whatever
+        // the hub says, so every probe it made was a call made for nothing —
+        // and the app's rule is that it only ever calls tools it has a use
+        // for. A repository the lifecycle STOPPED is skipped for the same
+        // reason: nothing is reconnecting, so "is the hub up" has no one
+        // waiting on the answer.
+        //
+        // One coroutine, not a collector that launches a second one per
+        // disconnect: `fleet.status` is a `StateFlow`, so reading `.value`
+        // directly here (rather than `collect`ing it) needs no extra hop
+        // before the very first probe of an already-disconnected screen can
+        // land.
         //
         // `CoroutineStart.UNDISPATCHED`: a screen constructed while already
         // disconnected must have that first probe *in flight the instant the
@@ -242,10 +272,22 @@ class SessionViewModel(
         // [actions.ping]'s own suspension, or — on a fake with none — the
         // `delay` below), which is exactly "started", not "about to start".
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            if (readOnly) return@launch
+            var answeredFor: ConnectionStatus? = null
             while (true) {
-                if (fleet.status.value is ConnectionStatus.Connected) {
+                val status = fleet.status.value
+                if (status != answeredFor) {
+                    // A different connection state: whatever the last probe
+                    // said was about the old one.
                     probe.value = null
-                    fleet.status.first { it !is ConnectionStatus.Connected }
+                    answeredFor = status
+                }
+                if (!worthProbing(status) || probe.value == true) {
+                    // Nothing more to ask until the picture changes. `first`
+                    // on a `StateFlow` sees the current value before it
+                    // suspends, so a status that moved while this line was
+                    // being reached returns at once rather than being missed.
+                    fleet.status.first { it != status }
                 } else {
                     probe.value = actions.ping()
                     delay(PROBE_DEBOUNCE)
@@ -264,10 +306,16 @@ class SessionViewModel(
         }
     }
 
-    /** The first read, when the screen opens. */
+    /**
+     * The first read, when the screen opens. A no-op against a refused hub —
+     * see [requestRead].
+     */
     fun load(): Job = scope.launch { requestRead(first = true) }
 
-    /** A later read, which folds any new turns onto what is already shown. */
+    /**
+     * A later read, which folds any new turns onto what is already shown.
+     * A no-op against a refused hub — see [requestRead].
+     */
     fun refresh(): Job = scope.launch { requestRead(first = false) }
 
     fun onDraftChange(text: String) {
@@ -312,11 +360,13 @@ class SessionViewModel(
     private fun canSendNow(l: Local): Boolean =
         !l.sending && !readOnly && connected() && l.draft.isNotBlank() && row() != null
 
-    /** The same rule [SessionUiState.connected] assembles from [state] — see its KDoc. */
-    private fun connected(): Boolean =
-        fleet.status.value is ConnectionStatus.Connected || probe.value == true
+    /** [isConnected] read from the live sources, for [send]'s own check. */
+    private fun connected(): Boolean = isConnected(fleet.status.value, probe.value)
 
     private fun row(): SessionRow? = fleet.sessions.value.firstOrNull { it.id == sessionId }
+
+    /** True while the hub named a contract this build refuses to talk across. */
+    private fun refused(): Boolean = fleet.status.value is ConnectionStatus.Refused
 
     /**
      * Ask for a fresh conversation read, coalescing with whatever is already
@@ -336,6 +386,15 @@ class SessionViewModel(
      * actually run.
      */
     private suspend fun requestRead(first: Boolean) {
+        // A refused hub gets no tool call from this screen, from any of the
+        // four callers. The refusal is a statement about the shape of every
+        // reply this hub would send, so `session_conversation` is exactly as
+        // unreadable as the rows the repository is already dropping — and
+        // `loaded` deliberately stays false, so the screen keeps saying
+        // nothing rather than claiming an empty conversation it never read.
+        // Guarded here rather than in `load()`/`refresh()` so that the
+        // event-driven refetch and the send follow-up cannot route around it.
+        if (refused()) return
         var created: Generation? = null
         val target = withQueueGate {
             val existing = queued
@@ -436,10 +495,42 @@ class SessionViewModel(
         refreshing = l.refreshing,
         sending = l.sending,
         readOnly = readOnly,
-        connected = status is ConnectionStatus.Connected || probed == true,
+        connected = isConnected(status, probed),
+        hubReachable = probed,
         error = l.error,
         silent = l.silent,
     )
+}
+
+/**
+ * The one rule for "can this screen reach the hub", used by
+ * [SessionUiState.connected] (through `assemble`) and by `send`'s own check
+ * against the live sources. It was written twice, in two places that had to
+ * agree and nothing made them.
+ *
+ * A live stream is proof on its own. Otherwise the screen's own probe of the
+ * hub stands in for it — except against a [ConnectionStatus.Refused] hub,
+ * which answers a probe perfectly well and still must not be sent to.
+ */
+internal fun isConnected(status: ConnectionStatus, probed: Boolean?): Boolean =
+    status is ConnectionStatus.Connected ||
+        (probed == true && status !is ConnectionStatus.Refused)
+
+/**
+ * Whether asking the hub directly could still change anything.
+ *
+ * No for a stream that is already [ConnectionStatus.Connected] (the answer is
+ * in hand), no for a [ConnectionStatus.Refused] hub (a `true` would only
+ * re-enable a button this build has decided must stay dark), and no for the
+ * [ConnectionStatus.Offline] the lifecycle itself published through
+ * `FleetRepository.stop()` — the app put the stream down, nothing is trying
+ * to come back, and a probe has no one waiting on its answer.
+ */
+internal fun worthProbing(status: ConnectionStatus): Boolean = when (status) {
+    is ConnectionStatus.Connected -> false
+    is ConnectionStatus.Refused -> false
+    is ConnectionStatus.Offline -> status.reason != STOPPED
+    is ConnectionStatus.Reconnecting -> true
 }
 
 /**
@@ -447,7 +538,8 @@ class SessionViewModel(
  * enough that a flapping stream does not turn into a `fleet_health` call on
  * every `Reconnecting(attempt = …)` tick; short enough that a hub which comes
  * back is noticed within a couple of seconds rather than left showing Send
- * disabled long after it would have worked.
+ * disabled long after it would have worked. It bounds a *run* of probes, not
+ * the screen's lifetime: the loop stops on the first `true` — see `init`.
  */
 internal val PROBE_DEBOUNCE = 2.seconds
 

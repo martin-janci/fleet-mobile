@@ -1,7 +1,6 @@
 package dev.claudefleet.mobile.ui
 
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -43,8 +42,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -78,7 +77,7 @@ fun SessionScreen(
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         SessionBar(state = state, onBack = onBack, onRefresh = onRefresh)
-        ConnectionBanner(status)
+        ConnectionBanner(status, state.hubReachable)
         ErrorBanner(state.error, onDismiss = onDismissError)
 
         val turns = state.conversation.turns
@@ -140,15 +139,7 @@ private fun LazyListScope.turnItems(turns: List<ConvTurn>) {
 @Composable
 private fun SessionBar(state: SessionUiState, onBack: () -> Unit, onRefresh: () -> Unit) {
     val busy = state.loading || state.refreshing
-    val transition = rememberInfiniteTransition()
-    val angle by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(900, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-    )
+    val angle = refreshAngle(busy)
     TopAppBar(
         navigationIcon = {
             IconButton(onClick = onBack) {
@@ -182,11 +173,41 @@ private fun SessionBar(state: SessionUiState, onBack: () -> Unit, onRefresh: () 
                 Icon(
                     FleetIcons.Refresh,
                     contentDescription = "Refresh",
-                    modifier = Modifier.rotate(if (busy) angle else 0f),
+                    // `graphicsLayer {}` rather than `Modifier.rotate(angle)`:
+                    // the lambda form reads the angle in the draw phase, so a
+                    // frame of the spin invalidates drawing alone instead of
+                    // recomposing the bar sixty times a second.
+                    modifier = Modifier.graphicsLayer { rotationZ = angle },
                 )
             }
         },
     )
+}
+
+/**
+ * The refresh icon's angle: spinning while [busy], and a flat `0f` otherwise.
+ *
+ * The transition used to be created unconditionally and only *applied* when
+ * busy, which meant an idle screen — the normal state of a session screen —
+ * ran an infinite 900 ms animation forever, waking the frame clock and
+ * recomposing the bar to draw an icon at the angle it was already at.
+ * Creating it inside the branch is what actually stops it: an
+ * `InfiniteTransition` that is not composed is not running.
+ *
+ * A conditional `rememberInfiniteTransition` is legal — `busy` gates the whole
+ * composable call, so the two branches are separate groups in the slot table
+ * and leaving one discards its state, which is exactly the intent here.
+ */
+@Composable
+private fun refreshAngle(busy: Boolean): Float = if (busy) {
+    rememberInfiniteTransition(label = "refresh").animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(animation = tween(900, easing = LinearEasing)),
+        label = "angle",
+    ).value
+} else {
+    0f
 }
 
 @Composable

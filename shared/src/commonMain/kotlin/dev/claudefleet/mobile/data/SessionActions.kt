@@ -2,7 +2,6 @@ package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.SendPromptResult
-import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CancellationException
 
 /**
@@ -53,11 +52,18 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
     override suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult =
         session.withClient { it.sendPrompt(sessionId, text) }
 
+    // `Throwable`, not `HubError`. The interface promises this never throws,
+    // and `HubError` is only *most* of what can come back: a payload the
+    // model cannot decode, a store that will not hand over the credential,
+    // anything a client plugin raises. One of those escaping turned a probe —
+    // a question whose whole contract is that it answers true or false — into
+    // an unhandled failure inside the screen's own probe loop, which is the
+    // one caller with no catch of its own.
     override suspend fun ping(): Boolean = try {
         session.withClient { it.fleetHealth() }
     } catch (e: CancellationException) {
         throw e
-    } catch (e: HubError) {
+    } catch (t: Throwable) {
         false
     }
 }

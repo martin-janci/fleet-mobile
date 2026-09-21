@@ -34,8 +34,16 @@ import dev.claudefleet.mobile.ui.theme.FleetIcons
  * and actions are disabled rather than hidden, so this never covers the list.
  */
 @Composable
-fun ConnectionBanner(status: ConnectionStatus, modifier: Modifier = Modifier) {
-    val text = connectionNotice(status) ?: return
+fun ConnectionBanner(
+    status: ConnectionStatus,
+    /**
+     * What the screen's own probe of the hub last said, where a screen makes
+     * one — see [connectionNotice]. Null on the screens that do not.
+     */
+    hubReachable: Boolean? = null,
+    modifier: Modifier = Modifier,
+) {
+    val text = connectionNotice(status, hubReachable) ?: return
     Notice(text, modifier)
 }
 
@@ -44,21 +52,34 @@ fun ConnectionBanner(status: ConnectionStatus, modifier: Modifier = Modifier) {
  * inside the composable because nothing in this repository can render one, and
  * the one claim worth a test — the reconnect reason reaches the screen — is a
  * claim about this string.
+ *
+ * [hubReachable] is the third connection state, and it was computed and never
+ * drawn. A session screen probes the hub directly whenever the stream is down
+ * (`fleet_health`), and when that probe answers `true` the app is in a state
+ * the two-word vocabulary could not express: the hub is live and Send works,
+ * only the update stream is missing. A banner saying "reconnecting" over a
+ * working Send button reads as a contradiction, so it says what is actually
+ * true instead.
  */
-internal fun connectionNotice(status: ConnectionStatus): String? = when (status) {
+internal fun connectionNotice(status: ConnectionStatus, hubReachable: Boolean? = null): String? = when (status) {
     is ConnectionStatus.Connected -> null
     // The reason is drawn. It used to be carried and discarded — the field
     // existed, was computed on every failure, and no composable read it, so
     // a person watching the app retry saw a counter going up and never what
     // it was retrying *from*. Absent on the first attempt, where there is no
     // previous failure to name.
-    is ConnectionStatus.Reconnecting -> {
+    is ConnectionStatus.Reconnecting -> if (hubReachable == true) {
+        "live over the hub; the update stream is down (reconnecting…)"
+    } else {
         val head =
             if (status.attempt <= 1) "connecting to the hub…"
             else "reconnecting to the hub (attempt ${status.attempt})…"
         status.reason?.let { "$head $it" } ?: head
     }
     is ConnectionStatus.Offline -> status.reason
+    // The hub answered and this build will not talk to it; `reason` is
+    // already the sentence that says which side is behind.
+    is ConnectionStatus.Refused -> status.reason
 }
 
 /**
