@@ -53,6 +53,7 @@ import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
+import dev.claudefleet.mobile.ui.components.MarkdownText
 import dev.claudefleet.mobile.ui.components.StatusChip
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.data.ConnectionStatus
@@ -239,7 +240,14 @@ private fun Turn(turn: ConvTurn) {
 @Composable
 private fun Item(item: ConvItem) {
     when (item) {
-        is ConvItem.Text -> Text(
+        // Hub text is untrusted Markdown, not plain text: `**bold**`, `- `
+        // lists and fenced code are common in a transcript (a test summary
+        // line, a diff, a shell command) and used to show as literal
+        // characters here. `MiniMarkdown.kt` parses a small, deliberately
+        // non-general subset (see its file comment for why it exists instead
+        // of a library) into native Compose `Text`/spans -- no HTML, no
+        // WebView, nothing that fetches a remote image.
+        is ConvItem.Text -> MarkdownText(
             text = item.text,
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(vertical = 4.dp),
