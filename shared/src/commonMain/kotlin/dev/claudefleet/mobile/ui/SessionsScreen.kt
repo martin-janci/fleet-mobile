@@ -149,7 +149,7 @@ private fun SessionsBar(
                     trailingIcon = {
                         Icon(
                             FleetIcons.Close,
-                            contentDescription = "Clear",
+                            contentDescription = "Clear host filter",
                             modifier = Modifier.size(InputChipDefaults.IconSize),
                         )
                     },

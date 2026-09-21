@@ -117,4 +117,49 @@ class NavigatorTest {
 
         assertEquals(Screen.Sessions(), nav.screen.value)
     }
+
+    /**
+     * Review fix round 1: `back()` used to build a bare `Screen.Sessions()`,
+     * so opening a session from a host-filtered list and coming back dropped
+     * the filter. `open()` now remembers the Sessions screen it was called
+     * from, filter and all, and `back()` restores exactly that.
+     */
+    @Test
+    fun back_from_a_session_opened_from_a_filtered_list_keeps_the_filter() {
+        val nav = Navigator()
+        nav.showSessionsFor("mefistos")
+
+        nav.open(7)
+        assertTrue(nav.back())
+
+        assertEquals(Screen.Sessions(hostAlias = "mefistos"), nav.screen.value)
+    }
+
+    /** The unfiltered case still works the same as before this fix. */
+    @Test
+    fun back_from_a_session_opened_from_the_unfiltered_list_stays_unfiltered() {
+        val nav = Navigator()
+        nav.open(7)
+
+        assertTrue(nav.back())
+
+        assertEquals(Screen.Sessions(), nav.screen.value)
+    }
+
+    /**
+     * A restored filter is still just a [select]'d Sessions screen underneath
+     * — reselecting the tab clears it exactly as it would if the filter had
+     * come from a host tap moments before.
+     */
+    @Test
+    fun reselecting_after_a_filtered_back_still_clears_the_filter() {
+        val nav = Navigator()
+        nav.showSessionsFor("mefistos")
+        nav.open(7)
+        nav.back()
+
+        nav.select(Tab.Sessions)
+
+        assertEquals(Screen.Sessions(), nav.screen.value)
+    }
 }

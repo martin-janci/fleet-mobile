@@ -325,11 +325,13 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                 is Screen.Sessions -> {
                     // The screen's own filter drives the view model, not the
                     // other way round: `Navigator.showSessionsFor` (a host
-                    // tap) and the plain tab tap both change `current`, and
-                    // this is what applies whichever one just happened. The
-                    // clear chip below instead calls `setHostFilter` directly,
-                    // which this effect does not re-fire against since
-                    // `current` itself has not changed.
+                    // tap), the plain tab tap, and `back()` restoring a
+                    // filtered screen all change `current`, and this is what
+                    // applies whichever one just happened. A structurally
+                    // equal `Screen.Sessions` — the clear chip below calling
+                    // `setHostFilter` directly, with no navigation involved —
+                    // does NOT re-fire this effect, which is fine: the view
+                    // model already holds the filter the chip just set.
                     LaunchedEffect(current) { sessions.setHostFilter(current.hostAlias) }
                     val state by sessions.state.collectAsState()
                     SessionsScreen(
