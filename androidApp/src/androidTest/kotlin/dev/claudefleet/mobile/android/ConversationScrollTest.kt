@@ -15,6 +15,7 @@ import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.ui.CONVERSATION_LIST
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.SessionUiState
+import dev.claudefleet.mobile.ui.theme.FleetTheme
 import org.junit.Rule
 import org.junit.Test
 
@@ -60,18 +61,24 @@ class ConversationScrollTest {
      */
     private fun show(sessionId: Long, initial: Int): (Int) -> Unit {
         var state by mutableStateOf(SessionUiState(conversation = conversation(initial), loaded = true))
+        // Wrapped, because the bar's `StatusChip` reads `LocalStatusColors`
+        // and `FleetTheme` is the only thing that provides it — composing the
+        // screen bare throws "FleetTheme is not applied" before anything can
+        // be measured.
         compose.setContent {
-            SessionScreen(
-                sessionId = sessionId,
-                state = state,
-                status = ConnectionStatus.Connected(hubVersion = "test"),
-                onDraftChange = {},
-                onSend = {},
-                onRefresh = {},
-                onBack = {},
-                onDismissError = {},
-                onAtBottom = {},
-            )
+            FleetTheme {
+                SessionScreen(
+                    sessionId = sessionId,
+                    state = state,
+                    status = ConnectionStatus.Connected(hubVersion = "test"),
+                    onDraftChange = {},
+                    onSend = {},
+                    onRefresh = {},
+                    onBack = {},
+                    onDismissError = {},
+                    onAtBottom = {},
+                )
+            }
         }
         // On the UI thread, as the view model's own collector would be. A
         // snapshot write from the test thread usually lands, and "usually" in
