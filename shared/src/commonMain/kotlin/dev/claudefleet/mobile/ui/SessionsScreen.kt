@@ -22,6 +22,8 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.InputChip
+import androidx.compose.material3.InputChipDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -60,6 +62,7 @@ fun SessionsScreen(
     state: SessionsUiState,
     onOpenSession: (Long) -> Unit,
     onToggleNeedsAttention: () -> Unit,
+    onClearHostFilter: () -> Unit,
     onRefresh: () -> Unit,
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
@@ -68,8 +71,10 @@ fun SessionsScreen(
         SessionsBar(
             needsAttentionOnly = state.needsAttentionOnly,
             attentionCount = state.attentionCount,
+            hostFilter = state.hostFilter,
             status = state.status,
             onToggleNeedsAttention = onToggleNeedsAttention,
+            onClearHostFilter = onClearHostFilter,
         )
         ConnectionBanner(state.status)
         ErrorBanner(state.error, onDismiss = onDismissError)
@@ -87,6 +92,7 @@ fun SessionsScreen(
                     item(key = "empty") {
                         EmptyFleet(
                             needsAttentionOnly = state.needsAttentionOnly,
+                            hostFilter = state.hostFilter,
                             modifier = Modifier.fillParentMaxSize(),
                         )
                     }
@@ -114,8 +120,10 @@ fun SessionsScreen(
 private fun SessionsBar(
     needsAttentionOnly: Boolean,
     attentionCount: Int,
+    hostFilter: String?,
     status: ConnectionStatus,
     onToggleNeedsAttention: () -> Unit,
+    onClearHostFilter: () -> Unit,
 ) {
     TopAppBar(
         title = {
@@ -133,6 +141,21 @@ private fun SessionsBar(
             }
         },
         actions = {
+            if (hostFilter != null) {
+                InputChip(
+                    selected = true,
+                    onClick = onClearHostFilter,
+                    label = { Text("host: $hostFilter") },
+                    trailingIcon = {
+                        Icon(
+                            FleetIcons.Close,
+                            contentDescription = "Clear",
+                            modifier = Modifier.size(InputChipDefaults.IconSize),
+                        )
+                    },
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            }
             FilterChip(
                 selected = needsAttentionOnly,
                 onClick = onToggleNeedsAttention,
@@ -232,13 +255,13 @@ private fun SessionRowItem(row: SessionRow, nowSeconds: Long, onClick: () -> Uni
 }
 
 @Composable
-private fun EmptyFleet(needsAttentionOnly: Boolean, modifier: Modifier = Modifier.fillMaxSize()) {
+private fun EmptyFleet(needsAttentionOnly: Boolean, hostFilter: String?, modifier: Modifier = Modifier.fillMaxSize()) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Text(
-            text = if (needsAttentionOnly) {
-                "Nothing needs you right now."
-            } else {
-                "No sessions. Start one from the desktop app or the terminal."
+            text = when {
+                hostFilter != null -> "No sessions on $hostFilter"
+                needsAttentionOnly -> "Nothing needs you right now."
+                else -> "No sessions. Start one from the desktop app or the terminal."
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

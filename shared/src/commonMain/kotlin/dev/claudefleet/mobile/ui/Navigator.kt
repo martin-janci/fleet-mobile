@@ -6,7 +6,12 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /** Which of the app's screens is showing. */
 sealed interface Screen {
-    data object Sessions : Screen
+    /**
+     * The fleet list, optionally narrowed to one host — what tapping a host
+     * row on the Hosts screen does. `null` is "no filter", not "unknown host";
+     * every ordinary navigation to Sessions (a tab tap, app start) passes it.
+     */
+    data class Sessions(val hostAlias: String? = null) : Screen
     data class Session(val id: Long) : Screen
     data object Hosts : Screen
     data object Settings : Screen
@@ -30,7 +35,7 @@ enum class Tab { Sessions, Hosts, Settings }
  * once you are in.
  */
 class Navigator {
-    private val _screen = MutableStateFlow<Screen>(Screen.Sessions)
+    private val _screen = MutableStateFlow<Screen>(Screen.Sessions())
     val screen: StateFlow<Screen> = _screen.asStateFlow()
 
     private val _tab = MutableStateFlow(tabOf(_screen.value))
@@ -59,7 +64,7 @@ class Navigator {
      */
     fun back(): Boolean {
         if (_screen.value !is Screen.Session) return false
-        go(Screen.Sessions)
+        go(Screen.Sessions())
         return true
     }
 
@@ -67,16 +72,27 @@ class Navigator {
      * Switch tabs. Leaves any open session behind rather than remembering it:
      * a session can be killed from the desktop while Settings is showing, and
      * "the app returns you to a session that no longer exists" is a worse
-     * surprise than "the app returns you to the list".
+     * surprise than "the app returns you to the list". A host filter is the
+     * same kind of state and leaves the same way — reselecting Sessions always
+     * lands on the unfiltered list, never the one a host tap set up earlier.
      */
     fun select(tab: Tab) {
         go(
             when (tab) {
-                Tab.Sessions -> Screen.Sessions
+                Tab.Sessions -> Screen.Sessions()
                 Tab.Hosts -> Screen.Hosts
                 Tab.Settings -> Screen.Settings
             },
         )
+    }
+
+    /**
+     * Jump to the Sessions tab filtered to one host — what tapping a host row
+     * on the Hosts screen does. Goes through [go] like every other move, so
+     * the tab indicator follows it there without a separate `select` call.
+     */
+    fun showSessionsFor(alias: String) {
+        go(Screen.Sessions(hostAlias = alias))
     }
 
     private fun go(screen: Screen) {
@@ -86,7 +102,7 @@ class Navigator {
 }
 
 private fun tabOf(screen: Screen): Tab = when (screen) {
-    Screen.Sessions, is Screen.Session -> Tab.Sessions
+    is Screen.Sessions, is Screen.Session -> Tab.Sessions
     Screen.Hosts -> Tab.Hosts
     Screen.Settings -> Tab.Settings
 }

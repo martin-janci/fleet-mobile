@@ -322,12 +322,21 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when (val current = screen) {
-                Screen.Sessions -> {
+                is Screen.Sessions -> {
+                    // The screen's own filter drives the view model, not the
+                    // other way round: `Navigator.showSessionsFor` (a host
+                    // tap) and the plain tab tap both change `current`, and
+                    // this is what applies whichever one just happened. The
+                    // clear chip below instead calls `setHostFilter` directly,
+                    // which this effect does not re-fire against since
+                    // `current` itself has not changed.
+                    LaunchedEffect(current) { sessions.setHostFilter(current.hostAlias) }
                     val state by sessions.state.collectAsState()
                     SessionsScreen(
                         state = state,
                         onOpenSession = nav::open,
                         onToggleNeedsAttention = sessions::toggleNeedsAttentionOnly,
+                        onClearHostFilter = { sessions.setHostFilter(null) },
                         onRefresh = { sessions.refresh() },
                         onDismissError = sessions::dismissError,
                     )
@@ -345,6 +354,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         state = state,
                         onRefresh = { hosts.refresh() },
                         onDismissError = hosts::dismissError,
+                        onOpenHost = { nav.showSessionsFor(it) },
                     )
                 }
                 Screen.Settings -> {

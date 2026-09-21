@@ -47,6 +47,8 @@ data class SessionsUiState(
     val groups: List<HostGroup> = emptyList(),
     val status: ConnectionStatus = ConnectionStatus.Offline("not connected yet"),
     val needsAttentionOnly: Boolean = false,
+    /** The host [groups] is narrowed to, or null for the whole fleet. */
+    val hostFilter: String? = null,
     /** How many rows in the **whole** fleet want a person, filtered or not. */
     val attentionCount: Int = 0,
     val refreshing: Boolean = false,
@@ -85,6 +87,7 @@ class SessionsViewModel(
 
     private data class Local(
         val needsAttentionOnly: Boolean = false,
+        val hostFilter: String? = null,
         val refreshing: Boolean = false,
         val error: Friendly? = null,
     )
@@ -142,6 +145,16 @@ class SessionsViewModel(
     }
 
     /**
+     * Show only one host's groups, or all of them again with `null`. A view
+     * over rows already held, like [toggleNeedsAttentionOnly] — this never
+     * talks to the hub, and [SessionsUiState.attentionCount] stays fleet-wide
+     * regardless of what this narrows [SessionsUiState.groups] to.
+     */
+    fun setHostFilter(alias: String?) {
+        local.update { it.copy(hostFilter = alias) }
+    }
+
+    /**
      * Clear the banner.
      *
      * Two of five screens had one and three did not, and the three without are
@@ -187,9 +200,10 @@ class SessionsViewModel(
         l: Local,
         nowSeconds: Long,
     ) = SessionsUiState(
-        groups = groupSessions(sessions, hosts, projects, l.needsAttentionOnly),
+        groups = groupSessions(sessions, hosts, projects, l.needsAttentionOnly, l.hostFilter),
         status = status,
         needsAttentionOnly = l.needsAttentionOnly,
+        hostFilter = l.hostFilter,
         attentionCount = sessions.count { it.needsAttention },
         refreshing = l.refreshing,
         error = l.error,
@@ -223,15 +237,19 @@ internal const val NO_PROJECT = "No project"
  *    did something.
  *
  * Empty groups do not survive: when [needsAttentionOnly] leaves a host with
- * nothing, the host goes too, rather than drawing a heading over a blank.
+ * nothing, the host goes too, rather than drawing a heading over a blank. The
+ * same is true of [hostFilter] — a host with nothing on it is simply absent,
+ * not an empty heading.
  */
 internal fun groupSessions(
     sessions: List<SessionRow>,
     hosts: List<HostRow>,
     projects: List<ProjectRow>,
     needsAttentionOnly: Boolean,
+    hostFilter: String? = null,
 ): List<HostGroup> {
-    val kept = if (needsAttentionOnly) sessions.filter { it.needsAttention } else sessions
+    val attended = if (needsAttentionOnly) sessions.filter { it.needsAttention } else sessions
+    val kept = if (hostFilter != null) attended.filter { it.hostAlias == hostFilter } else attended
     if (kept.isEmpty()) return emptyList()
 
     val byId = projects.associateBy { it.id }

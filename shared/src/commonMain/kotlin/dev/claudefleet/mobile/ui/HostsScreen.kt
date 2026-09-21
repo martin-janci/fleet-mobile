@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +41,7 @@ fun HostsScreen(
     state: HostsUiState,
     onRefresh: () -> Unit,
     onDismissError: () -> Unit,
+    onOpenHost: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -73,15 +75,19 @@ fun HostsScreen(
                         }
                     }
                 }
-                items(state.hosts, key = { it.alias }) { host -> HostLineItem(host) }
+                items(state.hosts, key = { it.alias }) { host ->
+                    HostLineItem(host, onClick = { onOpenHost(host.alias) })
+                }
             }
         }
     }
 }
 
 @Composable
-private fun HostLineItem(host: HostLine) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+private fun HostLineItem(host: HostLine, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = host.alias,
