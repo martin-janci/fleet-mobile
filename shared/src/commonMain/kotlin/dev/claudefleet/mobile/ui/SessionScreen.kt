@@ -1,7 +1,9 @@
 package dev.claudefleet.mobile.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -89,11 +91,15 @@ fun SessionScreen(
             if (newest != null && atBottom) listState.scrollToItem(newest)
         }
 
-        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
-            if (state.conversation.truncated) {
-                item(key = "truncated") { TruncationNote() }
+        if (state.loaded && turns.isEmpty()) {
+            EmptyConversation(state)
+        } else {
+            LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
+                if (state.conversation.truncated) {
+                    item(key = "truncated") { TruncationNote() }
+                }
+                turnItems(turns)
             }
-            turnItems(turns)
         }
 
         PromptBox(state = state, onDraftChange = onDraftChange, onSend = onSend)
@@ -217,6 +223,38 @@ private fun Item(item: ConvItem) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(vertical = 4.dp),
+        )
+    }
+}
+
+/**
+ * What the turn list shows instead of a `LazyColumn` once a read has answered
+ * and there is still nothing to draw: a killed session, a shell session (which
+ * has no conversation at all), a session that has gone silent
+ * ([SessionUiState.silent] — `E_NO_TRANSCRIPT`, not a failure), or, failing all
+ * of those, an empty read.
+ *
+ * A `ColumnScope` extension rather than a free function: `Modifier.weight` is a
+ * `ColumnScope` member, and this fills the same space the `LazyColumn` it
+ * replaces would have.
+ */
+@Composable
+private fun ColumnScope.EmptyConversation(state: SessionUiState) {
+    val text = when {
+        state.session == null -> "This session was killed."
+        state.session.kind == "shell" -> "Shell session — no conversation to show."
+        state.silent -> "Nothing has been said yet — send a prompt to start."
+        else -> "No turns yet."
+    }
+    Box(
+        modifier = Modifier.weight(1f).fillMaxWidth(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(32.dp),
         )
     }
 }

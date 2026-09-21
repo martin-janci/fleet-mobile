@@ -34,7 +34,7 @@ data class HostsUiState(
     val hosts: List<HostLine> = emptyList(),
     val status: ConnectionStatus = ConnectionStatus.Offline("not connected yet"),
     val refreshing: Boolean = false,
-    val error: String? = null,
+    val error: Friendly? = null,
 ) {
     val isEmpty: Boolean get() = hosts.isEmpty()
 }
@@ -57,7 +57,7 @@ class HostsViewModel(
     private val fleet: FleetState,
     private val scope: CoroutineScope,
 ) {
-    private data class Local(val refreshing: Boolean = false, val error: String? = null)
+    private data class Local(val refreshing: Boolean = false, val error: Friendly? = null)
 
     private val local = MutableStateFlow(Local())
 
@@ -93,7 +93,7 @@ class HostsViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { Local(error = explain(t)) }
+            local.update { Local(error = friendly(t)) }
         }
     }
 

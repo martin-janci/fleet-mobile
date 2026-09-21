@@ -175,7 +175,10 @@ class HostsViewModelTest {
         runCurrent()
 
         val error = assertNotNull(vm.state.value.error)
-        assertTrue("E_TIMEOUT" in error, "the hub's code is what an operator greps for: $error")
+        assertTrue(
+            "E_TIMEOUT" in error.details.orEmpty(),
+            "the hub's code is what an operator greps for: ${error.details}",
+        )
         assertEquals(listOf("box"), vm.state.value.hosts.map { it.alias }, "the last picture is still the best one")
         assertFalse(vm.state.value.refreshing)
     }

@@ -210,7 +210,26 @@ class SessionViewModelTest {
         runCurrent()
 
         assertEquals(listOf("t1"), vm.state.value.conversation.turns.map { it.at })
-        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error)
+        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error?.details)
+    }
+
+    /**
+     * `E_NO_TRANSCRIPT` is the hub's way of saying a session has nothing said
+     * yet — not a failure. A read that fails this way must mark the screen
+     * [SessionUiState.silent] rather than raise the error banner.
+     */
+    @Test
+    fun a_no_transcript_read_is_silent_not_an_error() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+
+        actions.readFails = HubError.Tool(NO_TRANSCRIPT, "no transcript for claude session 0b63c561-66fd on htz")
+        vm.load().join()
+        runCurrent()
+
+        assertTrue(vm.state.value.silent)
+        assertNull(vm.state.value.error)
+        assertTrue(vm.state.value.loaded, "a silent session is still a loaded one")
     }
 
 
@@ -231,7 +250,7 @@ class SessionViewModelTest {
         actions.readFails = HubError.Tool("E_NOTFOUND", "session 42 is gone")
         vm.refresh().join()
         runCurrent()
-        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error)
+        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error?.details)
 
         vm.dismissError()
         // The screen's state is assembled from `local` and the fleet flows by a
@@ -289,7 +308,7 @@ class SessionViewModelTest {
         vm.send().join()
         runCurrent()
 
-        assertEquals("E_BUSY: the session is mid-turn", vm.state.value.error)
+        assertEquals("E_BUSY: the session is mid-turn", vm.state.value.error?.details)
         assertEquals("ship it", vm.state.value.draft, "a refused prompt must not be thrown away")
         assertFalse(vm.state.value.sending)
     }
@@ -306,8 +325,8 @@ class SessionViewModelTest {
         runCurrent()
 
         val error = vm.state.value.error
-        assertTrue(error != null && error.isNotBlank())
-        assertFalse(error.contains("socket"), "the cause's text never reaches a person")
+        assertTrue(error != null && error.body.isNotBlank())
+        assertFalse(error.body.contains("socket"), "the cause's text never reaches a person")
     }
 
     @Test
@@ -612,7 +631,7 @@ class SessionViewModelTest {
         pastDebounce()
         runCurrent()
 
-        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error)
+        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error?.details)
         assertEquals(listOf("t1"), vm.state.value.conversation.turns.map { it.at }, "the turns stay")
 
         actions.readFails = null
@@ -780,7 +799,7 @@ class SessionViewModelTest {
         runCurrent()
 
         assertFalse(vm.state.value.refreshing, "a failure must clear refreshing exactly like a success does")
-        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error)
+        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error?.details)
     }
 
     /** The reviewer's own scenario, named: five taps behind one held read cost exactly one extra hub call. */
@@ -909,7 +928,7 @@ class SessionViewModelTest {
         actions.readFails = HubError.Tool("E_DOWN", "temporarily unavailable")
         gate1.complete(Unit)
         runCurrent()
-        assertEquals("E_DOWN: temporarily unavailable", vm.state.value.error, "the first, failed read's error is shown")
+        assertEquals("E_DOWN: temporarily unavailable", vm.state.value.error?.details, "the first, failed read's error is shown")
 
         actions.readFails = null
         gate2.complete(Unit)

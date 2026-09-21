@@ -1,6 +1,8 @@
 package dev.claudefleet.mobile.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -9,11 +11,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.ui.Friendly
 
 /**
  * What the event stream is doing, when it is doing anything worth saying.
@@ -50,34 +58,67 @@ internal fun connectionNotice(status: ConnectionStatus): String? = when (status)
     is ConnectionStatus.Offline -> status.reason
 }
 
-/** A failure a person can act on: the hub's own words, not a paraphrase. */
+/**
+ * A failure a person can act on: plain language up front, the hub's own words
+ * behind "Details".
+ *
+ * Draws nothing for a null [error] or one that is not actually an error — see
+ * [Friendly.isError] — so a session that has simply gone silent
+ * (`E_NO_TRANSCRIPT`) never raises this banner at all.
+ */
 @Composable
-fun ErrorBanner(message: String?, onDismiss: (() -> Unit)? = null, modifier: Modifier = Modifier) {
-    if (message == null) return
+fun ErrorBanner(error: Friendly?, onDismiss: (() -> Unit)? = null, modifier: Modifier = Modifier) {
+    if (error == null || !error.isError) return
+    var showDetails by remember(error) { mutableStateOf(false) }
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.errorContainer,
         contentColor = MaterialTheme.colorScheme.onErrorContainer,
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            // `explain(HubError.Http)` is "the hub answered HTTP $status:
-            // $body" with the body capped at 1 000 characters plus an
-            // ellipsis — 1 040 measured — and a reverse proxy's error page is
-            // exactly that shape. Unbounded, it pushed Dismiss off the row and
-            // swallowed the list behind it. Three lines is enough to read what
-            // went wrong; the rest was never legible on a phone anyway.
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-            if (onDismiss != null) TextButton(onClick = onDismiss) { Text("Dismiss") }
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.Top) {
+                // `Icons.Outlined.Warning` needs `compose.materialIconsCore`,
+                // which Task 5 adds. A bare "!" keeps this task's build green
+                // without pulling in a new dependency early.
+                Text(
+                    text = "!",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(error.title, style = MaterialTheme.typography.titleSmall)
+                    // `explain(HubError.Http)` is "the hub answered HTTP
+                    // $status: $body" with the body capped at 1 000
+                    // characters plus an ellipsis, and a reverse proxy's
+                    // error page is exactly that shape — but that text now
+                    // lives behind Details, not here. [Friendly.body] is the
+                    // plain sentence, and three lines is still enough of it.
+                    Text(
+                        text = error.body,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                if (error.details != null) {
+                    TextButton(onClick = { showDetails = !showDetails }) {
+                        Text(if (showDetails) "Hide" else "Details")
+                    }
+                }
+                if (onDismiss != null) TextButton(onClick = onDismiss) { Text("Dismiss") }
+            }
+            if (showDetails && error.details != null) {
+                Text(
+                    text = error.details,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .padding(8.dp),
+                )
+            }
         }
     }
 }

@@ -60,7 +60,9 @@ data class SessionUiState(
      * screen.
      */
     val connected: Boolean = true,
-    val error: String? = null,
+    val error: Friendly? = null,
+    /** True when the last read said [NO_TRANSCRIPT]: nothing has been said yet, not a failure. */
+    val silent: Boolean = false,
 ) {
     /**
      * Whether the send button does anything. Blank drafts are not prompts, a
@@ -128,7 +130,8 @@ class SessionViewModel(
         val loading: Boolean = false,
         val refreshing: Boolean = false,
         val sending: Boolean = false,
-        val error: String? = null,
+        val error: Friendly? = null,
+        val silent: Boolean = false,
     )
 
     private val local = MutableStateFlow(Local())
@@ -251,7 +254,7 @@ class SessionViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(sending = false, error = explain(t)) }
+            local.update { it.copy(sending = false, error = friendly(t)) }
         }
     }
 
@@ -319,6 +322,7 @@ class SessionViewModel(
                     conversation = it.conversation.appending(fresh),
                     loaded = true,
                     error = null,
+                    silent = false,
                 ) }
             }
         } catch (e: CancellationException) {
@@ -330,7 +334,19 @@ class SessionViewModel(
             // proceed without waiting on this one's error bookkeeping too.
             // The conversation on screen stays: a failed read is not evidence
             // that what was already said has stopped being true.
-            local.update { it.copy(error = explain(t)) }
+            //
+            // `E_NO_TRANSCRIPT` lands here too — the hub answers a read with a
+            // tool refusal even when the refusal just means "nothing said
+            // yet" — so this is also where that gets told apart from a real
+            // failure: [Friendly.isError] decides whether a banner shows at
+            // all, and [SessionUiState.silent] is what the empty state reads
+            // instead of it.
+            val f = friendly(t)
+            local.update { it.copy(
+                loaded = true,
+                silent = !f.isError && f.title == "Nothing has been said yet",
+                error = f.takeIf { e -> e.isError },
+            ) }
         } finally {
             // `NonCancellable`: this must clear the outstanding flags and
             // release anything waiting on `done` even when the coroutine
@@ -369,6 +385,7 @@ class SessionViewModel(
         readOnly = readOnly,
         connected = status is ConnectionStatus.Connected,
         error = l.error,
+        silent = l.silent,
     )
 }
 

@@ -47,8 +47,8 @@ data class SessionsUiState(
     /** How many rows in the **whole** fleet want a person, filtered or not. */
     val attentionCount: Int = 0,
     val refreshing: Boolean = false,
-    /** The last refresh's failure, in the hub's own words. */
-    val error: String? = null,
+    /** The last refresh's failure, in plain language with the hub's own words behind it. */
+    val error: Friendly? = null,
 ) {
     val isEmpty: Boolean get() = groups.isEmpty()
 }
@@ -72,7 +72,7 @@ class SessionsViewModel(
     private data class Local(
         val needsAttentionOnly: Boolean = false,
         val refreshing: Boolean = false,
-        val error: String? = null,
+        val error: Friendly? = null,
     )
 
     private val local = MutableStateFlow(Local())
@@ -144,7 +144,7 @@ class SessionsViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(refreshing = false, error = explain(t)) }
+            local.update { it.copy(refreshing = false, error = friendly(t)) }
         }
     }
 

@@ -1,0 +1,31 @@
+package dev.claudefleet.mobile.ui
+
+import dev.claudefleet.mobile.net.HubError
+
+/** What a banner shows: a title, a sentence, and the raw hub text behind a Details expander. */
+data class Friendly(val title: String, val body: String, val isError: Boolean, val details: String? = null)
+
+const val NO_TRANSCRIPT = "E_NO_TRANSCRIPT"
+
+/**
+ * Plain language in front, the hub's own words behind "Details". Built on
+ * [explain], which already decides what may be repeated at all, so the token
+ * rule holds here by construction.
+ */
+fun friendly(t: Throwable): Friendly {
+    val raw = explain(t)
+    return when (t) {
+        is HubError.Tool -> when (t.code) {
+            NO_TRANSCRIPT -> Friendly("Nothing has been said yet", "Send a prompt to start.", isError = false, details = raw)
+            "E_NOTFOUND" -> Friendly("This session is gone", "It was killed or the fleet no longer lists it.", isError = true, details = raw)
+            "E_FORBIDDEN" -> Friendly("The hub refused that", t.message, isError = true, details = raw)
+            "E_CONFIRM_REQUIRED" -> Friendly("Needs a confirmation on the desktop", "Approve it there; this screen will follow.", isError = true, details = raw)
+            "E_BG_SESSION" -> Friendly("Runs outside tmux", "This session has no terminal to type into.", isError = true, details = raw)
+            else -> Friendly("The hub refused that", t.message, isError = true, details = raw)
+        }
+        is HubError.Unauthorized -> Friendly("This device was signed out", raw, isError = true)
+        is HubError.Transport -> Friendly("Cannot reach the hub", raw, isError = true)
+        is HubError -> Friendly("The hub answered oddly", raw, isError = true)
+        else -> Friendly("Something went wrong", raw, isError = true)
+    }
+}

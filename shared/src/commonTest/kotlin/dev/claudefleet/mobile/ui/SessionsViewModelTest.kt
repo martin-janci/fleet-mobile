@@ -234,7 +234,7 @@ class SessionsViewModelTest {
 
         val state = vm.state.value
         assertFalse(state.refreshing)
-        assertEquals("E_NOTFOUND: no such session", state.error)
+        assertEquals("E_NOTFOUND: no such session", state.error?.details)
         assertEquals(1, state.groups.sumOf { it.sessionCount })
     }
 
@@ -254,7 +254,7 @@ class SessionsViewModelTest {
         val vm = SessionsViewModel(fleet, backgroundScope)
         vm.refresh().join()
         runCurrent()
-        assertEquals("E_NOTFOUND: no such session", vm.state.value.error)
+        assertEquals("E_NOTFOUND: no such session", vm.state.value.error?.details)
 
         vm.dismissError()
         // The screen's state is assembled from `local` and the fleet flows by a
