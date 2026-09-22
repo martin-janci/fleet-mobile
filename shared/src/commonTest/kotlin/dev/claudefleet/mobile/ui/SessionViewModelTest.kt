@@ -463,6 +463,80 @@ class SessionViewModelTest {
         assertTrue(vm.state.value.readOnly)
     }
 
+    // ---- sendCommand: the status strip's `/compact` chip, task 5 ----
+    //
+    // The one rule `send()` already follows (readonly / connected / idle),
+    // reused rather than re-decided — `sendCommand` is what the strip's
+    // amber `/compact` chip calls instead of stuffing the composer's draft
+    // and calling `send()`, so the box on screen is never touched by a tap
+    // that has nothing to do with what someone was typing.
+
+    @Test
+    fun sendCommand_delivers_the_given_text_without_touching_the_draft() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.onDraftChange("still typing")
+
+        vm.sendCommand("/compact").join()
+        runCurrent()
+
+        assertEquals(listOf("/compact"), actions.sentPrompts)
+        assertEquals("still typing", vm.state.value.draft, "sendCommand must not clobber what is being composed")
+        assertEquals(1, actions.reads, "a delivered command should pull the reply in, exactly like send()")
+    }
+
+    @Test
+    fun sendCommand_is_disabled_while_something_else_is_already_sending() = runTest {
+        val actions = FakeActions()
+        val gate = CompletableDeferred<Unit>()
+        actions.sendGate = gate
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.onDraftChange("ship it")
+        val sendJob = vm.send()
+        runCurrent()
+        assertTrue(vm.state.value.sending)
+
+        vm.sendCommand("/compact").join()
+
+        assertEquals(emptyList(), actions.sentPrompts.filter { it == "/compact" }, "a command must not race an in-flight prompt")
+
+        gate.complete(Unit)
+        sendJob.join()
+    }
+
+    @Test
+    fun sendCommand_does_nothing_for_a_readonly_credential() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, canSendPrompts = false)
+
+        vm.sendCommand("/compact").join()
+
+        assertTrue(actions.sentPrompts.isEmpty())
+    }
+
+    @Test
+    fun sendCommand_does_nothing_while_the_hub_is_unreachable() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        fleet.status.value = ConnectionStatus.Offline("not connected")
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.sendCommand("/compact").join()
+
+        assertTrue(actions.sentPrompts.isEmpty())
+    }
+
+    @Test
+    fun sendCommand_does_nothing_once_the_session_has_left_the_fleet() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(rows = emptyList())
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.sendCommand("/compact").join()
+
+        assertTrue(actions.sentPrompts.isEmpty())
+    }
+
     // ---- Send is disabled while the hub is unreachable ----
 
     @Test
@@ -724,6 +798,25 @@ class SessionViewModelTest {
         assertEquals("blocked", vm.state.value.session?.claudeStatus)
         assertEquals("press_enter", vm.state.value.session?.stuckKind)
         assertEquals("waiting", vm.state.value.session?.currentActivity)
+    }
+
+    /**
+     * `nowSeconds` is what [dev.claudefleet.mobile.ui.components.StatusStrip]
+     * computes elapsed/idle-since wording against — the same clock shape
+     * `SessionsViewModel` already carries for the fleet list, injectable so
+     * this test is neither flaky nor slow, and ticking on its own so a
+     * session screen left open keeps advancing without a refresh.
+     */
+    @Test
+    fun the_state_carries_a_clock_that_ticks() = runTest {
+        var now = 1_000L
+        val vm = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope, clock = { now })
+        val first = vm.state.first { it.nowSeconds > 0 }
+        assertEquals(1_000L, first.nowSeconds)
+
+        now = 1_040L
+        advanceTimeBy(31_000)
+        assertEquals(1_040L, vm.state.value.nowSeconds)
     }
 
     /** A session killed from the desktop disappears from the fleet under the screen. */

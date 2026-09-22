@@ -7,6 +7,7 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.data.STOPPED
+import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.appending
@@ -28,6 +29,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -129,6 +131,15 @@ data class SessionUiState(
      * before the first one's own refetch has even landed.
      */
     val busy: Boolean = false,
+    /**
+     * Unix seconds, refreshed every 30s by a ticker — what
+     * [dev.claudefleet.mobile.ui.components.StatusStrip] computes the bar's
+     * elapsed/idle-since wording against. The same pattern as
+     * [SessionsUiState.nowSeconds], one screen down: a `StateFlow` a device's
+     * clock actually moves, rather than a value fixed at whenever this state
+     * happened to be built.
+     */
+    val nowSeconds: Long = 0,
 ) {
     /**
      * Whether the ⋮ menu is offered at all: a readonly credential may not
@@ -249,6 +260,7 @@ class SessionViewModel(
     private val actions: SessionActions,
     private val scope: CoroutineScope,
     canSendPrompts: Boolean = true,
+    private val clock: () -> Long = { epochSeconds() },
 ) {
     /**
      * The screen state this class owns, as opposed to what the fleet owns.
@@ -307,6 +319,14 @@ class SessionViewModel(
     private val probe = MutableStateFlow<Boolean?>(null)
 
     /**
+     * Unix seconds, ticked every 30s — see [SessionUiState.nowSeconds]. The
+     * same shape as [SessionsViewModel]'s own `now`: a `StateFlow` folded into
+     * [state] rather than read fresh by a composable, so the strip's wording
+     * advances on the same recomposition every other live fact does.
+     */
+    private val now = MutableStateFlow(clock())
+
+    /**
      * Makes the hub call **and** the `local.update` that applies its reply one
      * critical section, across [requestRead]'s four callers — `load()`,
      * `refresh()`, a send's follow-up, and the event-triggered refetch above —
@@ -363,15 +383,29 @@ class SessionViewModel(
     private var queued: Generation? = null
 
     val state: StateFlow<SessionUiState> =
-        combine(fleet.sessions, fleet.status, fleet.hubVersion, local, probe) { rows, status, version, l, probed ->
-            assemble(rows.firstOrNull { it.id == sessionId }, status, version, l, probed)
+        // `combine` has no six-flow overload; `probe` and `now` are folded
+        // into one `Pair` first rather than nesting a second `.stateIn` or
+        // hand-rolling a sixth `combine`, so there is still exactly one
+        // downstream collector to reason about.
+        combine(fleet.sessions, fleet.status, fleet.hubVersion, local, combine(probe, now, ::Pair)) { rows, status, version, l, (probed, nowSeconds) ->
+            assemble(rows.firstOrNull { it.id == sessionId }, status, version, l, probed, nowSeconds)
         }.stateIn(
             scope,
             SharingStarted.Eagerly,
-            assemble(row(), fleet.status.value, fleet.hubVersion.value, local.value, probe.value),
+            assemble(row(), fleet.status.value, fleet.hubVersion.value, local.value, probe.value, now.value),
         )
 
     init {
+        // Ticks `now` every 30s — the same period [SessionsViewModel] uses for
+        // the fleet list — so the strip's "2 min" / "idle since 2 h" wording
+        // advances without a per-second recomposition on a screen a person
+        // may leave open for hours.
+        scope.launch {
+            while (isActive) {
+                delay(30_000)
+                now.value = clock()
+            }
+        }
         // Started here rather than from `load()`: `state` above is already
         // eager, and a subscription that only exists after the screen's first
         // explicit call would miss an event racing that call.
@@ -604,11 +638,33 @@ class SessionViewModel(
         // its value trails the last `onDraftChange` by however long the
         // collector takes to be resumed. A send must not depend on that.
         if (!canSendNow(current)) return@launch
-        val text = current.draft
+        deliver(current.draft, clearDraft = true)
+    }
+
+    /**
+     * Send [text] through the same guarded, single-flight path as [send] —
+     * for the status strip's `/compact` chip and anything else that has to
+     * speak to the REPL without going through what is sitting in the
+     * composer's draft. Reuses [deliver] rather than duplicating [send]'s
+     * body, so there is exactly one rule for "how this screen writes to the
+     * hub", not two that could drift apart.
+     *
+     * Guarded exactly like [send] — readonly, connected, [idle] — minus the
+     * blank-draft check, which has nothing to do with a caller-supplied
+     * command that is never blank to begin with.
+     */
+    fun sendCommand(text: String): Job = scope.launch {
+        val current = local.value
+        if (!canWriteNow(current) || row() == null) return@launch
+        deliver(text, clearDraft = false)
+    }
+
+    /** The guarded hub write both [send] and [sendCommand] make, and the refetch that follows it. */
+    private suspend fun deliver(text: String, clearDraft: Boolean) {
         local.update { it.copy(sending = true, error = null) }
         try {
             actions.sendPrompt(sessionId, text)
-            local.update { it.copy(sending = false, draft = "") }
+            local.update { it.copy(sending = false, draft = if (clearDraft) "" else it.draft) }
             requestRead(first = false)
         } catch (e: CancellationException) {
             throw e
@@ -697,8 +753,11 @@ class SessionViewModel(
     private fun canAnswerNow(l: Local): Boolean =
         !readOnly && idle(l.sending, l.answering, l.busy) && connected()
 
+    /** The part of [canSendNow] that does not care what is being sent — shared with [sendCommand]. */
+    private fun canWriteNow(l: Local): Boolean = idle(l.sending, l.answering, l.busy) && !readOnly && connected()
+
     private fun canSendNow(l: Local): Boolean =
-        idle(l.sending, l.answering, l.busy) && !readOnly && connected() && l.draft.isNotBlank() && row() != null
+        canWriteNow(l) && l.draft.isNotBlank() && row() != null
 
     /** [isConnected] read from the live sources, for [send]'s own check. */
     private fun connected(): Boolean = isConnected(fleet.status.value, probe.value)
@@ -843,6 +902,7 @@ class SessionViewModel(
         hubVersion: String?,
         l: Local,
         probed: Boolean?,
+        nowSeconds: Long,
     ) = SessionUiState(
         session = row,
         conversation = l.conversation,
@@ -866,6 +926,7 @@ class SessionViewModel(
         stillWaiting = l.stillWaiting,
         terminal = l.terminal,
         busy = l.busy,
+        nowSeconds = nowSeconds,
     )
 }
 

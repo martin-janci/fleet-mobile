@@ -70,7 +70,10 @@ import dev.claudefleet.mobile.ui.components.BlockedCardView
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.MarkdownText
-import dev.claudefleet.mobile.ui.components.StatusChip
+import dev.claudefleet.mobile.ui.components.CompactDivider
+import dev.claudefleet.mobile.ui.components.StatusStrip
+import dev.claudefleet.mobile.ui.components.SubagentRow
+import dev.claudefleet.mobile.ui.components.SystemLine
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.data.ConnectionStatus
 import kotlinx.coroutines.CoroutineScope
@@ -110,6 +113,7 @@ fun SessionScreen(
     onKill: () -> Unit,
     onSetTags: (List<String>) -> Unit,
     onRename: (String) -> Unit,
+    onSendCommand: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val turns = state.conversation.turns
@@ -208,6 +212,7 @@ fun SessionScreen(
             onKill = onKill,
             onSetTags = onSetTags,
             onRename = onRename,
+            onSendCommand = onSendCommand,
         )
         ConnectionBanner(status, state.hubReachable)
         ErrorBanner(state.error, onDismiss = onDismissError)
@@ -296,6 +301,7 @@ private fun SessionBar(
     onKill: () -> Unit,
     onSetTags: (List<String>) -> Unit,
     onRename: (String) -> Unit,
+    onSendCommand: (String) -> Unit,
 ) {
     val busy = state.loading || state.refreshing
     val angle = refreshAngle(busy)
@@ -333,9 +339,16 @@ private fun SessionBar(
             }
         },
         actions = {
-            StatusChip(
-                claudeStatus = state.session?.claudeStatus,
-                stuckKind = state.session?.stuckKind,
+            // Replaced the plain `StatusChip`: a status word alone told a
+            // person nothing about how long the agent had been at it, how
+            // full its context window was, or what the turn had cost so far
+            // — everything the strip now reads off the same row plus the
+            // conversation's own `context`. See `StatusStrip.kt`.
+            StatusStrip(
+                row = state.session,
+                context = state.conversation.context,
+                nowSeconds = state.nowSeconds,
+                onCompact = { onSendCommand("/compact") },
             )
             // A `safe_kill_session` retirement in progress — shown for as
             // long as the row carries one, independent of which screen armed
@@ -708,6 +721,14 @@ private fun Item(item: ConvItem) {
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        // The remaining kinds each own their own layout in `TranscriptItems.kt`
+        // — this stays a dispatch table rather than growing a composable body
+        // per branch.
+        is ConvItem.Subagent -> SubagentRow(item)
+        is ConvItem.Compact -> CompactDivider(item)
+        is ConvItem.Command -> SystemLine(item.label)
+        is ConvItem.Notification -> SystemLine(item.label)
+        is ConvItem.Interrupt -> SystemLine(item.label)
         // A kind this build does not know: say so rather than drop it.
         is ConvItem.Unsupported -> Text(
             text = item.label,

@@ -89,6 +89,96 @@ class ConvItemTest {
     fun an_unsupported_item_is_displayable() {
         assertTrue(ConvItem.Unsupported("thinking").label.isNotBlank())
     }
+
+    /**
+     * Task 5: the hub's `context` and the five item kinds it already sends
+     * (`subagent`, `compact`, `command`, `notification`, `interrupt`) must
+     * parse as their own types — an invented sixth kind still degrades.
+     */
+    @Test
+    fun context_and_new_kinds_parse_and_nothing_is_unsupported_anymore() {
+        val parsed = json.decodeFromString(
+            Conversation.serializer(),
+            """{"turns":[{"items":[
+                 {"kind":"subagent","id":"tu_1","name":"Task","agent_type":"Explore","description":"find it","result":"found","error":false,"at":"t1","ended_at":"t2","done":true},
+                 {"kind":"compact","trigger":"auto","pre_tokens":50000,"summary":"summarized"},
+                 {"kind":"command","name":"compact","args":"now","output":"done"},
+                 {"kind":"notification","task_id":"tk1","tool_use_id":"tu_2","status":"completed","summary":"agent finished","result":"the report","output_file":"/tmp/o","event":null,"at":"t3"},
+                 {"kind":"interrupt","during_tool":true},
+                 {"kind":"from_the_future","stuff":"???"}
+               ]}],
+               "context":{"tokens":1000,"window":200000,"pct":0.5,"stale":false}}""",
+        )
+        val items = parsed.turns.single().items
+        assertEquals(
+            ConvItem.Subagent(
+                id = "tu_1",
+                name = "Task",
+                agentType = "Explore",
+                description = "find it",
+                result = "found",
+                error = false,
+                at = "t1",
+                endedAt = "t2",
+                done = true,
+            ),
+            items[0],
+        )
+        assertEquals(ConvItem.Compact(trigger = "auto", preTokens = 50_000, summary = "summarized"), items[1])
+        assertEquals(ConvItem.Command(name = "compact", args = "now", output = "done"), items[2])
+        assertEquals(
+            ConvItem.Notification(
+                taskId = "tk1",
+                toolUseId = "tu_2",
+                status = "completed",
+                summary = "agent finished",
+                result = "the report",
+                outputFile = "/tmp/o",
+                event = null,
+                at = "t3",
+            ),
+            items[3],
+        )
+        assertEquals(ConvItem.Interrupt(duringTool = true), items[4])
+        assertIs<ConvItem.Unsupported>(items[5])
+        assertEquals("from_the_future", (items[5] as ConvItem.Unsupported).kind)
+        assertEquals(ConvContext(tokens = 1000, window = 200_000, pct = 0.5, stale = false), parsed.context)
+    }
+
+    /** Every new kind still owes the screen a one-line label, whatever it turns out to hold. */
+    @Test
+    fun every_new_kind_has_a_sensible_label() {
+        assertEquals("find it", ConvItem.Subagent(name = "Task", description = "find it").label)
+        assertEquals("Task", ConvItem.Subagent(name = "Task", description = null).label)
+        assertEquals("Compacted", ConvItem.Compact().label)
+        assertEquals("/compact", ConvItem.Command(name = "compact").label)
+        assertEquals("agent finished", ConvItem.Notification(summary = "agent finished", status = "completed").label)
+        assertEquals("completed", ConvItem.Notification(summary = null, status = "completed").label)
+        assertEquals("notification", ConvItem.Notification().label)
+        assertEquals("Interrupted", ConvItem.Interrupt().label)
+    }
+
+    /** A missing field on any of the five new kinds must never throw — same rule as an unknown key elsewhere. */
+    @Test
+    fun a_new_kind_with_only_its_bare_minimum_still_parses() {
+        val parsed = json.decodeFromString(
+            Conversation.serializer(),
+            """{"turns":[{"items":[
+                 {"kind":"subagent"},
+                 {"kind":"compact"},
+                 {"kind":"command"},
+                 {"kind":"notification"},
+                 {"kind":"interrupt"}
+               ]}]}""",
+        )
+        val items = parsed.turns.single().items
+        assertEquals(ConvItem.Subagent(), items[0])
+        assertEquals(ConvItem.Compact(), items[1])
+        assertEquals(ConvItem.Command(), items[2])
+        assertEquals(ConvItem.Notification(), items[3])
+        assertEquals(ConvItem.Interrupt(), items[4])
+        assertEquals(null, parsed.context, "no context in the tail is not an error")
+    }
 }
 
 /**

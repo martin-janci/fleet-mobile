@@ -16,6 +16,27 @@ data class Conversation(
     val turns: List<ConvTurn> = emptyList(),
     /** Older turns or items were dropped to fit the turn / character budget. */
     val truncated: Boolean = false,
+    /**
+     * Current-conversation context size, from this same read's tail. `null`
+     * when the tail carried no usage (nothing yet, or a compaction with no
+     * reply since) — mirrors the hub's `ContextView` (`transcript.rs`).
+     */
+    val context: ConvContext? = null,
+    /**
+     * This conversation's timeline events, oldest first — kept raw rather
+     * than modelled, since nothing on this screen renders them yet.
+     */
+    val events: List<JsonElement> = emptyList(),
+)
+
+/** The context size shown alongside a [Conversation] — the hub's `ContextView`. */
+@Serializable
+data class ConvContext(
+    val tokens: Long? = null,
+    val window: Long? = null,
+    val pct: Double? = null,
+    /** Always `false` on a value freshly read from the transcript. */
+    val stale: Boolean = false,
 )
 
 /**
@@ -106,6 +127,13 @@ fun Conversation.appending(fresh: Conversation): Conversation {
     return Conversation(
         turns = kept + fresh.turns,
         truncated = truncated || fresh.truncated,
+        // Both a rolling-window read like `turns` itself, not a ledger: the
+        // freshest read's own picture replaces the held one rather than being
+        // merged into it, and falls back to what was already held only when
+        // this particular read carried nothing (a fetch that raced ahead of
+        // the hub's own context/event bookkeeping).
+        context = fresh.context ?: context,
+        events = fresh.events.ifEmpty { events },
     ).withinCeiling()
 }
 
@@ -149,7 +177,7 @@ private fun Conversation.withinCeiling(): Conversation =
     if (turns.size <= MAX_RETAINED_TURNS) {
         this
     } else {
-        Conversation(turns = turns.takeLast(MAX_RETAINED_TURNS), truncated = true)
+        copy(turns = turns.takeLast(MAX_RETAINED_TURNS), truncated = true)
     }
 
 private fun ConvTurn.identity(): Pair<String?, String?> = at to prompt
@@ -184,11 +212,11 @@ data class ConvTurn(
  *
  * The discriminator is dispatched by hand rather than by the generated sealed
  * serializer, because the generated one *throws* on a tag it does not know. The
- * hub has two kinds today; the day it grows a third, an app already in someone's
- * pocket would fail the whole conversation screen on an item it could simply
- * have skipped past. [Unsupported] is that skip — the same promise
- * `ignoreUnknownKeys` already makes for an unknown *field*, kept for an unknown
- * *variant*.
+ * day the hub grows a kind past the seven modelled here, an app already in
+ * someone's pocket would fail the whole conversation screen on an item it
+ * could simply have skipped past. [Unsupported] is that skip — the same
+ * promise `ignoreUnknownKeys` already makes for an unknown *field*, kept for
+ * an unknown *variant*.
  */
 @Serializable(with = ConvItemSerializer::class)
 sealed class ConvItem {
@@ -209,6 +237,90 @@ sealed class ConvItem {
     @JsonIgnoreUnknownKeys
     data class Tool(val summary: String, val error: Boolean = false) : ConvItem() {
         override val label: String get() = summary
+    }
+
+    /**
+     * A `Task` / `Agent` call, kept apart from other tools so its final text
+     * can be shown without cramming a subagent transcript into the tool
+     * one-liner — mirrors the hub's `ConvItem::Subagent` (`transcript.rs`).
+     */
+    @Serializable
+    @SerialName("subagent")
+    @JsonIgnoreUnknownKeys
+    data class Subagent(
+        val id: String? = null,
+        /** `"Task"` or `"Agent"`. */
+        val name: String = "",
+        @SerialName("agent_type") val agentType: String? = null,
+        val description: String? = null,
+        val result: String? = null,
+        val error: Boolean = false,
+        val at: String? = null,
+        @SerialName("ended_at") val endedAt: String? = null,
+        val done: Boolean = false,
+    ) : ConvItem() {
+        override val label: String get() = description?.takeIf { it.isNotBlank() } ?: name
+    }
+
+    /** A compaction (`system/compact_boundary`) — the hub's `ConvItem::Compact`. */
+    @Serializable
+    @SerialName("compact")
+    @JsonIgnoreUnknownKeys
+    data class Compact(
+        val trigger: String? = null,
+        @SerialName("pre_tokens") val preTokens: Long? = null,
+        val summary: String? = null,
+    ) : ConvItem() {
+        override val label: String get() = "Compacted"
+    }
+
+    /**
+     * A slash command the user ran; `output` is the following
+     * `<local-command-stdout>` / `<local-command-stderr>` — the hub's
+     * `ConvItem::Command`.
+     */
+    @Serializable
+    @SerialName("command")
+    @JsonIgnoreUnknownKeys
+    data class Command(
+        val name: String = "",
+        val args: String? = null,
+        val output: String? = null,
+    ) : ConvItem() {
+        override val label: String get() = "/$name"
+    }
+
+    /**
+     * A `<task-notification>` user entry: a background agent, command,
+     * monitor or workflow reporting in — the hub's `ConvItem::Notification`.
+     */
+    @Serializable
+    @SerialName("notification")
+    @JsonIgnoreUnknownKeys
+    data class Notification(
+        @SerialName("task_id") val taskId: String? = null,
+        @SerialName("tool_use_id") val toolUseId: String? = null,
+        /** `completed` | `failed` | `stopped` | `killed`; `null` on a mid-stream event. */
+        val status: String? = null,
+        val summary: String? = null,
+        val result: String? = null,
+        @SerialName("output_file") val outputFile: String? = null,
+        /** Monitor's streamed line. */
+        val event: String? = null,
+        val at: String? = null,
+    ) : ConvItem() {
+        override val label: String
+            get() = summary?.takeIf { it.isNotBlank() } ?: status?.takeIf { it.isNotBlank() } ?: "notification"
+    }
+
+    /** `[Request interrupted by user]` — the hub's `ConvItem::Interrupt`. */
+    @Serializable
+    @SerialName("interrupt")
+    @JsonIgnoreUnknownKeys
+    data class Interrupt(
+        @SerialName("during_tool") val duringTool: Boolean = false,
+    ) : ConvItem() {
+        override val label: String get() = "Interrupted"
     }
 
     /**
@@ -242,6 +354,11 @@ internal object ConvItemSerializer : JsonContentPolymorphicSerializer<ConvItem>(
         when ((element as? JsonObject)?.get("kind").let { it as? JsonPrimitive }?.content) {
             "text" -> ConvItem.Text.serializer()
             "tool" -> ConvItem.Tool.serializer()
+            "subagent" -> ConvItem.Subagent.serializer()
+            "compact" -> ConvItem.Compact.serializer()
+            "command" -> ConvItem.Command.serializer()
+            "notification" -> ConvItem.Notification.serializer()
+            "interrupt" -> ConvItem.Interrupt.serializer()
             else -> ConvItem.Unsupported.serializer()
         }
 }

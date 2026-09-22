@@ -425,5 +425,6 @@ private fun SessionRoute(
         onKill = { vm.kill() },
         onSetTags = { vm.setTags(it) },
         onRename = { vm.rename(it) },
+        onSendCommand = { vm.sendCommand(it) },
     )
 }
