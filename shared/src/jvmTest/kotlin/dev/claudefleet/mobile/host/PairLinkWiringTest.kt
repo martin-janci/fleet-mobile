@@ -82,6 +82,27 @@ class PairLinkWiringTest {
         )
     }
 
+    /**
+     * `onNewIntent` is only reachable if the manifest asks for it.
+     *
+     * Under the default `standard` launch mode, a second `am start` does not
+     * call the override at all — Android stacks a fresh `MainActivity` and the
+     * one on screen keeps the first URL. The emulator showed exactly that.
+     * Both halves are needed and they live in different files, so removing
+     * either one leaves an override that never runs; the instrumentation test
+     * `a_second_link_reaches_the_same_activity` is the behavioural guard and
+     * this is the cheap one that fails in every CI job rather than only the
+     * emulator's.
+     */
+    @Test
+    fun android_asks_for_the_launch_mode_that_makes_onNewIntent_reachable() {
+        assertTrue(
+            """android:launchMode="singleTop"""" in manifest,
+            "without singleTop, a second claudefleet: link stacks a new activity and " +
+                "MainActivity.onNewIntent never runs",
+        )
+    }
+
     @Test
     fun ios_declares_the_scheme() {
         assertTrue("CFBundleURLTypes" in plist, "no URL type, no link")

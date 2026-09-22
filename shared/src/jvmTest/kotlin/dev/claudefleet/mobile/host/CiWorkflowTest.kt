@@ -218,4 +218,22 @@ class CiWorkflowTest {
             "the emulator job is the only thing that ever executes AndroidSecrets",
         )
     }
+
+    /**
+     * And it runs the app's own instrumentation tests.
+     *
+     * `:androidApp:connectedAndroidTest` is what proves Android routes a
+     * `claudefleet:` URL to `MainActivity` and that the Pair screen fills in
+     * response. Both are claims about the platform and about Compose, so
+     * neither can be made anywhere else; dropping this task from the script
+     * would leave the deep link asserted only by a source scan, which is what
+     * it was before and which passes with a manifest that routes nothing.
+     */
+    @Test
+    fun ci_still_follows_a_deep_link_on_a_device() {
+        assertTrue(
+            ":androidApp:connectedAndroidTest" in ci,
+            "the emulator job must run the app's instrumentation tests too",
+        )
+    }
 }

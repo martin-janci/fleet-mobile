@@ -19,6 +19,9 @@ android {
         // defaults are what a plain local build still gets.
         versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 1
         versionName = findProperty("versionName") as String? ?: "0.1.0"
+        // The instrumentation tests below need a runner. Declared here rather
+        // than in a `testOptions` block because this is the only one.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     // A `release` signing config exists only when all four of these are in the
@@ -74,4 +77,16 @@ dependencies {
     // The host builds the Ktor engine and hands it to `AppContainer`, so it
     // needs the engine itself; `:shared` depends on it only `implementation`.
     implementation(libs.ktor.client.okhttp)
+
+    // Instrumentation tests for the two things only a device can answer about
+    // this module: whether the manifest actually routes a `claudefleet:` URL
+    // here, and whether the shared Compose UI draws at all. Both live in
+    // `androidApp` rather than in `:shared` because both are properties of the
+    // *app* — its merged manifest and its activity — which `:shared` has no
+    // access to.
+    androidTestImplementation(libs.androidx.test.core)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
 }

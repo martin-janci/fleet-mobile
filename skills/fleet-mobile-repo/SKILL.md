@@ -45,7 +45,8 @@ below it.
 | `:shared:jvmTest` | JVM | commonTest + the `jvmTest` source scans (`IosHostTest`, `AndroidHostTest`, `CiWorkflowTest`, …) |
 | `:shared:connectedAndroidDeviceTest` | Android emulator | commonTest **again** (the device-test source-set tree pulls it in), plus `AndroidSecrets` and `QrDecodeTest` |
 | `:shared:iosSimulatorArm64Test` | Kotlin/Native | commonTest on the toolchain iOS actually ships, plus `KeychainSecretsTest` |
-| `xcodebuild test` (iosApp) | iOS app process | `KeychainRoundTripTests` — the only thing that **launches the app** |
+| `:androidApp:connectedAndroidTest` | Android emulator | the only tests that **launch the app**: manifest intent routing, deep-link delivery, the platform cleartext policy, and the one rendered Compose screen |
+| `xcodebuild test` (iosApp) | iOS app process | `KeychainRoundTripTests` — the only thing that launches the app on iOS |
 
 The first two are both a JVM. Kotlin/Native is the one with different string,
 regex, coroutine and memory implementations, and
@@ -84,6 +85,43 @@ Builds and bare-binary tests cannot see that class of failure.
 - **Measure on the dispatcher the app really uses.** The same stack probe on the
   test's *main* thread parsed 10,000 levels happily; only
   `withContext(Dispatchers.Default)`, where Ktor delivers, reproduced the crash.
+- **`compileKotlinIosSimulatorArm64` green on Linux does not mean it links.**
+  The klib step runs here; the LLVM step (`linkDebugTestIosSimulatorArm64`) is
+  macOS-only and rejects things the compiler accepted. A Kotlin `object`
+  extending an Objective-C class is one: it fails with *"Allocation of Obj-C
+  class … should have been lowered"* at link time and compiles cleanly at every
+  step before that. Use a `class`. Anything touching `iosMain`/`iosTest` and
+  cinterop needs a CI round before you believe it.
+
+## The contract with claude-fleet, and the one part that drifts
+
+Five wire contracts bind this app to the hub. Four are self-correcting:
+
+| Contract | Why it does not drift |
+|---|---|
+| Tool names and access | `ToolsTheAppMayCallTest` allow-lists them; the hub refuses anything else |
+| `SessionRow` | `ignoreUnknownKeys`, so new columns pass by |
+| `POST /pair` | Four fields, unchanged since it was written |
+| `GET /events` | `ready` / `lagged` plus open-ended row events |
+
+**`ConvItem` is the one that drifts, and it drifts silently.** It is a tagged
+union in `crates/fleet-core/src/service/transcript.rs`, and this app has its own
+copy in `model/Conversation.kt`. When the hub grows a variant, nothing fails:
+`ConvItemSerializer` falls back to `Unsupported` on purpose, so the screen draws
+`(unsupported item: <kind>)` and both repos' test suites stay green, because
+each side is internally consistent.
+
+That has already cost something. The hub's `74c82b3` (2026-09-20, "parse task
+notifications instead of printing their XML") improved the desktop and made the
+phone worse: task notifications had been arriving as `text` items holding raw
+XML — ugly, and readable — and afterwards arrived tagged, so the phone showed a
+placeholder where content used to be.
+
+So when anything touches `transcript.rs`, check `ConvItemTest` — it holds a
+fixture in the hub's own wire shape for every kind, and
+`every_kind_the_hub_emits_today_is_modelled` is the list to extend.
+`ConversationItemsTest` (emulator) then proves each one actually draws, which
+is a different claim from parsing.
 
 ## No Mac and no `/dev/kvm` here
 
@@ -151,6 +189,13 @@ parser:
 adb shell am start -a android.intent.action.VIEW -d "claudefleet:https://hub/pair#ABCDEFGH"
 xcrun simctl openurl booted "claudefleet:https://hub/pair#ABCDEFGH"
 ```
+
+`MainActivity` is `launchMode="singleTop"`, and it must stay that way. Under
+the default `standard` mode the *second* `am start` never reaches
+`onNewIntent`: Android stacks a fresh activity and the one on screen keeps the
+first URL. That is precisely the case an agent hits when it re-runs a setup
+script, and it was live until the emulator caught it. If a link seems to be
+ignored, check that attribute first.
 
 **Release fills the two fields and waits for a tap; a debug build submits.** The
 difference is wired to the build (`BuildConfig.DEBUG`, `Platform.isDebugBinary`)

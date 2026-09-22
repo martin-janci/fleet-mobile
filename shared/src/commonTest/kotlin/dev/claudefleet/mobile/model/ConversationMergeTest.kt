@@ -266,6 +266,52 @@ class ConversationCeilingTest {
 
         assertTrue(held.truncated)
     }
+
+    /**
+     * The splice takes the **longest** overlap, not the first one that matches.
+     *
+     * A turn's identity is `(at, prompt)` and is not unique. `at` is the hub's
+     * timestamp at second resolution, so a prompt repeated inside one second —
+     * an agent sending `go` three times, which is what an agent does — produces
+     * a run of turns that are indistinguishable to this function. Headless
+     * turns are worse: they all share the empty identity, which the KDoc above
+     * already says folds them together.
+     *
+     * That makes several overlap lengths match at once, and only the longest is
+     * right. Searching upward finds the shortest, splices too little, and
+     * repeats the rest of the run on screen — one duplicated block per read,
+     * for as long as the window holds the repetition.
+     *
+     * Found by mutation: reversing the loop's direction broke nothing any test
+     * could see, because every other case here has distinct identities and
+     * exactly one overlap to find.
+     */
+    @Test
+    fun the_longest_overlap_is_the_one_spliced() {
+        // `go` three times inside second `t2`: three turns, one identity.
+        val held = conversation(
+            turn("t1", "setup"),
+            turn("t2", "go", "first"),
+            turn("t2", "go", "second"),
+            turn("t2", "go", "third"),
+        )
+        // The window has slid: it shows the last two `go` turns and a new one.
+        val fresh = conversation(
+            turn("t2", "go", "second"),
+            turn("t2", "go", "third"),
+            turn("t5", "next", "answer"),
+        )
+
+        val merged = held.appending(fresh)
+
+        assertEquals(
+            listOf("setup", "go", "go", "go", "next"),
+            merged.turns.map { it.prompt },
+            "a two-turn overlap must be spliced as two; matching only the last turn " +
+                "keeps one `go` twice",
+        )
+        assertEquals(5, merged.turns.size, "nothing is repeated: ${merged.turns.map { it.at }}")
+    }
 }
 
 /**
