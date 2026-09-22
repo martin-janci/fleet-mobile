@@ -16,11 +16,15 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.ui.components.ErrorBanner
@@ -135,6 +139,17 @@ fun PairScreen(
             supportingText = { Text("Only needed for a typed code — a scanned QR names its own hub.") },
             singleLine = true,
             enabled = !state.pairing,
+            // A URL, and the keyboard is told so. Left on its defaults this
+            // field capitalises the first letter and runs autocorrect over a
+            // hostname — so `fleet.rlt.sk` arrives as `Fleet.rlt.sk` or as
+            // whatever the dictionary thought `rlt` should have been, and the
+            // pairing fails on an address the person can see is right.
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Uri,
+                capitalization = KeyboardCapitalization.None,
+                autoCorrectEnabled = false,
+                imeAction = ImeAction.Next,
+            ),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         )
         OutlinedTextField(
@@ -144,6 +159,16 @@ fun PairScreen(
             placeholder = { Text("ABCD1234") },
             singleLine = true,
             enabled = !state.pairing,
+            // Eight Crockford base32 characters, which `PairTarget.normalizeCode`
+            // uppercases anyway — so the keyboard may as well show the letters
+            // in the shape they are printed in, and stop autocorrecting a code
+            // that is by construction not a word.
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Ascii,
+                capitalization = KeyboardCapitalization.Characters,
+                autoCorrectEnabled = false,
+                imeAction = ImeAction.Done,
+            ),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
         )
         Row(

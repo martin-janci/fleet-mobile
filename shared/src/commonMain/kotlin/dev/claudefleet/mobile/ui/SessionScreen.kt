@@ -21,7 +21,6 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
@@ -55,6 +54,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.ConvItem
@@ -600,8 +600,25 @@ private fun PromptBox(state: SessionUiState, onDraftChange: (String) -> Unit, on
                         focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                         unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                     ),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { if (state.canSend) onSend() }),
+                    // `maxLines = 6` says this box takes more than one line,
+                    // and `ImeAction.Send` took the key that would have written
+                    // them: Enter sent, so a prompt with a second line could
+                    // not be typed on a phone at all. The send button is beside
+                    // the field, always has been, and is the only thing that
+                    // sends now.
+                    //
+                    // Autocorrect and the leading capital are off for the same
+                    // reason they are off on the Pair screen: a prompt carries
+                    // paths, flags and identifiers — `--rerun-tasks`,
+                    // `SessionsViewModel.kt`, `feat/pager-phase-1` — and a
+                    // dictionary that rewrites those is not a convenience, it
+                    // is a silent edit to something about to be sent to an
+                    // agent.
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        autoCorrectEnabled = false,
+                        imeAction = ImeAction.Default,
+                    ),
                     maxLines = 6,
                 )
                 FilledIconButton(onClick = onSend, enabled = state.canSend, modifier = Modifier.size(48.dp)) {
