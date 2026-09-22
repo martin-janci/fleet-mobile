@@ -35,13 +35,18 @@ final class PairLinkUITests: XCTestCase {
     /// The app launches, and this records what its accessibility tree looks
     /// like.
     ///
-    /// The attachment is the point. Compose Multiplatform bridges its
-    /// semantics to UIKit accessibility, but how a Compose `Text` or
-    /// `OutlinedTextField` surfaces to `XCUIElementQuery` is not something
-    /// this repository has ever observed — and there is no way to observe it
-    /// here, because there is no Mac. Guessing at `staticTexts` versus
-    /// `textFields` and being wrong costs a CI round and teaches nothing;
-    /// attaching the tree costs the same round and answers the question.
+    /// The attachment earned its keep on the first run. Compose Multiplatform
+    /// bridges its semantics to UIKit accessibility, and the mapping — which
+    /// nobody here could observe, there being no Mac — turned out to be:
+    ///
+    ///  - a Compose `Text` is a `StaticText` carrying `label:`
+    ///  - an `OutlinedTextField` is a `TextView` whose `label:` is its Compose
+    ///    label joined to its supporting text
+    ///  - a `Button` is a `Button` with a nested `StaticText`, and reports
+    ///    `Disabled` when it is
+    ///
+    /// Keep it attached. The next thing to change about this screen will be
+    /// diagnosed from here too.
     func testTheAppLaunchesAndItsAccessibilityTreeIsRecorded() throws {
         let app = XCUIApplication()
         app.launch()
@@ -61,15 +66,34 @@ final class PairLinkUITests: XCTestCase {
     /// holding the code.
     ///
     /// `XCUIDevice.shared.system.open` is the same delivery path a person
-    /// tapping a link uses. The assertion is deliberately loose about *which*
-    /// element carries the text — `descendants(matching: .any)` rather than
-    /// `staticTexts` — because what matters is that the eight characters are
-    /// on screen at all, and the first run's attachment is what will tell us
-    /// how to tighten it.
+    /// tapping a link uses.
+    ///
+    /// The first run of this test found a real bug, and it is worth recording
+    /// how. It failed, and the attached tree showed the Pair screen displaying
+    /// *"that is not a claude-fleet pairing code"* — which answered both open
+    /// questions at once: iOS **had** delivered the URL, and Compose **was**
+    /// rendering. What had gone wrong was in between. `URL`'s
+    /// `absoluteString` percent-encodes the fragment separator for this
+    /// scheme, so the app was handed `…/pair%23ABCDEFGH`, found no `#`, read
+    /// the whole thing as a bare code and refused it. Every `claudefleet:`
+    /// link on iOS had been failing that way. `pairLinkPayload` now undoes
+    /// exactly that one encoding.
+    ///
+    /// The assertion stays loose about *which* element carries the text, so
+    /// that a future Compose version moving it between a `StaticText` and a
+    /// `TextView`'s `value` does not read as a delivery failure.
     func testADeepLinkFillsThePairScreen() throws {
         let app = XCUIApplication()
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+
+        // Attached because it is not what you wrote in the source: `URL`
+        // re-encodes it, and the difference between what was typed and what
+        // was opened is precisely where the bug above lived.
+        let opened = XCTAttachment(string: pairURL.absoluteString)
+        opened.name = "url-as-opened"
+        opened.lifetime = .keepAlways
+        add(opened)
 
         XCUIDevice.shared.system.open(pairURL)
 

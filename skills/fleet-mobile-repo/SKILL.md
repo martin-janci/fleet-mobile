@@ -123,6 +123,28 @@ fixture in the hub's own wire shape for every kind, and
 `ConversationItemsTest` (emulator) then proves each one actually draws, which
 is a different claim from parsing.
 
+## How Compose surfaces to XCUITest on iOS
+
+Measured on an iOS 18.5 simulator (there is no other way to know it from here):
+
+| Compose | XCUITest element |
+|---|---|
+| `Text` | `StaticText`, carrying `label:` |
+| `OutlinedTextField` | `TextView`, `label:` = its label joined to its supporting text |
+| `Button` | `Button` with a nested `StaticText`; reports `Disabled` when it is |
+
+`PairLinkUITests` attaches the whole tree on every run, and CI keeps the
+`.xcresult` for it — the log alone drops attachments. That attachment is what
+diagnosed the `%23` bug below; without it the failure was three
+indistinguishable possibilities.
+
+**`URL.absoluteString` percent-encodes `#` for the `claudefleet:` scheme.** So
+iOS hands `onOpenURL` a URL whose string is `…/pair%23ABCDEFGH`, and every deep
+link failed with *"that is not a claude-fleet pairing code"* until
+`pairLinkPayload` learned to undo that one encoding. Android never sees it —
+`Uri.toString()` does not re-encode — which is why a shared parser was not
+enough and the two platforms needed separate proof.
+
 ## No Mac and no `/dev/kvm` here
 
 So the emulator and simulator jobs can only be exercised in CI. The workflow has
