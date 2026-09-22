@@ -419,6 +419,42 @@ class ScrubbingEdgesTest {
             "one character more is",
         )
     }
+
+    /**
+     * A secret that is blank redacts nothing, rather than everything.
+     *
+     * `"".replace("", "<redacted>")` is not a no-op: Kotlin inserts the
+     * replacement at every position, so an empty secret turns a proxy's error
+     * page into `<redacted>5<redacted>0<redacted>2…` — the banner becomes
+     * unreadable at the exact moment somebody needs to read it. A blank secret
+     * is not a secret, and there is nothing to remove.
+     *
+     * It is reachable: `redacted(body, *secrets)` is called with whatever the
+     * caller holds, and an unpaired or half-constructed credential has an empty
+     * token. Found by mutation — nothing had passed a blank one.
+     */
+    @Test
+    fun a_blank_secret_leaves_the_body_alone() {
+        val body = "502 Bad Gateway from proxy"
+
+        for (blank in listOf("", "   ", null)) {
+            assertEquals(body, redacted(body, blank), "a blank secret has nothing to remove")
+        }
+        assertEquals(body, redacted(body, "", null, "  "), "nor do several of them")
+    }
+
+    /** And a real secret alongside a blank one is still removed. */
+    @Test
+    fun a_blank_secret_does_not_disarm_the_real_one() {
+        val token = "a".repeat(64)
+
+        val safe = redacted("proxy echoed $token back", "", token, null)
+
+        assertFalse(token in safe, "the real secret must still go: $safe")
+        assertTrue("<redacted>" in safe)
+        assertTrue(safe.startsWith("proxy echoed "), "and the rest of the body survives: $safe")
+    }
+
 }
 
 /** Mirrors the private cap in `HubError.kt`; the test above pins the boundary. */
