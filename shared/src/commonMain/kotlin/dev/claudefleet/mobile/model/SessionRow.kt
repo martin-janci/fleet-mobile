@@ -32,6 +32,8 @@ data class SessionRow(
     @SerialName("stuck_kind") val stuckKind: String? = null,
     /** The hub's one-line summary of what the session is doing. */
     @SerialName("current_activity") val currentActivity: String? = null,
+    /** The hub's structured reading of a blocked prompt; null when there is none. */
+    @SerialName("pending_input") val pendingInput: PendingInput? = null,
     @SerialName("context_pct") val contextPct: Double? = null,
     @SerialName("created_at") val createdAt: Long? = null,
     @SerialName("last_activity_at") val lastActivityAt: Long? = null,

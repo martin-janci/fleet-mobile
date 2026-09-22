@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -204,5 +205,55 @@ class HubContractVerdictTest {
             "This app is too old for this hub (contract 2). Update the app.",
             contractVerdict(2).sentence(),
         )
+    }
+}
+
+/**
+ * [semverAtLeast] gates `send_prompt { keys }` on the hub's own version
+ * string rather than the wire-contract revision, because the `pending_input`
+ * / keys addition is additive and never moved [MAX_HUB_CONTRACT]. See
+ * [HUB_VERSION_KEYS].
+ */
+class SemverAtLeastTest {
+    @Test
+    fun an_equal_version_is_at_least() {
+        assertTrue(semverAtLeast("0.2.35", HUB_VERSION_KEYS))
+    }
+
+    @Test
+    fun a_higher_patch_is_at_least() {
+        assertTrue(semverAtLeast("0.2.36", HUB_VERSION_KEYS))
+    }
+
+    @Test
+    fun a_higher_minor_is_at_least() {
+        assertTrue(semverAtLeast("0.3.0", HUB_VERSION_KEYS))
+    }
+
+    @Test
+    fun a_higher_major_is_at_least() {
+        assertTrue(semverAtLeast("1.0.0", HUB_VERSION_KEYS))
+    }
+
+    @Test
+    fun a_lower_version_is_not_at_least() {
+        assertFalse(semverAtLeast("0.2.34", HUB_VERSION_KEYS))
+    }
+
+    @Test
+    fun a_null_version_is_not_at_least() {
+        assertFalse(semverAtLeast(null, HUB_VERSION_KEYS))
+    }
+
+    @Test
+    fun an_unparsable_version_is_not_at_least() {
+        assertFalse(semverAtLeast("garbage", HUB_VERSION_KEYS))
+    }
+
+    @Test
+    fun a_leading_v_and_a_pre_or_build_suffix_are_tolerated() {
+        assertTrue(semverAtLeast("v0.2.35", HUB_VERSION_KEYS))
+        assertTrue(semverAtLeast("0.2.35-pre", HUB_VERSION_KEYS))
+        assertTrue(semverAtLeast("0.2.35+build.7", HUB_VERSION_KEYS))
     }
 }

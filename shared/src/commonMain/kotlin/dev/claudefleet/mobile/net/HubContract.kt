@@ -64,3 +64,43 @@ fun ContractVerdict.sentence(): String? = when (this) {
             "This app is too old for this hub (contract $revision). Update the app."
         }
 }
+
+/**
+ * The first hub release that accepts `send_prompt { keys }` and carries
+ * `pending_input` on a row. The wire-contract revision does not move for this
+ * — it is an additive change — so it is gated on the hub's own version string
+ * instead, via [semverAtLeast].
+ */
+const val HUB_VERSION_KEYS: String = "0.2.35"
+
+/**
+ * Whether [version] is at or above [floor], read as `major.minor.patch`.
+ *
+ * Both strings are parsed by taking the leading `major.minor.patch` digits —
+ * a leading `v` is tolerated, and anything from a `-pre` or `+build` suffix
+ * onward is ignored. `version` being `null` or not parsable this way (e.g.
+ * `"garbage"`) reads as "not at least", the same conservative answer
+ * [contractVerdict] gives an unreadable contract.
+ */
+fun semverAtLeast(version: String?, floor: String): Boolean {
+    val v = parseSemver(version) ?: return false
+    val f = parseSemver(floor) ?: return false
+    return v >= f
+}
+
+private val semverPrefix = Regex("""^v?(\d+)\.(\d+)\.(\d+)""")
+
+private fun parseSemver(raw: String?): Semver? {
+    if (raw == null) return null
+    val match = semverPrefix.find(raw.trim()) ?: return null
+    val (major, minor, patch) = match.destructured
+    return Semver(major.toInt(), minor.toInt(), patch.toInt())
+}
+
+private data class Semver(val major: Int, val minor: Int, val patch: Int) : Comparable<Semver> {
+    override fun compareTo(other: Semver): Int {
+        major.compareTo(other.major).let { if (it != 0) return it }
+        minor.compareTo(other.minor).let { if (it != 0) return it }
+        return patch.compareTo(other.patch)
+    }
+}
