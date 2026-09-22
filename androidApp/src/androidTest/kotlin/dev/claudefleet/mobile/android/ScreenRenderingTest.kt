@@ -63,7 +63,11 @@ class SessionsScreenTest {
             HostGroup(alias = "laptop", reachable = false, projects = emptyList()),
         ),
         status = ConnectionStatus.Connected(hubVersion = "0.2.29"),
-        attentionCount = 1,
+        // Seven rather than one: the count is asserted by its text, and "1"
+        // is a substring of half the screen — a session id, a version, a
+        // "1 session" label. A number nothing else on the screen can produce
+        // is what makes the assertion mean what it says.
+        attentionCount = 7,
         nowSeconds = 1_758_153_600,
     )
 
@@ -107,7 +111,7 @@ class SessionsScreenTest {
         show(state)
 
         compose.onNodeWithText("Needs attention", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("1", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("7", substring = false).assertIsDisplayed()
     }
 
     /** An empty fleet is a state the view model emits, so it has to compose. */
@@ -153,9 +157,15 @@ class HostsScreenTest {
         )
 
         compose.onNodeWithText("workbench", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("reachable", substring = true).assertIsDisplayed()
         compose.onNodeWithText("laptop", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("unreachable", substring = true).assertIsDisplayed()
+
+        // Exact, not substring: "reachable" is a substring of "unreachable",
+        // so the loose form matches both rows and fails on the ambiguity —
+        // which is what it did on the first run. The two labels are one word
+        // apart by design, and a test for them has to be able to tell them
+        // apart too.
+        compose.onNodeWithText("reachable", substring = false).assertIsDisplayed()
+        compose.onNodeWithText("unreachable", substring = false).assertIsDisplayed()
     }
 
     /** A host nobody has probed has no versions to show, and must not say "null". */
