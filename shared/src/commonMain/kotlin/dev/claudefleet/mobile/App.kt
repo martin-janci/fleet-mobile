@@ -75,7 +75,12 @@ import kotlinx.coroutines.flow.getAndUpdate
  */
 class AppContainer(
     secrets: Secrets,
-    prefs: Prefs,
+    /**
+     * On-device UI preferences. Held as a `val` because two things read it
+     * now: [quickReplies] below, and the sessions list's lens, noise switch
+     * and collapsed hosts, which `FleetRoute` hands to its `SessionsViewModel`.
+     */
+    val prefs: Prefs,
     http: HttpClient,
     val appVersion: String,
     /**
@@ -299,7 +304,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     // return value still does not need reading here.
     BackHandler(enabled = screen is Screen.Session) { nav.back() }
 
-    val sessions = remember(repository, scope) { SessionsViewModel(repository, scope) }
+    val sessions = remember(repository, scope) { SessionsViewModel(repository, scope, container.prefs) }
     val hosts = remember(repository, scope) { HostsViewModel(repository, scope) }
     val settings = remember(container, scope) {
         SettingsViewModel(container.session, scope, container.appVersion)
@@ -350,7 +355,11 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                     SessionsScreen(
                         state = state,
                         onOpenSession = nav::open,
-                        onToggleNeedsAttention = sessions::toggleNeedsAttentionOnly,
+                        onLensChange = sessions::setLens,
+                        onQueryChange = sessions::setQuery,
+                        onToggleHideNoise = sessions::toggleHideNoise,
+                        onToggleHost = sessions::toggleHost,
+                        onToggleDormant = sessions::toggleDormant,
                         // Through the navigator, not `sessions.setHostFilter(null)`
                         // directly: `Screen.Sessions.hostAlias` is the one source of
                         // truth for the filter, and `open()` reads `nav.screen.value`

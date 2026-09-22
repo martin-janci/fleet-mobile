@@ -8,10 +8,13 @@ import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.net.HubError
+import dev.claudefleet.mobile.store.FakePrefs
+import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -62,6 +65,25 @@ private class FakeFleet(
  * in a test it is the difference between reading the answer and reading the
  * question.
  */
+/**
+ * The clock every view model here runs on.
+ *
+ * Pinned, and not only to keep `relativeTime` out of the assertions: the list
+ * now has a dormant tail, so "how old is this row" decides which half of the
+ * screen it lands in. With a real clock every row built below — their stamps
+ * are small numbers used as an ordering key — would be decades old and the
+ * whole suite would be asserting about the tail.
+ *
+ * Ten thousand seconds: comfortably more than [ACTIVE_SECONDS] and comfortably
+ * less than [DORMANT_SECONDS], so a row stamped `id` is live, unremarkable,
+ * and ordered by its id exactly as these tests have always assumed.
+ */
+private const val TEST_NOW = 10_000L
+
+/** The view model these tests drive: pinned clock, empty preference store. */
+private fun TestScope.viewModel(fleet: FakeFleet, prefs: Prefs = FakePrefs()) =
+    SessionsViewModel(fleet, backgroundScope, prefs, clock = { TEST_NOW })
+
 private fun session(
     id: Long,
     host: String = "box",
@@ -99,7 +121,7 @@ class SessionsViewModelTest {
                 ProjectRow(id = 2, owner = "martin-janci", repo = "fleet-mobile"),
             ),
         )
-        val vm = SessionsViewModel(fleet, backgroundScope)
+        val vm = viewModel(fleet)
 
         val groups = vm.state.value.groups
         assertEquals(listOf("box", "pine"), groups.map { it.alias })
@@ -121,7 +143,7 @@ class SessionsViewModelTest {
     @Test
     fun a_project_the_hub_has_not_named_is_still_its_own_group() = runTest {
         val fleet = FakeFleet(rows = listOf(session(1, project = 7)))
-        val vm = SessionsViewModel(fleet, backgroundScope)
+        val vm = viewModel(fleet)
 
         assertEquals(listOf("project #7"), vm.state.value.groups.single().projects.map { it.label })
     }
@@ -133,7 +155,7 @@ class SessionsViewModelTest {
             rows = listOf(session(1, project = null), session(2, project = 1)),
             projectRows = listOf(ProjectRow(id = 1, owner = "o", repo = "zzz")),
         )
-        val vm = SessionsViewModel(fleet, backgroundScope)
+        val vm = viewModel(fleet)
 
         val projects = vm.state.value.groups.single().projects
         assertEquals(listOf("o/zzz", "No project"), projects.map { it.label })
@@ -150,10 +172,10 @@ class SessionsViewModelTest {
                 session(4, host = "pine", claudeStatus = "completed"),
             ),
         )
-        val vm = SessionsViewModel(fleet, backgroundScope)
+        val vm = viewModel(fleet)
         assertEquals(4, vm.state.value.groups.sumOf { it.sessionCount })
 
-        vm.toggleNeedsAttentionOnly()
+        vm.setLens(Lens.NeedsYou)
         runCurrent()
 
         val state = vm.state.value
@@ -172,9 +194,9 @@ class SessionsViewModelTest {
                 session(2, host = "pine", claudeStatus = "blocked"),
             ),
         )
-        val vm = SessionsViewModel(fleet, backgroundScope)
+        val vm = viewModel(fleet)
 
-        vm.toggleNeedsAttentionOnly()
+        vm.setLens(Lens.NeedsYou)
         runCurrent()
 
         assertEquals(listOf("pine"), vm.state.value.groups.map { it.alias })
@@ -190,23 +212,31 @@ class SessionsViewModelTest {
                 session(3, claudeStatus = "working", stuckKind = "oom"),
             ),
         )
-        val vm = SessionsViewModel(fleet, backgroundScope)
+        val vm = viewModel(fleet)
         assertEquals(2, vm.state.value.attentionCount)
 
-        vm.toggleNeedsAttentionOnly()
+        vm.setLens(Lens.NeedsYou)
         runCurrent()
 
         assertEquals(2, vm.state.value.attentionCount)
     }
 
-    /** Filtering is a view over rows already in hand; it must not cost a call. */
+    /**
+     * Every choice on this screen is a view over rows already in hand; not one
+     * of them may cost a call. The lens, the search, the noise switch, a
+     * collapsed host and the tail are all folds over the same list.
+     */
     @Test
-    fun toggling_the_filter_does_not_talk_to_the_hub() = runTest {
+    fun none_of_the_choices_talk_to_the_hub() = runTest {
         val fleet = FakeFleet(rows = listOf(session(1)))
-        val vm = SessionsViewModel(fleet, backgroundScope)
+        val vm = viewModel(fleet)
 
-        vm.toggleNeedsAttentionOnly()
-        vm.toggleNeedsAttentionOnly()
+        vm.setLens(Lens.NeedsYou)
+        vm.setLens(Lens.All)
+        vm.setQuery("anything")
+        vm.toggleHideNoise()
+        vm.toggleHost("box")
+        vm.toggleDormant()
         runCurrent()
 
         assertEquals(0, fleet.refreshes)
@@ -215,7 +245,7 @@ class SessionsViewModelTest {
     @Test
     fun a_row_the_event_stream_changes_reaches_the_screen() = runTest {
         val fleet = FakeFleet(rows = listOf(session(1, claudeStatus = "working")))
-        val vm = SessionsViewModel(fleet, backgroundScope)
+        val vm = viewModel(fleet)
 
         fleet.sessions.value = listOf(session(1, claudeStatus = "blocked", activity = "waiting on you"))
         runCurrent()
@@ -230,7 +260,7 @@ class SessionsViewModelTest {
     fun a_refresh_that_fails_says_so_and_leaves_the_rows_on_screen() = runTest {
         val fleet = FakeFleet(rows = listOf(session(1)))
         fleet.failWith = HubError.Tool("E_NOTFOUND", "no such session")
-        val vm = SessionsViewModel(fleet, backgroundScope)
+        val vm = viewModel(fleet)
 
         vm.refresh().join()
         runCurrent()
@@ -254,7 +284,7 @@ class SessionsViewModelTest {
     fun a_failure_can_be_dismissed_without_the_rows_going_with_it() = runTest {
         val fleet = FakeFleet(rows = listOf(session(1)))
         fleet.failWith = HubError.Tool("E_NOTFOUND", "no such session")
-        val vm = SessionsViewModel(fleet, backgroundScope)
+        val vm = viewModel(fleet)
         vm.refresh().join()
         runCurrent()
         assertEquals("E_NOTFOUND: no such session", vm.state.value.error?.details)
@@ -274,7 +304,7 @@ class SessionsViewModelTest {
         val fleet = FakeFleet(rows = listOf(session(1)))
         val gate = CompletableDeferred<Unit>()
         fleet.gate = gate
-        val vm = SessionsViewModel(fleet, backgroundScope)
+        val vm = viewModel(fleet)
 
         val job = vm.refresh()
         runCurrent()
@@ -291,7 +321,7 @@ class SessionsViewModelTest {
     fun a_refresh_that_works_clears_the_last_failure() = runTest {
         val fleet = FakeFleet(rows = listOf(session(1)))
         fleet.failWith = HubError.Unauthorized()
-        val vm = SessionsViewModel(fleet, backgroundScope)
+        val vm = viewModel(fleet)
         vm.refresh().join()
         runCurrent()
         assertTrue(vm.state.value.error != null)
@@ -307,7 +337,7 @@ class SessionsViewModelTest {
     @Test
     fun the_connection_banner_follows_the_repository() = runTest {
         val fleet = FakeFleet()
-        val vm = SessionsViewModel(fleet, backgroundScope)
+        val vm = viewModel(fleet)
         assertEquals(ConnectionStatus.Connected("0.9.3"), vm.state.value.status)
 
         fleet.status.value = ConnectionStatus.Offline("revoked")
@@ -330,7 +360,7 @@ class SessionsViewModelTest {
                 session(3, lastActivityAt = 900),
             ),
         )
-        val vm = SessionsViewModel(fleet, backgroundScope)
+        val vm = viewModel(fleet)
 
         assertEquals(
             listOf(3L, 1L, 2L),
@@ -341,33 +371,41 @@ class SessionsViewModelTest {
     /** The pure grouping function, filtered to one host directly — no view model involved. */
     @Test
     fun grouping_can_be_filtered_to_one_host() {
-        val groups = groupSessions(
+        val groups = triageSessions(
             sessions = listOf(session(1, host = "box"), session(2, host = "pine")),
             hosts = emptyList(),
             projects = emptyList(),
-            needsAttentionOnly = false,
+            lens = Lens.All,
+            query = "",
+            hideNoise = false,
             hostFilter = "pine",
-        )
+            collapsedHosts = emptySet(),
+            nowSeconds = TEST_NOW,
+        ).groups
         assertEquals(listOf("pine"), groups.map { it.alias })
     }
 
     /** A host with no sessions of its own is simply not there, same as any other empty group. */
     @Test
     fun grouping_filtered_to_a_host_with_nothing_on_it_is_empty() {
-        val groups = groupSessions(
+        val groups = triageSessions(
             sessions = listOf(session(1, host = "box")),
             hosts = emptyList(),
             projects = emptyList(),
-            needsAttentionOnly = false,
+            lens = Lens.All,
+            query = "",
+            hideNoise = false,
             hostFilter = "pine",
-        )
+            collapsedHosts = emptySet(),
+            nowSeconds = TEST_NOW,
+        ).groups
         assertTrue(groups.isEmpty())
     }
 
     /**
      * Tapping a host row shows only that host's groups, but the badge in the
-     * bar still counts the whole fleet — matching how [toggleNeedsAttentionOnly]
-     * already treats [SessionsUiState.attentionCount].
+     * bar still counts the whole fleet — matching how the lens already treats
+     * [SessionsUiState.attentionCount].
      */
     @Test
     fun a_host_filter_keeps_only_that_hosts_groups_while_the_attention_count_stays_fleetwide() = runTest {
@@ -377,7 +415,7 @@ class SessionsViewModelTest {
                 session(2, host = "pine", claudeStatus = "working"),
             ),
         )
-        val vm = SessionsViewModel(fleet, backgroundScope)
+        val vm = viewModel(fleet)
         assertEquals(1, vm.state.value.attentionCount)
 
         vm.setHostFilter("pine")
@@ -398,7 +436,7 @@ class SessionsViewModelTest {
 
     @Test
     fun a_fleet_with_no_sessions_says_so_rather_than_drawing_an_empty_group() = runTest {
-        val vm = SessionsViewModel(FakeFleet(hostRows = listOf(HostRow("box"))), backgroundScope)
+        val vm = viewModel(FakeFleet(hostRows = listOf(HostRow("box"))))
 
         assertTrue(vm.state.value.groups.isEmpty())
         assertTrue(vm.state.value.isEmpty)
@@ -411,7 +449,7 @@ class SessionsViewModelTest {
             rows = listOf(session(1, host = "box"), session(2, host = "ghost")),
             hostRows = listOf(HostRow(alias = "box", reachable = true)),
         )
-        val vm = SessionsViewModel(fleet, backgroundScope)
+        val vm = viewModel(fleet)
 
         val groups = vm.state.value.groups.associateBy { it.alias }
         assertEquals(true, groups.getValue("box").reachable)
@@ -428,7 +466,7 @@ class SessionsViewModelTest {
     @Test
     fun the_state_carries_a_clock_that_ticks() = runTest {
         var now = 1_000L
-        val vm = SessionsViewModel(FakeFleet(), backgroundScope, clock = { now })
+        val vm = SessionsViewModel(FakeFleet(), backgroundScope, FakePrefs(), clock = { now })
         val first = vm.state.first { it.nowSeconds > 0 }
         assertEquals(1_000L, first.nowSeconds)
         now = 1_040L
@@ -439,24 +477,24 @@ class SessionsViewModelTest {
 
 
 /**
- * The needs-attention filter, through the method the bar is actually wired to.
+ * The lens and the switches, through the methods the bar is actually wired to.
  *
- * `SessionsScreen` calls `toggleNeedsAttentionOnly`, and nothing in the app ever
- * called `setNeedsAttentionOnly(on)` — but every test did. So the path being
- * exercised was not the path that ships, which is the arrangement that lets a
- * bug live in the gap between them. The setter is gone and these go through the
- * toggle.
+ * The rule this class was written for still holds and is worth restating: there
+ * was once a `setNeedsAttentionOnly(on)` that nothing in the app called and
+ * every test did, so the path being exercised was not the path that ships —
+ * which is the arrangement that lets a bug live in the gap between them. Every
+ * method below is one `SessionsScreen` calls.
  */
-class NeedsAttentionToggleTest {
+class TheLensAndTheSwitchesTest {
 
     @Test
-    fun the_toggle_turns_the_filter_on_and_off_again() = runTest {
+    fun the_lens_narrows_to_what_needs_a_person_and_widens_again() = runTest {
         val fleet = FakeFleet(listOf(session(1, claudeStatus = "blocked"), session(2)))
-        val vm = SessionsViewModel(fleet, backgroundScope)
+        val vm = viewModel(fleet)
 
         assertEquals(2, vm.state.value.groups.sumOf { it.sessionCount })
 
-        vm.toggleNeedsAttentionOnly()
+        vm.setLens(Lens.NeedsYou)
         runCurrent()
         assertTrue(vm.state.value.needsAttentionOnly)
         assertEquals(
@@ -464,7 +502,7 @@ class NeedsAttentionToggleTest {
             vm.state.value.groups.flatMap { g -> g.projects.flatMap { it.sessions } }.map { it.id },
         )
 
-        vm.toggleNeedsAttentionOnly()
+        vm.setLens(Lens.All)
         runCurrent()
         assertFalse(vm.state.value.needsAttentionOnly)
         assertEquals(2, vm.state.value.groups.sumOf { it.sessionCount })
@@ -473,42 +511,130 @@ class NeedsAttentionToggleTest {
     /**
      * Two taps in a row land on two different answers.
      *
-     * The flip reads and writes in one `update {}` rather than reading
-     * `local.value` and then writing, so two calls cannot both observe the same
-     * value and both write the same result — which would swallow one tap and
-     * leave the switch disagreeing with the list under it.
+     * The lens is now a choice rather than a flip, so the hazard moved with the
+     * shape: [SessionsViewModel.toggleHideNoise], [SessionsViewModel.toggleHost]
+     * and [SessionsViewModel.toggleDormant] are the three that still read a
+     * value in order to write its opposite. Each does it in one `update {}`
+     * rather than reading `local.value` and then writing, so two calls cannot
+     * both observe the same value and both write the same result — which would
+     * swallow one tap and leave the switch disagreeing with the list under it.
      */
     @Test
-    fun every_tap_moves_the_filter() = runTest {
-        val fleet = FakeFleet(listOf(session(1, claudeStatus = "blocked"), session(2)))
-        val vm = SessionsViewModel(fleet, backgroundScope)
+    fun every_tap_moves_a_switch() = runTest {
+        val vm = viewModel(FakeFleet(listOf(session(1))))
 
-        // Two taps with nothing in between — no `runCurrent()`, so the `stateIn`
-        // collector has not run and `state` still reads false throughout. That
-        // is the whole point: a toggle that decided from `state.value` would
-        // see false twice, write true twice, and swallow the second tap. One
-        // `update {}` reads the value it is writing against, so the pair
-        // cancels out.
-        vm.toggleNeedsAttentionOnly()
-        vm.toggleNeedsAttentionOnly()
+        // Two taps with nothing in between — no `runCurrent()`, so the
+        // `stateIn` collector has not run and `state` still reads the old
+        // value throughout. That is the whole point: a toggle that decided
+        // from `state.value` would see the same answer twice, write the same
+        // answer twice, and swallow the second tap.
+        vm.toggleHideNoise()
+        vm.toggleHideNoise()
+        vm.toggleDormant()
+        vm.toggleDormant()
+        vm.toggleHost("box")
+        vm.toggleHost("box")
         runCurrent()
 
-        assertFalse(vm.state.value.needsAttentionOnly, "two taps cancel; neither may be lost")
+        assertTrue(vm.state.value.hideNoise, "two taps cancel; neither may be lost")
+        assertFalse(vm.state.value.dormantExpanded, "and the same for the tail")
+        assertTrue(
+            vm.state.value.groups.none { it.collapsed },
+            "and for a host: collapsed then expanded is expanded",
+        )
 
-        vm.toggleNeedsAttentionOnly()
+        vm.toggleHideNoise()
         runCurrent()
-        assertTrue(vm.state.value.needsAttentionOnly, "and a third still flips it")
+        assertFalse(vm.state.value.hideNoise, "and a third still flips it")
     }
 
     /** The count in the bar is the whole fleet's, filtered or not. */
     @Test
     fun the_attention_count_ignores_the_filter() = runTest {
         val fleet = FakeFleet(listOf(session(1, claudeStatus = "blocked"), session(2)))
-        val vm = SessionsViewModel(fleet, backgroundScope)
+        val vm = viewModel(fleet)
 
         assertEquals(1, vm.state.value.attentionCount)
-        vm.toggleNeedsAttentionOnly()
+        vm.setLens(Lens.NeedsYou)
         runCurrent()
         assertEquals(1, vm.state.value.attentionCount, "it counts the fleet, not the filtered view")
+    }
+}
+
+/**
+ * What survives closing the app, and what deliberately does not.
+ *
+ * The lens, the noise switch and the folded hosts are *settings* — they say how
+ * this person wants the fleet shown — so a phone that opens on the list three
+ * days later opens on the same list. A search is not: it is a question asked
+ * once, and an app that reopened still filtered to something typed on a train
+ * would look broken rather than helpful.
+ *
+ * Every case builds a **second** view model over the same [FakePrefs], because
+ * that is what a relaunch is. Asserting that the first one's own state changed
+ * would prove nothing about the store.
+ */
+class WhatTheListRemembersTest {
+
+    @Test
+    fun the_lens_is_read_back_on_the_next_launch() = runTest {
+        val prefs = FakePrefs()
+        viewModel(FakeFleet(), prefs).setLens(Lens.Today)
+
+        assertEquals(Lens.Today, viewModel(FakeFleet(), prefs).state.value.lens)
+    }
+
+    /**
+     * The store outlives the app version that wrote it. A downgrade — or a
+     * build that has dropped a lens — must not crash on the first frame with a
+     * value it put there itself.
+     */
+    @Test
+    fun a_stored_lens_this_build_does_not_have_reads_as_all() = runTest {
+        val prefs = FakePrefs()
+        prefs.putStringList("sessions.lens", listOf("Fortnight"))
+
+        assertEquals(Lens.All, viewModel(FakeFleet(), prefs).state.value.lens)
+    }
+
+    @Test
+    fun the_noise_switch_survives_and_starts_on() = runTest {
+        val prefs = FakePrefs()
+        assertTrue(viewModel(FakeFleet(), prefs).state.value.hideNoise, "a fresh install hides the noise")
+
+        viewModel(FakeFleet(), prefs).toggleHideNoise()
+
+        assertFalse(viewModel(FakeFleet(), prefs).state.value.hideNoise)
+    }
+
+    @Test
+    fun a_folded_host_stays_folded() = runTest {
+        val prefs = FakePrefs()
+        val fleet = FakeFleet(listOf(session(1, host = "box"), session(2, host = "pine")))
+        viewModel(fleet, prefs).toggleHost("box")
+
+        val next = viewModel(fleet, prefs).state.value.groups.associateBy { it.alias }
+        assertTrue(next.getValue("box").collapsed)
+        assertFalse(next.getValue("pine").collapsed)
+    }
+
+    @Test
+    fun the_tail_stays_however_it_was_left_and_starts_closed() = runTest {
+        val prefs = FakePrefs()
+        assertFalse(viewModel(FakeFleet(), prefs).state.value.dormantExpanded)
+
+        viewModel(FakeFleet(), prefs).toggleDormant()
+
+        assertTrue(viewModel(FakeFleet(), prefs).state.value.dormantExpanded)
+    }
+
+    @Test
+    fun a_search_is_not_remembered() = runTest {
+        val prefs = FakePrefs()
+        viewModel(FakeFleet(), prefs).setQuery("violet-mars")
+
+        val next = viewModel(FakeFleet(), prefs).state.value
+        assertEquals("", next.query)
+        assertNull(next.results, "and so the next launch is not in the searching shape at all")
     }
 }
