@@ -420,5 +420,10 @@ private fun SessionRoute(
         onAnswer = { vm.answer(it) },
         onShowTerminal = { vm.showTerminal() },
         onHideTerminal = vm::hideTerminal,
+        onRestart = { vm.restart() },
+        onSafeKill = { vm.safeKill() },
+        onKill = { vm.kill() },
+        onSetTags = { vm.setTags(it) },
+        onRename = { vm.rename(it) },
     )
 }

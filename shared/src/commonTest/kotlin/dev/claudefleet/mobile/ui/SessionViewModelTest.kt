@@ -208,15 +208,44 @@ private class FakeActions : SessionActions {
         return waitAnswer
     }
 
-    override suspend fun restart(sessionId: Long) = Unit
+    /** Every session id [restart] was called with, in order. */
+    val restarted = mutableListOf<Long>()
 
-    override suspend fun safeKill(sessionId: Long) = Unit
+    /** Every session id [safeKill] was called with, in order. */
+    val safeKilled = mutableListOf<Long>()
 
-    override suspend fun kill(sessionId: Long) = Unit
+    /** Every session id [kill] was called with, in order — empty when [killError] refused it. */
+    val killed = mutableListOf<Long>()
 
-    override suspend fun setTags(sessionId: Long, tags: List<String>) = Unit
+    /** Every `(sessionId, tags)` pair [setTags] was called with, in order. */
+    val tags = mutableListOf<Pair<Long, List<String>>>()
 
-    override suspend fun rename(sessionId: Long, friendlyName: String) = Unit
+    /** Every `(sessionId, friendlyName)` pair [rename] was called with, in order. */
+    val renamed = mutableListOf<Pair<Long, String>>()
+
+    /** When set, [kill] throws this instead of recording the call. */
+    var killError: Throwable? = null
+
+    override suspend fun restart(sessionId: Long) {
+        restarted += sessionId
+    }
+
+    override suspend fun safeKill(sessionId: Long) {
+        safeKilled += sessionId
+    }
+
+    override suspend fun kill(sessionId: Long) {
+        killError?.let { throw it }
+        killed += sessionId
+    }
+
+    override suspend fun setTags(sessionId: Long, tags: List<String>) {
+        this.tags += sessionId to tags
+    }
+
+    override suspend fun rename(sessionId: Long, friendlyName: String) {
+        renamed += sessionId to friendlyName
+    }
 }
 
 class SessionViewModelTest {
@@ -1738,5 +1767,264 @@ class SessionViewModelTest {
         runCurrent()
 
         assertEquals(listOf("Enter"), actions.sentKeys)
+    }
+
+    // ---- Task 4: the overflow menu's management actions ----
+
+    /** The ordinary row from [row()] is manageable: not readonly, present, not the controller. */
+    @Test
+    fun canManage_is_true_for_an_ordinary_row_on_a_full_credential() = runTest {
+        val vm = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope)
+        runCurrent()
+        assertTrue(vm.state.value.canManage)
+        assertTrue(vm.state.value.canRestart)
+        assertTrue(vm.state.value.canKill)
+    }
+
+    @Test
+    fun canManage_is_false_for_a_readonly_credential() = runTest {
+        val vm = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope, canSendPrompts = false)
+        runCurrent()
+        assertFalse(vm.state.value.canManage)
+    }
+
+    @Test
+    fun canManage_is_false_once_the_session_leaves_the_fleet() = runTest {
+        val fleet = FakeFleetState()
+        val vm = SessionViewModel(ID, fleet, FakeActions(), backgroundScope)
+        fleet.sessions.value = emptyList()
+        runCurrent()
+        assertFalse(vm.state.value.canManage)
+    }
+
+    /** The hub refuses `kill_session` against the controller with `E_INVALID_STATE`; the app never tries. */
+    @Test
+    fun canManage_canRestart_and_canKill_are_all_false_for_the_controller() = runTest {
+        val fleet = FakeFleetState(listOf(row().copy(isController = true)))
+        val vm = SessionViewModel(ID, fleet, FakeActions(), backgroundScope)
+        runCurrent()
+
+        assertFalse(vm.state.value.canManage)
+        assertFalse(vm.state.value.canRestart)
+        assertFalse(vm.state.value.canKill)
+    }
+
+    /** The hub refuses `kill_session` on an external session with `E_INVALID_STATE`; Restart and Tags stay offered. */
+    @Test
+    fun canKill_alone_is_false_for_an_external_session() = runTest {
+        val fleet = FakeFleetState(listOf(row().copy(kind = "external")))
+        val vm = SessionViewModel(ID, fleet, FakeActions(), backgroundScope)
+        runCurrent()
+
+        assertTrue(vm.state.value.canManage)
+        assertTrue(vm.state.value.canRestart)
+        assertFalse(vm.state.value.canKill)
+    }
+
+    @Test
+    fun restart_calls_the_hub_and_refetches() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        val readsBeforeRestart = actions.reads
+
+        vm.restart().join()
+        runCurrent()
+
+        assertEquals(listOf(ID), actions.restarted)
+        assertTrue(actions.reads > readsBeforeRestart, "a restart should pull the fresh row/conversation in")
+        assertNull(vm.state.value.error)
+        assertFalse(vm.state.value.busy)
+    }
+
+    @Test
+    fun restart_no_ops_for_the_controller() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(row().copy(isController = true)))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.restart().join()
+        runCurrent()
+
+        assertTrue(actions.restarted.isEmpty())
+    }
+
+    @Test
+    fun restart_no_ops_for_a_readonly_credential() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, canSendPrompts = false)
+
+        vm.restart().join()
+        runCurrent()
+
+        assertTrue(actions.restarted.isEmpty())
+    }
+
+    @Test
+    fun safe_kill_calls_the_hub_and_refetches() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        val readsBefore = actions.reads
+
+        vm.safeKill().join()
+        runCurrent()
+
+        assertEquals(listOf(ID), actions.safeKilled)
+        assertTrue(actions.reads > readsBefore)
+    }
+
+    @Test
+    fun set_tags_calls_the_hub_and_refetches() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        val readsBefore = actions.reads
+
+        vm.setTags(listOf("a", "b")).join()
+        runCurrent()
+
+        assertEquals(listOf(ID to listOf("a", "b")), actions.tags)
+        assertTrue(actions.reads > readsBefore)
+    }
+
+    @Test
+    fun rename_calls_the_hub_and_refetches() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        val readsBefore = actions.reads
+
+        vm.rename("new name").join()
+        runCurrent()
+
+        assertEquals(listOf(ID to "new name"), actions.renamed)
+        assertTrue(actions.reads > readsBefore)
+    }
+
+    /**
+     * `kill_session` is refused for the controller (`canManage` is already
+     * false there — see [canManage_canRestart_and_canKill_are_all_false_for_the_controller])
+     * and for a readonly device, which never has `canManage` either.
+     */
+    @Test
+    fun kill_is_refused_for_the_controller_and_for_a_readonly_device() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(row().copy(isController = true)))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+        assertFalse(vm.state.value.canManage)
+
+        vm.kill().join()
+        runCurrent()
+        assertTrue(actions.killed.isEmpty())
+
+        val readonlyActions = FakeActions()
+        val readonlyVm = SessionViewModel(ID, FakeFleetState(), readonlyActions, backgroundScope, canSendPrompts = false)
+        readonlyVm.kill().join()
+        runCurrent()
+        assertTrue(readonlyActions.killed.isEmpty())
+    }
+
+    @Test
+    fun kill_no_ops_for_an_external_session() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(row().copy(kind = "external")))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.kill().join()
+        runCurrent()
+
+        assertTrue(actions.killed.isEmpty())
+    }
+
+    @Test
+    fun kill_calls_the_hub_and_refetches() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        val readsBefore = actions.reads
+
+        vm.kill().join()
+        runCurrent()
+
+        assertEquals(listOf(ID), actions.killed)
+        assertTrue(actions.reads > readsBefore)
+    }
+
+    /** `friendly(t)` already maps this code; a kill refused this way reads as a desktop confirmation, not a generic error. */
+    @Test
+    fun a_confirm_required_refusal_reads_as_a_desktop_confirmation() = runTest {
+        val actions = FakeActions()
+        actions.killError = HubError.Tool("E_CONFIRM_REQUIRED", "confirm on the desktop")
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+
+        vm.kill().join()
+        runCurrent()
+
+        assertEquals("Needs a confirmation on the desktop", vm.state.value.error?.title)
+        assertFalse(vm.state.value.busy, "a failed call must still clear busy")
+    }
+
+    @Test
+    fun safe_kill_state_follows_the_row() = runTest {
+        val fleet = FakeFleetState(listOf(row().copy(safeKillState = "ready")))
+        val vm = SessionViewModel(ID, fleet, FakeActions(), backgroundScope)
+        runCurrent()
+
+        assertEquals("ready", vm.state.value.safeKillState)
+    }
+
+    @Test
+    fun safe_kill_state_is_null_when_the_row_has_none() = runTest {
+        val vm = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope)
+        runCurrent()
+
+        assertNull(vm.state.value.safeKillState)
+    }
+
+    /** Every management action is refused, exactly like `send`, while the hub is unreachable. */
+    @Test
+    fun management_actions_are_refused_while_offline() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        fleet.status.value = ConnectionStatus.Offline("not connected")
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.restart().join()
+        vm.safeKill().join()
+        vm.kill().join()
+        vm.setTags(listOf("x")).join()
+        vm.rename("y").join()
+        runCurrent()
+
+        assertTrue(actions.restarted.isEmpty())
+        assertTrue(actions.safeKilled.isEmpty())
+        assertTrue(actions.killed.isEmpty())
+        assertTrue(actions.tags.isEmpty())
+        assertTrue(actions.renamed.isEmpty())
+    }
+
+    /** A second management call while one is already in flight is ignored — the same single-flight rule as `send`/`answer`. */
+    @Test
+    fun a_second_management_call_while_one_is_in_flight_is_ignored() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+
+        val gate = CompletableDeferred<Unit>()
+        actions.readGate = gate
+        val first = vm.restart()
+        runCurrent()
+        assertTrue(vm.state.value.busy, "restart's own refetch is what keeps busy set")
+
+        vm.rename("second").join()
+        runCurrent()
+        assertTrue(actions.renamed.isEmpty(), "a second management call must not run while the first is still busy")
+
+        gate.complete(Unit)
+        first.join()
+        runCurrent()
+        assertFalse(vm.state.value.busy)
     }
 }

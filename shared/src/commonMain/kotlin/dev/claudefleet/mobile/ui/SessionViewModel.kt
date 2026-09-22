@@ -119,7 +119,49 @@ data class SessionUiState(
      * is hidden.
      */
     val terminal: String? = null,
+    /**
+     * True while a management call — [SessionViewModel.restart],
+     * [SessionViewModel.safeKill], [SessionViewModel.kill],
+     * [SessionViewModel.setTags] or [SessionViewModel.rename] — and the
+     * refetch that follows it are outstanding. The overflow menu's items go
+     * dark for the whole span, the same way [sending]/[answering] darken the
+     * composer and the card, so a second tap cannot start a second call
+     * before the first one's own refetch has even landed.
+     */
+    val busy: Boolean = false,
 ) {
+    /**
+     * Whether the ⋮ menu is offered at all: a readonly credential may not
+     * call any of these tools, a session that has left the fleet has nothing
+     * to manage, and the hub refuses every one of these calls against the
+     * controller (`E_INVALID_STATE`) — so the menu simply is not drawn there
+     * rather than drawn and refused. [canRestart] and [canKill] are further
+     * narrowings of this, never a looser rule: a screen this is false on
+     * offers no management action at all.
+     */
+    val canManage: Boolean
+        get() = !readOnly && session != null && !session.isController
+
+    /** Restart carries no narrowing beyond [canManage] — see [BlockedCard.offerRestart] for when it is worth showing. */
+    val canRestart: Boolean
+        get() = canManage
+
+    /**
+     * [canManage], narrowed once more: the hub refuses `kill_session`
+     * against an `external` session with `E_INVALID_STATE`, so *Kill now* is
+     * not offered there even though Restart and Tags still are.
+     */
+    val canKill: Boolean
+        get() = canManage && session?.kind != "external"
+
+    /**
+     * The hub's own progress through a `safe_kill_session` retirement — the
+     * row's `safe_kill_state` — or null while none is armed. Drawn as a
+     * `SuggestionChip` in the status strip for as long as it is non-null.
+     */
+    val safeKillState: String?
+        get() = session?.safeKillState
+
     /**
      * Whether the send button does anything. Blank drafts are not prompts, a
      * second prompt while the first is in flight would race the hub's turn
@@ -227,6 +269,8 @@ class SessionViewModel(
          */
         val terminalShown: Boolean = false,
         val terminal: String? = null,
+        /** See [SessionUiState.busy]. */
+        val busy: Boolean = false,
     )
 
     private val local = MutableStateFlow(Local())
@@ -555,6 +599,71 @@ class SessionViewModel(
     }
 
     /**
+     * Kill and recreate the tmux session in place — for a wedged REPL. Also
+     * what the blocked card's own Restart button calls (see
+     * [SessionUiState.canRestart]) when it draws one at all.
+     */
+    fun restart(): Job = runManaged(::canRestartNow) { actions.restart(sessionId) }
+
+    /** Ask the session to persist its work, then arm deletion once it is clean. */
+    fun safeKill(): Job = runManaged(::canManageNow) { actions.safeKill(sessionId) }
+
+    /**
+     * Kill the session now, without waiting for it to persist anything. The
+     * hub refuses this against the controller or an `external` session with
+     * `E_INVALID_STATE` — [SessionUiState.canKill] is what keeps the menu
+     * from offering a tap that would only come back refused.
+     */
+    fun kill(): Job = runManaged(::canKillNow) { actions.kill(sessionId) }
+
+    /** Replace the session's tags with [tags]. */
+    fun setTags(tags: List<String>): Job = runManaged(::canManageNow) { actions.setTags(sessionId, tags) }
+
+    /** Set the session's friendly display name to [name]. */
+    fun rename(name: String): Job = runManaged(::canManageNow) { actions.rename(sessionId, name) }
+
+    /**
+     * One management call — [restart], [safeKill], [kill], [setTags] or
+     * [rename] — gated and bracketed the same way for all five: [guard] is
+     * this action's own live-source rule ([canRestartNow] for restart,
+     * [canKillNow] for kill, [canManageNow] for the rest — read from the live
+     * sources rather than from `state`, exactly as [canSendNow]/[canAnswerNow]
+     * are, since `state` trails its inputs by a dispatch), [connected] is the
+     * same hub-reachability gate [send]/[answer] use, and [Local.busy] is
+     * this family's own single-flight guard — a second call arriving while
+     * the first's own refetch is still outstanding is a no-op, not a second
+     * `busy` span layered onto the first.
+     *
+     * [SessionUiState.busy] stays true across the follow-up [requestRead]
+     * too, not just the call itself — a `finally` covers both the success and
+     * the caught-failure path — so the menu cannot be tapped again before the
+     * row it would act on next has actually been refreshed.
+     */
+    private fun runManaged(guard: () -> Boolean, call: suspend () -> Unit): Job = scope.launch {
+        if (!guard() || !connected() || local.value.busy) return@launch
+        local.update { it.copy(busy = true, error = null) }
+        try {
+            call()
+            requestRead(first = false)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(error = friendly(t)) }
+        } finally {
+            local.update { it.copy(busy = false) }
+        }
+    }
+
+    /** [SessionUiState.canManage] read from the live sources — see [runManaged]. */
+    private fun canManageNow(): Boolean = !readOnly && row()?.isController == false
+
+    /** [SessionUiState.canRestart] read from the live sources — see [runManaged]. */
+    private fun canRestartNow(): Boolean = canManageNow()
+
+    /** [SessionUiState.canKill] read from the live sources — see [runManaged]. */
+    private fun canKillNow(): Boolean = canManageNow() && row()?.kind != "external"
+
+    /**
      * [SessionUiState.canAnswer] read from the live sources rather than from
      * `state` — which is a `stateIn` of a `combine` and therefore trails its
      * inputs by a dispatch. A tap must not depend on that. The card's own
@@ -733,6 +842,7 @@ class SessionViewModel(
         answering = l.answering,
         stillWaiting = l.stillWaiting,
         terminal = l.terminal,
+        busy = l.busy,
     )
 }
 

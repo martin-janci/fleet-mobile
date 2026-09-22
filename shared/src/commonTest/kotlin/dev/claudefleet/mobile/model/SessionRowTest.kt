@@ -62,6 +62,15 @@ class SessionRowTest {
     }
 
     @Test
+    fun safe_kill_state_parses_and_is_null_when_absent() {
+        val row = json.decodeFromString(SessionRow.serializer(), """{"id":1,"safe_kill_state":"waiting_for_clean"}""")
+        assertEquals("waiting_for_clean", row.safeKillState)
+
+        val bare = json.decodeFromString(SessionRow.serializer(), """{"id":9}""")
+        assertNull(bare.safeKillState)
+    }
+
+    @Test
     fun pending_input_parses_and_is_null_when_absent() {
         val row = json.decodeFromString(
             SessionRow.serializer(),

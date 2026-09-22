@@ -188,6 +188,20 @@ object FleetIcons {
         }.build()
     }
 
+    /** Three filled dots, stacked vertically: the overflow ("more") glyph. */
+    val MoreVert: ImageVector by lazy {
+        ImageVector.Builder("MoreVert", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.Black), pathFillType = PathFillType.EvenOdd) {
+                for (cy in floatArrayOf(5f, 12f, 19f)) {
+                    moveTo(14f, cy)
+                    arcTo(2f, 2f, 0f, isMoreThanHalf = true, isPositiveArc = true, x1 = 10f, y1 = cy)
+                    arcTo(2f, 2f, 0f, isMoreThanHalf = true, isPositiveArc = true, x1 = 14f, y1 = cy)
+                    close()
+                }
+            }
+        }.build()
+    }
+
     /**
      * Two stroked overlapping rounded rectangles: the copy-to-clipboard
      * glyph. Both paths are stroke-only, like [ArrowBack]/[Check]/[Close] --

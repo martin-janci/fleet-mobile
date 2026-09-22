@@ -53,6 +53,8 @@ data class SessionRow(
     @SerialName("usage_model") val usageModel: String? = null,
     @SerialName("parent_session_id") val parentSessionId: Long? = null,
     val branch: String? = null,
+    /** The hub's own progress through a `safe_kill_session` retirement, or null when none is armed. */
+    @SerialName("safe_kill_state") val safeKillState: String? = null,
 ) {
     val isBackground: Boolean get() = tmuxName.startsWith("bg:")
 

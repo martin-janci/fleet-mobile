@@ -8,6 +8,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,16 +24,23 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
+import androidx.compose.material3.InputChipDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
@@ -66,7 +74,9 @@ import dev.claudefleet.mobile.ui.components.StatusChip
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.data.ConnectionStatus
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * One session: what has been said, newest at the bottom, and a box to answer.
@@ -95,6 +105,11 @@ fun SessionScreen(
     onAnswer: (Answer) -> Unit,
     onShowTerminal: () -> Unit,
     onHideTerminal: () -> Unit,
+    onRestart: () -> Unit,
+    onSafeKill: () -> Unit,
+    onKill: () -> Unit,
+    onSetTags: (List<String>) -> Unit,
+    onRename: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val turns = state.conversation.turns
@@ -188,6 +203,11 @@ fun SessionScreen(
             turnCount = turns.size,
             truncated = state.conversation.truncated,
             scope = scope,
+            onRestart = onRestart,
+            onSafeKill = onSafeKill,
+            onKill = onKill,
+            onSetTags = onSetTags,
+            onRename = onRename,
         )
         ConnectionBanner(status, state.hubReachable)
         ErrorBanner(state.error, onDismiss = onDismissError)
@@ -238,9 +258,10 @@ fun SessionScreen(
                 onAnswer = onAnswer,
                 onShowTerminal = onShowTerminal,
                 onHideTerminal = onHideTerminal,
-                // Task 4 owns the restart; until it lands the button is not
-                // drawn at all rather than drawn dead.
-                onRestart = null,
+                // A stuck card offers Restart only when there is a session
+                // this device may manage at all — the same rule the ⋮ menu's
+                // own Restart item uses (see [SessionOverflowMenu]).
+                onRestart = if (state.canManage) onRestart else null,
             )
         }
 
@@ -269,6 +290,11 @@ private fun SessionBar(
     turnCount: Int,
     truncated: Boolean,
     scope: CoroutineScope,
+    onRestart: () -> Unit,
+    onSafeKill: () -> Unit,
+    onKill: () -> Unit,
+    onSetTags: (List<String>) -> Unit,
+    onRename: (String) -> Unit,
 ) {
     val busy = state.loading || state.refreshing
     val angle = refreshAngle(busy)
@@ -310,6 +336,13 @@ private fun SessionBar(
                 claudeStatus = state.session?.claudeStatus,
                 stuckKind = state.session?.stuckKind,
             )
+            // A `safe_kill_session` retirement in progress — shown for as
+            // long as the row carries one, independent of which screen armed
+            // it (the desktop can start one too).
+            state.safeKillState?.let { retiring ->
+                Spacer(Modifier.width(4.dp))
+                SuggestionChip(onClick = {}, label = { Text(retiring) })
+            }
             Spacer(Modifier.width(4.dp))
             IconButton(
                 onClick = { prevTurn?.let { target -> scope.launch { listState.animateScrollToItem(target) } } },
@@ -342,9 +375,240 @@ private fun SessionBar(
                     modifier = Modifier.graphicsLayer { rotationZ = angle },
                 )
             }
+            // Hidden outright rather than drawn dark: a readonly credential,
+            // a session gone from the fleet, or the controller itself (the
+            // hub refuses every one of these calls against it with
+            // `E_INVALID_STATE`) has no management action to offer at all —
+            // see [SessionUiState.canManage].
+            if (state.canManage) {
+                SessionOverflowMenu(
+                    state = state,
+                    onRestart = onRestart,
+                    onSafeKill = onSafeKill,
+                    onKill = onKill,
+                    onSetTags = onSetTags,
+                    onRename = onRename,
+                )
+            }
         },
     )
 }
+
+/**
+ * The session's management actions, behind a ⋮ icon: rename, edit tags,
+ * restart, retire safely (`safe_kill_session`), and kill now.
+ *
+ * Only drawn when [SessionUiState.canManage] — the caller's job, not this
+ * composable's, so that "does this session have a menu at all" stays decided
+ * in one place. Within the menu, *Kill now* is further narrowed by
+ * [SessionUiState.canKill] (hidden for an `external` session, which the hub
+ * refuses with `E_INVALID_STATE`); every item is disabled rather than hidden
+ * while [SessionUiState.busy] or the hub is unreachable, the same rule Send
+ * and the card's own chips already draw by.
+ */
+@Composable
+private fun SessionOverflowMenu(
+    state: SessionUiState,
+    onRestart: () -> Unit,
+    onSafeKill: () -> Unit,
+    onKill: () -> Unit,
+    onSetTags: (List<String>) -> Unit,
+    onRename: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var showRename by remember { mutableStateOf(false) }
+    var showTags by remember { mutableStateOf(false) }
+    var showRestartConfirm by remember { mutableStateOf(false) }
+    var showKillConfirm by remember { mutableStateOf(false) }
+    val actionable = !state.busy && state.connected
+
+    IconButton(onClick = { expanded = true }) {
+        Icon(FleetIcons.MoreVert, contentDescription = "Session actions")
+    }
+    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenuItem(
+            text = { Text("Rename…") },
+            enabled = actionable,
+            onClick = { expanded = false; showRename = true },
+        )
+        DropdownMenuItem(
+            text = { Text("Tags…") },
+            enabled = actionable,
+            onClick = { expanded = false; showTags = true },
+        )
+        if (state.canRestart) {
+            DropdownMenuItem(
+                text = { Text("Restart") },
+                enabled = actionable,
+                onClick = { expanded = false; showRestartConfirm = true },
+            )
+        }
+        DropdownMenuItem(
+            text = { Text("Retire safely") },
+            enabled = actionable,
+            onClick = { expanded = false; onSafeKill() },
+        )
+        if (state.canKill) {
+            DropdownMenuItem(
+                text = { Text("Kill now", color = MaterialTheme.colorScheme.error) },
+                enabled = actionable,
+                onClick = { expanded = false; showKillConfirm = true },
+            )
+        }
+    }
+
+    if (showRename) {
+        RenameDialog(
+            initial = state.session?.friendlyName.orEmpty(),
+            onConfirm = { name -> showRename = false; onRename(name) },
+            onDismiss = { showRename = false },
+        )
+    }
+    if (showTags) {
+        TagsDialog(
+            tags = state.session?.tags.orEmpty(),
+            onConfirm = { tags -> showTags = false; onSetTags(tags) },
+            onDismiss = { showTags = false },
+        )
+    }
+    if (showRestartConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRestartConfirm = false },
+            title = { Text("Restart this session?") },
+            text = { Text("This kills and recreates the tmux session in place — for a wedged REPL.") },
+            confirmButton = {
+                TextButton(onClick = { showRestartConfirm = false; onRestart() }) { Text("Restart") }
+            },
+            dismissButton = { TextButton(onClick = { showRestartConfirm = false }) { Text("Cancel") } },
+        )
+    }
+    if (showKillConfirm) {
+        KillConfirmDialog(
+            onConfirm = { showKillConfirm = false; onKill() },
+            onDismiss = { showKillConfirm = false },
+        )
+    }
+}
+
+@Composable
+private fun RenameDialog(initial: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename session") },
+        text = {
+            TextField(value = text, onValueChange = { text = it }, singleLine = true)
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) { Text("Rename") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * The tag editor: a [FlowRow] of removable [InputChip]s plus a field to add
+ * one more. Local until Save, which is the point it becomes one `setTags`
+ * call replacing the whole list — the hub has no per-tag add/remove of its
+ * own.
+ */
+@Composable
+private fun TagsDialog(tags: List<String>, onConfirm: (List<String>) -> Unit, onDismiss: () -> Unit) {
+    var current by remember { mutableStateOf(tags) }
+    var draft by remember { mutableStateOf("") }
+    fun addDraft() {
+        val t = draft.trim()
+        if (t.isNotEmpty() && t !in current) current = current + t
+        draft = ""
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Tags") },
+        text = {
+            Column {
+                if (current.isNotEmpty()) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        for (tag in current) {
+                            InputChip(
+                                selected = false,
+                                // Tapping the chip removes it — there is no
+                                // "selected" state for a tag, so the whole
+                                // chip is the remove affordance, not just its
+                                // trailing icon.
+                                onClick = { current = current - tag },
+                                label = { Text(tag) },
+                                trailingIcon = {
+                                    Icon(
+                                        FleetIcons.Close,
+                                        contentDescription = "Remove $tag",
+                                        modifier = Modifier.size(InputChipDefaults.IconSize),
+                                    )
+                                },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        singleLine = true,
+                        placeholder = { Text("Add a tag") },
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { addDraft() }),
+                    )
+                    TextButton(onClick = ::addDraft, enabled = draft.isNotBlank()) { Text("Add") }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(current) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * *Kill now*'s own confirmation: there is no "hold to confirm" gesture worth
+ * building for one button, so the desktop's press-and-hold becomes a
+ * delayed-enable instead — the confirm button stays disabled for
+ * [KILL_CONFIRM_DELAY] after the dialog opens, which is long enough that a
+ * dialog dismissed by a stray tap cannot also kill the session.
+ */
+@Composable
+private fun KillConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    var enabled by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(KILL_CONFIRM_DELAY)
+        enabled = true
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Kill this session now?") },
+        text = {
+            Text(
+                "This kills it immediately, without waiting for it to persist anything. " +
+                    "This cannot be undone.",
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm, enabled = enabled) {
+                Text("Kill now", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * How long *Kill now*'s confirm button stays disabled after the dialog opens
+ * — the phone's stand-in for the desktop's press-and-hold, per the brief:
+ * "hold to confirm" on a phone is a delayed enable, not a gesture.
+ */
+private val KILL_CONFIRM_DELAY = 800.milliseconds
 
 /**
  * The refresh icon's angle: spinning while [busy], and a flat `0f` otherwise.
