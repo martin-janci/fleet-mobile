@@ -19,6 +19,7 @@ import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.WaitResult
 import dev.claudefleet.mobile.net.HUB_VERSION_KEYS
 import dev.claudefleet.mobile.net.HubError
+import dev.claudefleet.mobile.store.FakePrefs
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -535,6 +536,131 @@ class SessionViewModelTest {
         vm.sendCommand("/compact").join()
 
         assertTrue(actions.sentPrompts.isEmpty())
+    }
+
+    // ---- sendQuick: task 6, the chip row above the composer ----
+    //
+    // Reuses `sendCommand`'s own body -- see `SessionViewModel.sendQuick` --
+    // so these prove the delegation, not a second copy of the guard.
+
+    @Test
+    fun sendQuick_delivers_the_given_text_without_touching_the_draft() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.onDraftChange("still typing")
+
+        vm.sendQuick("go on").join()
+        runCurrent()
+
+        assertEquals(listOf("go on"), actions.sentPrompts)
+        assertEquals("still typing", vm.state.value.draft, "a chip tap must not clobber what is being composed")
+        assertEquals(1, actions.reads, "a delivered chip should pull the reply in, exactly like send()")
+    }
+
+    @Test
+    fun sendQuick_does_nothing_for_a_readonly_credential() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, canSendPrompts = false)
+
+        vm.sendQuick("go on").join()
+
+        assertTrue(actions.sentPrompts.isEmpty())
+    }
+
+    @Test
+    fun sendQuick_is_disabled_while_something_else_is_already_sending() = runTest {
+        val actions = FakeActions()
+        val gate = CompletableDeferred<Unit>()
+        actions.sendGate = gate
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.onDraftChange("ship it")
+        val sendJob = vm.send()
+        runCurrent()
+        assertTrue(vm.state.value.sending)
+
+        vm.sendQuick("go on").join()
+
+        assertEquals(emptyList(), actions.sentPrompts.filter { it == "go on" }, "a chip must not race an in-flight prompt")
+
+        gate.complete(Unit)
+        sendJob.join()
+    }
+
+    @Test
+    fun sendQuick_does_nothing_while_the_hub_is_unreachable() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        fleet.status.value = ConnectionStatus.Offline("not connected")
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.sendQuick("go on").join()
+
+        assertTrue(actions.sentPrompts.isEmpty())
+    }
+
+    // ---- history: task 6 -- recorded from the one place a prompt is delivered ----
+
+    @Test
+    fun a_prompt_sent_through_send_is_remembered_in_the_history() = runTest {
+        val actions = FakeActions()
+        val quickReplies = QuickReplies(FakePrefs())
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, quickReplies = quickReplies)
+        vm.onDraftChange("ship it")
+
+        vm.send().join()
+        runCurrent()
+
+        assertEquals(listOf("ship it"), quickReplies.history())
+    }
+
+    @Test
+    fun sendCommand_and_sendQuick_are_remembered_too_most_recent_first() = runTest {
+        val actions = FakeActions()
+        val quickReplies = QuickReplies(FakePrefs())
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, quickReplies = quickReplies)
+
+        vm.sendCommand("/compact").join()
+        runCurrent()
+        vm.sendQuick("go on").join()
+        runCurrent()
+
+        assertEquals(listOf("go on", "/compact"), quickReplies.history())
+    }
+
+    /** A refused prompt was never delivered, so it leaves no trace in the history either. */
+    @Test
+    fun a_send_that_fails_is_not_remembered() = runTest {
+        val actions = FakeActions()
+        actions.sendFails = HubError.Tool("E_BUSY", "the session is mid-turn")
+        val quickReplies = QuickReplies(FakePrefs())
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, quickReplies = quickReplies)
+        vm.onDraftChange("ship it")
+
+        vm.send().join()
+        runCurrent()
+
+        assertTrue(quickReplies.history().isEmpty())
+    }
+
+    /**
+     * A card's own answer -- a numbered option, Enter/Escape/Interrupt, or the
+     * trust prompt's typed y/n -- never goes through `deliver`, so none of it
+     * is a "composed" prompt and none of it belongs in the draft history.
+     */
+    @Test
+    fun answering_a_blocked_card_does_not_touch_the_history() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val quickReplies = QuickReplies(FakePrefs())
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope, quickReplies = quickReplies)
+        vm.load().join()
+        runCurrent()
+
+        vm.answer(Answer.Option(1, "Yes")).join()
+        runCurrent()
+
+        assertTrue(quickReplies.history().isEmpty(), "an answer from the card is not a prompt from the composer")
     }
 
     // ---- Send is disabled while the hub is unreachable ----

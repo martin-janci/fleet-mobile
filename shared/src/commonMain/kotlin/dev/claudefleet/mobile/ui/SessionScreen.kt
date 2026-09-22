@@ -5,25 +5,34 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
@@ -114,6 +123,17 @@ fun SessionScreen(
     onSetTags: (List<String>) -> Unit,
     onRename: (String) -> Unit,
     onSendCommand: (String) -> Unit,
+    /** The chip row's own content — see `ui/QuickReplies.kt`. */
+    quickReplies: List<String>,
+    onSendQuick: (String) -> Unit,
+    onAddQuickReply: (String) -> Unit,
+    onRemoveQuickReply: (String) -> Unit,
+    /**
+     * Pulled fresh each time the field's leading icon opens the history
+     * sheet — [dev.claudefleet.mobile.ui.QuickReplies.history] is a plain
+     * read, not a flow, so there is nothing to collect here.
+     */
+    onOpenHistory: () -> List<String>,
     modifier: Modifier = Modifier,
 ) {
     val turns = state.conversation.turns
@@ -271,7 +291,27 @@ fun SessionScreen(
             )
         }
 
-        PromptBox(state = state, onDraftChange = onDraftChange, onSend = onSend)
+        // Hidden outright, not merely dimmed, in the same two cases the card
+        // itself takes over the space for: while it is up (the answer goes
+        // there instead) and on a readonly device (no chip may offer a write
+        // it cannot make) — spec 1.1.
+        if (state.card == null && !state.readOnly) {
+            QuickRepliesRow(
+                chips = quickReplies,
+                draft = state.draft,
+                enabled = state.canSendQuick,
+                onSendQuick = onSendQuick,
+                onAdd = onAddQuickReply,
+                onRemove = onRemoveQuickReply,
+            )
+        }
+
+        PromptBox(
+            state = state,
+            onDraftChange = onDraftChange,
+            onSend = onSend,
+            onOpenHistory = onOpenHistory,
+        )
     }
 }
 
@@ -782,7 +822,13 @@ private fun TruncationNote() {
 }
 
 @Composable
-private fun PromptBox(state: SessionUiState, onDraftChange: (String) -> Unit, onSend: () -> Unit) {
+private fun PromptBox(
+    state: SessionUiState,
+    onDraftChange: (String) -> Unit,
+    onSend: () -> Unit,
+    onOpenHistory: () -> List<String>,
+) {
+    var showHistory by remember { mutableStateOf(false) }
     Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
         Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
             val why = when {
@@ -799,6 +845,17 @@ private fun PromptBox(state: SessionUiState, onDraftChange: (String) -> Unit, on
                     enabled = !state.sending && !state.readOnly,
                     placeholder = { Text("Message ${state.session?.displayName ?: "session"}…") },
                     shape = CircleShape,
+                    // The "swipe up on the field shows history" spec, realised
+                    // as a tap on the field's own leading icon rather than a
+                    // gesture: a `TextField` already owns vertical drag for
+                    // text selection and cursor placement, so a swipe on it is
+                    // not free real estate the way it would be on a plain
+                    // `Row`.
+                    leadingIcon = {
+                        IconButton(onClick = { showHistory = true }) {
+                            Icon(FleetIcons.History, contentDescription = "Draft history")
+                        }
+                    },
                     colors = TextFieldDefaults.colors(
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent,
@@ -818,6 +875,120 @@ private fun PromptBox(state: SessionUiState, onDraftChange: (String) -> Unit, on
             if (why != null) Text(why, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
         }
     }
+    if (showHistory) {
+        HistoryDialog(
+            entries = onOpenHistory(),
+            // Puts the picked entry in the draft; it is not sent — the
+            // person still taps Send (or edits it first), same as tapping a
+            // suggestion anywhere else in this screen never fires by itself.
+            onPick = { entry -> onDraftChange(entry); showHistory = false },
+            onDismiss = { showHistory = false },
+        )
+    }
+}
+
+/** What was actually sent, most recent first — picking one loads it into the draft, unsent. */
+@Composable
+private fun HistoryDialog(entries: List<String>, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Draft history") },
+        text = {
+            if (entries.isEmpty()) {
+                Text("Nothing sent yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Column(modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+                    for ((index, entry) in entries.withIndex()) {
+                        Text(
+                            text = entry,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth().clickable { onPick(entry) }.padding(vertical = 10.dp),
+                        )
+                        if (index != entries.lastIndex) HorizontalDivider()
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
+/**
+ * The chip row above the composer: a [LazyRow] of [SuggestionChip]s, one tap
+ * away from [onSendQuick], plus a trailing `+` chip that saves the current
+ * draft as a new one. Long-pressing an existing chip opens
+ * [EditQuickReplyDialog] rather than firing [onSendQuick] — see its own doc
+ * for how "edit" and "remove" share one dialog. Visibility (hidden while
+ * blocked or readonly) is the caller's decision, same as every other
+ * card-vs-composer choice on this screen — see `SessionScreen`'s own body.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QuickRepliesRow(
+    chips: List<String>,
+    draft: String,
+    enabled: Boolean,
+    onSendQuick: (String) -> Unit,
+    onAdd: (String) -> Unit,
+    onRemove: (String) -> Unit,
+) {
+    var editing by remember { mutableStateOf<String?>(null) }
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+    ) {
+        items(chips) { chip ->
+            Box(
+                modifier = Modifier.combinedClickable(
+                    onClick = { if (enabled) onSendQuick(chip) },
+                    onLongClick = { editing = chip },
+                ),
+            ) {
+                // `SuggestionChip`'s own `onClick` is not what fires here —
+                // the `combinedClickable` above it is, so a chip's tap and
+                // its long-press are the same gesture recognizer rather than
+                // two independent ones that could both claim the same touch.
+                SuggestionChip(onClick = {}, enabled = enabled, label = { Text(chip) })
+            }
+        }
+        item {
+            SuggestionChip(
+                onClick = { onAdd(draft) },
+                enabled = enabled && draft.isNotBlank(),
+                label = { Text("+") },
+            )
+        }
+    }
+    editing?.let { chip ->
+        EditQuickReplyDialog(
+            original = chip,
+            onSave = { edited -> onRemove(chip); onAdd(edited); editing = null },
+            onRemove = { onRemove(chip); editing = null },
+            onDismiss = { editing = null },
+        )
+    }
+}
+
+/**
+ * A chip's long-press dialog: edit its text (removes the old chip and adds
+ * the edited one — [dev.claudefleet.mobile.ui.QuickReplies] has no rename of
+ * its own) or remove it outright.
+ */
+@Composable
+private fun EditQuickReplyDialog(original: String, onSave: (String) -> Unit, onRemove: () -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf(original) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Quick reply") },
+        text = { TextField(value = text, onValueChange = { text = it }, singleLine = true) },
+        confirmButton = {
+            TextButton(onClick = { onSave(text) }, enabled = text.isNotBlank()) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onRemove) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+        },
+    )
 }
 
 /**

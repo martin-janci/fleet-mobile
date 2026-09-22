@@ -13,6 +13,7 @@ import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.appending
 import dev.claudefleet.mobile.model.tailMarker
 import dev.claudefleet.mobile.net.HubError
+import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -206,6 +207,17 @@ data class SessionUiState(
      */
     val canAnswer: Boolean
         get() = idle(sending, answering, busy) && !readOnly && connected && card != null
+
+    /**
+     * Whether a quick-reply chip does anything — [canSend] without the
+     * blank-draft term, since a chip's own text is never blank. The row
+     * itself is hidden outright rather than merely dimmed while [card] is up
+     * or [readOnly] (a device that may not send has no use for a chip that
+     * would only be refused) — that decision lives in `ui/SessionScreen.kt`,
+     * the same place [card] already decides whether to draw the row at all.
+     */
+    val canSendQuick: Boolean
+        get() = idle(sending, answering, busy) && !readOnly && connected && session != null
 }
 
 /**
@@ -253,6 +265,13 @@ internal fun idle(sending: Boolean, answering: Boolean, busy: Boolean): Boolean 
  *   in the hub's readonly allow-list (`READONLY_TOOLS` in `mcp/guard.rs`), so a
  *   readonly client would simply be refused — and the app's rule is that it only
  *   ever calls tools its token may use, rather than finding out from an error.
+ * @param quickReplies The chip row and the draft history — one instance per
+ *   [dev.claudefleet.mobile.AppContainer], not one per screen, so a chip added
+ *   on one session's screen is there the next time any session's screen opens
+ *   and the history is one list across the whole device rather than siloed
+ *   per session. Defaults to an instance over an in-memory, unread [Prefs] so
+ *   every existing caller in this file's own tests keeps compiling without
+ *   naming one; every real caller supplies the container's own instance.
  */
 class SessionViewModel(
     private val sessionId: Long,
@@ -261,6 +280,7 @@ class SessionViewModel(
     private val scope: CoroutineScope,
     canSendPrompts: Boolean = true,
     private val clock: () -> Long = { epochSeconds() },
+    val quickReplies: QuickReplies = QuickReplies(EphemeralPrefs),
 ) {
     /**
      * The screen state this class owns, as opposed to what the fleet owns.
@@ -659,11 +679,37 @@ class SessionViewModel(
         deliver(text, clearDraft = false)
     }
 
-    /** The guarded hub write both [send] and [sendCommand] make, and the refetch that follows it. */
+    /**
+     * Send one of the [quickReplies] chips — the row [SessionUiState.card]
+     * and [SessionUiState.readOnly] hide it for, drawn by `ui/SessionScreen.kt`.
+     * Identical to [sendCommand] in every guard and effect — reused rather
+     * than re-implemented, per the one-write-path rule [deliver] exists to
+     * keep — and kept as its own name only so a chip tap reads as its own
+     * intent in the call sites that fire it, not as a coincidental reuse of
+     * the status strip's `/compact` call.
+     */
+    fun sendQuick(text: String): Job = sendCommand(text)
+
+    /**
+     * The guarded hub write [send], [sendCommand] and [sendQuick] all make,
+     * and the refetch that follows it — the one write path, per the task-6
+     * ruling that added [sendQuick] rather than a second send.
+     *
+     * [QuickReplies.remember] is called here, once, rather than in each of
+     * the three callers: this is the one place a prompt from the composer (or
+     * a chip, or the status strip) is known to have actually been *accepted*
+     * by the hub — after [SessionActions.sendPrompt] returns and before
+     * anything here can still fail. A card's own [answer] never reaches this
+     * function (it calls [SessionActions.sendPrompt]/[SessionActions.sendKeys]
+     * directly), so neither a key nor a typed answer is ever recorded here —
+     * this is a history of what was composed, not of every prompt this screen
+     * ever sent.
+     */
     private suspend fun deliver(text: String, clearDraft: Boolean) {
         local.update { it.copy(sending = true, error = null) }
         try {
             actions.sendPrompt(sessionId, text)
+            quickReplies.remember(text)
             local.update { it.copy(sending = false, draft = if (clearDraft) "" else it.draft) }
             requestRead(first = false)
         } catch (e: CancellationException) {
@@ -995,3 +1041,16 @@ internal const val ANSWER_WAIT_SECONDS: Int = 30
 
 /** What `wait_for_session` answers when the turn actually moved. */
 internal const val WAIT_SATISFIED: String = "satisfied"
+
+/**
+ * Backs the default [SessionViewModel.quickReplies] for a caller that names
+ * no [QuickReplies] of its own. Every real caller does — see
+ * [dev.claudefleet.mobile.AppContainer.quickReplies] — so nothing written
+ * here is ever read back; it exists only so this file's own tests, and any
+ * other construction that has no opinion about quick replies, keep compiling
+ * without naming a [Prefs].
+ */
+private object EphemeralPrefs : Prefs {
+    override fun getStringList(key: String): List<String> = emptyList()
+    override fun putStringList(key: String, value: List<String>) = Unit
+}
