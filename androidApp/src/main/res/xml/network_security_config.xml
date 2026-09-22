@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Which destinations plain `http://` may reach.
+
+  The app already has a transport policy of its own — `permitsCleartext` in
+  `data/HubAddress.kt` — which allows plain http to this machine and to the LAN,
+  because a hub on a dev machine or a LAN has no certificate. That policy was
+  only ever half the answer: an app targeting SDK 28 or later gets a platform
+  policy that blocks cleartext by default, and it applies before any of the
+  app's code is consulted.
+
+  The emulator settled it. `NetworkSecurityPolicy.isCleartextTrafficPermitted`
+  answered **false** for `127.0.0.1`, which means pairing to a hub on the dev
+  machine over http — the documented way to set one up, and the one
+  `scripts/bootstrap.sh` builds — could not work on Android and never had.
+  `CleartextPolicyTest` is that experiment, and it now pins the answer.
+
+  So: loopback, and nothing else.
+
+  `10.0.2.2` is the emulator's alias for the host machine's loopback, which is
+  where a hub started by the bootstrap script is listening; without it the
+  emulator cannot reach a hub on the machine running it.
+
+  **What this deliberately does NOT do** is open cleartext to the LAN. A
+  network-security config can name hosts, not ranges, so the RFC 1918 space
+  `permitsCleartext` allows cannot be expressed here. A hub at
+  `http://192.168.1.10:8899` is still refused by the platform on Android, and
+  the app will report a connection failure rather than a reason — that is a
+  known, narrow gap, recorded in README.md, and the fix for an operator who
+  needs it is https or an entry below. It is not closed by turning cleartext on
+  for everything, which would put the bearer token on the open internet in the
+  clear on every other network the phone joins.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

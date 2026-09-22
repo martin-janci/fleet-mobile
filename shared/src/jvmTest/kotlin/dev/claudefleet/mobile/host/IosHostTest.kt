@@ -312,4 +312,52 @@ class TheIosHostIsUnbuiltTest {
             "the two fatal requirements must be named in the README, not only in code comments",
         )
     }
+    /**
+     * The UI-test target is in the project *and* in the shared scheme.
+     *
+     * Both halves, because either one alone is silent. A target no scheme
+     * references is never built, and `xcodebuild test -scheme iosApp` runs
+     * what the scheme's `Testables` list names — so dropping the
+     * `TestableReference` stops the deep-link test running without removing
+     * anything, and the job stays green while proving one fewer thing.
+     *
+     * This is the same failure the Android side already had: an intent-filter
+     * that a source scan could see and the platform never used. The scan is
+     * cheap, runs in every job, and does not replace the test — it replaces
+     * *nobody noticing the test stopped running*.
+     */
+    @Test
+    fun the_ui_test_target_is_built_and_run() {
+        val project = Repo.file("iosApp/iosApp.xcodeproj/project.pbxproj").readText()
+        val scheme = Repo.file("iosApp/iosApp.xcodeproj/xcshareddata/xcschemes/iosApp.xcscheme").readText()
+
+        assertTrue(
+            "com.apple.product-type.bundle.ui-testing" in project,
+            "a UI-testing target is the only thing that can drive the app from outside its process",
+        )
+        assertTrue("iosAppUITests" in project, "the target has to be in the project")
+        assertTrue(
+            """BlueprintName = "iosAppUITests"""" in scheme,
+            "a target the scheme does not name is never run by `xcodebuild test -scheme iosApp`",
+        )
+    }
+
+    /**
+     * And the result bundle is kept.
+     *
+     * `PairLinkUITests` attaches the app's accessibility tree, and attachments
+     * live in the `.xcresult` rather than in the log. Nobody working on this
+     * repository has a Mac, so that bundle is the only way to see how Compose
+     * surfaces its text to XCUITest — and without it, a failure cannot
+     * distinguish "iOS did not deliver the URL" from "it did, and the query
+     * looked in the wrong place".
+     */
+    @Test
+    fun the_ios_result_bundle_is_uploaded() {
+        val ci = Repo.file(".github/workflows/ci.yml").readText()
+
+        assertTrue("-resultBundlePath" in ci, "xcodebuild must be told to write a result bundle")
+        assertTrue("ios-xcresult" in ci, "and it must be uploaded, or the attachments are lost")
+    }
+
 }

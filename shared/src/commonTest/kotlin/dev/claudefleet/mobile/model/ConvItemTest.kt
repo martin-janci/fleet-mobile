@@ -7,12 +7,24 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /**
- * The hub's `ConvItem` enum has two variants today. The day it grows a third,
- * every phone already in a pocket must degrade to showing "something I don't
- * understand" — not throw on the conversation screen.
+ * The hub's `ConvItem` enum has **seven** variants, and this app models all of
+ * them plus a fallback.
  *
- * That is the same promise `ignoreUnknownKeys` makes for a new *field*; these
- * tests make it hold for a new *variant* too.
+ * It modelled two for a while, and the cost of that is the reason these tests
+ * exist in this shape. `crates/fleet-core/src/service/transcript.rs` grew
+ * `subagent`, `compact`, `command` and `interrupt`, and then on 2026-09-20
+ * `notification` — a change (`74c82b3`, "parse task notifications instead of
+ * printing their XML") that improved the desktop and quietly made the phone
+ * worse: before it, a task notification arrived as a `text` item holding raw
+ * XML, which was ugly and readable; after it, it arrived tagged and the phone
+ * drew "(unsupported item: notification)". Content that had been visible
+ * stopped being visible, nothing failed, and no test on either side could see
+ * it, because each repo was internally consistent.
+ *
+ * So the fixtures below are the hub's own JSON, field names and all. A shape
+ * change upstream fails here rather than turning into a placeholder on a
+ * screen. The fallback still has its own test: the eighth variant, whenever it
+ * comes, must degrade rather than throw.
  */
 class ConvItemTest {
 
@@ -40,6 +52,136 @@ class ConvItemTest {
         val item = parsed.turns.single().items.single()
         assertIs<ConvItem.Unsupported>(item)
         assertEquals("thinking", item.kind)
+    }
+
+
+    // ---- the five kinds the hub grew, in the hub's own wire shapes ----
+
+    private fun itemOf(itemJson: String): ConvItem =
+        json.decodeFromString(Conversation.serializer(), """{"turns":[{"items":[$itemJson]}]}""")
+            .turns.single().items.single()
+
+    /**
+     * A `Task`/`Agent` call. This fleet runs subagents constantly, so these are
+     * among the most common items on the screen rather than an edge case.
+     */
+    @Test
+    fun a_subagent_call_is_parsed_with_what_it_was_asked_and_what_it_answered() {
+        val item = itemOf(
+            """{"kind":"subagent","id":"tu_1","name":"Task","agent_type":"general-purpose",
+                "description":"Find every caller","result":"Four call sites.",
+                "error":false,"at":"t1","ended_at":"t2","done":true}""",
+        )
+
+        assertIs<ConvItem.Subagent>(item)
+        assertEquals("general-purpose", item.agentType)
+        assertEquals("Find every caller", item.description)
+        assertEquals("Four call sites.", item.result)
+        assertEquals("Find every caller", item.label, "the label says what it was asked to do")
+    }
+
+    /** A subagent still in flight, and one that failed: both have to look it. */
+    @Test
+    fun a_subagent_reports_running_and_failed_states() {
+        val running = itemOf("""{"kind":"subagent","name":"Task","done":false}""")
+        assertIs<ConvItem.Subagent>(running)
+        assertEquals(false, running.done)
+
+        val failed = itemOf("""{"kind":"subagent","name":"Task","error":true,"done":true}""")
+        assertIs<ConvItem.Subagent>(failed)
+        assertTrue(failed.error)
+    }
+
+    /**
+     * A task notification: the one whose absence was a regression.
+     *
+     * `summary` is what the hub puts the readable sentence in, so that is what
+     * the screen shows; the other fields are kept because a notification with
+     * no summary still has to say something.
+     */
+    @Test
+    fun a_task_notification_is_parsed_and_has_something_to_show() {
+        val item = itemOf(
+            """{"kind":"notification","task_id":"b12","tool_use_id":"tu_9","status":"completed",
+                "summary":"Background command finished","result":"exit 0",
+                "output_file":"/tmp/out","event":"task-notification","at":"t1"}""",
+        )
+
+        assertIs<ConvItem.Notification>(item)
+        assertEquals("completed", item.status)
+        assertEquals("Background command finished", item.label)
+    }
+
+    /** And one with no summary still says something rather than nothing. */
+    @Test
+    fun a_notification_without_a_summary_falls_back_through_its_other_fields() {
+        assertEquals("exit 0", itemOf("""{"kind":"notification","result":"exit 0"}""").label)
+        assertEquals("task-notification", itemOf("""{"kind":"notification","event":"task-notification"}""").label)
+        assertEquals("task notification", itemOf("""{"kind":"notification"}""").label, "never blank")
+    }
+
+    @Test
+    fun a_compaction_is_parsed_and_says_so_even_with_no_summary() {
+        val withSummary = itemOf(
+            """{"kind":"compact","trigger":"auto","pre_tokens":183000,"summary":"Earlier work on the parser."}""",
+        )
+        assertIs<ConvItem.Compact>(withSummary)
+        assertEquals(183_000L, withSummary.preTokens)
+        assertEquals("Earlier work on the parser.", withSummary.label)
+
+        assertEquals("Context compacted", itemOf("""{"kind":"compact","trigger":"manual"}""").label)
+    }
+
+    @Test
+    fun a_slash_command_is_parsed_with_its_arguments_and_output() {
+        val item = itemOf("""{"kind":"command","name":"review","args":"--fast","output":"no findings"}""")
+
+        assertIs<ConvItem.Command>(item)
+        assertEquals("no findings", item.output)
+        assertEquals("/review --fast", item.label)
+        assertEquals("/compact", itemOf("""{"kind":"command","name":"compact"}""").label, "no args, no trailing space")
+    }
+
+    /** An interrupt says *where* it landed, which is the useful half. */
+    @Test
+    fun an_interrupt_distinguishes_one_during_a_tool_call() {
+        val duringTool = itemOf("""{"kind":"interrupt","during_tool":true}""")
+        assertIs<ConvItem.Interrupt>(duringTool)
+        assertEquals("Interrupted during a tool call", duringTool.label)
+
+        assertEquals("Interrupted", itemOf("""{"kind":"interrupt","during_tool":false}""").label)
+    }
+
+    /**
+     * Every kind the hub emits today, parsed as itself.
+     *
+     * The list is the point: it is this app's copy of
+     * `transcript.rs`'s `ConvItem`, and the thing that went wrong before was
+     * that the two drifted with nothing comparing them. A kind added upstream
+     * still degrades safely — the test below this one — but it will show a
+     * placeholder until it is added here.
+     */
+    @Test
+    fun every_kind_the_hub_emits_today_is_modelled() {
+        val known = mapOf(
+            "text" to """{"kind":"text","text":"x"}""",
+            "tool" to """{"kind":"tool","summary":"Read(a)"}""",
+            "subagent" to """{"kind":"subagent","name":"Task"}""",
+            "compact" to """{"kind":"compact"}""",
+            "command" to """{"kind":"command","name":"c"}""",
+            "notification" to """{"kind":"notification"}""",
+            "interrupt" to """{"kind":"interrupt"}""",
+        )
+
+        val placeholders = known.filterValues { itemOf(it) is ConvItem.Unsupported }.keys
+        assertEquals(
+            emptySet(),
+            placeholders,
+            "these kinds come from the hub and would draw as '(unsupported item: …)'",
+        )
+        for ((kind, payload) in known) {
+            assertTrue(itemOf(payload).label.isNotBlank(), "$kind must have something to draw")
+        }
     }
 
     /** A new variant among known ones must not take the known ones down with it. */
@@ -150,11 +292,11 @@ class ConvItemTest {
     fun every_new_kind_has_a_sensible_label() {
         assertEquals("find it", ConvItem.Subagent(name = "Task", description = "find it").label)
         assertEquals("Task", ConvItem.Subagent(name = "Task", description = null).label)
-        assertEquals("Compacted", ConvItem.Compact().label)
+        assertEquals("Context compacted", ConvItem.Compact().label)
         assertEquals("/compact", ConvItem.Command(name = "compact").label)
         assertEquals("agent finished", ConvItem.Notification(summary = "agent finished", status = "completed").label)
         assertEquals("completed", ConvItem.Notification(summary = null, status = "completed").label)
-        assertEquals("notification", ConvItem.Notification().label)
+        assertEquals("task notification", ConvItem.Notification().label)
         assertEquals("Interrupted", ConvItem.Interrupt().label)
     }
 

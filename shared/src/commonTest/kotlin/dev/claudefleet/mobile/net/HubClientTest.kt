@@ -88,6 +88,80 @@ private fun JsonObject.args(): JsonObject = this["params"]!!.jsonObject["argumen
 
 class HubClientTest {
 
+
+    /**
+     * `"isError": false` is a success, and a spec-compliant server sends it on
+     * every call.
+     *
+     * The MCP result carries `isError` as a *flag*, so the shape that says
+     * "this went fine" is `false`, not absent. Testing only the absent case and
+     * the `true` case leaves the most common successful reply in the world
+     * untested — and reading "the key is present" as "the call failed" turns
+     * every success into a `HubError.Tool` with no code, on every screen at
+     * once.
+     *
+     * Found by mutation: no existing test sent the flag set to false.
+     */
+    @Test
+    fun a_result_that_says_isError_false_is_a_success() = runTest {
+        val rpc = """{"jsonrpc":"2.0","id":1,"result":{""" +
+            """"content":[{"type":"text","text":"{\"n\":7}"}],"isError":false}}"""
+        val (hub, _) = client { sse(rpc) to HttpStatusCode.OK }
+
+        val n = hub.call("fleet_health", JsonObject(emptyMap())) {
+            it.jsonObject["n"]!!.jsonPrimitive.content.toInt()
+        }
+
+        assertEquals(7, n, "isError:false is the ordinary successful reply, not a failure")
+    }
+
+    /**
+     * And a flag that is not a boolean is not a failure either.
+     *
+     * `asBooleanOrNull` is strict on purpose: only the literal `true` means
+     * the call failed. A string, a number or a null in that slot is a reply
+     * this app does not understand, and the safe reading of "I do not
+     * understand this flag" is not "everything failed".
+     */
+    @Test
+    fun a_non_boolean_isError_is_not_read_as_a_failure() = runTest {
+        // `"TRUE"` earns its place: it is the one spelling a lenient parse
+        // would accept. A JSON boolean's content is always lowercase `true`,
+        // so a capitalised one is a *string*, and a string is not the flag.
+        for (flag in listOf(""""maybe"""", """"TRUE"""", """"True"""", "0", "null", """{"v":true}""")) {
+            val rpc = """{"jsonrpc":"2.0","id":1,"result":{""" +
+                """"content":[{"type":"text","text":"{\"n\":7}"}],"isError":$flag}}"""
+            val (hub, _) = client { sse(rpc) to HttpStatusCode.OK }
+
+            val n = hub.call("fleet_health", JsonObject(emptyMap())) {
+                it.jsonObject["n"]!!.jsonPrimitive.content.toInt()
+            }
+            assertEquals(7, n, "isError:$flag is not the literal true")
+        }
+    }
+
+    /**
+     * The payload is read from the **text** block, not the first block.
+     *
+     * An MCP content array may hold images and embedded resources beside text.
+     * Taking whichever block comes first reads an image's fields as the tool's
+     * JSON answer, which fails somewhere far from here with a message about
+     * the wrong thing entirely.
+     */
+    @Test
+    fun the_answer_is_read_from_the_text_block_even_when_it_is_not_first() = runTest {
+        val rpc = """{"jsonrpc":"2.0","id":1,"result":{"content":[""" +
+            """{"type":"image","data":"iVBOR","mimeType":"image/png"},""" +
+            """{"type":"text","text":"{\"n\":42}"}]}}"""
+        val (hub, _) = client { sse(rpc) to HttpStatusCode.OK }
+
+        val n = hub.call("fleet_health", JsonObject(emptyMap())) {
+            it.jsonObject["n"]!!.jsonPrimitive.content.toInt()
+        }
+
+        assertEquals(42, n, "the text block is the one carrying the tool's answer")
+    }
+
     @Test
     fun a_tool_result_on_an_sse_data_line_is_parsed() = runTest {
         val (hub, calls) = client { sse(okResult("""{"ok":true,"n":3}""")) to HttpStatusCode.OK }

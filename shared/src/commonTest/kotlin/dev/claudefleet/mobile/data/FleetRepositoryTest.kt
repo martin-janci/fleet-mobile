@@ -30,6 +30,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -791,5 +792,69 @@ class FleetRepositoryTest {
 
         assertEquals(listOf(1L, 2L), repository.sessions.value.map { it.id })
         assertEquals(listOf("box"), repository.hosts.value.map { it.alias })
+    }
+
+    /**
+     * The banner says "reconnecting" from the moment `start()` is called.
+     *
+     * Not once the first attempt has already failed — *while* it is being
+     * made. Opening the app out of signal, or pointed at a hub that is down,
+     * means the first connect hangs until its timeout; without this the screen
+     * would sit on whatever it said before (`not connected yet`) for that whole
+     * time, which reads as "nothing is happening" rather than "trying".
+     *
+     * Found by mutation: deleting the announcement changed nothing any test
+     * could see, because every other reconnect test advances the clock past a
+     * failure first and then looks.
+     */
+    @Test
+    fun the_first_connection_attempt_is_announced_before_it_answers() = runTest {
+        val stream = FakeStream { awaitCancellation() }
+        stream.clock = this
+        val repository = repo(FakeHub(), stream, backgroundScope)
+
+        repository.start()
+        runCurrent()
+        val status = repository.status.value
+        repository.stop()
+
+        assertTrue(status is ConnectionStatus.Reconnecting, "expected Reconnecting, got $status")
+        assertEquals(1, status.attempt, "the attempt being waited through is the first one")
+        assertNull(status.reason, "nothing has failed yet, so there is nothing to blame")
+    }
+
+    /**
+     * A hub that closes the stream cleanly still gets a reason.
+     *
+     * This is the one drop that arrives as no exception at all: the flow simply
+     * ends. Every other path reaches the banner through `explain(t)`, so a
+     * clean close is the only way to get a `Reconnecting` with nothing in it —
+     * a banner that says the app is reconnecting and will not say from what,
+     * which is exactly the state a person cannot act on.
+     *
+     * Found by mutation: blanking the reason survived every test, because none
+     * of them closed a stream without throwing.
+     */
+    @Test
+    fun a_cleanly_closed_stream_says_so_rather_than_reconnecting_silently() = runTest {
+        val stream = FakeStream { attempt ->
+            // First connection ends normally, with no error; the second stays
+            // open so the loop settles somewhere observable.
+            if (attempt > 1) awaitCancellation()
+        }
+        stream.clock = this
+        val repository = repo(FakeHub(), stream, backgroundScope)
+
+        repository.start()
+        val status = repository.status.first {
+            it is ConnectionStatus.Reconnecting && it.attempt == 2
+        } as ConnectionStatus.Reconnecting
+        repository.stop()
+
+        assertNotNull(
+            status.reason,
+            "a hub that closed the stream must say so; a reasonless Reconnecting banner " +
+                "tells a person the app is retrying and refuses to say from what",
+        )
     }
 }

@@ -90,6 +90,14 @@ adb shell am start -a android.intent.action.VIEW \
 xcrun simctl openurl booted "claudefleet:https://fleet.example.com/pair#ABCDEFGH"
 ```
 
+On Android the activity is `launchMode="singleTop"`, and that is load-bearing
+rather than incidental: under the default `standard` mode a *second* `am start`
+does not reach `onNewIntent` at all — Android stacks a new copy of the activity
+and the one on screen keeps the first URL. The emulator showed exactly that,
+which means the second link was being ignored by the screen the person was
+looking at. It is the case an agent hits the moment it re-runs a setup script,
+so it is the one that matters most here.
+
 **A link fills the two fields and stops.** Somebody taps, exactly as they would
 after typing the code. That is deliberate: a link is something anyone can send,
 and while it cannot reach the credential this device already holds, a silent
@@ -126,7 +134,8 @@ not revoke it, it cannot revoke it, and the screen says so.
   gives for itself, not the one you scanned, so set `hub.public_url` to the
   name you want phones to use.
 - **A hub on the LAN, over plain `http://`.** Read *Transport* below before
-  trying this. The short version: use HTTPS. Android blocks cleartext outright
+  trying this. The short version: use HTTPS — loopback is the only cleartext
+  exception the Android build ships. Android blocks cleartext outright
   at this `targetSdk`, and the app now refuses plain `http` to anything that is
   not on your own network.
 
@@ -148,15 +157,28 @@ It fails closed, with a message.
 Then the platform has its own say, and on Android it is stricter than the app:
 
 - **Android.** `targetSdk` is 35, so the platform blocks cleartext for every
-  destination unless the app ships an exception. **This app ships none**, so a
-  plain-`http` hub does not work on Android as built — including on the LAN.
-  The fix is HTTPS on the hub.
+  destination unless the app ships an exception. The app now ships exactly one,
+  in `res/xml/network_security_config.xml`, and it is three hosts wide:
+  `127.0.0.1`, `localhost`, and `10.0.2.2` (the emulator's alias for the host
+  machine's loopback). **Everything else is still blocked, including the LAN.**
 
-  If you genuinely need cleartext to one LAN host, add a
+  That exception exists because the emulator was asked and said no.
+  `NetworkSecurityPolicy.isCleartextTrafficPermitted("127.0.0.1")` answered
+  **false**, which meant pairing to a hub on the dev machine over `http` —
+  the documented way to set one up, and the one `scripts/bootstrap.sh` builds —
+  could not work and never had. `permitsCleartext` in the shared code was
+  approving an address the platform then refused, and the failure surfaced as a
+  connection error with no explanation. `CleartextPolicyTest` in
+  `androidApp/src/androidTest` is that experiment, and it now pins both halves:
+  loopback permitted, LAN and the public internet not.
+
+  For a hub on the **LAN** over plain `http`, the answer is still HTTPS. Add a
   [network security configuration](https://developer.android.com/privacy-and-security/security-config)
-  naming that host and wire it up in the manifest. Note that the format matches
-  domains and IP *literals*, not CIDR ranges, so "all of 192.168/16" cannot be
-  expressed — you name the host you actually use. **Do not set
+  entry naming that host if you must. The format matches domains and IP
+  *literals*, not CIDR ranges, so "all of 192.168/16" cannot be expressed —
+  which is why the shipped exception stops at loopback, and why the shared
+  `permitsCleartext` is deliberately wider than what Android can enforce. **Do
+  not set
   `android:usesCleartextTraffic="true"`**: that is a blanket exception for every
   destination, which is precisely what the iOS side refuses, and a test fails if
   it appears.
@@ -169,7 +191,8 @@ Then the platform has its own say, and on Android it is stricter than the app:
 
 The asymmetry is real and is not a bug in this document: a LAN hub over plain
 http can work on iOS and cannot on Android, until someone adds the Android
-configuration for their own host.
+configuration for their own host. A hub on **this machine** over plain http now
+works on both.
 
 ### How much it will read
 
@@ -484,26 +507,25 @@ not polish: get either wrong and the app does not work at all.
    deliberately **not** changed, because unrun camera code is the worst thing
    to edit on faith:
 
-   - **`startRunning()` is called on the main thread.** The whole capture graph
-     is built and started inside `UIKitView`'s `factory`, which Compose runs on
-     the main queue, and Apple documents `startRunning()` as a blocking call
-     that should be made on a serial queue "so that the main queue isn't
-     blocked". Expect the UI to freeze for as long as the camera takes to come
-     up after tapping Scan — a fraction of a second to well over one. The same
-     goes for `stopRunning()` in `onDispose` and `onRelease`, on the way out.
-     The fix is the standard one — a dedicated serial `dispatch_queue` for the
-     session — but it wants a device to confirm the preview still attaches.
-   - **`unavailable(...)` is called from inside `factory`**, i.e. synchronously
-     during composition, when the capture graph refuses to start. It writes a
-     `StateFlow` that this composition reads. It converges — the Pair screen
-     simply stops composing the scanner — so this is a smell rather than a
-     loop, but it is the shape `App.kt` avoids on purpose one file over, and a
-     device is the only thing that can say whether the frame it produces is
-     clean. The Android actual does not have this: its equivalent arrives on a
-     later main-loop turn through a CameraX listener.
-   - **The session is stopped twice**, by `DisposableEffect(session)` and again
-     by `UIKitView(onRelease = …)`. Harmless as written — both are guarded by
-     `isRunning()` — and worth collapsing to one once someone can watch it.
+   - **`startRunning()`, `unavailable(...)` and the double stop are fixed**,
+     and the fix is the one a device would have prompted. The capture graph is
+     started from a `LaunchedEffect` on `Dispatchers.Default` instead of inside
+     `UIKitView`'s `factory`, so the main queue is not blocked for as long as
+     the camera takes to come up; the failure path reports through an effect
+     rather than writing a `StateFlow` synchronously during composition; and
+     the session is stopped in one place, off the main queue. What a device
+     still has to confirm is that the preview layer still attaches when the
+     session starts *after* the view is built rather than during it — the
+     reordering is the part no test here can see.
+
+     `QrScannerCaptureTest` now executes `startCapturing` on the simulator,
+     which has no camera, so it takes the first `return false`. That is a
+     narrow path and it is the only one reachable without hardware, but it
+     moves the file from "has never run" to "links AVFoundation and declines a
+     machine with no camera instead of trapping on it" — and the failure mode
+     for a wrong cinterop binding is an uncatchable Objective-C trap, not
+     something a test could otherwise report.
+
 6. **Layout.** `ContentView` passes `.ignoresSafeArea(.all)` so the Compose view
    owns the window and insets itself, matching `enableEdgeToEdge()` on Android.
    Check the notch, the home indicator, and that the prompt box rises with the
@@ -518,11 +540,18 @@ not polish: get either wrong and the app does not work at all.
 And the parts that need a **device or emulator on either platform**, or a
 **live hub**:
 
-- **No Compose has ever been rendered, anywhere.** Every screen compiles for
-  Android and both iOS targets and has never been drawn. Whether the grouped
-  list scrolls, whether the prompt box clears a soft keyboard, whether
-  auto-scroll behaves when someone has scrolled up, and whether the status chip
-  colours are legible in both themes are all open.
+- **One screen has now been rendered, once, on Android.**
+  `androidApp/src/androidTest` launches `MainActivity` with a `claudefleet:`
+  URL on the emulator and asserts the Pair screen comes back holding the code
+  and the hub — the first Compose this repository has drawn anywhere. It proves
+  the composition runs and recomposes on a state change from outside it.
+
+  It proves nothing else, and the list of what is still open is almost
+  unchanged: every other screen compiles for Android and both iOS targets and
+  has never been drawn. Whether the grouped list scrolls, whether the prompt
+  box clears a soft keyboard, whether auto-scroll behaves when someone has
+  scrolled up, and whether the status chip colours are legible in both themes
+  are all still open, and nothing has rendered on iOS at all.
 - **`AndroidSecrets` now executes on every push.** It is the only thing the app
   persists — `EncryptedSharedPreferences` over a Keystore master key — and until
   2026-09-19 it had never run a line on real hardware, because the machine it was

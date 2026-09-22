@@ -1484,6 +1484,88 @@ class SessionViewModelTest {
         assertEquals(0, actions.inFlightReads)
     }
 
+    // ---- coalescing: what a folded-in request is still owed ----
+
+    /**
+     * A `load()` folded into an already-queued refresh must upgrade it.
+     *
+     * The queued generation was created by a refresh, so it is carrying the
+     * *refreshing* flavour. When a `load()` folds into it, that one read is now
+     * also answering for a first load, and the screen owes the person the
+     * first-load indicator rather than the quieter refresh one — the difference
+     * between a screen that says it is fetching and a screen that looks empty.
+     * `Generation.first` is upgraded and never downgraded for exactly this.
+     *
+     * Found by mutation: dropping the upgrade changed nothing any test could
+     * see, because every existing coalescing test folds like into like.
+     */
+    @Test
+    fun a_load_folded_into_a_queued_refresh_upgrades_it_to_a_first_load() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+
+        val heldGate = actions.queueRead(Conversation(listOf(turn("t1", "a"))))
+        vm.refresh()
+        runCurrent()
+        assertEquals(1, actions.reads, "the first refresh is fetching")
+
+        // A second refresh, which queues behind the one in flight.
+        vm.refresh()
+        runCurrent()
+        assertFalse(vm.state.value.loading, "two refreshes are a refresh, not a first load")
+        assertTrue(vm.state.value.refreshing)
+
+        vm.load()
+        runCurrent()
+
+        assertTrue(
+            vm.state.value.loading,
+            "a load() folded into the queued refresh must make that generation first-flavoured, " +
+                "or the screen shows a refresh indicator for what is somebody's first load",
+        )
+
+        heldGate.complete(Unit)
+        runCurrent()
+    }
+
+    /**
+     * Asking for a read clears the previous failure straight away.
+     *
+     * Not when the read answers — *when it is asked for*. The banner says the
+     * last attempt failed, and once a new attempt is under way that is no
+     * longer what is happening; leaving it up means a screen that is visibly
+     * fetching while also claiming it has given up. The conversation stays
+     * either way, which is a separate rule with its own test.
+     *
+     * Found by mutation: no test distinguished clearing the error at request
+     * time from clearing it at apply time, because every one of them let the
+     * read finish first.
+     */
+    @Test
+    fun a_new_request_clears_the_previous_error_before_the_read_answers() = runTest {
+        val actions = FakeActions()
+        actions.readFails = IllegalStateException("E_TIMEOUT: the hub did not answer")
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        runCurrent()
+        assertTrue(vm.state.value.error != null, "the failed read left a banner")
+
+        actions.readFails = null
+        val gate = actions.queueRead(Conversation(listOf(turn("t1", "a"))))
+        vm.refresh()
+        runCurrent()
+
+        assertTrue(vm.state.value.refreshing, "the new read is in flight")
+        assertEquals(
+            null,
+            vm.state.value.error,
+            "the banner must go the moment a fresh read is asked for, not when it answers",
+        )
+
+        gate.complete(Unit)
+        runCurrent()
+    }
+
     // ---- newReply / onAtBottom: task 3, "open where you left off" ----
 
     @Test

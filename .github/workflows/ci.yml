@@ -138,7 +138,12 @@ jobs:
       # minSdk is 26, so any API level from 26 up exercises the same code. 34 is
       # chosen because it is the level with the most reliable x86_64 image on
       # these runners, not because the store behaves differently there.
-      - name: Round-trip the secure store
+      # Two things need the hardware, and they are unrelated: the secure store
+      # is the only class that cannot run off-device, and the deep link is the
+      # only claim that is about Android's own intent resolution rather than
+      # about this code. They share a job because they share an emulator boot,
+      # which is the expensive part.
+      - name: Round-trip the secure store and follow a deep link
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -147,14 +152,16 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
           disable-animations: true
-          script: ./gradlew :shared:connectedAndroidDeviceTest --stacktrace
+          script: ./gradlew :shared:connectedAndroidDeviceTest :androidApp:connectedAndroidTest --stacktrace
 
       - name: Instrumentation reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: instrumentation-reports
-          path: shared/build/reports/androidTests/
+          path: |
+            shared/build/reports/androidTests/
+            androidApp/build/reports/androidTests/
           if-no-files-found: warn
 
   macos:
@@ -246,7 +253,7 @@ jobs:
       # A concrete destination, not `generic/`: this one boots a simulator and
       # runs. The device is discovered rather than named, because the set
       # installed on the runner image changes.
-      - name: Keychain round trip on a booted simulator
+      - name: Keychain round trip and the deep link, on a booted simulator
         working-directory: iosApp
         run: |
           set -euo pipefail
@@ -275,6 +282,7 @@ jobs:
             ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="-" \
             PROVISIONING_PROFILE_SPECIFIER="" \
+            -resultBundlePath "$RUNNER_TEMP/ios-tests.xcresult" \
             2>&1 | tee "$RUNNER_TEMP/xcodebuild-test.log"
 
       # Uploaded whether or not the step above passed. An `xcodebuild test`
@@ -286,6 +294,20 @@ jobs:
         with:
           name: ios-xctest-log
           path: ${{ runner.temp }}/xcodebuild-test.log
+          if-no-files-found: warn
+
+      # The result bundle, not just the log, because `PairLinkUITests` attaches
+      # the app's accessibility tree and attachments live only in here. Nobody
+      # working on this repository has a Mac, so that tree is the only way to
+      # learn how Compose surfaces its text to XCUITest — and the difference
+      # between "iOS did not deliver the URL" and "it did, and the element is
+      # not where the query looked" is a whole round of guessing otherwise.
+      - name: iOS result bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-xcresult
+          path: ${{ runner.temp }}/ios-tests.xcresult
           if-no-files-found: warn
 
       # The shared suite, on Kotlin/Native rather than on the JVM.

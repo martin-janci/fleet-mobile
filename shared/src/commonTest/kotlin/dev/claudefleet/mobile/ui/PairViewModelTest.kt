@@ -725,6 +725,34 @@ class PairLinkTest {
         assertNotNull(vm.state.value.paired)
     }
 
+    /**
+     * The separator survives iOS percent-encoding it.
+     *
+     * `ContentView` hands `onPairLink` the delivered `URL`'s
+     * `absoluteString`, and Foundation percent-encodes the fragment separator
+     * for a scheme it does not know — so the link arrives as
+     * `…/pair%23ABCDEFGH`. Without undoing that, `PairTarget.parse` finds no
+     * separator, reads the whole string as a bare code, refuses it, and the
+     * link fills nothing. Silently: the Pair screen just sits there, which is
+     * the worst way for a pairing link to fail and the hardest to report.
+     *
+     * Measured, not assumed. An iOS 18 simulator handed
+     * `XCUIDevice.system.open` exactly this string, which is how it was found —
+     * the Android side never sees it, because `Uri.toString()` does not
+     * re-encode.
+     */
+    @Test
+    fun a_percent_encoded_separator_still_names_the_hub_and_the_code() = runTest {
+        val vm = PairViewModel(FakeAuth(), backgroundScope)
+
+        vm.onPairLink("claudefleet:$hub/pair%23ABCDEFGH")
+        runCurrent()
+
+        assertEquals(hub, vm.state.value.address, "the hub is still the hub")
+        assertEquals("ABCDEFGH", vm.state.value.code, "and the code is still the code")
+        assertNull(vm.state.value.error, "nothing to complain about: ${vm.state.value.error}")
+    }
+
     /** Both spellings of the scheme, because tooling normalises one to the other. */
     @Test
     fun the_scheme_is_accepted_with_and_without_slashes() = runTest {

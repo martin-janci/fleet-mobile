@@ -45,6 +45,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.InputChipDefaults
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
@@ -67,6 +68,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -79,16 +81,16 @@ import dev.claudefleet.mobile.ui.components.BlockedCardView
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.MarkdownText
-import dev.claudefleet.mobile.ui.components.CompactDivider
 import dev.claudefleet.mobile.ui.components.StatusStrip
-import dev.claudefleet.mobile.ui.components.SubagentRow
-import dev.claudefleet.mobile.ui.components.SystemLine
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.data.ConnectionStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.milliseconds
+
+/** The conversation list, for the device test that checks it follows new output. */
+const val CONVERSATION_LIST: String = "conversation-list"
 
 /**
  * One session: what has been said, newest at the bottom, and a box to answer.
@@ -241,7 +243,15 @@ fun SessionScreen(
             if (state.loaded && turns.isEmpty()) {
                 EmptyConversation(state)
             } else {
-                LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                // Tagged so a device test can address this list rather than
+                // guessing which of the screen's scrollable nodes it meant.
+                // `atBottom` above is derived from measurement, so it only
+                // means anything where there is measurement, and the test that
+                // checks it has to run on a device — see `ConversationScrollTest`.
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize().testTag(CONVERSATION_LIST),
+                ) {
                     if (state.conversation.truncated) {
                         item(key = "truncated") { TruncationNote() }
                     }
@@ -761,14 +771,51 @@ private fun Item(item: ConvItem) {
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        // The remaining kinds each own their own layout in `TranscriptItems.kt`
-        // — this stays a dispatch table rather than growing a composable body
-        // per branch.
-        is ConvItem.Subagent -> SubagentRow(item)
-        is ConvItem.Compact -> CompactDivider(item)
-        is ConvItem.Command -> SystemLine(item.label)
-        is ConvItem.Notification -> SystemLine(item.label)
-        is ConvItem.Interrupt -> SystemLine(item.label)
+        // A subagent gets a block rather than a line: it is a whole piece of
+        // work, and its result is the part somebody scrolls back for.
+        is ConvItem.Subagent -> Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            shape = MaterialTheme.shapes.small,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Text(
+                    text = buildString {
+                        append(item.agentType?.takeIf { it.isNotBlank() } ?: item.name.ifBlank { "subagent" })
+                        if (!item.done) append(" — running")
+                        if (item.error) append(" — failed")
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (item.error) MaterialTheme.colorScheme.error else LocalContentColor.current,
+                    fontWeight = FontWeight.Bold,
+                )
+                item.description?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                item.result?.takeIf { it.isNotBlank() }?.let {
+                    Spacer(Modifier.height(4.dp))
+                    Text(it, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        // A background job reporting in. Before the hub parsed these they
+        // arrived as raw XML in a text item; the point of drawing them is that
+        // they stay on the screen now they arrive tagged.
+        is ConvItem.Notification -> Note(
+            marker = "◆",
+            text = item.label,
+            detail = item.result?.takeIf { it.isNotBlank() && it != item.summary },
+        )
+        // Quiet by design: what matters is that it happened and roughly where.
+        is ConvItem.Compact -> Note(marker = "⋯", text = item.label)
+        is ConvItem.Interrupt -> Note(marker = "■", text = item.label)
+        is ConvItem.Command -> Note(
+            marker = "›",
+            text = item.label,
+            detail = item.output?.takeIf { it.isNotBlank() },
+            monospace = true,
+        )
         // A kind this build does not know: say so rather than drop it.
         is ConvItem.Unsupported -> Text(
             text = item.label,
@@ -776,6 +823,53 @@ private fun Item(item: ConvItem) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(vertical = 4.dp),
         )
+    }
+}
+
+/**
+ * One quiet line, optionally with a second under it.
+ *
+ * The transcript's shape is prompts and answers; compactions, interrupts,
+ * slash commands and task notifications are none of those. They are markers —
+ * they say something happened without claiming the reader's attention the way
+ * a turn does — so they share one understated treatment rather than each
+ * inventing their own.
+ */
+@Composable
+private fun Note(
+    marker: String,
+    text: String,
+    detail: String? = null,
+    monospace: Boolean = false,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            text = marker,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(8.dp))
+        Column {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = if (monospace) FontFamily.Monospace else null,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            detail?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = if (monospace) FontFamily.Monospace else null,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 6,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 
