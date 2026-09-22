@@ -101,6 +101,79 @@ class FleetSnapshotTest {
         hosts = listOf(HostRow(alias = "box"), HostRow(alias = "pine")),
     )
 
+    // ---- a malformed frame must not change what is on the screen ----
+    //
+    // `applying`'s own KDoc promises exactly this: "Anything that does not fit
+    // is ignored rather than thrown: a hub that grows a variant must not
+    // corrupt what is already on screen, and a live stream is not worth
+    // tearing down over one bad frame." Two of the guards keeping that promise
+    // had no test, so a sweep could delete them and nothing objected.
+
+    /**
+     * `box`, one with a blank alias, and one literally called `123`.
+     *
+     * The last is what makes the type guard testable at all. Without a host
+     * whose alias equals the stringified number, a frame carrying `"alias":
+     * 123` removes nothing either way — the filter simply matches nothing —
+     * and an assertion that the snapshot is unchanged passes whether the guard
+     * is there or not. It took the sweep to notice that; the first version of
+     * this test was green against the mutation it was written to catch.
+     */
+    private val twoHosts = FleetSnapshot(
+        hosts = listOf(HostRow(alias = "box"), HostRow(alias = ""), HostRow(alias = "123")),
+    )
+
+    /**
+     * A removal naming no host removes no host.
+     *
+     * The blank check is not decoration. `HostRow.alias` defaults to the empty
+     * string, so a row that arrived without one sits in the list under a blank
+     * alias — and a `host:removed` frame whose alias is blank or whitespace
+     * would match it and take it off the screen. The frame names nothing, so
+     * it must do nothing.
+     */
+    @Test
+    fun a_host_removal_with_a_blank_alias_removes_nothing() {
+        for (alias in listOf("\"\"", "\"   \"")) {
+            val after = twoHosts.applying(row("host:removed", """{"alias": $alias}"""))
+            assertSame(twoHosts, after, "a blank alias named no host, so nothing may change")
+        }
+    }
+
+    /**
+     * And neither does one whose alias is not a string.
+     *
+     * An alias arriving as a number or an object is a frame this app does not
+     * understand, and the rule for those is to ignore them. Reading `123` as
+     * the alias `"123"` would be a guess, and a guess that deletes a row is
+     * the wrong kind of guess.
+     *
+     * Numeric *ids* are read the other way round on purpose: `{"id": "7"}` is
+     * accepted, because a quoted number still names exactly one session and
+     * the reading cannot be wrong. Only the guess that could be is refused.
+     */
+    @Test
+    fun a_host_removal_whose_alias_is_not_a_string_removes_nothing() {
+        for (alias in listOf("123", "true", "null", """{"name":"box"}""", """["box"]""")) {
+            val after = twoHosts.applying(row("host:removed", """{"alias": $alias}"""))
+
+            assertSame(twoHosts, after, "alias $alias is not an alias")
+            assertEquals(
+                twoHosts.hosts.map { it.alias },
+                after.hosts.map { it.alias },
+                "the host called \"123\" must survive a frame carrying the number 123",
+            )
+        }
+    }
+
+    /** And the removal that does name a host still works: these are guards, not a wall. */
+    @Test
+    fun a_host_removal_that_names_a_host_still_removes_it() {
+        val after = twoHosts.applying(row("host:removed", """{"alias": "box"}"""))
+
+        assertEquals(listOf("", "123"), after.hosts.map { it.alias }, "only the named host goes")
+    }
+
     @Test
     fun a_session_updated_frame_replaces_the_row_with_that_id() {
         val after = two.applying(row("session:updated", sessionPayload(id = 2, tmux = "renamed")))
