@@ -58,5 +58,24 @@ internal fun pairLinkPayload(uri: String): String? {
     val trimmed = uri.trim()
     val prefix = "$PAIR_LINK_SCHEME:"
     if (!trimmed.regionMatches(0, prefix, 0, prefix.length, ignoreCase = true)) return null
-    return trimmed.substring(prefix.length).removePrefix("//").trim().takeIf { it.isNotEmpty() }
+    return trimmed.substring(prefix.length)
+        .removePrefix("//")
+        .trim()
+        // The one encoding this has to undo, and only this one.
+        //
+        // iOS hands `onOpenURL` a `URL`, and `ContentView` reads its
+        // `absoluteString`. Foundation percent-encodes the fragment separator
+        // for a scheme it does not know, so the link arrives as
+        // `…/pair%23ABCDEFGH` and the `#` that separates the hub from the code
+        // is gone. `PairTarget.parse` then finds no separator, reads the whole
+        // thing as a bare code, and the link fills nothing — silently, which is
+        // the worst way for a pairing link to fail. Measured on an iOS 18
+        // simulator: `XCUIDevice.system.open` was handed exactly that.
+        //
+        // Safe because it cannot be ambiguous: `hubBase` refuses any base
+        // containing `#`, so a `%23` in a pair link is never part of the
+        // address. This is un-encoding, not parsing — what the text *means* is
+        // still [PairTarget.parse]'s question and is still asked only there.
+        .replace("%23", "#")
+        .takeIf { it.isNotEmpty() }
 }
