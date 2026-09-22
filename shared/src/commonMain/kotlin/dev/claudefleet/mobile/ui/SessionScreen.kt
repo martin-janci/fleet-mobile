@@ -233,6 +233,8 @@ fun SessionScreen(
                 stillWaiting = state.stillWaiting,
                 terminal = state.terminal,
                 readOnly = state.readOnly,
+                canAnswer = state.canAnswer,
+                connected = state.connected,
                 onAnswer = onAnswer,
                 onShowTerminal = onShowTerminal,
                 onHideTerminal = onHideTerminal,

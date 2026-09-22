@@ -127,9 +127,29 @@ data class SessionUiState(
      * refused `send_prompt` by the hub, and an unreachable hub has nowhere to
      * deliver it. The draft itself is untouched by any of this — only the
      * button goes dark.
+     *
+     * [answering] is in here for the same reason [sending] is, across a path
+     * rather than within one: an answer is out for as long as its
+     * [ANSWER_WAIT_SECONDS] wait, and a prompt typed into the composer
+     * meanwhile would race the very turn counter that answer is waiting past.
+     * Two single-flight guards that did not know about each other were no
+     * guard at all — see [SessionViewModel.answer].
      */
     val canSend: Boolean
-        get() = !sending && !readOnly && connected && session != null && draft.isNotBlank()
+        get() = !sending && !answering && !readOnly && connected && session != null && draft.isNotBlank()
+
+    /**
+     * Whether the card's answer chips do anything — the other half of
+     * [canSend], and the same five facts in the same order. Drawn by
+     * `BlockedCardView` rather than re-derived there, so a chip is never
+     * live for a tap [SessionViewModel.answer] would drop on the floor.
+     *
+     * A readonly device is the one case the screen handles differently: it
+     * hides the chips outright instead of dimming them, because the hub would
+     * refuse the call whatever the connection does.
+     */
+    val canAnswer: Boolean
+        get() = !sending && !answering && !readOnly && connected && card != null
 }
 
 /**
@@ -350,6 +370,20 @@ class SessionViewModel(
                 }
             }
         }
+        // `stillWaiting` belongs to the card it was reported for: it says
+        // "the answer you just sent was delivered and the agent has not moved
+        // yet". Once that card is gone the episode is over, and leaving the
+        // flag set meant the NEXT prompt — a different question, nothing sent
+        // for it — drew the line too. Collecting the already-derived
+        // `state.card` rather than re-deciding here what "blocked" means
+        // keeps that rule in `blockedCard` alone; the `if` makes the update a
+        // no-op (same instance, so no re-emission) whenever there is nothing
+        // to clear, which is what stops this from feeding itself.
+        scope.launch {
+            state.collect { s ->
+                if (s.card == null) local.update { if (it.stillWaiting) it.copy(stillWaiting = false) else it }
+            }
+        }
         scope.launch {
             fleet.sessionChanges
                 // `ALL_SESSIONS_CHANGED` is the resync sentinel a `ready` or
@@ -418,12 +452,21 @@ class SessionViewModel(
      * device makes no call at all — and the screen hides the chips rather than
      * offering a tap that would be refused.
      *
-     * One answer at a time: a second tap while the first is in flight would
-     * send a second keystroke against a turn counter the first is still
-     * waiting on, and the REPL would see two answers to one prompt.
+     * One answer at a time, and never alongside a prompt from the composer: a
+     * second delivery while the first is in flight would go against a turn
+     * counter the first is still waiting on, and the REPL would see two
+     * answers to one prompt. [SessionUiState.canSend] carries the other half
+     * of that rule.
+     *
+     * Gated on the hub being reachable exactly as [send] is, through the same
+     * [isConnected] rule — which also covers a [ConnectionStatus.Refused] hub,
+     * the one this screen must not call even though it answers. The card
+     * cannot be relied on to disappear there: a refusal picked up on
+     * reconnect leaves the previous connection's rows in place, so the card
+     * outlives it and the gate has to be here.
      */
     fun answer(a: Answer): Job = scope.launch {
-        if (readOnly || local.value.answering) return@launch
+        if (!canAnswerNow(local.value)) return@launch
         local.update { it.copy(answering = true, stillWaiting = false, error = null) }
         try {
             val receipt = when (a) {
@@ -511,8 +554,19 @@ class SessionViewModel(
         }
     }
 
+    /**
+     * [SessionUiState.canAnswer] read from the live sources rather than from
+     * `state` — which is a `stateIn` of a `combine` and therefore trails its
+     * inputs by a dispatch. A tap must not depend on that. The card's own
+     * presence is left out here: `answer` is only reachable from a card, and
+     * re-deciding what "blocked" means at the moment of the tap would be a
+     * second copy of `blockedCard`'s rule.
+     */
+    private fun canAnswerNow(l: Local): Boolean =
+        !readOnly && !l.answering && !l.sending && connected()
+
     private fun canSendNow(l: Local): Boolean =
-        !l.sending && !readOnly && connected() && l.draft.isNotBlank() && row() != null
+        !l.sending && !l.answering && !readOnly && connected() && l.draft.isNotBlank() && row() != null
 
     /** [isConnected] read from the live sources, for [send]'s own check. */
     private fun connected(): Boolean = isConnected(fleet.status.value, probe.value)

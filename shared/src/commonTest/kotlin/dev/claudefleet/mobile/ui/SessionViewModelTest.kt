@@ -1589,4 +1589,154 @@ class SessionViewModelTest {
         assertEquals("E_BG_SESSION: no tmux pane", vm.state.value.error?.details)
         assertNull(vm.state.value.terminal)
     }
+
+    // ---- The card and the composer take turns ----
+
+    /**
+     * An answer is out for up to [ANSWER_WAIT_SECONDS] — `waitForTurn` is most
+     * of that window — and a prompt typed into the composer meanwhile would
+     * race the very turn counter the answer is waiting past. The two guards
+     * have to know about each other; each one alone only stops its own path
+     * from doubling up.
+     */
+    @Test
+    fun send_is_disabled_while_an_answer_is_in_flight() = runTest {
+        val actions = FakeActions()
+        val gate = CompletableDeferred<Unit>()
+        actions.sendGate = gate
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.onDraftChange("ship it")
+        runCurrent()
+        assertTrue(vm.state.value.canSend, "setup: the composer is live before the answer")
+
+        val answering = vm.answer(Answer.Enter)
+        runCurrent()
+        assertFalse(vm.state.value.canSend, "an answer in flight must darken Send")
+        assertFalse(vm.state.value.canAnswer, "and darken the chips it came from")
+        vm.send().join()
+        assertTrue(actions.sentPrompts.isEmpty(), "and send must not even try")
+
+        gate.complete(Unit)
+        answering.join()
+        runCurrent()
+        assertTrue(vm.state.value.canSend, "live again once the answer has landed")
+    }
+
+    /** The same rule from the other side. */
+    @Test
+    fun the_card_refuses_an_answer_while_a_prompt_is_in_flight() = runTest {
+        val actions = FakeActions()
+        val gate = CompletableDeferred<Unit>()
+        actions.sendGate = gate
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.onDraftChange("ship it")
+        runCurrent()
+
+        val sending = vm.send()
+        runCurrent()
+        assertTrue(vm.state.value.sending, "setup: the prompt is out")
+        assertFalse(vm.state.value.canAnswer, "and the chips say so before the tap does")
+        vm.answer(Answer.Enter).join()
+
+        assertTrue(actions.sentKeys.isEmpty(), "the card must not answer over a prompt in flight")
+        assertTrue(actions.waited.isEmpty())
+        gate.complete(Unit)
+        sending.join()
+    }
+
+    /**
+     * `stillWaiting` is about the answer just sent for the card on screen. Once
+     * that card is gone the episode is over, so the next prompt — a different
+     * question, nothing sent for it yet — must not inherit the line.
+     */
+    @Test
+    fun still_waiting_does_not_survive_the_card_it_was_reported_for() = runTest {
+        val actions = FakeActions()
+        actions.waitAnswer = WaitResult(status = "timeout")
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Enter).join()
+        runCurrent()
+        assertTrue(vm.state.value.stillWaiting, "setup: the wait timed out")
+
+        fleet.sessions.value = listOf(row(status = "working"))
+        runCurrent()
+        assertNull(vm.state.value.card)
+        assertFalse(vm.state.value.stillWaiting)
+
+        // A different prompt, later. Nothing has been sent for this one.
+        fleet.sessions.value = listOf(blockedRow())
+        runCurrent()
+        assertNotNull(vm.state.value.card)
+        assertFalse(vm.state.value.stillWaiting, "a fresh card starts with nothing sent for it")
+    }
+
+    /**
+     * The rows a refused hub leaves behind are the ones from the connection
+     * BEFORE it — `FleetRepository` sets `Refused` and returns without
+     * clearing the snapshot — so the card outlives the refusal, and the only
+     * thing that can stop it calling the hub is the same gate `send()` has.
+     */
+    @Test
+    fun a_refused_hub_gets_no_answer_even_though_the_card_is_still_drawn() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        fleet.status.value = ConnectionStatus.Refused("this hub is too old for this app")
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+
+        assertNotNull(vm.state.value.card, "setup: the stale row still draws a card")
+        assertFalse(vm.state.value.connected)
+        assertFalse(vm.state.value.canAnswer, "the chips go dark rather than being tapped into nothing")
+        vm.answer(Answer.Enter).join()
+        vm.answer(Answer.Option(1, "Yes")).join()
+        runCurrent()
+
+        assertTrue(actions.sentKeys.isEmpty())
+        assertTrue(actions.sentPrompts.isEmpty())
+        assertTrue(actions.waited.isEmpty())
+    }
+
+    @Test
+    fun an_offline_hub_gets_no_answer_either() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        fleet.status.value = ConnectionStatus.Offline(STOPPED)
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+
+        vm.answer(Answer.Enter).join()
+        runCurrent()
+
+        assertTrue(actions.sentKeys.isEmpty(), "answer must not try while the hub is unreachable")
+        assertFalse(vm.state.value.answering)
+    }
+
+    /** And it comes back the moment the hub does, like Send. */
+    @Test
+    fun an_answer_works_again_once_the_hub_is_reachable() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        fleet.status.value = ConnectionStatus.Offline(STOPPED)
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+        vm.answer(Answer.Enter).join()
+        assertTrue(actions.sentKeys.isEmpty())
+
+        fleet.status.value = ConnectionStatus.Connected("0.9.3")
+        runCurrent()
+        vm.answer(Answer.Enter).join()
+        runCurrent()
+
+        assertEquals(listOf("Enter"), actions.sentKeys)
+    }
 }
