@@ -476,6 +476,21 @@ private fun Item(item: ConvItem) {
             detail = item.output?.takeIf { it.isNotBlank() },
             monospace = true,
         )
+        // A `!` shell line: the person typed it, so it reads back as a command
+        // with its output under it — the same treatment a slash command gets.
+        is ConvItem.Bash -> Note(
+            marker = "›",
+            text = item.label,
+            detail = item.output,
+            monospace = true,
+        )
+        // A harness block the hub had no item for. Quiet, and labelled by its
+        // tag, because the reason it exists is that raw XML was worse.
+        is ConvItem.Harness -> Note(
+            marker = "⋯",
+            text = item.tag.ifBlank { "harness" },
+            detail = item.body.takeIf { it.isNotBlank() },
+        )
         // A kind this build does not know: say so rather than drop it.
         is ConvItem.Unsupported -> Text(
             text = item.label,
