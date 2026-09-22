@@ -1,14 +1,27 @@
 package dev.claudefleet.mobile.net
 
 /**
- * The hub wire-contract revisions this build understands, mirrored from the
- * desktop's `src-tauri/src/backend/contract.rs` (claude-fleet commit
- * 5fa119f7, v0.2.31). A hub outside the range is refused the way the desktop
- * refuses it: the banner says which side is behind, and no row event from
- * that hub is applied.
+ * The hub wire-contract revisions this build understands (claude-fleet
+ * `main`, revision 3, unreleased on the desktop side → hub 0.2.35). A hub
+ * outside the range is refused the way the desktop refuses it: the banner
+ * says which side is behind, and no row event from that hub is applied.
+ *
+ * [MAX_HUB_CONTRACT] mirrors the desktop's own maximum, because both sides
+ * read the same row shapes off the wire and a shape this build has never
+ * seen (revision 2 added `MoveOutcome`/`dry_run`; revision 3 gave
+ * `move_session` a `when` argument) is exactly what the maximum exists to
+ * catch.
+ *
+ * [MIN_HUB_CONTRACT] does NOT mirror the desktop's minimum. The desktop
+ * raised its own to 3 because a pre-3 hub would silently misperform
+ * `move_session { when: cancel }` — but this app never calls `move_session`
+ * (see `ToolsTheAppMayCallTest`'s `permitted` set), so that hazard does not
+ * exist here. The floor stays `0` because the production hub this app talks
+ * to is still 0.2.34 at revision 1, which must keep working until it is
+ * upgraded: this is the phone's own floor, not a copy of the desktop's.
  */
 const val MIN_HUB_CONTRACT: Int = 0
-const val MAX_HUB_CONTRACT: Int = 1
+const val MAX_HUB_CONTRACT: Int = 3
 
 /**
  * What a `contract` field that cannot be read as a revision counts as.
