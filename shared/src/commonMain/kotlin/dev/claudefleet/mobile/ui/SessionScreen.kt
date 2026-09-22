@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.tailMarker
+import dev.claudefleet.mobile.ui.components.BlockedCardView
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.MarkdownText
@@ -91,6 +92,9 @@ fun SessionScreen(
     onBack: () -> Unit,
     onDismissError: () -> Unit,
     onAtBottom: (Boolean) -> Unit,
+    onAnswer: (Answer) -> Unit,
+    onShowTerminal: () -> Unit,
+    onHideTerminal: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val turns = state.conversation.turns
@@ -217,6 +221,25 @@ fun SessionScreen(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
                 )
             }
+        }
+
+        // Between the conversation and the composer: a person who opened this
+        // screen because the agent is waiting should not have to scroll to
+        // answer it, and the card sits where the answer goes.
+        state.card?.let { card ->
+            BlockedCardView(
+                card = card,
+                answering = state.answering,
+                stillWaiting = state.stillWaiting,
+                terminal = state.terminal,
+                readOnly = state.readOnly,
+                onAnswer = onAnswer,
+                onShowTerminal = onShowTerminal,
+                onHideTerminal = onHideTerminal,
+                // Task 4 owns the restart; until it lands the button is not
+                // drawn at all rather than drawn dead.
+                onRestart = null,
+            )
         }
 
         PromptBox(state = state, onDraftChange = onDraftChange, onSend = onSend)

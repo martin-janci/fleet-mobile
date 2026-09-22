@@ -96,6 +96,29 @@ data class SessionUiState(
      * told to be back at the bottom.
      */
     val newReply: Boolean = false,
+    /**
+     * What to draw for a session the hub says is blocked or stuck, or null
+     * when there is nothing to answer. Derived from the row and the hub's
+     * version by [blockedCard] — the one place that mapping lives — so it
+     * appears and disappears with the row rather than being cleared by hand
+     * after an answer goes out.
+     */
+    val card: BlockedCard? = null,
+    /** True while an answer is in flight: the chips go dark and a spinner shows. */
+    val answering: Boolean = false,
+    /**
+     * True when the last answer's [SessionActions.waitForTurn] timed out
+     * rather than seeing the turn move. The answer was delivered; the agent
+     * has simply not moved on yet, which is a different thing from a failure
+     * and gets a line on the card rather than an error banner.
+     */
+    val stillWaiting: Boolean = false,
+    /**
+     * The captured tmux pane, while the terminal fallback is expanded — the
+     * way through for anything the card cannot offer a chip for. Null when it
+     * is hidden.
+     */
+    val terminal: String? = null,
 ) {
     /**
      * Whether the send button does anything. Blank drafts are not prompts, a
@@ -173,6 +196,17 @@ class SessionViewModel(
          */
         val atBottom: Boolean = true,
         val newReply: Boolean = false,
+        val answering: Boolean = false,
+        val stillWaiting: Boolean = false,
+        /**
+         * Whether the reader asked for the terminal. Kept apart from
+         * [terminal] so that a capture which has not answered yet — or one
+         * that failed — still counts as "shown", which is what makes the
+         * session-event path keep refreshing it rather than going quiet after
+         * one bad call.
+         */
+        val terminalShown: Boolean = false,
+        val terminal: String? = null,
     )
 
     private val local = MutableStateFlow(Local())
@@ -245,9 +279,14 @@ class SessionViewModel(
      */
     private var queued: Generation? = null
 
-    val state: StateFlow<SessionUiState> = combine(fleet.sessions, fleet.status, local, probe) { rows, status, l, probed ->
-        assemble(rows.firstOrNull { it.id == sessionId }, status, l, probed)
-    }.stateIn(scope, SharingStarted.Eagerly, assemble(row(), fleet.status.value, local.value, probe.value))
+    val state: StateFlow<SessionUiState> =
+        combine(fleet.sessions, fleet.status, fleet.hubVersion, local, probe) { rows, status, version, l, probed ->
+            assemble(rows.firstOrNull { it.id == sessionId }, status, version, l, probed)
+        }.stateIn(
+            scope,
+            SharingStarted.Eagerly,
+            assemble(row(), fleet.status.value, fleet.hubVersion.value, local.value, probe.value),
+        )
 
     init {
         // Started here rather than from `load()`: `state` above is already
@@ -319,7 +358,13 @@ class SessionViewModel(
                 // this screen refetches too, the same as it would for its own id.
                 .filter { it == sessionId || it == ALL_SESSIONS_CHANGED }
                 .debounce(SESSION_EVENT_DEBOUNCE)
-                .collect { requestRead(first = false) }
+                .collect {
+                    // The capture first: it is the thing a person staring at a
+                    // blocked pane is watching, and `requestRead` suspends
+                    // until its generation has fetched AND applied.
+                    if (local.value.terminalShown) captureTerminal()
+                    requestRead(first = false)
+                }
         }
     }
 
@@ -355,6 +400,88 @@ class SessionViewModel(
      */
     fun dismissError() {
         local.update { it.copy(error = null) }
+    }
+
+    /**
+     * Answer the blocked agent with one of the card's own [Answer]s, then wait
+     * for its turn counter to move past the one the send reported.
+     *
+     * Nothing clears the card here. It is derived from the row (see
+     * [SessionUiState.card]), so the thing that makes it go away is the hub
+     * publishing a row that is no longer blocked — which is exactly the fact
+     * [SessionActions.waitForTurn] is waiting for. A wait that times out
+     * instead leaves the card up and says [SessionUiState.stillWaiting]: the
+     * answer was delivered, the agent has not moved yet.
+     *
+     * Gated exactly as [send] is on the credential: neither `send_prompt` nor
+     * its `keys` form is in the hub's readonly allow-list, so a readonly
+     * device makes no call at all — and the screen hides the chips rather than
+     * offering a tap that would be refused.
+     *
+     * One answer at a time: a second tap while the first is in flight would
+     * send a second keystroke against a turn counter the first is still
+     * waiting on, and the REPL would see two answers to one prompt.
+     */
+    fun answer(a: Answer): Job = scope.launch {
+        if (readOnly || local.value.answering) return@launch
+        local.update { it.copy(answering = true, stillWaiting = false, error = null) }
+        try {
+            val receipt = when (a) {
+                // A numbered option is typed as its number, which is what the
+                // REPL's own prompt asks for; the trust prompt's y/n is text
+                // for the same reason. Only the bare keystrokes go through
+                // `send_prompt { keys }` — an empty prompt is not a key.
+                is Answer.Option -> actions.sendPrompt(sessionId, a.n.toString())
+                is Answer.Text -> actions.sendPrompt(sessionId, a.text)
+                Answer.Enter -> actions.sendKeys(sessionId, "Enter")
+                Answer.Escape -> actions.sendKeys(sessionId, "Escape")
+                Answer.Interrupt -> actions.sendKeys(sessionId, "C-c")
+            }
+            val wait = actions.waitForTurn(sessionId, receipt.turnSeqBefore, timeoutS = ANSWER_WAIT_SECONDS)
+            local.update { it.copy(answering = false, stillWaiting = wait.status != WAIT_SATISFIED) }
+            requestRead(first = false)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(answering = false, error = friendly(t)) }
+        }
+    }
+
+    /**
+     * Expand the terminal fallback and capture the pane once. While it is
+     * shown, the same debounced session-event path that refetches the
+     * conversation re-captures it, so a pane that moves on its own follows
+     * without polling.
+     */
+    fun showTerminal(): Job = scope.launch {
+        local.update { it.copy(terminalShown = true) }
+        captureTerminal()
+    }
+
+    /** Collapse it, and drop the capture with it rather than keeping a stale pane around. */
+    fun hideTerminal() {
+        local.update { it.copy(terminalShown = false, terminal = null) }
+    }
+
+    /**
+     * One `capture_session` call and the update that applies it. A failure
+     * goes to the banner like every other call this class makes, rather than
+     * showing an empty pane that would read as "the terminal is blank".
+     */
+    private suspend fun captureTerminal() {
+        // The same rule as [requestRead]: a refused hub gets no tool call from
+        // this screen, through any path.
+        if (refused()) return
+        try {
+            val text = actions.capture(sessionId)
+            // Only if it is still wanted: a `hideTerminal()` while this call
+            // was in flight must not be undone by its reply landing.
+            local.update { if (it.terminalShown) it.copy(terminal = text) else it }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(error = friendly(t)) }
+        }
     }
 
     /**
@@ -524,7 +651,13 @@ class SessionViewModel(
         result
     }
 
-    private fun assemble(row: SessionRow?, status: ConnectionStatus, l: Local, probed: Boolean?) = SessionUiState(
+    private fun assemble(
+        row: SessionRow?,
+        status: ConnectionStatus,
+        hubVersion: String?,
+        l: Local,
+        probed: Boolean?,
+    ) = SessionUiState(
         session = row,
         conversation = l.conversation,
         loaded = l.loaded,
@@ -538,6 +671,14 @@ class SessionViewModel(
         error = l.error,
         silent = l.silent,
         newReply = l.newReply,
+        // Derived, never stored: `blockedCard` in `Blocked.kt` is the one
+        // place that decides what a blocked or stuck row offers, and it is
+        // asked here with the hub's own version because the structured-key
+        // chips depend on it.
+        card = row?.let { blockedCard(it, hubVersion) },
+        answering = l.answering,
+        stillWaiting = l.stillWaiting,
+        terminal = l.terminal,
     )
 }
 
@@ -592,3 +733,17 @@ internal val PROBE_DEBOUNCE = 2.seconds
  * live rather than polled.
  */
 internal val SESSION_EVENT_DEBOUNCE = 500.milliseconds
+
+/**
+ * How long an answer waits for the session's turn counter to move before the
+ * card says [SessionUiState.stillWaiting] instead.
+ *
+ * The hub's `wait_for_session` default. Long enough that an agent which
+ * simply takes a moment to pick the answer up is not reported as stuck;
+ * short enough that a phone screen does not sit on a spinner indefinitely
+ * when the REPL never moves at all.
+ */
+internal const val ANSWER_WAIT_SECONDS: Int = 30
+
+/** What `wait_for_session` answers when the turn actually moved. */
+internal const val WAIT_SATISFIED: String = "satisfied"

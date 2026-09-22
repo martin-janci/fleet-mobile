@@ -417,5 +417,8 @@ private fun SessionRoute(
         onBack = onBack,
         onDismissError = vm::dismissError,
         onAtBottom = vm::onAtBottom,
+        onAnswer = { vm.answer(it) },
+        onShowTerminal = { vm.showTerminal() },
+        onHideTerminal = vm::hideTerminal,
     )
 }

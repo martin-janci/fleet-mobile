@@ -26,6 +26,20 @@ interface FleetState {
     val status: StateFlow<ConnectionStatus>
 
     /**
+     * The version string the hub's last `ready` frame named, or null until one
+     * has — which is also what a hub too old to name one looks like.
+     *
+     * Separate from [ConnectionStatus.Connected]'s own `hubVersion` because the
+     * two answer different questions. That one is part of "the stream is up
+     * right now" and goes away with it; this one is "which hub is this",
+     * which a screen still needs while the stream is down and which a `ready`
+     * whose contract was then refused has answered just as well. It is what
+     * gates the features the wire contract does not move for — see
+     * [dev.claudefleet.mobile.net.HUB_VERSION_KEYS].
+     */
+    val hubVersion: StateFlow<String?>
+
+    /**
      * The id of a session the hub just reported a row change for —
      * `session:created`, `session:updated` or `session:killed` — one at a time,
      * as they arrive. A `ready` or `lagged` resync also emits

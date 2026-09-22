@@ -11,10 +11,13 @@ import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.PendingInput
+import dev.claudefleet.mobile.model.PendingOption
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.WaitResult
+import dev.claudefleet.mobile.net.HUB_VERSION_KEYS
 import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -31,6 +34,7 @@ import kotlinx.coroutines.yield
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -40,6 +44,7 @@ private fun row(
     status: String? = "working",
     stuck: String? = null,
     activity: String? = null,
+    pending: PendingInput? = null,
 ) = SessionRow(
     id = ID,
     tmuxName = "fleet-api",
@@ -49,7 +54,13 @@ private fun row(
     claudeStatus = status,
     stuckKind = stuck,
     currentActivity = activity,
+    pendingInput = pending,
 )
+
+/** A session the hub says is waiting on a numbered permission prompt. */
+private fun blockedRow(
+    pending: PendingInput? = PendingInput("permission", "Do it?", listOf(PendingOption(1, "Yes"))),
+) = row(status = "blocked", pending = pending)
 
 private fun turn(at: String, prompt: String, vararg items: ConvItem) =
     ConvTurn(prompt = prompt, at = at, endedAt = at, items = items.toList())
@@ -61,6 +72,9 @@ private class FakeFleetState(rows: List<SessionRow> = listOf(row())) : FleetStat
     override val hosts = MutableStateFlow(listOf(HostRow(alias = "pine", reachable = true)))
     override val projects = MutableStateFlow(listOf(ProjectRow(id = 1, owner = "o", repo = "r")))
     override val status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Connected("0.9.3"))
+    // Null is the honest starting point: no `ready` frame has named a version
+    // yet, which is exactly what a hub too old to send one looks like too.
+    override val hubVersion = MutableStateFlow<String?>(null)
     override val sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override suspend fun refresh() = Unit
 }
@@ -75,7 +89,7 @@ private class FakeFleetState(rows: List<SessionRow> = listOf(row())) : FleetStat
 private class FakeActions : SessionActions {
     var reads = 0
         private set
-    val prompts = mutableListOf<String>()
+    val sentPrompts = mutableListOf<String>()
 
     /** What the next read answers. */
     var answer: Conversation = Conversation()
@@ -155,21 +169,44 @@ private class FakeActions : SessionActions {
     }
 
     override suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult {
-        prompts += text
+        sentPrompts += text
         sendGate?.await()
         sendFails?.let { throw it }
         return SendPromptResult(delivered = true, sessionId = sessionId, turnSeqBefore = 3)
     }
 
-    // Unused by any test in this file today — a later task's screen wires
-    // these up and gains its own fakes/assertions then.
-    override suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult =
-        SendPromptResult(delivered = true, sessionId = sessionId, turnSeqBefore = 3)
+    /** Every key the card pressed, in order. */
+    val sentKeys = mutableListOf<String>()
 
-    override suspend fun capture(sessionId: Long, maxLines: Int): String = ""
+    /** Every `wait_for_session` call, as (session, turn to wait past). */
+    val waited = mutableListOf<Pair<Long, Long>>()
 
-    override suspend fun waitForTurn(sessionId: Long, turn: Long, timeoutS: Int): WaitResult =
-        WaitResult(status = "satisfied", turnSeq = turn + 1)
+    /** What [waitForTurn] answers — a timeout is what keeps a card on screen. */
+    var waitAnswer: WaitResult = WaitResult(status = "satisfied", turnSeq = 4)
+
+    /** What [capture] answers, and how many times it was asked. */
+    var captureAnswer: String = ""
+    var captures = 0
+        private set
+    var captureFails: Throwable? = null
+
+    override suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult {
+        sentKeys += key
+        sendGate?.await()
+        sendFails?.let { throw it }
+        return SendPromptResult(delivered = true, sessionId = sessionId, turnSeqBefore = 3)
+    }
+
+    override suspend fun capture(sessionId: Long, maxLines: Int): String {
+        captures += 1
+        captureFails?.let { throw it }
+        return captureAnswer
+    }
+
+    override suspend fun waitForTurn(sessionId: Long, turn: Long, timeoutS: Int): WaitResult {
+        waited += sessionId to turn
+        return waitAnswer
+    }
 
     override suspend fun restart(sessionId: Long) = Unit
 
@@ -328,7 +365,7 @@ class SessionViewModelTest {
         vm.send().join()
         runCurrent()
 
-        assertEquals(listOf("ship it"), actions.prompts)
+        assertEquals(listOf("ship it"), actions.sentPrompts)
         assertEquals("", vm.state.value.draft)
         assertNull(vm.state.value.error)
         assertEquals(1, actions.reads, "a delivered prompt should pull the reply in")
@@ -375,7 +412,7 @@ class SessionViewModelTest {
         assertFalse(vm.state.value.canSend)
         vm.send().join()
 
-        assertTrue(actions.prompts.isEmpty())
+        assertTrue(actions.sentPrompts.isEmpty())
     }
 
     /**
@@ -393,7 +430,7 @@ class SessionViewModelTest {
         assertFalse(vm.state.value.canSend)
         vm.send().join()
 
-        assertTrue(actions.prompts.isEmpty())
+        assertTrue(actions.sentPrompts.isEmpty())
         assertTrue(vm.state.value.readOnly)
     }
 
@@ -413,7 +450,7 @@ class SessionViewModelTest {
 
         assertFalse(vm.state.value.canSend, "a reconnecting hub must disable Send")
         vm.send().join()
-        assertTrue(actions.prompts.isEmpty(), "send must not even try while offline")
+        assertTrue(actions.sentPrompts.isEmpty(), "send must not even try while offline")
         assertEquals("ship it", vm.state.value.draft, "the draft must survive being disabled")
     }
 
@@ -428,7 +465,7 @@ class SessionViewModelTest {
 
         assertFalse(vm.state.value.canSend)
         vm.send().join()
-        assertTrue(actions.prompts.isEmpty())
+        assertTrue(actions.sentPrompts.isEmpty())
     }
 
     @Test
@@ -611,7 +648,7 @@ class SessionViewModelTest {
         assertEquals(0, actions.pings, "and it is not even asked")
 
         vm.send().join()
-        assertTrue(actions.prompts.isEmpty(), "send must not try against a refused hub")
+        assertTrue(actions.sentPrompts.isEmpty(), "send must not try against a refused hub")
         assertEquals("ship it", vm.state.value.draft)
     }
 
@@ -1110,7 +1147,7 @@ class SessionViewModelTest {
         vm.onDraftChange("ship it")
         val sendJob = vm.send()
         runCurrent()
-        assertEquals(listOf("ship it"), actions.prompts, "the prompt itself is always delivered")
+        assertEquals(listOf("ship it"), actions.sentPrompts, "the prompt itself is always delivered")
         assertEquals(2, actions.reads, "the post-send read must coalesce with the already-queued refresh, not add a third call")
 
         heldGate.complete(Unit)
@@ -1322,5 +1359,234 @@ class SessionViewModelTest {
         runCurrent()
 
         assertFalse(vm.state.value.newReply)
+    }
+
+    // ---- Answering from the card ----
+
+    /**
+     * The card is derived from the row, so nothing clears it by hand: the
+     * answer goes out, the turn counter is waited past, and the row the hub
+     * publishes next is no longer `blocked`, which is what makes the card
+     * go away.
+     */
+    @Test
+    fun answering_an_option_sends_its_number_waits_for_the_turn_and_clears_the_card() = runTest {
+        val actions = FakeActions()
+        val gate = CompletableDeferred<Unit>()
+        actions.sendGate = gate
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+        runCurrent()
+        assertNotNull(vm.state.value.card)
+
+        val job = vm.answer(Answer.Option(1, "Yes"))
+        runCurrent()
+        assertTrue(vm.state.value.answering)
+        assertEquals(listOf("1"), actions.sentPrompts)
+
+        gate.complete(Unit)
+        // The hub moved on: the same row, no longer blocked.
+        fleet.sessions.value = listOf(row(status = "working"))
+        job.join()
+        runCurrent()
+
+        assertNull(vm.state.value.card)
+        assertFalse(vm.state.value.answering)
+        assertEquals(listOf(ID to 3L), actions.waited, "waited on the send's turn_seq_before")
+    }
+
+    @Test
+    fun enter_and_escape_go_through_keys_rather_than_an_empty_prompt() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Enter).join()
+        vm.answer(Answer.Escape).join()
+        vm.answer(Answer.Interrupt).join()
+        runCurrent()
+
+        assertEquals(listOf("Enter", "Escape", "C-c"), actions.sentKeys)
+        assertTrue(actions.sentPrompts.isEmpty(), "a key is never an empty send_prompt")
+    }
+
+    /** The trust prompt is a typed `y`/`n`, not a key: it goes through `send_prompt`. */
+    @Test
+    fun the_trust_prompts_y_goes_through_send_prompt() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(row(status = "blocked", stuck = "trust_prompt")))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Text("y")).join()
+        runCurrent()
+
+        assertEquals(listOf("y"), actions.sentPrompts)
+        assertTrue(actions.sentKeys.isEmpty())
+    }
+
+    @Test
+    fun a_timeout_keeps_the_card_and_says_still_waiting() = runTest {
+        val actions = FakeActions()
+        actions.waitAnswer = WaitResult(status = "timeout")
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Enter).join()
+        runCurrent()
+
+        assertNotNull(vm.state.value.card, "the session is still blocked, so the card stays")
+        assertTrue(vm.state.value.stillWaiting)
+        assertFalse(vm.state.value.answering)
+    }
+
+    /** A second answer while the first is still out would race the turn counter. */
+    @Test
+    fun a_second_answer_while_one_is_in_flight_is_ignored() = runTest {
+        val actions = FakeActions()
+        val gate = CompletableDeferred<Unit>()
+        actions.sendGate = gate
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        val first = vm.answer(Answer.Enter)
+        runCurrent()
+        vm.answer(Answer.Escape).join()
+        runCurrent()
+
+        assertEquals(listOf("Enter"), actions.sentKeys)
+        gate.complete(Unit)
+        first.join()
+    }
+
+    @Test
+    fun a_refused_answer_is_reported_and_leaves_the_card_answerable_again() = runTest {
+        val actions = FakeActions()
+        actions.sendFails = HubError.Tool("E_BUSY", "the session is mid-turn")
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Enter).join()
+        runCurrent()
+
+        assertEquals("E_BUSY: the session is mid-turn", vm.state.value.error?.details)
+        assertFalse(vm.state.value.answering)
+    }
+
+    /**
+     * `send_prompt` is not in the hub's readonly allow-list, and neither is
+     * `send_prompt { keys }` — so a readonly device makes no call at all, and
+     * the screen hides the chips rather than offering a refusal.
+     */
+    @Test
+    fun a_readonly_device_answers_nothing() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope, canSendPrompts = false)
+
+        vm.answer(Answer.Enter).join()
+        vm.answer(Answer.Option(1, "Yes")).join()
+        runCurrent()
+
+        assertTrue(actions.sentKeys.isEmpty())
+        assertTrue(actions.sentPrompts.isEmpty())
+        assertTrue(actions.waited.isEmpty())
+        assertFalse(vm.state.value.answering)
+    }
+
+    /**
+     * A hub older than [HUB_VERSION_KEYS] can take neither a structured key
+     * nor report a `pending_input`, so its blocked row is a bare one and the
+     * card carries no chips at all — but it still says what is happening, and
+     * the terminal is still the way through. The mapping itself is
+     * `blockedCard`'s and is tested in `BlockedTest`; what this pins is that
+     * the view model asks it with the hub's own version rather than assuming
+     * the newest.
+     */
+    @Test
+    fun an_old_hub_gets_a_card_with_no_answers_but_the_terminal_is_still_offered() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(row(status = "blocked", activity = "waiting for input: recreate turanga?")))
+        fleet.hubVersion.value = "0.2.34"
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+
+        val card = assertNotNull(vm.state.value.card)
+        assertTrue(card.answers.isEmpty(), "no structured keys against a hub that cannot take them")
+        assertTrue(card.terminalAvailable)
+        assertEquals("recreate turanga?", card.headline)
+    }
+
+    /** The same row against a current hub does get its Enter/Esc chips. */
+    @Test
+    fun a_current_hub_gets_the_key_chips_for_the_same_row() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(row(status = "blocked", activity = "waiting for input: recreate turanga?")))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+
+        assertEquals(listOf(Answer.Enter, Answer.Escape), assertNotNull(vm.state.value.card).answers)
+    }
+
+    // ---- The terminal fallback ----
+
+    @Test
+    fun show_terminal_captures_once_and_refreshes_on_session_events() = runTest {
+        val actions = FakeActions()
+        actions.captureAnswer = "1. Yes"
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.showTerminal().join()
+        runCurrent()
+        assertEquals("1. Yes", vm.state.value.terminal)
+        assertEquals(1, actions.captures)
+
+        actions.captureAnswer = "2. No"
+        fleet.sessionChanges.tryEmit(ID)
+        advanceTimeBy(SESSION_EVENT_DEBOUNCE.inWholeMilliseconds + 1)
+        runCurrent()
+        assertEquals("2. No", vm.state.value.terminal)
+
+        vm.hideTerminal()
+        runCurrent()
+        assertNull(vm.state.value.terminal)
+    }
+
+    /** Hidden, the capture stops costing a hub call on every session event. */
+    @Test
+    fun a_hidden_terminal_is_not_recaptured_on_session_events() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+
+        fleet.sessionChanges.tryEmit(ID)
+        advanceTimeBy(SESSION_EVENT_DEBOUNCE.inWholeMilliseconds + 1)
+        runCurrent()
+
+        assertEquals(0, actions.captures)
+    }
+
+    @Test
+    fun a_capture_that_fails_says_so_rather_than_showing_an_empty_pane() = runTest {
+        val actions = FakeActions()
+        actions.captureFails = HubError.Tool("E_BG_SESSION", "no tmux pane")
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.showTerminal().join()
+        runCurrent()
+
+        assertEquals("E_BG_SESSION: no tmux pane", vm.state.value.error?.details)
+        assertNull(vm.state.value.terminal)
     }
 }

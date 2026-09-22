@@ -119,6 +119,12 @@ class FleetRepository(
     private val _status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Offline(NOT_STARTED))
     override val status: StateFlow<ConnectionStatus> = _status.asStateFlow()
 
+    // Written from every `ready` and never cleared: see [FleetState.hubVersion].
+    // A drop does not un-see which hub this is, and the next connection's own
+    // `ready` overwrites it with whatever is there now.
+    private val _hubVersion = MutableStateFlow<String?>(null)
+    override val hubVersion: StateFlow<String?> = _hubVersion.asStateFlow()
+
     // Buffered rather than rendezvous: emitting must never suspend `follow()`
     // waiting on a session screen that may not be open at all. `DROP_OLDEST`
     // is fine because this is a hint to refetch, not the fact itself — a
@@ -184,6 +190,11 @@ class FleetRepository(
                     if (contractRefused) return@collect
                     when (event) {
                         is HubEvent.Ready -> {
+                            // Before the contract verdict, deliberately: a
+                            // refused hub is still a hub whose version a
+                            // screen may want to name, and this is the only
+                            // frame that carries it.
+                            _hubVersion.value = event.version
                             val refusal = contractVerdict(event.contract).sentence()
                             if (refusal != null) {
                                 // Not a transport failure — the hub answered
