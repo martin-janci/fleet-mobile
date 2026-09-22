@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.model.PairResult
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.WaitResult
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.header
@@ -188,6 +189,81 @@ class HubClient(
                 put("prompt", text)
             },
         ) { json.decodeFromJsonElement(SendPromptResult.serializer(), it) }
+
+    /**
+     * Press one key instead of typing text — `send_prompt` with `keys` and an
+     * empty `prompt`. [key] is one of `"Enter"`, `"Escape"`, `"C-c"`, the set
+     * the hub's guard accepts.
+     */
+    suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult =
+        call(
+            "send_prompt",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("prompt", "")
+                put("keys", key)
+            },
+        ) { json.decodeFromJsonElement(SendPromptResult.serializer(), it) }
+
+    /**
+     * The visible tmux pane, capped to [maxLines] lines.
+     *
+     * `capture_session` answers plain text, not JSON, so [payloadOf]'s own
+     * fallback — a text block that fails to parse as JSON is handed over as a
+     * `JsonPrimitive` — is what carries the pane text here.
+     */
+    suspend fun capture(sessionId: Long, maxLines: Int = 40): String =
+        call(
+            "capture_session",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("max_lines", maxLines)
+            },
+        ) { (it as JsonPrimitive).content }
+
+    /** Block until [sessionId]'s turn counter passes [turn], or [timeoutS] elapses. */
+    suspend fun waitForTurn(sessionId: Long, turn: Long, timeoutS: Int = 30): WaitResult =
+        call(
+            "wait_for_session",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("until", "turn_gt")
+                put("turn", turn)
+                put("timeout_s", timeoutS)
+            },
+        ) { json.decodeFromJsonElement(WaitResult.serializer(), it) }
+
+    /** Kill and recreate the tmux session in place — for a wedged REPL. */
+    suspend fun restart(sessionId: Long): Unit =
+        call("restart_session", buildJsonObject { put("session_id", sessionId) }) { }
+
+    /** Ask the session to persist its work, then arm deletion once it is clean. */
+    suspend fun safeKill(sessionId: Long): Unit =
+        call("safe_kill_session", buildJsonObject { put("session_id", sessionId) }) { }
+
+    /** Kill the session now, without waiting for it to persist anything. */
+    suspend fun kill(sessionId: Long): Unit =
+        call("kill_session", buildJsonObject { put("session_id", sessionId) }) { }
+
+    /** Replace the session's tags. */
+    suspend fun setTags(sessionId: Long, tags: List<String>): Unit =
+        call(
+            "set_session_tags",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("tags", JsonArray(tags.map { JsonPrimitive(it) }))
+            },
+        ) { }
+
+    /** Set the session's friendly display name. */
+    suspend fun rename(sessionId: Long, friendlyName: String): Unit =
+        call(
+            "set_friendly_name",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("friendly_name", friendlyName)
+            },
+        ) { }
 
     /**
      * Is this hub reachable and its store open, right now.

@@ -14,6 +14,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -63,6 +64,27 @@ private fun client(
     }
     return HubClient(HttpClient(engine), BASE, token) to calls
 }
+
+/**
+ * A tool-call client for tests that only care about one request's tool name
+ * and arguments, and answer one payload back. [handler] returns the payload
+ * exactly as the tool would put it in its text block — a JSON document for a
+ * structured result, or plain prose for a tool like `capture_session` that
+ * answers text — and [okResult] does the SSE/JSON-RPC/text-block wrapping.
+ */
+private fun clientAnswering(handler: (JsonObject) -> String): HubClient {
+    val engine = MockEngine { request ->
+        val body = Json.parseToJsonElement((request.body as TextContent).text).jsonObject
+        respond(sse(okResult(handler(body))), HttpStatusCode.OK, sseHeaders)
+    }
+    return HubClient(HttpClient(engine), BASE, "tok-phone")
+}
+
+/** The tool name off a parsed `tools/call` request body. */
+private fun JsonObject.tool(): String = this["params"]!!.jsonObject["name"]!!.jsonPrimitive.content
+
+/** The tool arguments off a parsed `tools/call` request body. */
+private fun JsonObject.args(): JsonObject = this["params"]!!.jsonObject["arguments"]!!.jsonObject
 
 class HubClientTest {
 
@@ -455,5 +477,59 @@ class HubClientTest {
         assertEquals(HUB_CALL_TIMEOUT_MS, timeout?.socketTimeoutMillis)
         assertEquals(HUB_CONNECT_TIMEOUT_MS, timeout?.connectTimeoutMillis)
         assertTrue(HUB_CALL_TIMEOUT_MS > 15_000L, "shorter than the hub's own keep-alive would defeat the point")
+    }
+
+    @Test
+    fun keys_are_sent_as_the_keys_argument_with_an_empty_prompt() = runTest {
+        val client = clientAnswering { body ->
+            assertEquals("send_prompt", body.tool())
+            assertEquals("Escape", body.args()["keys"]?.jsonPrimitive?.content)
+            assertEquals("", body.args()["prompt"]?.jsonPrimitive?.content)
+            """{"delivered":true,"session_id":7,"turn_seq_before":3}"""
+        }
+        assertEquals(3L, client.sendKeys(7, "Escape").turnSeqBefore)
+    }
+
+    /**
+     * `capture_session` answers plain text, not JSON — the pane's own text
+     * riding in the tool's text content block, not a JSON string inside it.
+     * `payloadOf` hands that text over as a `JsonPrimitive` fallback (its
+     * `parseWire` attempt fails because pane text is not valid JSON), so the
+     * assertion is that the pane text survives byte for byte.
+     */
+    @Test
+    fun capture_returns_the_pane_text_verbatim() = runTest {
+        val client = clientAnswering { body ->
+            assertEquals("capture_session", body.tool())
+            assertEquals(40, body.args()["max_lines"]?.jsonPrimitive?.int)
+            "❯ 1. Yes\n  2. No"
+        }
+        assertEquals("❯ 1. Yes\n  2. No", client.capture(7))
+    }
+
+    @Test
+    fun wait_for_turn_passes_the_turn_and_a_timeout() = runTest {
+        val client = clientAnswering { body ->
+            assertEquals("wait_for_session", body.tool())
+            assertEquals("turn_gt", body.args()["until"]?.jsonPrimitive?.content)
+            assertEquals(3, body.args()["turn"]?.jsonPrimitive?.int)
+            assertEquals(30, body.args()["timeout_s"]?.jsonPrimitive?.int)
+            """{"status":"satisfied","claude_status":"idle","turn_seq":4}"""
+        }
+        assertEquals("satisfied", client.waitForTurn(7, 3).status)
+    }
+
+    @Test
+    fun lifecycle_and_metadata_calls_name_their_tools() = runTest {
+        for ((call, tool, argKey) in listOf<Triple<suspend (HubClient) -> Unit, String, String>>(
+            Triple({ it.restart(7) }, "restart_session", "session_id"),
+            Triple({ it.safeKill(7) }, "safe_kill_session", "session_id"),
+            Triple({ it.kill(7) }, "kill_session", "session_id"),
+            Triple({ it.setTags(7, listOf("wip")) }, "set_session_tags", "tags"),
+            Triple({ it.rename(7, "ADR") }, "set_friendly_name", "friendly_name"),
+        )) {
+            val client = clientAnswering { body -> assertEquals(tool, body.tool()); assertTrue(argKey in body.args()); "7" }
+            call(client)
+        }
     }
 }

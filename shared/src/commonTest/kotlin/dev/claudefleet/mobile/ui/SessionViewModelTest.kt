@@ -14,6 +14,7 @@ import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.WaitResult
 import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -159,6 +160,26 @@ private class FakeActions : SessionActions {
         sendFails?.let { throw it }
         return SendPromptResult(delivered = true, sessionId = sessionId, turnSeqBefore = 3)
     }
+
+    // Unused by any test in this file today — a later task's screen wires
+    // these up and gains its own fakes/assertions then.
+    override suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult =
+        SendPromptResult(delivered = true, sessionId = sessionId, turnSeqBefore = 3)
+
+    override suspend fun capture(sessionId: Long, maxLines: Int): String = ""
+
+    override suspend fun waitForTurn(sessionId: Long, turn: Long, timeoutS: Int): WaitResult =
+        WaitResult(status = "satisfied", turnSeq = turn + 1)
+
+    override suspend fun restart(sessionId: Long) = Unit
+
+    override suspend fun safeKill(sessionId: Long) = Unit
+
+    override suspend fun kill(sessionId: Long) = Unit
+
+    override suspend fun setTags(sessionId: Long, tags: List<String>) = Unit
+
+    override suspend fun rename(sessionId: Long, friendlyName: String) = Unit
 }
 
 class SessionViewModelTest {

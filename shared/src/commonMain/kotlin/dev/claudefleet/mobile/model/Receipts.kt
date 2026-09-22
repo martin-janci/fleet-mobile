@@ -16,6 +16,20 @@ data class SendPromptResult(
 )
 
 /**
+ * What `wait_for_session` answers. [status] is `satisfied` | `timeout`;
+ * [claudeStatus] and [turnSeq] are the session's state as of that poll, which
+ * is what a blocked-card screen redraws from without a second round trip.
+ * The hub's reply also carries `last_stop_at` and `stuck_kind`, left off here
+ * because nothing in this app reads them from this call.
+ */
+@Serializable
+data class WaitResult(
+    val status: String,
+    @SerialName("claude_status") val claudeStatus: String? = null,
+    @SerialName("turn_seq") val turnSeq: Long = 0,
+)
+
+/**
  * What `POST /pair` answers: the one and only time the plaintext client token
  * crosses the wire. [hub] is the hub's own idea of its base URL, which is what
  * the app should store — the URL scanned from a QR may be one of several names
