@@ -258,10 +258,11 @@ fun SessionScreen(
                 onAnswer = onAnswer,
                 onShowTerminal = onShowTerminal,
                 onHideTerminal = onHideTerminal,
-                // A stuck card offers Restart only when there is a session
-                // this device may manage at all — the same rule the ⋮ menu's
-                // own Restart item uses (see [SessionOverflowMenu]).
-                onRestart = if (state.canManage) onRestart else null,
+                // The same `canRestart` the ⋮ menu's own Restart item gates
+                // on (see [SessionOverflowMenu]) — one source of truth for
+                // "is a restart worth offering", not `canManage` re-read here
+                // as a stand-in for it.
+                onRestart = if (state.canRestart) onRestart else null,
             )
         }
 

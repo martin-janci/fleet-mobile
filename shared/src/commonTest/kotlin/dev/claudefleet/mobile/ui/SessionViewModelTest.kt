@@ -2027,4 +2027,108 @@ class SessionViewModelTest {
         runCurrent()
         assertFalse(vm.state.value.busy)
     }
+
+    // ---- Fix round 1: management writes take their turn alongside send/answer ----
+    //
+    // `canSendNow`/`canAnswerNow` already excluded each other (`!l.sending &&
+    // !l.answering`), but the new management family's own `runManaged` only
+    // checked its own `busy` flag, and `canSendNow`/`canAnswerNow` were never
+    // taught about `busy` either — so a kill could run while an answer was
+    // still out, or Send could fire while a restart's refetch was still in
+    // flight. All five guards now share one "nothing else in flight" rule.
+
+    /** The new direction: a management call must not run while an answer is still out. */
+    @Test
+    fun kill_is_refused_while_an_answer_is_in_flight() = runTest {
+        val actions = FakeActions()
+        val gate = CompletableDeferred<Unit>()
+        actions.sendGate = gate
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        val answering = vm.answer(Answer.Enter)
+        runCurrent()
+        assertTrue(vm.state.value.answering, "setup: the answer is out")
+
+        vm.kill().join()
+        runCurrent()
+        assertTrue(actions.killed.isEmpty(), "a management call must not race an answer still in flight")
+
+        gate.complete(Unit)
+        answering.join()
+    }
+
+    /** The other new direction: a management call must not run while a prompt is still out. */
+    @Test
+    fun restart_is_refused_while_sending_is_in_flight() = runTest {
+        val actions = FakeActions()
+        val gate = CompletableDeferred<Unit>()
+        actions.sendGate = gate
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.onDraftChange("ship it")
+        runCurrent()
+
+        val sending = vm.send()
+        runCurrent()
+        assertTrue(vm.state.value.sending, "setup: the prompt is out")
+
+        vm.restart().join()
+        runCurrent()
+        assertTrue(actions.restarted.isEmpty(), "a management call must not race a prompt still in flight")
+
+        gate.complete(Unit)
+        sending.join()
+    }
+
+    /** The pre-existing direction, now including the new family: Send must go dark while a management call is out. */
+    @Test
+    fun send_is_disabled_while_a_management_action_is_in_flight() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        vm.onDraftChange("ship it")
+        runCurrent()
+        assertTrue(vm.state.value.canSend, "setup: the composer is live before the restart")
+
+        val gate = CompletableDeferred<Unit>()
+        actions.readGate = gate
+        val restarting = vm.restart()
+        runCurrent()
+        assertTrue(vm.state.value.busy, "setup: the restart's own refetch is outstanding")
+        assertFalse(vm.state.value.canSend, "a management call in flight must darken Send")
+
+        vm.send().join()
+        assertTrue(actions.sentPrompts.isEmpty(), "and send must not even try")
+
+        gate.complete(Unit)
+        restarting.join()
+        runCurrent()
+        assertTrue(vm.state.value.canSend, "live again once the management call has landed")
+    }
+
+    /** And the card's own chips, exactly the same way. */
+    @Test
+    fun answer_is_refused_while_a_management_action_is_in_flight() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+
+        val gate = CompletableDeferred<Unit>()
+        actions.readGate = gate
+        val restarting = vm.restart()
+        runCurrent()
+        assertTrue(vm.state.value.busy, "setup: the restart's own refetch is outstanding")
+        assertFalse(vm.state.value.canAnswer, "a management call in flight must darken the card's chips too")
+
+        vm.answer(Answer.Enter).join()
+        assertTrue(actions.sentKeys.isEmpty(), "and the card must not answer over a management call in flight")
+
+        gate.complete(Unit)
+        restarting.join()
+        runCurrent()
+        assertTrue(vm.state.value.canAnswer, "live again once the management call has landed")
+    }
 }

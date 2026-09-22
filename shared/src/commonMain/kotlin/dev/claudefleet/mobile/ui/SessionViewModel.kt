@@ -175,14 +175,17 @@ data class SessionUiState(
      * [ANSWER_WAIT_SECONDS] wait, and a prompt typed into the composer
      * meanwhile would race the very turn counter that answer is waiting past.
      * Two single-flight guards that did not know about each other were no
-     * guard at all — see [SessionViewModel.answer].
+     * guard at all — see [SessionViewModel.answer]. [busy] joined them for
+     * the same reason: a management call (`restart`, `kill`, …) is a hub
+     * write too, and one in flight must darken Send exactly as a prompt or an
+     * answer already in flight does — see [idle].
      */
     val canSend: Boolean
-        get() = !sending && !answering && !readOnly && connected && session != null && draft.isNotBlank()
+        get() = idle(sending, answering, busy) && !readOnly && connected && session != null && draft.isNotBlank()
 
     /**
      * Whether the card's answer chips do anything — the other half of
-     * [canSend], and the same five facts in the same order. Drawn by
+     * [canSend], and the same facts in the same order. Drawn by
      * `BlockedCardView` rather than re-derived there, so a chip is never
      * live for a tap [SessionViewModel.answer] would drop on the floor.
      *
@@ -191,8 +194,24 @@ data class SessionUiState(
      * refuse the call whatever the connection does.
      */
     val canAnswer: Boolean
-        get() = !sending && !answering && !readOnly && connected && card != null
+        get() = idle(sending, answering, busy) && !readOnly && connected && card != null
 }
+
+/**
+ * "Nothing else on this screen already holds a hub write outstanding" — the
+ * one rule shared, term for term, by [SessionUiState.canSend], `canSendNow`,
+ * [SessionUiState.canAnswer], `canAnswerNow`, and the management family's own
+ * `runManaged` guard in [SessionViewModel]. It used to be three separate
+ * copies: [SessionUiState.canSend]/[SessionUiState.canAnswer] and their
+ * `…Now` twins agreed with each other, but `runManaged` — added for
+ * `restart`/`safeKill`/`kill`/`setTags`/`rename` — checked only its own
+ * `busy` flag, and neither `canSendNow` nor `canAnswerNow` was taught about
+ * `busy` in return. A kill could run while an answer was still out; Send
+ * could fire while a restart's own refetch was still in flight. Every write
+ * this screen can start now reads the same three flags, in the same order,
+ * from this one place.
+ */
+internal fun idle(sending: Boolean, answering: Boolean, busy: Boolean): Boolean = !sending && !answering && !busy
 
 /**
  * One session: the conversation newest at the bottom, and a box to answer it.
@@ -629,18 +648,22 @@ class SessionViewModel(
      * [canKillNow] for kill, [canManageNow] for the rest — read from the live
      * sources rather than from `state`, exactly as [canSendNow]/[canAnswerNow]
      * are, since `state` trails its inputs by a dispatch), [connected] is the
-     * same hub-reachability gate [send]/[answer] use, and [Local.busy] is
-     * this family's own single-flight guard — a second call arriving while
-     * the first's own refetch is still outstanding is a no-op, not a second
-     * `busy` span layered onto the first.
+     * same hub-reachability gate [send]/[answer] use, and [idle] is the same
+     * "nothing else in flight" rule [canSendNow]/[canAnswerNow] use — a
+     * management call must not race a prompt or an answer any more than they
+     * may race each other, and [Local.busy] is its own third term in that
+     * same rule, so a second management call cannot start while the first's
+     * own refetch is still outstanding either.
      *
      * [SessionUiState.busy] stays true across the follow-up [requestRead]
      * too, not just the call itself — a `finally` covers both the success and
      * the caught-failure path — so the menu cannot be tapped again before the
-     * row it would act on next has actually been refreshed.
+     * row it would act on next has actually been refreshed, and Send/answer
+     * cannot fire into the middle of it either.
      */
     private fun runManaged(guard: () -> Boolean, call: suspend () -> Unit): Job = scope.launch {
-        if (!guard() || !connected() || local.value.busy) return@launch
+        val l = local.value
+        if (!guard() || !connected() || !idle(l.sending, l.answering, l.busy)) return@launch
         local.update { it.copy(busy = true, error = null) }
         try {
             call()
@@ -672,10 +695,10 @@ class SessionViewModel(
      * second copy of `blockedCard`'s rule.
      */
     private fun canAnswerNow(l: Local): Boolean =
-        !readOnly && !l.answering && !l.sending && connected()
+        !readOnly && idle(l.sending, l.answering, l.busy) && connected()
 
     private fun canSendNow(l: Local): Boolean =
-        !l.sending && !l.answering && !readOnly && connected() && l.draft.isNotBlank() && row() != null
+        idle(l.sending, l.answering, l.busy) && !readOnly && connected() && l.draft.isNotBlank() && row() != null
 
     /** [isConnected] read from the live sources, for [send]'s own check. */
     private fun connected(): Boolean = isConnected(fleet.status.value, probe.value)
