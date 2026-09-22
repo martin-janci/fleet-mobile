@@ -65,13 +65,20 @@ internal object Repo {
     val shippedSwift: List<File> by lazy {
         File(root, "iosApp").walkTopDown()
             .filter { it.isFile && it.extension == "swift" }
-            // `shipped`, so the XCTest bundle is out — the same exclusion
+            // `shipped`, so the test bundles are out — the same exclusion
             // [shipped] already makes for `commonTest` and `jvmTest`. The rule
             // these lists serve is "app logic lives in :shared, not in the
-            // host", and a test that exercises the host is not app logic. It
-            // has its own gate below rather than being swept in with the two
+            // host", and a test that exercises the host is not app logic. They
+            // have their own gates rather than being swept in with the two
             // files that do ship.
-            .filterNot { "iosAppTests" in it.path }
+            //
+            // Both bundles, named separately: `iosAppUITests` does not contain
+            // the substring `iosAppTests` (the `UI` sits in the middle), so the
+            // single check that used to be here silently counted the UI test as
+            // shipped host code the day it was added. It failed loudly, which
+            // is the system working — but only because something else pinned
+            // the file count.
+            .filterNot { "iosAppTests" in it.path || "iosAppUITests" in it.path }
             .toList()
             .also { if (it.isEmpty()) fail("found no Swift sources under $root/iosApp") }
     }
