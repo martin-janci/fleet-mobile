@@ -3,7 +3,9 @@ package dev.claudefleet.mobile.model
 import dev.claudefleet.mobile.net.json
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class SessionRowTest {
     private val now = 1_790_000_000L
@@ -85,5 +87,44 @@ class SessionRowTest {
 
         val bare = json.decodeFromString(SessionRow.serializer(), """{"id":9}""")
         assertNull(bare.pendingInput)
+    }
+
+    /**
+     * The hub decides who needs a person (`service::attention` in
+     * claude-fleet) and stamps its answer on every listed row and every
+     * `session:*` frame. That answer wins, reason and all, whatever the
+     * row's other columns say.
+     */
+    @Test
+    fun the_hubs_needs_attention_is_the_answer() {
+        val row = json.decodeFromString(
+            SessionRow.serializer(),
+            """{"id":1,"claude_status":"working","needs_attention":{"reason":"lifecycle","since":42}}""",
+        )
+        assertEquals("lifecycle", row.attentionReason)
+        assertEquals(42L, row.attention?.since)
+        assertTrue(row.needsAttention)
+    }
+
+    /**
+     * A hub released before it stamped the field sends none. The fallback is
+     * the hub's own rule, ported exactly — in its order, which is the
+     * precedence — so an older hub and a newer one agree about every row.
+     */
+    @Test
+    fun without_the_hubs_answer_the_row_applies_the_hubs_rule() {
+        val calm = SessionRow(id = 1, status = "running", claudeStatus = "working")
+        assertNull(calm.attentionReason)
+        assertFalse(calm.needsAttention)
+        assertEquals("waiting", calm.copy(claudeStatus = "blocked", stuckKind = "oom").attentionReason)
+        assertEquals("stuck", calm.copy(stuckKind = "press_enter").attentionReason)
+        assertEquals("failed", calm.copy(claudeStatus = "failed").attentionReason)
+        assertEquals("lifecycle", calm.copy(safeKillState = "failed").attentionReason)
+        assertEquals("lifecycle", calm.copy(safeKillState = "requested").attentionReason)
+        assertNull(calm.copy(safeKillState = "waiting_for_clean").attentionReason)
+        assertEquals("lifecycle", calm.copy(status = "ghost").attentionReason)
+        assertEquals("lifecycle", calm.copy(lostAt = 5).attentionReason)
+        // A Claude running outside fleet is read-only here: never a person's job.
+        assertNull(calm.copy(kind = "external", claudeStatus = "blocked").attentionReason)
     }
 }

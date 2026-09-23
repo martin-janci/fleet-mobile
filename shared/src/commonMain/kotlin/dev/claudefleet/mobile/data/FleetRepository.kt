@@ -172,6 +172,11 @@ class FleetRepository(
      * half-built snapshot still cannot reach the flows.
      */
     override suspend fun refresh() {
+        // Spent before the re-list, not after: the fresh snapshot is newer
+        // than every frame the id points past, so a later resume from it would
+        // replay older rows over newer ones. Cleared up front so a refresh
+        // that fails still leaves no id promising continuity it cannot give.
+        lastEventId = null
         coroutineScope {
             val sessions = async { client.listSessions() }
             val hosts = async { client.listHosts() }
@@ -179,6 +184,18 @@ class FleetRepository(
             publish(FleetSnapshot(sessions.await(), hosts.await(), projects.await()))
         }
     }
+
+    /**
+     * The `id:` of the last row frame applied to the snapshot, which the next
+     * connection sends as `Last-Event-ID` so a dropped stream costs the frames
+     * it missed instead of a full re-list (61 KB and three round trips,
+     * measured, on every lift, tunnel and app switch).
+     *
+     * Taken from what [follow] APPLIED, not from what the transport read: a
+     * frame read into a buffer and lost with the connection must not be
+     * counted as seen. [refresh] clears it.
+     */
+    private var lastEventId: String? = null
 
     private suspend fun follow() {
         var failures = 0
@@ -202,7 +219,7 @@ class FleetRepository(
                 // against an upgraded app — gets its own fair verdict rather
                 // than inheriting the last one's refusal.
                 var contractRefused = false
-                events.connect().collect { event ->
+                events.connect(lastEventId).collect { event ->
                     if (contractRefused) return@collect
                     when (event) {
                         is HubEvent.Ready -> {
@@ -231,7 +248,12 @@ class FleetRepository(
                             // every `ready`, so the wait never grew past its
                             // first step and the phone reconnected once a second
                             // for as long as the half-outage lasted.
-                            refresh()
+                            // A hub that honoured `Last-Event-ID` replays what
+                            // this app missed as ordinary row frames, so there
+                            // is nothing to re-list. Anything short of a clear
+                            // yes — `false`, or a hub that cannot resume — is
+                            // the old path.
+                            if (event.resumed != true) refresh()
                             failures = 0
                             // Re-measured per connection, so a device whose
                             // clock is corrected by NTP heals on the next
@@ -248,6 +270,7 @@ class FleetRepository(
                         }
                         is HubEvent.Row -> {
                             publish(snapshot().applying(event))
+                            event.id?.let { lastEventId = it }
                             event.sessionId()?.let { _sessionChanges.tryEmit(it) }
                         }
                     }

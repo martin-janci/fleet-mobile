@@ -169,9 +169,15 @@ class HubClient(
      * `summary=false` on purpose: the default slim row drops `friendly_name`,
      * `current_activity` and `last_activity_at`, which are exactly what the
      * list draws.
+     *
+     * `view=phone` is the hub's named projection for this app: the columns it
+     * reads and not the other half of the row (session ids, account ids, token
+     * counters). The hub owns that list and widens it when a screen starts
+     * reading a new column. A hub that predates the view ignores the key, and
+     * `summary=false` still gets it full rows.
      */
     suspend fun listSessions(): List<SessionRow> =
-        call("list_sessions", buildJsonObject { put("summary", false) }) {
+        call("list_sessions", buildJsonObject { put("summary", false); put("view", "phone") }) {
             json.decodeFromJsonElement(ListSerializer(SessionRow.serializer()), it)
         }
 
