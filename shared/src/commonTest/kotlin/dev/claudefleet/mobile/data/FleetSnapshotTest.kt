@@ -367,6 +367,30 @@ class FleetSnapshotTest {
         assertEquals(9L, row("session:killed", """{"id":9}""").sessionId())
     }
 
+    /**
+     * On a `session:event` frame `id` is the `session_events` rowid, not the
+     * session — a number in the millions. Reading it meant the open screen
+     * never refreshed on a real timeline entry and pushed an id that matches
+     * nothing into the change flow.
+     */
+    @Test
+    fun sessionId_reads_session_id_on_a_timeline_frame_not_the_row_id() {
+        val frame = """{"id":2125930,"session_id":21340,"at":1790027305,"kind":"status_change"}"""
+        assertEquals(21340L, row("session:event", frame).sessionId())
+    }
+
+    /**
+     * An `mcp_call` entry says somebody called a tool — including this app's
+     * own reads. Treating it as a change is a loop: a read produces the frame,
+     * the frame triggers a read. Current hubs no longer announce read-only
+     * calls; an older one does.
+     */
+    @Test
+    fun sessionId_is_null_for_an_mcp_call_timeline_frame() {
+        val frame = """{"id":2125930,"session_id":21340,"kind":"mcp_call","detail":"list_sessions by client:phone"}"""
+        assertEquals(null, row("session:event", frame).sessionId())
+    }
+
     @Test
     fun sessionId_is_null_for_a_row_event_that_is_not_about_a_session() {
         assertEquals(null, row("host:probed", hostPayload("box")).sessionId())

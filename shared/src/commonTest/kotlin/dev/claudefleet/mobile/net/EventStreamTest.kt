@@ -59,7 +59,7 @@ class EventStreamTest {
         val events = streamOf(body).connect().toList()
 
         assertEquals(3, events.size, "the keep-alive comment is not an event")
-        assertEquals(HubEvent.Ready("0.9.3", listOf("session")), events[0])
+        assertEquals(HubEvent.Ready("0.9.3", listOf("session"), now = 1L), events[0])
         assertEquals("session:updated", (events[1] as HubEvent.Row).name)
         assertEquals("session:killed", (events[2] as HubEvent.Row).name)
     }

@@ -149,7 +149,10 @@ class HubClientTest {
         }
 
         assertEquals(3, n)
-        assertEquals("/mcp", calls.path(0))
+        // The mount is whatever an ordinary call uses; the point here is that
+        // an SSE-framed *answer* parses on either of them — a proxy or a hub
+        // may still frame a reply the client asked for unframed.
+        assertEquals("/mcp/json", calls.path(0))
         val sent = Json.parseToJsonElement(calls.bodyText(0)).jsonObject
         assertEquals("2.0", sent["jsonrpc"]!!.jsonPrimitive.content)
         assertEquals("tools/call", sent["method"]!!.jsonPrimitive.content)
@@ -476,6 +479,61 @@ class HubClientTest {
         val (hub, _) = client { okResult("[]") to HttpStatusCode.OK }
 
         assertEquals(emptyList(), hub.listSessions())
+    }
+
+    /**
+     * An ordinary call goes to the mount whose answer a proxy will compress.
+     * `/mcp` answers `text/event-stream`, which Caddy and Cloudflare both skip
+     * by design, so on that mount nothing this app fetches is ever compressed.
+     */
+    @Test
+    fun an_ordinary_call_uses_the_json_mount() = runTest {
+        val calls = Calls()
+        val (hub, _) = client(calls = calls) { okResult("[]") to HttpStatusCode.OK }
+
+        hub.listSessions()
+
+        assertEquals("/mcp/json", calls.path(0))
+    }
+
+    /**
+     * A hub that predates the JSON mount answers 404. The call still succeeds,
+     * and the client stops asking: the 404 is a property of the hub, not of
+     * this one call.
+     */
+    @Test
+    fun a_hub_without_the_json_mount_falls_back_once_and_stays_there() = runTest {
+        val calls = Calls()
+        val (hub, _) = client(calls = calls) { request ->
+            if (request.url.encodedPath == "/mcp/json") {
+                "no such route" to HttpStatusCode.NotFound
+            } else {
+                okResult("[]") to HttpStatusCode.OK
+            }
+        }
+
+        assertEquals(emptyList(), hub.listSessions())
+        assertEquals(listOf("/mcp/json", "/mcp"), listOf(calls.path(0), calls.path(1)))
+
+        // The second call does not re-probe.
+        assertEquals(emptyList(), hub.listSessions())
+        assertEquals(3, calls.requests.size)
+        assertEquals("/mcp", calls.path(2))
+    }
+
+    /**
+     * A long poll keeps the SSE mount even on a hub that has both: the hub
+     * holds the request open for minutes, and the 15 s keep-alive comment is
+     * the only thing stopping a proxy or a phone's NAT from dropping it.
+     */
+    @Test
+    fun a_long_poll_tool_stays_on_the_framed_mount() = runTest {
+        val calls = Calls()
+        val (hub, _) = client(calls = calls) { sse(okResult("{}")) to HttpStatusCode.OK }
+
+        hub.call("wait_for_session") { it }
+
+        assertEquals("/mcp", calls.path(0))
     }
 
     @Test
