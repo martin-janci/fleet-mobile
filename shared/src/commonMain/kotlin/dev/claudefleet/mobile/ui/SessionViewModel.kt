@@ -7,11 +7,13 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.data.STOPPED
+import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.appending
 import dev.claudefleet.mobile.model.tailMarker
 import dev.claudefleet.mobile.net.HubError
+import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -28,6 +30,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -96,7 +99,81 @@ data class SessionUiState(
      * told to be back at the bottom.
      */
     val newReply: Boolean = false,
+    /**
+     * What to draw for a session the hub says is blocked or stuck, or null
+     * when there is nothing to answer. Derived from the row and the hub's
+     * version by [blockedCard] — the one place that mapping lives — so it
+     * appears and disappears with the row rather than being cleared by hand
+     * after an answer goes out.
+     */
+    val card: BlockedCard? = null,
+    /** True while an answer is in flight: the chips go dark and a spinner shows. */
+    val answering: Boolean = false,
+    /**
+     * True when the last answer's [SessionActions.waitForTurn] timed out
+     * rather than seeing the turn move. The answer was delivered; the agent
+     * has simply not moved on yet, which is a different thing from a failure
+     * and gets a line on the card rather than an error banner.
+     */
+    val stillWaiting: Boolean = false,
+    /**
+     * The captured tmux pane, while the terminal fallback is expanded — the
+     * way through for anything the card cannot offer a chip for. Null when it
+     * is hidden.
+     */
+    val terminal: String? = null,
+    /**
+     * True while a management call — [SessionViewModel.restart],
+     * [SessionViewModel.safeKill], [SessionViewModel.kill],
+     * [SessionViewModel.setTags] or [SessionViewModel.rename] — and the
+     * refetch that follows it are outstanding. The overflow menu's items go
+     * dark for the whole span, the same way [sending]/[answering] darken the
+     * composer and the card, so a second tap cannot start a second call
+     * before the first one's own refetch has even landed.
+     */
+    val busy: Boolean = false,
+    /**
+     * Unix seconds, refreshed every 30s by a ticker — what
+     * [dev.claudefleet.mobile.ui.components.StatusStrip] computes the bar's
+     * elapsed/idle-since wording against. The same pattern as
+     * [SessionsUiState.nowSeconds], one screen down: a `StateFlow` a device's
+     * clock actually moves, rather than a value fixed at whenever this state
+     * happened to be built.
+     */
+    val nowSeconds: Long = 0,
 ) {
+    /**
+     * Whether the ⋮ menu is offered at all: a readonly credential may not
+     * call any of these tools, a session that has left the fleet has nothing
+     * to manage, and the hub refuses every one of these calls against the
+     * controller (`E_INVALID_STATE`) — so the menu simply is not drawn there
+     * rather than drawn and refused. [canRestart] and [canKill] are further
+     * narrowings of this, never a looser rule: a screen this is false on
+     * offers no management action at all.
+     */
+    val canManage: Boolean
+        get() = !readOnly && session != null && !session.isController
+
+    /** Restart carries no narrowing beyond [canManage] — see [BlockedCard.offerRestart] for when it is worth showing. */
+    val canRestart: Boolean
+        get() = canManage
+
+    /**
+     * [canManage], narrowed once more: the hub refuses `kill_session`
+     * against an `external` session with `E_INVALID_STATE`, so *Kill now* is
+     * not offered there even though Restart and Tags still are.
+     */
+    val canKill: Boolean
+        get() = canManage && session?.kind != "external"
+
+    /**
+     * The hub's own progress through a `safe_kill_session` retirement — the
+     * row's `safe_kill_state` — or null while none is armed. Drawn as a
+     * `SuggestionChip` in the status strip for as long as it is non-null.
+     */
+    val safeKillState: String?
+        get() = session?.safeKillState
+
     /**
      * Whether the send button does anything. Blank drafts are not prompts, a
      * second prompt while the first is in flight would race the hub's turn
@@ -104,10 +181,60 @@ data class SessionUiState(
      * refused `send_prompt` by the hub, and an unreachable hub has nowhere to
      * deliver it. The draft itself is untouched by any of this — only the
      * button goes dark.
+     *
+     * [answering] is in here for the same reason [sending] is, across a path
+     * rather than within one: an answer is out for as long as its
+     * [ANSWER_WAIT_SECONDS] wait, and a prompt typed into the composer
+     * meanwhile would race the very turn counter that answer is waiting past.
+     * Two single-flight guards that did not know about each other were no
+     * guard at all — see [SessionViewModel.answer]. [busy] joined them for
+     * the same reason: a management call (`restart`, `kill`, …) is a hub
+     * write too, and one in flight must darken Send exactly as a prompt or an
+     * answer already in flight does — see [idle].
      */
     val canSend: Boolean
-        get() = !sending && !readOnly && connected && session != null && draft.isNotBlank()
+        get() = idle(sending, answering, busy) && !readOnly && connected && session != null && draft.isNotBlank()
+
+    /**
+     * Whether the card's answer chips do anything — the other half of
+     * [canSend], and the same facts in the same order. Drawn by
+     * `BlockedCardView` rather than re-derived there, so a chip is never
+     * live for a tap [SessionViewModel.answer] would drop on the floor.
+     *
+     * A readonly device is the one case the screen handles differently: it
+     * hides the chips outright instead of dimming them, because the hub would
+     * refuse the call whatever the connection does.
+     */
+    val canAnswer: Boolean
+        get() = idle(sending, answering, busy) && !readOnly && connected && card != null
+
+    /**
+     * Whether a quick-reply chip does anything — [canSend] without the
+     * blank-draft term, since a chip's own text is never blank. The row
+     * itself is hidden outright rather than merely dimmed while [card] is up
+     * or [readOnly] (a device that may not send has no use for a chip that
+     * would only be refused) — that decision lives in `ui/SessionScreen.kt`,
+     * the same place [card] already decides whether to draw the row at all.
+     */
+    val canSendQuick: Boolean
+        get() = idle(sending, answering, busy) && !readOnly && connected && session != null
 }
+
+/**
+ * "Nothing else on this screen already holds a hub write outstanding" — the
+ * one rule shared, term for term, by [SessionUiState.canSend], `canSendNow`,
+ * [SessionUiState.canAnswer], `canAnswerNow`, and the management family's own
+ * `runManaged` guard in [SessionViewModel]. It used to be three separate
+ * copies: [SessionUiState.canSend]/[SessionUiState.canAnswer] and their
+ * `…Now` twins agreed with each other, but `runManaged` — added for
+ * `restart`/`safeKill`/`kill`/`setTags`/`rename` — checked only its own
+ * `busy` flag, and neither `canSendNow` nor `canAnswerNow` was taught about
+ * `busy` in return. A kill could run while an answer was still out; Send
+ * could fire while a restart's own refetch was still in flight. Every write
+ * this screen can start now reads the same three flags, in the same order,
+ * from this one place.
+ */
+internal fun idle(sending: Boolean, answering: Boolean, busy: Boolean): Boolean = !sending && !answering && !busy
 
 /**
  * One session: the conversation newest at the bottom, and a box to answer it.
@@ -138,6 +265,13 @@ data class SessionUiState(
  *   in the hub's readonly allow-list (`READONLY_TOOLS` in `mcp/guard.rs`), so a
  *   readonly client would simply be refused — and the app's rule is that it only
  *   ever calls tools its token may use, rather than finding out from an error.
+ * @param quickReplies The chip row and the draft history — one instance per
+ *   [dev.claudefleet.mobile.AppContainer], not one per screen, so a chip added
+ *   on one session's screen is there the next time any session's screen opens
+ *   and the history is one list across the whole device rather than siloed
+ *   per session. Defaults to an instance over an in-memory, unread [Prefs] so
+ *   every existing caller in this file's own tests keeps compiling without
+ *   naming one; every real caller supplies the container's own instance.
  */
 class SessionViewModel(
     private val sessionId: Long,
@@ -145,6 +279,8 @@ class SessionViewModel(
     private val actions: SessionActions,
     private val scope: CoroutineScope,
     canSendPrompts: Boolean = true,
+    private val clock: () -> Long = { epochSeconds() },
+    val quickReplies: QuickReplies = QuickReplies(EphemeralPrefs),
 ) {
     /**
      * The screen state this class owns, as opposed to what the fleet owns.
@@ -173,6 +309,19 @@ class SessionViewModel(
          */
         val atBottom: Boolean = true,
         val newReply: Boolean = false,
+        val answering: Boolean = false,
+        val stillWaiting: Boolean = false,
+        /**
+         * Whether the reader asked for the terminal. Kept apart from
+         * [terminal] so that a capture which has not answered yet — or one
+         * that failed — still counts as "shown", which is what makes the
+         * session-event path keep refreshing it rather than going quiet after
+         * one bad call.
+         */
+        val terminalShown: Boolean = false,
+        val terminal: String? = null,
+        /** See [SessionUiState.busy]. */
+        val busy: Boolean = false,
     )
 
     private val local = MutableStateFlow(Local())
@@ -188,6 +337,14 @@ class SessionViewModel(
      * [isConnected] rule.
      */
     private val probe = MutableStateFlow<Boolean?>(null)
+
+    /**
+     * Unix seconds, ticked every 30s — see [SessionUiState.nowSeconds]. The
+     * same shape as [SessionsViewModel]'s own `now`: a `StateFlow` folded into
+     * [state] rather than read fresh by a composable, so the strip's wording
+     * advances on the same recomposition every other live fact does.
+     */
+    private val now = MutableStateFlow(clock())
 
     /**
      * Makes the hub call **and** the `local.update` that applies its reply one
@@ -252,11 +409,30 @@ class SessionViewModel(
      */
     private var queued: Generation? = null
 
-    val state: StateFlow<SessionUiState> = combine(fleet.sessions, fleet.status, local, probe) { rows, status, l, probed ->
-        assemble(rows.firstOrNull { it.id == sessionId }, status, l, probed)
-    }.stateIn(scope, SharingStarted.Eagerly, assemble(row(), fleet.status.value, local.value, probe.value))
+    val state: StateFlow<SessionUiState> =
+        // `combine` has no six-flow overload; `probe` and `now` are folded
+        // into one `Pair` first rather than nesting a second `.stateIn` or
+        // hand-rolling a sixth `combine`, so there is still exactly one
+        // downstream collector to reason about.
+        combine(fleet.sessions, fleet.status, fleet.hubVersion, local, combine(probe, now, ::Pair)) { rows, status, version, l, (probed, nowSeconds) ->
+            assemble(rows.firstOrNull { it.id == sessionId }, status, version, l, probed, nowSeconds)
+        }.stateIn(
+            scope,
+            SharingStarted.Eagerly,
+            assemble(row(), fleet.status.value, fleet.hubVersion.value, local.value, probe.value, now.value),
+        )
 
     init {
+        // Ticks `now` every 30s — the same period [SessionsViewModel] uses for
+        // the fleet list — so the strip's "2 min" / "idle since 2 h" wording
+        // advances without a per-second recomposition on a screen a person
+        // may leave open for hours.
+        scope.launch {
+            while (isActive) {
+                delay(30_000)
+                now.value = clock()
+            }
+        }
         // Started here rather than from `load()`: `state` above is already
         // eager, and a subscription that only exists after the screen's first
         // explicit call would miss an event racing that call.
@@ -318,6 +494,20 @@ class SessionViewModel(
                 }
             }
         }
+        // `stillWaiting` belongs to the card it was reported for: it says
+        // "the answer you just sent was delivered and the agent has not moved
+        // yet". Once that card is gone the episode is over, and leaving the
+        // flag set meant the NEXT prompt — a different question, nothing sent
+        // for it — drew the line too. Collecting the already-derived
+        // `state.card` rather than re-deciding here what "blocked" means
+        // keeps that rule in `blockedCard` alone; the `if` makes the update a
+        // no-op (same instance, so no re-emission) whenever there is nothing
+        // to clear, which is what stops this from feeding itself.
+        scope.launch {
+            state.collect { s ->
+                if (s.card == null) local.update { if (it.stillWaiting) it.copy(stillWaiting = false) else it }
+            }
+        }
         scope.launch {
             fleet.sessionChanges
                 // `ALL_SESSIONS_CHANGED` is the resync sentinel a `ready` or
@@ -327,7 +517,13 @@ class SessionViewModel(
                 .filter { it == sessionId || it == ALL_SESSIONS_CHANGED }
                 .filter { it == ALL_SESSIONS_CHANGED || rowChangeCouldMoveTheConversation() }
                 .debounce(SESSION_EVENT_DEBOUNCE)
-                .collect { requestRead(first = false) }
+                .collect {
+                    // The capture first: it is the thing a person staring at a
+                    // blocked pane is watching, and `requestRead` suspends
+                    // until its generation has fetched AND applied.
+                    if (local.value.terminalShown) captureTerminal()
+                    requestRead(first = false)
+                }
         }
     }
 
@@ -366,6 +562,97 @@ class SessionViewModel(
     }
 
     /**
+     * Answer the blocked agent with one of the card's own [Answer]s, then wait
+     * for its turn counter to move past the one the send reported.
+     *
+     * Nothing clears the card here. It is derived from the row (see
+     * [SessionUiState.card]), so the thing that makes it go away is the hub
+     * publishing a row that is no longer blocked — which is exactly the fact
+     * [SessionActions.waitForTurn] is waiting for. A wait that times out
+     * instead leaves the card up and says [SessionUiState.stillWaiting]: the
+     * answer was delivered, the agent has not moved yet.
+     *
+     * Gated exactly as [send] is on the credential: neither `send_prompt` nor
+     * its `keys` form is in the hub's readonly allow-list, so a readonly
+     * device makes no call at all — and the screen hides the chips rather than
+     * offering a tap that would be refused.
+     *
+     * One answer at a time, and never alongside a prompt from the composer: a
+     * second delivery while the first is in flight would go against a turn
+     * counter the first is still waiting on, and the REPL would see two
+     * answers to one prompt. [SessionUiState.canSend] carries the other half
+     * of that rule.
+     *
+     * Gated on the hub being reachable exactly as [send] is, through the same
+     * [isConnected] rule — which also covers a [ConnectionStatus.Refused] hub,
+     * the one this screen must not call even though it answers. The card
+     * cannot be relied on to disappear there: a refusal picked up on
+     * reconnect leaves the previous connection's rows in place, so the card
+     * outlives it and the gate has to be here.
+     */
+    fun answer(a: Answer): Job = scope.launch {
+        if (!canAnswerNow(local.value)) return@launch
+        local.update { it.copy(answering = true, stillWaiting = false, error = null) }
+        try {
+            val receipt = when (a) {
+                // A numbered option is typed as its number, which is what the
+                // REPL's own prompt asks for; the trust prompt's y/n is text
+                // for the same reason. Only the bare keystrokes go through
+                // `send_prompt { keys }` — an empty prompt is not a key.
+                is Answer.Option -> actions.sendPrompt(sessionId, a.n.toString())
+                is Answer.Text -> actions.sendPrompt(sessionId, a.text)
+                Answer.Enter -> actions.sendKeys(sessionId, "Enter")
+                Answer.Escape -> actions.sendKeys(sessionId, "Escape")
+                Answer.Interrupt -> actions.sendKeys(sessionId, "C-c")
+            }
+            val wait = actions.waitForTurn(sessionId, receipt.turnSeqBefore, timeoutS = ANSWER_WAIT_SECONDS)
+            local.update { it.copy(answering = false, stillWaiting = wait.status != WAIT_SATISFIED) }
+            requestRead(first = false)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(answering = false, error = friendly(t)) }
+        }
+    }
+
+    /**
+     * Expand the terminal fallback and capture the pane once. While it is
+     * shown, the same debounced session-event path that refetches the
+     * conversation re-captures it, so a pane that moves on its own follows
+     * without polling.
+     */
+    fun showTerminal(): Job = scope.launch {
+        local.update { it.copy(terminalShown = true) }
+        captureTerminal()
+    }
+
+    /** Collapse it, and drop the capture with it rather than keeping a stale pane around. */
+    fun hideTerminal() {
+        local.update { it.copy(terminalShown = false, terminal = null) }
+    }
+
+    /**
+     * One `capture_session` call and the update that applies it. A failure
+     * goes to the banner like every other call this class makes, rather than
+     * showing an empty pane that would read as "the terminal is blank".
+     */
+    private suspend fun captureTerminal() {
+        // The same rule as [requestRead]: a refused hub gets no tool call from
+        // this screen, through any path.
+        if (refused()) return
+        try {
+            val text = actions.capture(sessionId)
+            // Only if it is still wanted: a `hideTerminal()` while this call
+            // was in flight must not be undone by its reply landing.
+            local.update { if (it.terminalShown) it.copy(terminal = text) else it }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(error = friendly(t)) }
+        }
+    }
+
+    /**
      * Send what is typed, then pull the reply in.
      *
      * The box is disabled for the whole call — [SessionUiState.sending] — and a
@@ -379,11 +666,59 @@ class SessionViewModel(
         // its value trails the last `onDraftChange` by however long the
         // collector takes to be resumed. A send must not depend on that.
         if (!canSendNow(current)) return@launch
-        val text = current.draft
+        deliver(current.draft, clearDraft = true)
+    }
+
+    /**
+     * Send [text] through the same guarded, single-flight path as [send] —
+     * for the status strip's `/compact` chip and anything else that has to
+     * speak to the REPL without going through what is sitting in the
+     * composer's draft. Reuses [deliver] rather than duplicating [send]'s
+     * body, so there is exactly one rule for "how this screen writes to the
+     * hub", not two that could drift apart.
+     *
+     * Guarded exactly like [send] — readonly, connected, [idle] — minus the
+     * blank-draft check, which has nothing to do with a caller-supplied
+     * command that is never blank to begin with.
+     */
+    fun sendCommand(text: String): Job = scope.launch {
+        val current = local.value
+        if (!canWriteNow(current) || row() == null) return@launch
+        deliver(text, clearDraft = false)
+    }
+
+    /**
+     * Send one of the [quickReplies] chips — the row [SessionUiState.card]
+     * and [SessionUiState.readOnly] hide it for, drawn by `ui/SessionScreen.kt`.
+     * Identical to [sendCommand] in every guard and effect — reused rather
+     * than re-implemented, per the one-write-path rule [deliver] exists to
+     * keep — and kept as its own name only so a chip tap reads as its own
+     * intent in the call sites that fire it, not as a coincidental reuse of
+     * the status strip's `/compact` call.
+     */
+    fun sendQuick(text: String): Job = sendCommand(text)
+
+    /**
+     * The guarded hub write [send], [sendCommand] and [sendQuick] all make,
+     * and the refetch that follows it — the one write path, per the task-6
+     * ruling that added [sendQuick] rather than a second send.
+     *
+     * [QuickReplies.remember] is called here, once, rather than in each of
+     * the three callers: this is the one place a prompt from the composer (or
+     * a chip, or the status strip) is known to have actually been *accepted*
+     * by the hub — after [SessionActions.sendPrompt] returns and before
+     * anything here can still fail. A card's own [answer] never reaches this
+     * function (it calls [SessionActions.sendPrompt]/[SessionActions.sendKeys]
+     * directly), so neither a key nor a typed answer is ever recorded here —
+     * this is a history of what was composed, not of every prompt this screen
+     * ever sent.
+     */
+    private suspend fun deliver(text: String, clearDraft: Boolean) {
         local.update { it.copy(sending = true, error = null) }
         try {
             actions.sendPrompt(sessionId, text)
-            local.update { it.copy(sending = false, draft = "") }
+            quickReplies.remember(text)
+            local.update { it.copy(sending = false, draft = if (clearDraft) "" else it.draft) }
             requestRead(first = false)
         } catch (e: CancellationException) {
             throw e
@@ -392,8 +727,91 @@ class SessionViewModel(
         }
     }
 
+    /**
+     * Kill and recreate the tmux session in place — for a wedged REPL. Also
+     * what the blocked card's own Restart button calls (see
+     * [SessionUiState.canRestart]) when it draws one at all.
+     */
+    fun restart(): Job = runManaged(::canRestartNow) { actions.restart(sessionId) }
+
+    /** Ask the session to persist its work, then arm deletion once it is clean. */
+    fun safeKill(): Job = runManaged(::canManageNow) { actions.safeKill(sessionId) }
+
+    /**
+     * Kill the session now, without waiting for it to persist anything. The
+     * hub refuses this against the controller or an `external` session with
+     * `E_INVALID_STATE` — [SessionUiState.canKill] is what keeps the menu
+     * from offering a tap that would only come back refused.
+     */
+    fun kill(): Job = runManaged(::canKillNow) { actions.kill(sessionId) }
+
+    /** Replace the session's tags with [tags]. */
+    fun setTags(tags: List<String>): Job = runManaged(::canManageNow) { actions.setTags(sessionId, tags) }
+
+    /** Set the session's friendly display name to [name]. */
+    fun rename(name: String): Job = runManaged(::canManageNow) { actions.rename(sessionId, name) }
+
+    /**
+     * One management call — [restart], [safeKill], [kill], [setTags] or
+     * [rename] — gated and bracketed the same way for all five: [guard] is
+     * this action's own live-source rule ([canRestartNow] for restart,
+     * [canKillNow] for kill, [canManageNow] for the rest — read from the live
+     * sources rather than from `state`, exactly as [canSendNow]/[canAnswerNow]
+     * are, since `state` trails its inputs by a dispatch), [connected] is the
+     * same hub-reachability gate [send]/[answer] use, and [idle] is the same
+     * "nothing else in flight" rule [canSendNow]/[canAnswerNow] use — a
+     * management call must not race a prompt or an answer any more than they
+     * may race each other, and [Local.busy] is its own third term in that
+     * same rule, so a second management call cannot start while the first's
+     * own refetch is still outstanding either.
+     *
+     * [SessionUiState.busy] stays true across the follow-up [requestRead]
+     * too, not just the call itself — a `finally` covers both the success and
+     * the caught-failure path — so the menu cannot be tapped again before the
+     * row it would act on next has actually been refreshed, and Send/answer
+     * cannot fire into the middle of it either.
+     */
+    private fun runManaged(guard: () -> Boolean, call: suspend () -> Unit): Job = scope.launch {
+        val l = local.value
+        if (!guard() || !connected() || !idle(l.sending, l.answering, l.busy)) return@launch
+        local.update { it.copy(busy = true, error = null) }
+        try {
+            call()
+            requestRead(first = false)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(error = friendly(t)) }
+        } finally {
+            local.update { it.copy(busy = false) }
+        }
+    }
+
+    /** [SessionUiState.canManage] read from the live sources — see [runManaged]. */
+    private fun canManageNow(): Boolean = !readOnly && row()?.isController == false
+
+    /** [SessionUiState.canRestart] read from the live sources — see [runManaged]. */
+    private fun canRestartNow(): Boolean = canManageNow()
+
+    /** [SessionUiState.canKill] read from the live sources — see [runManaged]. */
+    private fun canKillNow(): Boolean = canManageNow() && row()?.kind != "external"
+
+    /**
+     * [SessionUiState.canAnswer] read from the live sources rather than from
+     * `state` — which is a `stateIn` of a `combine` and therefore trails its
+     * inputs by a dispatch. A tap must not depend on that. The card's own
+     * presence is left out here: `answer` is only reachable from a card, and
+     * re-deciding what "blocked" means at the moment of the tap would be a
+     * second copy of `blockedCard`'s rule.
+     */
+    private fun canAnswerNow(l: Local): Boolean =
+        !readOnly && idle(l.sending, l.answering, l.busy) && connected()
+
+    /** The part of [canSendNow] that does not care what is being sent — shared with [sendCommand]. */
+    private fun canWriteNow(l: Local): Boolean = idle(l.sending, l.answering, l.busy) && !readOnly && connected()
+
     private fun canSendNow(l: Local): Boolean =
-        !l.sending && !readOnly && connected() && l.draft.isNotBlank() && row() != null
+        canWriteNow(l) && l.draft.isNotBlank() && row() != null
 
     /** [isConnected] read from the live sources, for [send]'s own check. */
     private fun connected(): Boolean = isConnected(fleet.status.value, probe.value)
@@ -589,7 +1007,14 @@ class SessionViewModel(
         result
     }
 
-    private fun assemble(row: SessionRow?, status: ConnectionStatus, l: Local, probed: Boolean?) = SessionUiState(
+    private fun assemble(
+        row: SessionRow?,
+        status: ConnectionStatus,
+        hubVersion: String?,
+        l: Local,
+        probed: Boolean?,
+        nowSeconds: Long,
+    ) = SessionUiState(
         session = row,
         conversation = l.conversation,
         loaded = l.loaded,
@@ -603,6 +1028,16 @@ class SessionViewModel(
         error = l.error,
         silent = l.silent,
         newReply = l.newReply,
+        // Derived, never stored: `blockedCard` in `Blocked.kt` is the one
+        // place that decides what a blocked or stuck row offers, and it is
+        // asked here with the hub's own version because the structured-key
+        // chips depend on it.
+        card = row?.let { blockedCard(it, hubVersion) },
+        answering = l.answering,
+        stillWaiting = l.stillWaiting,
+        terminal = l.terminal,
+        busy = l.busy,
+        nowSeconds = nowSeconds,
     )
 }
 
@@ -657,3 +1092,30 @@ internal val PROBE_DEBOUNCE = 2.seconds
  * live rather than polled.
  */
 internal val SESSION_EVENT_DEBOUNCE = 500.milliseconds
+
+/**
+ * How long an answer waits for the session's turn counter to move before the
+ * card says [SessionUiState.stillWaiting] instead.
+ *
+ * The hub's `wait_for_session` default. Long enough that an agent which
+ * simply takes a moment to pick the answer up is not reported as stuck;
+ * short enough that a phone screen does not sit on a spinner indefinitely
+ * when the REPL never moves at all.
+ */
+internal const val ANSWER_WAIT_SECONDS: Int = 30
+
+/** What `wait_for_session` answers when the turn actually moved. */
+internal const val WAIT_SATISFIED: String = "satisfied"
+
+/**
+ * Backs the default [SessionViewModel.quickReplies] for a caller that names
+ * no [QuickReplies] of its own. Every real caller does — see
+ * [dev.claudefleet.mobile.AppContainer.quickReplies] — so nothing written
+ * here is ever read back; it exists only so this file's own tests, and any
+ * other construction that has no opinion about quick replies, keep compiling
+ * without naming a [Prefs].
+ */
+private object EphemeralPrefs : Prefs {
+    override fun getStringList(key: String): List<String> = emptyList()
+    override fun putStringList(key: String, value: List<String>) = Unit
+}

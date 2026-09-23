@@ -188,6 +188,45 @@ object FleetIcons {
         }.build()
     }
 
+    /** Three filled dots, stacked vertically: the overflow ("more") glyph. */
+    val MoreVert: ImageVector by lazy {
+        ImageVector.Builder("MoreVert", 24.dp, 24.dp, 24f, 24f).apply {
+            path(fill = SolidColor(Color.Black), pathFillType = PathFillType.EvenOdd) {
+                for (cy in floatArrayOf(5f, 12f, 19f)) {
+                    moveTo(14f, cy)
+                    arcTo(2f, 2f, 0f, isMoreThanHalf = true, isPositiveArc = true, x1 = 10f, y1 = cy)
+                    arcTo(2f, 2f, 0f, isMoreThanHalf = true, isPositiveArc = true, x1 = 14f, y1 = cy)
+                    close()
+                }
+            }
+        }.build()
+    }
+
+    /**
+     * A stroked clock face — a circle plus two hands — for the composer
+     * field's draft-history icon.
+     */
+    val History: ImageVector by lazy {
+        ImageVector.Builder("History", 24.dp, 24.dp, 24f, 24f).apply {
+            path(
+                fill = null,
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                // the face: four quarter arcs, centered on (12,12), r=9
+                moveTo(21f, 12f)
+                arcTo(9f, 9f, 0f, isMoreThanHalf = false, isPositiveArc = true, x1 = 12f, y1 = 21f)
+                arcTo(9f, 9f, 0f, isMoreThanHalf = false, isPositiveArc = true, x1 = 3f, y1 = 12f)
+                arcTo(9f, 9f, 0f, isMoreThanHalf = false, isPositiveArc = true, x1 = 12f, y1 = 3f)
+                arcTo(9f, 9f, 0f, isMoreThanHalf = false, isPositiveArc = true, x1 = 21f, y1 = 12f)
+                // the hands: minute straight up, hour toward 4 o'clock
+                moveTo(12f, 7f); lineTo(12f, 12.5f); lineTo(16f, 15f)
+            }
+        }.build()
+    }
+
     /**
      * Two stroked overlapping rounded rectangles: the copy-to-clipboard
      * glyph. Both paths are stroke-only, like [ArrowBack]/[Check]/[Close] --

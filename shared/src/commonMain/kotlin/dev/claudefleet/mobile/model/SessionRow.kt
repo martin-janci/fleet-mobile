@@ -32,6 +32,8 @@ data class SessionRow(
     @SerialName("stuck_kind") val stuckKind: String? = null,
     /** The hub's one-line summary of what the session is doing. */
     @SerialName("current_activity") val currentActivity: String? = null,
+    /** The hub's structured reading of a blocked prompt; null when there is none. */
+    @SerialName("pending_input") val pendingInput: PendingInput? = null,
     @SerialName("context_pct") val contextPct: Double? = null,
     @SerialName("created_at") val createdAt: Long? = null,
     @SerialName("last_activity_at") val lastActivityAt: Long? = null,
@@ -51,6 +53,8 @@ data class SessionRow(
     @SerialName("usage_model") val usageModel: String? = null,
     @SerialName("parent_session_id") val parentSessionId: Long? = null,
     val branch: String? = null,
+    /** The hub's own progress through a `safe_kill_session` retirement, or null when none is armed. */
+    @SerialName("safe_kill_state") val safeKillState: String? = null,
 ) {
     val isBackground: Boolean get() = tmuxName.startsWith("bg:")
 

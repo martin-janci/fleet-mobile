@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -152,12 +153,13 @@ class ForbiddenExplainsItselfTest {
 // name, and the first frame that actually *carries* a result or an error.
 
 /**
- * [contractVerdict] against the desktop's own range
- * (`claude-fleet` `src-tauri/src/backend/contract.rs`, commit 5fa119f7,
- * `MIN_HUB_CONTRACT = 0`, `MAX_HUB_CONTRACT = 1`). One revision below the
- * minimum is a hub too old for this app; one above the maximum is this app
- * too old for the hub; everything in between, including a hub that names no
- * contract at all, is trusted.
+ * [contractVerdict] against this app's own range
+ * (`MIN_HUB_CONTRACT = 0`, `MAX_HUB_CONTRACT = 3`; `MAX` mirrors the
+ * desktop's `src-tauri/src/backend/contract.rs`, `MIN` is this app's own
+ * floor — see the KDoc on the constants in `HubContract.kt`). One revision
+ * below the minimum is a hub too old for this app; one above the maximum is
+ * this app too old for the hub; everything in between, including a hub that
+ * names no contract at all, is trusted.
  */
 class HubContractVerdictTest {
 
@@ -166,13 +168,13 @@ class HubContractVerdictTest {
      * class is written in terms of `MIN_HUB_CONTRACT`/`MAX_HUB_CONTRACT`
      * themselves, so editing either constant moves the test with it and the
      * whole class stays green against a range nobody chose. `HubContractDriftTest`
-     * checks these against the desktop's own `contract.rs` where that checkout
+     * checks `MAX` against the desktop's own `contract.rs` where that checkout
      * is present; this is the half that runs everywhere, CI included.
      */
     @Test
-    fun the_range_is_zero_to_one() {
+    fun the_range_is_zero_to_three() {
         assertEquals(0, MIN_HUB_CONTRACT)
-        assertEquals(1, MAX_HUB_CONTRACT)
+        assertEquals(3, MAX_HUB_CONTRACT)
     }
 
     @Test
@@ -182,6 +184,12 @@ class HubContractVerdictTest {
         assertEquals(ContractVerdict.Ok, contractVerdict(MAX_HUB_CONTRACT))
         assertEquals(ContractVerdict.HubTooOld(MIN_HUB_CONTRACT - 1), contractVerdict(MIN_HUB_CONTRACT - 1))
         assertEquals(ContractVerdict.AppTooOld(MAX_HUB_CONTRACT + 1), contractVerdict(MAX_HUB_CONTRACT + 1))
+    }
+
+    /** Revision 3 — `move_session` gaining a `when` argument — is in range. */
+    @Test
+    fun revision_three_is_ok() {
+        assertEquals(ContractVerdict.Ok, contractVerdict(3))
     }
 
     /**
@@ -201,8 +209,58 @@ class HubContractVerdictTest {
     @Test
     fun a_readable_out_of_range_contract_still_names_itself() {
         assertEquals(
-            "This app is too old for this hub (contract 2). Update the app.",
-            contractVerdict(2).sentence(),
+            "This app is too old for this hub (contract 4). Update the app.",
+            contractVerdict(4).sentence(),
         )
+    }
+}
+
+/**
+ * [semverAtLeast] gates `send_prompt { keys }` on the hub's own version
+ * string rather than the wire-contract revision, because the `pending_input`
+ * / keys addition is additive and never moved [MAX_HUB_CONTRACT]. See
+ * [HUB_VERSION_KEYS].
+ */
+class SemverAtLeastTest {
+    @Test
+    fun an_equal_version_is_at_least() {
+        assertTrue(semverAtLeast("0.2.35", HUB_VERSION_KEYS))
+    }
+
+    @Test
+    fun a_higher_patch_is_at_least() {
+        assertTrue(semverAtLeast("0.2.36", HUB_VERSION_KEYS))
+    }
+
+    @Test
+    fun a_higher_minor_is_at_least() {
+        assertTrue(semverAtLeast("0.3.0", HUB_VERSION_KEYS))
+    }
+
+    @Test
+    fun a_higher_major_is_at_least() {
+        assertTrue(semverAtLeast("1.0.0", HUB_VERSION_KEYS))
+    }
+
+    @Test
+    fun a_lower_version_is_not_at_least() {
+        assertFalse(semverAtLeast("0.2.34", HUB_VERSION_KEYS))
+    }
+
+    @Test
+    fun a_null_version_is_not_at_least() {
+        assertFalse(semverAtLeast(null, HUB_VERSION_KEYS))
+    }
+
+    @Test
+    fun an_unparsable_version_is_not_at_least() {
+        assertFalse(semverAtLeast("garbage", HUB_VERSION_KEYS))
+    }
+
+    @Test
+    fun a_leading_v_and_a_pre_or_build_suffix_are_tolerated() {
+        assertTrue(semverAtLeast("v0.2.35", HUB_VERSION_KEYS))
+        assertTrue(semverAtLeast("0.2.35-pre", HUB_VERSION_KEYS))
+        assertTrue(semverAtLeast("0.2.35+build.7", HUB_VERSION_KEYS))
     }
 }

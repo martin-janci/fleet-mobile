@@ -5,35 +5,52 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
+import androidx.compose.material3.InputChipDefaults
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
@@ -60,14 +77,17 @@ import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.tailMarker
+import dev.claudefleet.mobile.ui.components.BlockedCardView
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.MarkdownText
-import dev.claudefleet.mobile.ui.components.StatusChip
+import dev.claudefleet.mobile.ui.components.StatusStrip
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.data.ConnectionStatus
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
 
 /** The conversation list, for the device test that checks it follows new output. */
 const val CONVERSATION_LIST: String = "conversation-list"
@@ -96,6 +116,26 @@ fun SessionScreen(
     onBack: () -> Unit,
     onDismissError: () -> Unit,
     onAtBottom: (Boolean) -> Unit,
+    onAnswer: (Answer) -> Unit,
+    onShowTerminal: () -> Unit,
+    onHideTerminal: () -> Unit,
+    onRestart: () -> Unit,
+    onSafeKill: () -> Unit,
+    onKill: () -> Unit,
+    onSetTags: (List<String>) -> Unit,
+    onRename: (String) -> Unit,
+    onSendCommand: (String) -> Unit,
+    /** The chip row's own content — see `ui/QuickReplies.kt`. */
+    quickReplies: List<String>,
+    onSendQuick: (String) -> Unit,
+    onAddQuickReply: (String) -> Unit,
+    onRemoveQuickReply: (String) -> Unit,
+    /**
+     * Pulled fresh each time the field's leading icon opens the history
+     * sheet — [dev.claudefleet.mobile.ui.QuickReplies.history] is a plain
+     * read, not a flow, so there is nothing to collect here.
+     */
+    onOpenHistory: () -> List<String>,
     modifier: Modifier = Modifier,
 ) {
     val turns = state.conversation.turns
@@ -189,6 +229,12 @@ fun SessionScreen(
             turnCount = turns.size,
             truncated = state.conversation.truncated,
             scope = scope,
+            onRestart = onRestart,
+            onSafeKill = onSafeKill,
+            onKill = onKill,
+            onSetTags = onSetTags,
+            onRename = onRename,
+            onSendCommand = onSendCommand,
         )
         ConnectionBanner(status, state.hubReachable)
         ErrorBanner(state.error, onDismiss = onDismissError)
@@ -232,7 +278,50 @@ fun SessionScreen(
             }
         }
 
-        PromptBox(state = state, onDraftChange = onDraftChange, onSend = onSend)
+        // Between the conversation and the composer: a person who opened this
+        // screen because the agent is waiting should not have to scroll to
+        // answer it, and the card sits where the answer goes.
+        state.card?.let { card ->
+            BlockedCardView(
+                card = card,
+                answering = state.answering,
+                stillWaiting = state.stillWaiting,
+                terminal = state.terminal,
+                readOnly = state.readOnly,
+                canAnswer = state.canAnswer,
+                connected = state.connected,
+                onAnswer = onAnswer,
+                onShowTerminal = onShowTerminal,
+                onHideTerminal = onHideTerminal,
+                // The same `canRestart` the ⋮ menu's own Restart item gates
+                // on (see [SessionOverflowMenu]) — one source of truth for
+                // "is a restart worth offering", not `canManage` re-read here
+                // as a stand-in for it.
+                onRestart = if (state.canRestart) onRestart else null,
+            )
+        }
+
+        // Hidden outright, not merely dimmed, in the same two cases the card
+        // itself takes over the space for: while it is up (the answer goes
+        // there instead) and on a readonly device (no chip may offer a write
+        // it cannot make) — spec 1.1.
+        if (state.card == null && !state.readOnly) {
+            QuickRepliesRow(
+                chips = quickReplies,
+                draft = state.draft,
+                enabled = state.canSendQuick,
+                onSendQuick = onSendQuick,
+                onAdd = onAddQuickReply,
+                onRemove = onRemoveQuickReply,
+            )
+        }
+
+        PromptBox(
+            state = state,
+            onDraftChange = onDraftChange,
+            onSend = onSend,
+            onOpenHistory = onOpenHistory,
+        )
     }
 }
 
@@ -257,6 +346,12 @@ private fun SessionBar(
     turnCount: Int,
     truncated: Boolean,
     scope: CoroutineScope,
+    onRestart: () -> Unit,
+    onSafeKill: () -> Unit,
+    onKill: () -> Unit,
+    onSetTags: (List<String>) -> Unit,
+    onRename: (String) -> Unit,
+    onSendCommand: (String) -> Unit,
 ) {
     val busy = state.loading || state.refreshing
     val angle = refreshAngle(busy)
@@ -294,10 +389,24 @@ private fun SessionBar(
             }
         },
         actions = {
-            StatusChip(
-                claudeStatus = state.session?.claudeStatus,
-                stuckKind = state.session?.stuckKind,
+            // Replaced the plain `StatusChip`: a status word alone told a
+            // person nothing about how long the agent had been at it, how
+            // full its context window was, or what the turn had cost so far
+            // — everything the strip now reads off the same row plus the
+            // conversation's own `context`. See `StatusStrip.kt`.
+            StatusStrip(
+                row = state.session,
+                context = state.conversation.context,
+                nowSeconds = state.nowSeconds,
+                onCompact = { onSendCommand("/compact") },
             )
+            // A `safe_kill_session` retirement in progress — shown for as
+            // long as the row carries one, independent of which screen armed
+            // it (the desktop can start one too).
+            state.safeKillState?.let { retiring ->
+                Spacer(Modifier.width(4.dp))
+                SuggestionChip(onClick = {}, label = { Text(retiring) })
+            }
             Spacer(Modifier.width(4.dp))
             IconButton(
                 onClick = { prevTurn?.let { target -> scope.launch { listState.animateScrollToItem(target) } } },
@@ -330,9 +439,240 @@ private fun SessionBar(
                     modifier = Modifier.graphicsLayer { rotationZ = angle },
                 )
             }
+            // Hidden outright rather than drawn dark: a readonly credential,
+            // a session gone from the fleet, or the controller itself (the
+            // hub refuses every one of these calls against it with
+            // `E_INVALID_STATE`) has no management action to offer at all —
+            // see [SessionUiState.canManage].
+            if (state.canManage) {
+                SessionOverflowMenu(
+                    state = state,
+                    onRestart = onRestart,
+                    onSafeKill = onSafeKill,
+                    onKill = onKill,
+                    onSetTags = onSetTags,
+                    onRename = onRename,
+                )
+            }
         },
     )
 }
+
+/**
+ * The session's management actions, behind a ⋮ icon: rename, edit tags,
+ * restart, retire safely (`safe_kill_session`), and kill now.
+ *
+ * Only drawn when [SessionUiState.canManage] — the caller's job, not this
+ * composable's, so that "does this session have a menu at all" stays decided
+ * in one place. Within the menu, *Kill now* is further narrowed by
+ * [SessionUiState.canKill] (hidden for an `external` session, which the hub
+ * refuses with `E_INVALID_STATE`); every item is disabled rather than hidden
+ * while [SessionUiState.busy] or the hub is unreachable, the same rule Send
+ * and the card's own chips already draw by.
+ */
+@Composable
+private fun SessionOverflowMenu(
+    state: SessionUiState,
+    onRestart: () -> Unit,
+    onSafeKill: () -> Unit,
+    onKill: () -> Unit,
+    onSetTags: (List<String>) -> Unit,
+    onRename: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var showRename by remember { mutableStateOf(false) }
+    var showTags by remember { mutableStateOf(false) }
+    var showRestartConfirm by remember { mutableStateOf(false) }
+    var showKillConfirm by remember { mutableStateOf(false) }
+    val actionable = !state.busy && state.connected
+
+    IconButton(onClick = { expanded = true }) {
+        Icon(FleetIcons.MoreVert, contentDescription = "Session actions")
+    }
+    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenuItem(
+            text = { Text("Rename…") },
+            enabled = actionable,
+            onClick = { expanded = false; showRename = true },
+        )
+        DropdownMenuItem(
+            text = { Text("Tags…") },
+            enabled = actionable,
+            onClick = { expanded = false; showTags = true },
+        )
+        if (state.canRestart) {
+            DropdownMenuItem(
+                text = { Text("Restart") },
+                enabled = actionable,
+                onClick = { expanded = false; showRestartConfirm = true },
+            )
+        }
+        DropdownMenuItem(
+            text = { Text("Retire safely") },
+            enabled = actionable,
+            onClick = { expanded = false; onSafeKill() },
+        )
+        if (state.canKill) {
+            DropdownMenuItem(
+                text = { Text("Kill now", color = MaterialTheme.colorScheme.error) },
+                enabled = actionable,
+                onClick = { expanded = false; showKillConfirm = true },
+            )
+        }
+    }
+
+    if (showRename) {
+        RenameDialog(
+            initial = state.session?.friendlyName.orEmpty(),
+            onConfirm = { name -> showRename = false; onRename(name) },
+            onDismiss = { showRename = false },
+        )
+    }
+    if (showTags) {
+        TagsDialog(
+            tags = state.session?.tags.orEmpty(),
+            onConfirm = { tags -> showTags = false; onSetTags(tags) },
+            onDismiss = { showTags = false },
+        )
+    }
+    if (showRestartConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRestartConfirm = false },
+            title = { Text("Restart this session?") },
+            text = { Text("This kills and recreates the tmux session in place — for a wedged REPL.") },
+            confirmButton = {
+                TextButton(onClick = { showRestartConfirm = false; onRestart() }) { Text("Restart") }
+            },
+            dismissButton = { TextButton(onClick = { showRestartConfirm = false }) { Text("Cancel") } },
+        )
+    }
+    if (showKillConfirm) {
+        KillConfirmDialog(
+            onConfirm = { showKillConfirm = false; onKill() },
+            onDismiss = { showKillConfirm = false },
+        )
+    }
+}
+
+@Composable
+private fun RenameDialog(initial: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename session") },
+        text = {
+            TextField(value = text, onValueChange = { text = it }, singleLine = true)
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) { Text("Rename") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * The tag editor: a [FlowRow] of removable [InputChip]s plus a field to add
+ * one more. Local until Save, which is the point it becomes one `setTags`
+ * call replacing the whole list — the hub has no per-tag add/remove of its
+ * own.
+ */
+@Composable
+private fun TagsDialog(tags: List<String>, onConfirm: (List<String>) -> Unit, onDismiss: () -> Unit) {
+    var current by remember { mutableStateOf(tags) }
+    var draft by remember { mutableStateOf("") }
+    fun addDraft() {
+        val t = draft.trim()
+        if (t.isNotEmpty() && t !in current) current = current + t
+        draft = ""
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Tags") },
+        text = {
+            Column {
+                if (current.isNotEmpty()) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        for (tag in current) {
+                            InputChip(
+                                selected = false,
+                                // Tapping the chip removes it — there is no
+                                // "selected" state for a tag, so the whole
+                                // chip is the remove affordance, not just its
+                                // trailing icon.
+                                onClick = { current = current - tag },
+                                label = { Text(tag) },
+                                trailingIcon = {
+                                    Icon(
+                                        FleetIcons.Close,
+                                        contentDescription = "Remove $tag",
+                                        modifier = Modifier.size(InputChipDefaults.IconSize),
+                                    )
+                                },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        singleLine = true,
+                        placeholder = { Text("Add a tag") },
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { addDraft() }),
+                    )
+                    TextButton(onClick = ::addDraft, enabled = draft.isNotBlank()) { Text("Add") }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(current) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * *Kill now*'s own confirmation: there is no "hold to confirm" gesture worth
+ * building for one button, so the desktop's press-and-hold becomes a
+ * delayed-enable instead — the confirm button stays disabled for
+ * [KILL_CONFIRM_DELAY] after the dialog opens, which is long enough that a
+ * dialog dismissed by a stray tap cannot also kill the session.
+ */
+@Composable
+private fun KillConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    var enabled by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(KILL_CONFIRM_DELAY)
+        enabled = true
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Kill this session now?") },
+        text = {
+            Text(
+                "This kills it immediately, without waiting for it to persist anything. " +
+                    "This cannot be undone.",
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm, enabled = enabled) {
+                Text("Kill now", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * How long *Kill now*'s confirm button stays disabled after the dialog opens
+ * — the phone's stand-in for the desktop's press-and-hold, per the brief:
+ * "hold to confirm" on a phone is a delayed enable, not a gesture.
+ */
+private val KILL_CONFIRM_DELAY = 800.milliseconds
 
 /**
  * The refresh icon's angle: spinning while [busy], and a flat `0f` otherwise.
@@ -591,7 +931,13 @@ private fun TruncationNote() {
 }
 
 @Composable
-private fun PromptBox(state: SessionUiState, onDraftChange: (String) -> Unit, onSend: () -> Unit) {
+private fun PromptBox(
+    state: SessionUiState,
+    onDraftChange: (String) -> Unit,
+    onSend: () -> Unit,
+    onOpenHistory: () -> List<String>,
+) {
+    var showHistory by remember { mutableStateOf(false) }
     Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
         Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
             val why = when {
@@ -608,6 +954,17 @@ private fun PromptBox(state: SessionUiState, onDraftChange: (String) -> Unit, on
                     enabled = !state.sending && !state.readOnly,
                     placeholder = { Text("Message ${state.session?.displayName ?: "session"}…") },
                     shape = CircleShape,
+                    // The "swipe up on the field shows history" spec, realised
+                    // as a tap on the field's own leading icon rather than a
+                    // gesture: a `TextField` already owns vertical drag for
+                    // text selection and cursor placement, so a swipe on it is
+                    // not free real estate the way it would be on a plain
+                    // `Row`.
+                    leadingIcon = {
+                        IconButton(onClick = { showHistory = true }) {
+                            Icon(FleetIcons.History, contentDescription = "Draft history")
+                        }
+                    },
                     colors = TextFieldDefaults.colors(
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent,
@@ -627,6 +984,120 @@ private fun PromptBox(state: SessionUiState, onDraftChange: (String) -> Unit, on
             if (why != null) Text(why, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
         }
     }
+    if (showHistory) {
+        HistoryDialog(
+            entries = onOpenHistory(),
+            // Puts the picked entry in the draft; it is not sent — the
+            // person still taps Send (or edits it first), same as tapping a
+            // suggestion anywhere else in this screen never fires by itself.
+            onPick = { entry -> onDraftChange(entry); showHistory = false },
+            onDismiss = { showHistory = false },
+        )
+    }
+}
+
+/** What was actually sent, most recent first — picking one loads it into the draft, unsent. */
+@Composable
+private fun HistoryDialog(entries: List<String>, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Draft history") },
+        text = {
+            if (entries.isEmpty()) {
+                Text("Nothing sent yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Column(modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+                    for ((index, entry) in entries.withIndex()) {
+                        Text(
+                            text = entry,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth().clickable { onPick(entry) }.padding(vertical = 10.dp),
+                        )
+                        if (index != entries.lastIndex) HorizontalDivider()
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
+/**
+ * The chip row above the composer: a [LazyRow] of [SuggestionChip]s, one tap
+ * away from [onSendQuick], plus a trailing `+` chip that saves the current
+ * draft as a new one. Long-pressing an existing chip opens
+ * [EditQuickReplyDialog] rather than firing [onSendQuick] — see its own doc
+ * for how "edit" and "remove" share one dialog. Visibility (hidden while
+ * blocked or readonly) is the caller's decision, same as every other
+ * card-vs-composer choice on this screen — see `SessionScreen`'s own body.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QuickRepliesRow(
+    chips: List<String>,
+    draft: String,
+    enabled: Boolean,
+    onSendQuick: (String) -> Unit,
+    onAdd: (String) -> Unit,
+    onRemove: (String) -> Unit,
+) {
+    var editing by remember { mutableStateOf<String?>(null) }
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+    ) {
+        items(chips) { chip ->
+            Box(
+                modifier = Modifier.combinedClickable(
+                    onClick = { if (enabled) onSendQuick(chip) },
+                    onLongClick = { editing = chip },
+                ),
+            ) {
+                // `SuggestionChip`'s own `onClick` is not what fires here —
+                // the `combinedClickable` above it is, so a chip's tap and
+                // its long-press are the same gesture recognizer rather than
+                // two independent ones that could both claim the same touch.
+                SuggestionChip(onClick = {}, enabled = enabled, label = { Text(chip) })
+            }
+        }
+        item {
+            SuggestionChip(
+                onClick = { onAdd(draft) },
+                enabled = enabled && draft.isNotBlank(),
+                label = { Text("+") },
+            )
+        }
+    }
+    editing?.let { chip ->
+        EditQuickReplyDialog(
+            original = chip,
+            onSave = { edited -> onRemove(chip); onAdd(edited); editing = null },
+            onRemove = { onRemove(chip); editing = null },
+            onDismiss = { editing = null },
+        )
+    }
+}
+
+/**
+ * A chip's long-press dialog: edit its text (removes the old chip and adds
+ * the edited one — [dev.claudefleet.mobile.ui.QuickReplies] has no rename of
+ * its own) or remove it outright.
+ */
+@Composable
+private fun EditQuickReplyDialog(original: String, onSave: (String) -> Unit, onRemove: () -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf(original) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Quick reply") },
+        text = { TextField(value = text, onValueChange = { text = it }, singleLine = true) },
+        confirmButton = {
+            TextButton(onClick = { onSave(text) }, enabled = text.isNotBlank()) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onRemove) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+        },
+    )
 }
 
 /**

@@ -206,12 +206,12 @@ class FleetRepositoryTest {
     fun a_ready_frame_naming_a_too_new_contract_is_refused_and_applies_no_rows() = runTest {
         val hub = FakeHub(sessionsJson = sessionRows(1, 2))
         val stream = FakeStream {
-            emit(HubEvent.Ready("0.9.9", listOf("session", "host"), contract = 2))
+            emit(HubEvent.Ready("0.9.9", listOf("session", "host"), contract = 4))
             emit(rowEvent("session:updated", """{"id":1,"tmux_name":"renamed","host_alias":"box"}"""))
             awaitCancellation()
         }
         val repository = repo(hub, stream, backgroundScope)
-        val expected = ConnectionStatus.Refused(contractVerdict(2).sentence()!!)
+        val expected = ConnectionStatus.Refused(contractVerdict(4).sentence()!!)
 
         repository.start()
         // Matching the exact refusal, not merely `it is Refused`: the
@@ -223,6 +223,29 @@ class FleetRepositoryTest {
         assertEquals(emptyList<Long>(), repository.sessions.value.map { it.id }, "no rows applied from a refused connection")
         assertEquals(0, hub.sessionCalls, "the resync must be skipped")
         repository.stop()
+    }
+
+    /**
+     * The hub's version is what gates the structured `send_prompt { keys }`
+     * chips on a blocked card ([dev.claudefleet.mobile.net.HUB_VERSION_KEYS]),
+     * so it is remembered from every `ready` — including one whose contract is
+     * then refused, because "which hub is this" is exactly the fact a person
+     * staring at a refusal needs. It is never cleared on a drop, either: the
+     * last hub seen is a better answer than none while the stream is down.
+     */
+    @Test
+    fun every_ready_frame_records_the_hubs_version_including_a_refused_one() = runTest {
+        val hub = FakeHub(sessionsJson = sessionRows(1))
+        val stream = FakeStream { emit(HubEvent.Ready("0.9.9", listOf("session"), contract = 4)); awaitCancellation() }
+        val repository = repo(hub, stream, backgroundScope)
+
+        assertNull(repository.hubVersion.value, "nothing seen before the first ready")
+        repository.start()
+        repository.status.first { it is ConnectionStatus.Refused }
+
+        assertEquals("0.9.9", repository.hubVersion.value)
+        repository.stop()
+        assertEquals("0.9.9", repository.hubVersion.value, "a stopped stream does not un-see the hub")
     }
 
     @Test

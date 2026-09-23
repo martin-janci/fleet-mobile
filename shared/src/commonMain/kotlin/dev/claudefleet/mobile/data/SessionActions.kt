@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.SendPromptResult
+import dev.claudefleet.mobile.model.WaitResult
 import kotlinx.coroutines.CancellationException
 
 /**
@@ -27,6 +28,30 @@ interface SessionActions {
     /** Deliver [text] to the session's REPL and submit it. */
     suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult
 
+    /** Press one key (`"Enter"` | `"Escape"` | `"C-c"`) instead of typing text. */
+    suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult
+
+    /** The visible tmux pane, capped to [maxLines] lines. */
+    suspend fun capture(sessionId: Long, maxLines: Int = 40): String
+
+    /** Block until [sessionId]'s turn counter passes [turn], or [timeoutS] elapses. */
+    suspend fun waitForTurn(sessionId: Long, turn: Long, timeoutS: Int = 30): WaitResult
+
+    /** Kill and recreate the tmux session in place — for a wedged REPL. */
+    suspend fun restart(sessionId: Long)
+
+    /** Ask the session to persist its work, then arm deletion once it is clean. */
+    suspend fun safeKill(sessionId: Long)
+
+    /** Kill the session now, without waiting for it to persist anything. */
+    suspend fun kill(sessionId: Long)
+
+    /** Replace the session's tags. */
+    suspend fun setTags(sessionId: Long, tags: List<String>)
+
+    /** Set the session's friendly display name. */
+    suspend fun rename(sessionId: Long, friendlyName: String)
+
     /**
      * Is the hub itself reachable, right now — independent of whether
      * `/events` happens to be connected.
@@ -51,6 +76,30 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
 
     override suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult =
         session.withClient { it.sendPrompt(sessionId, text) }
+
+    override suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult =
+        session.withClient { it.sendKeys(sessionId, key) }
+
+    override suspend fun capture(sessionId: Long, maxLines: Int): String =
+        session.withClient { it.capture(sessionId, maxLines) }
+
+    override suspend fun waitForTurn(sessionId: Long, turn: Long, timeoutS: Int): WaitResult =
+        session.withClient { it.waitForTurn(sessionId, turn, timeoutS) }
+
+    override suspend fun restart(sessionId: Long) =
+        session.withClient { it.restart(sessionId) }
+
+    override suspend fun safeKill(sessionId: Long) =
+        session.withClient { it.safeKill(sessionId) }
+
+    override suspend fun kill(sessionId: Long) =
+        session.withClient { it.kill(sessionId) }
+
+    override suspend fun setTags(sessionId: Long, tags: List<String>) =
+        session.withClient { it.setTags(sessionId, tags) }
+
+    override suspend fun rename(sessionId: Long, friendlyName: String) =
+        session.withClient { it.rename(sessionId, friendlyName) }
 
     // `Throwable`, not `HubError`. The interface promises this never throws,
     // and `HubError` is only *most* of what can come back: a payload the

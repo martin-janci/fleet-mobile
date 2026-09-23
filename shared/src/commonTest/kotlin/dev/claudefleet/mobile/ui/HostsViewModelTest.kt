@@ -28,6 +28,7 @@ private class FakeFleetForHosts(
     override val hosts = MutableStateFlow(hostRows)
     override val projects = MutableStateFlow<List<ProjectRow>>(emptyList())
     override val status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Connected("0.9.3"))
+    override val hubVersion = MutableStateFlow<String?>("0.9.3")
     override val clockSkewSeconds = MutableStateFlow(0L)
     override val sessionChanges = emptyFlow<Long>()
 

@@ -16,6 +16,27 @@ data class Conversation(
     val turns: List<ConvTurn> = emptyList(),
     /** Older turns or items were dropped to fit the turn / character budget. */
     val truncated: Boolean = false,
+    /**
+     * Current-conversation context size, from this same read's tail. `null`
+     * when the tail carried no usage (nothing yet, or a compaction with no
+     * reply since) — mirrors the hub's `ContextView` (`transcript.rs`).
+     */
+    val context: ConvContext? = null,
+    /**
+     * This conversation's timeline events, oldest first — kept raw rather
+     * than modelled, since nothing on this screen renders them yet.
+     */
+    val events: List<JsonElement> = emptyList(),
+)
+
+/** The context size shown alongside a [Conversation] — the hub's `ContextView`. */
+@Serializable
+data class ConvContext(
+    val tokens: Long? = null,
+    val window: Long? = null,
+    val pct: Double? = null,
+    /** Always `false` on a value freshly read from the transcript. */
+    val stale: Boolean = false,
 )
 
 /**
@@ -106,6 +127,13 @@ fun Conversation.appending(fresh: Conversation): Conversation {
     return Conversation(
         turns = kept + fresh.turns,
         truncated = truncated || fresh.truncated,
+        // Both a rolling-window read like `turns` itself, not a ledger: the
+        // freshest read's own picture replaces the held one rather than being
+        // merged into it, and falls back to what was already held only when
+        // this particular read carried nothing (a fetch that raced ahead of
+        // the hub's own context/event bookkeeping).
+        context = fresh.context ?: context,
+        events = fresh.events.ifEmpty { events },
     ).withinCeiling()
 }
 
@@ -149,7 +177,7 @@ private fun Conversation.withinCeiling(): Conversation =
     if (turns.size <= MAX_RETAINED_TURNS) {
         this
     } else {
-        Conversation(turns = turns.takeLast(MAX_RETAINED_TURNS), truncated = true)
+        copy(turns = turns.takeLast(MAX_RETAINED_TURNS), truncated = true)
     }
 
 private fun ConvTurn.identity(): Pair<String?, String?> = at to prompt
@@ -230,11 +258,15 @@ sealed class ConvItem {
     @SerialName("subagent")
     @JsonIgnoreUnknownKeys
     data class Subagent(
+        val id: String? = null,
+        /** `"Task"` or `"Agent"`. */
         val name: String = "",
         @SerialName("agent_type") val agentType: String? = null,
         val description: String? = null,
         val result: String? = null,
         val error: Boolean = false,
+        val at: String? = null,
+        @SerialName("ended_at") val endedAt: String? = null,
         val done: Boolean = true,
     ) : ConvItem() {
         /** What it was asked to do, else what it is. */
@@ -284,10 +316,16 @@ sealed class ConvItem {
     @SerialName("notification")
     @JsonIgnoreUnknownKeys
     data class Notification(
+        @SerialName("task_id") val taskId: String? = null,
+        @SerialName("tool_use_id") val toolUseId: String? = null,
+        /** `completed` | `failed` | `stopped` | `killed`; `null` on a mid-stream event. */
         val status: String? = null,
         val summary: String? = null,
         val result: String? = null,
+        @SerialName("output_file") val outputFile: String? = null,
+        /** Monitor's streamed line. */
         val event: String? = null,
+        val at: String? = null,
     ) : ConvItem() {
         override val label: String
             get() = summary?.takeIf { it.isNotBlank() }

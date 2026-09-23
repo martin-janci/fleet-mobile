@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile
 
 import androidx.compose.ui.window.ComposeUIViewController
+import dev.claudefleet.mobile.store.IosPrefs
 import dev.claudefleet.mobile.store.KeychainSecrets
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.darwin.Darwin
@@ -63,6 +64,7 @@ fun onPairLink(uri: String) {
 private val iosContainer: AppContainer by lazy {
     AppContainer(
         secrets = KeychainSecrets(),
+        prefs = IosPrefs(),
         http = HttpClient(Darwin),
         appVersion = iosAppVersion(),
         // The build decides, not the link. `Platform.isDebugBinary` is

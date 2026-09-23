@@ -60,4 +60,30 @@ class SessionRowTest {
         assertEquals(null, bare.lastPrompt)
         assertEquals(null, bare.usageCostMicros)
     }
+
+    @Test
+    fun safe_kill_state_parses_and_is_null_when_absent() {
+        val row = json.decodeFromString(SessionRow.serializer(), """{"id":1,"safe_kill_state":"waiting_for_clean"}""")
+        assertEquals("waiting_for_clean", row.safeKillState)
+
+        val bare = json.decodeFromString(SessionRow.serializer(), """{"id":9}""")
+        assertNull(bare.safeKillState)
+    }
+
+    @Test
+    fun pending_input_parses_and_is_null_when_absent() {
+        val row = json.decodeFromString(
+            SessionRow.serializer(),
+            """{"id":1,"pending_input":{"kind":"input","options":[{"n":2,"label":"1 day"}]}}""",
+        )
+        val pending = row.pendingInput!!
+        assertEquals("input", pending.kind)
+        assertEquals(null, pending.question)
+        assertEquals(2, pending.options[0].n)
+        assertEquals("1 day", pending.options[0].label)
+        assertEquals(false, pending.options[0].selected)
+
+        val bare = json.decodeFromString(SessionRow.serializer(), """{"id":9}""")
+        assertNull(bare.pendingInput)
+    }
 }

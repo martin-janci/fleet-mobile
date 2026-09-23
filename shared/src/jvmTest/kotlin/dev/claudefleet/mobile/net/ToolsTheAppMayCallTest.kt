@@ -55,6 +55,13 @@ class ToolsTheAppMayCallTest {
         "session_conversation",
         "send_prompt",
         "fleet_health",
+        "capture_session",
+        "wait_for_session",
+        "restart_session",
+        "safe_kill_session",
+        "kill_session",
+        "set_session_tags",
+        "set_friendly_name",
     )
 
     @Test

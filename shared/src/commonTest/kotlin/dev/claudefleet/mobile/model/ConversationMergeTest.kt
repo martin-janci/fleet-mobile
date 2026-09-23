@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.model
 
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -15,6 +17,8 @@ private fun turn(at: String?, prompt: String?, vararg items: String) = ConvTurn(
 
 private fun conversation(vararg turns: ConvTurn, truncated: Boolean = false) =
     Conversation(turns = turns.toList(), truncated = truncated)
+
+private fun event(tag: String): JsonElement = JsonPrimitive(tag)
 
 /**
  * `session_conversation` answers with a rolling window of the tail, so a second
@@ -128,6 +132,52 @@ class ConversationMergeTest {
         val have = conversation(orphan)
 
         assertEquals(1, have.appending(conversation(orphan)).turns.size)
+    }
+
+    // ---- context/events: task 5 review, "zero test coverage" ----
+    //
+    // `appending()` is a rolling-window merge like `turns` itself, not a
+    // ledger: `context` and `events` are the *freshest* read's own picture,
+    // replacing what was held, and only fall back to what was held when this
+    // particular read carried none at all (a fetch racing ahead of the hub's
+    // own context/event bookkeeping). Every case here goes through the
+    // ordinary overlap path (`have.turns` is never empty), which is the branch
+    // that actually carries the merge logic under review — the first-read
+    // branch (`turns.isEmpty()`) is already covered by
+    // `the_first_read_is_kept_as_it_came` above.
+
+    @Test
+    fun the_freshest_context_replaces_what_was_held() {
+        val have = conversation(turn("t1", "a")).copy(context = ConvContext(pct = 10.0))
+        val fresh = conversation(turn("t1", "a"), turn("t2", "b")).copy(context = ConvContext(pct = 55.0))
+
+        assertEquals(ConvContext(pct = 55.0), have.appending(fresh).context)
+    }
+
+    @Test
+    fun a_read_that_carries_no_context_keeps_what_was_held() {
+        val have = conversation(turn("t1", "a")).copy(context = ConvContext(pct = 10.0))
+        // `fresh` carries no context at all (the hub's tail had no usage yet).
+        val fresh = conversation(turn("t1", "a"), turn("t2", "b"))
+
+        assertEquals(ConvContext(pct = 10.0), have.appending(fresh).context)
+    }
+
+    @Test
+    fun the_freshest_non_empty_events_replace_what_was_held() {
+        val have = conversation(turn("t1", "a")).copy(events = listOf(event("old")))
+        val fresh = conversation(turn("t1", "a"), turn("t2", "b")).copy(events = listOf(event("new")))
+
+        assertEquals(listOf(event("new")), have.appending(fresh).events)
+    }
+
+    @Test
+    fun a_read_with_no_events_keeps_what_was_held() {
+        val have = conversation(turn("t1", "a")).copy(events = listOf(event("old")))
+        // `fresh` carries no events (the default empty list).
+        val fresh = conversation(turn("t1", "a"), turn("t2", "b"))
+
+        assertEquals(listOf(event("old")), have.appending(fresh).events)
     }
 }
 
@@ -265,6 +315,32 @@ class ConversationCeilingTest {
         )
 
         assertTrue(held.truncated)
+    }
+
+    /**
+     * `withinCeiling()` used to rebuild the trimmed [Conversation] from
+     * scratch (`Conversation(turns = ..., truncated = true)`), which silently
+     * dropped `context`/`events` on exactly the reads big enough to matter —
+     * a long-running session's. It now `copy()`s instead, so a merge that
+     * crosses [MAX_RETAINED_TURNS] keeps both.
+     */
+    @Test
+    fun a_merge_that_crosses_the_ceiling_still_keeps_context_and_events() {
+        var held = Conversation()
+        val total = MAX_RETAINED_TURNS + 5
+        for (n in 1..total) {
+            val window = ((n - 9).coerceAtLeast(1)..n).map { turn("t$it", "prompt $it", "line $it") }
+            val fresh = if (n == total) {
+                Conversation(turns = window, context = ConvContext(pct = 77.0), events = listOf(event("done")))
+            } else {
+                Conversation(turns = window)
+            }
+            held = held.appending(fresh)
+        }
+
+        assertEquals(MAX_RETAINED_TURNS, held.turns.size, "the ceiling still trims the turns")
+        assertEquals(ConvContext(pct = 77.0), held.context, "the ceiling must not drop the context on the way out")
+        assertEquals(listOf(event("done")), held.events, "nor the events")
     }
 
     /**
