@@ -210,12 +210,12 @@ class FleetRepositoryTest {
     fun a_ready_frame_naming_a_too_new_contract_is_refused_and_applies_no_rows() = runTest {
         val hub = FakeHub(sessionsJson = sessionRows(1, 2))
         val stream = FakeStream {
-            emit(HubEvent.Ready("0.9.9", listOf("session", "host"), contract = 4))
+            emit(HubEvent.Ready("0.9.9", listOf("session", "host"), contract = 5))
             emit(rowEvent("session:updated", """{"id":1,"tmux_name":"renamed","host_alias":"box"}"""))
             awaitCancellation()
         }
         val repository = repo(hub, stream, backgroundScope)
-        val expected = ConnectionStatus.Refused(contractVerdict(4).sentence()!!)
+        val expected = ConnectionStatus.Refused(contractVerdict(5).sentence()!!)
 
         repository.start()
         // Matching the exact refusal, not merely `it is Refused`: the
@@ -240,7 +240,7 @@ class FleetRepositoryTest {
     @Test
     fun every_ready_frame_records_the_hubs_version_including_a_refused_one() = runTest {
         val hub = FakeHub(sessionsJson = sessionRows(1))
-        val stream = FakeStream { emit(HubEvent.Ready("0.9.9", listOf("session"), contract = 4)); awaitCancellation() }
+        val stream = FakeStream { emit(HubEvent.Ready("0.9.9", listOf("session"), contract = 5)); awaitCancellation() }
         val repository = repo(hub, stream, backgroundScope)
 
         assertNull(repository.hubVersion.value, "nothing seen before the first ready")
