@@ -231,6 +231,13 @@ class SessionViewModel(
      */
     private val queueGate = Mutex()
 
+    /**
+     * The row's `turn_seq` as of the last conversation read this screen
+     * applied. `null` until the first read lands, so nothing is ever skipped
+     * before there is a drawn state to compare against.
+     */
+    private var drawnTurnSeq: Long? = null
+
     /** The generation currently inside [fetchLock], fetching and applying. */
     private var running: Generation? = null
 
@@ -318,6 +325,7 @@ class SessionViewModel(
                 // open session's reply may have arrived during the gap, so
                 // this screen refetches too, the same as it would for its own id.
                 .filter { it == sessionId || it == ALL_SESSIONS_CHANGED }
+                .filter { it == ALL_SESSIONS_CHANGED || rowChangeCouldMoveTheConversation() }
                 .debounce(SESSION_EVENT_DEBOUNCE)
                 .collect { requestRead(first = false) }
         }
@@ -392,6 +400,41 @@ class SessionViewModel(
 
     private fun row(): SessionRow? = fleet.sessions.value.firstOrNull { it.id == sessionId }
 
+    /**
+     * Whether the row change that just arrived could have moved the
+     * conversation — and so is worth a `session_conversation` read.
+     *
+     * A session row moves for reasons the transcript knows nothing about: a
+     * tag, a CI result, a usage figure, and above all reconcile rewriting
+     * `current_activity` on every pass. Reading the whole window back for
+     * those is the largest call this app makes, spent on nothing.
+     *
+     * The rule is deliberately generous, and it is worth saying why the
+     * obvious stricter one is wrong. Gating on `turn_seq` alone — "refetch
+     * only when a turn completed" — would be silent for the entire length of
+     * a reply, because `turn_seq` does not move until the turn ENDS. The
+     * screen would sit still exactly while the answer is being written,
+     * which is the one moment somebody is watching it.
+     *
+     * So a read happens whenever the turn count differs from the one the
+     * screen was drawn against, OR a turn is in flight (`working`), OR the
+     * session is waiting on the person (`blocked` — the question is in the
+     * transcript). What is skipped is a row that moved while the session is
+     * idle, done, stopped or failed and its turn count did not change: there
+     * is nothing new to read.
+     *
+     * A `/clear`, a resume or a compaction switches the conversation under
+     * us. The row does carry `claude_session_id`, but this app's model does
+     * not — no screen draws it. It is covered anyway: a new conversation
+     * starts its turn count over, so the count differs from the drawn one and
+     * the read happens. `!=`, not `>`, for exactly that reason.
+     */
+    private fun rowChangeCouldMoveTheConversation(): Boolean {
+        val row = row() ?: return true
+        if (row.turnSeq != drawnTurnSeq) return true
+        return row.claudeStatus == "working" || row.claudeStatus == "blocked"
+    }
+
     /** True while the hub named a contract this build refuses to talk across. */
     private fun refused(): Boolean = fleet.status.value is ConnectionStatus.Refused
 
@@ -464,6 +507,11 @@ class SessionViewModel(
                     running = generation
                 }
                 val fresh = actions.conversation(sessionId)
+                // Stamped from the row as it is NOW, inside the lock and
+                // before the apply: the read reflects whatever the hub had
+                // when it answered, and a turn that completes after this
+                // point must still trigger the next read.
+                drawnTurnSeq = row()?.turnSeq
                 local.update { current ->
                     val appended = current.conversation.appending(fresh)
                     // The same "did the tail move" signal `SessionScreen`'s
