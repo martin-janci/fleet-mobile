@@ -191,12 +191,35 @@ class HubClient(
         }
 
     /** A session's recent exchange. [turns] left null keeps the hub's default of 10. */
-    suspend fun conversation(sessionId: Long, turns: Int? = null): Conversation =
+    /**
+     * A session's conversation.
+     *
+     * Two things this asks the hub NOT to send, because the app has nowhere
+     * to put them:
+     *
+     * - `events_limit = 0`. The reply carries the conversation's timeline —
+     *   compactions, `/clear`, ops — and [Conversation] has `turns` and
+     *   `truncated`, so all of it was parsed and dropped on every poll. A hub
+     *   too old to accept zero clamps it to one, which is the same answer
+     *   minus the saving, never an error.
+     * - [sinceTurn], when the caller knows the `turn_seq` it already drew:
+     *   the hub then sends the turns completed since, plus the one still
+     *   running, instead of the last ten every time. An older hub ignores the
+     *   parameter and answers the full window, so a caller must read what
+     *   came back rather than assume what it asked for.
+     */
+    suspend fun conversation(
+        sessionId: Long,
+        turns: Int? = null,
+        sinceTurn: Long? = null,
+    ): Conversation =
         call(
             "session_conversation",
             buildJsonObject {
                 put("session_id", sessionId)
                 if (turns != null) put("turns", turns)
+                if (sinceTurn != null) put("since_turn", sinceTurn)
+                put("events_limit", 0)
             },
         ) { json.decodeFromJsonElement(Conversation.serializer(), it) }
 

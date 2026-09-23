@@ -454,6 +454,44 @@ class HubClientTest {
         assertNull(args["turns"], "the hub's own default (10) must stand")
     }
 
+    /**
+     * The reply carries the conversation's timeline, and [Conversation] has
+     * nowhere to put it: `turns` and `truncated`, and nothing else. Asking
+     * for none is the difference between parsing it and dropping it on every
+     * poll, and not receiving it at all.
+     */
+    @Test
+    fun conversation_asks_for_no_timeline_events() = runTest {
+        val (hub, calls) = client { sse(okResult("""{"turns":[],"truncated":false}""")) to HttpStatusCode.OK }
+
+        hub.conversation(sessionId = 12)
+
+        val args = Json.parseToJsonElement(calls.bodyText(0))
+            .jsonObject["params"]!!.jsonObject["arguments"]!!.jsonObject
+        assertEquals("0", args["events_limit"]!!.jsonPrimitive.content)
+    }
+
+    /**
+     * A caller that knows where it got to says so, and the hub sends the
+     * turns completed since plus the one still running — not the last ten
+     * every time. Omitted when there is nothing to resume from, so the hub's
+     * default window stands.
+     */
+    @Test
+    fun conversation_passes_a_cursor_only_when_it_has_one() = runTest {
+        val (hub, calls) = client { sse(okResult("""{"turns":[],"truncated":false}""")) to HttpStatusCode.OK }
+
+        hub.conversation(sessionId = 12, sinceTurn = 20)
+        hub.conversation(sessionId = 12)
+
+        val args = { i: Int ->
+            Json.parseToJsonElement(calls.bodyText(i))
+                .jsonObject["params"]!!.jsonObject["arguments"]!!.jsonObject
+        }
+        assertEquals("20", args(0)["since_turn"]!!.jsonPrimitive.content)
+        assertNull(args(1)["since_turn"], "no cursor, no parameter")
+    }
+
     @Test
     fun send_prompt_posts_the_text_and_parses_the_receipt() = runTest {
         val (hub, calls) = client {
