@@ -40,6 +40,19 @@ interface FleetState {
      */
     val sessionChanges: Flow<Long>
 
+    /**
+     * Seconds to add to this device's clock to read the hub's, measured from
+     * the `now` on each `ready` frame. Zero until a hub says otherwise, and
+     * zero forever against a hub that sends no `now`.
+     *
+     * Every relative time on screen is a hub timestamp minus a local clock, so
+     * a device whose time is off shifts the whole fleet at once: behind, and
+     * everything reads "just now"; ahead, and a session that is working reads
+     * as hours idle. The fact needed to correct it is already on the wire once
+     * per connection, and was being dropped.
+     */
+    val clockSkewSeconds: StateFlow<Long>
+
     /** Re-list everything. Raises rather than swallowing, so a pull-to-refresh can say it failed. */
     suspend fun refresh()
 }

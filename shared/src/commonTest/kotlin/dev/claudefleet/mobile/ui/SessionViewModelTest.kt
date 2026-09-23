@@ -60,6 +60,7 @@ private class FakeFleetState(rows: List<SessionRow> = listOf(row())) : FleetStat
     override val hosts = MutableStateFlow(listOf(HostRow(alias = "pine", reachable = true)))
     override val projects = MutableStateFlow(listOf(ProjectRow(id = 1, owner = "o", repo = "r")))
     override val status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Connected("0.9.3"))
+    override val clockSkewSeconds = MutableStateFlow(0L)
     override val sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override suspend fun refresh() = Unit
 }

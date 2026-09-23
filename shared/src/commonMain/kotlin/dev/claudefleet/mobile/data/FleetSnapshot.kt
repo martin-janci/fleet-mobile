@@ -61,8 +61,25 @@ fun FleetSnapshot.applying(event: HubEvent.Row): FleetSnapshot = when (event.nam
  * What lets a session screen tell "the hub reported a change for the session
  * I have open" from every other row event on the same stream, without
  * decoding the row into a [dev.claudefleet.mobile.model.SessionRow] first.
+ *
+ * Two frames on that prefix are not a row, and both were read wrong:
+ *
+ * - **`session:event`** is a timeline entry, where `id` is the
+ *   `session_events` rowid — a number in the millions — and the session is in
+ *   `session_id`. Reading `id` there meant the open screen never refreshed on
+ *   a real timeline entry, and pushed a nonexistent id into the change flow.
+ * - **an `mcp_call` timeline entry** says somebody called a tool, which
+ *   includes this app's own reads. Taking it as a change is a loop: a read
+ *   produces a frame, the frame triggers a read. Recent hubs no longer
+ *   announce read-only calls at all, but an older one does, and one client
+ *   spinning against it is not a failure mode worth leaving open.
  */
-fun HubEvent.Row.sessionId(): Long? = if (name.startsWith("session:")) payload.number("id") else null
+fun HubEvent.Row.sessionId(): Long? = when {
+    !name.startsWith("session:") -> null
+    name == "session:event" ->
+        if (payload.text("kind") == "mcp_call") null else payload.number("session_id")
+    else -> payload.number("id")
+}
 
 /**
  * Replace the row [sameRow] picks out, or append [incoming] when there is none.
