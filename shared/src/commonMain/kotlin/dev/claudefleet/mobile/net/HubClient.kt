@@ -37,8 +37,11 @@ import kotlinx.serialization.json.putJsonObject
 /**
  * Talks to one `fleet-hub`.
  *
- * Two shapes, both `POST`:
- *  - `/mcp` — a JSON-RPC `tools/call`, answered SSE-framed (see [call]).
+ * Three shapes, all `POST`:
+ *  - `/mcp/json` — a JSON-RPC `tools/call` answered as plain
+ *    `application/json`, which is what an ordinary call uses (see [call]).
+ *  - `/mcp` — the same call answered SSE-framed. Kept for long polls, and as
+ *    the fallback for a hub too old to have the JSON mount.
  *  - `/pair` — the one unauthenticated route, which exchanges a pairing code
  *    for this client's own token.
  *
@@ -58,9 +61,18 @@ class HubClient(
      *
      * The hub is a *stateless* streamable-HTTP MCP server: every POST is a
      * self-contained exchange with exactly one reply, so the JSON-RPC `id` is
-     * a constant and nothing needs correlating. Its responses keep SSE framing
-     * (rmcp's `json_response = false`) so that a 15 s keep-alive keeps flowing
-     * during a long poll — hence [jsonRpcReply].
+     * a constant and nothing needs correlating.
+     *
+     * **Which mount.** `/mcp` answers `text/event-stream`, and neither Caddy
+     * nor Cloudflare will compress that — so on that mount nothing this app
+     * fetches is ever compressed. Measured against the hub this was written
+     * for: the three calls the repository makes on a cold start are 61 335 B
+     * over `/mcp` and about 9 550 B over `/mcp/json`. An ordinary call
+     * therefore goes to the JSON mount; only a [FRAMED_TOOLS] long poll needs
+     * the framing, because its 15 s keep-alive is what holds the connection
+     * open. A hub without the JSON mount answers 404 once and [framedOnly]
+     * pins this client to `/mcp` for good — [jsonRpcReply] reads both shapes
+     * either way.
      *
      * A tool that fails does *not* come back as a JSON-RPC error: per the MCP
      * spec it is a successful result with `isError: true`, and fleet puts the
@@ -82,7 +94,16 @@ class HubClient(
                 put("arguments", args)
             }
         }
-        val (status, body) = send("$base/mcp", json.encodeToString(JsonObject.serializer(), envelope), authenticated = true)
+        val payload = json.encodeToString(JsonObject.serializer(), envelope)
+        var (status, body) = send(mountFor(tool), payload, authenticated = true)
+        if (status == 404 && !framedOnly) {
+            // The hub predates the JSON mount. Note it once and never ask
+            // again: a 404 here is a property of the hub, not of the call.
+            framedOnly = true
+            val retried = send("$base/mcp", payload, authenticated = true)
+            status = retried.first
+            body = retried.second
+        }
         throwForStatus(status, body, base, token)
 
         val reply = jsonRpcReply(body)
@@ -171,12 +192,35 @@ class HubClient(
         }
 
     /** A session's recent exchange. [turns] left null keeps the hub's default of 10. */
-    suspend fun conversation(sessionId: Long, turns: Int? = null): Conversation =
+    /**
+     * A session's conversation.
+     *
+     * Two things this asks the hub NOT to send, because the app has nowhere
+     * to put them:
+     *
+     * - `events_limit = 0`. The reply carries the conversation's timeline —
+     *   compactions, `/clear`, ops — and [Conversation] has `turns` and
+     *   `truncated`, so all of it was parsed and dropped on every poll. A hub
+     *   too old to accept zero clamps it to one, which is the same answer
+     *   minus the saving, never an error.
+     * - [sinceTurn], when the caller knows the `turn_seq` it already drew:
+     *   the hub then sends the turns completed since, plus the one still
+     *   running, instead of the last ten every time. An older hub ignores the
+     *   parameter and answers the full window, so a caller must read what
+     *   came back rather than assume what it asked for.
+     */
+    suspend fun conversation(
+        sessionId: Long,
+        turns: Int? = null,
+        sinceTurn: Long? = null,
+    ): Conversation =
         call(
             "session_conversation",
             buildJsonObject {
                 put("session_id", sessionId)
                 if (turns != null) put("turns", turns)
+                if (sinceTurn != null) put("since_turn", sinceTurn)
+                put("events_limit", 0)
             },
         ) { json.decodeFromJsonElement(Conversation.serializer(), it) }
 
@@ -277,6 +321,17 @@ class HubClient(
         call("fleet_health") { it.jsonObject["db_ready"]?.jsonPrimitive?.booleanOrNull == true }
 
     // ---- the wire ----
+
+    /**
+     * Set once, when a hub answers 404 on `/mcp/json`. Not a cache needing
+     * invalidation: a hub does not grow the mount while this client object
+     * lives, and the client is rebuilt whenever the hub it points at changes.
+     */
+    private var framedOnly: Boolean = false
+
+    /** `/mcp` for a long poll or a hub with no JSON mount; `/mcp/json` otherwise. */
+    private fun mountFor(tool: String): String =
+        if (framedOnly || tool in FRAMED_TOOLS) "$base/mcp" else "$base/mcp/json"
 
     private suspend fun send(
         url: String,
@@ -417,6 +472,21 @@ class HubClient(
          * correlate across calls, so the id never has to vary.
          */
         const val REQUEST_ID = 1
+
+        /**
+         * Tools whose reply is a long poll, and so must keep the SSE mount:
+         * the hub holds the request open for up to ten minutes and the 15 s
+         * keep-alive comment is the only thing stopping a proxy, a tunnel or
+         * a phone's NAT from dropping it. The app does not call any of these
+         * yet; the set exists so that adding one cannot silently take its
+         * keep-alive away.
+         */
+        val FRAMED_TOOLS = setOf(
+            "wait_for_session",
+            "wait_for_task",
+            "wait_for_attention",
+            "run_prompt",
+        )
         const val UNKNOWN_CODE = "E_UNKNOWN"
     }
 }

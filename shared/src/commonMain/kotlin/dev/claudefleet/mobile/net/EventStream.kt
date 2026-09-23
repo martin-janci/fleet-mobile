@@ -190,7 +190,23 @@ sealed interface HubEvent {
      * [dev.claudefleet.mobile.data.FleetRepository.follow] is where that
      * decision is made; this class only carries the raw number.
      */
-    data class Ready(val version: String?, val kinds: List<String>, val contract: Int? = null) : HubEvent
+    data class Ready(
+        val version: String?,
+        val kinds: List<String>,
+        val contract: Int? = null,
+        /**
+         * The hub's own unix second, as it stamped this frame. Null from a hub
+         * that does not send one.
+         *
+         * Every relative time this app draws — "2 m", "idle 3 h", the whole
+         * reason the list is worth opening — is `hubTimestamp - deviceClock`.
+         * A device clock that is wrong makes all of them wrong together, with
+         * nothing on screen to say so: a phone a few minutes behind shows
+         * "just now" for the entire fleet, and one ahead shows a session that
+         * is working as hours idle, which is a reading somebody acts on.
+         */
+        val now: Long? = null,
+    ) : HubEvent
 
     /**
      * The hub's subscriber ring overflowed and [skipped] events were lost. The
@@ -245,6 +261,10 @@ internal fun frameToEvent(frame: SseFrame): HubEvent? {
             contract = fields["contract"]?.let {
                 (it as? JsonPrimitive)?.content?.toIntOrNull() ?: UNREADABLE_CONTRACT
             },
+            // Unreadable and absent are the same answer here, unlike
+            // `contract` above: both mean "no usable reading", and the
+            // fallback for both is the device's own clock.
+            now = (fields["now"] as? JsonPrimitive)?.content?.toLongOrNull(),
         )
         LAGGED -> HubEvent.Lagged(
             fields["skipped"]?.let { runCatching { (it as JsonPrimitive).long }.getOrNull() } ?: 0L,

@@ -242,7 +242,17 @@ class EventFrameMeaningTest {
             SseFrame("ready", """{"version":"0.9.3","now":1758153600,"kinds":["session","host"]}"""),
         )
 
-        assertEquals(HubEvent.Ready("0.9.3", listOf("session", "host")), event)
+        // `now` is read, not ignored: it is how the app corrects a device clock
+        // that would otherwise mislabel every age on the list at once.
+        assertEquals(HubEvent.Ready("0.9.3", listOf("session", "host"), now = 1758153600L), event)
+    }
+
+    /** A hub that sends no `now` leaves the app on its own clock. */
+    @Test
+    fun a_ready_frame_without_a_clock_reads_as_no_reading() {
+        val event = frameToEvent(SseFrame("ready", """{"version":"0.9.3","kinds":["session"]}"""))
+
+        assertEquals(null, (event as HubEvent.Ready).now)
     }
 
     /** `lagged` is the hub saying the picture has a hole in it. */

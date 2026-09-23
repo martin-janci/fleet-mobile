@@ -155,6 +155,39 @@ class FleetRepositoryTest {
     }
 
     /**
+     * Every age the list draws is a hub timestamp minus a local clock, so a
+     * device whose time is wrong is wrong about the whole fleet at once, and
+     * silently. The hub states its own time once per connection; this is where
+     * the difference is taken.
+     */
+    @Test
+    fun the_ready_frame_sets_the_clock_skew_against_this_device() = runTest {
+        val hub = FakeHub()
+        val stream = FakeStream { emit(READY.copy(now = 1_000_120L)); awaitCancellation() }
+        val repository = FleetRepository(hub.client, stream, backgroundScope, clock = { 1_000_000L })
+
+        repository.start()
+        repository.status.first { it is ConnectionStatus.Connected }
+
+        assertEquals(120L, repository.clockSkewSeconds.value, "the hub is two minutes ahead of this phone")
+        repository.stop()
+    }
+
+    /** A hub that states no time leaves the app on its own clock, as before. */
+    @Test
+    fun a_ready_frame_without_a_clock_leaves_the_skew_alone() = runTest {
+        val hub = FakeHub()
+        val stream = FakeStream { emit(READY); awaitCancellation() }
+        val repository = FleetRepository(hub.client, stream, backgroundScope, clock = { 1_000_000L })
+
+        repository.start()
+        repository.status.first { it is ConnectionStatus.Connected }
+
+        assertEquals(0L, repository.clockSkewSeconds.value)
+        repository.stop()
+    }
+
+    /**
      * A hub naming a contract revision this build does not understand is not
      * a transport failure — it answered fine — so it gets its own status
      * rather than a reconnect: [ConnectionStatus.Refused] with the sentence
