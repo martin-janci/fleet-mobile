@@ -7,7 +7,11 @@ import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.WorkSummary
+import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
+import dev.claudefleet.mobile.net.ToolCatalog
+import dev.claudefleet.mobile.store.FakePrefs
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
@@ -40,6 +44,8 @@ private class FakeFleet(
     override val hubVersion = MutableStateFlow<String?>("0.9.3")
     override val clockSkewSeconds = MutableStateFlow(0L)
     override val sessionChanges = emptyFlow<Long>()
+    override val capabilities = MutableStateFlow(HubCapabilities())
+    override val myWork = MutableStateFlow<Set<Long>?>(null)
 
     var refreshes = 0
         private set
@@ -514,5 +520,159 @@ class NeedsAttentionToggleTest {
         vm.toggleNeedsAttentionOnly()
         runCurrent()
         assertEquals(1, vm.state.value.attentionCount, "it counts the fleet, not the filtered view")
+    }
+
+    // ---- by work (M8.2): the desktop's `buildSessionsByWork` cases, by name ----
+
+    private fun linked(key: String, itemId: Long? = null, unavailable: Boolean = false) =
+        WorkSummary(linkId = key.hashCode().toLong(), itemId = itemId, key = key, title = "$key title", unavailable = unavailable)
+
+    private fun keyed(id: Long, key: String, project: Long? = 1, host: String = "box", claudeStatus: String? = "working") =
+        session(id, host = host, project = project, claudeStatus = claudeStatus).copy(work = linked(key))
+
+    private fun Pair<List<HostGroup>, String>.labels() =
+        first.single { it.alias == second }.projects.map { (if (it.work != null) "work:" else "") + it.label to it.sessions.map { s -> s.id } }
+
+    /** Desktop: "groups keyed sessions and leaves the rest to the project tree" — one key across two projects is one group. */
+    @Test
+    fun groups_keyed_sessions_and_leaves_the_rest_to_the_project_tree() {
+        val rows = listOf(
+            keyed(1, "ABC-1", project = 1),
+            session(2, project = 1),
+            keyed(3, "DEF-2", project = 1),
+            keyed(4, "ABC-1", project = 2),
+            keyed(5, "ABC-1", project = 1).copy(kind = "external"),
+        )
+        val groups = groupSessions(rows, emptyList(), emptyList(), needsAttentionOnly = false, byWork = true)
+
+        assertEquals(
+            listOf("work:ABC-1" to listOf(4L, 1L), "work:DEF-2" to listOf(3L), "project #1" to listOf(5L, 2L)),
+            (groups to "box").labels(),
+            "an external session is never grouped; it stays with its project",
+        )
+    }
+
+    /** Desktop: "a suggestion never regroups: only a confirmed link makes a work group (M4.4)". */
+    @Test
+    fun a_suggestion_never_regroups_only_a_confirmed_link_makes_a_work_group() {
+        val suggested = session(1).copy(workSuggested = linked("ABC-1"))
+        val confirmed = keyed(2, "ABC-1")
+        val groups = groupSessions(listOf(suggested, confirmed), emptyList(), emptyList(), needsAttentionOnly = false, byWork = true)
+
+        assertEquals(listOf("work:ABC-1" to listOf(2L), "project #1" to listOf(1L)), (groups to "box").labels())
+    }
+
+    /**
+     * Desktop: "filters rows but still reports every keyed session" — a keyed
+     * session hidden by a filter must not reappear under its project header.
+     */
+    @Test
+    fun filters_rows_but_a_hidden_keyed_session_never_reappears_under_its_project() {
+        val rows = listOf(keyed(1, "ABC-1"), keyed(2, "ABC-1", host = "mefistos"), keyed(3, "ABC-1", claudeStatus = "blocked"))
+
+        val onHost = groupSessions(rows, emptyList(), emptyList(), needsAttentionOnly = false, hostFilter = "mefistos", byWork = true)
+        assertEquals(listOf("work:ABC-1" to listOf(2L)), (onHost to "mefistos").labels())
+
+        val attention = groupSessions(rows, emptyList(), emptyList(), needsAttentionOnly = true, byWork = true)
+        assertEquals(listOf("work:ABC-1" to listOf(3L)), (attention to "box").labels(), "session 1 is filtered out of both kinds of group")
+    }
+
+    /** Desktop: "drops a group with no visible session". */
+    @Test
+    fun drops_a_group_with_no_visible_session() {
+        val rows = listOf(keyed(1, "ABC-1"), keyed(2, "DEF-2", claudeStatus = "blocked"))
+        val groups = groupSessions(rows, emptyList(), emptyList(), needsAttentionOnly = true, byWork = true)
+
+        assertEquals(listOf("work:DEF-2" to listOf(2L)), (groups to "box").labels())
+    }
+
+    /** Desktop: "sorts groups by worst severity, keeping recency order on ties" — severity here is who needs a person. */
+    @Test
+    fun sorts_groups_by_attention_keeping_recency_order_on_ties() {
+        val rows = listOf(
+            keyed(1, "A-1"),
+            keyed(2, "B-2", claudeStatus = "blocked"),
+            keyed(3, "C-3"),
+            keyed(4, "B-2"),
+        )
+        val groups = groupSessions(rows, emptyList(), emptyList(), needsAttentionOnly = false, byWork = true)
+
+        // B-2 wants a person; C-3 (id 3) was active more recently than A-1.
+        assertEquals(listOf("work:B-2", "work:C-3", "work:A-1"), (groups to "box").labels().map { it.first })
+    }
+
+    /** Plan: a key whose ticket the tracker stopped answering for still groups, and the heading knows. */
+    @Test
+    fun a_key_with_an_unavailable_ticket_still_groups() {
+        val gone = session(1).copy(work = linked("PAY-7", unavailable = true))
+        val group = groupSessions(listOf(gone), emptyList(), emptyList(), needsAttentionOnly = false, byWork = true)
+            .single().projects.single()
+
+        assertEquals("PAY-7", group.label)
+        assertTrue(group.work!!.unavailable)
+    }
+
+    /** Keys are compared the way the hub normalises them: `pay-7` and `PAY-7` are one group. */
+    @Test
+    fun keys_group_case_insensitively() {
+        val rows = listOf(keyed(1, "PAY-7"), session(2).copy(work = linked("pay-7")))
+        val groups = groupSessions(rows, emptyList(), emptyList(), needsAttentionOnly = false, byWork = true)
+
+        assertEquals(1, groups.single().projects.size)
+    }
+
+    @Test
+    fun without_by_work_a_keyed_session_stays_in_its_project() {
+        val groups = groupSessions(listOf(keyed(1, "ABC-1")), emptyList(), emptyList(), needsAttentionOnly = false)
+        assertEquals(listOf("project #1" to listOf(1L)), (groups to "box").labels())
+    }
+
+    // ---- the view model's work toggles ----
+
+    private fun workFleet(rows: List<SessionRow>) = FakeFleet(rows).apply {
+        capabilities.value = HubCapabilities.of(ToolCatalog(setOf("work")))
+    }
+
+    @Test
+    fun by_work_is_offered_only_by_a_hub_with_the_work_graph_and_is_remembered() = runTest {
+        val prefs = FakePrefs()
+        val fleet = FakeFleet(listOf(keyed(1, "ABC-1")))
+        val vm = SessionsViewModel(fleet, backgroundScope, prefs = prefs)
+
+        vm.toggleByWork()
+        runCurrent()
+        assertFalse(vm.state.value.workAvailable)
+        assertFalse(vm.state.value.byWork, "an old hub: nothing to group by")
+
+        fleet.capabilities.value = HubCapabilities.of(ToolCatalog(setOf("work")))
+        runCurrent()
+        assertTrue(vm.state.value.byWork)
+        assertTrue(vm.state.value.groups.single().projects.single().work != null)
+
+        val next = SessionsViewModel(workFleet(listOf(keyed(1, "ABC-1"))), backgroundScope, prefs = prefs)
+        assertTrue(next.state.value.byWork, "the choice survives a relaunch")
+        next.toggleByWork()
+        assertEquals(emptyList(), prefs.getStringList("sessions.by_work"))
+    }
+
+    @Test
+    fun my_work_keeps_only_sessions_on_those_tickets_and_hides_without_a_tracker() = runTest {
+        val fleet = workFleet(
+            listOf(session(1).copy(work = linked("PAY-7", itemId = 70)), session(2).copy(work = linked("OPS-1", itemId = 80)), session(3)),
+        )
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        assertFalse(vm.state.value.myWorkAvailable, "no tracker: no My work")
+        fleet.myWork.value = setOf(70L)
+        vm.toggleMyWorkOnly()
+        runCurrent()
+
+        assertTrue(vm.state.value.myWorkOnly)
+        assertEquals(listOf(1L), vm.state.value.groups.single().projects.flatMap { it.sessions }.map { it.id })
+
+        fleet.myWork.value = null
+        runCurrent()
+        assertFalse(vm.state.value.myWorkOnly, "the tracker went: the filter goes with its chip")
+        assertEquals(3, vm.state.value.groups.single().projects.flatMap { it.sessions }.size)
     }
 }

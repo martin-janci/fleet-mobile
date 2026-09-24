@@ -79,7 +79,7 @@ import kotlinx.coroutines.flow.getAndUpdate
  */
 class AppContainer(
     secrets: Secrets,
-    prefs: Prefs,
+    val prefs: Prefs,
     http: HttpClient,
     val appVersion: String,
     /**
@@ -306,7 +306,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     // return value still does not need reading here.
     BackHandler(enabled = screen is Screen.Session || screen is Screen.NewSession) { nav.back() }
 
-    val sessions = remember(repository, scope) { SessionsViewModel(repository, scope) }
+    val sessions = remember(repository, scope) { SessionsViewModel(repository, scope, prefs = container.prefs) }
     val hosts = remember(repository, scope) { HostsViewModel(repository, scope) }
     val settings = remember(container, scope) {
         SettingsViewModel(container.session, scope, container.appVersion)
@@ -371,6 +371,8 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         // `new_session` is not a readonly tool: a readonly
                         // pairing is not offered a form the hub would refuse.
                         onNewSession = if (credentials.canWrite) ({ nav.newSession() }) else null,
+                        onToggleByWork = sessions::toggleByWork,
+                        onToggleMyWork = sessions::toggleMyWorkOnly,
                     )
                 }
                 is Screen.NewSession -> key(current) {
