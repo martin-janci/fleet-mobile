@@ -6,7 +6,7 @@ import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
-import dev.claudefleet.mobile.model.unnamedProject
+import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -20,33 +20,22 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-/** The sessions of one project on one host. */
-data class ProjectGroup(
-    /** Null for sessions that belong to no project at all — a shell session. */
-    val projectId: Long?,
-    val label: String,
-    val sessions: List<SessionRow>,
-)
-
-/** One machine's sessions, cut into projects. */
-data class HostGroup(
-    val alias: String,
-    /**
-     * What `list_hosts` said. **Null means unknown**, not unreachable: a session
-     * row names its host, and the host list may not have arrived yet or may not
-     * contain it at all.
-     */
-    val reachable: Boolean?,
-    val projects: List<ProjectGroup>,
-) {
-    val sessionCount: Int get() = projects.sumOf { it.sessions.size }
-}
-
 /** Everything the fleet list draws. */
 data class SessionsUiState(
+    /** Host groups, in the live part of the screen. Empty while [results] is set. */
     val groups: List<HostGroup> = emptyList(),
+    /** What has gone quiet for over a day, behind one collapsible heading. */
+    val dormant: List<SessionRow> = emptyList(),
+    val dormantExpanded: Boolean = false,
+    /** A flat answer to [query], or null when nothing was asked. */
+    val results: List<SessionRow>? = null,
+    val query: String = "",
+    val lens: Lens = Lens.All,
+    /** Whether background agents and shell panes are being held back. */
+    val hideNoise: Boolean = true,
+    /** How many rows [hideNoise] is holding back right now. */
+    val hiddenNoise: Int = 0,
     val status: ConnectionStatus = ConnectionStatus.Offline("not connected yet"),
-    val needsAttentionOnly: Boolean = false,
     /** The host [groups] is narrowed to, or null for the whole fleet. */
     val hostFilter: String? = null,
     /** How many rows in the **whole** fleet want a person, filtered or not. */
@@ -57,24 +46,43 @@ data class SessionsUiState(
     /** Unix seconds, refreshed every 30s by a ticker — what every row's age is computed against. */
     val nowSeconds: Long = 0,
 ) {
-    val isEmpty: Boolean get() = groups.isEmpty()
+    /** Whether a question has been asked. Distinct from "the answer was empty". */
+    val searching: Boolean get() = results != null
+
+    /** Nothing to draw at all — whichever of the two shapes the screen is in. */
+    val isEmpty: Boolean
+        get() = if (searching) results.isNullOrEmpty() else groups.isEmpty() && dormant.isEmpty()
+
+    /**
+     * Kept so the rest of the app can keep asking the question it always asked.
+     * The toggle this used to be is now the narrowest of four [Lens]es.
+     */
+    val needsAttentionOnly: Boolean get() = lens == Lens.NeedsYou
 }
 
 /**
- * The fleet list: sessions grouped by host and then by project, with a filter
- * for the ones that want a person.
+ * The fleet list: sessions grouped by host and then by project, under a lens
+ * that says how they are being used, with a search across everything the rows
+ * carry.
  *
  * Plain Kotlin, not an `androidx.lifecycle.ViewModel` — the same class has to
  * run on iOS, and everything a lifecycle-aware base class would give is one
  * injected [CoroutineScope]. Whoever owns the screen owns the scope.
  *
  * It reads [FleetState] and never a `HubClient`: the rows arrive through the
- * event stream and are already in hand, so grouping and filtering cost nothing
- * and, in particular, [toggleNeedsAttentionOnly] does not talk to the hub.
+ * event stream and are already in hand, so every one of the choices here —
+ * the lens, the search, the noise switch, a collapsed host — is a fold over
+ * rows this class already holds and costs the hub nothing. None of them talk
+ * to it.
+ *
+ * The rules themselves are in `SessionsTriage.kt` as one pure function, and
+ * that is where they are tested. This class holds the choices, persists the
+ * ones worth persisting, and combines them with the fleet.
  */
 class SessionsViewModel(
     private val fleet: FleetState,
     private val scope: CoroutineScope,
+    private val prefs: Prefs,
     /**
      * The clock every age on this screen is measured against: the device's,
      * corrected by what the hub said its own time was on the last `ready`.
@@ -92,17 +100,38 @@ class SessionsViewModel(
         val status: ConnectionStatus,
     )
 
+    /**
+     * The choices this screen holds.
+     *
+     * [query] is deliberately not persisted: a search is a moment, not a
+     * setting, and an app that reopened three days later still filtered to
+     * something typed on a train would look broken rather than helpful. The
+     * other three are settings — they describe how this person wants the fleet
+     * shown — and they are read back in [init] and written on every change.
+     */
     private data class Local(
-        val needsAttentionOnly: Boolean = false,
+        val lens: Lens = Lens.All,
+        val query: String = "",
+        val hideNoise: Boolean = true,
+        val collapsedHosts: Set<String> = emptySet(),
+        val dormantExpanded: Boolean = false,
         val hostFilter: String? = null,
         val refreshing: Boolean = false,
         val error: Friendly? = null,
     )
 
-    private val local = MutableStateFlow(Local())
+    private val local: MutableStateFlow<Local>
     private val now = MutableStateFlow(clock())
 
     init {
+        local = MutableStateFlow(
+            Local(
+                lens = prefs.lens(),
+                hideNoise = prefs.flag(HIDE_NOISE_KEY, default = true),
+                collapsedHosts = prefs.getStringList(COLLAPSED_KEY).toSet(),
+                dormantExpanded = prefs.flag(DORMANT_KEY, default = false),
+            ),
+        )
         scope.launch {
             while (isActive) {
                 delay(30_000)
@@ -115,47 +144,85 @@ class SessionsViewModel(
         combine(fleet.sessions, fleet.hosts, fleet.projects, fleet.status, ::FleetSnapshot),
         local,
         now,
-    ) { snapshot, l, nowSeconds -> assemble(snapshot.sessions, snapshot.hosts, snapshot.projects, snapshot.status, l, nowSeconds) }
+    ) { snapshot, l, nowSeconds -> assemble(snapshot, l, nowSeconds) }
         .stateIn(
             scope,
             SharingStarted.Eagerly,
             // Computed rather than left blank: the flows are StateFlows, so the
             // first frame the screen draws can be the real one.
             assemble(
-                fleet.sessions.value,
-                fleet.hosts.value,
-                fleet.projects.value,
-                fleet.status.value,
+                FleetSnapshot(
+                    fleet.sessions.value,
+                    fleet.hosts.value,
+                    fleet.projects.value,
+                    fleet.status.value,
+                ),
                 local.value,
                 now.value,
             ),
         )
 
     /**
-     * Show only the rows that want a person, or stop. A view over rows already
-     * held: this never talks to the hub.
+     * Look at the fleet through one lens. Persisted, because it is how this
+     * person wants the fleet shown rather than something they are doing now.
      *
-     * One method where there were two. The other — `setNeedsAttentionOnly(on)`
-     * — had no caller in the app at all; the bar is wired to this one. Its only
-     * callers were tests, so the path being exercised was not the path that
-     * ships, which is the arrangement that lets a bug live in the difference
-     * between them.
-     *
-     * The flip is one `update {}` rather than a read of `local.value` followed
-     * by a write. Two taps cannot then read the same value and both write the
-     * same answer, losing one — the rule `SessionViewModel`'s own KDoc states
-     * for this exact shape, and the one `HostsViewModel` was already changed
-     * for.
+     * Every mutator here is one `update {}` rather than a read of `local.value`
+     * followed by a write — the rule [SessionViewModel]'s own KDoc states, and
+     * the one a previous lost-update bug in this class was fixed for. Two taps
+     * cannot then read the same value and both write the same answer, losing
+     * one.
      */
-    fun toggleNeedsAttentionOnly() {
-        local.update { it.copy(needsAttentionOnly = !it.needsAttentionOnly) }
+    fun setLens(lens: Lens) {
+        local.update { it.copy(lens = lens) }
+        prefs.putStringList(LENS_KEY, listOf(lens.name))
     }
 
     /**
-     * Show only one host's groups, or all of them again with `null`. A view
-     * over rows already held, like [toggleNeedsAttentionOnly] — this never
-     * talks to the hub, and [SessionsUiState.attentionCount] stays fleet-wide
-     * regardless of what this narrows [SessionsUiState.groups] to.
+     * Ask a question of the whole fleet, or clear it with a blank string.
+     *
+     * Not persisted — see [Local].
+     */
+    fun setQuery(text: String) {
+        local.update { it.copy(query = text) }
+    }
+
+    /** Hold back background agents and shell panes, or stop. Persisted. */
+    fun toggleHideNoise() {
+        var updated = false
+        local.update {
+            updated = !it.hideNoise
+            it.copy(hideNoise = updated)
+        }
+        prefs.putFlag(HIDE_NOISE_KEY, updated)
+    }
+
+    /** Fold one host's rows away, or unfold them. Persisted. */
+    fun toggleHost(alias: String) {
+        var updated: Set<String> = emptySet()
+        local.update {
+            updated = if (alias in it.collapsedHosts) it.collapsedHosts - alias else it.collapsedHosts + alias
+            it.copy(collapsedHosts = updated)
+        }
+        prefs.putStringList(COLLAPSED_KEY, updated.sorted())
+    }
+
+    /** Show or hide the dormant tail. Persisted. */
+    fun toggleDormant() {
+        var updated = false
+        local.update {
+            updated = !it.dormantExpanded
+            it.copy(dormantExpanded = updated)
+        }
+        prefs.putFlag(DORMANT_KEY, updated)
+    }
+
+    /**
+     * Show only one host's groups, or all of them again with `null`.
+     *
+     * Not persisted, and not a setting: it is where the person navigated to
+     * (`Navigator.showSessionsFor`), and `Screen.Sessions.hostAlias` is its one
+     * source of truth. [SessionsUiState.attentionCount] stays fleet-wide
+     * regardless of what this narrows the groups to.
      */
     fun setHostFilter(alias: String?) {
         local.update { it.copy(hostFilter = alias) }
@@ -164,17 +231,15 @@ class SessionsViewModel(
     /**
      * Clear the banner.
      *
-     * Two of five screens had one and three did not, and the three without are
-     * where an error can sit longest: a refresh that failed leaves its sentence
-     * on screen until the *next* refresh succeeds, and on a hub that is down
-     * that is never. The banner is not dangerous — the rows behind it are still
-     * the last good picture — but an error a person has read and cannot put away
-     * teaches them to stop reading the banner, which is the one thing it must
-     * not do.
+     * An error a person has read and cannot put away teaches them to stop
+     * reading the banner, which is the one thing it must not do — and on a hub
+     * that is down, the next successful refresh that would have cleared it
+     * never comes.
      */
     fun dismissError() {
         local.update { it.copy(error = null) }
     }
+
     /**
      * Re-list the fleet. The rows on screen stay put if it fails — the last
      * snapshot is still the best picture there is — and the failure is shown.
@@ -199,92 +264,65 @@ class SessionsViewModel(
         }
     }
 
-    private fun assemble(
-        sessions: List<SessionRow>,
-        hosts: List<HostRow>,
-        projects: List<ProjectRow>,
-        status: ConnectionStatus,
-        l: Local,
-        nowSeconds: Long,
-    ) = SessionsUiState(
-        groups = groupSessions(sessions, hosts, projects, l.needsAttentionOnly, l.hostFilter),
-        status = status,
-        needsAttentionOnly = l.needsAttentionOnly,
-        hostFilter = l.hostFilter,
-        attentionCount = sessions.count { it.needsAttention },
-        refreshing = l.refreshing,
-        error = l.error,
-        nowSeconds = nowSeconds,
-    )
-}
+    private fun assemble(snapshot: FleetSnapshot, l: Local, nowSeconds: Long): SessionsUiState {
+        val triage = triageSessions(
+            sessions = snapshot.sessions,
+            hosts = snapshot.hosts,
+            projects = snapshot.projects,
+            lens = l.lens,
+            query = l.query,
+            hideNoise = l.hideNoise,
+            hostFilter = l.hostFilter,
+            collapsedHosts = l.collapsedHosts,
+            nowSeconds = nowSeconds,
+        )
+        return SessionsUiState(
+            groups = triage.groups,
+            dormant = triage.dormant,
+            dormantExpanded = l.dormantExpanded,
+            results = triage.results,
+            query = l.query,
+            lens = l.lens,
+            hideNoise = l.hideNoise,
+            hiddenNoise = triage.hiddenNoise,
+            status = snapshot.status,
+            hostFilter = l.hostFilter,
+            attentionCount = snapshot.sessions.count { it.needsAttention },
+            refreshing = l.refreshing,
+            error = l.error,
+            nowSeconds = nowSeconds,
+        )
+    }
 
-/** The label a project group carries, given what `list_projects` last said. */
-private fun projectLabel(id: Long?, byId: Map<Long, ProjectRow>): String = when (id) {
-    null -> NO_PROJECT
-    else -> byId[id]?.label ?: unnamedProject(id)
+    private companion object {
+        const val LENS_KEY = "sessions.lens"
+        const val HIDE_NOISE_KEY = "sessions.hideNoise"
+        const val COLLAPSED_KEY = "sessions.collapsedHosts"
+        const val DORMANT_KEY = "sessions.dormantExpanded"
+    }
 }
-
-/** The heading for sessions that belong to no project — a shell session, say. */
-internal const val NO_PROJECT = "No project"
 
 /**
- * Cut [sessions] into host groups and then project groups.
+ * The stored lens, or [Lens.All].
  *
- * Pure, so the shape of the list can be asserted without a scope or a clock.
- *
- * The order is fixed rather than inherited from the hub, because the hub's is
- * not stable across calls and a list that reshuffles under a thumb is worse
- * than one that is merely sorted oddly:
- *
- *  - hosts alphabetically;
- *  - projects alphabetically by label, with "no project at all" last, since it
- *    is a leftovers bin rather than a name;
- *  - sessions most recently active first, because that is the one being looked
- *    for. A row the hub has never stamped sorts last: it is not a row that just
- *    did something.
- *
- * Empty groups do not survive: when [needsAttentionOnly] leaves a host with
- * nothing, the host goes too, rather than drawing a heading over a blank. The
- * same is true of [hostFilter] — a host with nothing on it is simply absent,
- * not an empty heading.
+ * An unrecognised value reads as the default rather than throwing: the store
+ * outlives the app version that wrote it, so a downgrade — or a build that has
+ * dropped a lens — would otherwise crash on the first frame with a value it
+ * put there itself.
  */
-internal fun groupSessions(
-    sessions: List<SessionRow>,
-    hosts: List<HostRow>,
-    projects: List<ProjectRow>,
-    needsAttentionOnly: Boolean,
-    hostFilter: String? = null,
-): List<HostGroup> {
-    val attended = if (needsAttentionOnly) sessions.filter { it.needsAttention } else sessions
-    val kept = if (hostFilter != null) attended.filter { it.hostAlias == hostFilter } else attended
-    if (kept.isEmpty()) return emptyList()
-
-    val byId = projects.associateBy { it.id }
-    val reachability = hosts.associate { it.alias to it.reachable }
-
-    // `entries.sortedBy` rather than `toSortedMap()`: the latter is a JVM-only
-    // extension and this file compiles for iOS too.
-    return kept.groupBy { it.hostAlias }
-        .entries
-        .sortedBy { it.key }
-        .map { (alias, rows) ->
-            HostGroup(
-                alias = alias,
-                reachable = reachability[alias],
-                projects = rows.groupBy { it.projectId }
-                    .map { (id, inProject) ->
-                        ProjectGroup(
-                            projectId = id,
-                            label = projectLabel(id, byId),
-                            sessions = inProject.sortedWith(BY_RECENCY),
-                        )
-                    }
-                    // `null` last whatever it is called, then by label.
-                    .sortedWith(compareBy({ it.projectId == null }, { it.label })),
-            )
-        }
+private fun Prefs.lens(): Lens {
+    val stored = getStringList("sessions.lens").firstOrNull() ?: return Lens.All
+    return Lens.entries.firstOrNull { it.name == stored } ?: Lens.All
 }
 
-/** Most recently active first; never-stamped rows last; ties broken by id. */
-private val BY_RECENCY: Comparator<SessionRow> =
-    compareByDescending<SessionRow> { it.lastActivityAt ?: Long.MIN_VALUE }.thenBy { it.id }
+/** A boolean in a store that holds string lists. Anything unrecognised is [default]. */
+private fun Prefs.flag(key: String, default: Boolean): Boolean =
+    when (getStringList(key).firstOrNull()) {
+        "true" -> true
+        "false" -> false
+        else -> default
+    }
+
+private fun Prefs.putFlag(key: String, value: Boolean) {
+    putStringList(key, listOf(if (value) "true" else "false"))
+}

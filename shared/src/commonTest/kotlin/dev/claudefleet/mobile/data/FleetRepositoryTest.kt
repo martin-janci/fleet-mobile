@@ -114,7 +114,11 @@ private class FakeStream(
         private set
     var clock: TestScope? = null
 
-    override fun connect(): Flow<HubEvent> = flow {
+    /** The `Last-Event-ID` each connection was opened with. */
+    val resumedFrom = mutableListOf<String?>()
+
+    override fun connect(lastEventId: String?): Flow<HubEvent> = flow {
+        resumedFrom += lastEventId
         openedAt += clock?.testScheduler?.currentTime ?: 0L
         try {
             behaviour(openedAt.size)
@@ -206,12 +210,12 @@ class FleetRepositoryTest {
     fun a_ready_frame_naming_a_too_new_contract_is_refused_and_applies_no_rows() = runTest {
         val hub = FakeHub(sessionsJson = sessionRows(1, 2))
         val stream = FakeStream {
-            emit(HubEvent.Ready("0.9.9", listOf("session", "host"), contract = 4))
+            emit(HubEvent.Ready("0.9.9", listOf("session", "host"), contract = 5))
             emit(rowEvent("session:updated", """{"id":1,"tmux_name":"renamed","host_alias":"box"}"""))
             awaitCancellation()
         }
         val repository = repo(hub, stream, backgroundScope)
-        val expected = ConnectionStatus.Refused(contractVerdict(4).sentence()!!)
+        val expected = ConnectionStatus.Refused(contractVerdict(5).sentence()!!)
 
         repository.start()
         // Matching the exact refusal, not merely `it is Refused`: the
@@ -236,7 +240,7 @@ class FleetRepositoryTest {
     @Test
     fun every_ready_frame_records_the_hubs_version_including_a_refused_one() = runTest {
         val hub = FakeHub(sessionsJson = sessionRows(1))
-        val stream = FakeStream { emit(HubEvent.Ready("0.9.9", listOf("session"), contract = 4)); awaitCancellation() }
+        val stream = FakeStream { emit(HubEvent.Ready("0.9.9", listOf("session"), contract = 5)); awaitCancellation() }
         val repository = repo(hub, stream, backgroundScope)
 
         assertNull(repository.hubVersion.value, "nothing seen before the first ready")
@@ -889,5 +893,70 @@ class FleetRepositoryTest {
             "a hub that closed the stream must say so; a reasonless Reconnecting banner " +
                 "tells a person the app is retrying and refuses to say from what",
         )
+    }
+
+    /**
+     * A dropped stream costs what it missed, not a re-list: the next
+     * connection names the last frame the snapshot actually applied, and a
+     * hub that answers `resumed: true` is trusted to replay the rest — no
+     * `list_*` round trip at all.
+     */
+    @Test
+    fun a_reconnect_resumes_from_the_last_applied_frame_and_skips_the_relist() = runTest {
+        val hub = FakeHub(sessionsJson = sessionRows(1))
+        val stream = FakeStream { attempt ->
+            if (attempt == 1) {
+                emit(READY)
+                emit(HubEvent.Row("session:updated", Json.parseToJsonElement("""{"id":1,"tmux_name":"a","host_alias":"box"}"""), "7-10"))
+                emit(HubEvent.Row("session:updated", Json.parseToJsonElement("""{"id":1,"tmux_name":"b","host_alias":"box"}"""), "7-11"))
+                throw HubError.Transport(RuntimeException("tunnel"))
+            }
+            emit(READY.copy(resumed = true))
+            emit(HubEvent.Row("session:updated", Json.parseToJsonElement("""{"id":1,"tmux_name":"c","host_alias":"box"}"""), "7-12"))
+            awaitCancellation()
+        }
+        val repository = repo(hub, stream, backgroundScope)
+
+        repository.start()
+        repository.sessions.first { rows -> rows.singleOrNull()?.tmuxName == "c" }
+
+        assertEquals(listOf(null, "7-11"), stream.resumedFrom)
+        assertEquals(1, hub.sessionCalls, "a resumed stream is not re-listed")
+        assertEquals(ConnectionStatus.Connected("0.9.3"), repository.status.value)
+        repository.stop()
+    }
+
+    /**
+     * A full re-list is newer than every frame before it, so the id it
+     * followed is spent: resuming from it would replay older rows over the
+     * fresh snapshot. A hub that could not resume re-lists, and the next
+     * connection starts clean.
+     */
+    @Test
+    fun a_relist_spends_the_id_it_followed() = runTest {
+        val hub = FakeHub(sessionsJson = sessionRows(1))
+        val third = CompletableDeferred<Unit>()
+        val stream = FakeStream { attempt ->
+            when (attempt) {
+                1 -> {
+                    emit(READY)
+                    emit(HubEvent.Row("session:updated", Json.parseToJsonElement("""{"id":1,"tmux_name":"a","host_alias":"box"}"""), "7-10"))
+                    throw HubError.Transport(RuntimeException("tunnel"))
+                }
+                2 -> {
+                    emit(READY.copy(resumed = false))
+                    throw HubError.Transport(RuntimeException("tunnel again"))
+                }
+                else -> { third.complete(Unit); awaitCancellation() }
+            }
+        }
+        val repository = repo(hub, stream, backgroundScope)
+
+        repository.start()
+        third.await()
+
+        assertEquals(listOf(null, "7-10", null), stream.resumedFrom)
+        assertEquals(2, hub.sessionCalls, "the unresumed ready re-listed")
+        repository.stop()
     }
 }

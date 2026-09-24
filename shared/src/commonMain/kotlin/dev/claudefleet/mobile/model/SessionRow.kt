@@ -55,6 +55,12 @@ data class SessionRow(
     val branch: String? = null,
     /** The hub's own progress through a `safe_kill_session` retirement, or null when none is armed. */
     @SerialName("safe_kill_state") val safeKillState: String? = null,
+    /**
+     * The hub's own answer to "does this need a person?", stamped on every
+     * listed row and every `session:*` frame; absent when nobody is needed, and
+     * from any hub released before it stamped one. See [attentionReason].
+     */
+    @SerialName("needs_attention") val attention: Attention? = null,
 ) {
     val isBackground: Boolean get() = tmuxName.startsWith("bg:")
 
@@ -67,8 +73,30 @@ data class SessionRow(
             return "Background · ${tmuxName.removePrefix("bg:").take(4)}"
         }
 
+    /**
+     * Why this session needs a person — `waiting`, `stuck`, `failed` or
+     * `lifecycle` — or null when it does not.
+     *
+     * The hub decides this (`service::attention` in claude-fleet), so its
+     * stamped [attention] is the answer whenever it is there. The fallback is
+     * that same rule, ported check for check in its order — which is the
+     * precedence — for a hub too old to stamp it; a newer hub that stamps
+     * nothing has found nothing, and the port agrees.
+     */
+    val attentionReason: String?
+        get() = attention?.reason ?: when {
+            // Running outside fleet: read-only here, so never a person's job.
+            kind == "external" -> null
+            claudeStatus == "blocked" -> "waiting"
+            stuckKind != null -> "stuck"
+            claudeStatus == "failed" -> "failed"
+            safeKillState == "failed" || safeKillState == "requested" ||
+                status == "ghost" || lostAt != null -> "lifecycle"
+            else -> null
+        }
+
     /** The rows the "needs attention" filter keeps. */
-    val needsAttention: Boolean get() = claudeStatus == "blocked" || stuckKind != null
+    val needsAttention: Boolean get() = attentionReason != null
 
     /**
      * The row's second line: the sanitised activity when there is one, else
@@ -85,3 +113,15 @@ data class SessionRow(
         get() = Activity.sanitize(currentActivity)
             ?: kind?.takeIf { it != "work" && it.isNotBlank() }
 }
+
+/**
+ * Why a session needs a person, and since when — the hub's `needs_attention`.
+ * [reason] is kept as the hub's word rather than an enum, so a reason a later
+ * hub adds still counts as "needs a person" instead of failing the row.
+ */
+@Serializable
+data class Attention(
+    val reason: String,
+    /** Unix second the session entered this state, best effort. */
+    val since: Long? = null,
+)
