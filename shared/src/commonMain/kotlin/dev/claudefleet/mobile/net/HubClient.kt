@@ -9,6 +9,7 @@ import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.WaitResult
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -95,12 +96,13 @@ class HubClient(
             }
         }
         val payload = json.encodeToString(JsonObject.serializer(), envelope)
-        var (status, body) = send(mountFor(tool), payload, authenticated = true)
+        val deadline = if (tool in LIFECYCLE_TOOLS) HUB_LIFECYCLE_TIMEOUT_MS else null
+        var (status, body) = send(mountFor(tool), payload, authenticated = true, requestTimeoutMs = deadline)
         if (status == 404 && !framedOnly) {
             // The hub predates the JSON mount. Note it once and never ask
             // again: a 404 here is a property of the hub, not of the call.
             framedOnly = true
-            val retried = send("$base/mcp", payload, authenticated = true)
+            val retried = send("$base/mcp", payload, authenticated = true, requestTimeoutMs = deadline)
             status = retried.first
             body = retried.second
         }
@@ -316,6 +318,39 @@ class HubClient(
         ) { }
 
     /**
+     * Create a Claude Code session on [hostAlias] in project [projectId].
+     *
+     * `name` goes out empty: that is how the hub is asked to mint the tmux
+     * name itself (`fill_session_name`), the same way the desktop's dialog
+     * does, so a session made here is named like every other one. A blank
+     * [newWorktree], [baseBranch] or [friendlyName] is left out rather than
+     * sent empty — absent is what "the project root", "the default branch"
+     * and "derive a label" mean on the hub.
+     *
+     * This may clone the repository onto the host first, so it runs under
+     * [HUB_LIFECYCLE_TIMEOUT_MS] rather than the ordinary deadline; see
+     * [LIFECYCLE_TOOLS].
+     */
+    suspend fun newSession(
+        hostAlias: String,
+        projectId: Long,
+        newWorktree: String? = null,
+        baseBranch: String? = null,
+        friendlyName: String? = null,
+    ): SessionRow =
+        call(
+            "new_session",
+            buildJsonObject {
+                put("host_alias", hostAlias)
+                put("project_id", projectId)
+                put("name", "")
+                newWorktree?.takeIf { it.isNotBlank() }?.let { put("new_worktree", it) }
+                baseBranch?.takeIf { it.isNotBlank() }?.let { put("base_branch", it) }
+                friendlyName?.takeIf { it.isNotBlank() }?.let { put("friendly_name", it) }
+            },
+        ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
+
+    /**
      * Is this hub reachable and its store open, right now.
      *
      * `fleet_health` is in the hub's readonly allow-list — a paired client
@@ -337,14 +372,19 @@ class HubClient(
 
     /** `/mcp` for a long poll or a hub with no JSON mount; `/mcp/json` otherwise. */
     private fun mountFor(tool: String): String =
-        if (framedOnly || tool in FRAMED_TOOLS) "$base/mcp" else "$base/mcp/json"
+        if (framedOnly || tool in FRAMED_TOOLS || tool in LIFECYCLE_TOOLS) "$base/mcp" else "$base/mcp/json"
 
     private suspend fun send(
         url: String,
         body: String,
         authenticated: Boolean,
+        requestTimeoutMs: Long? = null,
     ): Pair<Int, String> = try {
         val response: HttpResponse = http.post(url) {
+            // Only the whole-request deadline moves. The socket timeout stays
+            // the ordinary one, because on the framed mount the hub's 15 s
+            // keep-alive is what keeps the socket from going idle.
+            if (requestTimeoutMs != null) timeout { requestTimeoutMillis = requestTimeoutMs }
             contentType(ContentType.Application.Json)
             // rmcp's streamable-HTTP transport requires both, and answers 406
             // without them.
@@ -493,6 +533,14 @@ class HubClient(
             "wait_for_attention",
             "run_prompt",
         )
+        /**
+         * Tools the hub bounds at its `LIFECYCLE_CAP` (300 s) rather than a
+         * quick round trip — creating a session may clone a repository onto
+         * the host first. They ride the framed mount for its keep-alive, like
+         * [FRAMED_TOOLS], and get [HUB_LIFECYCLE_TIMEOUT_MS] instead of the
+         * ordinary deadline, which would give up on a clone that is going fine.
+         */
+        val LIFECYCLE_TOOLS = setOf("new_session")
         const val UNKNOWN_CODE = "E_UNKNOWN"
     }
 }
@@ -534,6 +582,14 @@ internal fun HttpClient.withHubTimeouts(): HttpClient = config {
 
 internal const val HUB_CALL_TIMEOUT_MS = 45_000L
 internal const val HUB_CONNECT_TIMEOUT_MS = 15_000L
+
+/**
+ * The deadline for a [HubClient] call the hub itself bounds at five minutes
+ * (`LIFECYCLE_CAP`). Half a minute above it, so the hub's own timeout — which
+ * comes back as an answer — always lands before this one, which can only say
+ * the connection went.
+ */
+internal const val HUB_LIFECYCLE_TIMEOUT_MS = 330_000L
 
 /**
  * How much of one reply this app will read, in bytes.

@@ -33,10 +33,11 @@ class EveryErrorBannerCanBeDismissedTest {
     }
 
     @Test
-    fun all_five_screens_draw_one() {
+    fun all_six_screens_draw_one() {
         assertEquals(
             listOf(
                 "HostsScreen.kt",
+                "NewSessionScreen.kt",
                 "PairScreen.kt",
                 "SessionScreen.kt",
                 "SessionsScreen.kt",

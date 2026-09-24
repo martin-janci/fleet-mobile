@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Badge
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.InputChip
@@ -68,6 +70,11 @@ fun SessionsScreen(
     onRefresh: () -> Unit,
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * Open the New session form. Null hides the button — a `readonly` pairing,
+     * which the hub would refuse `new_session` anyway.
+     */
+    onNewSession: (() -> Unit)? = null,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         SessionsBar(status = state.status) {
@@ -90,7 +97,12 @@ fun SessionsScreen(
         // drag, which a bare `Box` is not, so the message rides as a single
         // item filling the viewport.
         PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
+            // Room under the last row for the button, or it sits on top of
+            // the one session a person scrolled all the way down to reach.
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = if (onNewSession != null) 88.dp else 0.dp),
+            ) {
                 if (state.isEmpty) {
                     item(key = "empty") {
                         EmptyFleet(
@@ -112,6 +124,14 @@ fun SessionsScreen(
                             SessionRowItem(row = row, nowSeconds = state.nowSeconds, onClick = { onOpenSession(row.id) })
                         }
                     }
+                }
+            }
+            if (onNewSession != null) {
+                FloatingActionButton(
+                    onClick = onNewSession,
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                ) {
+                    Icon(FleetIcons.Add, contentDescription = "New session")
                 }
             }
         }

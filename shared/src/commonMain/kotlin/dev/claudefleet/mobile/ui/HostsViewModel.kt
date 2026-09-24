@@ -131,8 +131,9 @@ class HostsViewModel(
  * snapshot (`FleetSnapshot.upsertHost`), so after one event the hub's order is
  * gone and the list reshuffles under a thumb on the next refetch. Sorting on
  * this side costs one pass and makes the order a property of the screen.
+ * The New session form offers its hosts in the same order.
  */
-private val BY_ALIAS: Comparator<HostRow> =
+internal val BY_ALIAS: Comparator<HostRow> =
     compareBy<HostRow>({ it.alias != LOCAL }, { it.alias })
 
 /** The machine the hub itself runs on. */

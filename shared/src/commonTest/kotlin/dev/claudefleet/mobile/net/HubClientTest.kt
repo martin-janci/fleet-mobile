@@ -705,4 +705,78 @@ class HubClientTest {
             call(client)
         }
     }
+
+    /**
+     * `name` is sent, and sent empty. The hub's `NewSessionParams.name` is a
+     * required string, and an empty one is the documented way to have the hub
+     * mint it (`fill_session_name`: `dev-<owner>-<repo>[--<worktree>]`, with a
+     * memorable suffix when that is taken) — the same convention the desktop's
+     * dialog follows, so a session made from the phone is named like any other.
+     * Optional arguments the person left out are absent, not `null` or `""`:
+     * an empty `new_worktree` would read as "no worktree" today only by the
+     * hub's grace.
+     */
+    @Test
+    fun new_session_sends_the_host_the_project_and_an_empty_name_and_reads_the_row() = runTest {
+        var args: JsonObject? = null
+        val client = clientAnswering { body ->
+            assertEquals("new_session", body.tool())
+            args = body.args()
+            """{"id":41,"tmux_name":"dev-me-repo","host_alias":"pine","project_id":3}"""
+        }
+
+        val row = client.newSession(hostAlias = "pine", projectId = 3)
+
+        assertEquals(41L, row.id)
+        assertEquals("pine", row.hostAlias)
+        val sent = args!!
+        assertEquals("pine", sent["host_alias"]!!.jsonPrimitive.content)
+        assertEquals(3, sent["project_id"]!!.jsonPrimitive.int)
+        assertEquals("", sent["name"]!!.jsonPrimitive.content)
+        for (absent in listOf("new_worktree", "base_branch", "friendly_name", "worktree_id", "kind")) {
+            assertFalse(absent in sent, "$absent was not asked for, so it is not sent")
+        }
+    }
+
+    @Test
+    fun new_session_passes_a_new_worktree_its_base_and_a_label_and_drops_blank_ones() = runTest {
+        val sent = mutableListOf<JsonObject>()
+        val client = clientAnswering { body -> sent += body.args(); """{"id":1,"tmux_name":"t","host_alias":"h"}""" }
+
+        client.newSession(hostAlias = "h", projectId = 9, newWorktree = "feat/x", baseBranch = "develop", friendlyName = "Fix it")
+        client.newSession(hostAlias = "h", projectId = 9, newWorktree = "feat/x", baseBranch = " ", friendlyName = "")
+
+        val (first, second) = sent
+        assertEquals("feat/x", first["new_worktree"]!!.jsonPrimitive.content)
+        assertEquals("develop", first["base_branch"]!!.jsonPrimitive.content)
+        assertEquals("Fix it", first["friendly_name"]!!.jsonPrimitive.content)
+        assertFalse("base_branch" in second, "a blank base means the default branch, which is the hub's default")
+        assertFalse("friendly_name" in second, "a blank label means the hub derives one")
+    }
+
+    /**
+     * Creating a session is the slowest thing the app asks for. The hub bounds
+     * it at `LIFECYCLE_CAP` (300 s, `mcp/tools/support.rs`) because it may
+     * clone the repository onto the host first, and the app's ordinary 45 s
+     * deadline would give up on a clone that is going fine — leaving a session
+     * the person was told had failed. So it rides the framed mount, whose 15 s
+     * keep-alive holds the socket open, under a deadline above the hub's own.
+     */
+    @Test
+    fun new_session_rides_the_framed_mount_under_a_deadline_above_the_hubs_lifecycle_cap() = runTest {
+        val calls = Calls()
+        val engine = MockEngine { request ->
+            calls.requests += request
+            respond(sse(okResult("""{"id":1,"tmux_name":"t","host_alias":"h"}""")), HttpStatusCode.OK, sseHeaders)
+        }
+        val hub = HubClient(HttpClient(engine).withHubTimeouts(), BASE, "tok-phone")
+
+        hub.newSession(hostAlias = "h", projectId = 1)
+
+        assertEquals("/mcp", calls.path(0))
+        val timeout = calls.requests.single().getCapabilityOrNull(HttpTimeoutCapability)
+        assertEquals(HUB_LIFECYCLE_TIMEOUT_MS, timeout?.requestTimeoutMillis)
+        assertTrue(HUB_LIFECYCLE_TIMEOUT_MS > 300_000L, "at or under the hub's own cap would cut a clone short")
+        assertEquals(HUB_CALL_TIMEOUT_MS, timeout?.socketTimeoutMillis, "the keep-alive, not a longer idle, holds the socket")
+    }
 }
