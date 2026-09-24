@@ -3,7 +3,10 @@ package dev.claudefleet.mobile.data
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.Ticket
+import dev.claudefleet.mobile.net.HubCapabilities
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -69,4 +72,30 @@ interface FleetState {
 
     /** Re-list everything. Raises rather than swallowing, so a pull-to-refresh can say it failed. */
     suspend fun refresh()
+
+    /**
+     * What the hub's `tools/list` said this token may do, re-read on every
+     * `ready` — the gate for the work UI (see [HubCapabilities]). Unknown
+     * ([HubCapabilities.known] false) until one has answered.
+     *
+     * Defaulted so a screen's test double that has no hub keeps compiling and
+     * reads as "no work features", which is what an old hub looks like.
+     */
+    val capabilities: StateFlow<HubCapabilities> get() = NO_CAPABILITIES
+
+    /**
+     * The hub refused [action] on [tool] as unknown (`E_INVALID`): hide it for
+     * the rest of this connection. The fallback for a hub whose `action` is
+     * not a schema enum.
+     */
+    fun forgetAction(tool: String, action: String) {}
+
+    /** The ticket cache, by item id — see [FleetSnapshot.tickets]. */
+    val tickets: StateFlow<Map<Long, Ticket>> get() = NO_TICKETS
+
+    /** Put tickets a screen fetched into the cache, replacing those ids. */
+    fun remember(tickets: List<Ticket>) {}
 }
+
+private val NO_CAPABILITIES: StateFlow<HubCapabilities> = MutableStateFlow(HubCapabilities())
+private val NO_TICKETS: StateFlow<Map<Long, Ticket>> = MutableStateFlow(emptyMap())

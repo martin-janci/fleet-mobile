@@ -165,7 +165,7 @@ class EventStreamTest {
         assertEquals("Bearer $TOKEN", request.headers[HttpHeaders.Authorization])
         assertEquals("text/event-stream", request.headers[HttpHeaders.Accept])
         assertEquals("/events", request.url.encodedPath)
-        assertEquals("session,host,project", request.url.parameters["kinds"])
+        assertEquals("session,host,project,work", request.url.parameters["kinds"])
     }
 
     @Test

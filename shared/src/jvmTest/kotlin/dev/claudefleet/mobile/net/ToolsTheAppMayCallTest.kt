@@ -41,6 +41,10 @@ class ToolsTheAppMayCallTest {
         "pair_client",
         "list_clients",
         "revoke_client",
+        // Trackers and their credentials: `Access::Master` in the hub's
+        // `guard.rs`, never served to a paired client. The phone reads
+        // tickets through `work`, and must never name this.
+        "work_admin",
     )
 
     /**
@@ -66,6 +70,12 @@ class ToolsTheAppMayCallTest {
         // the hub's `guard.rs`, so a `full` client may and a `readonly` one is
         // never offered the form.
         "new_session",
+        // The work graph (M8). `work` is readonly (chips, tickets, resume
+        // plans); `work_link` is `Access::Client` but not readonly, and the
+        // hub hides it from a `readonly` token's `tools/list` — which is what
+        // the app gates its buttons on.
+        "work",
+        "work_link",
     )
 
     @Test

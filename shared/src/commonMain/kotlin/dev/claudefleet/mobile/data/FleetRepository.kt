@@ -5,7 +5,9 @@ import dev.claudefleet.mobile.ui.explain
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.net.EventStream
+import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.HubEvent
@@ -24,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -121,6 +124,24 @@ class FleetRepository(
     private val _projects = MutableStateFlow<List<ProjectRow>>(emptyList())
     override val projects: StateFlow<List<ProjectRow>> = _projects.asStateFlow()
 
+    private val _tickets = MutableStateFlow<Map<Long, Ticket>>(emptyMap())
+    override val tickets: StateFlow<Map<Long, Ticket>> = _tickets.asStateFlow()
+
+    // Like [hubVersion]: written on every `ready`, never cleared by a drop —
+    // which tools a hub serves this token does not change because the stream
+    // went down, and the next `ready` re-reads it.
+    private val _capabilities = MutableStateFlow(HubCapabilities())
+    override val capabilities: StateFlow<HubCapabilities> = _capabilities.asStateFlow()
+
+    override fun forgetAction(tool: String, action: String) {
+        _capabilities.update { it.withoutAction(tool, action) }
+    }
+
+    override fun remember(tickets: List<Ticket>) {
+        if (tickets.isEmpty()) return
+        _tickets.update { cached -> cached + tickets.associateBy { it.id } }
+    }
+
     private val _status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Offline(NOT_STARTED))
     override val status: StateFlow<ConnectionStatus> = _status.asStateFlow()
 
@@ -181,7 +202,7 @@ class FleetRepository(
             val sessions = async { client.listSessions() }
             val hosts = async { client.listHosts() }
             val projects = async { client.listProjects() }
-            publish(FleetSnapshot(sessions.await(), hosts.await(), projects.await()))
+            publish(FleetSnapshot(sessions.await(), hosts.await(), projects.await(), _tickets.value))
         }
     }
 
@@ -253,7 +274,18 @@ class FleetRepository(
                             // is nothing to re-list. Anything short of a clear
                             // yes — `false`, or a hub that cannot resume — is
                             // the old path.
-                            if (event.resumed != true) refresh()
+                            //
+                            // `tools/list` goes out alongside the re-list, not
+                            // after it: one more round trip on every connect
+                            // is the cost, and it overlaps the three that were
+                            // already being paid. A resumed stream still asks,
+                            // since the hub may have been upgraded while the
+                            // phone was away.
+                            coroutineScope {
+                                val discovered = async { discoverCapabilities() }
+                                if (event.resumed != true) refresh()
+                                _capabilities.value = discovered.await()
+                            }
                             failures = 0
                             // Re-measured per connection, so a device whose
                             // clock is corrected by NTP heals on the next
@@ -302,12 +334,31 @@ class FleetRepository(
         }
     }
 
-    private fun snapshot() = FleetSnapshot(_sessions.value, _hosts.value, _projects.value)
+    private fun snapshot() = FleetSnapshot(_sessions.value, _hosts.value, _projects.value, _tickets.value)
 
     private fun publish(snapshot: FleetSnapshot) {
         _sessions.value = snapshot.sessions
         _hosts.value = snapshot.hosts
         _projects.value = snapshot.projects
+        _tickets.value = snapshot.tickets
+    }
+
+    /**
+     * This connection's [HubCapabilities]. A hub that cannot answer
+     * `tools/list` is not a failed connection — the stream and the re-list
+     * worked — so any refusal reads as "unknown", which leaves the work UI off
+     * and the version gate in charge. A revoked token is the exception: it is
+     * the same 401 the re-list would have raised, and must reach the handler
+     * that returns the app to Pair.
+     */
+    private suspend fun discoverCapabilities(): HubCapabilities = try {
+        client.toolsList()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: HubError.Unauthorized) {
+        throw e
+    } catch (_: Exception) {
+        HubCapabilities()
     }
 
     private companion object {

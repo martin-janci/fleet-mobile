@@ -61,6 +61,21 @@ data class SessionRow(
      * from any hub released before it stamped one. See [attentionReason].
      */
     @SerialName("needs_attention") val attention: Attention? = null,
+    /**
+     * The session's primary work link, confirmed (a person or a rule decided
+     * it): the key chip and the grouping by work. Null for most rows.
+     *
+     * Absent on the wire means none, on both paths — `list_sessions` and
+     * `/events` strip nulls — so a row replaced whole without it is a session
+     * whose link was cleared, not one whose link should be kept.
+     */
+    val work: WorkSummary? = null,
+    /**
+     * The session's top link SUGGESTION: a guess nobody has decided, offered
+     * with Confirm / *Not this*. Never groups a session. Absent means none,
+     * exactly as for [work].
+     */
+    @SerialName("work_suggested") val workSuggested: WorkSummary? = null,
 ) {
     val isBackground: Boolean get() = tmuxName.startsWith("bg:")
 

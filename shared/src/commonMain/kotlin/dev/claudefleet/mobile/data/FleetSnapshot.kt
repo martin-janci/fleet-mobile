@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.data
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.net.HubEvent
 import dev.claudefleet.mobile.net.json
 import kotlinx.serialization.DeserializationStrategy
@@ -17,6 +18,15 @@ data class FleetSnapshot(
     val hosts: List<HostRow> = emptyList(),
     /** Not drawn on their own: what names the groups the session list is cut into. */
     val projects: List<ProjectRow> = emptyList(),
+    /**
+     * Tracker tickets the app has been shown, by item id — seeded by the
+     * screens that call `work { tickets | lookup }` and kept current by
+     * `work:item` frames. A cache, not the tracker: a `ready` resync does not
+     * re-list it, because the hub has no "all tickets" call worth making on
+     * every reconnect; the next `tickets` call a screen makes replaces what it
+     * names.
+     */
+    val tickets: Map<Long, Ticket> = emptyMap(),
 )
 
 /**
@@ -24,12 +34,14 @@ data class FleetSnapshot(
  * hub for with `?kinds=`.
  *
  * The hub publishes ten (`EVENT_KINDS` in `crates/fleet-core/src/events.rs`);
- * a phone draws three of them. `HubEventStream`'s default carries the same list
+ * a phone draws four of them. `work` is harmless against an older hub, which
+ * ignores a kind it does not know; a session's primary work rides
+ * `session:updated`, so only the ticket cache needs it. `HubEventStream`'s default carries the same list
  * and a test on each side pins it, so the filter and the applier cannot drift
  * apart — a filter that is too narrow leaves rows quietly stale, and one that
  * is too wide spends a phone's radio on frames that get dropped.
  */
-val SNAPSHOT_EVENT_KINDS: List<String> = listOf("session", "host", "project")
+val SNAPSHOT_EVENT_KINDS: List<String> = listOf("session", "host", "project", "work")
 
 /**
  * Apply one row event, returning the snapshot it produces.
@@ -50,6 +62,10 @@ fun FleetSnapshot.applying(event: HubEvent.Row): FleetSnapshot = when (event.nam
     "host:added", "host:probed" -> upsertHost(event.payload)
     "host:removed" -> removeHost(event.payload)
     "project:updated" -> upsertProject(event.payload)
+    "work:item" -> upsertTicket(event.payload)
+    "work:tracker_removed" -> removeTracker(event.payload)
+    // `work:tracker` is a tracker's own row (state, sync time): nothing on a
+    // phone draws it yet, and the ticket rows it affects arrive as `work:item`.
     else -> this
 }
 
@@ -115,6 +131,11 @@ private fun FleetSnapshot.upsertSession(payload: JsonElement): FleetSnapshot {
             // incoming row wholesale would silently clear it on the first
             // update after a refresh. This is the only row with anything to
             // carry, which is why the other two take the default.
+            //
+            // `work` / `work_suggested` are NOT carried: they are columns, on
+            // every payload, and the hub strips nulls — so a frame without
+            // them says the link was cleared or the suggestion decided.
+            // Keeping the old value would pin a chip nobody can remove.
             merge = { existing -> incoming.copy(isController = existing.isController) },
         ) { it.id == incoming.id },
     )
@@ -147,6 +168,42 @@ private fun FleetSnapshot.upsertProject(payload: JsonElement): FleetSnapshot {
     val incoming = decode(ProjectRow.serializer(), payload) ?: return this
     return copy(projects = projects.upserted(incoming) { it.id == incoming.id })
 }
+
+/**
+ * A `work:item` frame is the bare `WorkItemRow`. `live_session_ids` and
+ * `views` are not columns — `tickets` / `lookup` add them — so, exactly like
+ * `is_controller` on a session, they are carried over from the cached copy
+ * rather than blanked by a frame that cannot carry them. Every column,
+ * `unavailable_*` included, is taken from the frame: absent there means none.
+ */
+private fun FleetSnapshot.upsertTicket(payload: JsonElement): FleetSnapshot {
+    val incoming = decode(Ticket.serializer(), payload) ?: return this
+    val existing = tickets[incoming.id]
+    val merged = if (existing == null) incoming else incoming.copy(
+        liveSessionIds = existing.liveSessionIds,
+        views = existing.views,
+        description = incoming.description ?: existing.description,
+    )
+    return copy(tickets = tickets + (merged.id to merged))
+}
+
+/**
+ * `work:tracker_removed` is `{"id": n}`. The hub keeps the tracker's items and
+ * marks them unavailable (C25: missing is not gone), without a `work:item`
+ * per row, so the cache does the same here.
+ */
+private fun FleetSnapshot.removeTracker(payload: JsonElement): FleetSnapshot {
+    val trackerId = payload.number("id") ?: return this
+    if (tickets.values.none { it.trackerId == trackerId && it.unavailableReason != TRACKER_REMOVED }) return this
+    return copy(
+        tickets = tickets.mapValues { (_, t) ->
+            if (t.trackerId == trackerId) t.copy(unavailableReason = TRACKER_REMOVED) else t
+        },
+    )
+}
+
+/** The hub's `unavailable_reason` for an item whose tracker was removed. */
+internal const val TRACKER_REMOVED = "tracker_removed"
 
 private fun <T> decode(serializer: DeserializationStrategy<T>, payload: JsonElement): T? = try {
     json.decodeFromJsonElement(serializer, payload)

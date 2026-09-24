@@ -1,6 +1,8 @@
 package dev.claudefleet.mobile.net
 
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Every way talking to a hub can fail, as one closed set the UI can branch on.
@@ -65,7 +67,27 @@ sealed class HubError(message: String, cause: Throwable? = null) : Exception(mes
      * The tool ran and said no: an MCP result with `isError: true` carrying an
      * `E_*` code, or a JSON-RPC `error` object. Both are one thing to a caller.
      */
-    data class Tool(val code: String, override val message: String) : HubError(message)
+    data class Tool(
+        val code: String,
+        override val message: String,
+        /**
+         * The refusal's structured `details`, when the hub gave any — what
+         * turns `E_EXISTS` into "open this session" and `E_AMBIGUOUS` into a
+         * list of candidates. Only fleet's own `structuredContent` fills it,
+         * and a document that would repeat the token is dropped whole rather
+         * than scrubbed (see `HubClient.toolError`).
+         */
+        val details: JsonObject? = null,
+    ) : HubError(message) {
+        /**
+         * The live session an `E_EXISTS` refusal names (`work_link start` on
+         * a key that already has one), or null. The phone opens it: a second
+         * session on the same ticket is never what was meant.
+         */
+        val existingSessionId: Long?
+            get() = if (code != "E_EXISTS") null else
+                (details?.get("session_id") as? JsonPrimitive)?.content?.toLongOrNull()
+    }
 
     /**
      * Any other HTTP status — `404` from a spent pairing code, `429` from the

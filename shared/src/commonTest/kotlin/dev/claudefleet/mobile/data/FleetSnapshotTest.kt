@@ -2,11 +2,16 @@ package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.STORE_ROW_WITHOUT_WORK
+import dev.claudefleet.mobile.model.STORE_ROW_WITH_WORK
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.StatusCategory
+import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.net.HubEvent
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -409,17 +414,103 @@ class FleetSnapshotTest {
      */
     @Test
     fun the_subscribed_kinds_are_exactly_the_ones_the_snapshot_acts_on() {
-        assertEquals(listOf("session", "host", "project"), SNAPSHOT_EVENT_KINDS)
+        assertEquals(listOf("session", "host", "project", "work"), SNAPSHOT_EVENT_KINDS)
 
         val empty = FleetSnapshot()
         val acted = listOf(
             "session" to row("session:created", sessionPayload(id = 1)),
             "host" to row("host:added", hostPayload("box")),
             "project" to row("project:updated", """{"id":3,"owner":"o","repo":"r","base_path":"/p","adopted":false}"""),
+            "work" to row("work:item", ticketPayload(id = 5)),
         )
         assertEquals(SNAPSHOT_EVENT_KINDS, acted.map { it.first })
         for ((kind, frame) in acted) {
             assertTrue(empty.applying(frame) !== empty, "$kind is subscribed but does nothing")
         }
     }
+
+    // ---- work graph (M8.1) ----
+
+    /**
+     * The hub strips nulls from every frame, so an update without `work` is a
+     * session whose link was cleared — not a frame too small to carry it, the
+     * way `is_controller` is. Keeping the old value, as the M8 plan's first
+     * draft said, would pin a chip nobody could remove. Both payloads are the
+     * hub's own serialization of one store row (see `STORE_ROW_WITH_WORK`).
+     */
+    @Test
+    fun an_update_without_work_clears_the_chip_and_the_suggestion() {
+        val linked = FleetSnapshot().applying(row("session:created", STORE_ROW_WITH_WORK))
+        assertEquals("PAY-7", linked.sessions.single().work?.key)
+        assertEquals(12L, linked.sessions.single().workSuggested?.linkId)
+
+        val cleared = linked.applying(row("session:updated", STORE_ROW_WITHOUT_WORK))
+
+        assertEquals(null, cleared.sessions.single().work, "absent on the wire means none")
+        assertEquals(null, cleared.sessions.single().workSuggested)
+    }
+
+    /** And the other way: a frame that gains a link shows it. */
+    @Test
+    fun an_update_with_work_sets_it() {
+        val bare = FleetSnapshot().applying(row("session:created", STORE_ROW_WITHOUT_WORK))
+        val linked = bare.applying(row("session:updated", STORE_ROW_WITH_WORK))
+        assertEquals("PAY-7", linked.sessions.single().work?.label)
+    }
+
+    @Test
+    fun a_work_item_frame_upserts_the_ticket_and_keeps_what_the_row_cannot_carry() {
+        val seeded = FleetSnapshot(
+            tickets = mapOf(5L to Ticket(id = 5, key = "PAY-9", title = "old", liveSessionIds = listOf(4), views = listOf("mine"))),
+        )
+
+        val next = seeded.applying(row("work:item", ticketPayload(id = 5, title = "Refund webhook", status = "done")))
+
+        val t = next.tickets.getValue(5)
+        assertEquals("Refund webhook", t.title)
+        assertEquals(StatusCategory.Done, t.statusCategory)
+        assertEquals(listOf(4L), t.liveSessionIds, "not a column: carried over")
+        assertEquals(listOf("mine"), t.views, "not a column: carried over")
+
+        val added = next.applying(row("work:item", ticketPayload(id = 6)))
+        assertEquals(setOf(5L, 6L), added.tickets.keys, "an item the cache has not seen is added")
+    }
+
+    @Test
+    fun a_work_item_frame_without_unavailable_makes_the_ticket_available_again() {
+        val gone = FleetSnapshot(tickets = mapOf(5L to Ticket(id = 5, key = "PAY-9", unavailableAt = 9, unavailableReason = "not_found_or_no_permission")))
+        val back = gone.applying(row("work:item", ticketPayload(id = 5)))
+        assertFalse(back.tickets.getValue(5).unavailable)
+    }
+
+    @Test
+    fun a_removed_tracker_marks_its_tickets_unavailable_and_leaves_others() {
+        val snap = FleetSnapshot(
+            tickets = mapOf(
+                1L to Ticket(id = 1, key = "PAY-1", trackerId = 2),
+                2L to Ticket(id = 2, key = "OPS-1", trackerId = 3),
+            ),
+        )
+
+        val next = snap.applying(row("work:tracker_removed", """{"id":2}"""))
+
+        assertTrue(next.tickets.getValue(1).unavailable)
+        assertEquals(TRACKER_REMOVED, next.tickets.getValue(1).unavailableReason)
+        assertFalse(next.tickets.getValue(2).unavailable)
+        assertSame(next, next.applying(row("work:tracker_removed", """{"id":2}""")), "nothing left to mark")
+        assertSame(snap, snap.applying(row("work:tracker_removed", """{"id":99}""")))
+        assertSame(snap, snap.applying(row("work:tracker", """{"id":2,"state":"ok"}""")), "a tracker's own row draws nothing yet")
+    }
+
+    @Test
+    fun a_malformed_work_frame_changes_nothing() {
+        val snap = FleetSnapshot()
+        assertSame(snap, snap.applying(row("work:item", """{"no_id":true}""")))
+        assertSame(snap, snap.applying(row("work:tracker_removed", """{"alias":"x"}""")))
+    }
 }
+
+/** A `work:item` frame: the hub's `WorkItemRow`, nulls stripped. */
+private fun ticketPayload(id: Long, title: String = "Refund", status: String = "todo") =
+    """{"id":$id,"source":"jira","key":"PAY-$id","title":"$title","status_category":"$status",""" +
+        """"created_at":1,"updated_at":2,"tracker_id":2,"external_id":"100$id","status_name":"To Do"}"""

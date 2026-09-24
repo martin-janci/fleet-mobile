@@ -779,4 +779,144 @@ class HubClientTest {
         assertTrue(HUB_LIFECYCLE_TIMEOUT_MS > 300_000L, "at or under the hub's own cap would cut a clone short")
         assertEquals(HUB_CALL_TIMEOUT_MS, timeout?.socketTimeoutMillis, "the keep-alive, not a longer idle, holds the socket")
     }
+
+    // ---- work graph (M8.1) ----
+
+    /** Every work wrapper: its tool, its action, and exactly the arguments it was given. */
+    @Test
+    fun the_work_wrappers_name_their_tool_action_and_arguments() = runTest {
+        val row = """{"id":7,"tmux_name":"t","host_alias":"h"}"""
+        val cases = listOf<Triple<suspend (HubClient) -> Unit, String, Map<String, String>>>(
+            Triple({ it.workTickets(view = "mine") }, "work", mapOf("action" to "tickets", "view" to "mine")),
+            Triple({ it.workTickets() }, "work", mapOf("action" to "tickets")),
+            Triple({ it.workLookup(" PAY-9 ") }, "work", mapOf("action" to "lookup", "key" to "PAY-9")),
+            Triple(
+                { it.workLookup("https://acme.atlassian.net/browse/PAY-9") },
+                "work",
+                mapOf("action" to "lookup", "url" to "https://acme.atlassian.net/browse/PAY-9"),
+            ),
+            Triple({ it.workTrackers() }, "work", mapOf("action" to "trackers")),
+            Triple({ it.workResumePlan("PAY-9") }, "work", mapOf("action" to "resume_plan", "key" to "PAY-9")),
+            Triple({ it.confirmWork(7, 12) }, "work_link", mapOf("action" to "confirm", "session_id" to "7", "link_id" to "12")),
+            Triple({ it.rejectWork(7, 12) }, "work_link", mapOf("action" to "reject", "session_id" to "7", "link_id" to "12")),
+            Triple({ it.unlinkWork(7, 3) }, "work_link", mapOf("action" to "unlink", "session_id" to "7", "link_id" to "3")),
+            Triple({ it.linkWork(7, "PAY-9") }, "work_link", mapOf("action" to "link", "session_id" to "7", "key" to "PAY-9")),
+            Triple(
+                { it.startWork("PAY-9", "hetzner") },
+                "work_link",
+                mapOf("action" to "start", "key" to "PAY-9", "host_alias" to "hetzner"),
+            ),
+            Triple(
+                { it.startWork("PAY-9", "hetzner", projectId = 3) },
+                "work_link",
+                mapOf("action" to "start", "key" to "PAY-9", "host_alias" to "hetzner", "project_id" to "3"),
+            ),
+            Triple({ it.resumeWork("PAY-9") }, "work_link", mapOf("action" to "resume", "key" to "PAY-9", "mode" to "last")),
+            Triple(
+                { it.resumeWork("PAY-9", hostAlias = "pine") },
+                "work_link",
+                mapOf("action" to "resume", "key" to "PAY-9", "mode" to "last", "host_alias" to "pine"),
+            ),
+        )
+        for ((call, tool, expected) in cases) {
+            var sent: JsonObject? = null
+            val client = clientAnswering { body ->
+                assertEquals(tool, body.tool())
+                sent = body.args()
+                when (body.args()["action"]!!.jsonPrimitive.content) {
+                    "tickets", "trackers" -> "[]"
+                    "lookup" -> """{"id":5,"key":"PAY-9"}"""
+                    "resume_plan" -> """{"key":"PAY-9","modes":[]}"""
+                    else -> row
+                }
+            }
+            call(client)
+            assertEquals(expected, sent!!.mapValues { it.value.jsonPrimitive.content }, "$tool $expected")
+        }
+    }
+
+    /**
+     * `start` and `resume` create a session, like `new_session`, so all of
+     * `work_link` rides the framed mount under the lifecycle deadline; `work`
+     * is an ordinary read on the JSON mount.
+     */
+    @Test
+    fun work_link_rides_the_lifecycle_mount_and_work_the_json_one() = runTest {
+        val calls = Calls()
+        val engine = MockEngine { request ->
+            calls.requests += request
+            val payload = if ("work_link" in (request.body as TextContent).text) """{"id":1,"tmux_name":"t","host_alias":"h"}""" else "[]"
+            respond(sse(okResult(payload)), HttpStatusCode.OK, sseHeaders)
+        }
+        val hub = HubClient(HttpClient(engine).withHubTimeouts(), BASE, "tok-phone")
+
+        hub.startWork("PAY-9", "h")
+        hub.workTickets()
+
+        assertEquals("/mcp", calls.path(0))
+        assertEquals(HUB_LIFECYCLE_TIMEOUT_MS, calls.requests[0].getCapabilityOrNull(HttpTimeoutCapability)?.requestTimeoutMillis)
+        assertEquals("/mcp/json", calls.path(1))
+        assertEquals(HUB_CALL_TIMEOUT_MS, calls.requests[1].getCapabilityOrNull(HttpTimeoutCapability)?.requestTimeoutMillis)
+    }
+
+    @Test
+    fun tools_list_is_a_plain_mcp_request_on_the_json_mount() = runTest {
+        val (hub, calls) = client {
+            """{"jsonrpc":"2.0","id":1,"result":{"tools":[""" +
+                """{"name":"work","inputSchema":{"properties":{"action":{"type":"string","enum":["links","tickets"]}}}}]}}""" to
+                HttpStatusCode.OK
+        }
+
+        val caps = hub.toolsList()
+
+        assertEquals("/mcp/json", calls.path(0))
+        val sent = Json.parseToJsonElement(calls.bodyText(0)).jsonObject
+        assertEquals("tools/list", sent["method"]!!.jsonPrimitive.content)
+        assertEquals("Bearer tok-phone", calls.requests[0].headers[HttpHeaders.Authorization])
+        assertTrue(caps.known && caps.work && !caps.workLink)
+        assertEquals(setOf("links", "tickets"), caps.actions["work"])
+    }
+
+    /** A hub too old for the method answers a JSON-RPC error: that is a refusal, not a crash. */
+    @Test
+    fun tools_list_refused_is_a_tool_error() = runTest {
+        val (hub, _) = client {
+            """{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found"}}""" to HttpStatusCode.OK
+        }
+        val e = assertFailsWith<HubError.Tool> { hub.toolsList() }
+        assertEquals("-32601", e.code)
+    }
+
+    /**
+     * `start` on a key that already has a session answers `E_EXISTS` with the
+     * session in `details`: the phone opens it rather than making a second.
+     */
+    @Test
+    fun an_e_exists_refusal_names_the_live_session() = runTest {
+        val (hub, _) = client {
+            val rpc = """{"jsonrpc":"2.0","id":1,"result":{"isError":true,""" +
+                """"content":[{"type":"text","text":"E_EXISTS: PAY-9 already has a live session"}],""" +
+                """"structuredContent":{"code":"E_EXISTS","message":"PAY-9 already has a live session",""" +
+                """"details":{"session_id":41,"host_alias":"pine","tmux_name":"pay-9"}}}}"""
+            sse(rpc) to HttpStatusCode.OK
+        }
+        val e = assertFailsWith<HubError.Tool> { hub.startWork("PAY-9", "pine") }
+        assertEquals("E_EXISTS", e.code)
+        assertEquals(41L, e.existingSessionId)
+        assertEquals("pine", e.details!!["host_alias"]!!.jsonPrimitive.content)
+        assertNull(HubError.Tool("E_INVALID", "x", e.details).existingSessionId, "only E_EXISTS names a session to open")
+    }
+
+    /** `details` would bypass the scrub the code and message get, so one repeating the token is dropped. */
+    @Test
+    fun details_that_repeat_the_token_are_dropped() = runTest {
+        val (hub, _) = client {
+            val rpc = """{"jsonrpc":"2.0","id":1,"result":{"isError":true,""" +
+                """"content":[{"type":"text","text":"no"}],""" +
+                """"structuredContent":{"code":"E_EXISTS","message":"no","details":{"echo":"Bearer tok-phone"}}}}"""
+            sse(rpc) to HttpStatusCode.OK
+        }
+        val e = assertFailsWith<HubError.Tool> { hub.startWork("PAY-9", "pine") }
+        assertNull(e.details)
+    }
 }

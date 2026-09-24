@@ -73,10 +73,28 @@ private class FakeHub(
     /** Makes `list_sessions` answer 502, so every refresh fails at its first call. */
     var failSessions = false
 
+    /**
+     * The `tools/list` result this hub serves, as JSON; null answers the
+     * JSON-RPC "method not found" a hub too old for it would.
+     */
+    var toolsListResult: String? = """{"tools":[{"name":"list_sessions"}]}"""
+    var toolsListCalls = 0
+        private set
+
     val client: HubClient = HubClient(
         HttpClient(
             MockEngine { request ->
                 val body = (request.body as TextContent).text
+                if ("\"tools/list\"" in body) {
+                    toolsListCalls += 1
+                    val result = toolsListResult
+                    val rpc = if (result != null) {
+                        """{"jsonrpc":"2.0","id":1,"result":$result}"""
+                    } else {
+                        """{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found"}}"""
+                    }
+                    return@MockEngine respond(rpc, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+                }
                 val payload = when {
                     "list_sessions" in body -> { sessionCalls += 1; sessionsJson }
                     "list_hosts" in body -> { hostCalls += 1; hostsJson }
@@ -957,6 +975,91 @@ class FleetRepositoryTest {
 
         assertEquals(listOf(null, "7-10", null), stream.resumedFrom)
         assertEquals(2, hub.sessionCalls, "the unresumed ready re-listed")
+        repository.stop()
+    }
+
+    // ---- tool discovery (work graph M8.1) ----
+
+    /** Every `ready` reads what this token may call — the work UI's gate. */
+    @Test
+    fun the_ready_frame_reads_the_hubs_tool_list() = runTest {
+        val hub = FakeHub()
+        hub.toolsListResult = """{"tools":[{"name":"work"},""" +
+            """{"name":"work_link","inputSchema":{"properties":{"action":{"type":"string","enum":["confirm","reject"]}}}}]}"""
+        val stream = FakeStream { emit(READY); awaitCancellation() }
+        val repository = repo(hub, stream, backgroundScope)
+
+        assertFalse(repository.capabilities.value.known, "unknown before any hub has answered")
+        repository.start()
+        repository.status.first { it is ConnectionStatus.Connected }
+
+        val caps = repository.capabilities.value
+        assertTrue(caps.known && caps.work && caps.workLink)
+        assertTrue(caps.has("work_link", "confirm"))
+        assertFalse(caps.has("work_link", "start"))
+        assertEquals(1, hub.toolsListCalls)
+
+        repository.forgetAction("work_link", "confirm")
+        assertFalse(repository.capabilities.value.has("work_link", "confirm"))
+        repository.stop()
+    }
+
+    /** A resumed stream skips the re-list, but still re-reads the tools: the hub may have been upgraded meanwhile. */
+    @Test
+    fun a_resumed_stream_still_reads_the_tool_list() = runTest {
+        val hub = FakeHub()
+        val stream = FakeStream { emit(READY.copy(resumed = true)); awaitCancellation() }
+        val repository = repo(hub, stream, backgroundScope)
+
+        repository.start()
+        repository.status.first { it is ConnectionStatus.Connected }
+
+        assertEquals(0, hub.sessionCalls, "resumed: nothing to re-list")
+        assertEquals(1, hub.toolsListCalls)
+        assertTrue(repository.capabilities.value.known)
+        repository.stop()
+    }
+
+    /**
+     * A hub that cannot answer `tools/list` is still a working hub: the stream
+     * connects, the rows arrive, and the work UI stays off.
+     */
+    @Test
+    fun a_hub_without_tools_list_connects_with_no_work_features() = runTest {
+        val hub = FakeHub(sessionsJson = sessionRows(1))
+        hub.toolsListResult = null
+        val stream = FakeStream { emit(READY); awaitCancellation() }
+        val repository = repo(hub, stream, backgroundScope)
+
+        repository.start()
+        repository.status.first { it is ConnectionStatus.Connected }
+
+        assertEquals(listOf(1L), repository.sessions.value.map { it.id })
+        assertFalse(repository.capabilities.value.known)
+        assertFalse(repository.capabilities.value.work)
+        repository.stop()
+    }
+
+    /** The ticket cache: what a screen fetched, kept current by `work:item`, and not wiped by a re-list. */
+    @Test
+    fun remembered_tickets_follow_work_frames_and_survive_a_resync() = runTest {
+        val hub = FakeHub(sessionsJson = sessionRows(1))
+        val stream = FakeStream {
+            emit(READY)
+            emit(rowEvent("work:item", """{"id":5,"key":"PAY-5","title":"new","status_category":"done","created_at":1,"updated_at":2}"""))
+            awaitCancellation()
+        }
+        val repository = repo(hub, stream, backgroundScope)
+        repository.remember(listOf(dev.claudefleet.mobile.model.Ticket(id = 5, key = "PAY-5", title = "old", liveSessionIds = listOf(1))))
+
+        repository.start()
+        repository.tickets.first { it[5L]?.title == "new" }
+        repository.refresh()
+
+        val t = repository.tickets.value.getValue(5L)
+        assertEquals("new", t.title)
+        assertEquals(listOf(1L), t.liveSessionIds, "not a column: kept from what the screen fetched")
+        assertEquals(2, hub.sessionCalls, "the ready and the explicit refresh both re-listed")
         repository.stop()
     }
 }
