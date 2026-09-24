@@ -43,7 +43,7 @@ class StatusStripTest {
             usageModel = "sonnet",
         )
         assertEquals(
-            "● working 2 min · ctx 62 % · $1.84 · sonnet",
+            "working 2 min · ctx 62 % · $1.84 · sonnet",
             statusStripText(row, ConvContext(pct = 62.4), nowSeconds = 1_134),
         )
         assertEquals(
@@ -60,20 +60,20 @@ class StatusStripTest {
     @Test
     fun working_falls_back_to_started_at_when_there_is_no_turn_yet() {
         val r = row(status = "working", lastTurnAt = null, startedAt = 1_000)
-        assertEquals("● working 2 min", statusStripText(r, null, nowSeconds = 1_134))
+        assertEquals("working 2 min", statusStripText(r, null, nowSeconds = 1_134))
     }
 
     @Test
     fun ctx_falls_back_to_the_rows_own_context_pct_when_the_conversation_has_none() {
         val r = row(status = "working", lastTurnAt = 1_000, contextPct = 40.0)
-        assertEquals("● working 2 min · ctx 40 %", statusStripText(r, null, nowSeconds = 1_134))
+        assertEquals("working 2 min · ctx 40 %", statusStripText(r, null, nowSeconds = 1_134))
     }
 
     @Test
     fun a_stale_context_says_so() {
         val r = row(status = "working", lastTurnAt = 1_000)
         assertEquals(
-            "● working 2 min · ctx 62 % (stale)",
+            "working 2 min · ctx 62 % (stale)",
             statusStripText(r, ConvContext(pct = 62.4, stale = true), nowSeconds = 1_134),
         )
     }

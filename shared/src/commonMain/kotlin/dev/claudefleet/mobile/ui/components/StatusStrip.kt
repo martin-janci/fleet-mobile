@@ -20,7 +20,7 @@ import dev.claudefleet.mobile.ui.theme.StatusTone
 import kotlin.math.roundToInt
 
 /**
- * The one-line summary that replaced the session bar's [StatusChip]: not just
+ * The one-line summary under a session's title, led by its [StatusDot]: not just
  * a status word, but how long the agent has been at it (or idle since when),
  * how full its context window is, and what the turn has cost so far — the
  * things a person reopening a session actually wants to know before reading
@@ -36,37 +36,54 @@ fun StatusStrip(
     row: SessionRow?,
     context: ConvContext?,
     nowSeconds: Long,
-    onCompact: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val text = statusStripText(row, context, nowSeconds)
     if (text.isBlank()) return
-    val pct = context?.pct ?: row?.contextPct
-    val amber = pct != null && pct >= CONTEXT_WARNING_PCT
-    val colors = LocalStatusColors.current(if (amber) StatusTone.BLOCKED else StatusTone.of(row?.claudeStatus, row?.stuckKind))
+    val amber = contextIsTight(row, context)
+    val colors = LocalStatusColors.current(StatusTone.BLOCKED)
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        // A real dot in the status's own colour rather than a `●` glyph in
+        // the text: the glyph was always grey, so "working" and "blocked"
+        // led with the same mark.
+        StatusDot(row?.claudeStatus, row?.stuckKind)
+        Spacer(Modifier.width(8.dp))
         Text(
             text = text,
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.labelLarge,
             color = if (amber) colors.onContainer else MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        // Only while the window is actually tight: a `/compact` offered at any
-        // other time is a chip nobody asked for, taking up a bar that is
-        // already crowded with the turn-stepping and refresh buttons.
-        if (amber) {
-            Spacer(Modifier.width(8.dp))
-            AssistChip(
-                onClick = onCompact,
-                label = { Text("/compact") },
-                colors = AssistChipDefaults.assistChipColors(
-                    containerColor = colors.container,
-                    labelColor = colors.onContainer,
-                ),
-            )
-        }
     }
+}
+
+/**
+ * The `/compact` offer, drawn in the strip's amber. Its own composable, not
+ * part of [StatusStrip]'s row: beside the strip it pushed the text to nothing
+ * on a phone, so the header gives it a line of its own under the strip — and
+ * only while [contextIsTight], since a `/compact` offered at any other time
+ * is a chip nobody asked for.
+ */
+@Composable
+fun CompactChip(onCompact: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = LocalStatusColors.current(StatusTone.BLOCKED)
+    AssistChip(
+        onClick = onCompact,
+        label = { Text("/compact", maxLines = 1) },
+        colors = AssistChipDefaults.assistChipColors(
+            containerColor = colors.container,
+            labelColor = colors.onContainer,
+        ),
+        border = null,
+        modifier = modifier,
+    )
+}
+
+/** Whether the context window is past [CONTEXT_WARNING_PCT]: the strip turns amber and `/compact` is offered. */
+fun contextIsTight(row: SessionRow?, context: ConvContext?): Boolean {
+    val pct = context?.pct ?: row?.contextPct
+    return pct != null && pct >= CONTEXT_WARNING_PCT
 }
 
 /** The context percentage past which the strip turns amber and offers `/compact`. */
@@ -101,7 +118,7 @@ fun statusStripText(row: SessionRow?, context: ConvContext?, nowSeconds: Long): 
 
 private fun workingStrip(row: SessionRow, context: ConvContext?, nowSeconds: Long): String {
     val elapsed = relativeTime(row.lastTurnAt ?: row.startedAt, nowSeconds)
-    val pieces = mutableListOf(if (elapsed != null) "● working $elapsed" else "● working")
+    val pieces = mutableListOf(if (elapsed != null) "working $elapsed" else "working")
     val pct = context?.pct ?: row.contextPct
     if (pct != null) {
         val stale = context?.stale == true

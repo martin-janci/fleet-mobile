@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Badge
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -32,7 +31,6 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -46,6 +44,7 @@ import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
+import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.components.StatusChip
 import dev.claudefleet.mobile.ui.components.StatusDot
 import dev.claudefleet.mobile.ui.theme.FleetIcons
@@ -71,14 +70,15 @@ fun SessionsScreen(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
-        SessionsBar(status = state.status)
-        FilterRow(
-            needsAttentionOnly = state.needsAttentionOnly,
-            attentionCount = state.attentionCount,
-            hostFilter = state.hostFilter,
-            onToggleNeedsAttention = onToggleNeedsAttention,
-            onClearHostFilter = onClearHostFilter,
-        )
+        SessionsBar(status = state.status) {
+            FilterRow(
+                needsAttentionOnly = state.needsAttentionOnly,
+                attentionCount = state.attentionCount,
+                hostFilter = state.hostFilter,
+                onToggleNeedsAttention = onToggleNeedsAttention,
+                onClearHostFilter = onClearHostFilter,
+            )
+        }
         ConnectionBanner(state.status)
         ErrorBanner(state.error, onDismiss = onDismissError)
 
@@ -118,29 +118,22 @@ fun SessionsScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** The Sessions header: the title, whether the list is live, and [filters] under both. */
 @Composable
-private fun SessionsBar(status: ConnectionStatus) {
-    TopAppBar(
-        title = {
-            Column {
-                Text("Sessions", style = MaterialTheme.typography.titleLarge)
-                val live = when (status) {
-                    is ConnectionStatus.Connected -> "live"
-                    is ConnectionStatus.Reconnecting -> "reconnecting…"
-                    is ConnectionStatus.Offline -> "offline"
-                    // Not "offline": the hub is up and answering. The banner
-                    // under this bar says which side is behind.
-                    is ConnectionStatus.Refused -> "refused"
-                }
-                Text(live, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        },
-    )
+private fun SessionsBar(status: ConnectionStatus, filters: @Composable () -> Unit) {
+    val live = when (status) {
+        is ConnectionStatus.Connected -> "live"
+        is ConnectionStatus.Reconnecting -> "reconnecting…"
+        is ConnectionStatus.Offline -> "offline"
+        // Not "offline": the hub is up and answering. The banner under this
+        // header says which side is behind.
+        is ConnectionStatus.Refused -> "refused"
+    }
+    ScreenHeader(title = "Sessions", subtitle = live, below = { filters() })
 }
 
 /**
- * The filters, on their own line under the bar.
+ * The filters, on their own line under the title, inside the header.
  *
  * They used to ride in the `TopAppBar`'s `actions`, which is a plain `Row`
  * that neither wraps nor scrolls and is measured before the title: on a phone,
@@ -163,7 +156,7 @@ private fun FilterRow(
     FlowRow(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+            .padding(start = 12.dp, end = 12.dp, bottom = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {

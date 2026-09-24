@@ -34,11 +34,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -53,7 +51,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -73,16 +70,20 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.tailMarker
 import dev.claudefleet.mobile.ui.components.BlockedCardView
+import dev.claudefleet.mobile.ui.components.CompactChip
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.MarkdownText
+import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.components.StatusStrip
+import dev.claudefleet.mobile.ui.components.contextIsTight
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.data.ConnectionStatus
 import kotlinx.coroutines.CoroutineScope
@@ -263,7 +264,8 @@ fun SessionScreen(
             // something and either wants the bottom again or just got a
             // fresh reply while they were up there — see `SessionUiState.newReply`.
             if (!atBottom) {
-                AssistChip(
+                JumpToLatest(
+                    newReply = state.newReply,
                     onClick = {
                         newest?.let { target -> scope.launch { listState.animateScrollToItem(target) } }
                         // Optimistic: this fires before `animateScrollToItem`
@@ -273,7 +275,6 @@ fun SessionScreen(
                         // list settles; nothing here waits for that.
                         onAtBottom(true)
                     },
-                    label = { Text(if (state.newReply) "↓ New reply" else "↓ Latest") },
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
                 )
             }
@@ -302,27 +303,36 @@ fun SessionScreen(
             )
         }
 
-        // Hidden outright, not merely dimmed, in the same two cases the card
-        // itself takes over the space for: while it is up (the answer goes
-        // there instead) and on a readonly device (no chip may offer a write
-        // it cannot make) — spec 1.1.
-        if (state.card == null && !state.readOnly) {
-            QuickRepliesRow(
-                chips = quickReplies,
-                draft = state.draft,
-                enabled = state.canSendQuick,
-                onSendQuick = onSendQuick,
-                onAdd = onAddQuickReply,
-                onRemove = onRemoveQuickReply,
-            )
+        // The footer: quick replies and the composer on one surface, the
+        // mirror of the header. The chips used to sit on the conversation's
+        // own background with the composer on a tinted band under them, so
+        // they read as the last line of the transcript rather than as part
+        // of the answer box.
+        Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+            Column {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                // Hidden outright, not merely dimmed, in the same two cases
+                // the card itself takes over the space for: while it is up
+                // (the answer goes there instead) and on a readonly device (no
+                // chip may offer a write it cannot make) — spec 1.1.
+                if (state.card == null && !state.readOnly) {
+                    QuickRepliesRow(
+                        chips = quickReplies,
+                        draft = state.draft,
+                        enabled = state.canSendQuick,
+                        onSendQuick = onSendQuick,
+                        onAdd = onAddQuickReply,
+                        onRemove = onRemoveQuickReply,
+                    )
+                }
+                PromptBox(
+                    state = state,
+                    onDraftChange = onDraftChange,
+                    onSend = onSend,
+                    onOpenHistory = onOpenHistory,
+                )
+            }
         }
-
-        PromptBox(
-            state = state,
-            onDraftChange = onDraftChange,
-            onSend = onSend,
-            onOpenHistory = onOpenHistory,
-        )
     }
 }
 
@@ -337,7 +347,17 @@ private fun LazyListScope.turnItems(turns: List<ConvTurn>) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * The session's header: back, the session's name over its host, refresh and
+ * the ⋮ menu on the first line; the [StatusStrip], a retirement in progress
+ * and the turn-stepping arrows on a line of their own under it.
+ *
+ * All of that used to share one `TopAppBar`'s `actions` slot, which is
+ * measured before the title and does not wrap. On a phone it was wider than
+ * the screen: the title was left zero width, its host line broke one
+ * character per row and stretched the bar down the screen, and the strip ran
+ * off the left edge over the back arrow. See [ScreenHeader].
+ */
 @Composable
 private fun SessionBar(
     state: SessionUiState,
@@ -366,69 +386,18 @@ private fun SessionBar(
     val nextTurn by remember(listState, turnCount, truncated) {
         derivedStateOf { adjacentTurn(listState.firstVisibleItemIndex, turnCount, truncated, 1) }
     }
-    TopAppBar(
-        navigationIcon = {
+    ScreenHeader(
+        title = state.session?.displayName ?: "Session",
+        // The host is in the header because a prompt goes to a machine, not
+        // just to a name.
+        subtitle = state.session?.hostAlias ?: "no longer in the fleet",
+        titleStyle = MaterialTheme.typography.titleMedium,
+        navigation = {
             IconButton(onClick = onBack) {
                 Icon(FleetIcons.ArrowBack, contentDescription = "Back")
             }
         },
-        title = {
-            Column {
-                Text(
-                    text = state.session?.displayName ?: "Session",
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    // The host is in the bar because a prompt goes to a machine,
-                    // not just to a name.
-                    text = state.session?.hostAlias ?: "no longer in the fleet",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
         actions = {
-            // Replaced the plain `StatusChip`: a status word alone told a
-            // person nothing about how long the agent had been at it, how
-            // full its context window was, or what the turn had cost so far
-            // — everything the strip now reads off the same row plus the
-            // conversation's own `context`. See `StatusStrip.kt`.
-            StatusStrip(
-                row = state.session,
-                context = state.conversation.context,
-                nowSeconds = state.nowSeconds,
-                onCompact = { onSendCommand("/compact") },
-            )
-            // A `safe_kill_session` retirement in progress — shown for as
-            // long as the row carries one, independent of which screen armed
-            // it (the desktop can start one too).
-            state.safeKillState?.let { retiring ->
-                Spacer(Modifier.width(4.dp))
-                SuggestionChip(onClick = {}, label = { Text(retiring) })
-            }
-            Spacer(Modifier.width(4.dp))
-            IconButton(
-                onClick = { prevTurn?.let { target -> scope.launch { listState.animateScrollToItem(target) } } },
-                enabled = prevTurn != null,
-            ) {
-                Icon(
-                    FleetIcons.ArrowBack,
-                    contentDescription = "Previous turn",
-                    modifier = Modifier.rotate(90f),
-                )
-            }
-            IconButton(
-                onClick = { nextTurn?.let { target -> scope.launch { listState.animateScrollToItem(target) } } },
-                enabled = nextTurn != null,
-            ) {
-                Icon(
-                    FleetIcons.ArrowBack,
-                    contentDescription = "Next turn",
-                    modifier = Modifier.rotate(-90f),
-                )
-            }
             IconButton(onClick = onRefresh, enabled = !busy) {
                 Icon(
                     FleetIcons.Refresh,
@@ -454,6 +423,64 @@ private fun SessionBar(
                     onSetTags = onSetTags,
                     onRename = onRename,
                 )
+            }
+        },
+        below = {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Takes what the arrows leave and gives way (ellipsis) before
+                // they do. A status word alone told a person nothing about how
+                // long the agent had been at it, how full its context window
+                // was, or what the turn had cost — see `StatusStrip.kt`.
+                StatusStrip(
+                    row = state.session,
+                    context = state.conversation.context,
+                    nowSeconds = state.nowSeconds,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(
+                    onClick = { prevTurn?.let { target -> scope.launch { listState.animateScrollToItem(target) } } },
+                    enabled = prevTurn != null,
+                ) {
+                    Icon(
+                        FleetIcons.ArrowBack,
+                        contentDescription = "Previous turn",
+                        modifier = Modifier.rotate(90f),
+                    )
+                }
+                IconButton(
+                    onClick = { nextTurn?.let { target -> scope.launch { listState.animateScrollToItem(target) } } },
+                    enabled = nextTurn != null,
+                ) {
+                    Icon(
+                        FleetIcons.ArrowBack,
+                        contentDescription = "Next turn",
+                        modifier = Modifier.rotate(-90f),
+                    )
+                }
+            }
+            // The two things that ask something of the reader get a line of
+            // their own, and only while one of them is up: beside the strip
+            // they left it no room at all on a phone.
+            val tight = contextIsTight(state.session, state.conversation.context)
+            val retiring = state.safeKillState
+            if (tight || retiring != null) {
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (tight) CompactChip(onCompact = { onSendCommand("/compact") })
+                    // A `safe_kill_session` retirement in progress — shown for
+                    // as long as the row carries one, independent of which
+                    // screen armed it (the desktop can start one too). Named,
+                    // because a bare "requested" beside the status read as if
+                    // the status itself were "requested".
+                    if (retiring != null) {
+                        SuggestionChip(onClick = {}, label = { Text("retire: $retiring", maxLines = 1) })
+                    }
+                }
             }
         },
     )
@@ -916,7 +943,33 @@ private fun EmptyConversation(state: SessionUiState) {
             text = text,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
             modifier = Modifier.padding(32.dp),
+        )
+    }
+}
+
+/**
+ * The fast way back down: a filled pill that floats over the conversation.
+ *
+ * Was an outlined `AssistChip`, whose container is transparent — floated over
+ * a transcript, the monospace tool lines showed straight through its label
+ * and "↓ New reply" was unreadable exactly when there was one.
+ */
+@Composable
+private fun JumpToLatest(newReply: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = if (newReply) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = if (newReply) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer,
+        shadowElevation = 4.dp,
+        modifier = modifier,
+    ) {
+        Text(
+            text = if (newReply) "↓ New reply" else "↓ Latest",
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         )
     }
 }
@@ -939,68 +992,83 @@ private fun PromptBox(
     onOpenHistory: () -> List<String>,
 ) {
     var showHistory by remember { mutableStateOf(false) }
-    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
-        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-            val why = when {
-                state.readOnly -> "This device is paired read-only."
-                !state.connected -> "The hub is offline; the prompt will not be delivered."
-                state.session == null -> "This session is gone."
-                else -> null
-            }
-            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextField(
-                    value = state.draft,
-                    onValueChange = onDraftChange,
-                    modifier = Modifier.weight(1f),
-                    enabled = !state.sending && !state.readOnly,
-                    placeholder = { Text("Message ${state.session?.displayName ?: "session"}…") },
-                    shape = CircleShape,
-                    // The "swipe up on the field shows history" spec, realised
-                    // as a tap on the field's own leading icon rather than a
-                    // gesture: a `TextField` already owns vertical drag for
-                    // text selection and cursor placement, so a swipe on it is
-                    // not free real estate the way it would be on a plain
-                    // `Row`.
-                    leadingIcon = {
-                        IconButton(onClick = { showHistory = true }) {
-                            Icon(FleetIcons.History, contentDescription = "Draft history")
-                        }
-                    },
-                    colors = TextFieldDefaults.colors(
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        disabledIndicatorColor = Color.Transparent,
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ),
-                    // `maxLines = 6` says this box takes more than one line,
-                    // and `ImeAction.Send` took the key that would have written
-                    // them: Enter sent, so a prompt with a second line could
-                    // not be typed on a phone at all. The send button is beside
-                    // the field, always has been, and is the only thing that
-                    // sends now.
-                    //
-                    // Autocorrect and the leading capital are off for the same
-                    // reason they are off on the Pair screen: a prompt carries
-                    // paths, flags and identifiers — `--rerun-tasks`,
-                    // `SessionsViewModel.kt`, `feat/pager-phase-1` — and a
-                    // dictionary that rewrites those is not a convenience, it
-                    // is a silent edit to something about to be sent to an
-                    // agent.
-                    keyboardOptions = KeyboardOptions(
-                        capitalization = KeyboardCapitalization.None,
-                        autoCorrectEnabled = false,
-                        imeAction = ImeAction.Default,
-                    ),
-                    maxLines = 6,
-                )
-                FilledIconButton(onClick = onSend, enabled = state.canSend, modifier = Modifier.size(48.dp)) {
-                    if (state.sending) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    else Icon(FleetIcons.Send, contentDescription = "Send")
-                }
-            }
-            if (why != null) Text(why, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+    // No surface of its own: it sits in the footer `SessionScreen` draws.
+    Column(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp)) {
+        val why = when {
+            state.readOnly -> "This device is paired read-only."
+            !state.connected -> "The hub is offline; the prompt will not be delivered."
+            state.session == null -> "This session is gone."
+            else -> null
         }
+        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextField(
+                value = state.draft,
+                onValueChange = onDraftChange,
+                modifier = Modifier.weight(1f),
+                enabled = !state.sending && !state.readOnly,
+                // One line: a long session name wrapped the placeholder
+                // onto a second row and made an empty field look filled.
+                placeholder = {
+                    Text(
+                        "Message ${state.session?.displayName ?: "session"}…",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                shape = CircleShape,
+                // The "swipe up on the field shows history" spec, realised
+                // as a tap on the field's own leading icon rather than a
+                // gesture: a `TextField` already owns vertical drag for
+                // text selection and cursor placement, so a swipe on it is
+                // not free real estate the way it would be on a plain
+                // `Row`.
+                leadingIcon = {
+                    IconButton(onClick = { showHistory = true }) {
+                        Icon(FleetIcons.History, contentDescription = "Draft history")
+                    }
+                },
+                colors = TextFieldDefaults.colors(
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    disabledIndicatorColor = Color.Transparent,
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                ),
+                // `maxLines = 6` says this box takes more than one line,
+                // and `ImeAction.Send` took the key that would have written
+                // them: Enter sent, so a prompt with a second line could
+                // not be typed on a phone at all. The send button is beside
+                // the field, always has been, and is the only thing that
+                // sends now.
+                //
+                // Autocorrect and the leading capital are off for the same
+                // reason they are off on the Pair screen: a prompt carries
+                // paths, flags and identifiers — `--rerun-tasks`,
+                // `SessionsViewModel.kt`, `feat/pager-phase-1` — and a
+                // dictionary that rewrites those is not a convenience, it
+                // is a silent edit to something about to be sent to an
+                // agent.
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    autoCorrectEnabled = false,
+                    imeAction = ImeAction.Default,
+                ),
+                maxLines = 6,
+            )
+            // Bottom-aligned so it stays by the last line of a tall draft;
+            // the 4 dp lifts it to the middle of the 56 dp field while the
+            // draft is a single line, which is most of the time.
+            FilledIconButton(
+                onClick = onSend,
+                enabled = state.canSend,
+                modifier = Modifier.padding(bottom = 4.dp).size(48.dp),
+            ) {
+                if (state.sending) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                else Icon(FleetIcons.Send, contentDescription = "Send")
+            }
+        }
+        if (why != null) Text(why, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
     }
     if (showHistory) {
         HistoryDialog(
@@ -1063,7 +1131,7 @@ private fun QuickRepliesRow(
     var editing by remember { mutableStateOf<String?>(null) }
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp),
     ) {
         items(chips) { chip ->
             Box(
