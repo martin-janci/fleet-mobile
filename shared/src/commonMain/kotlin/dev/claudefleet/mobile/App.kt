@@ -34,6 +34,8 @@ import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.data.FleetRepository
 import dev.claudefleet.mobile.data.HubNewSessionActions
 import dev.claudefleet.mobile.data.HubSessionActions
+import dev.claudefleet.mobile.data.HubWorkActions
+import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.net.HubClient
@@ -55,6 +57,8 @@ import dev.claudefleet.mobile.ui.QuickReplies
 import dev.claudefleet.mobile.ui.Screen
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.SessionViewModel
+import dev.claudefleet.mobile.ui.SessionWorkHandlers
+import dev.claudefleet.mobile.ui.SessionWorkViewModel
 import dev.claudefleet.mobile.ui.SessionsScreen
 import dev.claudefleet.mobile.ui.SessionsViewModel
 import dev.claudefleet.mobile.ui.SettingsScreen
@@ -129,6 +133,9 @@ class AppContainer(
 
     /** The New session form's one call, through the same 401 rule. */
     val newSessionActions: NewSessionActions = HubNewSessionActions(session)
+
+    /** The work graph's calls, through the same `withClient` as every other. */
+    val workActions: WorkActions = HubWorkActions(session)
 
     /**
      * The chip row and the draft history — one instance for the whole app,
@@ -481,9 +488,21 @@ private fun SessionRoute(
             quickReplies = container.quickReplies,
         )
     }
+    val workVm = remember(sessionId, repository, scope) {
+        SessionWorkViewModel(
+            sessionId = sessionId,
+            fleet = repository,
+            actions = container.workActions,
+            scope = scope,
+            // `work_link` is not readonly; the hub hides it from such a token
+            // too, and the view model checks both.
+            canWrite = credentials.canWrite,
+        )
+    }
     LaunchedEffect(sessionId) { vm.load() }
 
     val state by vm.state.collectAsState()
+    val work by workVm.state.collectAsState()
     val status by repository.status.collectAsState()
     // Collected here, not folded into `SessionUiState`: `QuickReplies.chips`
     // is its own `StateFlow`, one per app rather than one per session, and
@@ -514,5 +533,15 @@ private fun SessionRoute(
         onAddQuickReply = { vm.quickReplies.add(it) },
         onRemoveQuickReply = { vm.quickReplies.remove(it) },
         onOpenHistory = { vm.quickReplies.history() },
+        work = work,
+        workHandlers = SessionWorkHandlers(
+            onOpen = workVm::openSheet,
+            onClose = workVm::closeSheet,
+            onConfirm = { workVm.confirm() },
+            onReject = { workVm.reject() },
+            onClear = { workVm.clear() },
+            onSetWork = { workVm.setWork(it) },
+            onDismissError = workVm::dismissError,
+        ),
     )
 }
