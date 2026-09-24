@@ -2,7 +2,7 @@ package dev.claudefleet.mobile.net
 
 /**
  * The hub wire-contract revisions this build understands (claude-fleet
- * `main`, revision 3, unreleased on the desktop side → hub 0.2.35). A hub
+ * revision 4, hub 0.2.36 and later). A hub
  * outside the range is refused the way the desktop refuses it: the banner
  * says which side is behind, and no row event from that hub is applied.
  *
@@ -10,7 +10,12 @@ package dev.claudefleet.mobile.net
  * read the same row shapes off the wire and a shape this build has never
  * seen (revision 2 added `MoveOutcome`/`dry_run`; revision 3 gave
  * `move_session` a `when` argument) is exactly what the maximum exists to
- * catch.
+ * catch. Revision 4 added the `bash` and `harness` conversation item kinds —
+ * modelled here since fleet-mobile #22, and any unknown kind degrades to
+ * [dev.claudefleet.mobile.model.ConvItem.Unsupported] rather than failing the
+ * conversation — and the `session_activity` tool, which this app never calls.
+ * Left at 3, it refused the 0.2.36 hub outright with "this app is too old"
+ * (2026-09-24).
  *
  * [MIN_HUB_CONTRACT] does NOT mirror the desktop's minimum. The desktop
  * raised its own to 3 because a pre-3 hub would silently misperform
@@ -21,7 +26,7 @@ package dev.claudefleet.mobile.net
  * upgraded: this is the phone's own floor, not a copy of the desktop's.
  */
 const val MIN_HUB_CONTRACT: Int = 0
-const val MAX_HUB_CONTRACT: Int = 3
+const val MAX_HUB_CONTRACT: Int = 4
 
 /**
  * What a `contract` field that cannot be read as a revision counts as.

@@ -398,6 +398,9 @@ class HubClientTest {
             args["summary"]!!.jsonPrimitive.content,
             "summary=true drops friendly_name, current_activity and last_activity_at",
         )
+        // The hub's named projection for this app. A hub that predates it
+        // ignores the key, and `summary=false` above still gets full rows.
+        assertEquals("phone", args["view"]!!.jsonPrimitive.content)
     }
 
     @Test
