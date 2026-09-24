@@ -7,6 +7,9 @@ import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.net.HubEvent
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -465,25 +468,38 @@ class FleetSnapshotTest {
     }
 
     /**
-     * Decision 3: a payload that does not carry `work` at all must not blank
-     * the chip — it is a payload that could not say, like `is_controller`.
-     * The fixture is the whole store row, minus the work columns, which is
-     * what a frame from before the work graph looks like.
+     * The hub strips nulls from every frame (`strip_nulls` in `events.rs`),
+     * so a link cleared on the desktop — or by *Clear* here — arrives as an
+     * update with no `work` key. That must clear the chip: unlike
+     * `is_controller`, `work` is a column every frame carries when it is set.
+     * The second frame is the whole store row, nulls stripped, which is what
+     * the hub actually sends.
      */
     @Test
-    fun a_session_update_without_work_keeps_the_work_it_had() {
+    fun a_session_update_without_work_clears_it() {
         val linked = FleetSnapshot().applying(row("session:updated", workPayload(1, work = PAY7)))
-        val after = linked.applying(row("session:updated", sessionPayload(id = 1, activity = "testing")))
+        val stripped = Json.parseToJsonElement(sessionPayload(id = 1, activity = "testing")).jsonObject
+            .filterValues { it !is JsonNull }
+        val after = linked.applying(HubEvent.Row("session:updated", JsonObject(stripped)))
         assertEquals("testing", after.sessions.single().currentActivity, "the rest of the row did update")
-        assertEquals("PAY-7", after.sessions.single().work?.key)
+        assertNull(after.sessions.single().work)
     }
 
-    /** A present `null` is the hub saying the link was cleared, and is believed. */
+    /** A present `null` (a hub that did not strip) means the same. */
     @Test
     fun a_session_update_with_work_null_clears_it() {
         val linked = FleetSnapshot().applying(row("session:updated", workPayload(1, work = PAY7)))
         val after = linked.applying(row("session:updated", workPayload(1, work = "null")))
         assertNull(after.sessions.single().work)
+    }
+
+    /** `is_controller` is still carried: events never have it, so its absence says nothing. */
+    @Test
+    fun a_work_update_still_keeps_is_controller() {
+        val mine = FleetSnapshot(sessions = listOf(SessionRow(id = 1, isController = true)))
+        val after = mine.applying(row("session:updated", workPayload(1, work = PAY7)))
+        assertTrue(after.sessions.single().isController)
+        assertEquals("PAY-7", after.sessions.single().work?.key)
     }
 
     /**

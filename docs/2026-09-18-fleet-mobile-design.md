@@ -267,7 +267,9 @@ Plan: claude-fleet `docs/superpowers/plans/2026-09-24-work-graph-m8-phone.md`.
 On every `ready` the repository calls `tools/list` and publishes
 `HubCapabilities` (tool names, each schema's `action` enum when there is one,
 and actions the hub refused as unknown on this connection). `MAX_HUB_CONTRACT`
-did not move. `SessionRow` gained `work` / `work_suggested`; `"work"` joined
+did not move. `SessionRow` gained `work` / `work_suggested`, replaced whole with the row on
+every `session:updated` (the plan's "keep the old value" was corrected by the
+hub's M8.0: frames are null-stripped, so an absent `work` is a cleared link); `"work"` joined
 `SNAPSHOT_EVENT_KINDS` for the ticket cache (`work:item` upserts,
 `work:tracker_removed` marks unavailable), while a session's own work rides
 `session:updated`. `work_link` joined `LIFECYCLE_TOOLS`, so a quick Confirm

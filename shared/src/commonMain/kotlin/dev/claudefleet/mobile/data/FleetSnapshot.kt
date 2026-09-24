@@ -129,18 +129,15 @@ private fun FleetSnapshot.upsertSession(payload: JsonElement): FleetSnapshot {
             // update after a refresh. This is the only row with anything to
             // carry, which is why the other two take the default.
             //
-            // `work` is carried the same way, but only when the payload has
-            // no `work` key at all: the store row serializes it always, as
-            // `null` when the link was cleared, so a present null is a real
-            // "no work" and an absent key is a payload that could not say.
-            // `work_suggested` is deliberately NOT carried: the hub skips it
-            // when there is no suggestion, so its absence is the answer, and
-            // keeping the old one would leave Confirm on a decided guess.
+            // `work` and `work_suggested` are deliberately NOT carried. Unlike
+            // `is_controller` they are columns, and every frame carries them
+            // when they are set — but the hub strips nulls from each frame
+            // (`strip_nulls` in `events.rs`) and skips an empty
+            // `work_suggested`, so an absent key is how a cleared link or a
+            // decided suggestion arrives. Keeping the old value would leave a
+            // chip nobody can clear.
             merge = { existing ->
-                incoming.copy(
-                    isController = existing.isController,
-                    work = if (payload.has("work")) incoming.work else existing.work,
-                )
+                incoming.copy(isController = existing.isController)
             },
         ) { it.id == incoming.id },
     )
@@ -227,8 +224,6 @@ private fun <T> decode(serializer: DeserializationStrategy<T>, payload: JsonElem
 
 private fun JsonElement.number(key: String): Long? =
     ((this as? JsonObject)?.get(key) as? JsonPrimitive)?.let { runCatching { it.long }.getOrNull() }
-
-private fun JsonElement.has(key: String): Boolean = (this as? JsonObject)?.containsKey(key) == true
 
 private fun JsonElement.text(key: String): String? =
     ((this as? JsonObject)?.get(key) as? JsonPrimitive)?.takeIf { it.isString }?.content

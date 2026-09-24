@@ -146,11 +146,12 @@ missing feature should only hide a button. Instead, on every `ready`,
   for the `send_prompt { keys }` chips.
 
 `work` and `work_link` are in `ToolsTheAppMayCallTest`'s `permitted` set;
-`work_admin` (tracker administration, master-only) is in `forbidden`. Two row
-rules to keep: a `session:updated` payload **without** a `work` key keeps the
-old `work` (like `is_controller`), while a missing `work_suggested` means "no
-suggestion" — the hub skips it when empty. `FleetSnapshotTest` pins both with
-store-row fixtures. Grouping by work mirrors the desktop's
+`work_admin` (tracker administration, master-only) is in `forbidden`. One row
+rule to keep: a `session:updated` **without** `work` or `work_suggested` means
+there is none — the hub strips nulls from every `/events` frame and skips an
+empty suggestion — so both are replaced with the row, never carried over the
+way `is_controller` is (which no frame ever carries). `FleetSnapshotTest` pins
+it with a null-stripped store-row fixture. Grouping by work mirrors the desktop's
 `buildSessionsByWork` (`src/lib/sidebar_index.ts`); `SessionsViewModelTest`
 carries its cases by name, so extend both together.
 
