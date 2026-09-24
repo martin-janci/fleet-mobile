@@ -203,6 +203,16 @@ data class ConvTurn(
     /** ISO timestamp of the turn's latest assistant entry. */
     @SerialName("ended_at") val endedAt: String? = null,
     val items: List<ConvItem> = emptyList(),
+    /**
+     * `<system-reminder>` blocks the harness stapled onto this turn's prompt,
+     * which the hub lifts out rather than leaving inside [prompt].
+     *
+     * Carried, not drawn. What this field buys a phone is what is *no longer*
+     * in [prompt] — before the hub split them off, a one-line prompt could
+     * arrive as several kilobytes of XML. Empty for an older hub, which does
+     * not send it at all.
+     */
+    val reminders: List<String> = emptyList(),
 )
 
 /**
@@ -212,11 +222,11 @@ data class ConvTurn(
  *
  * The discriminator is dispatched by hand rather than by the generated sealed
  * serializer, because the generated one *throws* on a tag it does not know. The
- * day the hub grows a kind past the seven modelled here, an app already in
- * someone's pocket would fail the whole conversation screen on an item it
- * could simply have skipped past. [Unsupported] is that skip — the same
- * promise `ignoreUnknownKeys` already makes for an unknown *field*, kept for
- * an unknown *variant*.
+ * hub keeps growing kinds — `notification` in September 2026, then `bash` and
+ * `harness` — and an app already in someone's pocket would otherwise fail the
+ * whole conversation screen on an item it could simply have skipped past. [Unsupported] is that skip — the same promise
+ * `ignoreUnknownKeys` already makes for an unknown *field*, kept for an unknown
+ * *variant*.
  */
 @Serializable(with = ConvItemSerializer::class)
 sealed class ConvItem {
@@ -337,6 +347,51 @@ sealed class ConvItem {
     }
 
     /**
+     * A `!` shell line the person ran in the REPL, and what it printed.
+     *
+     * Kin to [Command] rather than to [Tool]: the person typed it, so it reads
+     * back the way they typed it.
+     */
+    @Serializable
+    @SerialName("bash")
+    @JsonIgnoreUnknownKeys
+    data class Bash(
+        val command: String = "",
+        val stdout: String? = null,
+        val stderr: String? = null,
+    ) : ConvItem() {
+        override val label: String get() = "!" + command.ifBlank { "(no command)" }
+
+        /** stdout and stderr as one block, in that order; null when neither ran. */
+        val output: String?
+            get() = listOfNotNull(
+                stdout?.takeIf { it.isNotBlank() },
+                stderr?.takeIf { it.isNotBlank() },
+            ).joinToString("\n").takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * A lone harness `<tag>…</tag>` block the hub has no dedicated item for.
+     *
+     * The hub's catch-all, added with `bash` when it stopped printing harness
+     * XML at the reader. Its whole point is that the *next* tag the harness
+     * invents arrives here instead of as raw XML inside a [Text] — so this
+     * variant is what keeps that promise on a phone too.
+     */
+    @Serializable
+    @SerialName("harness")
+    @JsonIgnoreUnknownKeys
+    data class Harness(
+        val tag: String = "",
+        val body: String = "",
+    ) : ConvItem() {
+        override val label: String
+            get() = body.takeIf { it.isNotBlank() }
+                ?: tag.takeIf { it.isNotBlank() }
+                ?: "harness block"
+    }
+
+    /**
      * An item whose `kind` this build of the app does not know — a variant the
      * hub grew after this app shipped, or an item with no discriminator at all.
      *
@@ -372,6 +427,8 @@ internal object ConvItemSerializer : JsonContentPolymorphicSerializer<ConvItem>(
             "command" -> ConvItem.Command.serializer()
             "notification" -> ConvItem.Notification.serializer()
             "interrupt" -> ConvItem.Interrupt.serializer()
+            "bash" -> ConvItem.Bash.serializer()
+            "harness" -> ConvItem.Harness.serializer()
             else -> ConvItem.Unsupported.serializer()
         }
 }

@@ -228,6 +228,22 @@ class SseFrameReaderTest {
     fun a_frame_with_a_name_but_no_data_is_not_dispatched() {
         assertTrue(read("event: session:updated", "").isEmpty())
     }
+
+    /**
+     * The hub marks each row frame `id: <generation>-<seq>` so a reconnect
+     * can resume from it. It rides on the frame it arrived with; a frame
+     * without one has none rather than inheriting the previous frame's.
+     */
+    @Test
+    fun an_id_rides_on_its_own_frame_and_only_that_one() {
+        val frames = read(
+            "event: session:updated", "id: 3-41", """data: {"id":1}""", "",
+            "event: ready", """data: {"version":"x"}""", "",
+        )
+
+        assertEquals("3-41", frames[0].id)
+        assertEquals(null, frames[1].id)
+    }
 }
 
 /**
@@ -242,7 +258,17 @@ class EventFrameMeaningTest {
             SseFrame("ready", """{"version":"0.9.3","now":1758153600,"kinds":["session","host"]}"""),
         )
 
-        assertEquals(HubEvent.Ready("0.9.3", listOf("session", "host")), event)
+        // `now` is read, not ignored: it is how the app corrects a device clock
+        // that would otherwise mislabel every age on the list at once.
+        assertEquals(HubEvent.Ready("0.9.3", listOf("session", "host"), now = 1758153600L), event)
+    }
+
+    /** A hub that sends no `now` leaves the app on its own clock. */
+    @Test
+    fun a_ready_frame_without_a_clock_reads_as_no_reading() {
+        val event = frameToEvent(SseFrame("ready", """{"version":"0.9.3","kinds":["session"]}"""))
+
+        assertEquals(null, (event as HubEvent.Ready).now)
     }
 
     /** `lagged` is the hub saying the picture has a hole in it. */

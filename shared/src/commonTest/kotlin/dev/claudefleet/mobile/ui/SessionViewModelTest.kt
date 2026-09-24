@@ -46,7 +46,9 @@ private fun row(
     stuck: String? = null,
     activity: String? = null,
     pending: PendingInput? = null,
+    turnSeq: Long = 0,
 ) = SessionRow(
+    turnSeq = turnSeq,
     id = ID,
     tmuxName = "fleet-api",
     friendlyName = "API work",
@@ -76,6 +78,7 @@ private class FakeFleetState(rows: List<SessionRow> = listOf(row())) : FleetStat
     // Null is the honest starting point: no `ready` frame has named a version
     // yet, which is exactly what a hub too old to send one looks like too.
     override val hubVersion = MutableStateFlow<String?>(null)
+    override val clockSkewSeconds = MutableStateFlow(0L)
     override val sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override suspend fun refresh() = Unit
 }
@@ -1018,6 +1021,71 @@ class SessionViewModelTest {
         runCurrent()
 
         assertFalse(vm.state.value.loading, "loading clears once load()'s own read has applied")
+    }
+
+    /**
+     * A session row moves for reasons the transcript knows nothing about —
+     * a tag, a CI result, reconcile rewriting `current_activity` every pass —
+     * and reading the whole conversation back for those is the largest call
+     * this app makes, spent on nothing.
+     */
+    @Test
+    fun a_row_change_on_a_settled_session_does_not_refetch_the_conversation() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "do it")))
+        val fleet = FakeFleetState(listOf(row(status = "idle", turnSeq = 3)))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+        assertEquals(1, actions.reads)
+
+        // The same row again, with something the conversation cannot see
+        // having changed.
+        fleet.sessions.value = listOf(row(status = "idle", activity = "tidying up", turnSeq = 3))
+        fleet.sessionChanges.tryEmit(ID)
+        pastDebounce()
+        runCurrent()
+
+        assertEquals(1, actions.reads, "nothing new to read")
+    }
+
+    /**
+     * The stricter gate — "refetch only when a turn completed" — would be
+     * silent for the whole length of a reply, because `turn_seq` does not
+     * move until the turn ENDS. The screen would sit still exactly while the
+     * answer is being written.
+     */
+    @Test
+    fun a_row_change_while_a_turn_is_running_still_refetches() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "do it")))
+        val fleet = FakeFleetState(listOf(row(status = "working", turnSeq = 3)))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+        assertEquals(1, actions.reads)
+
+        fleet.sessions.value = listOf(row(status = "working", activity = "still going", turnSeq = 3))
+        fleet.sessionChanges.tryEmit(ID)
+        pastDebounce()
+        runCurrent()
+
+        assertEquals(2, actions.reads, "the reply is still arriving")
+    }
+
+    /** A completed turn is news on any status. */
+    @Test
+    fun a_completed_turn_refetches_even_on_a_settled_session() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "do it")))
+        val fleet = FakeFleetState(listOf(row(status = "idle", turnSeq = 3)))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+
+        fleet.sessions.value = listOf(row(status = "idle", turnSeq = 4))
+        fleet.sessionChanges.tryEmit(ID)
+        pastDebounce()
+        runCurrent()
+
+        assertEquals(2, actions.reads)
     }
 
     @Test

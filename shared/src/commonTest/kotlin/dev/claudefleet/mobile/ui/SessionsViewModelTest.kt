@@ -41,6 +41,7 @@ private class FakeFleet(
     override val projects = MutableStateFlow(projectRows)
     override val status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Connected("0.9.3"))
     override val hubVersion = MutableStateFlow<String?>("0.9.3")
+    override val clockSkewSeconds = MutableStateFlow(0L)
     override val sessionChanges = emptyFlow<Long>()
 
     var refreshes = 0
@@ -163,24 +164,27 @@ class SessionsViewModelTest {
     }
 
     @Test
-    fun the_needs_attention_filter_keeps_only_blocked_or_stuck_rows() = runTest {
+    fun the_needs_attention_filter_keeps_only_rows_that_need_a_person() = runTest {
         val fleet = FakeFleet(
             rows = listOf(
                 session(1, host = "box", claudeStatus = "working"),
                 session(2, host = "box", claudeStatus = "blocked"),
                 session(3, host = "pine", claudeStatus = "working", stuckKind = "press_enter"),
                 session(4, host = "pine", claudeStatus = "completed"),
+                // Failed is the hub's third reason; the old blocked-or-stuck
+                // check let it pass as fine.
+                session(5, host = "pine", claudeStatus = "failed"),
             ),
         )
         val vm = viewModel(fleet)
-        assertEquals(4, vm.state.value.groups.sumOf { it.sessionCount })
+        assertEquals(5, vm.state.value.groups.sumOf { it.sessionCount })
 
         vm.setLens(Lens.NeedsYou)
         runCurrent()
 
         val state = vm.state.value
         assertTrue(state.needsAttentionOnly)
-        assertEquals(listOf(2L, 3L), state.groups.flatMap { g -> g.projects.flatMap { it.sessions } }.map { it.id })
+        assertEquals(setOf(2L, 3L, 5L), state.groups.flatMap { g -> g.projects.flatMap { it.sessions } }.map { it.id }.toSet())
         // Both hosts keep a group because both had a row that matched; a host
         // whose rows all filtered out must disappear rather than show empty.
         assertEquals(listOf("box", "pine"), state.groups.map { it.alias })
