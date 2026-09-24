@@ -33,8 +33,15 @@ private const val VERSION = "0.1.0"
  */
 private class FakeSecrets(
     private var stored: Credentials? = null,
-    /** When set, `clear()` throws it — the store refusing to forget. */
-    private val refuseToClear: SecretsUnavailable? = null,
+    /**
+     * When set, `clear()` throws it — the store refusing to forget.
+     *
+     * A `Throwable` rather than a `SecretsUnavailable`, so a test can hand it
+     * something the app has no case for. That is the interesting half: a
+     * failure the code anticipated is explained by its own type, and one it
+     * did not is where a library's message can walk onto the screen.
+     */
+    private val refuseToClear: Throwable? = null,
 ) : Secrets {
     /** Held open, a clear stays in flight so the disabled button can be seen. */
     var gate: CompletableDeferred<Unit>? = null
@@ -175,6 +182,44 @@ class SettingsViewModelTest {
         )
         assertIs<AuthState.Paired>(session.state.value)
         assertEquals(HUB_URL, vm.state.value.hub)
+    }
+
+    /**
+     * An unexpected failure is explained, not repeated.
+     *
+     * The test above hands `clear()` a `SecretsUnavailable`, whose message is
+     * written for a person and is meant to reach the screen — so it cannot
+     * tell `explain(t)` from `t.message`. This one hands it something the app
+     * has no case for, and the two answers differ completely: `explain` says
+     * what kind of failure it was, and `t.message` puts whatever a library
+     * author wrote into a banner.
+     *
+     * `TokenNeverLeaksTest` is why that matters here rather than in the
+     * abstract: a truncated pair reply once put the bearer token into an
+     * exception message, and `FleetRepository` already carries the same rule
+     * with the same reasoning. Settings had the rule and no test.
+     */
+    @Test
+    fun an_unexpected_failure_is_explained_rather_than_repeated() = runTest {
+        val leaky = "Authorization: Bearer 0123456789abcdef"
+        val (session, _) = paired(secrets = FakeSecrets(
+            Credentials(HUB_URL, TOKEN, "phone", Credentials.FULL),
+            refuseToClear = IllegalStateException(leaky),
+        ))
+        session.restore()
+        val vm = SettingsViewModel(session, backgroundScope, appVersion = VERSION)
+        runCurrent()
+
+        vm.forget()
+        runCurrent()
+
+        val error = assertNotNull(vm.state.value.error, "a failed forget must be reported")
+        assertFalse("Bearer" in error, "a library's own message reached the banner: $error")
+        assertTrue(
+            "IllegalStateException" in error,
+            "it should still say what kind of failure it was: $error",
+        )
+        assertFalse(vm.state.value.forgetting, "and the button comes back")
     }
 
     @Test

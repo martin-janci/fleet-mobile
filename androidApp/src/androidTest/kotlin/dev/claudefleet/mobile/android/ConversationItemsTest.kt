@@ -116,50 +116,20 @@ class ConversationItemsTest {
         )) {
             compose.onNodeWithText(text, substring = true).assertIsDisplayed()
         }
-    }
 
-    /**
-     * And the fallback still says which kind it is holding.
-     *
-     * That string is what a bug report quotes, so it is the difference between
-     * "the app showed a blank" and "the app needs support for X".
-     */
-    @Test
-    fun an_unknown_kind_names_itself_on_the_screen() {
-        // Wrapped, because the bar's `StatusChip` reads `LocalStatusColors`
-        // and `FleetTheme` is the only thing that provides it — composing
-        // the screen bare throws "FleetTheme is not applied".
-        compose.setContent {
-            FleetTheme {
-                SessionScreen(
-                    sessionId = 12L,
-                    state = SessionUiState(conversation = everything, loaded = true),
-                    status = ConnectionStatus.Connected(hubVersion = "test"),
-                    onDraftChange = {},
-                    onSend = {},
-                    onRefresh = {},
-                    onBack = {},
-                    onDismissError = {},
-                    onAtBottom = {},
-                    onAnswer = {},
-                    onShowTerminal = {},
-                    onHideTerminal = {},
-                    onRestart = {},
-                    onSafeKill = {},
-                    onKill = {},
-                    onSetTags = {},
-                    onRename = {},
-                    onSendCommand = {},
-                    quickReplies = emptyList(),
-                    onSendQuick = {},
-                    onAddQuickReply = {},
-                    onRemoveQuickReply = {},
-                    onOpenHistory = { emptyList() },
-                )
-            }
-        }
-        compose.waitForIdle()
-
+        // The fallback, asserted here rather than in a test of its own.
+        //
+        // Each `setContent` costs a host-activity launch, and two of them in
+        // one class raced on a loaded emulator: the second test failed with
+        // "No compose hierarchies found in the app" while the first passed.
+        // These two assertions were always about the same composition — the
+        // same turn holds the unknown item — so rendering it once is both the
+        // fix and the more honest arrangement.
+        //
+        // The string matters: it is what a bug report quotes, and the
+        // difference between "the app showed a blank" and "the app needs
+        // support for X".
         compose.onNodeWithText("whatever-comes-next", substring = true).assertIsDisplayed()
     }
+
 }
