@@ -12,14 +12,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.ui.components.ErrorBanner
+import dev.claudefleet.mobile.ui.components.ScreenHeader
 
 /**
  * Settings: which hub, under what name, with what rights, on what version — and
@@ -40,54 +39,51 @@ fun SettingsScreen(
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Settings", style = MaterialTheme.typography.titleMedium)
-            }
-        }
+    // The header and the error stay put; only the fields scroll. The header
+    // used to live inside the scrolling column and left with the content.
+    Column(modifier = modifier.fillMaxSize()) {
+        ScreenHeader(title = "Settings")
         // `SettingsUiState.error` stays a plain `String?` — wrapped here only,
         // at the point `ErrorBanner` needs a [Friendly], rather than pulling
         // `SettingsViewModel` into this task's scope.
         val errorAsFriendly = state.error?.asGenericFriendly()
         ErrorBanner(errorAsFriendly, onDismiss = onDismissError)
+        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+            Spacer(Modifier.height(8.dp))
+            Field("Hub", state.hub)
+            Field("Client name", state.clientName)
+            Field(
+                label = "Access",
+                value = if (state.readOnly) {
+                    "read only — this device cannot send prompts"
+                } else {
+                    state.mode
+                },
+            )
+            Field("App version", state.appVersion)
 
-        Field("Hub", state.hub)
-        Field("Client name", state.clientName)
-        Field(
-            label = "Access",
-            value = if (state.readOnly) {
-                "read only — this device cannot send prompts"
-            } else {
-                state.mode
-            },
-        )
-        Field("App version", state.appVersion)
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-        Text(
-            text = "Forget this hub",
-            style = MaterialTheme.typography.titleSmall,
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
-        Text(
-            text = "Removes the credential from this phone. It does not cancel it — the " +
-                "token stays good on the hub until the operator cancels it there, which " +
-                "is what to do if this phone is lost.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
-        Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            OutlinedButton(onClick = onForget, enabled = state.canForget) {
-                Text(if (state.forgetting) "Forgetting…" else "Forget")
+            Text(
+                text = "Forget this hub",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+            Text(
+                text = "Removes the credential from this phone. It does not cancel it — the " +
+                    "token stays good on the hub until the operator cancels it there, which " +
+                    "is what to do if this phone is lost.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                OutlinedButton(onClick = onForget, enabled = state.canForget) {
+                    Text(if (state.forgetting) "Forgetting…" else "Forget")
+                }
             }
+            Spacer(Modifier.height(24.dp))
         }
-        Spacer(Modifier.height(24.dp))
     }
 }
 

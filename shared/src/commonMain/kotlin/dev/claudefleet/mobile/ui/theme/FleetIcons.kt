@@ -122,11 +122,17 @@ object FleetIcons {
                 strokeLineCap = StrokeCap.Round,
                 strokeLineJoin = StrokeJoin.Round,
             ) {
+                // Clockwise from 3 o'clock round to 12, centred on (12, 12).
+                // This was `isPositiveArc = false`, and of the two circles
+                // through these endpoints that picks the one centred on
+                // (19, 5): three quarters of it lie outside the 24×24 box, so
+                // the icon drew as two clipped scraps instead of a circle.
                 moveTo(19f, 12f)
-                arcTo(7f, 7f, 0f, isMoreThanHalf = true, isPositiveArc = false, x1 = 12f, y1 = 5f)
-                // arrowhead at the arc's end
-                moveTo(12f, 5f); lineTo(9f, 7f)
-                moveTo(12f, 5f); lineTo(15f, 7f)
+                arcTo(7f, 7f, 0f, isMoreThanHalf = true, isPositiveArc = true, x1 = 12f, y1 = 5f)
+                // Arrowhead at the arc's end, pointing the way it travels
+                // (right, into the gap).
+                moveTo(12f, 5f); lineTo(9f, 2f)
+                moveTo(12f, 5f); lineTo(9f, 8f)
             }
         }.build()
     }
