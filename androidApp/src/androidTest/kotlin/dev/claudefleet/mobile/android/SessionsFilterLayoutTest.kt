@@ -69,4 +69,41 @@ class SessionsFilterLayoutTest {
             assertTrue("\"$text\" is cut off: its right edge is $right in a 320dp screen", right <= 320.dp)
         }
     }
+
+    /**
+     * Work graph M8.2: "By work" and "My work" join the row. Four chips do not
+     * fit one 320dp line, so the `FlowRow` has to wrap them, whole, rather
+     * than push any past the right edge.
+     */
+    @Test
+    fun all_four_filters_fit_a_narrow_screen() {
+        compose.setContent {
+            FleetTheme {
+                Box(Modifier.width(320.dp)) {
+                    SessionsScreen(
+                        state = SessionsUiState(
+                            status = ConnectionStatus.Connected(hubVersion = null),
+                            hostFilter = "mefistos-builder",
+                            attentionCount = 12,
+                            workAvailable = true,
+                            byWork = true,
+                            myWorkAvailable = true,
+                        ),
+                        onOpenSession = {},
+                        onToggleNeedsAttention = {},
+                        onClearHostFilter = {},
+                        onRefresh = {},
+                        onDismissError = {},
+                    )
+                }
+            }
+        }
+
+        val chips = listOf("Needs attention", "host: mefistos-builder", "By work", "My work")
+        for (text in chips) {
+            compose.onNodeWithText(text).assertIsDisplayed()
+            val right = compose.onNodeWithText(text).getBoundsInRoot().right
+            assertTrue("\"$text\" is cut off: its right edge is $right in a 320dp screen", right <= 320.dp)
+        }
+    }
 }

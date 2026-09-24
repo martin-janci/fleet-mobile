@@ -38,7 +38,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.data.ConnectionStatus
@@ -49,6 +51,9 @@ import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.components.StatusChip
 import dev.claudefleet.mobile.ui.components.StatusDot
+import dev.claudefleet.mobile.ui.components.WorkChip
+import dev.claudefleet.mobile.ui.components.tone
+import dev.claudefleet.mobile.ui.components.workChipLook
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.LocalStatusColors
 import dev.claudefleet.mobile.ui.theme.StatusTone
@@ -75,6 +80,10 @@ fun SessionsScreen(
      * which the hub would refuse `new_session` anyway.
      */
     onNewSession: (() -> Unit)? = null,
+    /** Lead each host with its work groups (shown only when the hub serves `work`). */
+    onToggleByWork: () -> Unit = {},
+    /** Only the person's own tickets (shown only when a tracker is connected). */
+    onToggleMyWork: () -> Unit = {},
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         SessionsBar(status = state.status) {
@@ -84,6 +93,10 @@ fun SessionsScreen(
                 hostFilter = state.hostFilter,
                 onToggleNeedsAttention = onToggleNeedsAttention,
                 onClearHostFilter = onClearHostFilter,
+                byWork = if (state.workAvailable) state.byWork else null,
+                onToggleByWork = onToggleByWork,
+                myWorkOnly = if (state.myWorkAvailable) state.myWorkOnly else null,
+                onToggleMyWork = onToggleMyWork,
             )
         }
         ConnectionBanner(state.status)
@@ -108,6 +121,7 @@ fun SessionsScreen(
                         EmptyFleet(
                             needsAttentionOnly = state.needsAttentionOnly,
                             hostFilter = state.hostFilter,
+                            myWorkOnly = state.myWorkOnly,
                             modifier = Modifier.fillParentMaxSize(),
                         )
                     }
@@ -116,12 +130,26 @@ fun SessionsScreen(
                     stickyHeader(key = "host-${host.alias}") {
                         HostHeader(alias = host.alias, reachable = host.reachable, sessions = host.sessionCount)
                     }
+                    for (group in host.work) {
+                        item(key = "work-${host.alias}-${group.key}") {
+                            WorkGroupHeader(group)
+                        }
+                        items(group.sessions, key = { it.id }) { row ->
+                            // The heading already names the key: no chip repeating it.
+                            SessionRowItem(row = row, nowSeconds = state.nowSeconds, showWork = false, onClick = { onOpenSession(row.id) })
+                        }
+                    }
                     for (project in host.projects) {
                         item(key = "project-${host.alias}-${project.projectId ?: "none"}") {
                             ProjectHeader(project.label)
                         }
                         items(project.sessions, key = { it.id }) { row ->
-                            SessionRowItem(row = row, nowSeconds = state.nowSeconds, onClick = { onOpenSession(row.id) })
+                            SessionRowItem(
+                                row = row,
+                                nowSeconds = state.nowSeconds,
+                                showWork = state.workAvailable,
+                                onClick = { onOpenSession(row.id) },
+                            )
                         }
                     }
                 }
@@ -172,6 +200,12 @@ private fun FilterRow(
     hostFilter: String?,
     onToggleNeedsAttention: () -> Unit,
     onClearHostFilter: () -> Unit,
+    /** Null hides the chip: the hub serves no `work`. */
+    byWork: Boolean?,
+    onToggleByWork: () -> Unit,
+    /** Null hides the chip: no tracker, or "My work" has not answered. */
+    myWorkOnly: Boolean?,
+    onToggleMyWork: () -> Unit,
 ) {
     FlowRow(
         modifier = Modifier
@@ -208,6 +242,47 @@ private fun FilterRow(
                 modifier = Modifier.widthIn(max = 220.dp),
             )
         }
+        if (byWork != null) {
+            FilterChip(selected = byWork, onClick = onToggleByWork, label = { Text("By work") })
+        }
+        if (myWorkOnly != null) {
+            FilterChip(selected = myWorkOnly, onClick = onToggleMyWork, label = { Text("My work") })
+        }
+    }
+}
+
+/**
+ * A work group's heading: the ticket's status dot, the key, its title, and how
+ * many of its sessions want a person — the number a pager is opened to read.
+ */
+@Composable
+private fun WorkGroupHeader(group: WorkGroup) {
+    val colors = LocalStatusColors.current(group.status.tone())
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)
+            .semantics(mergeDescendants = true) {},
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(colors.dot))
+        Text(
+            text = group.key,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.secondary,
+            textDecoration = if (group.unavailable) TextDecoration.LineThrough else null,
+        )
+        Text(
+            text = group.title,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (group.attentionCount > 0) Badge { Text("${group.attentionCount}") }
     }
 }
 
@@ -249,7 +324,7 @@ private fun ProjectHeader(label: String) {
 }
 
 @Composable
-private fun SessionRowItem(row: SessionRow, nowSeconds: Long, onClick: () -> Unit) {
+private fun SessionRowItem(row: SessionRow, nowSeconds: Long, showWork: Boolean, onClick: () -> Unit) {
     ListItem(
         modifier = Modifier.clickable(onClick = onClick),
         leadingContent = { StatusDot(row.claudeStatus, row.stuckKind) },
@@ -273,7 +348,15 @@ private fun SessionRowItem(row: SessionRow, nowSeconds: Long, onClick: () -> Uni
         },
         supportingContent = {
             val line = row.supportingLine
-            if (line != null) Text(line, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val chip = if (showWork) workChipLook(row) else null
+            if (chip != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    WorkChip(chip)
+                    if (line != null) Text(line, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            } else if (line != null) {
+                Text(line, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         },
         trailingContent = {
             Column(horizontalAlignment = Alignment.End) {
@@ -292,10 +375,16 @@ private fun SessionRowItem(row: SessionRow, nowSeconds: Long, onClick: () -> Uni
 }
 
 @Composable
-private fun EmptyFleet(needsAttentionOnly: Boolean, hostFilter: String?, modifier: Modifier = Modifier.fillMaxSize()) {
+private fun EmptyFleet(
+    needsAttentionOnly: Boolean,
+    hostFilter: String?,
+    myWorkOnly: Boolean,
+    modifier: Modifier = Modifier.fillMaxSize(),
+) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Text(
             text = when {
+                myWorkOnly -> "None of your tickets has a session${hostFilter?.let { " on $it" } ?: ""}."
                 // Both filters on and nothing matches: name what is actually
                 // being asked for, rather than the host-only message that
                 // used to win here and said nothing about attention at all.
