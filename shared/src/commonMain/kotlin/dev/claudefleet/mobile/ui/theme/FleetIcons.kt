@@ -178,6 +178,22 @@ object FleetIcons {
         }.build()
     }
 
+    /** A stroked plus, two crossing lines: the "new" glyph. */
+    val Add: ImageVector by lazy {
+        ImageVector.Builder("Add", 24.dp, 24.dp, 24f, 24f).apply {
+            path(
+                fill = null,
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                moveTo(12f, 5f); lineTo(12f, 19f)
+                moveTo(5f, 12f); lineTo(19f, 12f)
+            }
+        }.build()
+    }
+
     /** A stroked X, two crossing lines. */
     val Close: ImageVector by lazy {
         ImageVector.Builder("Close", 24.dp, 24.dp, 24f, 24f).apply {

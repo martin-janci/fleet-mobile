@@ -195,4 +195,74 @@ class NavigatorTest {
 
         assertEquals(Screen.Hosts, nav.screen.value)
     }
+
+    /**
+     * The form is pushed over the list like a session is, so the Sessions tab
+     * stays lit, and a host filter on the list becomes the form's first guess
+     * at a host — the person was already looking at that machine.
+     */
+    @Test
+    fun new_session_is_pushed_over_the_list_and_takes_its_host_filter() {
+        val nav = Navigator()
+        nav.showSessionsFor("pine")
+
+        nav.newSession()
+
+        assertEquals(Screen.NewSession(hostAlias = "pine"), nav.screen.value)
+        assertEquals(Tab.Sessions, nav.tab.value)
+    }
+
+    @Test
+    fun back_from_the_form_returns_to_the_list_as_it_stood() {
+        val nav = Navigator()
+        nav.showSessionsFor("pine")
+        nav.newSession()
+
+        assertTrue(nav.back(), "the app handled it")
+        assertEquals(Screen.Sessions(hostAlias = "pine"), nav.screen.value)
+    }
+
+    /**
+     * Once the session exists the form has done its job. Back from the new
+     * session goes to the list, not to a form that would create a second one.
+     */
+    @Test
+    fun back_from_the_session_the_form_created_skips_the_form() {
+        val nav = Navigator()
+        nav.showSessionsFor("pine")
+        nav.newSession()
+
+        nav.created(41)
+        assertEquals(Screen.Session(41), nav.screen.value)
+
+        assertTrue(nav.back())
+        assertEquals(Screen.Sessions(hostAlias = "pine"), nav.screen.value)
+    }
+
+    /** Only the list offers the form; anywhere else there is no list to return to. */
+    @Test
+    fun new_session_from_another_tab_does_nothing() {
+        val nav = Navigator()
+        nav.select(Tab.Hosts)
+
+        nav.newSession()
+
+        assertEquals(Screen.Hosts, nav.screen.value)
+    }
+
+    /** A create that finishes after the person left the form does not pull them back. */
+    @Test
+    fun a_create_finishing_after_the_form_was_left_changes_nothing() {
+        val nav = Navigator()
+        nav.newSession()
+        nav.back()
+
+        nav.created(41)
+        assertEquals(Screen.Sessions(), nav.screen.value)
+
+        nav.newSession()
+        nav.select(Tab.Settings)
+        nav.created(42)
+        assertEquals(Screen.Settings, nav.screen.value)
+    }
 }

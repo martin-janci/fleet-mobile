@@ -62,6 +62,10 @@ class ToolsTheAppMayCallTest {
         "kill_session",
         "set_session_tags",
         "set_friendly_name",
+        // Fleet-wide session control, like `send_prompt`: `Access::Client` in
+        // the hub's `guard.rs`, so a `full` client may and a `readonly` one is
+        // never offered the form.
+        "new_session",
     )
 
     @Test

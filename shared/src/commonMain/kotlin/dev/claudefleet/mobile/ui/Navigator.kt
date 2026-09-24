@@ -13,6 +13,12 @@ sealed interface Screen {
      */
     data class Sessions(val hostAlias: String? = null) : Screen
     data class Session(val id: Long) : Screen
+
+    /**
+     * The New session form, pushed over the list it was opened from.
+     * [hostAlias] is that list's host filter — the form's first guess at a host.
+     */
+    data class NewSession(val hostAlias: String? = null) : Screen
     data object Hosts : Screen
     data object Settings : Screen
 }
@@ -66,6 +72,32 @@ class Navigator {
     }
 
     /**
+     * Open the New session form over the list. Only from the list: that is
+     * where the button is, and where [back] and the created session's own back
+     * both return to.
+     *
+     * The form itself is never a place to come back to. [open] from it leaves
+     * [returnTo] as the list, so backing out of the session it just created
+     * lands on the list rather than on a form that would make a second one.
+     */
+    fun newSession() {
+        val list = _screen.value as? Screen.Sessions ?: return
+        returnTo = list
+        go(Screen.NewSession(hostAlias = list.hostAlias))
+    }
+
+    /**
+     * The form's create finished: show the new session — if the form is still
+     * what is showing. The call outlives the form (see
+     * `NewSessionViewModel.callScope`), so it can finish after the person has
+     * backed out or switched tabs, and yanking them into a session then would
+     * be a surprise. The session is on the list either way.
+     */
+    fun created(sessionId: Long) {
+        if (_screen.value is Screen.NewSession) open(sessionId)
+    }
+
+    /**
      * Go back one step.
      *
      * Returns whether the app handled it. On a tab there is nowhere to go back
@@ -79,7 +111,8 @@ class Navigator {
      * returning.
      */
     fun back(): Boolean {
-        if (_screen.value !is Screen.Session) return false
+        val current = _screen.value
+        if (current !is Screen.Session && current !is Screen.NewSession) return false
         go(returnTo)
         return true
     }
@@ -137,7 +170,7 @@ class Navigator {
 }
 
 private fun tabOf(screen: Screen): Tab = when (screen) {
-    is Screen.Sessions, is Screen.Session -> Tab.Sessions
+    is Screen.Sessions, is Screen.Session, is Screen.NewSession -> Tab.Sessions
     Screen.Hosts -> Tab.Hosts
     Screen.Settings -> Tab.Settings
 }

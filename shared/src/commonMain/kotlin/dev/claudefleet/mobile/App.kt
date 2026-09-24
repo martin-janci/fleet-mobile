@@ -32,7 +32,9 @@ import androidx.lifecycle.compose.LifecycleStartEffect
 import dev.claudefleet.mobile.data.AppSession
 import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.data.FleetRepository
+import dev.claudefleet.mobile.data.HubNewSessionActions
 import dev.claudefleet.mobile.data.HubSessionActions
+import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.net.HubEventStream
@@ -43,6 +45,8 @@ import dev.claudefleet.mobile.store.Secrets
 import dev.claudefleet.mobile.ui.HostsScreen
 import dev.claudefleet.mobile.ui.HostsViewModel
 import dev.claudefleet.mobile.ui.Navigator
+import dev.claudefleet.mobile.ui.NewSessionScreen
+import dev.claudefleet.mobile.ui.NewSessionViewModel
 import dev.claudefleet.mobile.ui.PairScreen
 import dev.claudefleet.mobile.ui.PairViewModel
 import dev.claudefleet.mobile.ui.PairedHub
@@ -122,6 +126,9 @@ class AppContainer(
 
     /** The two calls a session screen may make, through the 401 rule. */
     val sessionActions: SessionActions = HubSessionActions(session)
+
+    /** The New session form's one call, through the same 401 rule. */
+    val newSessionActions: NewSessionActions = HubNewSessionActions(session)
 
     /**
      * The chip row and the draft history — one instance for the whole app,
@@ -297,7 +304,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     // app handles back, and on a tab it does not, which lets Android close the
     // app and iOS do whatever it does with an unclaimed swipe. That is why the
     // return value still does not need reading here.
-    BackHandler(enabled = screen is Screen.Session) { nav.back() }
+    BackHandler(enabled = screen is Screen.Session || screen is Screen.NewSession) { nav.back() }
 
     val sessions = remember(repository, scope) { SessionsViewModel(repository, scope) }
     val hosts = remember(repository, scope) { HostsViewModel(repository, scope) }
@@ -361,6 +368,22 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         onClearHostFilter = { nav.clearHostFilter() },
                         onRefresh = { sessions.refresh() },
                         onDismissError = sessions::dismissError,
+                        // `new_session` is not a readonly tool: a readonly
+                        // pairing is not offered a form the hub would refuse.
+                        onNewSession = if (credentials.canWrite) ({ nav.newSession() }) else null,
+                    )
+                }
+                is Screen.NewSession -> key(current) {
+                    NewSessionRoute(
+                        initialHost = current.hostAlias,
+                        container = container,
+                        repository = repository,
+                        credentials = credentials,
+                        // The fleet's scope, not the form's: see
+                        // `NewSessionViewModel.callScope`.
+                        callScope = scope,
+                        onCreated = nav::created,
+                        onBack = { nav.back() },
                     )
                 }
                 is Screen.Session -> key(current.id) {
@@ -392,6 +415,44 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
             }
         }
     }
+}
+
+@Composable
+private fun NewSessionRoute(
+    initialHost: String?,
+    container: AppContainer,
+    repository: FleetRepository,
+    credentials: Credentials,
+    callScope: CoroutineScope,
+    onCreated: (Long) -> Unit,
+    onBack: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val vm = remember(repository, scope) {
+        NewSessionViewModel(
+            fleet = repository,
+            actions = container.newSessionActions,
+            scope = scope,
+            canWrite = credentials.canWrite,
+            initialHost = initialHost,
+            onCreated = onCreated,
+            callScope = callScope,
+        )
+    }
+    val state by vm.state.collectAsState()
+    NewSessionScreen(
+        state = state,
+        onBack = onBack,
+        onSelectHost = vm::selectHost,
+        onProjectQuery = vm::onProjectQuery,
+        onSelectProject = vm::selectProject,
+        onNewWorktree = vm::setNewWorktree,
+        onBranchChange = vm::onBranchChange,
+        onBaseBranchChange = vm::onBaseBranchChange,
+        onFriendlyNameChange = vm::onFriendlyNameChange,
+        onCreate = { vm.create() },
+        onDismissError = vm::dismissError,
+    )
 }
 
 @Composable

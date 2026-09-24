@@ -3,7 +3,8 @@
 A phone client for [`claude-fleet`](https://github.com/martin-janci/claude-fleet).
 
 Every Claude Code session on every machine, on a phone: what each one is doing,
-which ones are blocked, what an agent just said, and a box to answer it with.
+which ones are blocked, what an agent just said, a box to answer it with, and
+a **+** to start a new one on any reachable host.
 One Kotlin Multiplatform codebase with a shared Compose UI, so Android and iOS
 are the same app rather than two apps that look alike.
 
@@ -47,7 +48,8 @@ fleet-hub pair --name phone --ttl 120         # seconds the code stays valid (30
 ```
 
 A `readonly` client can watch everything and send nothing; the app knows this
-and disables the prompt box rather than making a call it knows would be refused.
+and disables the prompt box, and leaves out the New session button, rather than
+making a call it knows would be refused.
 
 It decides that the way the hub decides it, which is worth stating because the
 two used to disagree. `TokenMode::parse` in the hub is
