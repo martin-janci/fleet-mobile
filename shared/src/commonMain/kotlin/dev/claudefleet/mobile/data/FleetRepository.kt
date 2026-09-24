@@ -5,7 +5,9 @@ import dev.claudefleet.mobile.ui.explain
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.net.EventStream
+import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.HubEvent
@@ -24,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -140,7 +143,31 @@ class FleetRepository(
     private val _sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val sessionChanges: Flow<Long> = _sessionChanges.asSharedFlow()
 
+    private val _capabilities = MutableStateFlow(HubCapabilities())
+    override val capabilities: StateFlow<HubCapabilities> = _capabilities.asStateFlow()
+
+    private val _tickets = MutableStateFlow<List<Ticket>>(emptyList())
+    override val tickets: StateFlow<List<Ticket>> = _tickets.asStateFlow()
+
+    private val _myWork = MutableStateFlow<Set<Long>?>(null)
+    override val myWork: StateFlow<Set<Long>?> = _myWork.asStateFlow()
+
+    override fun actionMissing(tool: String, action: String) {
+        _capabilities.update { it.forgetting(tool, action) }
+    }
+
+    override fun rememberTickets(tickets: List<Ticket>) {
+        if (tickets.isEmpty()) return
+        val fresh = tickets.associateBy { it.id }
+        _tickets.update { cached ->
+            cached.map { fresh[it.id] ?: it } + tickets.filter { t -> cached.none { it.id == t.id } }
+        }
+    }
+
     private var job: Job? = null
+
+    /** This connection's `tools/list` and My-work read; replaced on every `ready`. */
+    private var discovery: Job? = null
 
     /** Subscribe, and keep subscribing. Idempotent: a second call is a no-op. */
     fun start() {
@@ -153,6 +180,7 @@ class FleetRepository(
         val running = job
         job = null
         running?.cancel()
+        discovery?.cancel()
         _status.value = ConnectionStatus.Offline(STOPPED)
     }
 
@@ -181,7 +209,7 @@ class FleetRepository(
             val sessions = async { client.listSessions() }
             val hosts = async { client.listHosts() }
             val projects = async { client.listProjects() }
-            publish(FleetSnapshot(sessions.await(), hosts.await(), projects.await()))
+            publish(FleetSnapshot(sessions.await(), hosts.await(), projects.await(), _tickets.value))
         }
     }
 
@@ -263,6 +291,7 @@ class FleetRepository(
                             event.now?.let { _clockSkewSeconds.value = it - clock() }
                             _status.value = ConnectionStatus.Connected(event.version)
                             _sessionChanges.tryEmit(ALL_SESSIONS_CHANGED)
+                            discover()
                         }
                         is HubEvent.Lagged -> {
                             refresh()
@@ -302,12 +331,54 @@ class FleetRepository(
         }
     }
 
-    private fun snapshot() = FleetSnapshot(_sessions.value, _hosts.value, _projects.value)
+    /**
+     * Ask the hub what this token may call, then — when it has the work graph
+     * and a tracker — which tickets are *My work*.
+     *
+     * Once per connection, off the stream's own coroutine: it is a second
+     * opinion on features, not part of the resync, so a slow `tools/list`
+     * must not hold `Connected` back and a failed one must not tear the
+     * stream down. A failure reads as the old hub — every work feature
+     * hidden — which is the safe answer; the next `ready` asks again.
+     * `missing` actions reset here with the rest, because a reconnect may be
+     * to an upgraded hub.
+     */
+    private fun discover() {
+        discovery?.cancel()
+        discovery = scope.launch {
+            val caps = try {
+                HubCapabilities.of(client.toolCatalog())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                HubCapabilities()
+            }
+            _capabilities.value = caps
+            if (!caps.work) {
+                _myWork.value = null
+                return@launch
+            }
+            _myWork.value = try {
+                if (client.workTrackers().isEmpty()) {
+                    null
+                } else {
+                    client.workTickets(MY_WORK).also { rememberTickets(it) }.map { it.id }.toSet()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                null
+            }
+        }
+    }
+
+    private fun snapshot() = FleetSnapshot(_sessions.value, _hosts.value, _projects.value, _tickets.value)
 
     private fun publish(snapshot: FleetSnapshot) {
         _sessions.value = snapshot.sessions
         _hosts.value = snapshot.hosts
         _projects.value = snapshot.projects
+        _tickets.value = snapshot.tickets
     }
 
     private companion object {
@@ -342,6 +413,9 @@ internal const val STOPPED = "not connected"
  * `SessionViewModel` treats it as "refetch me too," alongside its own id.
  */
 internal const val ALL_SESSIONS_CHANGED: Long = Long.MIN_VALUE
+
+/** The hub's view name for the tickets assigned to the tracker account. */
+internal const val MY_WORK = "mine"
 
 /** The first wait, after one failure. */
 internal val BASE_RECONNECT_DELAY = 1.seconds

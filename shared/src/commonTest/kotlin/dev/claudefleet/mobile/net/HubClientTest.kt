@@ -779,4 +779,164 @@ class HubClientTest {
         assertTrue(HUB_LIFECYCLE_TIMEOUT_MS > 300_000L, "at or under the hub's own cap would cut a clone short")
         assertEquals(HUB_CALL_TIMEOUT_MS, timeout?.socketTimeoutMillis, "the keep-alive, not a longer idle, holds the socket")
     }
+
+    // ---- the work graph (M8) ----
+
+    /**
+     * `tools/list` is plain MCP on the ordinary mount. What it answers is what
+     * the hub serves this token: names, and the `action` enum where the
+     * schema has one. A free-string `action` has no entry — unknown, not
+     * empty.
+     */
+    @Test
+    fun the_tool_catalog_reads_names_and_action_enums() = runTest {
+        val tools = """{"jsonrpc":"2.0","id":1,"result":{"tools":[""" +
+            """{"name":"list_sessions","inputSchema":{"type":"object"}},""" +
+            """{"name":"work","inputSchema":{"properties":{"action":{"type":"string","enum":["links","tickets","lookup"]}}}},""" +
+            """{"name":"work_link","inputSchema":{"properties":{"action":{"type":"string"}}}}]}}"""
+        val (hub, calls) = client { tools to HttpStatusCode.OK }
+
+        val catalog = hub.toolCatalog()
+
+        assertEquals(setOf("list_sessions", "work", "work_link"), catalog.names)
+        assertEquals(mapOf("work" to setOf("links", "tickets", "lookup")), catalog.actions)
+        assertEquals("/mcp/json", calls.path(0))
+        val sent = Json.parseToJsonElement(calls.bodyText(0)).jsonObject
+        assertEquals("tools/list", sent["method"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun the_work_reads_name_their_actions() = runTest {
+        val sent = mutableListOf<JsonObject>()
+        val client = clientAnswering { body ->
+            assertEquals("work", body.tool())
+            sent += body.args()
+            when (body.args()["action"]!!.jsonPrimitive.content) {
+                "tickets" -> """[{"id":70,"key":"PAY-7","title":"Refund","status_category":"todo","live_session_ids":[3]}]"""
+                "trackers" -> """[{"id":1,"provider":"jira","name":"acme","state":"ok"}]"""
+                "lookup" -> """{"id":70,"key":"PAY-7","title":"Refund","description":"<b>raw</b>"}"""
+                else -> """{"key":"PAY-7","modes":[{"mode":"last","ok":true}],"hosts":["pine"]}"""
+            }
+        }
+
+        assertEquals(listOf(3L), client.workTickets("mine").single().liveSessionIds)
+        assertEquals("acme", client.workTrackers().single().name)
+        assertEquals("<b>raw</b>", client.workLookup(" PAY-7 ").description)
+        client.workLookup("https://acme.atlassian.net/browse/PAY-7")
+        assertTrue(client.workResumePlan("PAY-7").canResumeLast)
+
+        assertEquals("mine", sent[0]["view"]!!.jsonPrimitive.content)
+        assertEquals("PAY-7", sent[2]["key"]!!.jsonPrimitive.content, "a key is trimmed and sent as key")
+        assertEquals("https://acme.atlassian.net/browse/PAY-7", sent[3]["url"]!!.jsonPrimitive.content)
+        assertFalse("key" in sent[3], "a pasted URL goes as url, not key")
+        assertEquals("resume_plan", sent[4]["action"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun the_work_link_decisions_send_the_session_and_the_link() = runTest {
+        val sent = mutableListOf<JsonObject>()
+        val client = clientAnswering { body ->
+            assertEquals("work_link", body.tool())
+            sent += body.args()
+            """{"id":5,"tmux_name":"t","host_alias":"h"}"""
+        }
+
+        client.confirmWork(5, 11)
+        client.rejectWork(5, 12)
+        client.unlinkWork(5, 13)
+        client.linkWork(5, itemId = 70)
+        client.linkWork(5, key = "billing migration")
+
+        assertEquals(listOf("confirm", "reject", "unlink", "link", "link"), sent.map { it["action"]!!.jsonPrimitive.content })
+        assertEquals(listOf(11, 12, 13), sent.take(3).map { it["link_id"]!!.jsonPrimitive.int })
+        assertTrue(sent.all { it["session_id"]!!.jsonPrimitive.int == 5 })
+        assertEquals(70, sent[3]["item_id"]!!.jsonPrimitive.int)
+        assertFalse("key" in sent[3])
+        assertEquals("billing migration", sent[4]["key"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun start_and_resume_send_their_arguments_and_leave_out_what_was_not_chosen() = runTest {
+        val sent = mutableListOf<JsonObject>()
+        val client = clientAnswering { body -> sent += body.args(); """{"id":8,"tmux_name":"t","host_alias":"pine"}""" }
+
+        client.startWork("PAY-9", hostAlias = "pine", projectId = 3)
+        client.startWork("PAY-9", hostAlias = "pine")
+        client.resumeWork("PAY-9", hostAlias = "hetzner")
+        client.resumeWork("PAY-9")
+
+        val (start, startDefault, resume, resumeDefault) = sent
+        assertEquals("start", start["action"]!!.jsonPrimitive.content)
+        assertEquals(3, start["project_id"]!!.jsonPrimitive.int)
+        assertFalse("project_id" in startDefault, "no project: the hub picks the one that last worked on PAY-*")
+        for (never in listOf("brief", "with_brief")) assertFalse(never in start, "the phone never sends a brief")
+        assertEquals("last", resume["mode"]!!.jsonPrimitive.content)
+        assertEquals("hetzner", resume["host_alias"]!!.jsonPrimitive.content)
+        assertFalse("host_alias" in resumeDefault)
+    }
+
+    /** Starting work creates a session — a worktree, perhaps a clone — so it rides the lifecycle mount. */
+    @Test
+    fun work_link_rides_the_framed_mount_under_the_lifecycle_deadline() = runTest {
+        val calls = Calls()
+        val engine = MockEngine { request ->
+            calls.requests += request
+            val payload = if (request.url.encodedPath == "/mcp") """{"id":1,"tmux_name":"t","host_alias":"h"}""" else "[]"
+            respond(sse(okResult(payload)), HttpStatusCode.OK, sseHeaders)
+        }
+        val hub = HubClient(HttpClient(engine).withHubTimeouts(), BASE, "tok-phone")
+
+        hub.startWork("PAY-9", hostAlias = "h")
+        hub.workTickets("mine") // an ordinary read, for contrast
+
+        assertEquals("/mcp", calls.path(0))
+        assertEquals(HUB_LIFECYCLE_TIMEOUT_MS, calls.requests[0].getCapabilityOrNull(HttpTimeoutCapability)?.requestTimeoutMillis)
+        assertEquals("/mcp/json", calls.path(1))
+    }
+
+    /** `E_EXISTS` names the live session so the phone can jump to it — and its details are scrubbed like the message. */
+    @Test
+    fun a_refusal_keeps_its_details_with_the_token_scrubbed() = runTest {
+        val rpc = """{"jsonrpc":"2.0","id":1,"result":{"isError":true,""" +
+            """"content":[{"type":"text","text":"E_EXISTS: PAY-9 already has a live session"}],""" +
+            """"structuredContent":{"code":"E_EXISTS","message":"PAY-9 already has a live session; jump to it",""" +
+            """"details":{"session_id":41,"host_alias":"pine","tmux_name":"leak tok-phone here"}}}}"""
+        val (hub, _) = client { sse(rpc) to HttpStatusCode.OK }
+
+        val e = assertFailsWith<HubError.Tool> { hub.startWork("PAY-9", hostAlias = "pine") }
+
+        assertEquals(41L, e.existingSessionId())
+        assertFalse("tok-phone" in e.toString(), e.toString())
+        assertNull(HubError.Tool("E_INVALID", "x").existingSessionId())
+    }
+
+    @Test
+    fun an_unknown_action_refusal_is_recognised_and_nothing_else_is() {
+        assertTrue(HubError.Tool("E_INVALID", "unknown work_link action \"confirm\"; one of link, reject, unlink").isUnknownAction())
+        assertTrue(HubError.Tool("E_INVALID", "unknown work action \"lookup\"; one of links, context").isUnknownAction())
+        assertFalse(HubError.Tool("E_INVALID", "confirm needs link_id").isUnknownAction())
+        assertFalse(HubError.Tool("E_NOTFOUND", "unknown action").isUnknownAction())
+    }
+
+    @Test
+    fun capabilities_gate_on_the_tool_then_the_enum_then_what_the_hub_refused() {
+        val old = HubCapabilities()
+        assertFalse(old.work)
+        assertFalse(old.has("work_link", "confirm"), "nothing discovered: nothing offered")
+
+        val readonly = HubCapabilities.of(ToolCatalog(setOf("work")))
+        assertTrue(readonly.work)
+        assertFalse(readonly.workLink, "the hub hides work_link from a readonly token")
+        assertFalse(readonly.has("work_link", "confirm"))
+
+        val free = HubCapabilities.of(ToolCatalog(setOf("work", "work_link")))
+        assertTrue(free.has("work_link", "confirm"), "a free-string action is present until refused")
+        val refused = free.forgetting("work_link", "confirm")
+        assertFalse(refused.has("work_link", "confirm"))
+        assertTrue(refused.has("work_link", "reject"))
+
+        val enumerated = HubCapabilities.of(ToolCatalog(setOf("work", "work_link"), mapOf("work_link" to setOf("link", "unlink"))))
+        assertTrue(enumerated.has("work_link", "unlink"))
+        assertFalse(enumerated.has("work_link", "confirm"), "a hub before M4 enumerates no confirm")
+    }
 }

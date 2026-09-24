@@ -41,6 +41,9 @@ class ToolsTheAppMayCallTest {
         "pair_client",
         "list_clients",
         "revoke_client",
+        // Tracker administration — connecting Jira, storing its credential.
+        // Master-only on the hub, and the phone must never even name it.
+        "work_admin",
     )
 
     /**
@@ -66,6 +69,12 @@ class ToolsTheAppMayCallTest {
         // the hub's `guard.rs`, so a `full` client may and a `readonly` one is
         // never offered the form.
         "new_session",
+        // The work graph (M8). `work` is readonly — tickets, lookup, the
+        // resume plan. `work_link` is `Access::Client` and not readonly, so a
+        // readonly token is never shown it by `tools/list` and the app never
+        // offers what it decides; see `HubCapabilities`.
+        "work",
+        "work_link",
     )
 
     @Test

@@ -3,8 +3,12 @@ package dev.claudefleet.mobile.data
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.Ticket
+import dev.claudefleet.mobile.net.HubCapabilities
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * The fleet's live picture, as a screen sees it.
@@ -69,4 +73,37 @@ interface FleetState {
 
     /** Re-list everything. Raises rather than swallowing, so a pull-to-refresh can say it failed. */
     suspend fun refresh()
+
+    /**
+     * What this hub serves this token, discovered with `tools/list` on every
+     * `ready` — the gate for every work-graph feature. Until a hub has said,
+     * and forever for a hub that cannot, nothing work-shaped is offered.
+     *
+     * The members below default to "an old hub" so a fake that does not care
+     * about the work graph need not model it.
+     */
+    val capabilities: StateFlow<HubCapabilities> get() = NoWork.capabilities
+
+    /** The ticket cache, kept fresh by `work:item` frames. */
+    val tickets: StateFlow<List<Ticket>> get() = NoWork.tickets
+
+    /**
+     * The work item ids in the hub's *My work* view, or null when there is no
+     * such view to ask — no `work` tool, or no tracker connected — which is
+     * what hides the *My work* chip.
+     */
+    val myWork: StateFlow<Set<Long>?> get() = NoWork.myWork
+
+    /** The hub refused [action] of [tool] as unknown: hide it for the rest of this connection. */
+    fun actionMissing(tool: String, action: String) {}
+
+    /** Tickets a read just answered, merged into [tickets]. */
+    fun rememberTickets(tickets: List<Ticket>) {}
+}
+
+/** The defaults [FleetState] hands a fake: a hub without the work graph. */
+private object NoWork {
+    val capabilities: StateFlow<HubCapabilities> = MutableStateFlow(HubCapabilities()).asStateFlow()
+    val tickets: StateFlow<List<Ticket>> = MutableStateFlow<List<Ticket>>(emptyList()).asStateFlow()
+    val myWork: StateFlow<Set<Long>?> = MutableStateFlow<Set<Long>?>(null).asStateFlow()
 }

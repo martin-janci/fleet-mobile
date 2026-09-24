@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.net
 
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.JsonElement
 
 /**
  * Every way talking to a hub can fail, as one closed set the UI can branch on.
@@ -65,7 +66,16 @@ sealed class HubError(message: String, cause: Throwable? = null) : Exception(mes
      * The tool ran and said no: an MCP result with `isError: true` carrying an
      * `E_*` code, or a JSON-RPC `error` object. Both are one thing to a caller.
      */
-    data class Tool(val code: String, override val message: String) : HubError(message)
+    data class Tool(
+        val code: String,
+        override val message: String,
+        /**
+         * The refusal's structured `details`, strings already scrubbed —
+         * `E_EXISTS` names the live session to jump to, `E_AMBIGUOUS` the
+         * candidates to pick from. Null when the hub sent none.
+         */
+        val details: JsonElement? = null,
+    ) : HubError(message)
 
     /**
      * Any other HTTP status — `404` from a spent pairing code, `429` from the

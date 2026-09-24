@@ -4,8 +4,11 @@ import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.PairResult
 import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.Ticket
+import dev.claudefleet.mobile.model.TrackerRow
 import dev.claudefleet.mobile.model.WaitResult
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
@@ -27,6 +30,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
@@ -86,32 +90,13 @@ class HubClient(
         args: JsonObject = JsonObject(emptyMap()),
         deserialize: (JsonElement) -> T,
     ): T {
-        val envelope = buildJsonObject {
-            put("jsonrpc", "2.0")
-            put("id", REQUEST_ID)
-            put("method", "tools/call")
-            putJsonObject("params") {
-                put("name", tool)
-                put("arguments", args)
-            }
+        val params = buildJsonObject {
+            put("name", tool)
+            put("arguments", args)
         }
-        val payload = json.encodeToString(JsonObject.serializer(), envelope)
         val deadline = if (tool in LIFECYCLE_TOOLS) HUB_LIFECYCLE_TIMEOUT_MS else null
-        var (status, body) = send(mountFor(tool), payload, authenticated = true, requestTimeoutMs = deadline)
-        if (status == 404 && !framedOnly) {
-            // The hub predates the JSON mount. Note it once and never ask
-            // again: a 404 here is a property of the hub, not of the call.
-            framedOnly = true
-            val retried = send("$base/mcp", payload, authenticated = true, requestTimeoutMs = deadline)
-            status = retried.first
-            body = retried.second
-        }
-        throwForStatus(status, body, base, token)
-
-        val reply = jsonRpcReply(body)
-        (reply["error"] as? JsonObject)?.let { throw rpcError(it) }
-        val result = reply["result"] as? JsonObject
-            ?: throw HubError.Transport(IllegalStateException("the hub's reply had neither a result nor an error"))
+        val framed = tool in FRAMED_TOOLS || tool in LIFECYCLE_TOOLS
+        val result = rpc("tools/call", params, framed, deadline)
         if (result["isError"]?.asBooleanOrNull() == true) throw toolError(result)
         // Inside the try, not outside it: [HubError] claims to be the closed set
         // every screen branches on, and a payload that does not fit the model
@@ -127,6 +112,73 @@ class HubClient(
         } catch (t: Throwable) {
             throw HubError.Transport(t)
         }
+    }
+
+    /**
+     * The tools this hub serves *this* token, and the `action` values each
+     * one's schema enumerates — `tools/list`, plain MCP on the same mount and
+     * the same auth as a call.
+     *
+     * The hub filters the list per caller (`present::visible_to`), so a
+     * readonly token is simply not shown `work_link`: what comes back is what
+     * this app may call, which is the gate additive features hang on rather
+     * than the wire contract (the contract refuses whole connections; a
+     * missing tool should only hide a button).
+     *
+     * A tool whose `action` is a free string has no entry in
+     * [ToolCatalog.actions] — "unknown", not "none": the caller then learns
+     * an action is missing only from the hub's `E_INVALID` refusal.
+     */
+    suspend fun toolCatalog(): ToolCatalog {
+        val result = rpc("tools/list", JsonObject(emptyMap()), framed = false, requestTimeoutMs = null)
+        val tools = (result["tools"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+        val names = tools.mapNotNull { (it["name"] as? JsonPrimitive)?.content }.toSet()
+        val actions = tools.mapNotNull { tool ->
+            val name = (tool["name"] as? JsonPrimitive)?.content ?: return@mapNotNull null
+            val enum = (
+                ((tool["inputSchema"] as? JsonObject)?.get("properties") as? JsonObject)
+                    ?.get("action") as? JsonObject
+                )?.get("enum") as? JsonArray ?: return@mapNotNull null
+            name to enum.mapNotNull { (it as? JsonPrimitive)?.content }.toSet()
+        }.toMap()
+        return ToolCatalog(names, actions)
+    }
+
+    /**
+     * One JSON-RPC exchange, answered with its `result` object. [call] and
+     * [toolCatalog] differ only in method and what they read out of it.
+     *
+     * A tool that fails does *not* come back as a JSON-RPC error: per the MCP
+     * spec it is a successful result with `isError: true`; [call] reads that.
+     */
+    private suspend fun rpc(
+        method: String,
+        params: JsonObject,
+        framed: Boolean,
+        requestTimeoutMs: Long?,
+    ): JsonObject {
+        val envelope = buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", REQUEST_ID)
+            put("method", method)
+            put("params", params)
+        }
+        val payload = json.encodeToString(JsonObject.serializer(), envelope)
+        var (status, body) = send(mountFor(framed), payload, authenticated = true, requestTimeoutMs = requestTimeoutMs)
+        if (status == 404 && !framedOnly) {
+            // The hub predates the JSON mount. Note it once and never ask
+            // again: a 404 here is a property of the hub, not of the call.
+            framedOnly = true
+            val retried = send("$base/mcp", payload, authenticated = true, requestTimeoutMs = requestTimeoutMs)
+            status = retried.first
+            body = retried.second
+        }
+        throwForStatus(status, body, base, token)
+
+        val reply = jsonRpcReply(body)
+        (reply["error"] as? JsonObject)?.let { throw rpcError(it) }
+        return reply["result"] as? JsonObject
+            ?: throw HubError.Transport(IllegalStateException("the hub's reply had neither a result nor an error"))
     }
 
     /**
@@ -350,6 +402,104 @@ class HubClient(
             },
         ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
 
+    // ---- the work graph: `work` reads, `work_link` decides ----
+    //
+    // Every wrapper names its action outright, so `ToolsTheAppMayCallTest`
+    // sees one tool per call site. None of these is ever called unless
+    // `HubCapabilities` says the tool (and, for a decision, the action) is
+    // there — see `FleetState.capabilities`.
+
+    /** Tickets from the hub's tracker cache for one view: `mine`, `sprint`, `recent`. Never a tracker call. */
+    suspend fun workTickets(view: String): List<Ticket> =
+        call("work", buildJsonObject { put("action", "tickets"); put("view", view) }) {
+            json.decodeFromJsonElement(ListSerializer(Ticket.serializer()), it)
+        }
+
+    /** The connected trackers — empty on a hub with the work graph and no tracker. */
+    suspend fun workTrackers(): List<TrackerRow> =
+        call("work", buildJsonObject { put("action", "trackers") }) {
+            json.decodeFromJsonElement(ListSerializer(TrackerRow.serializer()), it)
+        }
+
+    /** One ticket by key or pasted URL: the cache, else one live fetch by the hub. */
+    suspend fun workLookup(keyOrUrl: String): Ticket {
+        val reference = keyOrUrl.trim()
+        return call(
+            "work",
+            buildJsonObject {
+                put("action", "lookup")
+                put(if (reference.contains("://")) "url" else "key", reference)
+            },
+        ) { json.decodeFromJsonElement(Ticket.serializer(), it) }
+    }
+
+    /** What resuming [key] would do, and where. */
+    suspend fun workResumePlan(key: String): ResumePlan =
+        call("work", buildJsonObject { put("action", "resume_plan"); put("key", key) }) {
+            json.decodeFromJsonElement(ResumePlan.serializer(), it)
+        }
+
+    /** Accept a suggestion: it becomes the session's work. Answers the updated row. */
+    suspend fun confirmWork(sessionId: Long, linkId: Long): SessionRow =
+        workLink("confirm", sessionId) { put("link_id", linkId) }
+
+    /** "Not this": a sticky rejection of one suggestion. Answers the updated row. */
+    suspend fun rejectWork(sessionId: Long, linkId: Long): SessionRow =
+        workLink("reject", sessionId) { put("link_id", linkId) }
+
+    /** Clear a live link. Answers the updated row. */
+    suspend fun unlinkWork(sessionId: Long, linkId: Long): SessionRow =
+        workLink("unlink", sessionId) { put("link_id", linkId) }
+
+    /** Set the session's work by item id (a looked-up ticket) or by bare key. */
+    suspend fun linkWork(sessionId: Long, itemId: Long? = null, key: String? = null): SessionRow =
+        workLink("link", sessionId) {
+            if (itemId != null) put("item_id", itemId) else put("key", key.orEmpty())
+        }
+
+    /**
+     * Start work on a ticket: the hub resolves it, refuses a duplicate with
+     * `E_EXISTS` naming the live session, names the worktree and creates the
+     * session. [projectId] null lets the hub pick the project that last worked
+     * on the key's prefix. No brief: the phone never edits one.
+     */
+    suspend fun startWork(key: String, hostAlias: String, projectId: Long? = null): SessionRow =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "start")
+                put("key", key)
+                put("host_alias", hostAlias)
+                projectId?.let { put("project_id", it) }
+            },
+        ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
+
+    /** Resume past work on [key] — [mode] `last` continues the last conversation. */
+    suspend fun resumeWork(key: String, mode: String = "last", hostAlias: String? = null): SessionRow =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "resume")
+                put("key", key)
+                put("mode", mode)
+                hostAlias?.let { put("host_alias", it) }
+            },
+        ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
+
+    private suspend fun workLink(
+        action: String,
+        sessionId: Long,
+        extra: JsonObjectBuilder.() -> Unit,
+    ): SessionRow =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", action)
+                put("session_id", sessionId)
+                extra()
+            },
+        ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
+
     /**
      * Is this hub reachable and its store open, right now.
      *
@@ -370,9 +520,9 @@ class HubClient(
      */
     private var framedOnly: Boolean = false
 
-    /** `/mcp` for a long poll or a hub with no JSON mount; `/mcp/json` otherwise. */
-    private fun mountFor(tool: String): String =
-        if (framedOnly || tool in FRAMED_TOOLS || tool in LIFECYCLE_TOOLS) "$base/mcp" else "$base/mcp/json"
+    /** `/mcp` for a long poll, a lifecycle call or a hub with no JSON mount; `/mcp/json` otherwise. */
+    private fun mountFor(framed: Boolean): String =
+        if (framedOnly || framed) "$base/mcp" else "$base/mcp/json"
 
     private suspend fun send(
         url: String,
@@ -497,7 +647,11 @@ class HubClient(
                 ?.mapNotNull { it as? JsonObject }
                 ?.firstNotNullOfOrNull { (it["text"] as? JsonPrimitive)?.content }
             ?: "the tool failed without saying why"
-        return HubError.Tool(redacted(code ?: UNKNOWN_CODE, token), redacted(message, token))
+        return HubError.Tool(
+            redacted(code ?: UNKNOWN_CODE, token),
+            redacted(message, token),
+            structured?.get("details")?.redactedStrings(token),
+        )
     }
 
     private fun rpcError(error: JsonObject): HubError.Tool {
@@ -509,7 +663,11 @@ class HubClient(
             ?: UNKNOWN_CODE
         val message = (error["message"] as? JsonPrimitive)?.content
             ?: "the hub rejected the call"
-        return HubError.Tool(redacted(code, token), redacted(message, token))
+        return HubError.Tool(
+            redacted(code, token),
+            redacted(message, token),
+            (error["data"] as? JsonObject)?.get("details")?.redactedStrings(token),
+        )
     }
 
     private companion object {
@@ -539,8 +697,13 @@ class HubClient(
          * the host first. They ride the framed mount for its keep-alive, like
          * [FRAMED_TOOLS], and get [HUB_LIFECYCLE_TIMEOUT_MS] instead of the
          * ordinary deadline, which would give up on a clone that is going fine.
+         *
+         * `work_link` is here whole, not per action: `start` and `resume`
+         * create a session (a worktree, perhaps a clone) and the hub bounds
+         * the tool at `Deadline::Lifecycle`. A quick `confirm` riding the
+         * same mount costs nothing but the framing.
          */
-        val LIFECYCLE_TOOLS = setOf("new_session")
+        val LIFECYCLE_TOOLS = setOf("new_session", "work_link")
         const val UNKNOWN_CODE = "E_UNKNOWN"
     }
 }
@@ -638,6 +801,18 @@ internal suspend fun HttpResponse.textWithin(limit: Int): String {
     val bytes = bodyAsChannel().readBuffer(limit.toLong() + 1).readByteArray()
     if (bytes.size > limit) throw HubError.TooLarge(HUB_REPLY, limit)
     return bytes.decodeToString()
+}
+
+/**
+ * A tool refusal's `details`, with every string in it scrubbed like the
+ * message is. It is wire text like any other, and it lands on [HubError.Tool],
+ * whose `toString` a crash report may print.
+ */
+private fun JsonElement.redactedStrings(token: String?): JsonElement? = when (this) {
+    is JsonNull -> null
+    is JsonPrimitive -> if (isString) JsonPrimitive(redacted(content, token)) else this
+    is JsonArray -> JsonArray(mapNotNull { it.redactedStrings(token) ?: JsonNull })
+    is JsonObject -> JsonObject(mapValues { (_, v) -> v.redactedStrings(token) ?: JsonNull })
 }
 
 private fun JsonElement.asBooleanOrNull(): Boolean? =
