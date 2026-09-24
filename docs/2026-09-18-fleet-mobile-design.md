@@ -261,3 +261,25 @@ its hub call yet, so a burst of taps or event frames costs at most one hub
 call beyond whichever is already running. `SessionUiState.loading` tracks the
 first-ever read; `refreshing` tracks every later one, queued or in flight, and
 the Refresh button is disabled while either is true.
+
+**The work graph (M8) is gated on the hub's tools, not on its contract.**
+Plan: claude-fleet `docs/superpowers/plans/2026-09-24-work-graph-m8-phone.md`.
+On every `ready` the repository calls `tools/list` and publishes
+`HubCapabilities` (tool names, each schema's `action` enum when there is one,
+and actions the hub refused as unknown on this connection). `MAX_HUB_CONTRACT`
+did not move. `SessionRow` gained `work` / `work_suggested`, replaced whole with the row on
+every `session:updated` (the plan's "keep the old value" was corrected by the
+hub's M8.0: frames are null-stripped, so an absent `work` is a cleared link); `"work"` joined
+`SNAPSHOT_EVENT_KINDS` for the ticket cache (`work:item` upserts,
+`work:tracker_removed` marks unavailable), while a session's own work rides
+`session:updated`. `work_link` joined `LIFECYCLE_TOOLS`, so a quick Confirm
+also rides `/mcp` under the 330 s deadline — the price of starting work being
+the same tool. The session screen's work lives in its own
+`SessionWorkViewModel` rather than growing `SessionViewModel`; the plan's
+`SessionViewModelTest` cases are in `SessionWorkViewModelTest`. The Tickets
+sheet is a sheet over the Sessions tab, not a fourth tab. Resume offers only
+`last` with a host picker; the phone never edits a brief. In ticket mode the
+New session form leaves the project to the hub unless one is picked, and an
+`E_AMBIGUOUS` narrows the list to the hub's candidates; `E_EXISTS` from start
+or resume opens the named session instead.
+

@@ -33,22 +33,27 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.components.StatusChip
 import dev.claudefleet.mobile.ui.components.StatusDot
+import dev.claudefleet.mobile.ui.components.WorkChip
+import dev.claudefleet.mobile.ui.components.WorkStatusDot
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.LocalStatusColors
 import dev.claudefleet.mobile.ui.theme.StatusTone
@@ -75,15 +80,25 @@ fun SessionsScreen(
      * which the hub would refuse `new_session` anyway.
      */
     onNewSession: (() -> Unit)? = null,
+    /** Group by work, or stop. Only drawn when the hub has the work graph. */
+    onToggleByWork: () -> Unit = {},
+    /** Only *My work*, or stop. Only drawn when the hub has a tracker. */
+    onToggleMyWork: () -> Unit = {},
+    /** Open the Tickets sheet. Null hides the action — a hub without the work graph. */
+    onOpenTickets: (() -> Unit)? = null,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
-        SessionsBar(status = state.status) {
+        SessionsBar(status = state.status, onOpenTickets = onOpenTickets) {
             FilterRow(
                 needsAttentionOnly = state.needsAttentionOnly,
                 attentionCount = state.attentionCount,
                 hostFilter = state.hostFilter,
                 onToggleNeedsAttention = onToggleNeedsAttention,
                 onClearHostFilter = onClearHostFilter,
+                byWork = state.byWork.takeIf { state.workAvailable },
+                onToggleByWork = onToggleByWork,
+                myWorkOnly = state.myWorkOnly.takeIf { state.myWorkAvailable },
+                onToggleMyWork = onToggleMyWork,
             )
         }
         ConnectionBanner(state.status)
@@ -108,6 +123,7 @@ fun SessionsScreen(
                         EmptyFleet(
                             needsAttentionOnly = state.needsAttentionOnly,
                             hostFilter = state.hostFilter,
+                            myWorkOnly = state.myWorkOnly,
                             modifier = Modifier.fillParentMaxSize(),
                         )
                     }
@@ -117,11 +133,18 @@ fun SessionsScreen(
                         HostHeader(alias = host.alias, reachable = host.reachable, sessions = host.sessionCount)
                     }
                     for (project in host.projects) {
-                        item(key = "project-${host.alias}-${project.projectId ?: "none"}") {
-                            ProjectHeader(project.label)
+                        item(key = "${host.alias}-${project.id}") {
+                            val work = project.work
+                            if (work != null) WorkHeader(work, project.attentionCount) else ProjectHeader(project.label)
                         }
                         items(project.sessions, key = { it.id }) { row ->
-                            SessionRowItem(row = row, nowSeconds = state.nowSeconds, onClick = { onOpenSession(row.id) })
+                            SessionRowItem(
+                                row = row,
+                                nowSeconds = state.nowSeconds,
+                                // Under its work heading the key is already said.
+                                showWork = project.work == null,
+                                onClick = { onOpenSession(row.id) },
+                            )
                         }
                     }
                 }
@@ -140,7 +163,7 @@ fun SessionsScreen(
 
 /** The Sessions header: the title, whether the list is live, and [filters] under both. */
 @Composable
-private fun SessionsBar(status: ConnectionStatus, filters: @Composable () -> Unit) {
+private fun SessionsBar(status: ConnectionStatus, onOpenTickets: (() -> Unit)?, filters: @Composable () -> Unit) {
     val live = when (status) {
         is ConnectionStatus.Connected -> "live"
         is ConnectionStatus.Reconnecting -> "reconnecting…"
@@ -149,7 +172,13 @@ private fun SessionsBar(status: ConnectionStatus, filters: @Composable () -> Uni
         // header says which side is behind.
         is ConnectionStatus.Refused -> "refused"
     }
-    ScreenHeader(title = "Sessions", subtitle = live, below = { filters() })
+    ScreenHeader(
+        title = "Sessions",
+        subtitle = live,
+        // A sheet, not a fourth tab: the phone is a pager.
+        actions = { if (onOpenTickets != null) TextButton(onClick = onOpenTickets) { Text("Tickets") } },
+        below = { filters() },
+    )
 }
 
 /**
@@ -172,6 +201,12 @@ private fun FilterRow(
     hostFilter: String?,
     onToggleNeedsAttention: () -> Unit,
     onClearHostFilter: () -> Unit,
+    /** Null hides the chip: a hub without the work graph. */
+    byWork: Boolean? = null,
+    onToggleByWork: () -> Unit = {},
+    /** Null hides the chip: no tracker to ask what *My work* is. */
+    myWorkOnly: Boolean? = null,
+    onToggleMyWork: () -> Unit = {},
 ) {
     FlowRow(
         modifier = Modifier
@@ -193,6 +228,12 @@ private fun FilterRow(
             },
             trailingIcon = if (attentionCount > 0) ({ Badge { Text("$attentionCount") } }) else null,
         )
+        if (byWork != null) {
+            FilterChip(selected = byWork, onClick = onToggleByWork, label = { Text("By work") })
+        }
+        if (myWorkOnly != null) {
+            FilterChip(selected = myWorkOnly, onClick = onToggleMyWork, label = { Text("My work") })
+        }
         if (hostFilter != null) {
             InputChip(
                 selected = true,
@@ -248,8 +289,32 @@ private fun ProjectHeader(label: String) {
     )
 }
 
+/**
+ * A work group's heading: key, status, title, and how many of its sessions
+ * want a person. The title is the tracker's text, drawn plain.
+ */
 @Composable
-private fun SessionRowItem(row: SessionRow, nowSeconds: Long, onClick: () -> Unit) {
+private fun WorkHeader(work: WorkSummary, attention: Int) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        work.statusCategory?.let { WorkStatusDot(it) }
+        Text(
+            text = if (work.key != null && work.title.isNotBlank()) "${work.label} · ${work.title}" else work.label,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.secondary,
+            textDecoration = if (work.unavailable) TextDecoration.LineThrough else null,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (attention > 0) Badge(modifier = Modifier.padding(start = 8.dp)) { Text("$attention") }
+    }
+}
+
+@Composable
+private fun SessionRowItem(row: SessionRow, nowSeconds: Long, showWork: Boolean, onClick: () -> Unit) {
     ListItem(
         modifier = Modifier.clickable(onClick = onClick),
         leadingContent = { StatusDot(row.claudeStatus, row.stuckKind) },
@@ -273,7 +338,17 @@ private fun SessionRowItem(row: SessionRow, nowSeconds: Long, onClick: () -> Uni
         },
         supportingContent = {
             val line = row.supportingLine
-            if (line != null) Text(line, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val work = row.work?.takeIf { showWork }
+            val guess = row.workSuggested
+            if (work != null || guess != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    work?.let { WorkChip(it, suggested = false) }
+                    guess?.let { WorkChip(it, suggested = true) }
+                    if (line != null) Text(line, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            } else if (line != null) {
+                Text(line, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         },
         trailingContent = {
             Column(horizontalAlignment = Alignment.End) {
@@ -292,13 +367,19 @@ private fun SessionRowItem(row: SessionRow, nowSeconds: Long, onClick: () -> Uni
 }
 
 @Composable
-private fun EmptyFleet(needsAttentionOnly: Boolean, hostFilter: String?, modifier: Modifier = Modifier.fillMaxSize()) {
+private fun EmptyFleet(
+    needsAttentionOnly: Boolean,
+    hostFilter: String?,
+    myWorkOnly: Boolean,
+    modifier: Modifier = Modifier.fillMaxSize(),
+) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Text(
             text = when {
                 // Both filters on and nothing matches: name what is actually
                 // being asked for, rather than the host-only message that
                 // used to win here and said nothing about attention at all.
+                myWorkOnly -> "No session is on your tickets"
                 hostFilter != null && needsAttentionOnly -> "Nothing on $hostFilter needs you"
                 hostFilter != null -> "No sessions on $hostFilter"
                 needsAttentionOnly -> "Nothing needs you right now."

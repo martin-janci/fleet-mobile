@@ -6,7 +6,9 @@ import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.unnamedProject
+import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -17,16 +19,30 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-/** The sessions of one project on one host. */
+/**
+ * The sessions of one project on one host — or, with *by work* on, of one
+ * piece of work on one host, when [work] is set.
+ */
 data class ProjectGroup(
     /** Null for sessions that belong to no project at all — a shell session. */
     val projectId: Long?,
     val label: String,
     val sessions: List<SessionRow>,
-)
+    /**
+     * Set on a work group: the most recently active session's link, which is
+     * what the heading draws (key, title, status). Null on a project group.
+     */
+    val work: WorkSummary? = null,
+) {
+    /** What keys the group on screen: stable across recompositions, distinct per kind. */
+    val id: String get() = work?.groupKey?.let { "work-$it" } ?: "project-${projectId ?: "none"}"
+
+    val attentionCount: Int get() = sessions.count { it.needsAttention }
+}
 
 /** One machine's sessions, cut into projects. */
 data class HostGroup(
@@ -56,6 +72,14 @@ data class SessionsUiState(
     val error: Friendly? = null,
     /** Unix seconds, refreshed every 30s by a ticker — what every row's age is computed against. */
     val nowSeconds: Long = 0,
+    /** The hub has the work graph: the *By work* toggle is offered. */
+    val workAvailable: Boolean = false,
+    /** Sessions are grouped by their work first (only ever true when [workAvailable]). */
+    val byWork: Boolean = false,
+    /** The hub has a tracker and answered *My work*: the chip is offered. */
+    val myWorkAvailable: Boolean = false,
+    /** Narrowed to sessions on *My work* tickets (only ever true when [myWorkAvailable]). */
+    val myWorkOnly: Boolean = false,
 ) {
     val isEmpty: Boolean get() = groups.isEmpty()
 }
@@ -83,6 +107,8 @@ class SessionsViewModel(
      * silently, since every row is wrong by the same amount.
      */
     private val clock: () -> Long = { epochSeconds() + fleet.clockSkewSeconds.value },
+    /** Where *By work* is remembered across launches; null keeps it for this run only. */
+    private val prefs: Prefs? = null,
 ) {
     /** The four fleet flows combined into one value, so a second `combine` can fold in [local] and [now]. */
     private data class FleetSnapshot(
@@ -97,9 +123,14 @@ class SessionsViewModel(
         val hostFilter: String? = null,
         val refreshing: Boolean = false,
         val error: Friendly? = null,
+        val byWork: Boolean = false,
+        val myWorkOnly: Boolean = false,
     )
 
-    private val local = MutableStateFlow(Local())
+    /** What the hub's work graph adds to the picture: whether it is there, and *My work*. */
+    private data class Work(val available: Boolean, val myWork: Set<Long>?)
+
+    private val local = MutableStateFlow(Local(byWork = prefs?.getStringList(BY_WORK_KEY) == listOf(ON)))
     private val now = MutableStateFlow(clock())
 
     init {
@@ -113,9 +144,12 @@ class SessionsViewModel(
 
     val state: StateFlow<SessionsUiState> = combine(
         combine(fleet.sessions, fleet.hosts, fleet.projects, fleet.status, ::FleetSnapshot),
+        combine(fleet.capabilities, fleet.myWork) { caps, mine -> Work(caps.work, mine) },
         local,
         now,
-    ) { snapshot, l, nowSeconds -> assemble(snapshot.sessions, snapshot.hosts, snapshot.projects, snapshot.status, l, nowSeconds) }
+    ) { snapshot, work, l, nowSeconds ->
+        assemble(snapshot.sessions, snapshot.hosts, snapshot.projects, snapshot.status, work, l, nowSeconds)
+    }
         .stateIn(
             scope,
             SharingStarted.Eagerly,
@@ -126,6 +160,7 @@ class SessionsViewModel(
                 fleet.hosts.value,
                 fleet.projects.value,
                 fleet.status.value,
+                Work(fleet.capabilities.value.work, fleet.myWork.value),
                 local.value,
                 now.value,
             ),
@@ -159,6 +194,21 @@ class SessionsViewModel(
      */
     fun setHostFilter(alias: String?) {
         local.update { it.copy(hostFilter = alias) }
+    }
+
+    /**
+     * Group each host's sessions by their work first, or stop. Remembered on
+     * the device, because it is how a person reads the list rather than a
+     * question they are asking this minute.
+     */
+    fun toggleByWork() {
+        val next = local.updateAndGet { it.copy(byWork = !it.byWork) }.byWork
+        prefs?.putStringList(BY_WORK_KEY, if (next) listOf(ON) else emptyList())
+    }
+
+    /** Only sessions on *My work* tickets, or all of them again. Never talks to the hub. */
+    fun toggleMyWorkOnly() {
+        local.update { it.copy(myWorkOnly = !it.myWorkOnly) }
     }
 
     /**
@@ -204,18 +254,34 @@ class SessionsViewModel(
         hosts: List<HostRow>,
         projects: List<ProjectRow>,
         status: ConnectionStatus,
+        work: Work,
         l: Local,
         nowSeconds: Long,
-    ) = SessionsUiState(
-        groups = groupSessions(sessions, hosts, projects, l.needsAttentionOnly, l.hostFilter),
-        status = status,
-        needsAttentionOnly = l.needsAttentionOnly,
-        hostFilter = l.hostFilter,
-        attentionCount = sessions.count { it.needsAttention },
-        refreshing = l.refreshing,
-        error = l.error,
-        nowSeconds = nowSeconds,
-    )
+    ): SessionsUiState {
+        // A hub that loses the work graph (a downgrade, a reconnect elsewhere)
+        // takes the toggles with it rather than leaving a filter nobody can see.
+        val byWork = work.available && l.byWork
+        val myWork = work.myWork?.takeIf { work.available && l.myWorkOnly }
+        return SessionsUiState(
+            groups = groupSessions(sessions, hosts, projects, l.needsAttentionOnly, l.hostFilter, byWork, myWork),
+            status = status,
+            needsAttentionOnly = l.needsAttentionOnly,
+            hostFilter = l.hostFilter,
+            attentionCount = sessions.count { it.needsAttention },
+            refreshing = l.refreshing,
+            error = l.error,
+            nowSeconds = nowSeconds,
+            workAvailable = work.available,
+            byWork = byWork,
+            myWorkAvailable = work.available && work.myWork != null,
+            myWorkOnly = myWork != null,
+        )
+    }
+
+    private companion object {
+        const val BY_WORK_KEY = "sessions.by_work"
+        const val ON = "on"
+    }
 }
 
 /** The label a project group carries, given what `list_projects` last said. */
@@ -247,6 +313,17 @@ internal const val NO_PROJECT = "No project"
  * nothing, the host goes too, rather than drawing a heading over a blank. The
  * same is true of [hostFilter] — a host with nothing on it is simply absent,
  * not an empty heading.
+ *
+ * **[byWork]** puts each host's work groups ahead of its project groups —
+ * hybrid, the desktop's `buildSessionsByWork` rule: only a session whose
+ * *confirmed* primary link the hub stamped (`work`) joins a work group; a
+ * suggestion alone, an external session, or no work at all leaves it in its
+ * project, and there is no "Unclassified" bucket. Work groups come first by
+ * how many of their sessions need a person, then by recency — the desktop's
+ * `sortWorkGroups`, with attention as the severity.
+ *
+ * **[myWork]**, when set, keeps only sessions whose work is one of those
+ * tracker items.
  */
 internal fun groupSessions(
     sessions: List<SessionRow>,
@@ -254,9 +331,12 @@ internal fun groupSessions(
     projects: List<ProjectRow>,
     needsAttentionOnly: Boolean,
     hostFilter: String? = null,
+    byWork: Boolean = false,
+    myWork: Set<Long>? = null,
 ): List<HostGroup> {
     val attended = if (needsAttentionOnly) sessions.filter { it.needsAttention } else sessions
-    val kept = if (hostFilter != null) attended.filter { it.hostAlias == hostFilter } else attended
+    val onHost = if (hostFilter != null) attended.filter { it.hostAlias == hostFilter } else attended
+    val kept = if (myWork != null) onHost.filter { it.work?.itemId in myWork } else onHost
     if (kept.isEmpty()) return emptyList()
 
     val byId = projects.associateBy { it.id }
@@ -268,10 +348,11 @@ internal fun groupSessions(
         .entries
         .sortedBy { it.key }
         .map { (alias, rows) ->
+            val (keyed, rest) = if (byWork) rows.partition { it.workGroupKey != null } else emptyList<SessionRow>() to rows
             HostGroup(
                 alias = alias,
                 reachable = reachability[alias],
-                projects = rows.groupBy { it.projectId }
+                projects = workGroups(keyed) + rest.groupBy { it.projectId }
                     .map { (id, inProject) ->
                         ProjectGroup(
                             projectId = id,
@@ -284,6 +365,25 @@ internal fun groupSessions(
             )
         }
 }
+
+/**
+ * The key a session joins a work group under, or null when it stays in its
+ * project: only the hub's confirmed primary link counts, never a guess, and a
+ * session running outside fleet is never grouped.
+ */
+private val SessionRow.workGroupKey: String?
+    get() = if (kind == "external") null else work?.groupKey
+
+/** One host's keyed sessions as work groups, needing-a-person first, then by recency. */
+private fun workGroups(keyed: List<SessionRow>): List<ProjectGroup> =
+    keyed.sortedWith(BY_RECENCY)
+        .groupBy { it.workGroupKey!! }
+        .map { (_, rows) ->
+            val work = rows.first().work!!
+            ProjectGroup(projectId = null, label = work.label, sessions = rows, work = work)
+        }
+        // Stable: equal attention keeps the recency order the groupBy saw.
+        .sortedByDescending { it.attentionCount }
 
 /** Most recently active first; never-stamped rows last; ties broken by id. */
 private val BY_RECENCY: Comparator<SessionRow> =

@@ -69,4 +69,41 @@ class SessionsFilterLayoutTest {
             assertTrue("\"$text\" is cut off: its right edge is $right in a 320dp screen", right <= 320.dp)
         }
     }
+
+    /**
+     * The work graph adds two chips (M8.2). All four at once is the widest the
+     * row gets — a hub with a tracker, By work on, and a host filter — and on
+     * 320dp that has to wrap onto lines rather than run off the edge.
+     */
+    @Test
+    fun the_work_chips_wrap_rather_than_clip_on_a_narrow_screen() {
+        compose.setContent {
+            FleetTheme {
+                Box(Modifier.width(320.dp)) {
+                    SessionsScreen(
+                        state = SessionsUiState(
+                            status = ConnectionStatus.Connected(hubVersion = null),
+                            hostFilter = "mefistos-builder",
+                            attentionCount = 12,
+                            workAvailable = true,
+                            byWork = true,
+                            myWorkAvailable = true,
+                        ),
+                        onOpenSession = {},
+                        onToggleNeedsAttention = {},
+                        onClearHostFilter = {},
+                        onRefresh = {},
+                        onDismissError = {},
+                    )
+                }
+            }
+        }
+
+        for (text in listOf("Needs attention", "By work", "My work", "host: mefistos-builder")) {
+            compose.onNodeWithText(text).assertIsDisplayed()
+            val right = compose.onNodeWithText(text).getBoundsInRoot().right
+            assertTrue("\"$text\" is cut off: its right edge is $right in a 320dp screen", right <= 320.dp)
+        }
+        compose.onNodeWithText("Sessions").assertIsDisplayed()
+    }
 }

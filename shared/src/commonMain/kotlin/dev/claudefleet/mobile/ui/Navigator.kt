@@ -18,7 +18,11 @@ sealed interface Screen {
      * The New session form, pushed over the list it was opened from.
      * [hostAlias] is that list's host filter — the form's first guess at a host.
      */
-    data class NewSession(val hostAlias: String? = null) : Screen
+    data class NewSession(
+        val hostAlias: String? = null,
+        /** Ticket mode (M8.4): start work on this key rather than a plain session. */
+        val ticketKey: String? = null,
+    ) : Screen
     data object Hosts : Screen
     data object Settings : Screen
 }
@@ -79,11 +83,15 @@ class Navigator {
      * The form itself is never a place to come back to. [open] from it leaves
      * [returnTo] as the list, so backing out of the session it just created
      * lands on the list rather than on a form that would make a second one.
+     *
+     * [ticketKey] is the Tickets sheet's **Start here**: the same form, in
+     * ticket mode, and [created] opens what it makes exactly as for a plain
+     * session.
      */
-    fun newSession() {
+    fun newSession(ticketKey: String? = null) {
         val list = _screen.value as? Screen.Sessions ?: return
         returnTo = list
-        go(Screen.NewSession(hostAlias = list.hostAlias))
+        go(Screen.NewSession(hostAlias = list.hostAlias, ticketKey = ticketKey))
     }
 
     /**

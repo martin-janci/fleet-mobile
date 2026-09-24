@@ -4,9 +4,14 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.NewSessionRequest
+import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.net.HubCapabilities
+import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK_LINK
 import dev.claudefleet.mobile.net.HubError
+import dev.claudefleet.mobile.net.existingSessionId
+import dev.claudefleet.mobile.net.isUnknownAction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -17,6 +22,10 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 /** A machine the form can offer. An unreachable one is listed, greyed, and cannot be picked. */
 data class HostChoice(val alias: String, val reachable: Boolean)
@@ -42,6 +51,13 @@ data class NewSessionUiState(
     val canCreate: Boolean = false,
     val status: ConnectionStatus = ConnectionStatus.Offline("not connected yet"),
     val error: Friendly? = null,
+    /**
+     * Set in ticket mode (M8.4): the session starts work on this key through
+     * `work_link start`, so the hub names the worktree after the ticket and
+     * links it; the worktree and label fields are not offered, and the
+     * project may be left to the hub.
+     */
+    val ticketKey: String? = null,
 )
 
 /**
@@ -80,6 +96,10 @@ class NewSessionViewModel(
      * form is no longer showing.
      */
     private val callScope: CoroutineScope = scope,
+    /** Ticket mode: start work on this key instead of a plain session. */
+    private val ticketKey: String? = null,
+    /** How ticket mode starts work; required with [ticketKey]. */
+    private val workActions: WorkActions? = null,
 ) {
     private data class Local(
         val pickedHost: String? = null,
@@ -91,13 +111,15 @@ class NewSessionViewModel(
         val friendlyName: String = "",
         val creating: Boolean = false,
         val error: Friendly? = null,
+        /** The projects an `E_AMBIGUOUS` start offered; the list narrows to them. */
+        val candidates: List<Long>? = null,
     )
 
     private val local = MutableStateFlow(Local())
 
     val state: StateFlow<NewSessionUiState> =
-        combine(fleet.hosts, fleet.projects, fleet.status, local) { hosts, projects, status, l ->
-            assemble(hosts, projects, status, l)
+        combine(fleet.hosts, fleet.projects, fleet.status, local, fleet.capabilities) { hosts, projects, status, l, caps ->
+            assemble(hosts, projects, status, l, caps)
         }.stateIn(scope, SharingStarted.Eagerly, current())
 
     /** Pick a host. One the hub cannot reach is ignored — the row is greyed for that reason. */
@@ -142,6 +164,7 @@ class NewSessionViewModel(
      * nothing. A failure unlocks it with everything still filled in.
      */
     fun create(): Job? {
+        if (ticketKey != null) return startWork(ticketKey)
         // `canCreate` is false while a create is in flight, so a second tap
         // stops here.
         val request = requestFrom(current()) ?: return null
@@ -159,14 +182,61 @@ class NewSessionViewModel(
         }
     }
 
+    /**
+     * Ticket mode's create: `work_link start` on the chosen host, with the
+     * project only when the person picked one — otherwise the hub uses the
+     * project that last worked on the key's prefix.
+     *
+     * Two refusals are answers rather than failures. `E_EXISTS` names the
+     * session already on the ticket, and the phone opens it (Jump — never a
+     * second session). `E_AMBIGUOUS` says the hub cannot pick a project and
+     * lists candidates; the project list narrows to them.
+     */
+    private fun startWork(key: String): Job? {
+        val s = current()
+        val actions = workActions ?: return null
+        if (!s.canCreate) return null
+        val host = s.host ?: return null
+        local.update { it.copy(creating = true, error = null) }
+        return callScope.launch {
+            try {
+                val row = actions.start(key, host, s.projectId)
+                local.update { it.copy(creating = false) }
+                onCreated(row.id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                val tool = t as? HubError.Tool
+                val jump = tool?.existingSessionId()
+                when {
+                    jump != null -> {
+                        local.update { it.copy(creating = false) }
+                        onCreated(jump)
+                    }
+                    tool?.code == "E_AMBIGUOUS" -> {
+                        val ids = projectCandidates(tool)
+                        local.update {
+                            it.copy(creating = false, candidates = ids.ifEmpty { null }, error = friendlyWork(t))
+                        }
+                    }
+                    else -> {
+                        if (tool != null && tool.isUnknownAction()) fleet.actionMissing(WORK_LINK, START)
+                        local.update { it.copy(creating = false, error = explainCreateFailure(t)) }
+                    }
+                }
+            }
+        }
+    }
+
     private fun current(): NewSessionUiState =
-        assemble(fleet.hosts.value, fleet.projects.value, fleet.status.value, local.value)
+        assemble(fleet.hosts.value, fleet.projects.value, fleet.status.value, local.value, fleet.capabilities.value)
 
     private fun assemble(
         hosts: List<HostRow>,
         projects: List<ProjectRow>,
         status: ConnectionStatus,
         l: Local,
+        caps: HubCapabilities,
     ): NewSessionUiState {
         // Hidden is the desktop's "do not show me this". The exception is the
         // host the list was filtered to: the person tapped + on that host's own
@@ -186,10 +256,17 @@ class NewSessionViewModel(
         val chosen = projects.firstOrNull { it.id == l.projectId }
         val listed = projects
             .sortedWith(MOST_RECENT_FIRST)
+            .filter { l.candidates == null || it.id in l.candidates }
             .filter { query.isEmpty() || it.label.contains(query, ignoreCase = true) }
             .map { ProjectChoice(it.id, it.label) }
 
         val branchOk = !l.newWorktree || isBranchName(l.branch.trim())
+        val ready = if (ticketKey != null) {
+            // The project is the hub's to pick unless the person chose one.
+            workActions != null && caps.has(WORK_LINK, START)
+        } else {
+            chosen != null && branchOk
+        }
         return NewSessionUiState(
             hosts = offered.map { HostChoice(it.alias, it.reachable) },
             host = host,
@@ -202,9 +279,10 @@ class NewSessionViewModel(
             baseBranch = l.baseBranch,
             friendlyName = l.friendlyName,
             creating = l.creating,
-            canCreate = canWrite && !l.creating && host != null && chosen != null && branchOk,
+            canCreate = canWrite && !l.creating && host != null && ready,
             status = status,
             error = l.error,
+            ticketKey = ticketKey,
         )
     }
 
@@ -219,6 +297,13 @@ class NewSessionViewModel(
         )
     }
 }
+
+private const val START = "start"
+
+/** The project ids an `E_AMBIGUOUS` start offers — `{"candidates": [{"id", "owner", "repo"}]}`. */
+private fun projectCandidates(e: HubError.Tool): List<Long> =
+    ((e.details as? JsonObject)?.get("candidates") as? JsonArray).orEmpty()
+        .mapNotNull { ((it as? JsonObject)?.get("id") as? JsonPrimitive)?.longOrNull }
 
 /**
  * Enough of a branch name to be worth sending: something, with no whitespace.

@@ -127,4 +127,38 @@ class SessionRowTest {
         // A Claude running outside fleet is read-only here: never a person's job.
         assertNull(calm.copy(kind = "external", claudeStatus = "blocked").attentionReason)
     }
+
+    /** The phone view from a hub with the work graph: `ok_json_compact` drops what is empty. */
+    @Test
+    fun work_and_the_suggestion_parse_with_every_optional_field_absent() {
+        val row = json.decodeFromString(
+            SessionRow.serializer(),
+            """{"id":1,"work":{"link_id":4,"key":"PAY-7","title":"","source":"branch"},""" +
+                """"work_suggested":{"link_id":5,"item_id":9,"key":"PAY-9","title":"Ledger","source":"prompt",""" +
+                """"state":"suggested","status_category":"blocked_by_legal","unavailable":true,"suggestions":3}}""",
+        )
+        val work = row.work!!
+        assertEquals(4L, work.linkId)
+        assertEquals("PAY-7", work.label)
+        assertNull(work.statusCategory)
+        assertEquals("", work.state, "a link older than M4 has no state")
+        val guess = row.workSuggested!!
+        assertEquals(StatusCategory.Unknown, guess.statusCategory, "a new wire value must not fail the row")
+        assertTrue(guess.unavailable)
+        assertEquals(3, guess.suggestions)
+    }
+
+    @Test
+    fun a_row_without_work_has_none() {
+        val bare = json.decodeFromString(SessionRow.serializer(), """{"id":9}""")
+        assertNull(bare.work)
+        assertNull(bare.workSuggested)
+    }
+
+    @Test
+    fun the_group_key_is_the_key_upper_cased_else_the_title() {
+        assertEquals("PAY-7", WorkSummary(key = "pay-7").groupKey)
+        assertEquals("BILLING MIGRATION", WorkSummary(title = "billing migration").groupKey)
+        assertNull(WorkSummary().groupKey)
+    }
 }

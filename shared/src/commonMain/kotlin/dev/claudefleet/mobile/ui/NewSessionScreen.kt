@@ -68,7 +68,7 @@ fun NewSessionScreen(
     val editable = !state.creating
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
-            title = "New session",
+            title = state.ticketKey?.let { "Start $it" } ?: "New session",
             subtitle = state.host?.let { host -> state.projectLabel?.let { "$it on $host" } ?: host },
             navigation = {
                 IconButton(onClick = onBack) { Icon(FleetIcons.ArrowBack, contentDescription = "Back") }
@@ -101,7 +101,11 @@ fun NewSessionScreen(
 
             item(key = "project-label") {
                 SectionLabel("Project")
-                if (state.projectLabel != null) Hint("Selected: ${state.projectLabel}")
+                when {
+                    state.projectLabel != null -> Hint("Selected: ${state.projectLabel}")
+                    // Ticket mode: the hub picks the project that last worked on the key's prefix.
+                    state.ticketKey != null -> Hint("Optional — left empty, the hub picks the project that last worked on it.")
+                }
             }
             item(key = "project-query") {
                 OutlinedTextField(
@@ -128,7 +132,9 @@ fun NewSessionScreen(
                 )
             }
 
-            item(key = "worktree") {
+            // Starting work names the worktree after the ticket on the hub, and
+            // the label too: nothing to ask here.
+            if (state.ticketKey == null) item(key = "worktree") {
                 HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -146,7 +152,7 @@ fun NewSessionScreen(
                     Switch(checked = state.newWorktree, onCheckedChange = onNewWorktree, enabled = editable)
                 }
             }
-            if (state.newWorktree) {
+            if (state.newWorktree && state.ticketKey == null) {
                 item(key = "branch") {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -175,7 +181,7 @@ fun NewSessionScreen(
                     }
                 }
             }
-            item(key = "name") {
+            if (state.ticketKey == null) item(key = "name") {
                 OutlinedTextField(
                     value = state.friendlyName,
                     onValueChange = onFriendlyNameChange,
@@ -198,9 +204,9 @@ fun NewSessionScreen(
                 if (state.creating) {
                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
-                    Text("Creating…")
+                    Text(if (state.ticketKey != null) "Starting…" else "Creating…")
                 } else {
-                    Text("Create session")
+                    Text(if (state.ticketKey != null) "Start here" else "Create session")
                 }
             }
         }

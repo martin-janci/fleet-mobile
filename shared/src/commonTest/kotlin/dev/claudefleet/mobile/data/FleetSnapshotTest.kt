@@ -3,10 +3,17 @@ package dev.claudefleet.mobile.data
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.StatusCategory
+import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.net.HubEvent
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -93,6 +100,30 @@ private fun hostPayload(alias: String, reachable: Boolean = true): String = """
   "transport": "ssh"
 }
 """
+
+/**
+ * [sessionPayload] as a hub with the work graph serializes it: `work` always
+ * present (`null` when the session has none), `work_rejected` always, and
+ * `work_suggested` only when there is a suggestion — the store row skips it
+ * otherwise (`crates/fleet-core/src/store/rows.rs`).
+ */
+private fun workPayload(id: Long, work: String = "null", suggested: String? = null): String =
+    sessionPayload(id).trimEnd().removeSuffix("}") +
+        """, "work": $work, "work_rejected": []""" +
+        (suggested?.let { """, "work_suggested": $it""" } ?: "") + "}"
+
+private const val PAY7 =
+    """{"link_id":11,"item_id":70,"key":"PAY-7","title":"Refund retries","source":"branch",""" +
+        """"status_category":"in_progress","status_name":"In Review","state":"confirmed"}"""
+
+private const val PAY9_GUESS =
+    """{"link_id":12,"item_id":90,"key":"PAY-9","title":"Ledger","source":"prompt","state":"suggested",""" +
+        """"strength":"weak","rule":"R5","suggestions":2}"""
+
+/** A `work:item` payload: the hub's `WorkItemRow`, no live sessions. */
+internal fun ticketPayload(id: Long, key: String, trackerId: Long = 1, title: String = "t"): String =
+    """{"id":$id,"source":"jira","key":"$key","title":"$title","status_category":"todo",""" +
+        """"created_at":1,"updated_at":2,"tracker_id":$trackerId}"""
 
 class FleetSnapshotTest {
 
@@ -409,17 +440,104 @@ class FleetSnapshotTest {
      */
     @Test
     fun the_subscribed_kinds_are_exactly_the_ones_the_snapshot_acts_on() {
-        assertEquals(listOf("session", "host", "project"), SNAPSHOT_EVENT_KINDS)
+        assertEquals(listOf("session", "host", "project", "work"), SNAPSHOT_EVENT_KINDS)
 
         val empty = FleetSnapshot()
         val acted = listOf(
             "session" to row("session:created", sessionPayload(id = 1)),
             "host" to row("host:added", hostPayload("box")),
             "project" to row("project:updated", """{"id":3,"owner":"o","repo":"r","base_path":"/p","adopted":false}"""),
+            "work" to row("work:item", ticketPayload(id = 70, key = "PAY-7")),
         )
         assertEquals(SNAPSHOT_EVENT_KINDS, acted.map { it.first })
         for ((kind, frame) in acted) {
             assertTrue(empty.applying(frame) !== empty, "$kind is subscribed but does nothing")
         }
+    }
+
+    // ---- the work graph (M8) ----
+
+    @Test
+    fun a_session_update_carries_its_work_and_its_suggestion() {
+        val after = FleetSnapshot().applying(row("session:updated", workPayload(1, work = PAY7, suggested = PAY9_GUESS)))
+        val s = after.sessions.single()
+        assertEquals("PAY-7", s.work?.key)
+        assertEquals(StatusCategory.InProgress, s.work?.statusCategory)
+        assertEquals(12L, s.workSuggested?.linkId)
+        assertEquals("R5", s.workSuggested?.rule)
+    }
+
+    /**
+     * The hub strips nulls from every frame (`strip_nulls` in `events.rs`),
+     * so a link cleared on the desktop — or by *Clear* here — arrives as an
+     * update with no `work` key. That must clear the chip: unlike
+     * `is_controller`, `work` is a column every frame carries when it is set.
+     * The second frame is the whole store row, nulls stripped, which is what
+     * the hub actually sends.
+     */
+    @Test
+    fun a_session_update_without_work_clears_it() {
+        val linked = FleetSnapshot().applying(row("session:updated", workPayload(1, work = PAY7)))
+        val stripped = Json.parseToJsonElement(sessionPayload(id = 1, activity = "testing")).jsonObject
+            .filterValues { it !is JsonNull }
+        val after = linked.applying(HubEvent.Row("session:updated", JsonObject(stripped)))
+        assertEquals("testing", after.sessions.single().currentActivity, "the rest of the row did update")
+        assertNull(after.sessions.single().work)
+    }
+
+    /** A present `null` (a hub that did not strip) means the same. */
+    @Test
+    fun a_session_update_with_work_null_clears_it() {
+        val linked = FleetSnapshot().applying(row("session:updated", workPayload(1, work = PAY7)))
+        val after = linked.applying(row("session:updated", workPayload(1, work = "null")))
+        assertNull(after.sessions.single().work)
+    }
+
+    /** `is_controller` is still carried: events never have it, so its absence says nothing. */
+    @Test
+    fun a_work_update_still_keeps_is_controller() {
+        val mine = FleetSnapshot(sessions = listOf(SessionRow(id = 1, isController = true)))
+        val after = mine.applying(row("session:updated", workPayload(1, work = PAY7)))
+        assertTrue(after.sessions.single().isController)
+        assertEquals("PAY-7", after.sessions.single().work?.key)
+    }
+
+    /**
+     * `work_suggested` is skipped by the hub when there is none, so its
+     * absence is the answer: a confirmed or rejected guess must leave, or the
+     * phone keeps offering Confirm on something already decided.
+     */
+    @Test
+    fun a_decided_suggestion_leaves_with_the_next_update() {
+        val guessed = FleetSnapshot().applying(row("session:updated", workPayload(1, suggested = PAY9_GUESS)))
+        val after = guessed.applying(row("session:updated", workPayload(1, work = PAY7)))
+        assertNull(after.sessions.single().workSuggested)
+        assertEquals("PAY-7", after.sessions.single().work?.key)
+    }
+
+    @Test
+    fun a_work_item_frame_upserts_the_ticket_and_keeps_its_live_sessions() {
+        val cached = FleetSnapshot(
+            tickets = listOf(Ticket(id = 70, key = "PAY-7", title = "old", liveSessionIds = listOf(1))),
+        )
+        val after = cached.applying(row("work:item", ticketPayload(70, "PAY-7", title = "Refund retries")))
+        val t = after.tickets.single()
+        assertEquals("Refund retries", t.title)
+        assertEquals(listOf(1L), t.liveSessionIds, "a work:item frame cannot carry live sessions")
+
+        val added = after.applying(row("work:item", ticketPayload(90, "PAY-9")))
+        assertEquals(listOf(70L, 90L), added.tickets.map { it.id })
+    }
+
+    @Test
+    fun a_removed_tracker_marks_its_tickets_unavailable_and_leaves_the_others() {
+        val cached = FleetSnapshot(
+            tickets = listOf(Ticket(id = 70, key = "PAY-7", trackerId = 1), Ticket(id = 80, key = "OPS-1", trackerId = 2)),
+        )
+        val after = cached.applying(row("work:tracker_removed", """{"id":1}"""))
+        assertTrue(after.tickets.first { it.id == 70L }.unavailable)
+        assertFalse(after.tickets.first { it.id == 80L }.unavailable)
+        assertSame(after, after.applying(row("work:tracker_removed", """{"id":1}""")), "already marked: a no-op")
+        assertSame(cached, cached.applying(row("work:tracker_removed", """{"id":"x"}""")))
     }
 }

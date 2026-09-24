@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -67,6 +68,13 @@ private class FakeHub(
     var projectCalls = 0
         private set
 
+    /** What `tools/list` answers, as the `tools` array; null makes it a 404-free JSON-RPC error. */
+    var toolsJson: String? = null
+    var trackersJson: String = "[]"
+    var mineJson: String = "[]"
+    var toolListCalls = 0
+        private set
+
     /** Makes `list_hosts` answer 401, so a refresh fails after its first call. */
     var failHosts = false
 
@@ -77,7 +85,15 @@ private class FakeHub(
         HttpClient(
             MockEngine { request ->
                 val body = (request.body as TextContent).text
+                if ("tools/list" in body) {
+                    toolListCalls += 1
+                    val reply = toolsJson?.let { """{"jsonrpc":"2.0","id":1,"result":{"tools":$it}}""" }
+                        ?: """{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found"}}"""
+                    return@MockEngine respond(reply, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+                }
                 val payload = when {
+                    "\"trackers\"" in body -> trackersJson
+                    "\"tickets\"" in body -> mineJson
                     "list_sessions" in body -> { sessionCalls += 1; sessionsJson }
                     "list_hosts" in body -> { hostCalls += 1; hostsJson }
                     "list_projects" in body -> { projectCalls += 1; projectsJson }
@@ -957,6 +973,84 @@ class FleetRepositoryTest {
 
         assertEquals(listOf(null, "7-10", null), stream.resumedFrom)
         assertEquals(2, hub.sessionCalls, "the unresumed ready re-listed")
+        repository.stop()
+    }
+
+    // ---- the work graph (M8): what this token may call, per connection ----
+
+    @Test
+    fun every_ready_asks_the_hub_which_tools_this_token_has() = runTest {
+        val hub = FakeHub().apply {
+            toolsJson = """[{"name":"list_sessions"},{"name":"work"},{"name":"work_link"}]"""
+            trackersJson = """[{"id":1,"provider":"jira","name":"acme","state":"ok"}]"""
+            mineJson = """[{"id":70,"key":"PAY-7","title":"Refund"},{"id":90,"key":"PAY-9","title":"Ledger"}]"""
+        }
+        val stream = FakeStream { emit(READY); awaitCancellation() }
+        val repository = repo(hub, stream, backgroundScope)
+
+        repository.start()
+        val caps = repository.capabilities.first { it.work }
+
+        assertTrue(caps.workLink)
+        assertEquals(setOf(70L, 90L), repository.myWork.first { it != null })
+        assertEquals(listOf("PAY-7", "PAY-9"), repository.tickets.value.map { it.key })
+        assertEquals(1, hub.toolListCalls)
+        repository.stop()
+    }
+
+    /** No tracker connected: work groups still work, but there is no *My work* to filter by. */
+    @Test
+    fun a_hub_with_work_and_no_tracker_has_no_my_work() = runTest {
+        val hub = FakeHub().apply { toolsJson = """[{"name":"work"}]""" }
+        val stream = FakeStream { emit(READY); awaitCancellation() }
+        val repository = repo(hub, stream, backgroundScope)
+
+        repository.start()
+        repository.capabilities.first { it.work }
+        repository.status.first { it is ConnectionStatus.Connected }
+
+        assertNull(repository.myWork.value)
+        assertFalse(repository.capabilities.value.workLink, "a readonly token is not shown work_link")
+        repository.stop()
+    }
+
+    /** A hub too old for `tools/list` is the old hub: connected, and nothing work-shaped offered. */
+    @Test
+    fun a_hub_that_cannot_list_tools_stays_connected_with_no_work() = runTest {
+        val hub = FakeHub(sessionsJson = sessionRows(1))
+        val stream = FakeStream { emit(READY); awaitCancellation() }
+        val repository = repo(hub, stream, backgroundScope)
+
+        repository.start()
+        repository.status.first { it is ConnectionStatus.Connected }
+        while (hub.toolListCalls == 0) yield()
+
+        assertFalse(repository.capabilities.value.work)
+        assertEquals(listOf(1L), repository.sessions.value.map { it.id })
+        repository.stop()
+    }
+
+    @Test
+    fun an_action_the_hub_refused_stays_hidden_until_the_next_connection() = runTest {
+        val hub = FakeHub().apply { toolsJson = """[{"name":"work"},{"name":"work_link"}]""" }
+        val drop = CompletableDeferred<Unit>()
+        val stream = FakeStream { attempt ->
+            emit(READY)
+            if (attempt == 1) {
+                drop.await()
+                throw IllegalStateException("the connection dropped")
+            }
+            awaitCancellation()
+        }
+        val repository = FleetRepository(hub.client, stream, backgroundScope, backoff = { kotlin.time.Duration.ZERO })
+
+        repository.start()
+        repository.capabilities.first { it.workLink }
+        repository.actionMissing("work_link", "confirm")
+        assertFalse(repository.capabilities.value.has("work_link", "confirm"))
+
+        drop.complete(Unit)
+        repository.capabilities.first { it.has("work_link", "confirm") }
         repository.stop()
     }
 }

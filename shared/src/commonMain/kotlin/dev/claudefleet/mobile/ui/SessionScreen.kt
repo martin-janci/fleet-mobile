@@ -83,6 +83,7 @@ import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.MarkdownText
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.components.StatusStrip
+import dev.claudefleet.mobile.ui.components.WorkChip
 import dev.claudefleet.mobile.ui.components.contextIsTight
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.data.ConnectionStatus
@@ -139,6 +140,9 @@ fun SessionScreen(
      */
     onOpenHistory: () -> List<String>,
     modifier: Modifier = Modifier,
+    /** The ticket chip and its sheet; the default draws nothing (a hub without the work graph). */
+    work: SessionWorkUiState = SessionWorkUiState(),
+    workHandlers: SessionWorkHandlers = SessionWorkHandlers(),
 ) {
     val turns = state.conversation.turns
     val listState = rememberLazyListState()
@@ -237,9 +241,13 @@ fun SessionScreen(
             onSetTags = onSetTags,
             onRename = onRename,
             onSendCommand = onSendCommand,
+            work = work,
+            workHandlers = workHandlers,
         )
         ConnectionBanner(status, state.hubReachable)
         ErrorBanner(state.error, onDismiss = onDismissError)
+        ErrorBanner(work.error, onDismiss = workHandlers.onDismissError)
+        if (work.sheetOpen) WorkTicketSheet(work, workHandlers)
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             if (state.loaded && turns.isEmpty()) {
@@ -373,6 +381,8 @@ private fun SessionBar(
     onSetTags: (List<String>) -> Unit,
     onRename: (String) -> Unit,
     onSendCommand: (String) -> Unit,
+    work: SessionWorkUiState,
+    workHandlers: SessionWorkHandlers,
 ) {
     val busy = state.loading || state.refreshing
     val angle = refreshAngle(busy)
@@ -414,7 +424,7 @@ private fun SessionBar(
             // hub refuses every one of these calls against it with
             // `E_INVALID_STATE`) has no management action to offer at all —
             // see [SessionUiState.canManage].
-            if (state.canManage) {
+            if (state.canManage || work.canSetWork) {
                 SessionOverflowMenu(
                     state = state,
                     onRestart = onRestart,
@@ -422,6 +432,7 @@ private fun SessionBar(
                     onKill = onKill,
                     onSetTags = onSetTags,
                     onRename = onRename,
+                    onSetWork = workHandlers.onSetWork.takeIf { work.canSetWork },
                 )
             }
         },
@@ -466,11 +477,23 @@ private fun SessionBar(
             // they left it no room at all on a phone.
             val tight = contextIsTight(state.session, state.conversation.context)
             val retiring = state.safeKillState
-            if (tight || retiring != null) {
+            val ticket = work.chip
+            if (tight || retiring != null || ticket != null) {
                 FlowRow(
                     modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
+                    // The ticket: key, status and title; a tap opens the sheet.
+                    if (ticket != null) {
+                        WorkChip(
+                            work = ticket,
+                            suggested = work.work == null,
+                            showTitle = true,
+                            onClick = workHandlers.onOpen,
+                            modifier = Modifier.align(Alignment.CenterVertically),
+                        )
+                    }
                     if (tight) CompactChip(onCompact = { onSendCommand("/compact") })
                     // A `safe_kill_session` retirement in progress — shown for
                     // as long as the row carries one, independent of which
@@ -506,9 +529,13 @@ private fun SessionOverflowMenu(
     onKill: () -> Unit,
     onSetTags: (List<String>) -> Unit,
     onRename: (String) -> Unit,
+    /** *Set work…*; null when this token or this hub cannot link work. */
+    onSetWork: ((String) -> Unit)? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
+    var showSetWork by remember { mutableStateOf(false) }
+    val manage = state.canManage
     var showTags by remember { mutableStateOf(false) }
     var showRestartConfirm by remember { mutableStateOf(false) }
     var showKillConfirm by remember { mutableStateOf(false) }
@@ -518,66 +545,138 @@ private fun SessionOverflowMenu(
         Icon(FleetIcons.MoreVert, contentDescription = "Session actions")
     }
     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-        DropdownMenuItem(
-            text = { Text("Rename…") },
-            enabled = actionable,
-            onClick = { expanded = false; showRename = true },
-        )
-        DropdownMenuItem(
-            text = { Text("Tags…") },
-            enabled = actionable,
-            onClick = { expanded = false; showTags = true },
-        )
-        if (state.canRestart) {
+        if (onSetWork != null) {
             DropdownMenuItem(
-                text = { Text("Restart") },
-                enabled = actionable,
-                onClick = { expanded = false; showRestartConfirm = true },
+                text = { Text("Set work…") },
+                enabled = state.connected,
+                onClick = { expanded = false; showSetWork = true },
             )
         }
-        DropdownMenuItem(
-            text = { Text("Retire safely") },
-            enabled = actionable,
-            onClick = { expanded = false; onSafeKill() },
-        )
-        if (state.canKill) {
-            DropdownMenuItem(
-                text = { Text("Kill now", color = MaterialTheme.colorScheme.error) },
-                enabled = actionable,
-                onClick = { expanded = false; showKillConfirm = true },
+        if (manage) {
+            SessionManageItems(
+                state = state,
+                actionable = actionable,
+                onSafeKill = onSafeKill,
+                close = { expanded = false },
+                showRename = { showRename = true },
+                showTags = { showTags = true },
+                showRestartConfirm = { showRestartConfirm = true },
+                showKillConfirm = { showKillConfirm = true },
             )
         }
     }
 
+    if (showSetWork && onSetWork != null) {
+        SetWorkDialog(
+            onConfirm = { showSetWork = false; onSetWork(it) },
+            onDismiss = { showSetWork = false },
+        )
+    }
+    ManageDialogs(
+        state = state,
+        showRename = showRename,
+        hideRename = { showRename = false },
+        showTags = showTags,
+        hideTags = { showTags = false },
+        showRestartConfirm = showRestartConfirm,
+        hideRestartConfirm = { showRestartConfirm = false },
+        showKillConfirm = showKillConfirm,
+        hideKillConfirm = { showKillConfirm = false },
+        onRename = onRename,
+        onSetTags = onSetTags,
+        onRestart = onRestart,
+        onKill = onKill,
+    )
+}
+
+/** The management half of the menu — only when [SessionUiState.canManage]. */
+@Composable
+private fun SessionManageItems(
+    state: SessionUiState,
+    actionable: Boolean,
+    onSafeKill: () -> Unit,
+    close: () -> Unit,
+    showRename: () -> Unit,
+    showTags: () -> Unit,
+    showRestartConfirm: () -> Unit,
+    showKillConfirm: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = { Text("Rename…") },
+        enabled = actionable,
+        onClick = { close(); showRename() },
+    )
+    DropdownMenuItem(
+        text = { Text("Tags…") },
+        enabled = actionable,
+        onClick = { close(); showTags() },
+    )
+    if (state.canRestart) {
+        DropdownMenuItem(
+            text = { Text("Restart") },
+            enabled = actionable,
+            onClick = { close(); showRestartConfirm() },
+        )
+    }
+    DropdownMenuItem(
+        text = { Text("Retire safely") },
+        enabled = actionable,
+        onClick = { close(); onSafeKill() },
+    )
+    if (state.canKill) {
+        DropdownMenuItem(
+            text = { Text("Kill now", color = MaterialTheme.colorScheme.error) },
+            enabled = actionable,
+            onClick = { close(); showKillConfirm() },
+        )
+    }
+}
+
+@Composable
+private fun ManageDialogs(
+    state: SessionUiState,
+    showRename: Boolean,
+    hideRename: () -> Unit,
+    showTags: Boolean,
+    hideTags: () -> Unit,
+    showRestartConfirm: Boolean,
+    hideRestartConfirm: () -> Unit,
+    showKillConfirm: Boolean,
+    hideKillConfirm: () -> Unit,
+    onRename: (String) -> Unit,
+    onSetTags: (List<String>) -> Unit,
+    onRestart: () -> Unit,
+    onKill: () -> Unit,
+) {
     if (showRename) {
         RenameDialog(
             initial = state.session?.friendlyName.orEmpty(),
-            onConfirm = { name -> showRename = false; onRename(name) },
-            onDismiss = { showRename = false },
+            onConfirm = { name -> hideRename(); onRename(name) },
+            onDismiss = hideRename,
         )
     }
     if (showTags) {
         TagsDialog(
             tags = state.session?.tags.orEmpty(),
-            onConfirm = { tags -> showTags = false; onSetTags(tags) },
-            onDismiss = { showTags = false },
+            onConfirm = { tags -> hideTags(); onSetTags(tags) },
+            onDismiss = hideTags,
         )
     }
     if (showRestartConfirm) {
         AlertDialog(
-            onDismissRequest = { showRestartConfirm = false },
+            onDismissRequest = hideRestartConfirm,
             title = { Text("Restart this session?") },
             text = { Text("This kills and recreates the tmux session in place — for a wedged REPL.") },
             confirmButton = {
-                TextButton(onClick = { showRestartConfirm = false; onRestart() }) { Text("Restart") }
+                TextButton(onClick = { hideRestartConfirm(); onRestart() }) { Text("Restart") }
             },
-            dismissButton = { TextButton(onClick = { showRestartConfirm = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = hideRestartConfirm) { Text("Cancel") } },
         )
     }
     if (showKillConfirm) {
         KillConfirmDialog(
-            onConfirm = { showKillConfirm = false; onKill() },
-            onDismiss = { showKillConfirm = false },
+            onConfirm = { hideKillConfirm(); onKill() },
+            onDismiss = hideKillConfirm,
         )
     }
 }

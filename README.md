@@ -250,6 +250,24 @@ costs one reconnect.
   unhide one and a hidden host can still own live sessions.
 - **Settings** — which hub, which client name, the app version, and *Forget
   this hub*.
+- **Work** (a hub with the work graph) — what each session is working on, as
+  the hub decided it:
+  - a key chip on every row (a dotted outline for a guess nobody has decided,
+    struck through when the tracker stopped answering for the ticket), and a
+    *By work* toggle that puts each host's work groups ahead of its projects;
+  - a *My work* chip when a tracker is connected;
+  - on a session, the ticket chip opens a sheet with the ticket, *why* the
+    session is linked to it, and **Confirm** / **Not this** / **Clear**, plus
+    *Set work…* in the menu;
+  - a **Tickets** sheet (My work, Current sprint, Recent, and a search by key or
+    pasted URL) with **Open** for a ticket a session is already on, **Start
+    here** for one nobody is, and **Resume** for past work.
+
+  The phone never works a key out for itself and never becomes a second brain:
+  it shows what the hub stamped on the row and calls the same `work` /
+  `work_link` tools the desktop does. Which of those buttons exist is decided
+  per connection by the hub's own `tools/list` — see *Gating on the hub's
+  tools* in `skills/fleet-mobile-repo/SKILL.md`.
 
 ## What it deliberately does not do
 
@@ -261,6 +279,10 @@ costs one reconnect.
   tools it may call are pinned by a test (`ToolsTheAppMayCallTest`), as an
   allow-list rather than a list of things someone thought to forbid.
 - **No file browsing or diffs.**
+- **No tracker administration, and no brief editing.** Connecting Jira is
+  `work_admin`, which is master-only and which the app never names (the test
+  forbids it). Starting or resuming work uses the hub's default brief; editing
+  one stays on the desktop.
 - **No push notifications while the app is closed.** That needs a vendor push
   service and a sender in the hub; it is its own piece of work.
 - **No offline mirror.** The last snapshot stays on screen when the hub is

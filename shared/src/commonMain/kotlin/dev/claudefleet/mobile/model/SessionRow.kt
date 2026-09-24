@@ -61,6 +61,18 @@ data class SessionRow(
      * from any hub released before it stamped one. See [attentionReason].
      */
     @SerialName("needs_attention") val attention: Attention? = null,
+    /**
+     * The session's primary work link, stamped by the hub; null when it has
+     * none, and from a hub older than the work graph. Set only through
+     * `work_link` — the phone never derives a key from a branch or a tag.
+     */
+    val work: WorkSummary? = null,
+    /**
+     * The hub's top guess nobody has decided yet (work graph M4). Kept apart
+     * from [work] on purpose: a guess never moves a session into a work group,
+     * it only offers Confirm / Not this.
+     */
+    @SerialName("work_suggested") val workSuggested: WorkSummary? = null,
 ) {
     val isBackground: Boolean get() = tmuxName.startsWith("bg:")
 

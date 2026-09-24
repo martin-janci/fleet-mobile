@@ -99,7 +99,7 @@ Five wire contracts bind this app to the hub. Four are self-correcting:
 
 | Contract | Why it does not drift |
 |---|---|
-| Tool names and access | `ToolsTheAppMayCallTest` allow-lists them; the hub refuses anything else |
+| Tool names and access | `ToolsTheAppMayCallTest` allow-lists them; the hub refuses anything else; `tools/list` decides the additive ones per connection |
 | `SessionRow` | `ignoreUnknownKeys`, so new columns pass by |
 | `POST /pair` | Four fields, unchanged since it was written |
 | `GET /events` | `ready` / `lagged` plus open-ended row events |
@@ -122,6 +122,38 @@ fixture in the hub's own wire shape for every kind, and
 `every_kind_the_hub_emits_today_is_modelled` is the list to extend.
 `ConversationItemsTest` (emulator) then proves each one actually draws, which
 is a different claim from parsing.
+
+## Gating on the hub's tools, not its version
+
+The work graph (M8) is additive, and the wire contract (`MAX_HUB_CONTRACT`) is
+**not** what gates it — a contract bump refuses whole connections, and a
+missing feature should only hide a button. Instead, on every `ready`,
+`FleetRepository` calls `tools/list` once (plain MCP, same auth) and publishes
+`FleetState.capabilities`:
+
+- `work` present → chips, *By work*, *My work*, the Tickets sheet.
+- `work_link` present → Confirm / Not this / Clear / Set work… / Start here /
+  Resume. The hub filters `tools/list` per caller, so a **readonly** token is
+  never shown `work_link` — and the UI checks `Credentials.canWrite` as well.
+  Both, always: never call a tool the token cannot use.
+- **Actions.** `action` is a free string on hubs before M8.0. When the schema
+  has an `enum`, `HubCapabilities.has(tool, action)` reads it; when it does
+  not, an action counts as present until the hub answers `E_INVALID`
+  "unknown … action", which `FleetState.actionMissing` records **for that
+  connection** (the next `ready` asks again — it may be an upgraded hub).
+- A hub that cannot answer `tools/list` reads as the old hub: nothing
+  work-shaped is offered, and nothing errors. `HUB_VERSION_KEYS` stays only
+  for the `send_prompt { keys }` chips.
+
+`work` and `work_link` are in `ToolsTheAppMayCallTest`'s `permitted` set;
+`work_admin` (tracker administration, master-only) is in `forbidden`. One row
+rule to keep: a `session:updated` **without** `work` or `work_suggested` means
+there is none — the hub strips nulls from every `/events` frame and skips an
+empty suggestion — so both are replaced with the row, never carried over the
+way `is_controller` is (which no frame ever carries). `FleetSnapshotTest` pins
+it with a null-stripped store-row fixture. Grouping by work mirrors the desktop's
+`buildSessionsByWork` (`src/lib/sidebar_index.ts`); `SessionsViewModelTest`
+carries its cases by name, so extend both together.
 
 ## How Compose surfaces to XCUITest on iOS
 
@@ -244,7 +276,8 @@ sessions, so point it at a live hub rather than expecting demo data.
   `SessionViewModel`'s KDoc; two classes have been fixed for breaking it.
 - **The app never calls a tool its token may not use.** Its four read tools are
   in the hub's `READONLY_TOOLS`; `send_prompt` is not, which is what
-  `canSendPrompts` gates. `Credentials.grantsWrite` mirrors the hub's
+  `canSendPrompts` gates. `work_link` is not either, and is gated twice (see
+  *Gating on the hub's tools*). `Credentials.grantsWrite` mirrors the hub's
   `TokenMode::parse` exactly — only the literal `full` grants write, because
   the hub fails closed and the app used to fail open.
 - **A gate that cannot fail is worse than no gate.** This repo has removed

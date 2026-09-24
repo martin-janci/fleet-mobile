@@ -34,6 +34,8 @@ import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.data.FleetRepository
 import dev.claudefleet.mobile.data.HubNewSessionActions
 import dev.claudefleet.mobile.data.HubSessionActions
+import dev.claudefleet.mobile.data.HubWorkActions
+import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.net.HubClient
@@ -55,11 +57,16 @@ import dev.claudefleet.mobile.ui.QuickReplies
 import dev.claudefleet.mobile.ui.Screen
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.SessionViewModel
+import dev.claudefleet.mobile.ui.SessionWorkHandlers
+import dev.claudefleet.mobile.ui.SessionWorkViewModel
 import dev.claudefleet.mobile.ui.SessionsScreen
 import dev.claudefleet.mobile.ui.SessionsViewModel
 import dev.claudefleet.mobile.ui.SettingsScreen
 import dev.claudefleet.mobile.ui.SettingsViewModel
 import dev.claudefleet.mobile.ui.Tab
+import dev.claudefleet.mobile.ui.TicketsHandlers
+import dev.claudefleet.mobile.ui.TicketsSheet
+import dev.claudefleet.mobile.ui.TicketsViewModel
 import dev.claudefleet.mobile.ui.scan.qrScannerSupported
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.FleetTheme
@@ -79,7 +86,7 @@ import kotlinx.coroutines.flow.getAndUpdate
  */
 class AppContainer(
     secrets: Secrets,
-    prefs: Prefs,
+    val prefs: Prefs,
     http: HttpClient,
     val appVersion: String,
     /**
@@ -129,6 +136,9 @@ class AppContainer(
 
     /** The New session form's one call, through the same 401 rule. */
     val newSessionActions: NewSessionActions = HubNewSessionActions(session)
+
+    /** The work graph's calls, through the same `withClient` as every other. */
+    val workActions: WorkActions = HubWorkActions(session)
 
     /**
      * The chip row and the draft history — one instance for the whole app,
@@ -306,7 +316,19 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     // return value still does not need reading here.
     BackHandler(enabled = screen is Screen.Session || screen is Screen.NewSession) { nav.back() }
 
-    val sessions = remember(repository, scope) { SessionsViewModel(repository, scope) }
+    val sessions = remember(repository, scope) { SessionsViewModel(repository, scope, prefs = container.prefs) }
+    // The fleet's scope, like the New session form's `callScope`: a resume
+    // started from the sheet must not be cancelled by closing it.
+    val tickets = remember(repository, scope) {
+        TicketsViewModel(
+            fleet = repository,
+            actions = container.workActions,
+            scope = scope,
+            canWrite = credentials.canWrite,
+            onOpenSession = { nav.open(it) },
+            onStartHere = { nav.newSession(ticketKey = it) },
+        )
+    }
     val hosts = remember(repository, scope) { HostsViewModel(repository, scope) }
     val settings = remember(container, scope) {
         SettingsViewModel(container.session, scope, container.appVersion)
@@ -354,6 +376,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                     // model already holds the filter the chip just set.
                     LaunchedEffect(current) { sessions.setHostFilter(current.hostAlias) }
                     val state by sessions.state.collectAsState()
+                    val ticketsState by tickets.state.collectAsState()
                     SessionsScreen(
                         state = state,
                         onOpenSession = nav::open,
@@ -371,11 +394,31 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         // `new_session` is not a readonly tool: a readonly
                         // pairing is not offered a form the hub would refuse.
                         onNewSession = if (credentials.canWrite) ({ nav.newSession() }) else null,
+                        onToggleByWork = sessions::toggleByWork,
+                        onToggleMyWork = sessions::toggleMyWorkOnly,
+                        onOpenTickets = if (ticketsState.available) ({ tickets.open() }) else null,
                     )
+                    if (ticketsState.open) {
+                        TicketsSheet(
+                            state = ticketsState,
+                            handlers = TicketsHandlers(
+                                onClose = tickets::close,
+                                onQuery = tickets::onQuery,
+                                onSearch = { tickets.search() },
+                                onSelect = { tickets.select(it) },
+                                onOpenLive = tickets::openLive,
+                                onStartHere = tickets::startHere,
+                                onResumeHost = tickets::selectResumeHost,
+                                onResume = { tickets.resume() },
+                                onDismissError = tickets::dismissError,
+                            ),
+                        )
+                    }
                 }
                 is Screen.NewSession -> key(current) {
                     NewSessionRoute(
                         initialHost = current.hostAlias,
+                        ticketKey = current.ticketKey,
                         container = container,
                         repository = repository,
                         credentials = credentials,
@@ -420,6 +463,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
 @Composable
 private fun NewSessionRoute(
     initialHost: String?,
+    ticketKey: String?,
     container: AppContainer,
     repository: FleetRepository,
     credentials: Credentials,
@@ -437,6 +481,8 @@ private fun NewSessionRoute(
             initialHost = initialHost,
             onCreated = onCreated,
             callScope = callScope,
+            ticketKey = ticketKey,
+            workActions = container.workActions,
         )
     }
     val state by vm.state.collectAsState()
@@ -479,9 +525,21 @@ private fun SessionRoute(
             quickReplies = container.quickReplies,
         )
     }
+    val workVm = remember(sessionId, repository, scope) {
+        SessionWorkViewModel(
+            sessionId = sessionId,
+            fleet = repository,
+            actions = container.workActions,
+            scope = scope,
+            // `work_link` is not readonly; the hub hides it from such a token
+            // too, and the view model checks both.
+            canWrite = credentials.canWrite,
+        )
+    }
     LaunchedEffect(sessionId) { vm.load() }
 
     val state by vm.state.collectAsState()
+    val work by workVm.state.collectAsState()
     val status by repository.status.collectAsState()
     // Collected here, not folded into `SessionUiState`: `QuickReplies.chips`
     // is its own `StateFlow`, one per app rather than one per session, and
@@ -512,5 +570,15 @@ private fun SessionRoute(
         onAddQuickReply = { vm.quickReplies.add(it) },
         onRemoveQuickReply = { vm.quickReplies.remove(it) },
         onOpenHistory = { vm.quickReplies.history() },
+        work = work,
+        workHandlers = SessionWorkHandlers(
+            onOpen = workVm::openSheet,
+            onClose = workVm::closeSheet,
+            onConfirm = { workVm.confirm() },
+            onReject = { workVm.reject() },
+            onClear = { workVm.clear() },
+            onSetWork = { workVm.setWork(it) },
+            onDismissError = workVm::dismissError,
+        ),
     )
 }
