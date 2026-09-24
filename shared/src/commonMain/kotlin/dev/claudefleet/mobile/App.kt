@@ -38,6 +38,7 @@ import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.net.HubEventStream
 import dev.claudefleet.mobile.net.withHubTimeouts
 import dev.claudefleet.mobile.store.Credentials
+import dev.claudefleet.mobile.store.Prefs
 import dev.claudefleet.mobile.store.Secrets
 import dev.claudefleet.mobile.ui.HostsScreen
 import dev.claudefleet.mobile.ui.HostsViewModel
@@ -46,6 +47,7 @@ import dev.claudefleet.mobile.ui.PairScreen
 import dev.claudefleet.mobile.ui.PairViewModel
 import dev.claudefleet.mobile.ui.PairedHub
 import dev.claudefleet.mobile.ui.PairedScreen
+import dev.claudefleet.mobile.ui.QuickReplies
 import dev.claudefleet.mobile.ui.Screen
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.SessionViewModel
@@ -73,6 +75,7 @@ import kotlinx.coroutines.flow.getAndUpdate
  */
 class AppContainer(
     secrets: Secrets,
+    prefs: Prefs,
     http: HttpClient,
     val appVersion: String,
     /**
@@ -119,6 +122,15 @@ class AppContainer(
 
     /** The two calls a session screen may make, through the 401 rule. */
     val sessionActions: SessionActions = HubSessionActions(session)
+
+    /**
+     * The chip row and the draft history — one instance for the whole app,
+     * not one per session screen, so a chip added on one session's screen is
+     * there the next time any session's screen opens, and so is the shared
+     * history. Handed to every [SessionViewModel] this container builds; see
+     * [SessionRoute].
+     */
+    val quickReplies: QuickReplies = QuickReplies(prefs)
 
     /**
      * The live fleet picture for one credential.
@@ -401,12 +413,20 @@ private fun SessionRoute(
             // readonly credential disables the box rather than making a call it
             // knows would be refused.
             canSendPrompts = credentials.canWrite,
+            // The container's one instance, not a fresh one per session — see
+            // `AppContainer.quickReplies`.
+            quickReplies = container.quickReplies,
         )
     }
     LaunchedEffect(sessionId) { vm.load() }
 
     val state by vm.state.collectAsState()
     val status by repository.status.collectAsState()
+    // Collected here, not folded into `SessionUiState`: `QuickReplies.chips`
+    // is its own `StateFlow`, one per app rather than one per session, and
+    // `status` right above is the same shape for the same reason — a value
+    // `SessionViewModel.state`'s own `combine` does not own.
+    val chips by vm.quickReplies.chips.collectAsState()
     SessionScreen(
         sessionId = sessionId,
         state = state,
@@ -417,5 +437,19 @@ private fun SessionRoute(
         onBack = onBack,
         onDismissError = vm::dismissError,
         onAtBottom = vm::onAtBottom,
+        onAnswer = { vm.answer(it) },
+        onShowTerminal = { vm.showTerminal() },
+        onHideTerminal = vm::hideTerminal,
+        onRestart = { vm.restart() },
+        onSafeKill = { vm.safeKill() },
+        onKill = { vm.kill() },
+        onSetTags = { vm.setTags(it) },
+        onRename = { vm.rename(it) },
+        onSendCommand = { vm.sendCommand(it) },
+        quickReplies = chips,
+        onSendQuick = { vm.sendQuick(it) },
+        onAddQuickReply = { vm.quickReplies.add(it) },
+        onRemoveQuickReply = { vm.quickReplies.remove(it) },
+        onOpenHistory = { vm.quickReplies.history() },
     )
 }

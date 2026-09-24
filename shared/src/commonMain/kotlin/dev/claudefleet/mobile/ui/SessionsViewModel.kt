@@ -75,7 +75,14 @@ data class SessionsUiState(
 class SessionsViewModel(
     private val fleet: FleetState,
     private val scope: CoroutineScope,
-    private val clock: () -> Long = { epochSeconds() },
+    /**
+     * The clock every age on this screen is measured against: the device's,
+     * corrected by what the hub said its own time was on the last `ready`.
+     * Uncorrected, a device a few minutes behind labels the whole fleet "just
+     * now" and one running fast labels a working session as hours idle — both
+     * silently, since every row is wrong by the same amount.
+     */
+    private val clock: () -> Long = { epochSeconds() + fleet.clockSkewSeconds.value },
 ) {
     /** The four fleet flows combined into one value, so a second `combine` can fold in [local] and [now]. */
     private data class FleetSnapshot(

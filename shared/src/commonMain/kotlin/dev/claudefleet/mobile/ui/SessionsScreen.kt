@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -68,11 +71,11 @@ fun SessionsScreen(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
-        SessionsBar(
+        SessionsBar(status = state.status)
+        FilterRow(
             needsAttentionOnly = state.needsAttentionOnly,
             attentionCount = state.attentionCount,
             hostFilter = state.hostFilter,
-            status = state.status,
             onToggleNeedsAttention = onToggleNeedsAttention,
             onClearHostFilter = onClearHostFilter,
         )
@@ -117,14 +120,7 @@ fun SessionsScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SessionsBar(
-    needsAttentionOnly: Boolean,
-    attentionCount: Int,
-    hostFilter: String?,
-    status: ConnectionStatus,
-    onToggleNeedsAttention: () -> Unit,
-    onClearHostFilter: () -> Unit,
-) {
+private fun SessionsBar(status: ConnectionStatus) {
     TopAppBar(
         title = {
             Column {
@@ -140,38 +136,66 @@ private fun SessionsBar(
                 Text(live, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
-        actions = {
-            if (hostFilter != null) {
-                InputChip(
-                    selected = true,
-                    onClick = onClearHostFilter,
-                    label = { Text("host: $hostFilter", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    trailingIcon = {
-                        Icon(
-                            FleetIcons.Close,
-                            contentDescription = "Clear host filter",
-                            modifier = Modifier.size(InputChipDefaults.IconSize),
-                        )
-                    },
-                    modifier = Modifier.padding(end = 8.dp),
+    )
+}
+
+/**
+ * The filters, on their own line under the bar.
+ *
+ * They used to ride in the `TopAppBar`'s `actions`, which is a plain `Row`
+ * that neither wraps nor scrolls and is measured before the title: on a phone,
+ * the moment a host filter joined the "Needs attention" chip the two overflowed
+ * the bar and pushed the title clean off the screen. Here they own the full
+ * width and *wrap* — a `FlowRow`, not a `Row`, because on a 320dp screen the
+ * two chips genuinely do not fit side by side and the second one belongs on a
+ * second line rather than half past the right edge. A long alias is capped so
+ * one chip can never be the whole line.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun FilterRow(
+    needsAttentionOnly: Boolean,
+    attentionCount: Int,
+    hostFilter: String?,
+    onToggleNeedsAttention: () -> Unit,
+    onClearHostFilter: () -> Unit,
+) {
+    FlowRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        FilterChip(
+            selected = needsAttentionOnly,
+            onClick = onToggleNeedsAttention,
+            label = { Text("Needs attention") },
+            leadingIcon = {
+                Icon(
+                    FleetIcons.Warning,
+                    contentDescription = null,
+                    modifier = Modifier.size(FilterChipDefaults.IconSize),
                 )
-            }
-            FilterChip(
-                selected = needsAttentionOnly,
-                onClick = onToggleNeedsAttention,
-                label = { Text("Needs attention") },
-                leadingIcon = {
+            },
+            trailingIcon = if (attentionCount > 0) ({ Badge { Text("$attentionCount") } }) else null,
+        )
+        if (hostFilter != null) {
+            InputChip(
+                selected = true,
+                onClick = onClearHostFilter,
+                label = { Text("host: $hostFilter", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                trailingIcon = {
                     Icon(
-                        FleetIcons.Warning,
-                        contentDescription = null,
-                        modifier = Modifier.size(FilterChipDefaults.IconSize),
+                        FleetIcons.Close,
+                        contentDescription = "Clear host filter",
+                        modifier = Modifier.size(InputChipDefaults.IconSize),
                     )
                 },
-                trailingIcon = if (attentionCount > 0) ({ Badge { Text("$attentionCount") } }) else null,
-                modifier = Modifier.padding(end = 12.dp),
+                modifier = Modifier.widthIn(max = 220.dp),
             )
-        },
-    )
+        }
+    }
 }
 
 @Composable

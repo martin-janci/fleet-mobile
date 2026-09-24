@@ -7,7 +7,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /**
- * The hub's `ConvItem` enum has **seven** variants, and this app models all of
+ * The hub's `ConvItem` enum has **nine** variants, and this app models all of
  * them plus a fallback.
  *
  * It modelled two for a while, and the cost of that is the reason these tests
@@ -21,9 +21,15 @@ import kotlin.test.assertTrue
  * stopped being visible, nothing failed, and no test on either side could see
  * it, because each repo was internally consistent.
  *
+ * It happened a second time on 2026-09-22, and this time the hub's commit said
+ * so: "stop printing harness XML at the reader" added `bash` and `harness` —
+ * a `!` shell line and a lone harness `<tag>…</tag>` block, both of which had
+ * been arriving as `text` items full of raw XML. Same trade as before, and the
+ * same answer: model them here.
+ *
  * So the fixtures below are the hub's own JSON, field names and all. A shape
  * change upstream fails here rather than turning into a placeholder on a
- * screen. The fallback still has its own test: the eighth variant, whenever it
+ * screen. The fallback still has its own test: the tenth variant, whenever it
  * comes, must degrade rather than throw.
  */
 class ConvItemTest {
@@ -55,7 +61,7 @@ class ConvItemTest {
     }
 
 
-    // ---- the five kinds the hub grew, in the hub's own wire shapes ----
+    // ---- the seven kinds the hub grew, in the hub's own wire shapes ----
 
     private fun itemOf(itemJson: String): ConvItem =
         json.decodeFromString(Conversation.serializer(), """{"turns":[{"items":[$itemJson]}]}""")
@@ -153,6 +159,85 @@ class ConvItemTest {
     }
 
     /**
+     * A `!` shell line the person ran in the REPL.
+     *
+     * The hub used to hand this over as a `text` item holding
+     * `<bash-input>…</bash-input><bash-stdout>…</bash-stdout>`, so the screen
+     * drew the tags. Modelling it is what turns that back into a command and
+     * its output.
+     */
+    @Test
+    fun a_bash_line_is_parsed_with_its_command_and_output() {
+        val item = itemOf(
+            """{"kind":"bash","command":"git pull --ff-only",
+                "stdout":"Already up to date.","stderr":null}""",
+        )
+
+        assertIs<ConvItem.Bash>(item)
+        assertEquals("git pull --ff-only", item.command)
+        assertEquals("Already up to date.", item.stdout)
+        assertEquals("!git pull --ff-only", item.label, "it reads the way it was typed")
+    }
+
+    /** stderr is the half worth seeing when a command fails. */
+    @Test
+    fun a_bash_line_keeps_stderr() {
+        val item = itemOf("""{"kind":"bash","command":"false","stderr":"boom"}""")
+        assertIs<ConvItem.Bash>(item)
+        assertEquals("boom", item.stderr)
+        assertEquals(null, item.stdout)
+    }
+
+    /**
+     * A lone harness block: the hub's catch-all for a `<tag>…</tag>` entry it
+     * has no dedicated item for, so a tag the harness adds later never reaches
+     * a reader as XML on either end.
+     */
+    @Test
+    fun a_harness_block_is_parsed_and_labelled_by_what_is_in_it() {
+        val item = itemOf("""{"kind":"harness","tag":"ci-monitor-event","body":"PR #12 checks failed"}""")
+
+        assertIs<ConvItem.Harness>(item)
+        assertEquals("ci-monitor-event", item.tag)
+        assertEquals("PR #12 checks failed", item.label)
+    }
+
+    /** With nothing in it, the tag is still something to draw. */
+    @Test
+    fun a_harness_block_with_an_empty_body_falls_back_to_its_tag() {
+        assertEquals("ci-monitor-event", itemOf("""{"kind":"harness","tag":"ci-monitor-event"}""").label)
+        assertTrue(itemOf("""{"kind":"harness"}""").label.isNotBlank(), "never blank")
+    }
+
+    /**
+     * The hub lifts `<system-reminder>` blocks out of the prompt into
+     * `reminders`, which is why a prompt on this screen is the person's own
+     * words again. The field is carried rather than drawn: what matters on a
+     * phone is that it is no longer *inside* `prompt`.
+     */
+    @Test
+    fun a_turns_reminders_are_parsed_and_kept_off_the_prompt() {
+        val parsed = json.decodeFromString(
+            Conversation.serializer(),
+            """{"turns":[{"prompt":"UI nereflektuje","reminders":["You are operating in a git worktree."],
+                 "items":[{"kind":"text","text":"ok"}]}]}""",
+        )
+        val turn = parsed.turns.single()
+        assertEquals("UI nereflektuje", turn.prompt)
+        assertEquals(listOf("You are operating in a git worktree."), turn.reminders)
+    }
+
+    /** An older hub sends no `reminders` at all, and that must still decode. */
+    @Test
+    fun a_turn_from_an_older_hub_without_reminders_still_parses() {
+        val parsed = json.decodeFromString(
+            Conversation.serializer(),
+            """{"turns":[{"prompt":"hi","items":[]}]}""",
+        )
+        assertEquals(emptyList(), parsed.turns.single().reminders)
+    }
+
+    /**
      * Every kind the hub emits today, parsed as itself.
      *
      * The list is the point: it is this app's copy of
@@ -171,6 +256,8 @@ class ConvItemTest {
             "command" to """{"kind":"command","name":"c"}""",
             "notification" to """{"kind":"notification"}""",
             "interrupt" to """{"kind":"interrupt"}""",
+            "bash" to """{"kind":"bash","command":"ls"}""",
+            "harness" to """{"kind":"harness","tag":"ci-monitor-event"}""",
         )
 
         val placeholders = known.filterValues { itemOf(it) is ConvItem.Unsupported }.keys
@@ -230,6 +317,96 @@ class ConvItemTest {
     @Test
     fun an_unsupported_item_is_displayable() {
         assertTrue(ConvItem.Unsupported("thinking").label.isNotBlank())
+    }
+
+    /**
+     * Task 5: the hub's `context` and the five item kinds it already sends
+     * (`subagent`, `compact`, `command`, `notification`, `interrupt`) must
+     * parse as their own types — an invented sixth kind still degrades.
+     */
+    @Test
+    fun context_and_new_kinds_parse_and_nothing_is_unsupported_anymore() {
+        val parsed = json.decodeFromString(
+            Conversation.serializer(),
+            """{"turns":[{"items":[
+                 {"kind":"subagent","id":"tu_1","name":"Task","agent_type":"Explore","description":"find it","result":"found","error":false,"at":"t1","ended_at":"t2","done":true},
+                 {"kind":"compact","trigger":"auto","pre_tokens":50000,"summary":"summarized"},
+                 {"kind":"command","name":"compact","args":"now","output":"done"},
+                 {"kind":"notification","task_id":"tk1","tool_use_id":"tu_2","status":"completed","summary":"agent finished","result":"the report","output_file":"/tmp/o","event":null,"at":"t3"},
+                 {"kind":"interrupt","during_tool":true},
+                 {"kind":"from_the_future","stuff":"???"}
+               ]}],
+               "context":{"tokens":1000,"window":200000,"pct":0.5,"stale":false}}""",
+        )
+        val items = parsed.turns.single().items
+        assertEquals(
+            ConvItem.Subagent(
+                id = "tu_1",
+                name = "Task",
+                agentType = "Explore",
+                description = "find it",
+                result = "found",
+                error = false,
+                at = "t1",
+                endedAt = "t2",
+                done = true,
+            ),
+            items[0],
+        )
+        assertEquals(ConvItem.Compact(trigger = "auto", preTokens = 50_000, summary = "summarized"), items[1])
+        assertEquals(ConvItem.Command(name = "compact", args = "now", output = "done"), items[2])
+        assertEquals(
+            ConvItem.Notification(
+                taskId = "tk1",
+                toolUseId = "tu_2",
+                status = "completed",
+                summary = "agent finished",
+                result = "the report",
+                outputFile = "/tmp/o",
+                event = null,
+                at = "t3",
+            ),
+            items[3],
+        )
+        assertEquals(ConvItem.Interrupt(duringTool = true), items[4])
+        assertIs<ConvItem.Unsupported>(items[5])
+        assertEquals("from_the_future", (items[5] as ConvItem.Unsupported).kind)
+        assertEquals(ConvContext(tokens = 1000, window = 200_000, pct = 0.5, stale = false), parsed.context)
+    }
+
+    /** Every new kind still owes the screen a one-line label, whatever it turns out to hold. */
+    @Test
+    fun every_new_kind_has_a_sensible_label() {
+        assertEquals("find it", ConvItem.Subagent(name = "Task", description = "find it").label)
+        assertEquals("Task", ConvItem.Subagent(name = "Task", description = null).label)
+        assertEquals("Context compacted", ConvItem.Compact().label)
+        assertEquals("/compact", ConvItem.Command(name = "compact").label)
+        assertEquals("agent finished", ConvItem.Notification(summary = "agent finished", status = "completed").label)
+        assertEquals("completed", ConvItem.Notification(summary = null, status = "completed").label)
+        assertEquals("task notification", ConvItem.Notification().label)
+        assertEquals("Interrupted", ConvItem.Interrupt().label)
+    }
+
+    /** A missing field on any of the five new kinds must never throw — same rule as an unknown key elsewhere. */
+    @Test
+    fun a_new_kind_with_only_its_bare_minimum_still_parses() {
+        val parsed = json.decodeFromString(
+            Conversation.serializer(),
+            """{"turns":[{"items":[
+                 {"kind":"subagent"},
+                 {"kind":"compact"},
+                 {"kind":"command"},
+                 {"kind":"notification"},
+                 {"kind":"interrupt"}
+               ]}]}""",
+        )
+        val items = parsed.turns.single().items
+        assertEquals(ConvItem.Subagent(), items[0])
+        assertEquals(ConvItem.Compact(), items[1])
+        assertEquals(ConvItem.Command(), items[2])
+        assertEquals(ConvItem.Notification(), items[3])
+        assertEquals(ConvItem.Interrupt(), items[4])
+        assertEquals(null, parsed.context, "no context in the tail is not an error")
     }
 }
 

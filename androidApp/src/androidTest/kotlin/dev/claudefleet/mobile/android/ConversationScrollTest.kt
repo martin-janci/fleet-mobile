@@ -77,6 +77,20 @@ class ConversationScrollTest {
                     onBack = {},
                     onDismissError = {},
                     onAtBottom = {},
+                    onAnswer = {},
+                    onShowTerminal = {},
+                    onHideTerminal = {},
+                    onRestart = {},
+                    onSafeKill = {},
+                    onKill = {},
+                    onSetTags = {},
+                    onRename = {},
+                    onSendCommand = {},
+                    quickReplies = emptyList(),
+                    onSendQuick = {},
+                    onAddQuickReply = {},
+                    onRemoveQuickReply = {},
+                    onOpenHistory = { emptyList() },
                 )
             }
         }

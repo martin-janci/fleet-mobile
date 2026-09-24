@@ -1,6 +1,8 @@
 package dev.claudefleet.mobile
 
+import androidx.compose.ui.uikit.OnFocusBehavior
 import androidx.compose.ui.window.ComposeUIViewController
+import dev.claudefleet.mobile.store.IosPrefs
 import dev.claudefleet.mobile.store.KeychainSecrets
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.darwin.Darwin
@@ -33,7 +35,26 @@ import platform.UIKit.UIViewController
  * `README.md` → *What a Mac still has to check* for everything that still
  * needs a real run.
  */
-fun MainViewController(): UIViewController = ComposeUIViewController {
+fun MainViewController(): UIViewController = ComposeUIViewController(
+    configure = {
+        // Compose raises the prompt box; nothing else may.
+        //
+        // The default here is `OnFocusBehavior.FocusableAboveKeyboard`, which
+        // translates the WHOLE Compose scene upwards so a focused text field
+        // clears the keyboard. `App` already pads for the keyboard — its root
+        // `WindowInsets.safeDrawing` contains the IME inset — so the default
+        // made the prompt box travel roughly twice the keyboard's height, and
+        // took the session's top bar off the top of the screen with it.
+        //
+        // `ContentView.swift` documents this hazard and turns off *SwiftUI's*
+        // keyboard avoidance with `.ignoresSafeArea(.all)`. It cannot reach
+        // this one: Compose Multiplatform's own avoidance is configured here,
+        // in Kotlin, and is invisible from Swift. Android's half of the same
+        // property is `android:windowSoftInputMode="adjustResize"` in the
+        // manifest; `KeyboardInsetsTest` gates both.
+        onFocusBehavior = OnFocusBehavior.DoNothing
+    },
+) {
     App(iosContainer)
 }
 
@@ -63,6 +84,7 @@ fun onPairLink(uri: String) {
 private val iosContainer: AppContainer by lazy {
     AppContainer(
         secrets = KeychainSecrets(),
+        prefs = IosPrefs(),
         http = HttpClient(Darwin),
         appVersion = iosAppVersion(),
         // The build decides, not the link. `Platform.isDebugBinary` is

@@ -49,11 +49,27 @@
           code — the case an agent hits the moment it re-runs a setup script.
           `PairLinkRoutingTest.a_second_link_reaches_the_same_activity` is that
           scenario, and it fails without this attribute.
+
+          `adjustResize` is the other attribute that is not a style choice.
+          Declare nothing and the activity gets ADJUST_UNSPECIFIED, which lets
+          the system choose — and what it chooses is to PAN the window when the
+          keyboard opens. `App` already raises the prompt box itself, because it
+          pads the whole app with `WindowInsets.safeDrawing` and that contains
+          the IME inset. With the pan on top, the screen travelled twice the
+          height of the keyboard and the session's top bar walked off it.
+
+          The value works *with* `enableEdgeToEdge()` rather than against it:
+          edge-to-edge clears `decorFitsSystemWindows`, so `adjustResize` no
+          longer resizes the window at all — it dispatches the IME as an inset
+          and leaves the single padding in `App` as the one and only movement.
+          `KeyboardInsetsTest` is the gate; the iOS half of the same property
+          is in `MainViewController.kt`.
         -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import dev.claudefleet.mobile.App
 import dev.claudefleet.mobile.AppContainer
+import dev.claudefleet.mobile.store.AndroidPrefs
 import dev.claudefleet.mobile.store.AndroidSecrets
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
@@ -27,6 +28,7 @@ class MainActivity : ComponentActivity() {
     private val container by lazy {
         AppContainer(
             secrets = AndroidSecrets(applicationContext),
+            prefs = AndroidPrefs(getSharedPreferences("quick_replies", MODE_PRIVATE)),
             http = HttpClient(OkHttp),
             appVersion = BuildConfig.VERSION_NAME,
             // The build decides, not the link. A release build fills the Pair

@@ -89,7 +89,18 @@ internal const val SSE_LINE = "a line on the event stream"
  * two things a change stream needs — and, as it turned out, one thing a
  * *request* needs too, since the first frame is not necessarily the reply.
  */
-internal data class SseFrame(val event: String?, val data: String)
+internal data class SseFrame(
+    val event: String?,
+    val data: String,
+    /**
+     * The frame's `id:` — `<generation>-<seq>` on a hub row frame — which a
+     * reconnect sends back as `Last-Event-ID`. Per frame, deliberately: the
+     * SSE rule that an id carries over to later frames is the browser's
+     * bookkeeping, and here the app keeps its own (see
+     * [dev.claudefleet.mobile.data.FleetRepository]).
+     */
+    val id: String? = null,
+)
 
 /**
  * The streaming half of SSE framing: fed one line at a time, it hands back a
@@ -105,6 +116,7 @@ internal data class SseFrame(val event: String?, val data: String)
  */
 internal class SseFrameReader {
     private var event: String? = null
+    private var id: String? = null
     private val data = StringBuilder()
     private var hasData = false
 
@@ -131,6 +143,7 @@ internal class SseFrameReader {
         }
         when (field) {
             "event" -> event = value.ifEmpty { null }
+            "id" -> id = value.ifEmpty { null }
             "data" -> {
                 // Before appending, not after: the point is never to hold the
                 // oversized string, so a check that runs once it is already in
@@ -144,7 +157,7 @@ internal class SseFrameReader {
                 data.append(value)
                 hasData = true
             }
-            // `id:`, `retry:` and anything the hub grows later: skipped, and
+            // `retry:` and anything the hub grows later: skipped, and
             // pointedly not treated as the end of the frame.
             else -> Unit
         }
@@ -165,13 +178,14 @@ internal class SseFrameReader {
             reset()
             return null
         }
-        val frame = SseFrame(event, data.toString())
+        val frame = SseFrame(event, data.toString(), id)
         reset()
         return frame
     }
 
     private fun reset() {
         event = null
+        id = null
         data.clear()
         hasData = false
     }
@@ -190,7 +204,30 @@ sealed interface HubEvent {
      * [dev.claudefleet.mobile.data.FleetRepository.follow] is where that
      * decision is made; this class only carries the raw number.
      */
-    data class Ready(val version: String?, val kinds: List<String>, val contract: Int? = null) : HubEvent
+    data class Ready(
+        val version: String?,
+        val kinds: List<String>,
+        val contract: Int? = null,
+        /**
+         * The hub's own unix second, as it stamped this frame. Null from a hub
+         * that does not send one.
+         *
+         * Every relative time this app draws — "2 m", "idle 3 h", the whole
+         * reason the list is worth opening — is `hubTimestamp - deviceClock`.
+         * A device clock that is wrong makes all of them wrong together, with
+         * nothing on screen to say so: a phone a few minutes behind shows
+         * "just now" for the entire fleet, and one ahead shows a session that
+         * is working as hours idle, which is a reading somebody acts on.
+         */
+        val now: Long? = null,
+        /**
+         * Whether the hub honoured the `Last-Event-ID` this connection was
+         * opened with and will replay what was missed. `false` — the gap was
+         * longer than its history, or the hub restarted — and null, from a
+         * hub that cannot resume at all, both mean re-list.
+         */
+        val resumed: Boolean? = null,
+    ) : HubEvent
 
     /**
      * The hub's subscriber ring overflowed and [skipped] events were lost. The
@@ -200,7 +237,12 @@ sealed interface HubEvent {
     data class Lagged(val skipped: Long) : HubEvent
 
     /** A row change: `session:updated`, `host:probed`, and the rest. */
-    data class Row(val name: String, val payload: JsonElement) : HubEvent
+    data class Row(
+        val name: String,
+        val payload: JsonElement,
+        /** The frame's `id:`, for resuming after it; null from a hub that sends none. */
+        val id: String? = null,
+    ) : HubEvent
 }
 
 /**
@@ -245,11 +287,16 @@ internal fun frameToEvent(frame: SseFrame): HubEvent? {
             contract = fields["contract"]?.let {
                 (it as? JsonPrimitive)?.content?.toIntOrNull() ?: UNREADABLE_CONTRACT
             },
+            // Unreadable and absent are the same answer here, unlike
+            // `contract` above: both mean "no usable reading", and the
+            // fallback for both is the device's own clock.
+            now = (fields["now"] as? JsonPrimitive)?.content?.toLongOrNull(),
+            resumed = (fields["resumed"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull(),
         )
         LAGGED -> HubEvent.Lagged(
             fields["skipped"]?.let { runCatching { (it as JsonPrimitive).long }.getOrNull() } ?: 0L,
         )
-        else -> HubEvent.Row(name, fields)
+        else -> HubEvent.Row(name, fields, frame.id)
     }
 }
 
@@ -285,8 +332,12 @@ interface EventStream {
      * Open one connection. The flow ends when the hub closes the stream and
      * fails with a [HubError] when the hub refuses or cannot be reached;
      * reconnecting is the caller's business, not this flow's.
+     *
+     * [lastEventId] is the `id:` of the last frame the caller applied; the hub
+     * replays what came after it and says so in `ready` (`resumed`). Null
+     * asks for no replay.
      */
-    fun connect(): Flow<HubEvent>
+    fun connect(lastEventId: String? = null): Flow<HubEvent>
 }
 
 /**
@@ -334,7 +385,7 @@ class HubEventStream(
     /** The hub's base URL, without a trailing slash. */
     val base: String = base.trimEnd('/')
 
-    override fun connect(): Flow<HubEvent> = channelFlow {
+    override fun connect(lastEventId: String?): Flow<HubEvent> = channelFlow {
         val url = buildString {
             append(base).append("/events")
             if (kinds.isNotEmpty()) append("?kinds=").append(kinds.joinToString(","))
@@ -343,6 +394,7 @@ class HubEventStream(
             http.prepareGet(url) {
                 header(HttpHeaders.Accept, ContentType.Text.EventStream.toString())
                 if (token != null) header(HttpHeaders.Authorization, "Bearer $token")
+                if (lastEventId != null) header("Last-Event-ID", lastEventId)
                 // A live stream has no natural end, so the request itself gets
                 // no deadline — the client-wide default from `withHubTimeouts()`
                 // would otherwise tear this down the first time the hub goes

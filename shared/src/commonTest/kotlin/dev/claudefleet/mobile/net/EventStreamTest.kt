@@ -59,7 +59,7 @@ class EventStreamTest {
         val events = streamOf(body).connect().toList()
 
         assertEquals(3, events.size, "the keep-alive comment is not an event")
-        assertEquals(HubEvent.Ready("0.9.3", listOf("session")), events[0])
+        assertEquals(HubEvent.Ready("0.9.3", listOf("session"), now = 1L), events[0])
         assertEquals("session:updated", (events[1] as HubEvent.Row).name)
         assertEquals("session:killed", (events[2] as HubEvent.Row).name)
     }
@@ -289,5 +289,36 @@ class EventStreamTest {
         assertEquals(EVENTS_IDLE_TIMEOUT_MS, timeout?.socketTimeoutMillis)
         assertEquals(HUB_CONNECT_TIMEOUT_MS, timeout?.connectTimeoutMillis)
         assertTrue(EVENTS_IDLE_TIMEOUT_MS > 15_000L, "shorter than the hub's own keep-alive would flap a healthy stream")
+    }
+
+    /**
+     * Resume, both halves on the wire: a row frame hands its `id:` to the
+     * app, and `ready` says whether the hub honoured the one it was sent.
+     */
+    @Test
+    fun a_row_carries_its_id_and_ready_says_whether_it_resumed() {
+        val row = frameToEvent(SseFrame("session:updated", """{"id":7}""", "2-9"))
+        assertEquals("2-9", (row as HubEvent.Row).id)
+
+        val resumed = frameToEvent(SseFrame("ready", """{"version":"0.2.37","kinds":[],"resumed":true}"""))
+        assertEquals(true, (resumed as HubEvent.Ready).resumed)
+        val fresh = frameToEvent(SseFrame("ready", """{"version":"0.2.37","kinds":[],"resumed":false}"""))
+        assertEquals(false, (fresh as HubEvent.Ready).resumed)
+        // A hub from before resume says nothing, which is not a yes.
+        val old = frameToEvent(SseFrame("ready", """{"version":"0.2.30","kinds":[]}"""))
+        assertEquals(null, (old as HubEvent.Ready).resumed)
+    }
+
+    /** `Last-Event-ID` goes out when the app has one, and not otherwise. */
+    @Test
+    fun a_reconnect_sends_the_last_event_id_it_was_given() = runTest {
+        val recorder = Recorder()
+        val stream = streamOf("", recorder = recorder)
+
+        stream.connect("4-120").toList()
+        stream.connect(null).toList()
+
+        assertEquals("4-120", recorder.requests[0].headers["Last-Event-ID"])
+        assertNull(recorder.requests[1].headers["Last-Event-ID"])
     }
 }

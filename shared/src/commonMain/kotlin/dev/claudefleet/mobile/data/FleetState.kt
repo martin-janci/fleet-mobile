@@ -26,6 +26,20 @@ interface FleetState {
     val status: StateFlow<ConnectionStatus>
 
     /**
+     * The version string the hub's last `ready` frame named, or null until one
+     * has — which is also what a hub too old to name one looks like.
+     *
+     * Separate from [ConnectionStatus.Connected]'s own `hubVersion` because the
+     * two answer different questions. That one is part of "the stream is up
+     * right now" and goes away with it; this one is "which hub is this",
+     * which a screen still needs while the stream is down and which a `ready`
+     * whose contract was then refused has answered just as well. It is what
+     * gates the features the wire contract does not move for — see
+     * [dev.claudefleet.mobile.net.HUB_VERSION_KEYS].
+     */
+    val hubVersion: StateFlow<String?>
+
+    /**
      * The id of a session the hub just reported a row change for —
      * `session:created`, `session:updated` or `session:killed` — one at a time,
      * as they arrive. A `ready` or `lagged` resync also emits
@@ -39,6 +53,19 @@ interface FleetState {
      * conversation, which stays a `session_conversation` call.
      */
     val sessionChanges: Flow<Long>
+
+    /**
+     * Seconds to add to this device's clock to read the hub's, measured from
+     * the `now` on each `ready` frame. Zero until a hub says otherwise, and
+     * zero forever against a hub that sends no `now`.
+     *
+     * Every relative time on screen is a hub timestamp minus a local clock, so
+     * a device whose time is off shifts the whole fleet at once: behind, and
+     * everything reads "just now"; ahead, and a session that is working reads
+     * as hours idle. The fact needed to correct it is already on the wire once
+     * per connection, and was being dropped.
+     */
+    val clockSkewSeconds: StateFlow<Long>
 
     /** Re-list everything. Raises rather than swallowing, so a pull-to-refresh can say it failed. */
     suspend fun refresh()

@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.data
 
+import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.ui.explain
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
@@ -12,6 +13,8 @@ import dev.claudefleet.mobile.net.contractVerdict
 import dev.claudefleet.mobile.net.sentence
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
@@ -103,6 +106,8 @@ class FleetRepository(
      * and a store that will not clear must not turn that into a crash.
      */
     private val onRevoked: suspend () -> Unit = {},
+    /** This device's clock, in unix seconds. Injectable so the skew is testable. */
+    private val clock: () -> Long = { epochSeconds() },
 ) : FleetState {
     // Starts empty rather than from a cache: see the "no cold-start cache"
     // deviation in the design appendix — the app's one persistence seam is
@@ -118,6 +123,14 @@ class FleetRepository(
 
     private val _status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Offline(NOT_STARTED))
     override val status: StateFlow<ConnectionStatus> = _status.asStateFlow()
+
+    // Written from every `ready` and never cleared: see [FleetState.hubVersion].
+    // A drop does not un-see which hub this is, and the next connection's own
+    // `ready` overwrites it with whatever is there now.
+    private val _hubVersion = MutableStateFlow<String?>(null)
+    override val hubVersion: StateFlow<String?> = _hubVersion.asStateFlow()
+    private val _clockSkewSeconds = MutableStateFlow(0L)
+    override val clockSkewSeconds: StateFlow<Long> = _clockSkewSeconds.asStateFlow()
 
     // Buffered rather than rendezvous: emitting must never suspend `follow()`
     // waiting on a session screen that may not be open at all. `DROP_OLDEST`
@@ -150,13 +163,39 @@ class FleetRepository(
      * so a refresh that fails half way leaves the old picture intact rather than
      * pairing new sessions with stale hosts. Failures are raised, not swallowed
      * — a pull-to-refresh has to be able to say it did not work.
+     *
+     * The three calls go out together. They were sequential, and this runs on
+     * every app open and every reconnect: three round trips at a measured
+     * ~105 ms each from the same continent as the hub, on a link where that is
+     * the optimistic figure. `coroutineScope` keeps the contract above — the
+     * first failure cancels its siblings and is raised before `publish`, so a
+     * half-built snapshot still cannot reach the flows.
      */
     override suspend fun refresh() {
-        val sessions = client.listSessions()
-        val hosts = client.listHosts()
-        val projects = client.listProjects()
-        publish(FleetSnapshot(sessions, hosts, projects))
+        // Spent before the re-list, not after: the fresh snapshot is newer
+        // than every frame the id points past, so a later resume from it would
+        // replay older rows over newer ones. Cleared up front so a refresh
+        // that fails still leaves no id promising continuity it cannot give.
+        lastEventId = null
+        coroutineScope {
+            val sessions = async { client.listSessions() }
+            val hosts = async { client.listHosts() }
+            val projects = async { client.listProjects() }
+            publish(FleetSnapshot(sessions.await(), hosts.await(), projects.await()))
+        }
     }
+
+    /**
+     * The `id:` of the last row frame applied to the snapshot, which the next
+     * connection sends as `Last-Event-ID` so a dropped stream costs the frames
+     * it missed instead of a full re-list (61 KB and three round trips,
+     * measured, on every lift, tunnel and app switch).
+     *
+     * Taken from what [follow] APPLIED, not from what the transport read: a
+     * frame read into a buffer and lost with the connection must not be
+     * counted as seen. [refresh] clears it.
+     */
+    private var lastEventId: String? = null
 
     private suspend fun follow() {
         var failures = 0
@@ -180,10 +219,15 @@ class FleetRepository(
                 // against an upgraded app — gets its own fair verdict rather
                 // than inheriting the last one's refusal.
                 var contractRefused = false
-                events.connect().collect { event ->
+                events.connect(lastEventId).collect { event ->
                     if (contractRefused) return@collect
                     when (event) {
                         is HubEvent.Ready -> {
+                            // Before the contract verdict, deliberately: a
+                            // refused hub is still a hub whose version a
+                            // screen may want to name, and this is the only
+                            // frame that carries it.
+                            _hubVersion.value = event.version
                             val refusal = contractVerdict(event.contract).sentence()
                             if (refusal != null) {
                                 // Not a transport failure — the hub answered
@@ -204,8 +248,19 @@ class FleetRepository(
                             // every `ready`, so the wait never grew past its
                             // first step and the phone reconnected once a second
                             // for as long as the half-outage lasted.
-                            refresh()
+                            // A hub that honoured `Last-Event-ID` replays what
+                            // this app missed as ordinary row frames, so there
+                            // is nothing to re-list. Anything short of a clear
+                            // yes — `false`, or a hub that cannot resume — is
+                            // the old path.
+                            if (event.resumed != true) refresh()
                             failures = 0
+                            // Re-measured per connection, so a device whose
+                            // clock is corrected by NTP heals on the next
+                            // reconnect rather than staying wrong until a
+                            // restart. A hub that sends no `now` leaves the
+                            // last reading alone rather than zeroing it.
+                            event.now?.let { _clockSkewSeconds.value = it - clock() }
                             _status.value = ConnectionStatus.Connected(event.version)
                             _sessionChanges.tryEmit(ALL_SESSIONS_CHANGED)
                         }
@@ -215,6 +270,7 @@ class FleetRepository(
                         }
                         is HubEvent.Row -> {
                             publish(snapshot().applying(event))
+                            event.id?.let { lastEventId = it }
                             event.sessionId()?.let { _sessionChanges.tryEmit(it) }
                         }
                     }
