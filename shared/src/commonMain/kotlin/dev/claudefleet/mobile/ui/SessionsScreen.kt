@@ -33,6 +33,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -83,9 +84,11 @@ fun SessionsScreen(
     onToggleByWork: () -> Unit = {},
     /** Only *My work*, or stop. Only drawn when the hub has a tracker. */
     onToggleMyWork: () -> Unit = {},
+    /** Open the Tickets sheet. Null hides the action — a hub without the work graph. */
+    onOpenTickets: (() -> Unit)? = null,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
-        SessionsBar(status = state.status) {
+        SessionsBar(status = state.status, onOpenTickets = onOpenTickets) {
             FilterRow(
                 needsAttentionOnly = state.needsAttentionOnly,
                 attentionCount = state.attentionCount,
@@ -160,7 +163,7 @@ fun SessionsScreen(
 
 /** The Sessions header: the title, whether the list is live, and [filters] under both. */
 @Composable
-private fun SessionsBar(status: ConnectionStatus, filters: @Composable () -> Unit) {
+private fun SessionsBar(status: ConnectionStatus, onOpenTickets: (() -> Unit)?, filters: @Composable () -> Unit) {
     val live = when (status) {
         is ConnectionStatus.Connected -> "live"
         is ConnectionStatus.Reconnecting -> "reconnecting…"
@@ -169,7 +172,13 @@ private fun SessionsBar(status: ConnectionStatus, filters: @Composable () -> Uni
         // header says which side is behind.
         is ConnectionStatus.Refused -> "refused"
     }
-    ScreenHeader(title = "Sessions", subtitle = live, below = { filters() })
+    ScreenHeader(
+        title = "Sessions",
+        subtitle = live,
+        // A sheet, not a fourth tab: the phone is a pager.
+        actions = { if (onOpenTickets != null) TextButton(onClick = onOpenTickets) { Text("Tickets") } },
+        below = { filters() },
+    )
 }
 
 /**

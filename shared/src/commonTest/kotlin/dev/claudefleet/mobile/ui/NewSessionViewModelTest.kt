@@ -17,6 +17,12 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
+import dev.claudefleet.mobile.net.HubCapabilities
+import dev.claudefleet.mobile.net.ToolCatalog
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
@@ -426,5 +432,98 @@ class NewSessionViewModelTest {
         runCurrent()
 
         assertEquals(listOf(41L), opened, "the call finished and reported the session")
+    }
+
+    // ---- ticket mode (M8.4): Start here from the Tickets sheet ----
+
+    private fun ticketVm(
+        fleet: FleetState,
+        work: FakeWorkActions,
+        scope: kotlinx.coroutines.CoroutineScope,
+        opened: MutableList<Long>,
+        canWrite: Boolean = true,
+    ) = NewSessionViewModel(
+        fleet, FakeCreate(), scope, canWrite, initialHost = "pine", onCreated = { opened += it },
+        ticketKey = "PAY-9", workActions = work,
+    )
+
+    /** No project picked is the default: the hub uses the project that last worked on PAY-*. */
+    @Test
+    fun ticket_mode_starts_work_with_the_hubs_default_project() = runTest {
+        val work = FakeWorkActions()
+        val opened = mutableListOf<Long>()
+        val vm = ticketVm(WorkFleet(hostRows = listOf(PINE, BOX), projectRows = listOf(REPO)), work, backgroundScope, opened)
+        runCurrent()
+
+        assertEquals("PAY-9", vm.state.value.ticketKey)
+        assertTrue(vm.state.value.canCreate, "no project needed")
+        vm.create()
+        runCurrent()
+
+        assertEquals(listOf("start PAY-9 pine -"), work.calls)
+        assertEquals(listOf(99L), opened, "the started session opens, exactly as a created one does")
+    }
+
+    @Test
+    fun ticket_mode_passes_a_project_the_person_picked() = runTest {
+        val work = FakeWorkActions()
+        val vm = ticketVm(WorkFleet(hostRows = listOf(PINE), projectRows = listOf(REPO)), work, backgroundScope, mutableListOf())
+        vm.selectProject(3)
+        runCurrent()
+        vm.create()
+        runCurrent()
+
+        assertEquals(listOf("start PAY-9 pine 3"), work.calls)
+    }
+
+    /** `E_EXISTS` is Jump: the phone opens the live session and never makes a second one. */
+    @Test
+    fun a_start_the_hub_refuses_as_existing_opens_that_session() = runTest {
+        val work = FakeWorkActions().apply {
+            fail = HubError.Tool("E_EXISTS", "PAY-9 already has a live session; jump to it", buildJsonObject { put("session_id", 41) })
+        }
+        val opened = mutableListOf<Long>()
+        val vm = ticketVm(WorkFleet(hostRows = listOf(PINE)), work, backgroundScope, opened)
+        runCurrent()
+        vm.create()
+        runCurrent()
+
+        assertEquals(listOf(41L), opened)
+        assertNull(vm.state.value.error)
+        assertFalse(vm.state.value.creating)
+    }
+
+    /** `E_AMBIGUOUS`: the hub cannot pick a project, and its candidates become the list. */
+    @Test
+    fun an_ambiguous_start_offers_the_hubs_candidates() = runTest {
+        val candidates = buildJsonObject {
+            putJsonArray("candidates") {
+                add(buildJsonObject { put("id", 4); put("owner", "me"); put("repo", "other") })
+            }
+        }
+        val work = FakeWorkActions().apply { fail = HubError.Tool("E_AMBIGUOUS", "no project has worked on PAY-* yet; pick one", candidates) }
+        val vm = ticketVm(WorkFleet(hostRows = listOf(PINE), projectRows = listOf(REPO, OTHER)), work, backgroundScope, mutableListOf())
+        runCurrent()
+        vm.create()
+        runCurrent()
+
+        assertEquals(listOf(4L), vm.state.value.projects.map { it.id })
+        assertEquals("Pick one", vm.state.value.error?.title)
+        assertTrue(vm.state.value.canCreate, "the form unlocks with the choice in front of the person")
+    }
+
+    @Test
+    fun ticket_mode_is_never_offered_without_work_link_start_or_to_a_readonly_token() = runTest {
+        val noStart = WorkFleet(hostRows = listOf(PINE), caps = HubCapabilities.of(ToolCatalog(setOf("work"))))
+        val work = FakeWorkActions()
+        val hidden = ticketVm(noStart, work, backgroundScope, mutableListOf())
+        val readonly = ticketVm(WorkFleet(hostRows = listOf(PINE)), work, backgroundScope, mutableListOf(), canWrite = false)
+        runCurrent()
+
+        assertFalse(hidden.state.value.canCreate)
+        assertFalse(readonly.state.value.canCreate)
+        hidden.create(); readonly.create()
+        runCurrent()
+        assertEquals(emptyList(), work.calls)
     }
 }

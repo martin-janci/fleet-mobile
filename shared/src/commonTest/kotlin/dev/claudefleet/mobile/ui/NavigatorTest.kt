@@ -265,4 +265,18 @@ class NavigatorTest {
         nav.created(42)
         assertEquals(Screen.Settings, nav.screen.value)
     }
+
+    /** Start here from the Tickets sheet: the same form in ticket mode, and the made session opens like any other. */
+    @Test
+    fun start_here_opens_the_form_in_ticket_mode_and_created_opens_the_session() {
+        val nav = Navigator()
+        nav.showSessionsFor("pine")
+        nav.newSession(ticketKey = "PAY-9")
+
+        assertEquals(Screen.NewSession(hostAlias = "pine", ticketKey = "PAY-9"), nav.screen.value)
+        nav.created(41)
+        assertEquals(Screen.Session(41), nav.screen.value)
+        nav.back()
+        assertEquals(Screen.Sessions("pine"), nav.screen.value, "back lands on the list, never on a form that would start it again")
+    }
 }

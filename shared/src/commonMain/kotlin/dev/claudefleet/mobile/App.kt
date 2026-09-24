@@ -64,6 +64,9 @@ import dev.claudefleet.mobile.ui.SessionsViewModel
 import dev.claudefleet.mobile.ui.SettingsScreen
 import dev.claudefleet.mobile.ui.SettingsViewModel
 import dev.claudefleet.mobile.ui.Tab
+import dev.claudefleet.mobile.ui.TicketsHandlers
+import dev.claudefleet.mobile.ui.TicketsSheet
+import dev.claudefleet.mobile.ui.TicketsViewModel
 import dev.claudefleet.mobile.ui.scan.qrScannerSupported
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.FleetTheme
@@ -314,6 +317,18 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     BackHandler(enabled = screen is Screen.Session || screen is Screen.NewSession) { nav.back() }
 
     val sessions = remember(repository, scope) { SessionsViewModel(repository, scope, prefs = container.prefs) }
+    // The fleet's scope, like the New session form's `callScope`: a resume
+    // started from the sheet must not be cancelled by closing it.
+    val tickets = remember(repository, scope) {
+        TicketsViewModel(
+            fleet = repository,
+            actions = container.workActions,
+            scope = scope,
+            canWrite = credentials.canWrite,
+            onOpenSession = { nav.open(it) },
+            onStartHere = { nav.newSession(ticketKey = it) },
+        )
+    }
     val hosts = remember(repository, scope) { HostsViewModel(repository, scope) }
     val settings = remember(container, scope) {
         SettingsViewModel(container.session, scope, container.appVersion)
@@ -361,6 +376,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                     // model already holds the filter the chip just set.
                     LaunchedEffect(current) { sessions.setHostFilter(current.hostAlias) }
                     val state by sessions.state.collectAsState()
+                    val ticketsState by tickets.state.collectAsState()
                     SessionsScreen(
                         state = state,
                         onOpenSession = nav::open,
@@ -380,11 +396,29 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         onNewSession = if (credentials.canWrite) ({ nav.newSession() }) else null,
                         onToggleByWork = sessions::toggleByWork,
                         onToggleMyWork = sessions::toggleMyWorkOnly,
+                        onOpenTickets = if (ticketsState.available) ({ tickets.open() }) else null,
                     )
+                    if (ticketsState.open) {
+                        TicketsSheet(
+                            state = ticketsState,
+                            handlers = TicketsHandlers(
+                                onClose = tickets::close,
+                                onQuery = tickets::onQuery,
+                                onSearch = { tickets.search() },
+                                onSelect = { tickets.select(it) },
+                                onOpenLive = tickets::openLive,
+                                onStartHere = tickets::startHere,
+                                onResumeHost = tickets::selectResumeHost,
+                                onResume = { tickets.resume() },
+                                onDismissError = tickets::dismissError,
+                            ),
+                        )
+                    }
                 }
                 is Screen.NewSession -> key(current) {
                     NewSessionRoute(
                         initialHost = current.hostAlias,
+                        ticketKey = current.ticketKey,
                         container = container,
                         repository = repository,
                         credentials = credentials,
@@ -429,6 +463,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
 @Composable
 private fun NewSessionRoute(
     initialHost: String?,
+    ticketKey: String?,
     container: AppContainer,
     repository: FleetRepository,
     credentials: Credentials,
@@ -446,6 +481,8 @@ private fun NewSessionRoute(
             initialHost = initialHost,
             onCreated = onCreated,
             callScope = callScope,
+            ticketKey = ticketKey,
+            workActions = container.workActions,
         )
     }
     val state by vm.state.collectAsState()
