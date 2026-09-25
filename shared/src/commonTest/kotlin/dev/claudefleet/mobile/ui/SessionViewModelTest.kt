@@ -19,6 +19,7 @@ import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.WaitResult
 import dev.claudefleet.mobile.net.HUB_VERSION_KEYS
 import dev.claudefleet.mobile.net.HubError
+import dev.claudefleet.mobile.data.FakeQuickReplyActions
 import dev.claudefleet.mobile.store.FakePrefs
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -606,7 +607,7 @@ class SessionViewModelTest {
     @Test
     fun a_prompt_sent_through_send_is_remembered_in_the_history() = runTest {
         val actions = FakeActions()
-        val quickReplies = QuickReplies(FakePrefs())
+        val quickReplies = QuickReplies(FakePrefs(), FakeQuickReplyActions())
         val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, quickReplies = quickReplies)
         vm.onDraftChange("ship it")
 
@@ -619,7 +620,7 @@ class SessionViewModelTest {
     @Test
     fun sendCommand_and_sendQuick_are_remembered_too_most_recent_first() = runTest {
         val actions = FakeActions()
-        val quickReplies = QuickReplies(FakePrefs())
+        val quickReplies = QuickReplies(FakePrefs(), FakeQuickReplyActions())
         val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, quickReplies = quickReplies)
 
         vm.sendCommand("/compact").join()
@@ -635,7 +636,7 @@ class SessionViewModelTest {
     fun a_send_that_fails_is_not_remembered() = runTest {
         val actions = FakeActions()
         actions.sendFails = HubError.Tool("E_BUSY", "the session is mid-turn")
-        val quickReplies = QuickReplies(FakePrefs())
+        val quickReplies = QuickReplies(FakePrefs(), FakeQuickReplyActions())
         val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, quickReplies = quickReplies)
         vm.onDraftChange("ship it")
 
@@ -655,7 +656,7 @@ class SessionViewModelTest {
         val actions = FakeActions()
         val fleet = FakeFleetState(listOf(blockedRow()))
         fleet.hubVersion.value = HUB_VERSION_KEYS
-        val quickReplies = QuickReplies(FakePrefs())
+        val quickReplies = QuickReplies(FakePrefs(), FakeQuickReplyActions())
         val vm = SessionViewModel(ID, fleet, actions, backgroundScope, quickReplies = quickReplies)
         vm.load().join()
         runCurrent()

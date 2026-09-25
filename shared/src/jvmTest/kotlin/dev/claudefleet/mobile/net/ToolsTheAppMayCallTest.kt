@@ -75,6 +75,11 @@ class ToolsTheAppMayCallTest {
         // offers what it decides; see `HubCapabilities`.
         "work",
         "work_link",
+        // The composer's shared chip row. `Access::Client` and not readonly
+        // (one tool both reads and replaces the list), so a `full` client may
+        // and a `readonly` one is never shown it — which is also the token
+        // that draws no chip row at all.
+        "quick_replies",
     )
 
     @Test

@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.PairResult
 import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
@@ -361,6 +362,29 @@ class HubClient(
                 put("tags", JsonArray(tags.map { JsonPrimitive(it) }))
             },
         ) { }
+
+    /**
+     * The fleet's quick replies — the chip row every composer draws — read
+     * (`set` omitted) or replaced whole (`set` given).
+     *
+     * One tool for both directions, and the answer is the stored list either
+     * way: a write needs no follow-up read to find out what the hub made of
+     * it, which matters because the hub normalises (trims, drops a duplicate
+     * prompt, and answers the built-in defaults for an empty list).
+     *
+     * `set` is omitted rather than sent as null for a read: a present-but-null
+     * `set` is "replace with nothing" to a stricter reader than today's, and
+     * the difference between those two is a fleet's whole chip row.
+     */
+    suspend fun quickReplies(set: List<QuickReply>? = null): List<QuickReply> =
+        call(
+            "quick_replies",
+            buildJsonObject {
+                if (set != null) {
+                    put("set", json.encodeToJsonElement(ListSerializer(QuickReply.serializer()), set))
+                }
+            },
+        ) { json.decodeFromJsonElement(ListSerializer(QuickReply.serializer()), it) }
 
     /** Set the session's friendly display name. */
     suspend fun rename(sessionId: Long, friendlyName: String): Unit =

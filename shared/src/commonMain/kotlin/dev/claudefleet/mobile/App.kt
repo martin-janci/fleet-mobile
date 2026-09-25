@@ -33,6 +33,7 @@ import dev.claudefleet.mobile.data.AppSession
 import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.data.FleetRepository
 import dev.claudefleet.mobile.data.HubNewSessionActions
+import dev.claudefleet.mobile.data.HubQuickReplyActions
 import dev.claudefleet.mobile.data.HubSessionActions
 import dev.claudefleet.mobile.data.HubWorkActions
 import dev.claudefleet.mobile.data.WorkActions
@@ -149,8 +150,12 @@ class AppContainer(
      * there the next time any session's screen opens, and so is the shared
      * history. Handed to every [SessionViewModel] this container builds; see
      * [SessionRoute].
+     *
+     * The chips themselves live on the hub (`quick_replies`), so the list is
+     * the same one the desktop composer draws; the device keeps only a cache
+     * of it and the draft history, which is this phone's alone.
      */
-    val quickReplies: QuickReplies = QuickReplies(prefs)
+    val quickReplies: QuickReplies = QuickReplies(prefs, HubQuickReplyActions(session))
 
     /**
      * The live fleet picture for one credential.
@@ -572,6 +577,11 @@ private fun SessionRoute(
     // `status` right above is the same shape for the same reason — a value
     // `SessionViewModel.state`'s own `combine` does not own.
     val chips by vm.quickReplies.chips.collectAsState()
+    // A hub older than the shared chip row has nowhere to put an edit, so the
+    // row draws its cached chips and offers no editor. Collected here rather
+    // than folded into `SessionUiState` for the same reason `chips` is: it is
+    // the fleet's own value, not one this screen's view model owns.
+    val caps by repository.capabilities.collectAsState()
     SessionScreen(
         sessionId = sessionId,
         state = state,
@@ -592,9 +602,14 @@ private fun SessionRoute(
         onRename = { vm.rename(it) },
         onSendCommand = { vm.sendCommand(it) },
         quickReplies = chips,
+        quickRepliesEditable = caps.quickReplies,
         onSendQuick = { vm.sendQuick(it) },
-        onAddQuickReply = { vm.quickReplies.add(it) },
-        onRemoveQuickReply = { vm.quickReplies.remove(it) },
+        // Through the view model, not straight at the store: an edit is a hub
+        // write that can fail, and the view model is what turns that into the
+        // screen's error banner (and puts the row back).
+        onAddQuickReply = { vm.addQuickReply(it) },
+        onEditQuickReply = { original, edited -> vm.editQuickReply(original, edited) },
+        onRemoveQuickReply = { vm.removeQuickReply(it) },
         onOpenHistory = { vm.quickReplies.history() },
         work = work,
         workHandlers = SessionWorkHandlers(
