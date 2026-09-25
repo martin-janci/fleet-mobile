@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.net
 
 import dev.claudefleet.mobile.data.SNAPSHOT_EVENT_KINDS
+import dev.claudefleet.mobile.data.SNAPSHOT_PAYLOAD_FIELDS
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.client.plugins.timeout
@@ -380,6 +381,14 @@ class HubEventStream(
      * rows quietly stale — and neither shows up until someone edits a list.
      */
     private val kinds: List<String> = SNAPSHOT_EVENT_KINDS,
+    /**
+     * The `?fields=` projection, for the same reason and with the same
+     * mechanism as [kinds]: [SNAPSHOT_PAYLOAD_FIELDS] is derived from what the
+     * snapshot's serializers declare, so it cannot ask for less than the
+     * applier reads. A hub too old to know the parameter ignores it and sends
+     * whole rows.
+     */
+    private val fields: List<String> = SNAPSHOT_PAYLOAD_FIELDS,
 ) : EventStream {
 
     /** The hub's base URL, without a trailing slash. */
@@ -388,7 +397,14 @@ class HubEventStream(
     override fun connect(lastEventId: String?): Flow<HubEvent> = channelFlow {
         val url = buildString {
             append(base).append("/events")
-            if (kinds.isNotEmpty()) append("?kinds=").append(kinds.joinToString(","))
+            var sep = '?'
+            if (kinds.isNotEmpty()) {
+                append(sep).append("kinds=").append(kinds.joinToString(","))
+                sep = '&'
+            }
+            if (fields.isNotEmpty()) {
+                append(sep).append("fields=").append(fields.joinToString(","))
+            }
         }
         try {
             http.prepareGet(url) {

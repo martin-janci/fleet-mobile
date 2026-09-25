@@ -6,6 +6,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeoutCapability
 import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.client.request.HttpRequestData
+import dev.claudefleet.mobile.data.SNAPSHOT_PAYLOAD_FIELDS
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
@@ -166,6 +167,18 @@ class EventStreamTest {
         assertEquals("text/event-stream", request.headers[HttpHeaders.Accept])
         assertEquals("/events", request.url.encodedPath)
         assertEquals("session,host,project,work", request.url.parameters["kinds"])
+
+        // And only the payload keys it decodes. Not spelled out here: the set
+        // is derived from the row serializers, so a literal would be a second
+        // copy to keep in step. What is worth asserting is that it is sent,
+        // that it carries a field each row type needs, and that it is not
+        // somehow empty — an empty `fields=` means "everything" to the hub,
+        // which would look like this working while saving nothing.
+        val fields = request.url.parameters["fields"]!!.split(",")
+        assertEquals(SNAPSHOT_PAYLOAD_FIELDS, fields)
+        for (needed in listOf("id", "claude_status", "alias", "reachable", "owner")) {
+            assertTrue(needed in fields, "$needed must survive the projection")
+        }
     }
 
     @Test
