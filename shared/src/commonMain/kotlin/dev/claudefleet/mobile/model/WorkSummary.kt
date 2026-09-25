@@ -169,3 +169,33 @@ data class ResumeCandidate(
     @SerialName("host_alias") val hostAlias: String? = null,
     val resumable: Boolean = true,
 )
+
+/**
+ * This link as the ticket cache knows it now: [ticket]'s title, status and
+ * availability over the ones stamped on the session row.
+ *
+ * A `work:item` frame updates the cache but does not restamp the session
+ * rows that link the item, so without this a work heading and a row's chip
+ * keep the status they had when the session last changed. The cache is the
+ * newer word because it is emptied on every re-list and then only moves on
+ * frames (see `FleetRepository.relist`). An empty ticket title keeps the
+ * row's — a bare key has none to give.
+ */
+fun WorkSummary.refreshedBy(ticket: Ticket?): WorkSummary {
+    if (ticket == null || ticket.id != itemId) return this
+    return copy(
+        title = ticket.title.ifBlank { title },
+        statusCategory = ticket.statusCategory ?: statusCategory,
+        statusName = ticket.statusName ?: statusName,
+        url = ticket.url ?: url,
+        unavailable = ticket.unavailable,
+    )
+}
+
+/** [work] and [workSuggested] refreshed from the ticket cache; this very row when nothing changes. */
+fun SessionRow.withTicketsFrom(tickets: Map<Long, Ticket>): SessionRow {
+    if (tickets.isEmpty()) return this
+    val w = work?.let { it.refreshedBy(it.itemId?.let(tickets::get)) }
+    val g = workSuggested?.let { it.refreshedBy(it.itemId?.let(tickets::get)) }
+    return if (w == work && g == workSuggested) this else copy(work = w, workSuggested = g)
+}

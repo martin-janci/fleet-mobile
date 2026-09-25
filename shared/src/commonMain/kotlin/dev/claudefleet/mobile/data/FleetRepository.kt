@@ -181,6 +181,7 @@ class FleetRepository(
         job = null
         running?.cancel()
         discovery?.cancel()
+        myWorkRead?.cancel()
         _status.value = ConnectionStatus.Offline(STOPPED)
     }
 
@@ -200,6 +201,25 @@ class FleetRepository(
      * half-built snapshot still cannot reach the flows.
      */
     override suspend fun refresh() {
+        relist()
+        // A pull or a `lagged` resync re-reads *My work* too: which tickets
+        // are the person's changes on the tracker, and no frame says so. A
+        // `ready` does not come through here — its discovery reads it.
+        if (_capabilities.value.work) readMyWorkSoon()
+    }
+
+    /**
+     * The re-list itself.
+     *
+     * The ticket cache is emptied by it, not carried over. The cache is newer
+     * than the session rows only while every `work:item` frame since it was
+     * filled has been applied, and a re-list is exactly the case where some
+     * were not — the stream lagged or dropped. Carried over, a stale ticket
+     * would be overlaid on rows the re-list just made fresh (the work
+     * heading's status, a chip's title). What refills it is whatever next
+     * reads tickets: *My work*, or the Tickets sheet.
+     */
+    private suspend fun relist() {
         // Spent before the re-list, not after: the fresh snapshot is newer
         // than every frame the id points past, so a later resume from it would
         // replay older rows over newer ones. Cleared up front so a refresh
@@ -209,7 +229,7 @@ class FleetRepository(
             val sessions = async { client.listSessions() }
             val hosts = async { client.listHosts() }
             val projects = async { client.listProjects() }
-            publish(FleetSnapshot(sessions.await(), hosts.await(), projects.await(), _tickets.value))
+            publish(FleetSnapshot(sessions.await(), hosts.await(), projects.await(), tickets = emptyList()))
         }
     }
 
@@ -281,7 +301,7 @@ class FleetRepository(
                             // is nothing to re-list. Anything short of a clear
                             // yes — `false`, or a hub that cannot resume — is
                             // the old path.
-                            if (event.resumed != true) refresh()
+                            if (event.resumed != true) relist()
                             failures = 0
                             // Re-measured per connection, so a device whose
                             // clock is corrected by NTP heals on the next
@@ -354,22 +374,35 @@ class FleetRepository(
                 HubCapabilities()
             }
             _capabilities.value = caps
-            if (!caps.work) {
-                _myWork.value = null
-                return@launch
-            }
-            _myWork.value = try {
-                if (client.workTrackers().isEmpty()) {
-                    null
-                } else {
-                    client.workTickets(MY_WORK).also { rememberTickets(it) }.map { it.id }.toSet()
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Throwable) {
-                null
-            }
+            myWorkRead?.cancel()
+            _myWork.value = if (caps.work) readMyWork() else null
         }
+    }
+
+    /** A *My work* read in flight from [refresh]; a newer read replaces it. */
+    private var myWorkRead: Job? = null
+
+    private fun readMyWorkSoon() {
+        myWorkRead?.cancel()
+        myWorkRead = scope.launch { _myWork.value = readMyWork() }
+    }
+
+    /**
+     * The item ids in the hub's *My work* view, or null when there is none to
+     * ask for — no tracker — or the read failed, which hides the chip rather
+     * than filtering the list to nothing. The tickets it answers refill the
+     * cache.
+     */
+    private suspend fun readMyWork(): Set<Long>? = try {
+        if (client.workTrackers().isEmpty()) {
+            null
+        } else {
+            client.workTickets(MY_WORK).also { rememberTickets(it) }.map { it.id }.toSet()
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Throwable) {
+        null
     }
 
     private fun snapshot() = FleetSnapshot(_sessions.value, _hosts.value, _projects.value, _tickets.value)

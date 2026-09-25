@@ -46,6 +46,7 @@ private class FakeFleet(
     override val sessionChanges = emptyFlow<Long>()
     override val capabilities = MutableStateFlow(HubCapabilities())
     override val myWork = MutableStateFlow<Set<Long>?>(null)
+    override val tickets = MutableStateFlow<List<dev.claudefleet.mobile.model.Ticket>>(emptyList())
 
     var refreshes = 0
         private set
@@ -674,5 +675,29 @@ class NeedsAttentionToggleTest {
         runCurrent()
         assertFalse(vm.state.value.myWorkOnly, "the tracker went: the filter goes with its chip")
         assertEquals(3, vm.state.value.groups.single().projects.flatMap { it.sessions }.size)
+    }
+
+    /**
+     * A ticket moving on the tracker arrives as `work:item`, which updates the
+     * ticket cache and not the session rows. The heading and the chips follow
+     * the cache rather than keep the status the row was stamped with.
+     */
+    @Test
+    fun a_work_heading_follows_the_ticket_cache() = runTest {
+        val fleet = workFleet(listOf(session(1).copy(work = linked("PAY-7", itemId = 70).copy(statusName = "To Do"))))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+        vm.toggleByWork()
+        runCurrent()
+        assertEquals("To Do", vm.state.value.groups.single().projects.single().work!!.statusName)
+
+        fleet.tickets.value = listOf(
+            dev.claudefleet.mobile.model.Ticket(id = 70, key = "PAY-7", title = "Refund webhook", statusName = "In Review"),
+        )
+        runCurrent()
+
+        val work = vm.state.value.groups.single().projects.single().work!!
+        assertEquals("In Review", work.statusName)
+        assertEquals("Refund webhook", work.title)
+        assertEquals("In Review", vm.state.value.groups.single().projects.single().sessions.single().work!!.statusName, "the row's chip too")
     }
 }

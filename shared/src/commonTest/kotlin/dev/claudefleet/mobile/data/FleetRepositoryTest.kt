@@ -74,6 +74,8 @@ private class FakeHub(
     var mineJson: String = "[]"
     var toolListCalls = 0
         private set
+    var mineCalls = 0
+        private set
 
     /** Makes `list_hosts` answer 401, so a refresh fails after its first call. */
     var failHosts = false
@@ -93,7 +95,7 @@ private class FakeHub(
                 }
                 val payload = when {
                     "\"trackers\"" in body -> trackersJson
-                    "\"tickets\"" in body -> mineJson
+                    "\"tickets\"" in body -> { mineCalls += 1; mineJson }
                     "list_sessions" in body -> { sessionCalls += 1; sessionsJson }
                     "list_hosts" in body -> { hostCalls += 1; hostsJson }
                     "list_projects" in body -> { projectCalls += 1; projectsJson }
@@ -1051,6 +1053,69 @@ class FleetRepositoryTest {
 
         drop.complete(Unit)
         repository.capabilities.first { it.has("work_link", "confirm") }
+        repository.stop()
+    }
+
+    // ---- the ticket cache and My work across re-lists ----
+
+    private fun workHub() = FakeHub().apply {
+        toolsJson = """[{"name":"work"},{"name":"work_link"}]"""
+        trackersJson = """[{"id":1,"provider":"jira","name":"acme","state":"ok"}]"""
+        mineJson = """[{"id":70,"key":"PAY-7","title":"Refund"}]"""
+    }
+
+    /** A `ready` reads *My work* once, through discovery — the re-list before it does not read it again. */
+    @Test
+    fun a_ready_reads_my_work_once() = runTest {
+        val hub = workHub()
+        val repository = repo(hub, FakeStream { emit(READY); awaitCancellation() }, backgroundScope)
+
+        repository.start()
+        repository.myWork.first { it != null }
+        repository.status.first { it is ConnectionStatus.Connected }
+
+        assertEquals(1, hub.mineCalls)
+        repository.stop()
+    }
+
+    /**
+     * A pull re-reads *My work*: tickets assigned on the tracker since the
+     * last `ready` show up without a reconnect.
+     */
+    @Test
+    fun a_pull_to_refresh_re_reads_my_work() = runTest {
+        val hub = workHub()
+        val repository = repo(hub, FakeStream { emit(READY); awaitCancellation() }, backgroundScope)
+        repository.start()
+        repository.myWork.first { it == setOf(70L) }
+
+        hub.mineJson = """[{"id":70,"key":"PAY-7"},{"id":90,"key":"PAY-9"}]"""
+        repository.refresh()
+
+        assertEquals(setOf(70L, 90L), repository.myWork.first { it == setOf(70L, 90L) })
+        assertEquals(2, hub.mineCalls)
+        repository.stop()
+    }
+
+    /**
+     * The cache is overlaid on the rows as the newer word, which is only true
+     * while every `work:item` since it was filled was applied. A re-list is
+     * the case where some were not, so it empties the cache; whatever reads
+     * tickets next refills it.
+     */
+    @Test
+    fun a_re_list_empties_the_ticket_cache() = runTest {
+        val hub = workHub()
+        val repository = repo(hub, FakeStream { emit(READY); awaitCancellation() }, backgroundScope)
+        repository.start()
+        repository.tickets.first { it.isNotEmpty() }
+        repository.rememberTickets(listOf(dev.claudefleet.mobile.model.Ticket(id = 99, key = "OPS-1")))
+
+        hub.trackersJson = "[]" // nothing to refill it with
+        repository.refresh()
+        repository.myWork.first { it == null }
+
+        assertEquals(emptyList(), repository.tickets.value)
         repository.stop()
     }
 }
