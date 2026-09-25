@@ -114,26 +114,57 @@ class SessionWorkViewModel(
      * *Set work…*: a key or a pasted ticket URL. Looked up first, so a
      * tracker's ticket is linked by its item (title, status and all); a key no
      * tracker knows is linked as a bare key — trackers never gate work.
+     *
+     * A URL is linked **only** by the item it resolves to. The hub takes any
+     * string of up to 64 characters as a free-form key, so a URL sent as one
+     * would make a work group named after the URL. When the hub cannot look
+     * it up — no `lookup`, or a refusal — the person is asked for the key.
+     *
+     * The lookup's own refusal is answered here and never rethrown:
+     * [runGated] would read an "unknown action" there as `work_link link`
+     * being missing and hide *Set work…* for the rest of the connection,
+     * when it was `work lookup` the hub did not know.
      */
     fun setWork(input: String): Job = runGated(LINK) {
         val reference = input.trim()
         if (reference.isEmpty()) return@runGated
+        val isUrl = reference.contains("://")
         val ticket = if (fleet.capabilities.value.has(WORK, LOOKUP)) {
             try {
                 actions.lookup(reference)
             } catch (e: HubError.Tool) {
-                if (e.isUnknownAction()) fleet.actionMissing(WORK, LOOKUP)
-                // A URL must resolve; a bare key may stand on its own.
-                if (reference.contains("://") || !(e.code == "E_NOTFOUND" || e.isUnknownAction())) throw e
-                null
+                val unknown = e.isUnknownAction()
+                if (unknown) fleet.actionMissing(WORK, LOOKUP)
+                when {
+                    // A bare key may stand on its own.
+                    !isUrl && (unknown || e.code == "E_NOTFOUND") -> null
+                    unknown -> return@runGated refuseUrl()
+                    else -> {
+                        local.update { it.copy(error = friendlyWork(e)) }
+                        return@runGated
+                    }
+                }
             }
         } else {
             null
         }
-        if (ticket != null) {
-            actions.link(sessionId, itemId = ticket.id)
-        } else {
-            actions.link(sessionId, key = reference)
+        when {
+            ticket != null -> actions.link(sessionId, itemId = ticket.id)
+            isUrl -> refuseUrl()
+            else -> actions.link(sessionId, key = reference)
+        }
+    }
+
+    /** A URL the hub cannot resolve to a ticket: ask for the key rather than link the URL. */
+    private fun refuseUrl() {
+        local.update {
+            it.copy(
+                error = Friendly(
+                    "This hub can't look up a ticket link",
+                    "Type the ticket's key instead, like PAY-7.",
+                    isError = true,
+                ),
+            )
         }
     }
 

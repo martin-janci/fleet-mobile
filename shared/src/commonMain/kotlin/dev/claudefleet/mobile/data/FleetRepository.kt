@@ -286,6 +286,18 @@ class FleetRepository(
                                 // is untouched, so an upgrade on either side
                                 // is picked up the next time it connects.
                                 contractRefused = true
+                                // Forget what the LAST hub let this token do.
+                                // Discovery is skipped on a refused hub, and
+                                // the work screens gate on capabilities alone:
+                                // left in place, the previous connection's
+                                // `work_link` would keep Confirm, Start and
+                                // Resume live against a hub this build has
+                                // just decided not to call. A My work read
+                                // still in flight would refill `myWork`.
+                                discovery?.cancel()
+                                myWorkRead?.cancel()
+                                _capabilities.value = HubCapabilities()
+                                _myWork.value = null
                                 _status.value = ConnectionStatus.Refused(refusal)
                                 return@collect
                             }
