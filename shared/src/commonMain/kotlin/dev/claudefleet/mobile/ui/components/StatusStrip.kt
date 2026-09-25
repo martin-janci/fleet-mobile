@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui.components
 
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
@@ -14,7 +15,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.ConvContext
 import dev.claudefleet.mobile.model.SessionRow
-import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.theme.LocalStatusColors
 import dev.claudefleet.mobile.ui.theme.StatusTone
 import kotlin.math.roundToInt
@@ -38,25 +38,46 @@ fun StatusStrip(
     nowSeconds: Long,
     modifier: Modifier = Modifier,
 ) {
-    val text = statusStripText(row, context, nowSeconds)
-    if (text.isBlank()) return
     val amber = contextIsTight(row, context)
     val colors = LocalStatusColors.current(StatusTone.BLOCKED)
-    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        // A real dot in the status's own colour rather than a `●` glyph in
-        // the text: the glyph was always grey, so "working" and "blocked"
-        // led with the same mark.
-        StatusDot(row?.claudeStatus, row?.stuckKind)
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (amber) colors.onContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+    // The strip is measured before it is written: on the narrowest phone the
+    // four-fact line does not fit, and a fact clipped mid-word ("$13.2…") is
+    // worse than one that is honestly absent. See [stripFitsModel].
+    BoxWithConstraints(modifier = modifier) {
+        val text = statusStripText(row, context, nowSeconds, includeModel = stripFitsModel(maxWidth.value.toDouble()))
+        if (text.isBlank()) return@BoxWithConstraints
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // A real dot in the status's own colour rather than a `●` glyph in
+            // the text: the glyph was always grey, so "working" and "blocked"
+            // led with the same mark.
+            StatusDot(row?.claudeStatus, row?.stuckKind)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (amber) colors.onContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                // A backstop, not the plan: a friendly name long enough to
+                // matter is not in this text at all, so what reaches here is
+                // the bounded line [statusStripText] builds.
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
+
+/**
+ * Whether a strip [availableDp] wide can carry the model as well.
+ *
+ * The full four-fact line — `working 2m · ctx 91% · $13.22 · opus-5` — is
+ * about 38 characters of `labelLarge`, and the status dot and its gap take
+ * 18 dp before a word of it is drawn. That clears a 360 dp phone's content
+ * width and does not clear a 320 dp one, which is where the threshold sits.
+ *
+ * Its own function, and a pure one, so the rule is stated once and tested
+ * without a device.
+ */
+internal fun stripFitsModel(availableDp: Double): Boolean = availableDp >= 300.0
 
 /**
  * The `/compact` offer, drawn in the strip's amber. Its own composable, not
@@ -103,12 +124,17 @@ internal const val CONTEXT_WARNING_PCT: Double = 80.0
  * `idle` says only how long ago it stopped; any other status is shown as the
  * bare word, since nothing else here has a caption for it yet.
  */
-fun statusStripText(row: SessionRow?, context: ConvContext?, nowSeconds: Long): String {
+fun statusStripText(
+    row: SessionRow?,
+    context: ConvContext?,
+    nowSeconds: Long,
+    includeModel: Boolean = true,
+): String {
     if (row == null) return ""
     return when (row.claudeStatus) {
-        "working" -> workingStrip(row, context, nowSeconds)
+        "working" -> workingStrip(row, context, nowSeconds, includeModel)
         "idle" -> {
-            val elapsed = relativeTime(row.lastStopAt, nowSeconds)
+            val elapsed = compactElapsed(row.lastStopAt, nowSeconds)
             if (elapsed != null) "idle since $elapsed" else "idle"
         }
         null -> ""
@@ -116,18 +142,50 @@ fun statusStripText(row: SessionRow?, context: ConvContext?, nowSeconds: Long): 
     }
 }
 
-private fun workingStrip(row: SessionRow, context: ConvContext?, nowSeconds: Long): String {
-    val elapsed = relativeTime(row.lastTurnAt ?: row.startedAt, nowSeconds)
+private fun workingStrip(
+    row: SessionRow,
+    context: ConvContext?,
+    nowSeconds: Long,
+    includeModel: Boolean,
+): String {
+    val elapsed = compactElapsed(row.lastTurnAt ?: row.startedAt, nowSeconds)
     val pieces = mutableListOf(if (elapsed != null) "working $elapsed" else "working")
     val pct = context?.pct ?: row.contextPct
     if (pct != null) {
         val stale = context?.stale == true
-        pieces += "ctx ${pct.roundToInt()} %" + if (stale) " (stale)" else ""
+        pieces += "ctx ${pct.roundToInt()}%" + if (stale) " (stale)" else ""
     }
     row.usageCostMicros?.let { pieces += formatUsd(it) }
-    row.usageModel?.let { pieces += it }
+    if (includeModel) row.usageModel?.let { pieces += shortModel(it) }
     return pieces.joinToString(" · ")
 }
+
+/**
+ * `relativeTime`'s vocabulary with the spaces squeezed out: `now`, `2m`, `3h`,
+ * `4d`.
+ *
+ * Not a change to `relativeTime` itself, which reads well in the places that
+ * have room for it (a session row, the Today sheet). This strip does not: four
+ * facts share one line on a 320 dp screen, and "2 min" against "2m" is three
+ * characters that buy nothing here.
+ */
+private fun compactElapsed(epochSeconds: Long?, nowSeconds: Long): String? {
+    if (epochSeconds == null) return null
+    val delta = (nowSeconds - epochSeconds).coerceAtLeast(0)
+    return when {
+        delta < 60 -> "now"
+        delta < 3600 -> "${delta / 60}m"
+        delta < 86_400 -> "${delta / 3600}h"
+        else -> "${delta / 86_400}d"
+    }
+}
+
+/**
+ * `claude-opus-5` as `opus-5`. Every model the hub reports carries the prefix,
+ * so it is seven characters that tell two of them apart not at all — the
+ * desktop's conversation header drops it for the same reason.
+ */
+private fun shortModel(model: String): String = model.removePrefix("claude-")
 
 /** `$1.84` from micro-USD, without `String.format`/`java.util` — this runs on every KMP target. */
 private fun formatUsd(micros: Long): String {

@@ -1,10 +1,5 @@
 package dev.claudefleet.mobile.ui
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -51,6 +46,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -64,7 +60,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -82,6 +77,7 @@ import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.MarkdownText
 import dev.claudefleet.mobile.ui.components.ScreenHeader
+import dev.claudefleet.mobile.ui.components.SpiralLoader
 import dev.claudefleet.mobile.ui.components.StatusStrip
 import dev.claudefleet.mobile.ui.components.WorkChip
 import dev.claudefleet.mobile.ui.components.contextIsTight
@@ -231,10 +227,6 @@ fun SessionScreen(
             state = state,
             onBack = onBack,
             onRefresh = onRefresh,
-            listState = listState,
-            turnCount = turns.size,
-            truncated = state.conversation.truncated,
-            scope = scope,
             onRestart = onRestart,
             onSafeKill = onSafeKill,
             onKill = onKill,
@@ -251,22 +243,31 @@ fun SessionScreen(
         if (work.sheetOpen) WorkTicketSheet(work, workHandlers)
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            if (state.loaded && turns.isEmpty()) {
-                EmptyConversation(state)
-            } else {
-                // Tagged so a device test can address this list rather than
-                // guessing which of the screen's scrollable nodes it meant.
-                // `atBottom` above is derived from measurement, so it only
-                // means anything where there is measurement, and the test that
-                // checks it has to run on a device — see `ConversationScrollTest`.
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize().testTag(CONVERSATION_LIST),
-                ) {
-                    if (state.conversation.truncated) {
-                        item(key = "truncated") { TruncationNote() }
+            // Pull down to re-read, as the sessions and hosts lists already
+            // do. This screen was the only one where the sole way to refresh
+            // was hitting a 24 dp icon in the far corner of the header.
+            PullToRefreshBox(
+                isRefreshing = state.refreshing,
+                onRefresh = onRefresh,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                if (state.loaded && turns.isEmpty()) {
+                    EmptyConversation(state)
+                } else {
+                    // Tagged so a device test can address this list rather than
+                    // guessing which of the screen's scrollable nodes it meant.
+                    // `atBottom` above is derived from measurement, so it only
+                    // means anything where there is measurement, and the test that
+                    // checks it has to run on a device — see `ConversationScrollTest`.
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize().testTag(CONVERSATION_LIST),
+                    ) {
+                        if (state.conversation.truncated) {
+                            item(key = "truncated") { TruncationNote() }
+                        }
+                        turnItems(turns)
                     }
-                    turnItems(turns)
                 }
             }
             // The fast way back down, for whoever scrolled up to read
@@ -287,6 +288,16 @@ fun SessionScreen(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
                 )
             }
+            // Turn stepping, off the header and onto the glass: at the bottom
+            // right it is under a thumb, where the header was not, and it
+            // clears the centred jump pill instead of colliding with it.
+            TurnStepper(
+                listState = listState,
+                turnCount = turns.size,
+                truncated = state.conversation.truncated,
+                scope = scope,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 12.dp),
+            )
         }
 
         // Between the conversation and the composer: a person who opened this
@@ -358,24 +369,25 @@ private fun LazyListScope.turnItems(turns: List<ConvTurn>) {
 
 /**
  * The session's header: back, the session's name over its host, refresh and
- * the ⋮ menu on the first line; the [StatusStrip], a retirement in progress
- * and the turn-stepping arrows on a line of their own under it.
+ * the ⋮ menu on the first line; the [StatusStrip] and a retirement in progress
+ * on a line of their own under it.
  *
  * All of that used to share one `TopAppBar`'s `actions` slot, which is
  * measured before the title and does not wrap. On a phone it was wider than
  * the screen: the title was left zero width, its host line broke one
  * character per row and stretched the bar down the screen, and the strip ran
  * off the left edge over the back arrow. See [ScreenHeader].
+ *
+ * The turn-stepping arrows used to sit beside the strip and took 96 dp of a
+ * 340 dp row with them, which is most of the reason the strip's tail — the
+ * turn's cost and model — was never on screen. They are a [TurnStepper]
+ * floating over the transcript now, where a thumb reaches them.
  */
 @Composable
 private fun SessionBar(
     state: SessionUiState,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
-    listState: LazyListState,
-    turnCount: Int,
-    truncated: Boolean,
-    scope: CoroutineScope,
     onRestart: () -> Unit,
     onSafeKill: () -> Unit,
     onKill: () -> Unit,
@@ -386,17 +398,6 @@ private fun SessionBar(
     workHandlers: SessionWorkHandlers,
 ) {
     val busy = state.loading || state.refreshing
-    val angle = refreshAngle(busy)
-    // Recomputed from `listState.firstVisibleItemIndex` — a snapshot-backed
-    // read — whenever it moves, same as `atBottom` above it in the file; see
-    // [adjacentTurn] for what "adjacent" means once the truncation note is
-    // in the count.
-    val prevTurn by remember(listState, turnCount, truncated) {
-        derivedStateOf { adjacentTurn(listState.firstVisibleItemIndex, turnCount, truncated, -1) }
-    }
-    val nextTurn by remember(listState, turnCount, truncated) {
-        derivedStateOf { adjacentTurn(listState.firstVisibleItemIndex, turnCount, truncated, 1) }
-    }
     ScreenHeader(
         title = state.session?.displayName ?: "Session",
         // The host is in the header because a prompt goes to a machine, not
@@ -410,15 +411,16 @@ private fun SessionBar(
         },
         actions = {
             IconButton(onClick = onRefresh, enabled = !busy) {
-                Icon(
-                    FleetIcons.Refresh,
-                    contentDescription = "Refresh",
-                    // `graphicsLayer {}` rather than `Modifier.rotate(angle)`:
-                    // the lambda form reads the angle in the draw phase, so a
-                    // frame of the spin invalidates drawing alone instead of
-                    // recomposing the bar sixty times a second.
-                    modifier = Modifier.graphicsLayer { rotationZ = angle },
-                )
+                // The spiral replaces the icon rather than spinning it. A
+                // rotating refresh arrow says "I am a button, and I am
+                // turning"; the button is `enabled = !busy` anyway, so while
+                // the read is in flight there is no arrow worth keeping — and
+                // this is the same loader the desktop app draws for a wait.
+                if (busy) {
+                    SpiralLoader(size = 20.dp, contentDescription = "Refreshing")
+                } else {
+                    Icon(FleetIcons.Refresh, contentDescription = "Refresh")
+                }
             }
             // Hidden outright rather than drawn dark: a readonly credential,
             // a session gone from the fleet, or the controller itself (the
@@ -438,41 +440,18 @@ private fun SessionBar(
             }
         },
         below = {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Takes what the arrows leave and gives way (ellipsis) before
-                // they do. A status word alone told a person nothing about how
-                // long the agent had been at it, how full its context window
-                // was, or what the turn had cost — see `StatusStrip.kt`.
-                StatusStrip(
-                    row = state.session,
-                    context = state.conversation.context,
-                    nowSeconds = state.nowSeconds,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(
-                    onClick = { prevTurn?.let { target -> scope.launch { listState.animateScrollToItem(target) } } },
-                    enabled = prevTurn != null,
-                ) {
-                    Icon(
-                        FleetIcons.ArrowBack,
-                        contentDescription = "Previous turn",
-                        modifier = Modifier.rotate(90f),
-                    )
-                }
-                IconButton(
-                    onClick = { nextTurn?.let { target -> scope.launch { listState.animateScrollToItem(target) } } },
-                    enabled = nextTurn != null,
-                ) {
-                    Icon(
-                        FleetIcons.ArrowBack,
-                        contentDescription = "Next turn",
-                        modifier = Modifier.rotate(-90f),
-                    )
-                }
-            }
+            // The whole row, now that the arrows have gone to [TurnStepper]:
+            // what the strip says is short enough to fit a 320 dp screen
+            // outright, so nothing here is competing for the space any more.
+            // A status word alone told a person nothing about how long the
+            // agent had been at it, how full its context window was, or what
+            // the turn had cost — see `StatusStrip.kt`.
+            StatusStrip(
+                row = state.session,
+                context = state.conversation.context,
+                nowSeconds = state.nowSeconds,
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp),
+            )
             // The two things that ask something of the reader get a line of
             // their own, and only while one of them is up: beside the strip
             // they left it no room at all on a phone.
@@ -803,29 +782,66 @@ private fun KillConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
 private val KILL_CONFIRM_DELAY = 800.milliseconds
 
 /**
- * The refresh icon's angle: spinning while [busy], and a flat `0f` otherwise.
+ * Step to the previous or next turn: a small floating pair of arrows at the
+ * bottom-right of the transcript.
  *
- * The transition used to be created unconditionally and only *applied* when
- * busy, which meant an idle screen — the normal state of a session screen —
- * ran an infinite 900 ms animation forever, waking the frame clock and
- * recomposing the bar to draw an icon at the angle it was already at.
- * Creating it inside the branch is what actually stops it: an
- * `InfiniteTransition` that is not composed is not running.
+ * It used to be two `IconButton`s in the header, beside the [StatusStrip].
+ * Two of them are 96 dp of a 340 dp row, which is most of the reason the
+ * strip's tail was always cut off — and the top-right corner of a phone is
+ * the furthest point from a thumb for a control used while reading.
  *
- * A conditional `rememberInfiniteTransition` is legal — `busy` gates the whole
- * composable call, so the two branches are separate groups in the slot table
- * and leaving one discards its state, which is exactly the intent here.
+ * Hidden outright when there is nowhere to step (a single turn, or a list
+ * that has not loaded), so it is never a pair of dead arrows over the text.
+ * What "adjacent" means once the truncation note is in the count is
+ * [adjacentTurn]'s, unchanged by the move.
  */
 @Composable
-private fun refreshAngle(busy: Boolean): Float = if (busy) {
-    rememberInfiniteTransition(label = "refresh").animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(animation = tween(900, easing = LinearEasing)),
-        label = "angle",
-    ).value
-} else {
-    0f
+private fun TurnStepper(
+    listState: LazyListState,
+    turnCount: Int,
+    truncated: Boolean,
+    scope: CoroutineScope,
+    modifier: Modifier = Modifier,
+) {
+    // Recomputed from `listState.firstVisibleItemIndex` — a snapshot-backed
+    // read — whenever it moves, same as `atBottom` in [SessionScreen].
+    val prevTurn by remember(listState, turnCount, truncated) {
+        derivedStateOf { adjacentTurn(listState.firstVisibleItemIndex, turnCount, truncated, -1) }
+    }
+    val nextTurn by remember(listState, turnCount, truncated) {
+        derivedStateOf { adjacentTurn(listState.firstVisibleItemIndex, turnCount, truncated, 1) }
+    }
+    if (prevTurn == null && nextTurn == null) return
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shadowElevation = 4.dp,
+        modifier = modifier,
+    ) {
+        Column {
+            IconButton(
+                onClick = { prevTurn?.let { target -> scope.launch { listState.animateScrollToItem(target) } } },
+                enabled = prevTurn != null,
+            ) {
+                Icon(
+                    FleetIcons.ArrowBack,
+                    contentDescription = "Previous turn",
+                    modifier = Modifier.rotate(90f),
+                )
+            }
+            IconButton(
+                onClick = { nextTurn?.let { target -> scope.launch { listState.animateScrollToItem(target) } } },
+                enabled = nextTurn != null,
+            ) {
+                Icon(
+                    FleetIcons.ArrowBack,
+                    contentDescription = "Next turn",
+                    modifier = Modifier.rotate(-90f),
+                )
+            }
+        }
+    }
 }
 
 @Composable

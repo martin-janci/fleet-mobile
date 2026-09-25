@@ -3,11 +3,13 @@ package dev.claudefleet.mobile.android
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.claudefleet.mobile.data.ConnectionStatus
@@ -15,6 +17,7 @@ import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.SessionUiState
 import dev.claudefleet.mobile.ui.theme.FleetTheme
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -97,16 +100,41 @@ class SessionHeaderLayoutTest {
         assertTrue("the strip is left of the screen at ${strip.left}", strip.left >= 0.dp)
         assertTrue("the strip is not under the title: ${strip.top} vs ${host.bottom}", strip.top >= host.bottom)
 
+        // The whole turn, on one line, not ellipsised away. The arrows used to
+        // sit beside the strip and take 96 dp of the row with them, and what
+        // fell off the end was the cost — the reason this assertion exists.
+        // `onNodeWithText` matches the semantic string whether or not it is
+        // legible, so the check is the layout's own overflow flag.
+        val layout = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText("working", substring = true)
+            .fetchSemanticsNode()
+            .config[SemanticsActions.GetTextLayoutResult]
+            .action
+            ?.invoke(layout)
+        assertTrue("no text layout for the strip", layout.isNotEmpty())
+        assertFalse("the status strip is truncated: \"${layout[0].layoutInput.text}\"", layout[0].hasVisualOverflow)
+        // At 320 dp the model is the fact that goes (see `stripFitsModel`);
+        // what the reader asked for — how long, how full, how much — stays.
+        val text = layout[0].layoutInput.text.text
+        assertTrue("the elapsed time is missing from \"$text\"", text.contains("working "))
+        assertTrue("the context is missing from \"$text\"", text.contains("ctx 91%"))
+        assertTrue("the cost is missing from \"$text\"", text.contains("$13.22"))
+
         // Everything the header offers is on screen and whole.
         for (label in listOf("/compact", "retire: requested")) {
             compose.onNodeWithText(label).assertIsDisplayed()
             val right = compose.onNodeWithText(label).getBoundsInRoot().right
             assertTrue("\"$label\" is cut off at $right", right <= WIDTH)
         }
-        for (description in listOf("Previous turn", "Next turn", "Refresh", "Session actions")) {
+        for (description in listOf("Refresh", "Session actions")) {
             val bounds = compose.onNodeWithContentDescription(description).getBoundsInRoot()
             assertTrue("\"$description\" is cut off: ${bounds.left}..${bounds.right}", bounds.left >= 0.dp && bounds.right <= WIDTH)
         }
+        // Turn stepping left the header for the glass over the transcript, so
+        // that it is both out of the strip's way and under a thumb. With a
+        // single turn there is nowhere to step and it is not drawn at all.
+        compose.onNodeWithContentDescription("Previous turn").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Next turn").assertDoesNotExist()
     }
 
     private companion object {
