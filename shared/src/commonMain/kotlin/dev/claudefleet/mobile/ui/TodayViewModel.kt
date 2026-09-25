@@ -42,7 +42,7 @@ data class TodayUiState(
     val loaded: Boolean = false,
     val error: Friendly? = null,
 ) {
-    /** What *Copy standup* puts on the clipboard: the desktop's text, for what is on screen. */
+    /** What *Copy standup* and *Share* hand on: the desktop's text, for what is on screen. */
     val standup: String get() = standupText(view)
 }
 
