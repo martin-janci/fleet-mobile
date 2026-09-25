@@ -51,6 +51,14 @@ android {
     }
 
     buildTypes {
+        // A debug build is signed with whichever machine's debug key built it,
+        // the release with the release key — Android refuses to update one
+        // with the other. Its own application id lets a local debug build sit
+        // next to the installed release (each paired on its own) instead of
+        // demanding an uninstall. `src/debug/res` renames it on the launcher.
+        debug {
+            applicationIdSuffix = ".debug"
+        }
         release {
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
