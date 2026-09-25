@@ -509,7 +509,20 @@ class NewSessionViewModelTest {
 
         assertEquals(listOf(4L), vm.state.value.projects.map { it.id })
         assertEquals("Pick one", vm.state.value.error?.title)
-        assertTrue(vm.state.value.canCreate, "the form unlocks with the choice in front of the person")
+        // Not creatable until a project is picked: Create again would send the
+        // same request and get the same refusal.
+        assertFalse(vm.state.value.canCreate, "the hub cannot pick, so the person must")
+        vm.create()
+        runCurrent()
+        assertEquals(listOf("start PAY-9 pine -"), work.calls, "no second identical request")
+
+        work.fail = null
+        vm.selectProject(4)
+        runCurrent()
+        assertTrue(vm.state.value.canCreate, "a candidate picked: the form unlocks")
+        vm.create()
+        runCurrent()
+        assertEquals(listOf("start PAY-9 pine -", "start PAY-9 pine 4"), work.calls)
     }
 
     @Test

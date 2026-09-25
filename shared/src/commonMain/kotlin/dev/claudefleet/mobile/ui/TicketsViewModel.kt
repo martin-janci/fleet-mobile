@@ -243,10 +243,15 @@ class TicketsViewModel(
         fun Ticket.current() = fresh[id]?.copy(liveSessionIds = liveSessionIds, views = views, description = description) ?: this
         val selected = (fresh[l.selectedId] ?: l.selected)?.let { ticket ->
             // Whoever knows of a live session wins: the fleet's own rows, the
-            // ticket's listing, or the plan. Any one of them means Jump.
+            // ticket's listing, or the plan. Any one of them means Jump —
+            // but the listing and the plan are snapshots from when the sheet
+            // read them, so an id they name counts only while the fleet still
+            // has that session. A session killed with the sheet open must turn
+            // Open back into Resume, not jump to a row that is gone.
+            val alive = sessions.mapTo(HashSet()) { it.id }
             val live = sessions.firstOrNull { it.work?.itemId == ticket.id }?.id
-                ?: ticket.liveSessionIds.firstOrNull()
-                ?: l.plan?.live?.firstOrNull()?.sessionId
+                ?: ticket.liveSessionIds.firstOrNull { it in alive }
+                ?: l.plan?.live?.firstOrNull { it.sessionId in alive }?.sessionId
             val plan = l.plan?.takeIf { live == null }
             TicketDetail(
                 ticket = ticket,

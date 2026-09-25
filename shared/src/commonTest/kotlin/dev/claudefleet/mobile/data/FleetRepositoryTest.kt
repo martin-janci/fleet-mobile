@@ -29,6 +29,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlin.time.Duration
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -1051,6 +1052,45 @@ class FleetRepositoryTest {
 
         drop.complete(Unit)
         repository.capabilities.first { it.has("work_link", "confirm") }
+        repository.stop()
+    }
+
+    /**
+     * A reconnect that lands on a hub this build refuses must not keep the
+     * last hub's capabilities: discovery is skipped on a refused hub, and the
+     * work screens gate on capabilities alone, so `work_link` would stay live
+     * against a hub the app has decided not to call.
+     */
+    @Test
+    fun a_refused_reconnect_forgets_the_last_hubs_capabilities_and_my_work() = runTest {
+        val hub = FakeHub().apply {
+            toolsJson = """[{"name":"work"},{"name":"work_link"}]"""
+            trackersJson = """[{"id":1,"provider":"jira","name":"acme","state":"ok"}]"""
+            mineJson = """[{"id":70,"key":"PAY-7"}]"""
+        }
+        // The first connection stays up until the test has seen what it
+        // discovered, then drops; the second lands on a refused hub.
+        val drop = CompletableDeferred<Unit>()
+        val stream = FakeStream { attempt ->
+            if (attempt == 1) {
+                emit(READY)
+                drop.await()
+            } else {
+                emit(HubEvent.Ready("0.9.9", listOf("session", "host"), contract = 5))
+                awaitCancellation()
+            }
+        }
+        val repository = FleetRepository(hub.client, stream, backgroundScope, backoff = { Duration.ZERO })
+
+        repository.start()
+        repository.capabilities.first { it.workLink }
+        repository.myWork.first { it != null }
+        drop.complete(Unit)
+        repository.status.first { it is ConnectionStatus.Refused }
+
+        assertFalse(repository.capabilities.value.work, "a refused hub offers nothing work-shaped")
+        assertFalse(repository.capabilities.value.workLink)
+        assertNull(repository.myWork.value)
         repository.stop()
     }
 }

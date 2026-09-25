@@ -24,6 +24,9 @@ import kotlin.test.assertTrue
 private val PAY9 = Ticket(id = 90, key = "PAY-9", title = "Ledger")
 private val PAY7 = Ticket(id = 70, key = "PAY-7", title = "Refund", liveSessionIds = listOf(5))
 
+/** A live session with no work of its own: what makes a listed or planned id count as live. */
+private fun alive(id: Long) = SessionRow(id = id, tmuxName = "s$id", hostAlias = "pine")
+
 private fun plan(ok: Boolean = true, live: List<LiveWork> = emptyList()) = ResumePlan(
     key = "PAY-9",
     hostAlias = "pine",
@@ -78,7 +81,7 @@ class TicketsViewModelTest {
     @Test
     fun a_ticket_with_a_live_session_offers_open_and_open_jumps_there() = runTest {
         val nav = Nav()
-        val tickets = vm(WorkFleet(), FakeWorkActions(), backgroundScope, nav)
+        val tickets = vm(WorkFleet(listOf(alive(5))), FakeWorkActions(), backgroundScope, nav)
         tickets.select(PAY7)
         runCurrent()
 
@@ -149,7 +152,7 @@ class TicketsViewModelTest {
     @Test
     fun a_plan_that_says_live_is_a_jump() = runTest {
         val actions = FakeWorkActions().apply { planAnswer = plan(ok = false, live = listOf(LiveWork(sessionId = 12, hostAlias = "pine"))) }
-        val tickets = vm(WorkFleet(), actions, backgroundScope, Nav())
+        val tickets = vm(WorkFleet(listOf(alive(12))), actions, backgroundScope, Nav())
         tickets.select(PAY9)
         runCurrent()
 
@@ -202,5 +205,38 @@ class TicketsViewModelTest {
         assertEquals(90L, tickets.state.value.selected?.ticket?.id)
         assertFalse(tickets.state.value.selected!!.canStart, "a hub that hides work_link: read-only")
         assertEquals("lookup https://acme.atlassian.net/browse/PAY-9", actions.calls.first())
+    }
+
+    /**
+     * The listing's `live_session_ids` and the plan's `live` are snapshots
+     * from when the sheet read them. A session killed while the sheet is open
+     * leaves the fleet, and the ticket must stop offering Open on it.
+     */
+    @Test
+    fun a_session_killed_with_the_sheet_open_is_not_offered_as_open() = runTest {
+        val fleet = WorkFleet(listOf(alive(5)))
+        val tickets = vm(fleet, FakeWorkActions(), backgroundScope, Nav())
+        tickets.select(PAY7)
+        runCurrent()
+        assertEquals(5L, tickets.state.value.selected!!.liveSessionId)
+
+        fleet.sessions.value = emptyList() // `session:killed`
+        runCurrent()
+
+        val detail = tickets.state.value.selected!!
+        assertNull(detail.liveSessionId, "Open would jump to a session that is gone")
+        assertTrue(detail.canStart, "with nobody on it, the ticket can be started again")
+    }
+
+    @Test
+    fun a_planned_live_session_that_is_gone_is_not_a_jump() = runTest {
+        val actions = FakeWorkActions().apply { planAnswer = plan(live = listOf(LiveWork(sessionId = 12, hostAlias = "pine"))) }
+        val tickets = vm(WorkFleet(), actions, backgroundScope, Nav())
+        tickets.select(PAY9)
+        runCurrent()
+
+        val detail = tickets.state.value.selected!!
+        assertNull(detail.liveSessionId)
+        assertTrue(detail.canResume, "past work, nobody on it now: Resume")
     }
 }
