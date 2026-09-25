@@ -253,4 +253,55 @@ class SessionWorkViewModelTest {
         assertEquals("linked from a prompt · rule R5 · weak guess", workWhy(PAY9_GUESS.copy(strength = "weak")))
         assertEquals("linked (jira-sync)", workWhy(PAY7.copy(source = "jira-sync")))
     }
+
+    /**
+     * A URL is linked only by the item it resolves to. The hub takes any
+     * string of up to 64 characters as a free-form key, so a URL sent as one
+     * would become a work group named after the URL.
+     */
+    @Test
+    fun without_lookup_a_url_is_refused_and_never_linked_as_a_key() = runTest {
+        val actions = FakeWorkActions()
+        val noLookup = HubCapabilities.of(ToolCatalog(setOf("work", "work_link"), mapOf("work" to setOf("links"))))
+        val vm = SessionWorkViewModel(5, WorkFleet(listOf(row()), caps = noLookup), actions, backgroundScope, canWrite = true)
+
+        vm.setWork("https://acme.atlassian.net/browse/PAY-7")
+        runCurrent()
+        assertEquals(emptyList(), actions.calls)
+        assertEquals("This hub can't look up a ticket link", vm.state.value.error?.title)
+
+        // A bare key still stands on its own: trackers never gate work.
+        vm.setWork("PAY-7")
+        runCurrent()
+        assertEquals(listOf("link 5 PAY-7"), actions.calls)
+    }
+
+    /**
+     * An "unknown action" refusal of `work lookup` is about `lookup`, not
+     * about `work_link link`: Set work… stays, only the lookup is forgotten,
+     * and the URL is not linked as a key.
+     */
+    @Test
+    fun a_lookup_refused_as_unknown_hides_only_the_lookup() = runTest {
+        val actions = FakeWorkActions().apply {
+            failLookup = HubError.Tool("E_INVALID", "unknown work action \"lookup\"; one of links, context")
+        }
+        val fleet = WorkFleet(listOf(row()))
+        val vm = SessionWorkViewModel(5, fleet, actions, backgroundScope, canWrite = true)
+
+        vm.setWork("https://acme.atlassian.net/browse/PAY-7")
+        runCurrent()
+
+        assertTrue(fleet.capabilities.value.has("work_link", "link"), "Set work… must survive a lookup refusal")
+        assertTrue(vm.state.value.canSetWork)
+        assertFalse(fleet.capabilities.value.has("work", "lookup"))
+        assertEquals(listOf("lookup https://acme.atlassian.net/browse/PAY-7"), actions.calls, "the URL is not linked as a key")
+        assertEquals("This hub can't look up a ticket link", vm.state.value.error?.title)
+
+        // A bare key with the lookup refused as unknown falls back to the key.
+        actions.calls.clear()
+        vm.setWork("PAY-7")
+        runCurrent()
+        assertEquals(listOf("link 5 PAY-7"), actions.calls, "lookup is now known missing: straight to the key")
+    }
 }

@@ -113,6 +113,12 @@ class NewSessionViewModel(
         val error: Friendly? = null,
         /** The projects an `E_AMBIGUOUS` start offered; the list narrows to them. */
         val candidates: List<Long>? = null,
+        /**
+         * The hub said it cannot pick the project (`E_AMBIGUOUS`): from here
+         * on the person must, or Create would send the same request and get
+         * the same refusal.
+         */
+        val mustPickProject: Boolean = false,
     )
 
     private val local = MutableStateFlow(Local())
@@ -216,7 +222,12 @@ class NewSessionViewModel(
                     tool?.code == "E_AMBIGUOUS" -> {
                         val ids = projectCandidates(tool)
                         local.update {
-                            it.copy(creating = false, candidates = ids.ifEmpty { null }, error = friendlyWork(t))
+                            it.copy(
+                                creating = false,
+                                candidates = ids.ifEmpty { null },
+                                mustPickProject = true,
+                                error = friendlyWork(t),
+                            )
                         }
                     }
                     else -> {
@@ -262,8 +273,9 @@ class NewSessionViewModel(
 
         val branchOk = !l.newWorktree || isBranchName(l.branch.trim())
         val ready = if (ticketKey != null) {
-            // The project is the hub's to pick unless the person chose one.
-            workActions != null && caps.has(WORK_LINK, START)
+            // The project is the hub's to pick unless the person chose one —
+            // or the hub already said it cannot.
+            workActions != null && caps.has(WORK_LINK, START) && (!l.mustPickProject || chosen != null)
         } else {
             chosen != null && branchOk
         }
