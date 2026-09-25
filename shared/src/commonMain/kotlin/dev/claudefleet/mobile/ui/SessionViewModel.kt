@@ -924,7 +924,12 @@ class SessionViewModel(
                     if (queued === generation) queued = null
                     running = generation
                 }
-                val fresh = actions.conversation(sessionId)
+                // The cursor the last applied read was drawn against, so the
+                // hub sends what happened since instead of the last ten turns
+                // every time. Null on the first read, which is the full
+                // window — and `appending` folds a narrower one the same way,
+                // since it is still a tail whose head overlaps what is held.
+                val fresh = actions.conversation(sessionId, sinceTurn = drawnTurnSeq)
                 // Stamped from the row as it is NOW, inside the lock and
                 // before the apply: the read reflects whatever the hub had
                 // when it answered, and a turn that completes after this
