@@ -39,6 +39,15 @@ data class SessionWorkUiState(
     val canSetWork: Boolean = false,
     val busy: Boolean = false,
     val error: Friendly? = null,
+    /**
+     * **Ask for a handover** (`work_link handover`, claude-fleet M9.3): a
+     * write token, a hub that lists it, a session with a confirmed key, and a
+     * running Claude session to ask. The hub refuses the rest (busy, stuck)
+     * in words the sheet shows.
+     */
+    val canHandover: Boolean = false,
+    /** Where the last handover asked from this screen has got to, or null. */
+    val handover: HandoverStatus? = null,
 ) {
     /** What the chip draws: the confirmed work, else the guess. */
     val chip: WorkSummary? get() = work ?: suggested
@@ -69,9 +78,28 @@ class SessionWorkViewModel(
     private val scope: CoroutineScope,
     private val canWrite: Boolean,
 ) {
-    private data class Local(val sheetOpen: Boolean = false, val busy: Boolean = false, val error: Friendly? = null)
+    private data class Local(
+        val sheetOpen: Boolean = false,
+        val busy: Boolean = false,
+        val error: Friendly? = null,
+        val handover: HandoverStatus? = null,
+    )
 
     private val local = MutableStateFlow(Local())
+
+    init {
+        // The hub writes the note when the turn it asked for stops, and says
+        // so on the session's timeline; the answer to the call only means the
+        // prompt went in. Followed for the life of the screen, so a handover
+        // asked on the desktop is reported here too.
+        scope.launch {
+            fleet.timeline.collect { frame ->
+                if (frame.sessionId != sessionId) return@collect
+                val status = HandoverStatus.of(frame.kind) ?: return@collect
+                local.update { it.copy(handover = status) }
+            }
+        }
+    }
 
     val state: StateFlow<SessionWorkUiState> =
         combine(fleet.sessions, fleet.capabilities, fleet.tickets, local) { rows, caps, cache, l ->
@@ -155,6 +183,34 @@ class SessionWorkViewModel(
         }
     }
 
+    /**
+     * **Ask for a handover**: the hub types a request into the idle session
+     * and the note is written when that turn stops (see [HandoverStatus]).
+     * Its refusals are said for what they mean here — not idle, one already
+     * asked — rather than as a generic "the hub refused that".
+     */
+    fun handover(): Job = scope.launch {
+        if (!state.value.canHandover || !allowed(fleet.capabilities.value, HANDOVER) || local.value.busy) return@launch
+        local.update { it.copy(busy = true, error = null) }
+        try {
+            actions.handover(sessionId)
+            // The timeline may already have moved past "asked" (a fast
+            // turn); a later answer to the call must not move it back.
+            local.update { l ->
+                if (l.handover == null || l.handover == HandoverStatus.Requested) l.copy(handover = HandoverStatus.Requested) else l
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: HubError.Tool) {
+            if (e.isUnknownAction()) fleet.actionMissing(WORK_LINK, HANDOVER)
+            local.update { it.copy(error = friendlyHandover(e)) }
+        } catch (t: Throwable) {
+            local.update { it.copy(error = friendly(t)) }
+        } finally {
+            local.update { it.copy(busy = false) }
+        }
+    }
+
     /** A URL the hub cannot resolve to a ticket: ask for the key rather than link the URL. */
     private fun refuseUrl() {
         local.update {
@@ -216,6 +272,8 @@ class SessionWorkViewModel(
             canSetWork = allowed(caps, LINK),
             busy = l.busy,
             error = l.error,
+            canHandover = work?.key != null && row.canBeAskedForHandover && allowed(caps, HANDOVER),
+            handover = l.handover,
         )
     }
 
@@ -225,6 +283,56 @@ class SessionWorkViewModel(
         const val UNLINK = "unlink"
         const val LINK = "link"
         const val LOOKUP = "lookup"
+        const val HANDOVER = "handover"
+    }
+}
+
+/**
+ * Where a handover asked for a session has got to, from the hub's timeline
+ * (`handover_*` entries, claude-fleet M9.3).
+ */
+enum class HandoverStatus(val sentence: String) {
+    Requested("Asked Claude for a handover. It is written when this turn ends."),
+    Written("Handover written. It is in the work's context for whoever picks it up next."),
+    Missing("Claude's reply had no handover in it. Ask again, or write one on the desktop."),
+    SendFailed("The request could not be typed into the session."),
+    ;
+
+    companion object {
+        fun of(kind: String): HandoverStatus? = when (kind) {
+            "handover_requested" -> Requested
+            "handover_written" -> Written
+            "handover_missing" -> Missing
+            "handover_send_failed" -> SendFailed
+            else -> null
+        }
+    }
+}
+
+/**
+ * Whether the session is one the hub could ask: running, and a Claude
+ * session of fleet's own — not a background agent, a shell, or one running
+ * outside fleet. The hub checks the rest (idle, not stuck) and says so.
+ */
+private val SessionRow.canBeAskedForHandover: Boolean
+    get() = status == "running" && !isBackground && kind != "shell" && kind != "external"
+
+/** A handover refusal, said for what it means on this sheet. */
+internal fun friendlyHandover(e: HubError.Tool): Friendly {
+    // An older hub's "unknown action" is an E_INVALID too, and means the hub,
+    // not this session.
+    if (e.isUnknownAction()) return friendlyWork(e)
+    val raw = explain(e)
+    return when (e.code) {
+        "E_NOT_ALIVE" -> Friendly(
+            "Claude can't write one right now",
+            "Ask again when the session is idle — not mid-turn, blocked, or stuck.",
+            isError = true,
+            details = raw,
+        )
+        "E_EXISTS" -> Friendly("A handover is already on its way", e.message, isError = false, details = raw)
+        "E_INVALID" -> Friendly("No handover for this session", e.message, isError = true, details = raw)
+        else -> friendlyWork(e)
     }
 }
 
@@ -251,6 +359,14 @@ internal fun friendlyWork(t: Throwable): Friendly {
  * vocabulary, so the phone and the desktop explain a link the same way.
  */
 fun workWhy(work: WorkSummary): String {
+    val rule = work.rule?.takeIf { it.isNotBlank() }?.let { " · rule $it" } ?: ""
+    // The classification nudge's answer (claude-fleet M4.6): Claude's own
+    // pick when fleet asked it, only ever a suggestion until a person
+    // confirms. The desktop's words, and no strength suffix — `inferred` is
+    // said by the sentence itself.
+    if (work.source == AGENT_INFERRED) {
+        return (if (work.state == "suggested") "suggested" else "named") + " by Claude when asked" + rule
+    }
     val from = when (work.source) {
         "manual" -> "set by hand"
         "agent" -> "set by the agent"
@@ -263,7 +379,9 @@ fun workWhy(work: WorkSummary): String {
         "" -> "linked"
         else -> "linked (${work.source})"
     }
-    val rule = work.rule?.takeIf { it.isNotBlank() }?.let { " · rule $it" } ?: ""
     val strength = work.strength?.takeIf { work.state == "suggested" }?.let { " · $it guess" } ?: ""
     return from + rule + strength
 }
+
+/** The source of a link Claude named when fleet asked it to classify its session (M4.6, rule R11). */
+internal const val AGENT_INFERRED = "agent_inferred"

@@ -131,9 +131,12 @@ missing feature should only hide a button. Instead, on every `ready`,
 `FleetRepository` calls `tools/list` once (plain MCP, same auth) and publishes
 `FleetState.capabilities`:
 
-- `work` present → chips, *By work*, *My work*, the Tickets sheet.
+- `work` present → chips, *By work*, *My work*, the Tickets sheet; its
+  `today`, `card` and `orgs` actions add the Today sheet, a ticket's
+  acceptance criteria, and org labels / chips (M8.6), each hidden on its own
+  when the hub does not list it.
 - `work_link` present → Confirm / Not this / Clear / Set work… / Start here /
-  Resume. The hub filters `tools/list` per caller, so a **readonly** token is
+  Resume / Ask for a handover. The hub filters `tools/list` per caller, so a **readonly** token is
   never shown `work_link` — and the UI checks `Credentials.canWrite` as well.
   Both, always: never call a tool the token cannot use.
 - **Actions.** `action` is a free string on hubs before M8.0. When the schema

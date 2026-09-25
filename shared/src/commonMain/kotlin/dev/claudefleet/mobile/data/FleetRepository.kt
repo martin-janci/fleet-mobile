@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.data
 import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.ui.explain
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
@@ -12,6 +13,7 @@ import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.HubEvent
 import dev.claudefleet.mobile.net.contractVerdict
+import dev.claudefleet.mobile.net.isUnknownAction
 import dev.claudefleet.mobile.net.sentence
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -151,6 +153,15 @@ class FleetRepository(
 
     private val _myWork = MutableStateFlow<Set<Long>?>(null)
     override val myWork: StateFlow<Set<Long>?> = _myWork.asStateFlow()
+
+    private val _orgs = MutableStateFlow(OrgDirectory.EMPTY)
+    override val orgs: StateFlow<OrgDirectory> = _orgs.asStateFlow()
+
+    // Buffered and lossy for the reason `_sessionChanges` is: a timeline
+    // entry is news for whichever screen is waiting on one, and emitting must
+    // never suspend `follow()`.
+    private val _timeline = MutableSharedFlow<TimelineFrame>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val timeline: Flow<TimelineFrame> = _timeline.asSharedFlow()
 
     override fun actionMissing(tool: String, action: String) {
         _capabilities.update { it.forgetting(tool, action) }
@@ -298,6 +309,7 @@ class FleetRepository(
                                 myWorkRead?.cancel()
                                 _capabilities.value = HubCapabilities()
                                 _myWork.value = null
+                                _orgs.value = OrgDirectory.EMPTY
                                 _status.value = ConnectionStatus.Refused(refusal)
                                 return@collect
                             }
@@ -333,6 +345,7 @@ class FleetRepository(
                             publish(snapshot().applying(event))
                             event.id?.let { lastEventId = it }
                             event.sessionId()?.let { _sessionChanges.tryEmit(it) }
+                            event.timelineFrame()?.let { _timeline.tryEmit(it) }
                         }
                     }
                 }
@@ -387,6 +400,7 @@ class FleetRepository(
             }
             _capabilities.value = caps
             myWorkRead?.cancel()
+            _orgs.value = readOrgs(caps)
             _myWork.value = if (caps.work) readMyWork() else null
         }
     }
@@ -396,7 +410,31 @@ class FleetRepository(
 
     private fun readMyWorkSoon() {
         myWorkRead?.cancel()
-        myWorkRead = scope.launch { _myWork.value = readMyWork() }
+        myWorkRead = scope.launch {
+            _orgs.value = readOrgs(_capabilities.value)
+            _myWork.value = readMyWork()
+        }
+    }
+
+    /**
+     * The org directory, when the hub lists `work orgs`; empty otherwise, and
+     * on a failed read — labels and a filter a person can do without, so a
+     * failure hides them rather than saying anything. A hub whose `action` is
+     * a free string and that does not know `orgs` has it forgotten for the
+     * connection, as every other work action is.
+     */
+    private suspend fun readOrgs(caps: HubCapabilities): OrgDirectory {
+        if (!caps.has(HubCapabilities.WORK, ORGS)) return OrgDirectory.EMPTY
+        return try {
+            OrgDirectory.of(client.workOrgs())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: HubError.Tool) {
+            if (e.isUnknownAction()) actionMissing(HubCapabilities.WORK, ORGS)
+            OrgDirectory.EMPTY
+        } catch (_: Throwable) {
+            OrgDirectory.EMPTY
+        }
     }
 
     /**
@@ -461,6 +499,9 @@ internal const val ALL_SESSIONS_CHANGED: Long = Long.MIN_VALUE
 
 /** The hub's view name for the tickets assigned to the tracker account. */
 internal const val MY_WORK = "mine"
+
+/** The `work` action that lists the organisations (claude-fleet M5). */
+internal const val ORGS = "orgs"
 
 /** The first wait, after one failure. */
 internal val BASE_RECONNECT_DELAY = 1.seconds

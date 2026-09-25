@@ -4,18 +4,22 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
+import dev.claudefleet.mobile.data.TimelineFrame
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
+import dev.claudefleet.mobile.model.TicketCard
+import dev.claudefleet.mobile.model.Today
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.ToolCatalog
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -39,10 +43,12 @@ internal class WorkFleet(
     override val status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Connected("0.9.3"))
     override val hubVersion = MutableStateFlow<String?>("0.9.3")
     override val clockSkewSeconds = MutableStateFlow(0L)
-    override val sessionChanges = emptyFlow<Long>()
+    override val sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16)
     override val capabilities = MutableStateFlow(caps)
     override val tickets = MutableStateFlow<List<Ticket>>(emptyList())
     override val myWork = MutableStateFlow<Set<Long>?>(null)
+    override val orgs = MutableStateFlow(OrgDirectory.EMPTY)
+    override val timeline = MutableSharedFlow<TimelineFrame>(extraBufferCapacity = 16)
     val remembered = mutableListOf<Ticket>()
 
     override suspend fun refresh() = Unit
@@ -99,6 +105,27 @@ internal class FakeWorkActions : WorkActions {
     override suspend fun link(sessionId: Long, itemId: Long?, key: String?) = record("link $sessionId ${itemId ?: key}")
     override suspend fun start(key: String, hostAlias: String, projectId: Long?) = record("start $key $hostAlias ${projectId ?: "-"}")
     override suspend fun resume(key: String, hostAlias: String?) = record("resume $key ${hostAlias ?: "-"}")
+
+    // The reads M8.6 added are kept out of [calls], which the older tests
+    // pin exactly: a card read beside a resume plan is not a decision.
+    var todayAnswer = Today()
+    var failToday: Throwable? = null
+    val todayCalls = mutableListOf<Long>()
+    var cardAnswer: TicketCard? = null
+    val cardCalls = mutableListOf<String>()
+
+    override suspend fun today(since: Long): Today {
+        todayCalls += since
+        failToday?.let { throw it }
+        return todayAnswer
+    }
+
+    override suspend fun card(key: String): TicketCard {
+        cardCalls += key
+        return cardAnswer ?: throw HubError.Tool("E_NOTFOUND", "no card")
+    }
+
+    override suspend fun handover(sessionId: Long) = record("handover $sessionId")
 }
 
 private val PAY7 = WorkSummary(linkId = 11, itemId = 70, key = "PAY-7", title = "Refund retries", source = "branch", state = "confirmed")
@@ -254,6 +281,18 @@ class SessionWorkViewModelTest {
         assertEquals("linked (jira-sync)", workWhy(PAY7.copy(source = "jira-sync")))
     }
 
+    /**
+     * Claude's answer to the classification nudge (claude-fleet M4.6, R11)
+     * is said as the desktop says it, and its `inferred` strength is not
+     * tacked on as "· inferred guess": the sentence already says whose guess.
+     */
+    @Test
+    fun an_answer_claude_gave_when_asked_is_said_as_such() {
+        val asked = PAY9_GUESS.copy(source = "agent_inferred", strength = "inferred", rule = "R11", preselected = true)
+        assertEquals("suggested by Claude when asked · rule R11", workWhy(asked))
+        assertEquals("named by Claude when asked", workWhy(asked.copy(state = "confirmed", rule = null)))
+    }
+
     /** The session screen's chip follows the ticket cache, as the list does: a `work:item` does not restamp the row. */
     @Test
     fun the_chip_follows_the_ticket_cache() = runTest {
@@ -319,5 +358,96 @@ class SessionWorkViewModelTest {
         vm.setWork("PAY-7")
         runCurrent()
         assertEquals(listOf("link 5 PAY-7"), actions.calls, "lookup is now known missing: straight to the key")
+    }
+
+    // ---- handover on demand (claude-fleet M9.3) ----
+
+    private fun running(work: WorkSummary? = PAY7, guess: WorkSummary? = null) = row(work, guess).copy(status = "running")
+
+    @Test
+    fun a_handover_is_offered_for_a_running_linked_session_to_a_write_token_only() = runTest {
+        fun canHandover(r: SessionRow, canWrite: Boolean = true, caps: HubCapabilities = WorkFleet.FULL) =
+            SessionWorkViewModel(5, WorkFleet(listOf(r), caps = caps), FakeWorkActions(), backgroundScope, canWrite).state.value.canHandover
+
+        assertTrue(canHandover(running()))
+        assertFalse(canHandover(running(), canWrite = false), "a readonly token")
+        assertFalse(canHandover(running(work = null, guess = PAY9_GUESS)), "a guess is not the session's work")
+        assertFalse(canHandover(running(work = PAY7.copy(key = null))), "no key to write it against")
+        assertFalse(canHandover(row(PAY7).copy(status = "exited")), "nobody to ask")
+        assertFalse(canHandover(running().copy(tmuxName = "bg:1234")), "a background agent")
+        assertFalse(canHandover(running().copy(kind = "shell")), "a shell")
+        val noHandover = HubCapabilities.of(ToolCatalog(setOf("work", "work_link"), mapOf("work_link" to setOf("confirm", "link"))))
+        assertFalse(canHandover(running(), caps = noHandover), "a hub before M9.3")
+    }
+
+    /** The call only types the request in; the timeline says when the note is written. */
+    @Test
+    fun a_handover_is_asked_then_followed_on_the_timeline() = runTest {
+        val fleet = WorkFleet(listOf(running()))
+        val actions = FakeWorkActions()
+        val vm = SessionWorkViewModel(5, fleet, actions, backgroundScope, canWrite = true)
+        runCurrent()
+
+        vm.handover().join()
+        runCurrent()
+        assertEquals(listOf("handover 5"), actions.calls)
+        assertEquals(HandoverStatus.Requested, vm.state.value.handover)
+
+        fleet.timeline.tryEmit(dev.claudefleet.mobile.data.TimelineFrame(6, "handover_written"))
+        runCurrent()
+        assertEquals(HandoverStatus.Requested, vm.state.value.handover, "another session's note is not this one's")
+
+        fleet.timeline.tryEmit(dev.claudefleet.mobile.data.TimelineFrame(5, "prompt"))
+        fleet.timeline.tryEmit(dev.claudefleet.mobile.data.TimelineFrame(5, "handover_written"))
+        runCurrent()
+        assertEquals(HandoverStatus.Written, vm.state.value.handover)
+
+        fleet.timeline.tryEmit(dev.claudefleet.mobile.data.TimelineFrame(5, "handover_missing"))
+        runCurrent()
+        assertEquals(HandoverStatus.Missing, vm.state.value.handover)
+    }
+
+    /** The hub's refusals are said for what they mean on this sheet. */
+    @Test
+    fun a_refused_handover_says_why() = runTest {
+        val actions = FakeWorkActions()
+        val vm = SessionWorkViewModel(5, WorkFleet(listOf(running())), actions, backgroundScope, canWrite = true)
+        runCurrent()
+
+        actions.fail = HubError.Tool("E_NOT_ALIVE", "session is working")
+        vm.handover().join()
+        runCurrent()
+        assertEquals("Claude can't write one right now", vm.state.value.error?.title)
+        assertNull(vm.state.value.handover)
+
+        actions.fail = HubError.Tool("E_EXISTS", "a handover was asked 3 min ago")
+        vm.handover().join()
+        runCurrent()
+        assertEquals("A handover is already on its way", vm.state.value.error?.title)
+        assertFalse(vm.state.value.error!!.isError)
+    }
+
+    /** A free-string hub that does not know `handover` hides the button for the connection, and nothing else. */
+    @Test
+    fun an_unknown_handover_hides_only_the_handover() = runTest {
+        val fleet = WorkFleet(listOf(running()))
+        val actions = FakeWorkActions().apply { fail = HubError.Tool("E_INVALID", "unknown work_link action \"handover\"; one of link") }
+        val vm = SessionWorkViewModel(5, fleet, actions, backgroundScope, canWrite = true)
+        runCurrent()
+        vm.handover().join()
+        runCurrent()
+        assertFalse(vm.state.value.canHandover)
+        assertTrue(vm.state.value.canClear, "the other decisions stay")
+        assertEquals("This hub can't do that yet", vm.state.value.error?.title, "the hub is too old, not the session unsuited")
+    }
+
+    /** A readonly screen never reaches the tool, whatever calls `handover()`. */
+    @Test
+    fun a_readonly_token_never_asks() = runTest {
+        val actions = FakeWorkActions()
+        val vm = SessionWorkViewModel(5, WorkFleet(listOf(running())), actions, backgroundScope, canWrite = false)
+        runCurrent()
+        vm.handover().join()
+        assertEquals(emptyList(), actions.calls)
     }
 }

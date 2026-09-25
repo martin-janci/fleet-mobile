@@ -45,6 +45,8 @@ data class WorkSummary(
     val preselected: Boolean = false,
     /** Live suggestions the session still has to decide. */
     val suggestions: Int = 0,
+    /** The work's organisation (M5): the tracker's, else the session's. An id; names come from `work orgs`. */
+    @SerialName("org_id") val orgId: Long? = null,
 ) {
     /** What a chip says: the key, else the title, else nothing worth drawing. */
     val label: String get() = key?.takeIf { it.isNotBlank() } ?: title
@@ -127,6 +129,8 @@ data class TrackerRow(
     val name: String = "",
     /** `ok` or a reason it is not; an unknown value reads as "not ok". */
     val state: String = "",
+    /** The organisation this tracker's tickets belong to (M5), if any. */
+    @SerialName("org_id") val orgId: Long? = null,
 )
 
 /**
@@ -163,11 +167,23 @@ data class LiveWork(
     @SerialName("friendly_name") val friendlyName: String? = null,
 )
 
+/**
+ * One past piece of work on a key, as the resume plan lists it — what the
+ * Tickets sheet shows as *past work*: the session's name and host when it
+ * ended, its branch and PR, and how many conversations it held. Snapshots
+ * taken when the session ended; the session itself may be long gone.
+ */
 @Serializable
 data class ResumeCandidate(
     @SerialName("link_id") val linkId: Long,
     @SerialName("host_alias") val hostAlias: String? = null,
     val resumable: Boolean = true,
+    @SerialName("ended_at") val endedAt: Long? = null,
+    val name: String? = null,
+    val branch: String? = null,
+    val worktree: String? = null,
+    @SerialName("pr_url") val prUrl: String? = null,
+    val conversations: Int = 0,
 )
 
 /**

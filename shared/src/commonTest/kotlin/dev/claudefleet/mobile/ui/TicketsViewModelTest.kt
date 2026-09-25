@@ -3,10 +3,15 @@
 package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.model.LiveWork
+import dev.claudefleet.mobile.model.OrgDetail
+import dev.claudefleet.mobile.model.OrgDirectory
+import dev.claudefleet.mobile.model.OrgTracker
+import dev.claudefleet.mobile.model.ResumeCandidate
 import dev.claudefleet.mobile.model.ResumeMode
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
+import dev.claudefleet.mobile.model.TicketCard
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
@@ -238,5 +243,79 @@ class TicketsViewModelTest {
         val detail = tickets.state.value.selected!!
         assertNull(detail.liveSessionId)
         assertTrue(detail.canResume, "past work, nobody on it now: Resume")
+    }
+
+    // ---- M8.6: the card, past work, and orgs ----
+
+    /** The card is read beside the plan; its criteria are what the detail shows. An uncached key shows none. */
+    @Test
+    fun a_ticket_shows_its_acceptance_criteria_from_the_card() = runTest {
+        val actions = FakeWorkActions().apply {
+            cardAnswer = TicketCard(key = "PAY-9", cached = true, acceptance = listOf("Retries back off"))
+            planAnswer = plan()
+        }
+        val tickets = vm(WorkFleet(), actions, backgroundScope, Nav())
+        tickets.select(PAY9)!!.join()
+        runCurrent()
+        assertEquals(listOf("PAY-9"), actions.cardCalls)
+        assertEquals(listOf("Retries back off"), tickets.state.value.selected?.card?.acceptance)
+
+        actions.cardAnswer = TicketCard(key = "PAY-9", cached = false)
+        tickets.select(PAY9)!!.join()
+        runCurrent()
+        assertNull(tickets.state.value.selected?.card, "nothing cached: nothing to show")
+    }
+
+    /** A hub without `card` is not asked, and the plan still answers. */
+    @Test
+    fun a_hub_without_the_card_is_not_asked_for_one() = runTest {
+        val caps = HubCapabilities.of(ToolCatalog(setOf("work", "work_link"), mapOf("work" to setOf("tickets", "resume_plan"))))
+        val actions = FakeWorkActions().apply { planAnswer = plan() }
+        val tickets = vm(WorkFleet(caps = caps), actions, backgroundScope, Nav())
+        tickets.select(PAY9)!!.join()
+        runCurrent()
+        assertEquals(emptyList(), actions.cardCalls)
+        assertTrue(tickets.state.value.selected!!.canResume)
+    }
+
+    /** Past work is listed newest first, and whether or not a session is live on the ticket now. */
+    @Test
+    fun past_work_is_listed_newest_first_even_beside_a_live_session() = runTest {
+        val actions = FakeWorkActions().apply {
+            planAnswer = plan(live = listOf(LiveWork(sessionId = 5))).copy(
+                candidates = listOf(
+                    ResumeCandidate(linkId = 1, endedAt = 100, name = "first"),
+                    ResumeCandidate(linkId = 2, endedAt = 300, name = "latest", hostAlias = "pine", branch = "pay-9", prUrl = "https://gh/pr/2", conversations = 2),
+                ),
+            )
+        }
+        val tickets = vm(WorkFleet(rows = listOf(alive(5))), actions, backgroundScope, Nav())
+        tickets.select(PAY9)!!.join()
+        runCurrent()
+        val detail = tickets.state.value.selected!!
+        assertEquals(5L, detail.liveSessionId)
+        assertEquals(listOf("latest", "first"), detail.pastWork.map { it.name })
+        assertEquals("latest · on pine · pay-9 · PR https://gh/pr/2 · 2 conversations", pastWorkLine(detail.pastWork.first()))
+        assertEquals("first", pastWorkLine(detail.pastWork.last()))
+    }
+
+    /** With two orgs, each ticket row names its org by its tracker; with one, none does. */
+    @Test
+    fun tickets_name_their_org_only_when_there_are_several() = runTest {
+        val fleet = WorkFleet()
+        val actions = FakeWorkActions().apply {
+            ticketsAnswer = mapOf("mine" to listOf(PAY9.copy(trackerId = 7), PAY7.copy(trackerId = 8)))
+        }
+        val tickets = vm(fleet, actions, backgroundScope, Nav())
+        fleet.orgs.value = OrgDirectory.of(listOf(OrgDetail(1, "Acme", trackers = listOf(OrgTracker(7)))))
+        tickets.open()
+        runCurrent()
+        assertEquals(emptyMap(), tickets.state.value.ticketOrgs, "one org: no labels")
+
+        fleet.orgs.value = OrgDirectory.of(
+            listOf(OrgDetail(1, "Acme", trackers = listOf(OrgTracker(7))), OrgDetail(2, "Side", trackers = listOf(OrgTracker(8)))),
+        )
+        runCurrent()
+        assertEquals(mapOf(90L to "Acme", 70L to "Side"), tickets.state.value.ticketOrgs)
     }
 }

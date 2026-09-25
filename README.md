@@ -261,7 +261,14 @@ costs one reconnect.
     *Set work…* in the menu;
   - a **Tickets** sheet (My work, Current sprint, Recent, and a search by key or
     pasted URL) with **Open** for a ticket a session is already on, **Start
-    here** for one nobody is, and **Resume** for past work.
+    here** for one nobody is, and **Resume** for past work. A tapped ticket
+    shows its acceptance criteria and the sessions that worked on it before;
+  - a **Today** sheet: what is waiting on you, in progress, shipped and stale
+    since local midnight, and **Copy standup** — the desktop's text;
+  - **Ask for a handover** on a linked session: Claude writes a handover note
+    for whoever picks the work up next, and the sheet says when it is written;
+  - with two or more organisations, org chips that narrow the list and Today,
+    and the org on each work heading and ticket.
 
   The phone never works a key out for itself and never becomes a second brain:
   it shows what the hub stamped on the row and calls the same `work` /

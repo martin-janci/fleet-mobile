@@ -2,12 +2,15 @@ package dev.claudefleet.mobile.net
 
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.PairResult
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
+import dev.claudefleet.mobile.model.TicketCard
+import dev.claudefleet.mobile.model.Today
 import dev.claudefleet.mobile.model.TrackerRow
 import dev.claudefleet.mobile.model.WaitResult
 import io.ktor.client.HttpClient
@@ -439,6 +442,28 @@ class HubClient(
             json.decodeFromJsonElement(ResumePlan.serializer(), it)
         }
 
+    /**
+     * The Today digest (claude-fleet M9.1): sessions active since [since]
+     * (unix seconds — the phone sends local midnight) by their work, and what
+     * shipped. A read over rows the hub already has; never a tracker call.
+     */
+    suspend fun workToday(since: Long): Today =
+        call("work", buildJsonObject { put("action", "today"); put("since", since) }) {
+            json.decodeFromJsonElement(Today.serializer(), it)
+        }
+
+    /** A ticket's context card (claude-fleet M9.2): its acceptance criteria, from the hub's cache only. */
+    suspend fun workCard(key: String): TicketCard =
+        call("work", buildJsonObject { put("action", "card"); put("key", key) }) {
+            json.decodeFromJsonElement(TicketCard.serializer(), it)
+        }
+
+    /** The organisations this token can see (claude-fleet M5), with their trackers. */
+    suspend fun workOrgs(): List<OrgDetail> =
+        call("work", buildJsonObject { put("action", "orgs") }) {
+            json.decodeFromJsonElement(ListSerializer(OrgDetail.serializer()), it)
+        }
+
     /** Accept a suggestion: it becomes the session's work. Answers the updated row. */
     suspend fun confirmWork(sessionId: Long, linkId: Long): SessionRow =
         workLink("confirm", sessionId) { put("link_id", linkId) }
@@ -450,6 +475,14 @@ class HubClient(
     /** Clear a live link. Answers the updated row. */
     suspend fun unlinkWork(sessionId: Long, linkId: Long): SessionRow =
         workLink("unlink", sessionId) { put("link_id", linkId) }
+
+    /**
+     * Ask the session's Claude to write a handover for its work (claude-fleet
+     * M9.3). Asynchronous on the hub: the prompt is typed into the idle
+     * session and this answers at once; the note is stored when the turn
+     * stops, and `handover_*` timeline frames say how it went.
+     */
+    suspend fun handoverWork(sessionId: Long): SessionRow = workLink("handover", sessionId) {}
 
     /** Set the session's work by item id (a looked-up ticket) or by bare key. */
     suspend fun linkWork(sessionId: Long, itemId: Long? = null, key: String? = null): SessionRow =

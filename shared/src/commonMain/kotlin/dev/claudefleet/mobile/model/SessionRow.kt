@@ -73,6 +73,12 @@ data class SessionRow(
      * it only offers Confirm / Not this.
      */
     @SerialName("work_suggested") val workSuggested: WorkSummary? = null,
+    /**
+     * The session's organisation (M5), when one claims it — an id; the names
+     * come from `work orgs`. In the phone view from claude-fleet's M8.6; an
+     * older hub leaves it out, and the row's work's own `org_id` stands in.
+     */
+    @SerialName("org_id") val orgId: Long? = null,
 ) {
     val isBackground: Boolean get() = tmuxName.startsWith("bg:")
 

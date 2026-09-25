@@ -67,6 +67,9 @@ import dev.claudefleet.mobile.ui.Tab
 import dev.claudefleet.mobile.ui.TicketsHandlers
 import dev.claudefleet.mobile.ui.TicketsSheet
 import dev.claudefleet.mobile.ui.TicketsViewModel
+import dev.claudefleet.mobile.ui.TodayHandlers
+import dev.claudefleet.mobile.ui.TodaySheet
+import dev.claudefleet.mobile.ui.TodayViewModel
 import dev.claudefleet.mobile.ui.scan.qrScannerSupported
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.FleetTheme
@@ -329,6 +332,15 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
             onStartHere = { nav.newSession(ticketKey = it) },
         )
     }
+    val today = remember(repository, scope) {
+        TodayViewModel(
+            fleet = repository,
+            actions = container.workActions,
+            scope = scope,
+            orgFilter = sessions.orgFilter,
+            onOpenSession = { nav.open(it) },
+        )
+    }
     val hosts = remember(repository, scope) { HostsViewModel(repository, scope) }
     val settings = remember(container, scope) {
         SettingsViewModel(container.session, scope, container.appVersion)
@@ -377,6 +389,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                     LaunchedEffect(current) { sessions.setHostFilter(current.hostAlias) }
                     val state by sessions.state.collectAsState()
                     val ticketsState by tickets.state.collectAsState()
+                    val todayState by today.state.collectAsState()
                     SessionsScreen(
                         state = state,
                         onOpenSession = nav::open,
@@ -397,7 +410,20 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         onToggleByWork = sessions::toggleByWork,
                         onToggleMyWork = sessions::toggleMyWorkOnly,
                         onOpenTickets = if (ticketsState.available) ({ tickets.open() }) else null,
+                        onOpenToday = if (todayState.available) ({ today.open() }) else null,
+                        onToggleOrg = sessions::toggleOrg,
                     )
+                    if (todayState.open) {
+                        TodaySheet(
+                            state = todayState,
+                            handlers = TodayHandlers(
+                                onClose = today::close,
+                                onRefresh = { today.refresh() },
+                                onOpenSession = today::openSession,
+                                onDismissError = today::dismissError,
+                            ),
+                        )
+                    }
                     if (ticketsState.open) {
                         TicketsSheet(
                             state = ticketsState,
@@ -579,6 +605,7 @@ private fun SessionRoute(
             onClear = { workVm.clear() },
             onSetWork = { workVm.setWork(it) },
             onDismissError = workVm::dismissError,
+            onHandover = { workVm.handover() },
         ),
     )
 }
