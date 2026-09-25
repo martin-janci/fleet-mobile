@@ -4,6 +4,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -26,8 +28,9 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.InputChip
-import androidx.compose.material3.InputChipDefaults
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -39,15 +42,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.data.ConnectionStatus
-import dev.claudefleet.mobile.model.OrgInfo
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.relativeTime
@@ -63,8 +68,57 @@ import dev.claudefleet.mobile.ui.theme.LocalStatusColors
 import dev.claudefleet.mobile.ui.theme.StatusTone
 
 /**
+ * Everything the fleet list reports.
+ *
+ * A data class rather than eighteen parameters, the way [TodayHandlers] and
+ * [SessionFiltersHandlers] already are: the screen grew from three controls to
+ * a sheet's worth, and a call site of eighteen positional lambdas is one
+ * transposition away from wiring *clear all* to *refresh*.
+ */
+data class SessionsHandlers(
+    val onOpenSession: (Long) -> Unit = {},
+    val onToggleNeedsAttention: () -> Unit = {},
+    val onRefresh: () -> Unit = {},
+    val onDismissError: () -> Unit = {},
+    /** Move to the next view: project → work → urgency. Work is skipped without the work graph. */
+    val onCycleGroupMode: () -> Unit = {},
+    /** Show the search field, or hide it (hiding clears the query). */
+    val onToggleSearch: () -> Unit = {},
+    val onSetQuery: (String) -> Unit = {},
+    val onOpenFilters: () -> Unit = {},
+    /**
+     * Every filter off, the host one included — which is why this is one
+     * handler and not [SessionsViewModel.clearFilters]: the host filter is the
+     * navigator's (`Screen.Sessions.hostAlias`), so clearing everything means
+     * calling both, and the screen must not be the place that remembers to.
+     */
+    val onClearAll: () -> Unit = {},
+    /**
+     * Open the New session form. Null hides the button — a `readonly` pairing,
+     * which the hub would refuse `new_session` anyway.
+     */
+    val onNewSession: (() -> Unit)? = null,
+    /** Open the Tickets sheet. Null hides the action — a hub without the work graph. */
+    val onOpenTickets: (() -> Unit)? = null,
+    /** Open the Today sheet. Null hides the action — a hub without `work today`. */
+    val onOpenToday: (() -> Unit)? = null,
+)
+
+/**
  * The home screen: every session in the fleet, grouped by host and then by
- * project, with a switch for the ones that want a person.
+ * project, with the triage toggles a thumb reaches for and a sheet holding the
+ * rest.
+ *
+ * Three things ride in the header and nothing else does: **Needs attention**,
+ * because it is the question this screen exists to answer; **Filters**, which
+ * carries its own count and opens [SessionFiltersSheet]; and **By work**,
+ * which is last and apart because it is not a filter at all — it regroups the
+ * list without removing a row from it, and drawing it as a fourth identical
+ * chip is what made it read as a filter that does nothing.
+ *
+ * Under them, whenever anything is on, one line saying how many rows are
+ * hidden and by what. That line is the screen's answer to "where did my
+ * session go", and it is why the other filters can safely live out of sight.
  *
  * Stateless by design — it draws a [SessionsUiState] and reports taps. The view
  * model is what is tested; this is what only a device can show.
@@ -73,47 +127,33 @@ import dev.claudefleet.mobile.ui.theme.StatusTone
 @Composable
 fun SessionsScreen(
     state: SessionsUiState,
-    onOpenSession: (Long) -> Unit,
-    onToggleNeedsAttention: () -> Unit,
-    onClearHostFilter: () -> Unit,
-    onRefresh: () -> Unit,
-    onDismissError: () -> Unit,
+    handlers: SessionsHandlers = SessionsHandlers(),
     modifier: Modifier = Modifier,
-    /**
-     * Open the New session form. Null hides the button — a `readonly` pairing,
-     * which the hub would refuse `new_session` anyway.
-     */
-    onNewSession: (() -> Unit)? = null,
-    /** Group by work, or stop. Only drawn when the hub has the work graph. */
-    onToggleByWork: () -> Unit = {},
-    /** Only *My work*, or stop. Only drawn when the hub has a tracker. */
-    onToggleMyWork: () -> Unit = {},
-    /** Open the Tickets sheet. Null hides the action — a hub without the work graph. */
-    onOpenTickets: (() -> Unit)? = null,
-    /** Open the Today sheet. Null hides the action — a hub without `work today`. */
-    onOpenToday: (() -> Unit)? = null,
-    /** Narrow to one org, or clear it by tapping it again. Only drawn with two or more orgs. */
-    onToggleOrg: (Long) -> Unit = {},
 ) {
     Column(modifier = modifier.fillMaxSize()) {
-        SessionsBar(status = state.status, onOpenTickets = onOpenTickets, onOpenToday = onOpenToday) {
+        SessionsBar(
+            status = state.status,
+            searchOpen = state.searchOpen,
+            onToggleSearch = handlers.onToggleSearch,
+            onOpenTickets = handlers.onOpenTickets,
+            onOpenToday = handlers.onOpenToday,
+        ) {
+            if (state.searchOpen) {
+                SearchField(query = state.filters.query, onSetQuery = handlers.onSetQuery)
+            }
             FilterRow(
                 needsAttentionOnly = state.needsAttentionOnly,
                 attentionCount = state.attentionCount,
-                hostFilter = state.hostFilter,
-                onToggleNeedsAttention = onToggleNeedsAttention,
-                onClearHostFilter = onClearHostFilter,
-                byWork = state.byWork.takeIf { state.workAvailable },
-                onToggleByWork = onToggleByWork,
-                myWorkOnly = state.myWorkOnly.takeIf { state.myWorkAvailable },
-                onToggleMyWork = onToggleMyWork,
-                orgChoices = state.orgChoices,
-                orgFilter = state.orgFilter,
-                onToggleOrg = onToggleOrg,
+                activeFilters = state.filters.sheetCount,
+                onToggleNeedsAttention = handlers.onToggleNeedsAttention,
+                onOpenFilters = handlers.onOpenFilters,
+                groupMode = state.groupMode,
+                onCycleGroupMode = handlers.onCycleGroupMode,
             )
+            FilterSummary(state = state, onOpenFilters = handlers.onOpenFilters, onClearAll = handlers.onClearAll)
         }
         ConnectionBanner(state.status)
-        ErrorBanner(state.error, onDismiss = onDismissError)
+        ErrorBanner(state.error, onDismiss = handlers.onDismissError)
 
         // The empty state is INSIDE the pull-to-refresh, and inside the
         // `LazyColumn` at that. It used to return early, so the one screen a
@@ -122,22 +162,37 @@ fun SessionsScreen(
         // gesture. `PullToRefreshBox` needs a scrollable child to receive the
         // drag, which a bare `Box` is not, so the message rides as a single
         // item filling the viewport.
-        PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
+        PullToRefreshBox(
+            isRefreshing = state.refreshing,
+            onRefresh = handlers.onRefresh,
+            modifier = Modifier.fillMaxSize(),
+        ) {
             // Room under the last row for the button, or it sits on top of
             // the one session a person scrolled all the way down to reach.
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = if (onNewSession != null) 88.dp else 0.dp),
+                contentPadding = PaddingValues(bottom = if (handlers.onNewSession != null) 88.dp else 0.dp),
             ) {
                 if (state.isEmpty) {
                     item(key = "empty") {
                         EmptyFleet(
-                            needsAttentionOnly = state.needsAttentionOnly,
-                            hostFilter = state.hostFilter,
-                            myWorkOnly = state.myWorkOnly,
+                            state = state,
+                            onClearAll = handlers.onClearAll,
                             modifier = Modifier.fillParentMaxSize(),
                         )
                     }
+                }
+                // The ranked queue has no headings to group under: one flat
+                // list, worst first. Each row therefore carries its own host,
+                // which the tree leaves to the sticky header.
+                items(state.urgent, key = { "urgent-${it.id}" }) { row ->
+                    SessionRowItem(
+                        row = row,
+                        nowSeconds = state.nowSeconds,
+                        showWork = true,
+                        showHost = true,
+                        onClick = { handlers.onOpenSession(row.id) },
+                    )
                 }
                 for (host in state.groups) {
                     stickyHeader(key = "host-${host.alias}") {
@@ -154,15 +209,15 @@ fun SessionsScreen(
                                 nowSeconds = state.nowSeconds,
                                 // Under its work heading the key is already said.
                                 showWork = project.work == null,
-                                onClick = { onOpenSession(row.id) },
+                                onClick = { handlers.onOpenSession(row.id) },
                             )
                         }
                     }
                 }
             }
-            if (onNewSession != null) {
+            handlers.onNewSession?.let { newSession ->
                 FloatingActionButton(
-                    onClick = onNewSession,
+                    onClick = newSession,
                     modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                 ) {
                     Icon(FleetIcons.Add, contentDescription = "New session")
@@ -176,6 +231,8 @@ fun SessionsScreen(
 @Composable
 private fun SessionsBar(
     status: ConnectionStatus,
+    searchOpen: Boolean,
+    onToggleSearch: () -> Unit,
     onOpenTickets: (() -> Unit)?,
     onOpenToday: (() -> Unit)?,
     filters: @Composable () -> Unit,
@@ -193,6 +250,16 @@ private fun SessionsBar(
         subtitle = live,
         // A sheet, not a fourth tab: the phone is a pager.
         actions = {
+            // An icon rather than a permanent field: search is the fastest
+            // filter there is on a long list, but a text field is 48 dp of
+            // chrome above every session, every launch, for a control most
+            // openings of this screen never touch.
+            IconToggle(
+                on = searchOpen,
+                icon = FleetIcons.Search,
+                label = if (searchOpen) "Hide search" else "Search sessions",
+                onClick = onToggleSearch,
+            )
             if (onOpenToday != null) TextButton(onClick = onOpenToday) { Text("Today") }
             if (onOpenTickets != null) TextButton(onClick = onOpenTickets) { Text("Tickets") }
         },
@@ -200,36 +267,89 @@ private fun SessionsBar(
     )
 }
 
+/** An icon button that shows whether the thing it opens is open. */
+@Composable
+private fun IconToggle(on: Boolean, icon: ImageVector, label: String, onClick: () -> Unit) {
+    IconButton(onClick = onClick) {
+        Icon(
+            icon,
+            contentDescription = label,
+            tint = if (on) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+        )
+    }
+}
+
 /**
- * The filters, on their own line under the title, inside the header.
+ * The search field, shown only while it is open.
+ *
+ * `singleLine`, because a wrapped search box pushes the list down as someone
+ * types, and the query is one phrase. The trailing ✕ clears the text without
+ * closing the field — closing it is the icon in the header, and a person
+ * mid-search usually wants the next query rather than no query.
+ *
+ * The IME key only drops focus. It was wired to the header's search toggle,
+ * which *clears the query on the way out* — so pressing the button marked
+ * **Search** threw the search away. The list is already filtered by then;
+ * there is nothing for the key to submit, and the only useful thing it can do
+ * is put the keyboard away and show more of the result.
+ */
+@Composable
+private fun SearchField(query: String, onSetQuery: (String) -> Unit) {
+    val focus = LocalFocusManager.current
+    OutlinedTextField(
+        value = query,
+        onValueChange = onSetQuery,
+        modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 4.dp),
+        placeholder = { Text("Search sessions, branches, projects…") },
+        singleLine = true,
+        leadingIcon = { Icon(FleetIcons.Search, contentDescription = null) },
+        trailingIcon = if (query.isNotEmpty()) {
+            {
+                IconButton(onClick = { onSetQuery("") }) {
+                    Icon(FleetIcons.Close, contentDescription = "Clear search")
+                }
+            }
+        } else {
+            null
+        },
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { focus.clearFocus() }),
+    )
+}
+
+/**
+ * The three controls that stay on screen, on their own line under the title.
  *
  * They used to ride in the `TopAppBar`'s `actions`, which is a plain `Row`
  * that neither wraps nor scrolls and is measured before the title: on a phone,
- * the moment a host filter joined the "Needs attention" chip the two overflowed
- * the bar and pushed the title clean off the screen. Here they own the full
- * width and *wrap* — a `FlowRow`, not a `Row`, because on a 320dp screen the
- * two chips genuinely do not fit side by side and the second one belongs on a
- * second line rather than half past the right edge. A long alias is capped so
- * one chip can never be the whole line.
+ * the moment a host filter joined the "Needs attention" chip the two
+ * overflowed the bar and pushed the title clean off the screen. Here they own
+ * the full width and *wrap* — a `FlowRow`, not a `Row`, because on a 320dp
+ * screen two chips genuinely do not fit side by side and the second belongs on
+ * a second line rather than half past the right edge.
+ *
+ * Wrapping bought room, and then the row spent it: a host token, *My work*,
+ * and one chip per organisation all landed here, and at six chips the header
+ * was four lines deep over the list it was filtering. So this row is now
+ * capped at three by construction rather than by luck — everything that
+ * narrows the list beyond *Needs attention* is behind [onOpenFilters], which
+ * carries the count, and everything that is on is named on the line below.
+ *
+ * [byWork] sits last and is not a filter: it regroups the list without
+ * removing a row, which is why it is outside the count. It keeps a chip of its
+ * own because it is a *view*, and a view control belongs where its effect is
+ * visible.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FilterRow(
     needsAttentionOnly: Boolean,
     attentionCount: Int,
-    hostFilter: String?,
+    activeFilters: Int,
     onToggleNeedsAttention: () -> Unit,
-    onClearHostFilter: () -> Unit,
-    /** Null hides the chip: a hub without the work graph. */
-    byWork: Boolean? = null,
-    onToggleByWork: () -> Unit = {},
-    /** Null hides the chip: no tracker to ask what *My work* is. */
-    myWorkOnly: Boolean? = null,
-    onToggleMyWork: () -> Unit = {},
-    /** Empty hides the org chips: fewer than two orgs to choose between. */
-    orgChoices: List<OrgInfo> = emptyList(),
-    orgFilter: Long? = null,
-    onToggleOrg: (Long) -> Unit = {},
+    onOpenFilters: () -> Unit,
+    groupMode: GroupMode = GroupMode.PROJECT,
+    onCycleGroupMode: () -> Unit = {},
 ) {
     FlowRow(
         modifier = Modifier
@@ -251,34 +371,64 @@ private fun FilterRow(
             },
             trailingIcon = if (attentionCount > 0) ({ Badge { Text("$attentionCount") } }) else null,
         )
-        if (byWork != null) {
-            FilterChip(selected = byWork, onClick = onToggleByWork, label = { Text("By work") })
-        }
-        if (myWorkOnly != null) {
-            FilterChip(selected = myWorkOnly, onClick = onToggleMyWork, label = { Text("My work") })
-        }
-        for (org in orgChoices) {
-            FilterChip(
-                selected = org.id == orgFilter,
-                onClick = { onToggleOrg(org.id) },
-                label = { Text(org.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                modifier = Modifier.widthIn(max = 160.dp),
-            )
-        }
-        if (hostFilter != null) {
-            InputChip(
-                selected = true,
-                onClick = onClearHostFilter,
-                label = { Text("host: $hostFilter", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                trailingIcon = {
-                    Icon(
-                        FleetIcons.Close,
-                        contentDescription = "Clear host filter",
-                        modifier = Modifier.size(InputChipDefaults.IconSize),
-                    )
-                },
-                modifier = Modifier.widthIn(max = 220.dp),
-            )
+        FilterChip(
+            selected = activeFilters > 0,
+            onClick = onOpenFilters,
+            label = { Text(if (activeFilters > 0) "Filters · $activeFilters" else "Filters") },
+            leadingIcon = {
+                Icon(
+                    FleetIcons.Filters,
+                    contentDescription = null,
+                    modifier = Modifier.size(FilterChipDefaults.IconSize),
+                )
+            },
+        )
+        // The label names the view you are *in*, not the one a tap would give
+        // — the desktop's `group-by-toggle`. A cycling control whose label
+        // promises the next state leaves you unable to read the current one.
+        FilterChip(
+            selected = groupMode != GroupMode.PROJECT,
+            onClick = onCycleGroupMode,
+            label = { Text("Group: ${groupMode.label}") },
+        )
+    }
+}
+
+/**
+ * One line saying how many sessions are hidden and by what, drawn only while
+ * something is on.
+ *
+ * The cheapest thing on this screen and the one that makes the rest safe. With
+ * the filters behind a sheet a person can leave one on, close the app, come
+ * back tomorrow and read a three-session list as a quiet fleet — so the list
+ * says "3 of 87" in its own chrome, names what is doing it, and offers the way
+ * out. Tapping the line reopens the sheet; the ✕ clears everything.
+ *
+ * The counts come from the view model rather than from `groups.sumOf` here,
+ * because a session hidden by a filter and a session on a host that is simply
+ * absent look identical once the tree is built.
+ */
+@Composable
+private fun FilterSummary(state: SessionsUiState, onOpenFilters: () -> Unit, onClearAll: () -> Unit) {
+    if (!state.filters.any) return
+    val names = state.filters.summary { id -> state.orgChoices.firstOrNull { it.id == id }?.name ?: "org #$id" }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpenFilters)
+            .padding(start = 16.dp, end = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "${state.shown} of ${state.total} · ${names.joinToString(", ")}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onClearAll, contentPadding = PaddingValues(horizontal = 8.dp)) {
+            Text("Clear", style = MaterialTheme.typography.labelMedium)
         }
     }
 }
@@ -364,7 +514,14 @@ private fun WorkHeader(work: WorkSummary, attention: Int, orgLabel: String? = nu
 }
 
 @Composable
-private fun SessionRowItem(row: SessionRow, nowSeconds: Long, showWork: Boolean, onClick: () -> Unit) {
+private fun SessionRowItem(
+    row: SessionRow,
+    nowSeconds: Long,
+    showWork: Boolean,
+    onClick: () -> Unit,
+    /** Name the host on the row itself — for the urgency queue, which has no host heading. */
+    showHost: Boolean = false,
+) {
     ListItem(
         modifier = Modifier.clickable(onClick = onClick),
         leadingContent = { StatusDot(row.claudeStatus, row.stuckKind) },
@@ -387,7 +544,9 @@ private fun SessionRowItem(row: SessionRow, nowSeconds: Long, showWork: Boolean,
             }
         },
         supportingContent = {
-            val line = row.supportingLine
+            val line = listOfNotNull(row.hostAlias.takeIf { showHost && it.isNotBlank() }, row.supportingLine)
+                .joinToString(" · ")
+                .takeIf { it.isNotEmpty() }
             val work = row.work?.takeIf { showWork }
             val guess = row.workSuggested
             if (work != null || guess != null) {
@@ -416,29 +575,54 @@ private fun SessionRowItem(row: SessionRow, nowSeconds: Long, showWork: Boolean,
     HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
 }
 
+/**
+ * What the list says when it has nothing to draw.
+ *
+ * It used to be a `when` over three filters, and it already lied: *My work*
+ * won the branch whenever it was on, so "No session is on your tickets" was
+ * printed over a list that a host filter was also emptying, and clearing the
+ * one the message named left the screen just as blank. Four filters would have
+ * made that `when` sixteen branches and every added filter doubles it — a
+ * message that is wrong in a way a person cannot act on.
+ *
+ * So it says one true thing instead, names every filter that is on, and puts
+ * the way out under it. The only special case left is the one that is not
+ * about filters at all: an empty fleet, where the useful sentence is how to
+ * start a session rather than what to clear.
+ */
 @Composable
-private fun EmptyFleet(
-    needsAttentionOnly: Boolean,
-    hostFilter: String?,
-    myWorkOnly: Boolean,
-    modifier: Modifier = Modifier.fillMaxSize(),
-) {
+private fun EmptyFleet(state: SessionsUiState, onClearAll: () -> Unit, modifier: Modifier = Modifier.fillMaxSize()) {
+    val names = state.filters.summary { id -> state.orgChoices.firstOrNull { it.id == id }?.name ?: "org #$id" }
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        Text(
-            text = when {
-                // Both filters on and nothing matches: name what is actually
-                // being asked for, rather than the host-only message that
-                // used to win here and said nothing about attention at all.
-                myWorkOnly -> "No session is on your tickets"
-                hostFilter != null && needsAttentionOnly -> "Nothing on $hostFilter needs you"
-                hostFilter != null -> "No sessions on $hostFilter"
-                needsAttentionOnly -> "Nothing needs you right now."
-                else -> "No sessions. Start one from the desktop app or the terminal."
-            },
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(32.dp),
-        )
+        ) {
+            if (names.isEmpty()) {
+                Text(
+                    text = "No sessions. Start one from the desktop app or the terminal.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Text(
+                    text = if (state.total == 1) {
+                        "The one session in the fleet does not match your filters"
+                    } else {
+                        "None of the ${state.total} sessions match your filters"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = names.joinToString(", "),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = onClearAll) { Text("Clear all filters") }
+            }
+        }
     }
 }
 

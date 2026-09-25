@@ -8,7 +8,13 @@ import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.OrgInfo
 import dev.claudefleet.mobile.model.orgOf
 import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.SessionFilters
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.StatusFilter
+import dev.claudefleet.mobile.model.TimeDirection
+import dev.claudefleet.mobile.model.TimeWindow
+import dev.claudefleet.mobile.model.byTriage
+import dev.claudefleet.mobile.model.matches
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.withTicketsFrom
@@ -70,15 +76,54 @@ data class HostGroup(
     val sessionCount: Int get() = projects.sumOf { it.sessions.size }
 }
 
+/**
+ * How the list is shaped — a *view*, never a filter: each of these shows every
+ * session that survived [SessionFilters], arranged differently.
+ *
+ * [URGENCY] is the one that is not a grouping at all. It is the desktop's
+ * ranked queue (P13/P27), which there *replaced* the old stuck-only and
+ * needs-attention pills because those "ordered rows two different ways": one
+ * flat list, worst first, no host or project headings, so the session that
+ * most wants a person is the first thing under the thumb. On a phone that
+ * answers the question this screen exists for better than any arrangement of
+ * filters can.
+ */
+enum class GroupMode(val label: String) {
+    PROJECT("project"),
+    WORK("work"),
+    URGENCY("urgency"),
+}
+
+/**
+ * A host the filter sheet offers, and whether the hub can reach it.
+ *
+ * Not `NewSessionViewModel`'s [HostChoice], whose `reachable` is a plain
+ * `Boolean`: that list comes from `list_hosts`, where reachability is always
+ * known, while this one also offers a host that only a *session* names. For
+ * those the answer is **unknown**, and flattening it to `false` would draw a
+ * working machine as unreachable — the accusation [HostGroup.reachable]'s own
+ * KDoc exists to avoid. Same three words, different question.
+ */
+data class HostFilterChoice(val alias: String, val reachable: Boolean?)
+
 /** Everything the fleet list draws. */
 data class SessionsUiState(
     val groups: List<HostGroup> = emptyList(),
     val status: ConnectionStatus = ConnectionStatus.Offline("not connected yet"),
-    val needsAttentionOnly: Boolean = false,
-    /** The host [groups] is narrowed to, or null for the whole fleet. */
-    val hostFilter: String? = null,
+    /** Everything that narrows the list, in one value. */
+    val filters: SessionFilters = SessionFilters(),
     /** How many rows in the **whole** fleet want a person, filtered or not. */
     val attentionCount: Int = 0,
+    /**
+     * How many sessions [groups] holds, and how many the fleet has in all.
+     *
+     * Drawn as "14 of 87" whenever the two differ, which is the one thing that
+     * makes a filter's effect visible rather than leaving a person to wonder
+     * where a session went. Every "why is my session missing" question this
+     * screen can raise is answered by this line plus [SessionFilters.summary].
+     */
+    val shown: Int = 0,
+    val total: Int = 0,
     val refreshing: Boolean = false,
     /** The last refresh's failure, in plain language with the hub's own words behind it. */
     val error: Friendly? = null,
@@ -86,21 +131,42 @@ data class SessionsUiState(
     val nowSeconds: Long = 0,
     /** The hub has the work graph: the *By work* toggle is offered. */
     val workAvailable: Boolean = false,
-    /** Sessions are grouped by their work first (only ever true when [workAvailable]). */
-    val byWork: Boolean = false,
+    /** How the list is shaped. [GroupMode.WORK] is only ever set when [workAvailable]. */
+    val groupMode: GroupMode = GroupMode.PROJECT,
+    /**
+     * The ranked queue, worst first — filled only in [GroupMode.URGENCY], where
+     * [groups] is empty because the queue has no headings to group under.
+     */
+    val urgent: List<SessionRow> = emptyList(),
     /** The hub has a tracker and answered *My work*: the chip is offered. */
     val myWorkAvailable: Boolean = false,
-    /** Narrowed to sessions on *My work* tickets (only ever true when [myWorkAvailable]). */
-    val myWorkOnly: Boolean = false,
     /**
      * The orgs the fleet's sessions belong to, by name — offered as a filter
      * only when there are two or more; empty hides it.
      */
     val orgChoices: List<OrgInfo> = emptyList(),
-    /** The org the list is narrowed to, or null for all of them. Only ever set while [orgChoices] offers it. */
-    val orgFilter: Long? = null,
+    /** Every host the sheet can narrow to: the host list, plus any host only a session names. */
+    val hostChoices: List<HostFilterChoice> = emptyList(),
+    /** The filter sheet is up. */
+    val filtersOpen: Boolean = false,
+    /** The search field is showing (it holds [SessionFilters.query]). */
+    val searchOpen: Boolean = false,
 ) {
-    val isEmpty: Boolean get() = groups.isEmpty()
+    val isEmpty: Boolean get() = groups.isEmpty() && urgent.isEmpty()
+
+    // The screen and its tests ask these of the state, not of the filters:
+    // they were fields here before the filters were gathered into one value,
+    // and there is no reason to make every caller reach through.
+    /** Kept as it was before there were three modes: the screen and its tests ask this. */
+    val byWork: Boolean get() = groupMode == GroupMode.WORK
+
+    val needsAttentionOnly: Boolean get() = filters.needsAttentionOnly
+    val hostFilter: String? get() = filters.hostFilter
+    val myWorkOnly: Boolean get() = filters.myWorkOnly
+    val orgFilter: Long? get() = filters.orgFilter
+
+    /** Rows are being hidden: what makes the "N of M" line worth drawing. */
+    val narrowed: Boolean get() = filters.any && shown != total
 }
 
 /**
@@ -138,13 +204,24 @@ class SessionsViewModel(
     )
 
     private data class Local(
-        val needsAttentionOnly: Boolean = false,
-        val hostFilter: String? = null,
+        val filters: SessionFilters = SessionFilters(),
+        /**
+         * The instant the activity window is measured from — **not** [now].
+         *
+         * [now] re-emits every 30 seconds so every row's age stays honest, and
+         * deriving window membership from it would mean rows silently leaving
+         * the list under a thumb as they crossed the boundary mid-scroll: the
+         * one thing a list must not do. So the window is anchored when a
+         * person sets it and re-anchored when they pull to refresh, and
+         * between those two the set of rows only changes because the fleet
+         * did.
+         */
+        val filterAt: Long = 0,
         val refreshing: Boolean = false,
         val error: Friendly? = null,
-        val byWork: Boolean = false,
-        val myWorkOnly: Boolean = false,
-        val orgFilter: Long? = null,
+        val groupMode: GroupMode = GroupMode.PROJECT,
+        val filtersOpen: Boolean = false,
+        val searchOpen: Boolean = false,
     )
 
     /** What the hub's work graph adds to the picture: whether it is there, and *My work*. */
@@ -156,7 +233,24 @@ class SessionsViewModel(
         val orgs: OrgDirectory = OrgDirectory.EMPTY,
     )
 
-    private val local = MutableStateFlow(Local(byWork = prefs?.getStringList(BY_WORK_KEY) == listOf(ON)))
+    private val local = MutableStateFlow(
+        Local(groupMode = readGroupMode(), filterAt = clock()),
+    )
+
+    /**
+     * The remembered view.
+     *
+     * `sessions.by_work` is still read, and still written, because a build
+     * that has been storing `["on"]` for months is on people's phones: moving
+     * to a new key alone would silently reset everyone's view to project on
+     * upgrade. The new key wins when it is there; the old one is the fallback.
+     */
+    private fun readGroupMode(): GroupMode {
+        prefs?.getStringList(GROUP_MODE_KEY)?.firstOrNull()?.let { stored ->
+            GroupMode.entries.firstOrNull { it.name == stored }?.let { return it }
+        }
+        return if (prefs?.getStringList(BY_WORK_KEY) == listOf(ON)) GroupMode.WORK else GroupMode.PROJECT
+    }
     private val now = MutableStateFlow(clock())
 
     init {
@@ -216,7 +310,85 @@ class SessionsViewModel(
      * for.
      */
     fun toggleNeedsAttentionOnly() {
-        local.update { it.copy(needsAttentionOnly = !it.needsAttentionOnly) }
+        filter { it.copy(needsAttentionOnly = !it.needsAttentionOnly) }
+    }
+
+    /**
+     * Every filter through one place, so that no mutator can forget the parts
+     * that are not its own field.
+     *
+     * Two of them: `update {}` rather than a read-then-write, which is the
+     * rule [toggleNeedsAttentionOnly] states and which matters more now that
+     * a sheet can put several of these in flight in the same frame; and
+     * re-anchoring [Local.filterAt] on **every** change, so a window set an
+     * hour after the app opened measures from now rather than from launch.
+     */
+    private fun filter(f: (SessionFilters) -> SessionFilters) {
+        local.update { it.copy(filters = f(it.filters), filterAt = clock()) }
+    }
+
+    /** The search text. Blank searches for nothing and keeps every row. */
+    fun setQuery(query: String) {
+        filter { it.copy(query = query) }
+    }
+
+    /**
+     * Show the search field, or hide it — and hiding it clears the query,
+     * because a filter whose control is not on screen is one nobody can see to
+     * undo. The summary line would still name it, but the field is where it is
+     * turned off.
+     */
+    fun toggleSearch() {
+        local.update {
+            val open = !it.searchOpen
+            it.copy(
+                searchOpen = open,
+                filters = if (open) it.filters else it.filters.copy(query = ""),
+                filterAt = clock(),
+            )
+        }
+    }
+
+    /** How far back the activity window reaches. [TimeWindow.ANY] turns it off. */
+    fun setWindow(window: TimeWindow) {
+        filter { it.copy(window = window) }
+    }
+
+    /** Which side of the window to keep — recently active, or idle for longer than it. */
+    fun setDirection(direction: TimeDirection) {
+        filter { it.copy(direction = direction) }
+    }
+
+    /** Add [status] to the statuses kept, or drop it. No statuses chosen means every status. */
+    fun toggleStatus(status: StatusFilter) {
+        filter { f ->
+            f.copy(statuses = if (status in f.statuses) f.statuses - status else f.statuses + status)
+        }
+    }
+
+    /** List background agents, or leave them out. The desktop's `bg on/off`. */
+    fun toggleBackground() {
+        filter { it.copy(showBackground = !it.showBackground) }
+    }
+
+    /**
+     * Every filter off at once.
+     *
+     * The host filter is **not** cleared here: `Screen.Sessions.hostAlias`
+     * owns it, and clearing it in this object alone leaves that screen value
+     * stale, so opening a session and coming back resurrects it — the bug
+     * `Navigator.clearHostFilter` exists for. The screen's *clear all* calls
+     * both, and [SessionFilters.cleared] carries the host through so this one
+     * cannot silently disagree with the navigator in the meantime.
+     */
+    fun clearFilters() {
+        filter { it.cleared() }
+        local.update { it.copy(searchOpen = false) }
+    }
+
+    /** Show the filter sheet, or put it away. */
+    fun setFiltersOpen(open: Boolean) {
+        local.update { it.copy(filtersOpen = open) }
     }
 
     /**
@@ -226,22 +398,41 @@ class SessionsViewModel(
      * regardless of what this narrows [SessionsUiState.groups] to.
      */
     fun setHostFilter(alias: String?) {
-        local.update { it.copy(hostFilter = alias) }
+        filter { it.copy(hostFilter = alias) }
     }
 
     /**
-     * Group each host's sessions by their work first, or stop. Remembered on
-     * the device, because it is how a person reads the list rather than a
-     * question they are asking this minute.
+     * Shape the list. Remembered on the device, because it is how a person
+     * reads the list rather than a question they are asking this minute — and
+     * unlike a filter it hides nothing, so restoring it on launch cannot make
+     * a busy fleet look quiet.
      */
-    fun toggleByWork() {
-        val next = local.updateAndGet { it.copy(byWork = !it.byWork) }.byWork
-        prefs?.putStringList(BY_WORK_KEY, if (next) listOf(ON) else emptyList())
+    fun setGroupMode(mode: GroupMode) {
+        local.update { it.copy(groupMode = mode) }
+        prefs?.putStringList(GROUP_MODE_KEY, listOf(mode.name))
+        // The old key is kept in step so a downgrade still finds the view it
+        // knows how to read. `urgency` has no representation there; it is not
+        // `work`, so it writes the same thing `project` does.
+        prefs?.putStringList(BY_WORK_KEY, if (mode == GroupMode.WORK) listOf(ON) else emptyList())
+    }
+
+    /**
+     * The next view along, which is what tapping the header chip does — the
+     * desktop's `group-by-toggle`, where the label always names the mode you
+     * are *in* rather than the one you would get.
+     *
+     * Work is skipped on a hub without the work graph rather than offered and
+     * ignored, so the cycle a person sees is the cycle they get.
+     */
+    fun cycleGroupMode(workAvailable: Boolean) {
+        val modes = GroupMode.entries.filter { it != GroupMode.WORK || workAvailable }
+        val next = modes[(modes.indexOf(local.value.groupMode).coerceAtLeast(0) + 1) % modes.size]
+        setGroupMode(next)
     }
 
     /** Only sessions on *My work* tickets, or all of them again. Never talks to the hub. */
     fun toggleMyWorkOnly() {
-        local.update { it.copy(myWorkOnly = !it.myWorkOnly) }
+        filter { it.copy(myWorkOnly = !it.myWorkOnly) }
     }
 
     /**
@@ -250,7 +441,7 @@ class SessionsViewModel(
      * every org, so this is a way of reading the list, not a scope.
      */
     fun toggleOrg(org: Long) {
-        local.update { it.copy(orgFilter = if (it.orgFilter == org) null else org) }
+        filter { it.copy(orgFilter = if (it.orgFilter == org) null else org) }
     }
 
     /**
@@ -290,7 +481,10 @@ class SessionsViewModel(
         local.update { it.copy(refreshing = true, error = null) }
         try {
             fleet.refresh()
-            local.update { it.copy(refreshing = false, error = null) }
+            // A pull is the other thing that re-anchors the activity window
+            // (see `Local.filterAt`): asking for the list again is asking for
+            // "within 8 hours" to mean eight hours from *now*.
+            local.update { it.copy(refreshing = false, error = null, filterAt = clock()) }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -309,46 +503,93 @@ class SessionsViewModel(
     ): SessionsUiState {
         // A hub that loses the work graph (a downgrade, a reconnect elsewhere)
         // takes the toggles with it rather than leaving a filter nobody can see.
-        val byWork = work.available && l.byWork
-        val myWork = work.myWork?.takeIf { work.available && l.myWorkOnly }
+        // A hub that loses the work graph cannot leave the list in a mode
+        // whose chip is gone, the same rule the filters follow below.
+        val groupMode = if (l.groupMode == GroupMode.WORK && !work.available) GroupMode.PROJECT else l.groupMode
+        val byWork = groupMode == GroupMode.WORK
+        val myWorkAvailable = work.available && work.myWork != null
         val choices = orgChoices(sessions, work.orgs)
         // Like the toggles above: a filter nobody can see is dropped, so a
-        // hub that stops listing a second org cannot leave the list narrowed.
-        val org = l.orgFilter?.takeIf { f -> choices.any { it.id == f } }
-        return SessionsUiState(
-            groups = groupSessions(
-                // Only a hub with the work graph has a ticket cache worth
-                // overlaying; without one this is the rows as they came.
-                if (work.available) sessions.map { it.withTicketsFrom(work.tickets) } else sessions,
+        // hub that stops listing a second org cannot leave the list narrowed,
+        // and neither can a *My work* filter whose tracker went away.
+        val filters = l.filters.copy(
+            myWorkOnly = l.filters.myWorkOnly && myWorkAvailable,
+            orgFilter = l.filters.orgFilter?.takeIf { f -> choices.any { it.id == f } },
+        )
+        val myWork = work.myWork?.takeIf { filters.myWorkOnly }
+        // Only a hub with the work graph has a ticket cache worth overlaying;
+        // without one these are the rows as they came.
+        val rows = if (work.available) sessions.map { it.withTicketsFrom(work.tickets) } else sessions
+        val urgency = groupMode == GroupMode.URGENCY
+        // The queue is flat, so it is filtered here rather than grouped: the
+        // narrowing is the same `matches` the tree uses, with the same project
+        // label handed in, so the two views can never keep different rows.
+        val byId = projects.associateBy { it.id }
+        val urgent = if (!urgency) {
+            emptyList()
+        } else {
+            rows.filter { row ->
+                row.matches(filters, l.filterAt, projectLabel(row.projectId, byId)) &&
+                    (myWork == null || row.work?.itemId in myWork)
+            }.byTriage(now = nowSeconds)
+        }
+        val groups = if (urgency) {
+            emptyList()
+        } else {
+            groupSessions(
+                rows,
                 hosts,
                 projects,
-                l.needsAttentionOnly,
-                l.hostFilter,
+                filters,
+                l.filterAt,
                 byWork,
                 myWork,
-                org,
-                orgLabel = if (choices.isNotEmpty() && org == null) work.orgs::name else null,
-            ),
+                orgLabel = if (choices.isNotEmpty() && filters.orgFilter == null) work.orgs::name else null,
+            )
+        }
+        return SessionsUiState(
+            groups = groups,
             status = status,
-            needsAttentionOnly = l.needsAttentionOnly,
-            hostFilter = l.hostFilter,
+            filters = filters,
             attentionCount = sessions.count { it.needsAttention },
+            shown = if (urgency) urgent.size else groups.sumOf { it.sessionCount },
+            total = sessions.size,
             refreshing = l.refreshing,
             error = l.error,
             nowSeconds = nowSeconds,
             workAvailable = work.available,
-            byWork = byWork,
-            myWorkAvailable = work.available && work.myWork != null,
-            myWorkOnly = myWork != null,
+            groupMode = groupMode,
+            urgent = urgent,
+            myWorkAvailable = myWorkAvailable,
             orgChoices = choices,
-            orgFilter = org,
+            hostChoices = hostChoices(sessions, hosts),
+            filtersOpen = l.filtersOpen,
+            searchOpen = l.searchOpen,
         )
     }
 
     private companion object {
         const val BY_WORK_KEY = "sessions.by_work"
+        const val GROUP_MODE_KEY = "sessions.group_mode"
         const val ON = "on"
     }
+}
+
+/**
+ * Every host the filter sheet can narrow to, alphabetically.
+ *
+ * The host list is the source, plus any alias only a session names — the same
+ * reasoning `HostGroup.reachable` documents: a host missing from `list_hosts`
+ * is unknown rather than absent, and leaving it out of the sheet would make
+ * its sessions unreachable by the one filter meant to find them. A hidden host
+ * with no sessions stays hidden; one with sessions is offered, because its
+ * rows are on screen either way.
+ */
+internal fun hostChoices(sessions: List<SessionRow>, hosts: List<HostRow>): List<HostFilterChoice> {
+    val named = sessions.mapTo(LinkedHashSet()) { it.hostAlias }
+    val known = hosts.filter { !it.hidden || it.alias in named }.map { HostFilterChoice(it.alias, it.reachable) }
+    val extra = (named - known.mapTo(mutableSetOf()) { it.alias }).map { HostFilterChoice(it, null) }
+    return (known + extra).filter { it.alias.isNotBlank() }.sortedBy { it.alias }
 }
 
 /**
@@ -387,9 +628,9 @@ internal const val NO_PROJECT = "No project"
  *    for. A row the hub has never stamped sorts last: it is not a row that just
  *    did something.
  *
- * Empty groups do not survive: when [needsAttentionOnly] leaves a host with
- * nothing, the host goes too, rather than drawing a heading over a blank. The
- * same is true of [hostFilter] — a host with nothing on it is simply absent,
+ * Empty groups do not survive: when a filter leaves a host with nothing, the
+ * host goes too, rather than drawing a heading over a blank. The same is true
+ * of [SessionFilters.hostFilter] — a host with nothing on it is simply absent,
  * not an empty heading.
  *
  * **[byWork]** puts each host's work groups ahead of its project groups —
@@ -401,30 +642,35 @@ internal const val NO_PROJECT = "No project"
  * `sortWorkGroups`, with attention as the severity.
  *
  * **[myWork]**, when set, keeps only sessions whose work is one of those
- * tracker items.
+ * tracker items. It is not part of [filters] because it is the hub's answer
+ * rather than the person's question: the toggle is
+ * [SessionFilters.myWorkOnly], and this is what it resolves to.
  *
- * **[org]**, when set, keeps only that org's sessions ([orgOf]); a session no
- * org claims is not in any. **[orgLabel]**, when set, names the org on each
- * work group's heading — for a list showing several orgs at once.
+ * **[orgLabel]**, when set, names the org on each work group's heading — for a
+ * list showing several orgs at once.
+ *
+ * Narrowing is [SessionRow.matches] and lives with the filters, not here, so
+ * that the rule can be read and tested without a host tree around it. The
+ * project label goes in with each row because a person typing a repo name
+ * expects to find its sessions, and a row carries only a `project_id`.
  */
 internal fun groupSessions(
     sessions: List<SessionRow>,
     hosts: List<HostRow>,
     projects: List<ProjectRow>,
-    needsAttentionOnly: Boolean,
-    hostFilter: String? = null,
+    filters: SessionFilters = SessionFilters(),
+    nowSeconds: Long = 0,
     byWork: Boolean = false,
     myWork: Set<Long>? = null,
-    org: Long? = null,
     orgLabel: ((Long) -> String)? = null,
 ): List<HostGroup> {
-    val attended = if (needsAttentionOnly) sessions.filter { it.needsAttention } else sessions
-    val onHost = if (hostFilter != null) attended.filter { it.hostAlias == hostFilter } else attended
-    val mine = if (myWork != null) onHost.filter { it.work?.itemId in myWork } else onHost
-    val kept = if (org != null) mine.filter { it.orgOf == org } else mine
+    val byId = projects.associateBy { it.id }
+    val kept = sessions.filter { row ->
+        row.matches(filters, nowSeconds, projectLabel(row.projectId, byId)) &&
+            (myWork == null || row.work?.itemId in myWork)
+    }
     if (kept.isEmpty()) return emptyList()
 
-    val byId = projects.associateBy { it.id }
     val reachability = hosts.associate { it.alias to it.reachable }
 
     // `entries.sortedBy` rather than `toSortedMap()`: the latter is a JVM-only

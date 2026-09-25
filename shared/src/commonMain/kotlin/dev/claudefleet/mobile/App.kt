@@ -59,6 +59,9 @@ import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.SessionViewModel
 import dev.claudefleet.mobile.ui.SessionWorkHandlers
 import dev.claudefleet.mobile.ui.SessionWorkViewModel
+import dev.claudefleet.mobile.ui.SessionFiltersHandlers
+import dev.claudefleet.mobile.ui.SessionFiltersSheet
+import dev.claudefleet.mobile.ui.SessionsHandlers
 import dev.claudefleet.mobile.ui.SessionsScreen
 import dev.claudefleet.mobile.ui.SessionsViewModel
 import dev.claudefleet.mobile.ui.SettingsScreen
@@ -392,27 +395,62 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                     val todayState by today.state.collectAsState()
                     SessionsScreen(
                         state = state,
-                        onOpenSession = nav::open,
-                        onToggleNeedsAttention = sessions::toggleNeedsAttentionOnly,
-                        // Through the navigator, not `sessions.setHostFilter(null)`
-                        // directly: `Screen.Sessions.hostAlias` is the one source of
-                        // truth for the filter, and `open()` reads `nav.screen.value`
-                        // to build `returnTo`. Clearing the view model alone left
-                        // that screen value stale, so opening a session and coming
-                        // back resurrected the filter the chip had just cleared. See
-                        // `Navigator.clearHostFilter`.
-                        onClearHostFilter = { nav.clearHostFilter() },
-                        onRefresh = { sessions.refresh() },
-                        onDismissError = sessions::dismissError,
-                        // `new_session` is not a readonly tool: a readonly
-                        // pairing is not offered a form the hub would refuse.
-                        onNewSession = if (credentials.canWrite) ({ nav.newSession() }) else null,
-                        onToggleByWork = sessions::toggleByWork,
-                        onToggleMyWork = sessions::toggleMyWorkOnly,
-                        onOpenTickets = if (ticketsState.available) ({ tickets.open() }) else null,
-                        onOpenToday = if (todayState.available) ({ today.open() }) else null,
-                        onToggleOrg = sessions::toggleOrg,
+                        handlers = SessionsHandlers(
+                            onOpenSession = nav::open,
+                            onToggleNeedsAttention = sessions::toggleNeedsAttentionOnly,
+                            onRefresh = { sessions.refresh() },
+                            onDismissError = sessions::dismissError,
+                            onCycleGroupMode = { sessions.cycleGroupMode(state.workAvailable) },
+                            onToggleSearch = sessions::toggleSearch,
+                            onSetQuery = sessions::setQuery,
+                            onOpenFilters = { sessions.setFiltersOpen(true) },
+                            // Both, in this order, and this is the only place
+                            // that knows to: `clearFilters` deliberately leaves
+                            // the host alone because `Screen.Sessions.hostAlias`
+                            // owns it (see `onSetHost` below), so a *clear all*
+                            // that called only the view model would leave the
+                            // one filter a person most often wants gone.
+                            onClearAll = {
+                                sessions.clearFilters()
+                                nav.clearHostFilter()
+                            },
+                            // `new_session` is not a readonly tool: a readonly
+                            // pairing is not offered a form the hub would refuse.
+                            onNewSession = if (credentials.canWrite) ({ nav.newSession() }) else null,
+                            onOpenTickets = if (ticketsState.available) ({ tickets.open() }) else null,
+                            onOpenToday = if (todayState.available) ({ today.open() }) else null,
+                        ),
                     )
+                    if (state.filtersOpen) {
+                        SessionFiltersSheet(
+                            state = state,
+                            handlers = SessionFiltersHandlers(
+                                onClose = { sessions.setFiltersOpen(false) },
+                                onSetWindow = sessions::setWindow,
+                                onSetDirection = sessions::setDirection,
+                                onToggleStatus = sessions::toggleStatus,
+                                // Through the navigator, not
+                                // `sessions.setHostFilter(...)` directly:
+                                // `Screen.Sessions.hostAlias` is the one source of
+                                // truth for the filter, and `open()` reads
+                                // `nav.screen.value` to build `returnTo`. Setting
+                                // the view model alone left that screen value
+                                // stale, so opening a session and coming back
+                                // resurrected the filter the sheet had just
+                                // changed. See `Navigator.clearHostFilter`.
+                                onSetHost = { alias ->
+                                    if (alias == null) nav.clearHostFilter() else nav.showSessionsFor(alias)
+                                },
+                                onToggleOrg = sessions::toggleOrg,
+                                onToggleMyWork = sessions::toggleMyWorkOnly,
+                                onToggleBackground = sessions::toggleBackground,
+                                onClearAll = {
+                                    sessions.clearFilters()
+                                    nav.clearHostFilter()
+                                },
+                            ),
+                        )
+                    }
                     if (todayState.open) {
                         TodaySheet(
                             state = todayState,
