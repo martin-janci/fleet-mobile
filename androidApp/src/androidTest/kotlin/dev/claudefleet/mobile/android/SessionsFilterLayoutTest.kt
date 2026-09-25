@@ -11,7 +11,10 @@ import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.model.SessionFilters
+import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.ui.GroupMode
+import dev.claudefleet.mobile.ui.HostGroup
+import dev.claudefleet.mobile.ui.ProjectGroup
 import dev.claudefleet.mobile.ui.SessionsScreen
 import dev.claudefleet.mobile.ui.SessionsUiState
 import dev.claudefleet.mobile.ui.theme.FleetTheme
@@ -110,9 +113,27 @@ class SessionsFilterLayoutTest {
      */
     @Test
     fun the_summary_line_names_the_active_filters_and_fits() {
+        // With rows on screen, because "3 of 87" over an empty list is a state
+        // the view model cannot produce. The first version of this test left
+        // `groups` empty, so the empty state drew its own *Clear all filters*
+        // beside the summary's *Clear* and the substring matcher found two
+        // nodes — a test failing on a screen it had built wrong, not on a bug.
         show(
             SessionsUiState(
                 status = ConnectionStatus.Connected(hubVersion = null),
+                groups = listOf(
+                    HostGroup(
+                        alias = "mefistos-builder",
+                        reachable = true,
+                        projects = listOf(
+                            ProjectGroup(
+                                projectId = 1,
+                                label = "martin-janci/fleet-mobile",
+                                sessions = (1L..3L).map { SessionRow(id = it, tmuxName = "sess-$it") },
+                            ),
+                        ),
+                    ),
+                ),
                 filters = SessionFilters(hostFilter = "mefistos-builder", needsAttentionOnly = true),
                 shown = 3,
                 total = 87,
