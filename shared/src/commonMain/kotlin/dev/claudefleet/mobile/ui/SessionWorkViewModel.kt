@@ -3,7 +3,9 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.WorkSummary
+import dev.claudefleet.mobile.model.withTicketsFrom
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK_LINK
@@ -72,13 +74,17 @@ class SessionWorkViewModel(
     private val local = MutableStateFlow(Local())
 
     val state: StateFlow<SessionWorkUiState> =
-        combine(fleet.sessions, fleet.capabilities, local) { rows, caps, l ->
-            assemble(rows.firstOrNull { it.id == sessionId }, caps, l)
+        combine(fleet.sessions, fleet.capabilities, fleet.tickets, local) { rows, caps, cache, l ->
+            assemble(rows.freshRow(cache), caps, l)
         }.stateIn(
             scope,
             SharingStarted.Eagerly,
-            assemble(fleet.sessions.value.firstOrNull { it.id == sessionId }, fleet.capabilities.value, local.value),
+            assemble(fleet.sessions.value.freshRow(fleet.tickets.value), fleet.capabilities.value, local.value),
         )
+
+    /** This session's row, its work refreshed from the ticket cache — the list does the same. */
+    private fun List<SessionRow>.freshRow(cache: List<Ticket>): SessionRow? =
+        firstOrNull { it.id == sessionId }?.withTicketsFrom(cache.associateBy { it.id })
 
     fun openSheet() {
         if (state.value.chip != null) local.update { it.copy(sheetOpen = true) }

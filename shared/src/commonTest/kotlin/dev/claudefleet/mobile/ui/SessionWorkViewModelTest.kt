@@ -254,6 +254,22 @@ class SessionWorkViewModelTest {
         assertEquals("linked (jira-sync)", workWhy(PAY7.copy(source = "jira-sync")))
     }
 
+    /** The session screen's chip follows the ticket cache, as the list does: a `work:item` does not restamp the row. */
+    @Test
+    fun the_chip_follows_the_ticket_cache() = runTest {
+        val stamped = WorkSummary(linkId = 3, itemId = 70, key = "PAY-7", title = "Refund", source = "manual", statusName = "To Do")
+        val fleet = WorkFleet(listOf(row(work = stamped)))
+        val vm = SessionWorkViewModel(5, fleet, FakeWorkActions(), backgroundScope, canWrite = true)
+        runCurrent()
+        assertEquals("To Do", vm.state.value.chip?.statusName)
+
+        fleet.tickets.value = listOf(Ticket(id = 70, key = "PAY-7", title = "Refund", statusName = "Done"))
+        runCurrent()
+
+        assertEquals("Done", vm.state.value.chip?.statusName)
+        assertEquals(3L, vm.state.value.work?.linkId, "decisions still address the row's link")
+    }
+
     /**
      * A URL is linked only by the item it resolves to. The hub takes any
      * string of up to 64 characters as a free-form key, so a URL sent as one

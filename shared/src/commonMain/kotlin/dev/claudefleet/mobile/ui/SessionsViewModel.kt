@@ -6,7 +6,9 @@ import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.WorkSummary
+import dev.claudefleet.mobile.model.withTicketsFrom
 import dev.claudefleet.mobile.model.unnamedProject
 import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
@@ -128,7 +130,8 @@ class SessionsViewModel(
     )
 
     /** What the hub's work graph adds to the picture: whether it is there, and *My work*. */
-    private data class Work(val available: Boolean, val myWork: Set<Long>?)
+    /** [tickets] is the ticket cache by item id, overlaid on each row's work (see `withTicketsFrom`). */
+    private data class Work(val available: Boolean, val myWork: Set<Long>?, val tickets: Map<Long, Ticket>)
 
     private val local = MutableStateFlow(Local(byWork = prefs?.getStringList(BY_WORK_KEY) == listOf(ON)))
     private val now = MutableStateFlow(clock())
@@ -144,7 +147,9 @@ class SessionsViewModel(
 
     val state: StateFlow<SessionsUiState> = combine(
         combine(fleet.sessions, fleet.hosts, fleet.projects, fleet.status, ::FleetSnapshot),
-        combine(fleet.capabilities, fleet.myWork) { caps, mine -> Work(caps.work, mine) },
+        combine(fleet.capabilities, fleet.myWork, fleet.tickets) { caps, mine, cache ->
+            Work(caps.work, mine, cache.associateBy { it.id })
+        },
         local,
         now,
     ) { snapshot, work, l, nowSeconds ->
@@ -160,7 +165,7 @@ class SessionsViewModel(
                 fleet.hosts.value,
                 fleet.projects.value,
                 fleet.status.value,
-                Work(fleet.capabilities.value.work, fleet.myWork.value),
+                Work(fleet.capabilities.value.work, fleet.myWork.value, fleet.tickets.value.associateBy { it.id }),
                 local.value,
                 now.value,
             ),
@@ -263,7 +268,17 @@ class SessionsViewModel(
         val byWork = work.available && l.byWork
         val myWork = work.myWork?.takeIf { work.available && l.myWorkOnly }
         return SessionsUiState(
-            groups = groupSessions(sessions, hosts, projects, l.needsAttentionOnly, l.hostFilter, byWork, myWork),
+            groups = groupSessions(
+                // Only a hub with the work graph has a ticket cache worth
+                // overlaying; without one this is the rows as they came.
+                if (work.available) sessions.map { it.withTicketsFrom(work.tickets) } else sessions,
+                hosts,
+                projects,
+                l.needsAttentionOnly,
+                l.hostFilter,
+                byWork,
+                myWork,
+            ),
             status = status,
             needsAttentionOnly = l.needsAttentionOnly,
             hostFilter = l.hostFilter,

@@ -39,6 +39,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -295,8 +298,17 @@ private fun ProjectHeader(label: String) {
  */
 @Composable
 private fun WorkHeader(work: WorkSummary, attention: Int) {
+    val spoken = workHeaderDescription(work, attention)
     Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)
+            // Read as one heading, in words: the strike-through and the dot
+            // say nothing to a screen reader on their own.
+            .clearAndSetSemantics {
+                heading()
+                contentDescription = spoken
+            },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         work.statusCategory?.let { WorkStatusDot(it) }
@@ -391,3 +403,12 @@ private fun EmptyFleet(
         )
     }
 }
+
+/** A work heading, in words: the key, its title and status, and who is waiting. */
+internal fun workHeaderDescription(work: WorkSummary, attention: Int): String = buildList {
+    add("Work ${work.label}")
+    if (work.key != null && work.title.isNotBlank()) add(work.title)
+    work.statusName?.let { add(it) }
+    if (work.unavailable) add("ticket unavailable")
+    if (attention > 0) add(if (attention == 1) "1 session needs you" else "$attention sessions need you")
+}.joinToString(", ")
