@@ -2,6 +2,7 @@
 
 package dev.claudefleet.mobile.data
 
+import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.net.EventStream
 import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.net.HubError
@@ -18,6 +19,7 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.FlowCollector
@@ -77,6 +79,9 @@ private class FakeHub(
         private set
     var mineCalls = 0
         private set
+    var orgsJson: String = "[]"
+    var orgsCalls = 0
+        private set
 
     /** Makes `list_hosts` answer 401, so a refresh fails after its first call. */
     var failHosts = false
@@ -96,6 +101,7 @@ private class FakeHub(
                 }
                 val payload = when {
                     "\"trackers\"" in body -> trackersJson
+                    "\"orgs\"" in body -> { orgsCalls += 1; orgsJson }
                     "\"tickets\"" in body -> { mineCalls += 1; mineJson }
                     "list_sessions" in body -> { sessionCalls += 1; sessionsJson }
                     "list_hosts" in body -> { hostCalls += 1; hostsJson }
@@ -1156,6 +1162,74 @@ class FleetRepositoryTest {
         assertFalse(repository.capabilities.value.work, "a refused hub offers nothing work-shaped")
         assertFalse(repository.capabilities.value.workLink)
         assertNull(repository.myWork.value)
+        repository.stop()
+    }
+
+    // ---- M8.6: the org directory and the timeline ----
+
+    /** A hub that lists `work orgs` has it read with the rest of discovery; one that does not is never asked. */
+    @Test
+    fun a_ready_reads_the_orgs_when_the_hub_lists_them() = runTest {
+        val hub = workHub().apply {
+            orgsJson = """[{"id":1,"name":"Acme","trackers":[{"id":1,"name":"acme"}]},{"id":2,"name":"Side","trackers":[]}]"""
+        }
+        val repository = repo(hub, FakeStream { emit(READY); awaitCancellation() }, backgroundScope)
+        repository.start()
+        val dir = repository.orgs.first { it.orgs.isNotEmpty() }
+        assertEquals("Acme", dir.name(1))
+        assertEquals(1L, dir.trackerOrg[1])
+        repository.stop()
+
+        val old = FakeHub().apply { toolsJson = """[{"name":"work","inputSchema":{"properties":{"action":{"enum":["tickets","links"]}}}}]""" }
+        val oldRepo = repo(old, FakeStream { emit(READY); awaitCancellation() }, backgroundScope)
+        oldRepo.start()
+        oldRepo.capabilities.first { it.work }
+        oldRepo.myWork.first { true }
+        assertEquals(0, old.orgsCalls)
+        assertEquals(OrgDirectory.EMPTY, oldRepo.orgs.value)
+        oldRepo.stop()
+    }
+
+    /** Like *My work*: a refused hub forgets the last hub's orgs. */
+    @Test
+    fun a_refused_reconnect_forgets_the_orgs() = runTest {
+        val hub = workHub().apply { orgsJson = """[{"id":1,"name":"Acme"},{"id":2,"name":"Side"}]""" }
+        val drop = CompletableDeferred<Unit>()
+        val stream = FakeStream { attempt ->
+            if (attempt == 1) {
+                emit(READY)
+                drop.await()
+            } else {
+                emit(HubEvent.Ready("0.9.9", listOf("session", "host"), contract = 5))
+                awaitCancellation()
+            }
+        }
+        val repository = FleetRepository(hub.client, stream, backgroundScope, backoff = { Duration.ZERO })
+        repository.start()
+        repository.orgs.first { it.orgs.size == 2 }
+        drop.complete(Unit)
+        repository.status.first { it is ConnectionStatus.Refused }
+        assertEquals(OrgDirectory.EMPTY, repository.orgs.value)
+        repository.stop()
+    }
+
+    /** A `session:event` frame is passed on as a timeline entry; a row frame is not. */
+    @Test
+    fun timeline_frames_are_passed_on() = runTest {
+        val repository = repo(
+            FakeHub(),
+            FakeStream {
+                emit(READY)
+                emit(rowEvent("session:updated", """{"id":5,"tmux_name":"a","host_alias":"box"}"""))
+                emit(rowEvent("session:event", """{"id":9001,"session_id":5,"at":1,"kind":"handover_written","detail":"n"}"""))
+                awaitCancellation()
+            },
+            backgroundScope,
+        )
+        val got = async { repository.timeline.first() }
+        runCurrent()
+        repository.start()
+        assertEquals(TimelineFrame(5, "handover_written", "n"), got.await())
         repository.stop()
     }
 }

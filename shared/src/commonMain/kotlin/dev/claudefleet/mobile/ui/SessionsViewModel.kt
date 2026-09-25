@@ -4,6 +4,9 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.OrgDirectory
+import dev.claudefleet.mobile.model.OrgInfo
+import dev.claudefleet.mobile.model.orgOf
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
@@ -19,6 +22,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
@@ -39,6 +44,11 @@ data class ProjectGroup(
      * what the heading draws (key, title, status). Null on a project group.
      */
     val work: WorkSummary? = null,
+    /**
+     * The org a work group's heading names, when the list shows more than one
+     * org and is not already narrowed to one. Null on a project group.
+     */
+    val orgLabel: String? = null,
 ) {
     /** What keys the group on screen: stable across recompositions, distinct per kind. */
     val id: String get() = work?.groupKey?.let { "work-$it" } ?: "project-${projectId ?: "none"}"
@@ -82,6 +92,13 @@ data class SessionsUiState(
     val myWorkAvailable: Boolean = false,
     /** Narrowed to sessions on *My work* tickets (only ever true when [myWorkAvailable]). */
     val myWorkOnly: Boolean = false,
+    /**
+     * The orgs the fleet's sessions belong to, by name — offered as a filter
+     * only when there are two or more; empty hides it.
+     */
+    val orgChoices: List<OrgInfo> = emptyList(),
+    /** The org the list is narrowed to, or null for all of them. Only ever set while [orgChoices] offers it. */
+    val orgFilter: Long? = null,
 ) {
     val isEmpty: Boolean get() = groups.isEmpty()
 }
@@ -127,11 +144,17 @@ class SessionsViewModel(
         val error: Friendly? = null,
         val byWork: Boolean = false,
         val myWorkOnly: Boolean = false,
+        val orgFilter: Long? = null,
     )
 
     /** What the hub's work graph adds to the picture: whether it is there, and *My work*. */
     /** [tickets] is the ticket cache by item id, overlaid on each row's work (see `withTicketsFrom`). */
-    private data class Work(val available: Boolean, val myWork: Set<Long>?, val tickets: Map<Long, Ticket>)
+    private data class Work(
+        val available: Boolean,
+        val myWork: Set<Long>?,
+        val tickets: Map<Long, Ticket>,
+        val orgs: OrgDirectory = OrgDirectory.EMPTY,
+    )
 
     private val local = MutableStateFlow(Local(byWork = prefs?.getStringList(BY_WORK_KEY) == listOf(ON)))
     private val now = MutableStateFlow(clock())
@@ -147,8 +170,8 @@ class SessionsViewModel(
 
     val state: StateFlow<SessionsUiState> = combine(
         combine(fleet.sessions, fleet.hosts, fleet.projects, fleet.status, ::FleetSnapshot),
-        combine(fleet.capabilities, fleet.myWork, fleet.tickets) { caps, mine, cache ->
-            Work(caps.work, mine, cache.associateBy { it.id })
+        combine(fleet.capabilities, fleet.myWork, fleet.tickets, fleet.orgs) { caps, mine, cache, orgs ->
+            Work(caps.work, mine, cache.associateBy { it.id }, orgs)
         },
         local,
         now,
@@ -165,7 +188,12 @@ class SessionsViewModel(
                 fleet.hosts.value,
                 fleet.projects.value,
                 fleet.status.value,
-                Work(fleet.capabilities.value.work, fleet.myWork.value, fleet.tickets.value.associateBy { it.id }),
+                Work(
+                    fleet.capabilities.value.work,
+                    fleet.myWork.value,
+                    fleet.tickets.value.associateBy { it.id },
+                    fleet.orgs.value,
+                ),
                 local.value,
                 now.value,
             ),
@@ -215,6 +243,22 @@ class SessionsViewModel(
     fun toggleMyWorkOnly() {
         local.update { it.copy(myWorkOnly = !it.myWorkOnly) }
     }
+
+    /**
+     * Only [org]'s sessions, or all of them again — tapping the chosen org
+     * again clears it. Never talks to the hub: a phone's token already sees
+     * every org, so this is a way of reading the list, not a scope.
+     */
+    fun toggleOrg(org: Long) {
+        local.update { it.copy(orgFilter = if (it.orgFilter == org) null else org) }
+    }
+
+    /**
+     * The org the list is narrowed to, as the screen applies it — what the
+     * Today sheet scopes itself by, so the two never disagree.
+     */
+    val orgFilter: StateFlow<Long?> = state.map { it.orgFilter }.distinctUntilChanged()
+        .stateIn(scope, SharingStarted.Eagerly, state.value.orgFilter)
 
     /**
      * Clear the banner.
@@ -267,6 +311,10 @@ class SessionsViewModel(
         // takes the toggles with it rather than leaving a filter nobody can see.
         val byWork = work.available && l.byWork
         val myWork = work.myWork?.takeIf { work.available && l.myWorkOnly }
+        val choices = orgChoices(sessions, work.orgs)
+        // Like the toggles above: a filter nobody can see is dropped, so a
+        // hub that stops listing a second org cannot leave the list narrowed.
+        val org = l.orgFilter?.takeIf { f -> choices.any { it.id == f } }
         return SessionsUiState(
             groups = groupSessions(
                 // Only a hub with the work graph has a ticket cache worth
@@ -278,6 +326,8 @@ class SessionsViewModel(
                 l.hostFilter,
                 byWork,
                 myWork,
+                org,
+                orgLabel = if (choices.isNotEmpty() && org == null) work.orgs::name else null,
             ),
             status = status,
             needsAttentionOnly = l.needsAttentionOnly,
@@ -290,6 +340,8 @@ class SessionsViewModel(
             byWork = byWork,
             myWorkAvailable = work.available && work.myWork != null,
             myWorkOnly = myWork != null,
+            orgChoices = choices,
+            orgFilter = org,
         )
     }
 
@@ -297,6 +349,17 @@ class SessionsViewModel(
         const val BY_WORK_KEY = "sessions.by_work"
         const val ON = "on"
     }
+}
+
+/**
+ * The orgs [sessions] belong to, by name, when there are at least two — one
+ * org, or none, is nothing to filter by. A session's org is its row's, else
+ * its work's ([orgOf]).
+ */
+internal fun orgChoices(sessions: List<SessionRow>, orgs: OrgDirectory): List<OrgInfo> {
+    val ids = sessions.mapNotNullTo(LinkedHashSet()) { it.orgOf }
+    if (ids.size < 2) return emptyList()
+    return ids.map { orgs.orgs[it] ?: OrgInfo(it, orgs.name(it)) }.sortedBy { it.name.lowercase() }
 }
 
 /** The label a project group carries, given what `list_projects` last said. */
@@ -339,6 +402,10 @@ internal const val NO_PROJECT = "No project"
  *
  * **[myWork]**, when set, keeps only sessions whose work is one of those
  * tracker items.
+ *
+ * **[org]**, when set, keeps only that org's sessions ([orgOf]); a session no
+ * org claims is not in any. **[orgLabel]**, when set, names the org on each
+ * work group's heading — for a list showing several orgs at once.
  */
 internal fun groupSessions(
     sessions: List<SessionRow>,
@@ -348,10 +415,13 @@ internal fun groupSessions(
     hostFilter: String? = null,
     byWork: Boolean = false,
     myWork: Set<Long>? = null,
+    org: Long? = null,
+    orgLabel: ((Long) -> String)? = null,
 ): List<HostGroup> {
     val attended = if (needsAttentionOnly) sessions.filter { it.needsAttention } else sessions
     val onHost = if (hostFilter != null) attended.filter { it.hostAlias == hostFilter } else attended
-    val kept = if (myWork != null) onHost.filter { it.work?.itemId in myWork } else onHost
+    val mine = if (myWork != null) onHost.filter { it.work?.itemId in myWork } else onHost
+    val kept = if (org != null) mine.filter { it.orgOf == org } else mine
     if (kept.isEmpty()) return emptyList()
 
     val byId = projects.associateBy { it.id }
@@ -367,7 +437,7 @@ internal fun groupSessions(
             HostGroup(
                 alias = alias,
                 reachable = reachability[alias],
-                projects = workGroups(keyed) + rest.groupBy { it.projectId }
+                projects = workGroups(keyed, orgLabel) + rest.groupBy { it.projectId }
                     .map { (id, inProject) ->
                         ProjectGroup(
                             projectId = id,
@@ -390,12 +460,18 @@ private val SessionRow.workGroupKey: String?
     get() = if (kind == "external") null else work?.groupKey
 
 /** One host's keyed sessions as work groups, needing-a-person first, then by recency. */
-private fun workGroups(keyed: List<SessionRow>): List<ProjectGroup> =
+private fun workGroups(keyed: List<SessionRow>, orgLabel: ((Long) -> String)?): List<ProjectGroup> =
     keyed.sortedWith(BY_RECENCY)
         .groupBy { it.workGroupKey!! }
         .map { (_, rows) ->
             val work = rows.first().work!!
-            ProjectGroup(projectId = null, label = work.label, sessions = rows, work = work)
+            ProjectGroup(
+                projectId = null,
+                label = work.label,
+                sessions = rows,
+                work = work,
+                orgLabel = orgLabel?.let { name -> rows.first().orgOf?.let(name) },
+            )
         }
         // Stable: equal attention keeps the recency order the groupBy saw.
         .sortedByDescending { it.attentionCount }

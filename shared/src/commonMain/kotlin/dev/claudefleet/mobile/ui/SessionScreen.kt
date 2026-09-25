@@ -246,7 +246,8 @@ fun SessionScreen(
         )
         ConnectionBanner(status, state.hubReachable)
         ErrorBanner(state.error, onDismiss = onDismissError)
-        ErrorBanner(work.error, onDismiss = workHandlers.onDismissError)
+        // Behind an open sheet a banner cannot be read: the sheet shows it instead.
+        if (!work.sheetOpen) ErrorBanner(work.error, onDismiss = workHandlers.onDismissError)
         if (work.sheetOpen) WorkTicketSheet(work, workHandlers)
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {

@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
@@ -9,6 +10,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 
 /**
  * The fleet's live picture, as a screen sees it.
@@ -94,6 +96,22 @@ interface FleetState {
      */
     val myWork: StateFlow<Set<Long>?> get() = NoWork.myWork
 
+    /**
+     * The organisations this token can see and what their trackers are
+     * (claude-fleet M5), read once per connection when the hub lists
+     * `work orgs`; empty otherwise. A label and a filter, never a fence: a
+     * phone's token is not org-scoped on the hub.
+     */
+    val orgs: StateFlow<OrgDirectory> get() = NoWork.orgs
+
+    /**
+     * Timeline entries as they arrive — `session:event` frames, one at a
+     * time — for a screen waiting on something the hub does later, such as a
+     * handover note written at the end of a turn. A hot flow like
+     * [sessionChanges]: a screen not collecting when one arrived missed it.
+     */
+    val timeline: Flow<TimelineFrame> get() = emptyFlow()
+
     /** The hub refused [action] of [tool] as unknown: hide it for the rest of this connection. */
     fun actionMissing(tool: String, action: String) {}
 
@@ -106,4 +124,8 @@ private object NoWork {
     val capabilities: StateFlow<HubCapabilities> = MutableStateFlow(HubCapabilities()).asStateFlow()
     val tickets: StateFlow<List<Ticket>> = MutableStateFlow<List<Ticket>>(emptyList()).asStateFlow()
     val myWork: StateFlow<Set<Long>?> = MutableStateFlow<Set<Long>?>(null).asStateFlow()
+    val orgs: StateFlow<OrgDirectory> = MutableStateFlow(OrgDirectory.EMPTY).asStateFlow()
 }
+
+/** One `session:event` frame: which session's timeline, and what kind of entry. */
+data class TimelineFrame(val sessionId: Long, val kind: String, val detail: String? = null)

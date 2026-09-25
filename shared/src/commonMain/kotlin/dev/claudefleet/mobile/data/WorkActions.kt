@@ -3,6 +3,8 @@ package dev.claudefleet.mobile.data
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
+import dev.claudefleet.mobile.model.TicketCard
+import dev.claudefleet.mobile.model.Today
 
 /**
  * The work-graph calls a screen may make — narrow for the same reason
@@ -24,6 +26,12 @@ interface WorkActions {
     /** What resuming [key] would do. */
     suspend fun resumePlan(key: String): ResumePlan
 
+    /** The Today digest since [since], unix seconds. */
+    suspend fun today(since: Long): Today
+
+    /** [key]'s context card: acceptance criteria from the hub's cache. */
+    suspend fun card(key: String): TicketCard
+
     suspend fun confirm(sessionId: Long, linkId: Long): SessionRow
 
     suspend fun reject(sessionId: Long, linkId: Long): SessionRow
@@ -38,6 +46,9 @@ interface WorkActions {
 
     /** Resume [key]'s last conversation, on [hostAlias] or where the hub would put it. */
     suspend fun resume(key: String, hostAlias: String? = null): SessionRow
+
+    /** Ask the session's Claude for a handover note on its work; the answer comes later. */
+    suspend fun handover(sessionId: Long): SessionRow
 }
 
 /** [WorkActions] against the paired hub, through [AppSession.withClient]. */
@@ -47,6 +58,10 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
     override suspend fun lookup(keyOrUrl: String): Ticket = session.withClient { it.workLookup(keyOrUrl) }
 
     override suspend fun resumePlan(key: String): ResumePlan = session.withClient { it.workResumePlan(key) }
+
+    override suspend fun today(since: Long): Today = session.withClient { it.workToday(since) }
+
+    override suspend fun card(key: String): TicketCard = session.withClient { it.workCard(key) }
 
     override suspend fun confirm(sessionId: Long, linkId: Long): SessionRow =
         session.withClient { it.confirmWork(sessionId, linkId) }
@@ -65,4 +80,6 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
 
     override suspend fun resume(key: String, hostAlias: String?): SessionRow =
         session.withClient { it.resumeWork(key, mode = "last", hostAlias = hostAlias) }
+
+    override suspend fun handover(sessionId: Long): SessionRow = session.withClient { it.handoverWork(sessionId) }
 }

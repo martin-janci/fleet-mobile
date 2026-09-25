@@ -94,6 +94,14 @@ fun HubEvent.Row.sessionId(): Long? = when {
     else -> payload.number("id")
 }
 
+/** The timeline entry a `session:event` frame carries, or null for any other frame. */
+fun HubEvent.Row.timelineFrame(): TimelineFrame? {
+    if (name != "session:event") return null
+    val id = payload.number("session_id") ?: return null
+    val kind = payload.text("kind") ?: return null
+    return TimelineFrame(id, kind, payload.text("detail"))
+}
+
 /**
  * Replace the row [sameRow] picks out, or append [incoming] when there is none.
  *

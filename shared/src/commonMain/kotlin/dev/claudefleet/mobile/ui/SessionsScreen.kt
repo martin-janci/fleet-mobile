@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.model.OrgInfo
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.relativeTime
@@ -89,9 +90,13 @@ fun SessionsScreen(
     onToggleMyWork: () -> Unit = {},
     /** Open the Tickets sheet. Null hides the action — a hub without the work graph. */
     onOpenTickets: (() -> Unit)? = null,
+    /** Open the Today sheet. Null hides the action — a hub without `work today`. */
+    onOpenToday: (() -> Unit)? = null,
+    /** Narrow to one org, or clear it by tapping it again. Only drawn with two or more orgs. */
+    onToggleOrg: (Long) -> Unit = {},
 ) {
     Column(modifier = modifier.fillMaxSize()) {
-        SessionsBar(status = state.status, onOpenTickets = onOpenTickets) {
+        SessionsBar(status = state.status, onOpenTickets = onOpenTickets, onOpenToday = onOpenToday) {
             FilterRow(
                 needsAttentionOnly = state.needsAttentionOnly,
                 attentionCount = state.attentionCount,
@@ -102,6 +107,9 @@ fun SessionsScreen(
                 onToggleByWork = onToggleByWork,
                 myWorkOnly = state.myWorkOnly.takeIf { state.myWorkAvailable },
                 onToggleMyWork = onToggleMyWork,
+                orgChoices = state.orgChoices,
+                orgFilter = state.orgFilter,
+                onToggleOrg = onToggleOrg,
             )
         }
         ConnectionBanner(state.status)
@@ -138,7 +146,7 @@ fun SessionsScreen(
                     for (project in host.projects) {
                         item(key = "${host.alias}-${project.id}") {
                             val work = project.work
-                            if (work != null) WorkHeader(work, project.attentionCount) else ProjectHeader(project.label)
+                            if (work != null) WorkHeader(work, project.attentionCount, project.orgLabel) else ProjectHeader(project.label)
                         }
                         items(project.sessions, key = { it.id }) { row ->
                             SessionRowItem(
@@ -166,7 +174,12 @@ fun SessionsScreen(
 
 /** The Sessions header: the title, whether the list is live, and [filters] under both. */
 @Composable
-private fun SessionsBar(status: ConnectionStatus, onOpenTickets: (() -> Unit)?, filters: @Composable () -> Unit) {
+private fun SessionsBar(
+    status: ConnectionStatus,
+    onOpenTickets: (() -> Unit)?,
+    onOpenToday: (() -> Unit)?,
+    filters: @Composable () -> Unit,
+) {
     val live = when (status) {
         is ConnectionStatus.Connected -> "live"
         is ConnectionStatus.Reconnecting -> "reconnecting…"
@@ -179,7 +192,10 @@ private fun SessionsBar(status: ConnectionStatus, onOpenTickets: (() -> Unit)?, 
         title = "Sessions",
         subtitle = live,
         // A sheet, not a fourth tab: the phone is a pager.
-        actions = { if (onOpenTickets != null) TextButton(onClick = onOpenTickets) { Text("Tickets") } },
+        actions = {
+            if (onOpenToday != null) TextButton(onClick = onOpenToday) { Text("Today") }
+            if (onOpenTickets != null) TextButton(onClick = onOpenTickets) { Text("Tickets") }
+        },
         below = { filters() },
     )
 }
@@ -210,6 +226,10 @@ private fun FilterRow(
     /** Null hides the chip: no tracker to ask what *My work* is. */
     myWorkOnly: Boolean? = null,
     onToggleMyWork: () -> Unit = {},
+    /** Empty hides the org chips: fewer than two orgs to choose between. */
+    orgChoices: List<OrgInfo> = emptyList(),
+    orgFilter: Long? = null,
+    onToggleOrg: (Long) -> Unit = {},
 ) {
     FlowRow(
         modifier = Modifier
@@ -236,6 +256,14 @@ private fun FilterRow(
         }
         if (myWorkOnly != null) {
             FilterChip(selected = myWorkOnly, onClick = onToggleMyWork, label = { Text("My work") })
+        }
+        for (org in orgChoices) {
+            FilterChip(
+                selected = org.id == orgFilter,
+                onClick = { onToggleOrg(org.id) },
+                label = { Text(org.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                modifier = Modifier.widthIn(max = 160.dp),
+            )
         }
         if (hostFilter != null) {
             InputChip(
@@ -297,8 +325,8 @@ private fun ProjectHeader(label: String) {
  * want a person. The title is the tracker's text, drawn plain.
  */
 @Composable
-private fun WorkHeader(work: WorkSummary, attention: Int) {
-    val spoken = workHeaderDescription(work, attention)
+private fun WorkHeader(work: WorkSummary, attention: Int, orgLabel: String? = null) {
+    val spoken = workHeaderDescription(work, attention, orgLabel)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -321,6 +349,16 @@ private fun WorkHeader(work: WorkSummary, attention: Int) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        if (orgLabel != null) {
+            Text(
+                orgLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 8.dp).widthIn(max = 120.dp),
+            )
+        }
         if (attention > 0) Badge(modifier = Modifier.padding(start = 8.dp)) { Text("$attention") }
     }
 }
@@ -405,9 +443,10 @@ private fun EmptyFleet(
 }
 
 /** A work heading, in words: the key, its title and status, and who is waiting. */
-internal fun workHeaderDescription(work: WorkSummary, attention: Int): String = buildList {
+internal fun workHeaderDescription(work: WorkSummary, attention: Int, orgLabel: String? = null): String = buildList {
     add("Work ${work.label}")
     if (work.key != null && work.title.isNotBlank()) add(work.title)
+    orgLabel?.let { add("in $it") }
     work.statusName?.let { add(it) }
     if (work.unavailable) add("ticket unavailable")
     if (attention > 0) add(if (attention == 1) "1 session needs you" else "$attention sessions need you")

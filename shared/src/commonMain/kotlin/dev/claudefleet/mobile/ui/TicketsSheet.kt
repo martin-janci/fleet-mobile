@@ -31,6 +31,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.claudefleet.mobile.model.ResumeCandidate
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.WorkStatusDot
@@ -79,7 +80,9 @@ fun TicketsSheet(state: TicketsUiState, handlers: TicketsHandlers) {
             LazyColumn(modifier = Modifier.fillMaxWidth()) {
                 state.found?.let { found ->
                     item(key = "found") { SectionTitle("Found") }
-                    item(key = "found-${found.id}") { TicketRow(found, state.selected?.ticket?.id == found.id, handlers) }
+                    item(key = "found-${found.id}") {
+                        TicketRow(found, state.selected?.ticket?.id == found.id, state.ticketOrgs[found.id], handlers)
+                    }
                 }
                 for (section in state.sections) {
                     item(key = "section-${section.view}") { SectionTitle(section.title) }
@@ -94,7 +97,7 @@ fun TicketsSheet(state: TicketsUiState, handlers: TicketsHandlers) {
                         }
                     }
                     items(section.tickets, key = { "${section.view}-${it.id}" }) { ticket ->
-                        TicketRow(ticket, state.selected?.ticket?.id == ticket.id, handlers)
+                        TicketRow(ticket, state.selected?.ticket?.id == ticket.id, state.ticketOrgs[ticket.id], handlers)
                     }
                 }
             }
@@ -113,7 +116,7 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
-private fun TicketRow(ticket: Ticket, selected: Boolean, handlers: TicketsHandlers) {
+private fun TicketRow(ticket: Ticket, selected: Boolean, org: String?, handlers: TicketsHandlers) {
     ListItem(
         modifier = Modifier.clickable { handlers.onSelect(if (selected) null else ticket) },
         leadingContent = { ticket.statusCategory?.let { WorkStatusDot(it) } },
@@ -125,7 +128,8 @@ private fun TicketRow(ticket: Ticket, selected: Boolean, handlers: TicketsHandle
             )
         },
         supportingContent = {
-            if (ticket.title.isNotBlank()) Text(ticket.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            val line = listOfNotNull(ticket.title.takeIf { it.isNotBlank() }, org).joinToString(" · ")
+            if (line.isNotEmpty()) Text(line, maxLines = 2, overflow = TextOverflow.Ellipsis)
         },
         trailingContent = {
             val status = ticket.statusName ?: if (ticket.liveSessionIds.isNotEmpty()) "live" else null
@@ -154,8 +158,30 @@ private fun TicketActions(detail: TicketDetail, busy: Boolean, handlers: Tickets
                     )
                 }
             }
-            detail.ticket.description?.takeIf { it.isNotBlank() }?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 4, overflow = TextOverflow.Ellipsis)
+            val card = detail.card
+            when {
+                card != null && card.acceptance.isNotEmpty() -> {
+                    Text("Acceptance criteria", style = MaterialTheme.typography.labelMedium)
+                    for (line in card.acceptance) {
+                        Text("• $line", style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                card != null && !card.excerpt.isNullOrBlank() ->
+                    Text(card.excerpt, style = MaterialTheme.typography.bodySmall, maxLines = 6, overflow = TextOverflow.Ellipsis)
+                else -> detail.ticket.description?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (detail.pastWork.isNotEmpty()) {
+                Text("Past work", style = MaterialTheme.typography.labelMedium)
+                for (past in detail.pastWork.take(PAST_WORK_SHOWN)) {
+                    Text(
+                        pastWorkLine(past),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             if (detail.canResume && detail.resumeHosts.size > 1) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -181,3 +207,23 @@ private fun TicketActions(detail: TicketDetail, busy: Boolean, handlers: Tickets
         }
     }
 }
+
+/** How many past sessions the detail lists; the desktop has the rest. */
+private const val PAST_WORK_SHOWN = 5
+
+/**
+ * One past session on the key, in a line: its name, where it ran, its branch
+ * and PR, and how many conversations it held. The branch and PR are the
+ * hub's snapshots, drawn as text.
+ */
+internal fun pastWorkLine(past: ResumeCandidate): String = buildList {
+    add(past.name?.takeIf { it.isNotBlank() } ?: "Session")
+    past.hostAlias?.takeIf { it.isNotBlank() }?.let { add("on $it") }
+    past.branch?.takeIf { it.isNotBlank() }?.let { add(it) }
+    past.prUrl?.takeIf { it.isNotBlank() }?.let { add("PR $it") }
+    when (past.conversations) {
+        0 -> Unit
+        1 -> add("1 conversation")
+        else -> add("${past.conversations} conversations")
+    }
+}.joinToString(" · ")

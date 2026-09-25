@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.WorkSummary
+import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.WorkStatusDot
 
 /** What the session screen can do about its work — every one a no-op until wired. */
@@ -38,6 +39,7 @@ data class SessionWorkHandlers(
     val onClear: () -> Unit = {},
     val onSetWork: (String) -> Unit = {},
     val onDismissError: () -> Unit = {},
+    val onHandover: () -> Unit = {},
 )
 
 /**
@@ -66,6 +68,7 @@ fun WorkTicketSheet(state: SessionWorkUiState, handlers: SessionWorkHandlers) {
                     Text(" · $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+            ErrorBanner(state.error, onDismiss = handlers.onDismissError)
             if (shown.title.isNotBlank() && shown.key != null) {
                 Text(shown.title, style = MaterialTheme.typography.bodyLarge)
             }
@@ -85,6 +88,12 @@ fun WorkTicketSheet(state: SessionWorkUiState, handlers: SessionWorkHandlers) {
                 if (state.canConfirm) Button(onClick = handlers.onConfirm, enabled = !state.busy) { Text("Confirm") }
                 if (state.canReject) OutlinedButton(onClick = handlers.onReject, enabled = !state.busy) { Text("Not this") }
                 if (state.canClear) OutlinedButton(onClick = handlers.onClear, enabled = !state.busy) { Text("Clear") }
+                if (state.canHandover && !suggestion) {
+                    OutlinedButton(onClick = handlers.onHandover, enabled = !state.busy) { Text("Ask for a handover") }
+                }
+            }
+            state.handover?.let {
+                Text(it.sentence, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

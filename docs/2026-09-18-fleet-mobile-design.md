@@ -283,3 +283,20 @@ New session form leaves the project to the hub unless one is picked, and an
 `E_AMBIGUOUS` narrows the list to the hub's candidates; `E_EXISTS` from start
 or resume opens the named session instead.
 
+**M8.6 caught the phone up with the hub** (claude-fleet M4.6, M5, M9.1–M9.3),
+gated the same way, action by action. *Today* is a sheet like Tickets: it
+sends local midnight as `since` (a `utcOffsetSeconds` expect/actual rather
+than a date library), re-buckets after the org filter with the hub's rule,
+and re-reads — debounced — on `session:*` and `work:item` while open; its
+`standupText` is the desktop's, line for line, with the desktop's test cases
+by name. The one departure: a session the phone has no row for yet keeps the
+digest's own `org_id` instead of dropping out of every org. Orgs are read
+once per connection (`work orgs`) into an `OrgDirectory` — a label and a
+filter, never a fence, since a paired phone's token sees every org. A row's
+org is its `org_id` (in the phone view from the hub's M8.6), else its work's.
+Past work is the resume plan's `candidates`; the ticket card is `work card`
+from the hub's cache. **Ask for a handover** is asynchronous on the hub, so
+`FleetState.timeline` passes `session:event` frames on and the work sheet
+follows `handover_*` for its session. `agent_inferred` links (Claude's answer
+to the classification nudge) read "suggested by Claude when asked".
+

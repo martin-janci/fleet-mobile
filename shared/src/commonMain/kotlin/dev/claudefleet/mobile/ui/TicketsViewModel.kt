@@ -2,9 +2,12 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.WorkActions
+import dev.claudefleet.mobile.model.OrgDirectory
+import dev.claudefleet.mobile.model.ResumeCandidate
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
+import dev.claudefleet.mobile.model.TicketCard
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK_LINK
@@ -40,6 +43,18 @@ data class TicketDetail(
     /** Where a resume may go: the plan's reachable hosts, its own suggestion first. */
     val resumeHosts: List<String> = emptyList(),
     val resumeHost: String? = null,
+    /**
+     * The ticket's context card (`work card`, claude-fleet M9.2): its
+     * acceptance criteria, or an excerpt — null until it answers, and on a
+     * hub without the action or a key it has not cached.
+     */
+    val card: TicketCard? = null,
+    /**
+     * Past work on the key, newest first — the resume plan's candidates,
+     * shown whether or not a session is live on it now: what was done
+     * before is worth reading either way.
+     */
+    val pastWork: List<ResumeCandidate> = emptyList(),
 )
 
 data class TicketsUiState(
@@ -54,6 +69,11 @@ data class TicketsUiState(
     val selected: TicketDetail? = null,
     val busy: Boolean = false,
     val error: Friendly? = null,
+    /**
+     * Ticket id → the name of its org (by its tracker), when the hub has two
+     * or more orgs; empty otherwise, which draws no org labels at all.
+     */
+    val ticketOrgs: Map<Long, String> = emptyMap(),
 )
 
 /**
@@ -89,6 +109,7 @@ class TicketsViewModel(
         val selectedId: Long? = null,
         val selected: Ticket? = null,
         val plan: ResumePlan? = null,
+        val card: TicketCard? = null,
         val resumeHost: String? = null,
         val busy: Boolean = false,
         val error: Friendly? = null,
@@ -97,12 +118,12 @@ class TicketsViewModel(
     private val local = MutableStateFlow(Local())
 
     val state: StateFlow<TicketsUiState> =
-        combine(fleet.capabilities, fleet.tickets, fleet.sessions, local) { caps, cache, sessions, l ->
-            assemble(caps, cache, sessions, l)
+        combine(fleet.capabilities, fleet.tickets, fleet.sessions, fleet.orgs, local) { caps, cache, sessions, orgs, l ->
+            assemble(caps, cache, sessions, orgs, l)
         }.stateIn(
             scope,
             SharingStarted.Eagerly,
-            assemble(fleet.capabilities.value, fleet.tickets.value, fleet.sessions.value, local.value),
+            assemble(fleet.capabilities.value, fleet.tickets.value, fleet.sessions.value, fleet.orgs.value, local.value),
         )
 
     /** Open the sheet and read the three views. */
@@ -162,20 +183,37 @@ class TicketsViewModel(
      * offers no Resume.
      */
     fun select(ticket: Ticket?): Job? {
-        local.update { it.copy(selectedId = ticket?.id, selected = ticket, plan = null, resumeHost = null) }
+        local.update { it.copy(selectedId = ticket?.id, selected = ticket, plan = null, card = null, resumeHost = null) }
         val key = ticket?.key ?: return null
-        if (!fleet.capabilities.value.has(WORK, RESUME_PLAN)) return null
+        val caps = fleet.capabilities.value
         return scope.launch {
-            val plan = try {
-                actions.resumePlan(key)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (t: Throwable) {
-                if (t is HubError.Tool && t.isUnknownAction()) fleet.actionMissing(WORK, RESUME_PLAN)
-                null
+            // The card and the plan are independent reads; neither waits on
+            // the other, and either failing leaves the other standing.
+            if (caps.has(WORK, CARD)) {
+                launch {
+                    val card = readOrNull(CARD) { actions.card(key) }?.takeIf { it.cached }
+                    local.update { if (it.selectedId == ticket.id) it.copy(card = card) else it }
+                }
             }
-            local.update { if (it.selectedId == ticket.id) it.copy(plan = plan, resumeHost = plan?.hostAlias) else it }
+            if (caps.has(WORK, RESUME_PLAN)) {
+                val plan = readOrNull(RESUME_PLAN) { actions.resumePlan(key) }
+                local.update { if (it.selectedId == ticket.id) it.copy(plan = plan, resumeHost = plan?.hostAlias) else it }
+            }
         }
+    }
+
+    /**
+     * A read whose failure means "nothing to show": an older hub's answer
+     * that does not parse, a key with no past work. An action the hub does
+     * not know is forgotten for the connection.
+     */
+    private suspend fun <T> readOrNull(action: String, read: suspend () -> T): T? = try {
+        read()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (t: Throwable) {
+        if (t is HubError.Tool && t.isUnknownAction()) fleet.actionMissing(WORK, action)
+        null
     }
 
     fun selectResumeHost(alias: String) {
@@ -235,7 +273,13 @@ class TicketsViewModel(
         local.update { it.copy(error = null) }
     }
 
-    private fun assemble(caps: HubCapabilities, cache: List<Ticket>, sessions: List<SessionRow>, l: Local): TicketsUiState {
+    private fun assemble(
+        caps: HubCapabilities,
+        cache: List<Ticket>,
+        sessions: List<SessionRow>,
+        orgs: OrgDirectory,
+        l: Local,
+    ): TicketsUiState {
         if (!caps.work) return TicketsUiState()
         // The cache is newer than a listing whenever a `work:item` frame has
         // landed since; the listing still decides which tickets are shown.
@@ -261,7 +305,15 @@ class TicketsViewModel(
                 canResume = plan?.canResumeLast == true && canWrite && caps.has(WORK_LINK, RESUME),
                 resumeHosts = plan?.let { p -> (listOfNotNull(p.hostAlias) + p.hosts).distinct() }.orEmpty(),
                 resumeHost = l.resumeHost,
+                card = l.card,
+                pastWork = l.plan?.candidates.orEmpty().sortedByDescending { it.endedAt ?: Long.MIN_VALUE },
             )
+        }
+        val shown = l.sections.flatMap { it.tickets } + listOfNotNull(l.found, l.selected)
+        val ticketOrgs = if (orgs.orgs.size < 2) {
+            emptyMap()
+        } else {
+            shown.mapNotNull { t -> orgs.orgOf(t)?.let { t.id to orgs.name(it) } }.toMap()
         }
         return TicketsUiState(
             available = caps.has(WORK, TICKETS),
@@ -273,11 +325,13 @@ class TicketsViewModel(
             selected = selected,
             busy = l.busy,
             error = l.error,
+            ticketOrgs = ticketOrgs,
         )
     }
 
     private companion object {
         const val TICKETS = "tickets"
+        const val CARD = "card"
         const val LOOKUP = "lookup"
         const val RESUME_PLAN = "resume_plan"
         const val START = "start"

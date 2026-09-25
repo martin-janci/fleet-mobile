@@ -5,6 +5,8 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.OrgDetail
+import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.WorkSummary
@@ -47,6 +49,7 @@ private class FakeFleet(
     override val capabilities = MutableStateFlow(HubCapabilities())
     override val myWork = MutableStateFlow<Set<Long>?>(null)
     override val tickets = MutableStateFlow<List<dev.claudefleet.mobile.model.Ticket>>(emptyList())
+    override val orgs = MutableStateFlow(OrgDirectory.EMPTY)
 
     var refreshes = 0
         private set
@@ -699,5 +702,73 @@ class NeedsAttentionToggleTest {
         assertEquals("In Review", work.statusName)
         assertEquals("Refund webhook", work.title)
         assertEquals("In Review", vm.state.value.groups.single().projects.single().sessions.single().work!!.statusName, "the row's chip too")
+    }
+
+    // ---- orgs (M8.6): a way of reading the list, never a scope ----
+
+    private val twoOrgs = OrgDirectory.of(listOf(OrgDetail(1, "Acme"), OrgDetail(2, "Side")))
+
+    @Test
+    fun the_org_chips_are_offered_only_for_two_or_more_orgs() = runTest {
+        val fleet = workFleet(listOf(session(1).copy(orgId = 1), session(2)))
+        fleet.orgs.value = twoOrgs
+        val vm = SessionsViewModel(fleet, backgroundScope)
+        runCurrent()
+        assertEquals(emptyList(), vm.state.value.orgChoices, "one org and an unclaimed session: nothing to choose")
+
+        // A second org, known only through a work link — a hub before M8.6.
+        fleet.sessions.value = listOf(session(1).copy(orgId = 1), session(2).copy(work = linked("ENG-2").copy(orgId = 2)))
+        runCurrent()
+        assertEquals(listOf("Acme", "Side"), vm.state.value.orgChoices.map { it.name })
+    }
+
+    @Test
+    fun an_org_narrows_the_list_and_tapping_it_again_clears_it() = runTest {
+        val fleet = workFleet(listOf(session(1).copy(orgId = 1), session(2).copy(orgId = 2), session(3)))
+        fleet.orgs.value = twoOrgs
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.toggleOrg(2)
+        runCurrent()
+        assertEquals(2L, vm.state.value.orgFilter)
+        assertEquals(2L, vm.orgFilter.value, "what the Today sheet scopes itself by")
+        assertEquals(listOf(2L), vm.state.value.groups.flatMap { h -> h.projects.flatMap { p -> p.sessions.map { it.id } } })
+
+        vm.toggleOrg(2)
+        runCurrent()
+        assertNull(vm.state.value.orgFilter)
+        assertEquals(3, vm.state.value.groups.flatMap { h -> h.projects.flatMap { it.sessions } }.size)
+    }
+
+    /** Like *My work*'s chip: a filter nobody can see is dropped rather than left narrowing the list. */
+    @Test
+    fun the_filter_goes_with_its_chips() = runTest {
+        val fleet = workFleet(listOf(session(1).copy(orgId = 1), session(2).copy(orgId = 2)))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+        vm.toggleOrg(2)
+        runCurrent()
+        assertEquals(2L, vm.state.value.orgFilter)
+
+        fleet.sessions.value = listOf(session(1).copy(orgId = 1))
+        runCurrent()
+        assertNull(vm.state.value.orgFilter)
+        assertEquals(1, vm.state.value.groups.single().projects.single().sessions.size)
+    }
+
+    /** With several orgs on screen a work heading says which org it is; narrowed to one, it need not. */
+    @Test
+    fun a_work_heading_names_its_org_while_the_list_shows_several() = runTest {
+        val fleet = workFleet(listOf(keyed(1, "PAY-7").copy(orgId = 1), keyed(2, "ENG-2").copy(orgId = 2)))
+        fleet.orgs.value = twoOrgs
+        val vm = SessionsViewModel(fleet, backgroundScope)
+        vm.toggleByWork()
+        runCurrent()
+        val labels = vm.state.value.groups.single().projects.associate { it.label to it.orgLabel }
+        assertEquals(mapOf("PAY-7" to "Acme", "ENG-2" to "Side"), labels)
+        assertEquals("Work PAY-7, PAY-7 title, in Acme", workHeaderDescription(linked("PAY-7"), 0, "Acme"))
+
+        vm.toggleOrg(1)
+        runCurrent()
+        assertEquals(listOf<String?>(null), vm.state.value.groups.single().projects.map { it.orgLabel })
     }
 }
