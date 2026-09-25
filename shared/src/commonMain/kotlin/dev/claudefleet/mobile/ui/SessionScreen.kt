@@ -29,7 +29,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
@@ -1180,7 +1179,10 @@ private fun PromptBox(
                 enabled = state.canSend,
                 modifier = Modifier.padding(bottom = 4.dp).size(48.dp),
             ) {
-                if (state.sending) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                // The spiral, and in the button's own `onPrimary` rather than
+                // the spinner's default `primary` — which is the colour of the
+                // filled button it sat on.
+                if (state.sending) SpiralLoader(size = 18.dp, contentDescription = "Sending")
                 else Icon(FleetIcons.Send, contentDescription = "Send")
             }
         }
