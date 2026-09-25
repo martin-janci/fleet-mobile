@@ -300,3 +300,13 @@ from the hub's cache. **Ask for a handover** is asynchronous on the hub, so
 follows `handover_*` for its session. `agent_inferred` links (Claude's answer
 to the classification nudge) read "suggested by Claude when asked".
 
+**Share standup.** Beside *Copy standup*, the Today sheet's **Share** hands
+the same text to the platform share sheet (`rememberShareText`, an
+expect/actual: Android's chooser, iOS's `UIActivityViewController`, the
+clipboard on the test-only JVM target), for a standup posted from the phone.
+What the two produce is held to the desktop's by a shared fixture,
+`commonTest/fixtures/today-standup.json`, whose expected texts were produced by
+running claude-fleet's `today.ts`; `StandupFixtureTest` runs every case the
+phone's org filter can express through `scopeToday` and `standupText` on every
+target.
+

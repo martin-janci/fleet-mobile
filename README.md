@@ -264,7 +264,8 @@ costs one reconnect.
     here** for one nobody is, and **Resume** for past work. A tapped ticket
     shows its acceptance criteria and the sessions that worked on it before;
   - a **Today** sheet: what is waiting on you, in progress, shipped and stale
-    since local midnight, and **Copy standup** — the desktop's text;
+    since local midnight, and **Copy standup** / **Share** — the desktop's
+    text, to the clipboard or the system share sheet;
   - **Ask for a handover** on a linked session: Claude writes a handover note
     for whoever picks the work up next, and the sheet says when it is written;
   - with two or more organisations, org chips that narrow the list and Today,

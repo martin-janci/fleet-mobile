@@ -20,6 +20,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import dev.claudefleet.mobile.ui.HubWorkJson
 import dev.claudefleet.mobile.ui.explain
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -830,6 +831,41 @@ class HubClientTest {
         assertEquals("https://acme.atlassian.net/browse/PAY-7", sent[3]["url"]!!.jsonPrimitive.content)
         assertFalse("key" in sent[3], "a pasted URL goes as url, not key")
         assertEquals("resume_plan", sent[4]["action"]!!.jsonPrimitive.content)
+    }
+
+    /** The M9 reads and the org list: one `work` action each, the hub's recorded payloads decoded whole. */
+    @Test
+    fun today_card_and_orgs_send_their_action_and_decode_the_hub_shape() = runTest {
+        val sent = mutableListOf<JsonObject>()
+        val client = clientAnswering { body ->
+            assertEquals("work", body.tool())
+            val args = body.args()
+            sent += args
+            when (args["action"]!!.jsonPrimitive.content) {
+                "today" -> HubWorkJson.TODAY_EVERY_SECTION
+                "card" -> HubWorkJson.CARD_WITH_AC
+                else -> HubWorkJson.ORGS
+            }
+        }
+
+        val today = client.workToday(since = 1_790_294_400)
+        val card = client.workCard("PAY-7")
+        val orgs = client.workOrgs()
+
+        assertEquals(listOf("today", "card", "orgs"), sent.map { it["action"]!!.jsonPrimitive.content })
+        assertEquals(1_790_294_400L, sent[0]["since"]!!.jsonPrimitive.content.toLong())
+        assertEquals("PAY-7", sent[1]["key"]!!.jsonPrimitive.content)
+        assertEquals(setOf("action"), sent[2].keys, "the org list takes no arguments")
+
+        assertEquals(4, today.groups.size)
+        assertNull(today.groups[2].key, "the no-work group has no key on the wire")
+        assertEquals("https://github.com/acme/pay/pull/9", today.groups[1].sessions.single().prUrl)
+        assertEquals(listOf("PAY-3", "ENG-2"), today.shipped.map { it.key })
+        assertTrue(card.cached)
+        assertEquals(listOf("Refund issued within 24 h", "Email sent to https://evil.example/phish", "<b>not bold</b>"), card.acceptance)
+        assertEquals(listOf(1L, 2L), orgs.map { it.id })
+        assertEquals(listOf(7L), orgs[0].trackers.map { it.id })
+        assertNull(orgs[1].color)
     }
 
     @Test

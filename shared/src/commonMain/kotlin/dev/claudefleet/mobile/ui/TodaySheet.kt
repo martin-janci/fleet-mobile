@@ -42,14 +42,16 @@ data class TodayHandlers(
 )
 
 /**
- * The Today sheet: the desktop's four sections and **Copy standup**. A
- * session line opens that session. Titles are the tracker's text, drawn as
- * plain text only.
+ * The Today sheet: the desktop's four sections, **Copy standup** and
+ * **Share** — the same text handed to the platform's share sheet, for a
+ * standup posted from the phone. A session line opens that session. Titles
+ * are the tracker's text, drawn as plain text only.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TodaySheet(state: TodayUiState, handlers: TodayHandlers) {
     val clipboard = LocalClipboardManager.current
+    val share = rememberShareText()
     var copied by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -66,6 +68,7 @@ fun TodaySheet(state: TodayUiState, handlers: TodayHandlers) {
                     },
                     enabled = state.loaded,
                 ) { Text(if (copied) "Copied" else "Copy standup") }
+                TextButton(onClick = { share(state.standup) }, enabled = state.loaded) { Text("Share") }
             }
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
             if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())

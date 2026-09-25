@@ -9,6 +9,7 @@ import dev.claudefleet.mobile.model.TodayShipped
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.ToolCatalog
+import dev.claudefleet.mobile.net.json
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -151,5 +152,77 @@ class TodayViewModelTest {
         assertTrue(t.state.value.open)
         assertFalse(t.state.value.loaded)
         assertTrue(t.state.value.error != null)
+    }
+
+    private fun recorded(text: String) = json.decodeFromString(Today.serializer(), text)
+
+    /** The live rows behind [HubWorkJson.TODAY_EVERY_SECTION]: sessions 1–5, two orgs and an unplaced one. */
+    private val recordedRows = listOf(
+        SessionRow(id = 1, tmuxName = "pay", hostAlias = "pine", orgId = 1),
+        SessionRow(id = 2, tmuxName = "pay-tests", hostAlias = "pine", orgId = 2),
+        SessionRow(id = 3, tmuxName = "ledger", hostAlias = "hetzner", orgId = 1),
+        SessionRow(id = 4, tmuxName = "old", hostAlias = "pine", orgId = 1),
+        SessionRow(id = 5, tmuxName = "scratch", hostAlias = "pine"),
+    )
+
+    /** Every section, from the hub's own JSON — and, whole, the standup the desktop would copy for it. */
+    @Test
+    fun every_section_from_a_recorded_digest_and_the_desktops_standup() = runTest {
+        val actions = FakeWorkActions().apply { todayAnswer = recorded(HubWorkJson.TODAY_EVERY_SECTION) }
+        val t = vm(WorkFleet(recordedRows), actions, backgroundScope)
+        t.open()!!.join()
+        runCurrent()
+
+        val v = t.state.value.view
+        assertEquals(listOf("PAY-7"), v.waiting.map { it.key })
+        assertEquals(listOf("PAY-9", null), v.inProgress.map { it.key })
+        assertEquals(listOf("PAY-3", "ENG-2"), v.shipped.map { it.key })
+        assertEquals(listOf("OLD-1"), v.stale.map { it.key })
+        assertEquals(
+            """
+            Shipped
+            - PAY-3 Receipts — done https://github.com/acme/pay/pull/3
+            - ENG-2 Other — PR https://github.com/acme/eng/pull/4
+
+            In progress
+            - PAY-9 Ledger — PR https://github.com/acme/pay/pull/9 (CI passing) · ledger
+            - scratch
+
+            Waiting on me
+            - PAY-7 Refund flow — In Progress · pay (waiting for an answer), pay-tests
+
+            Stale
+            - OLD-1 — old (idle)
+
+            """.trimIndent(),
+            t.state.value.standup,
+        )
+    }
+
+    /** A quiet day: the hub may leave `groups` and `shipped` out altogether. */
+    @Test
+    fun an_empty_day_says_nothing_to_report() = runTest {
+        val actions = FakeWorkActions().apply { todayAnswer = recorded(HubWorkJson.TODAY_EMPTY) }
+        val t = vm(WorkFleet(recordedRows), actions, backgroundScope)
+        t.open()!!.join()
+        runCurrent()
+
+        assertTrue(t.state.value.loaded)
+        assertTrue(t.state.value.view.isEmpty)
+        assertEquals("Nothing to report.\n", t.state.value.standup)
+    }
+
+    /** A read, so a readonly token — whose `tools/list` has no `work_link` — gets the whole day. */
+    @Test
+    fun a_readonly_token_gets_the_whole_day() = runTest {
+        val readonly = HubCapabilities.of(ToolCatalog(setOf("work"), mapOf("work" to setOf("tickets", "today", "card", "orgs"))))
+        val actions = FakeWorkActions().apply { todayAnswer = recorded(HubWorkJson.TODAY_EVERY_SECTION) }
+        val t = vm(WorkFleet(recordedRows, caps = readonly), actions, backgroundScope)
+
+        assertTrue(t.state.value.available)
+        t.open()!!.join()
+        runCurrent()
+        assertEquals(1, actions.todayCalls.size)
+        assertEquals(4, t.state.value.view.let { it.waiting.size + it.inProgress.size + it.stale.size })
     }
 }
