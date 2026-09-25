@@ -455,6 +455,63 @@ class FleetSnapshotTest {
         }
     }
 
+    /**
+     * `?fields=` is ONE list for every frame on the connection, so a
+     * session-shaped list would project a `host:probed` payload down to
+     * nothing — and the failure would be a host row that quietly stopped
+     * updating: no error, no log line, just a stale screen.
+     *
+     * This filters a realistic payload of every event name the snapshot acts
+     * on through the field set the stream asks for, the way the hub does
+     * before it writes the frame, and asserts the snapshot still changes.
+     */
+    @Test
+    fun every_event_survives_the_field_projection_the_stream_asks_for() {
+        val keep = SNAPSHOT_PAYLOAD_FIELDS.toSet()
+        fun project(frame: HubEvent.Row): HubEvent.Row {
+            val obj = frame.payload as? JsonObject ?: return frame
+            return HubEvent.Row(
+                frame.name,
+                JsonObject(obj.filterKeys { it in keep }),
+            )
+        }
+
+        val empty = FleetSnapshot()
+        val frames = listOf(
+            row("session:created", sessionPayload(id = 1)),
+            row("host:added", hostPayload("box")),
+            row("project:updated", """{"id":3,"owner":"o","repo":"r","base_path":"/p","adopted":false}"""),
+            row("work:item", ticketPayload(id = 70, key = "PAY-7")),
+        )
+        for (frame in frames) {
+            val projected = project(frame)
+            assertTrue(
+                empty.applying(projected) !== empty,
+                "${frame.name} decoded nothing once projected — the field set is missing a key it needs",
+            )
+            assertEquals(
+                empty.applying(frame),
+                empty.applying(projected),
+                "${frame.name} must apply the same projected as whole",
+            )
+        }
+
+        // The two removal frames carry a single key each, and neither has a
+        // field of its own in the set — they borrow the row's.
+        val seeded = empty
+            .applying(row("session:created", sessionPayload(id = 1)))
+            .applying(row("host:added", hostPayload("box")))
+        for (frame in listOf(
+            row("session:killed", """{"id":1}"""),
+            row("host:removed", """{"alias":"box"}"""),
+        )) {
+            assertTrue(
+                seeded.applying(project(frame)) !== seeded,
+                "${frame.name} lost its only key to the projection",
+            )
+        }
+    }
+
     // ---- the work graph (M8) ----
 
     @Test

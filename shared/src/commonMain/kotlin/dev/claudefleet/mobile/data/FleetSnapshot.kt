@@ -42,6 +42,37 @@ data class FleetSnapshot(
 val SNAPSHOT_EVENT_KINDS: List<String> = listOf("session", "host", "project", "work")
 
 /**
+ * The payload keys the snapshot decodes, and therefore what the stream asks
+ * the hub for with `?fields=`.
+ *
+ * A hub session row is about 1.2 KB and this app reads roughly a third of it;
+ * the rest is decoded and dropped, around twelve hundred times an hour. The
+ * hub projects a frame's payload to these names before writing it.
+ *
+ * **Derived, never written down.** The list is the union of what the four row
+ * serializers declare, so it cannot drift from what `applying` decodes the way
+ * a hand-kept literal would. The union matters because `?fields=` is one list
+ * for every frame on the connection: a session-shaped list would project a
+ * `host:probed` payload down to nothing, and the failure would be a host row
+ * that quietly stopped updating — no error, no log line, just a stale screen.
+ *
+ * The removal frames (`{"id": n}`, `{"alias": "…"}`) need no entry of their
+ * own: both keys are already fields of the rows they remove. `FleetSnapshotTest`
+ * pins that by filtering a realistic payload of every event name through this
+ * set and asserting the snapshot still changes.
+ */
+val SNAPSHOT_PAYLOAD_FIELDS: List<String> =
+    listOf(
+        SessionRow.serializer().descriptor,
+        HostRow.serializer().descriptor,
+        ProjectRow.serializer().descriptor,
+        Ticket.serializer().descriptor,
+    )
+        .flatMap { d -> (0 until d.elementsCount).map { d.getElementName(it) } }
+        .distinct()
+        .sorted()
+
+/**
  * Apply one row event, returning the snapshot it produces.
  *
  * Pure: no coroutines, no transport, no clock. Returns *this very instance*
