@@ -22,8 +22,20 @@ import kotlinx.coroutines.CancellationException
  * `canSendPrompts`).
  */
 interface SessionActions {
-    /** A session's recent exchange. [turns] left null keeps the hub's default of 10. */
-    suspend fun conversation(sessionId: Long, turns: Int? = null): Conversation
+    /**
+     * A session's recent exchange. [turns] left null keeps the hub's default
+     * of 10.
+     *
+     * [sinceTurn] is the `turn_seq` the caller already drew: the hub then
+     * answers the turns completed since, plus the one still running, instead
+     * of the last ten every time. [turns] wins over it on both sides, so a
+     * screen asking for a wider window still gets one.
+     */
+    suspend fun conversation(
+        sessionId: Long,
+        turns: Int? = null,
+        sinceTurn: Long? = null,
+    ): Conversation
 
     /** Deliver [text] to the session's REPL and submit it. */
     suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult
@@ -71,8 +83,11 @@ interface SessionActions {
  * that a 401 on any call drops the credential exactly once, in one place.
  */
 class HubSessionActions(private val session: AppSession) : SessionActions {
-    override suspend fun conversation(sessionId: Long, turns: Int?): Conversation =
-        session.withClient { it.conversation(sessionId, turns) }
+    override suspend fun conversation(
+        sessionId: Long,
+        turns: Int?,
+        sinceTurn: Long?,
+    ): Conversation = session.withClient { it.conversation(sessionId, turns, sinceTurn) }
 
     override suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult =
         session.withClient { it.sendPrompt(sessionId, text) }

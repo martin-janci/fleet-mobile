@@ -147,8 +147,12 @@ private class FakeActions : SessionActions {
         return gate
     }
 
-    override suspend fun conversation(sessionId: Long, turns: Int?): Conversation {
+    /** The cursor each read carried, so a test can assert the hub was told where the screen got to. */
+    val cursors = mutableListOf<Long?>()
+
+    override suspend fun conversation(sessionId: Long, turns: Int?, sinceTurn: Long?): Conversation {
         reads += 1
+        cursors += sinceTurn
         inFlightReads += 1
         maxInFlightReads = maxOf(maxInFlightReads, inFlightReads)
         // `yield()` before the hook, not after: `vm.state` is a `combine(...)`
@@ -1069,6 +1073,33 @@ class SessionViewModelTest {
         runCurrent()
 
         assertEquals(2, actions.reads, "the reply is still arriving")
+    }
+
+    /**
+     * The hub answers a rolling window of the tail; told where the screen got
+     * to, it answers the turns since instead of the last ten every time. The
+     * first read has no cursor — there is nothing drawn to be since.
+     */
+    @Test
+    fun a_read_tells_the_hub_the_turn_the_screen_was_drawn_against() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "do it")))
+        val fleet = FakeFleetState(listOf(row(status = "working", turnSeq = 3)))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.load().join()
+        assertEquals(listOf<Long?>(null), actions.cursors, "the first read has nothing drawn to be since")
+
+        fleet.sessions.value = listOf(row(status = "working", turnSeq = 4))
+        fleet.sessionChanges.tryEmit(ID)
+        pastDebounce()
+        runCurrent()
+
+        assertEquals(
+            listOf<Long?>(null, 3),
+            actions.cursors,
+            "the second read is since the turn the first was drawn against",
+        )
     }
 
     /** A completed turn is news on any status. */
