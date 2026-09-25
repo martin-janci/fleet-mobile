@@ -279,4 +279,33 @@ class NavigatorTest {
         nav.back()
         assertEquals(Screen.Sessions("pine"), nav.screen.value, "back lands on the list, never on a form that would start it again")
     }
+
+    /** A multi-repo start's note reaches the session it opens, once, and no other. */
+    @Test
+    fun a_note_from_the_form_rides_to_the_session_it_opens() {
+        val nav = Navigator()
+        nav.newSession(ticketKey = "PAY-9")
+        nav.noteForCreated("Started 2; me/web: already running")
+        nav.created(20)
+        assertEquals(Screen.Session(20), nav.screen.value, "a session is still just its id")
+        assertEquals(SessionNotice(20, "Started 2; me/web: already running"), nav.notice.value)
+
+        nav.dismissNotice()
+        assertEquals(null, nav.notice.value)
+    }
+
+    /** A create that finishes after the person left the form opens nothing — and leaves no note for a later one. */
+    @Test
+    fun a_note_for_a_create_that_finished_elsewhere_is_dropped() {
+        val nav = Navigator()
+        nav.newSession(ticketKey = "PAY-9")
+        nav.back()
+        nav.noteForCreated("Started 1; me/api: already running")
+        nav.created(20)
+        assertEquals(null, nav.notice.value)
+
+        nav.newSession()
+        nav.created(21)
+        assertEquals(null, nav.notice.value, "the old note did not wait for the next create")
+    }
 }

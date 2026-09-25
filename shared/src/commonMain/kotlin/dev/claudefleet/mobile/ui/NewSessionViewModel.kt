@@ -6,8 +6,13 @@ import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.NewSessionRequest
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.MultiStart
+import dev.claudefleet.mobile.model.PastLink
 import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.unnamedProject
 import dev.claudefleet.mobile.net.HubCapabilities
+import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK_LINK
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.existingSessionId
@@ -58,6 +63,14 @@ data class NewSessionUiState(
      * project may be left to the hub.
      */
     val ticketKey: String? = null,
+    /**
+     * Ticket mode with a project picked, on a hub that starts several
+     * repositories at once (claude-fleet M9.6): the other repositories this
+     * ticket ran in before, newest first — *Also start in…*. Empty hides it.
+     */
+    val siblings: List<ProjectChoice> = emptyList(),
+    /** The [siblings] ticked, in ticking order; each gets its own sibling session. */
+    val siblingsTicked: List<Long> = emptyList(),
 )
 
 /**
@@ -100,6 +113,12 @@ class NewSessionViewModel(
     private val ticketKey: String? = null,
     /** How ticket mode starts work; required with [ticketKey]. */
     private val workActions: WorkActions? = null,
+    /**
+     * A line for the session screen about what a multi-repo start left out
+     * (already running there, or failed), handed over just before
+     * [onCreated]. The form closes on create, so it cannot say it itself.
+     */
+    private val onNote: (String) -> Unit = {},
 ) {
     private data class Local(
         val pickedHost: String? = null,
@@ -119,14 +138,48 @@ class NewSessionViewModel(
          * the same refusal.
          */
         val mustPickProject: Boolean = false,
+        /** The links that ended on the ticket: where *Also start in…* looks for other repositories. */
+        val pastLinks: List<PastLink> = emptyList(),
+        /** Sibling repositories ticked, in ticking order. */
+        val siblings: List<Long> = emptyList(),
     )
 
     private val local = MutableStateFlow(Local())
 
+    private data class Fleet(
+        val hosts: List<HostRow>,
+        val projects: List<ProjectRow>,
+        val status: ConnectionStatus,
+        val sessions: List<SessionRow>,
+    )
+
     val state: StateFlow<NewSessionUiState> =
-        combine(fleet.hosts, fleet.projects, fleet.status, local, fleet.capabilities) { hosts, projects, status, l, caps ->
-            assemble(hosts, projects, status, l, caps)
+        combine(
+            combine(fleet.hosts, fleet.projects, fleet.status, fleet.sessions, ::Fleet),
+            local,
+            fleet.capabilities,
+        ) { f, l, caps ->
+            assemble(f.hosts, f.projects, f.status, f.sessions, l, caps)
         }.stateIn(scope, SharingStarted.Eagerly, current())
+
+    init {
+        // Where the ticket ran before, for *Also start in…*. A read; a hub
+        // that cannot answer it simply offers no siblings.
+        val key = ticketKey
+        val work = workActions
+        if (key != null && work != null && canWrite && fleet.capabilities.value.has(WORK, LINKS)) {
+            scope.launch {
+                val past = try {
+                    work.pastLinks(key)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Throwable) {
+                    emptyList()
+                }
+                local.update { it.copy(pastLinks = past) }
+            }
+        }
+    }
 
     /** Pick a host. One the hub cannot reach is ignored — the row is greyed for that reason. */
     fun selectHost(alias: String) {
@@ -140,6 +193,11 @@ class NewSessionViewModel(
 
     fun selectProject(id: Long) {
         local.update { it.copy(projectId = id) }
+    }
+
+    /** Tick or untick a sibling repository for a multi-repo start. */
+    fun toggleSibling(id: Long) {
+        local.update { it.copy(siblings = if (id in it.siblings) it.siblings - id else it.siblings + id) }
     }
 
     fun setNewWorktree(on: Boolean) {
@@ -203,6 +261,8 @@ class NewSessionViewModel(
         val actions = workActions ?: return null
         if (!s.canCreate) return null
         val host = s.host ?: return null
+        val primary = s.projectId
+        if (primary != null && s.siblingsTicked.isNotEmpty()) return startMany(key, host, listOf(primary) + s.siblingsTicked, actions)
         local.update { it.copy(creating = true, error = null) }
         return callScope.launch {
             try {
@@ -239,13 +299,54 @@ class NewSessionViewModel(
         }
     }
 
+    /**
+     * A multi-repo start: one `work_link start { project_ids }` for the
+     * picked project and the ticked siblings. The answer is a report — the
+     * picked project's session opens (else the first that started); what
+     * was already running or failed is handed on as a note. When nothing
+     * started but the key already runs somewhere, that session opens, as a
+     * single start's `E_EXISTS` does.
+     */
+    private fun startMany(key: String, host: String, ids: List<Long>, actions: WorkActions): Job {
+        local.update { it.copy(creating = true, error = null) }
+        return callScope.launch {
+            try {
+                val r = actions.startMulti(key, host, ids)
+                val label = { id: Long -> fleet.projects.value.firstOrNull { it.id == id }?.label ?: unnamedProject(id) }
+                val note = multiStartNote(r, label)
+                val open = r.started.firstOrNull { it.projectId == ids.first() }?.id
+                    ?: r.started.firstOrNull()?.id
+                    ?: r.skipped.firstNotNullOfOrNull { it.sessionId }
+                local.update { it.copy(creating = false) }
+                if (open != null) {
+                    note?.let(onNote)
+                    onCreated(open)
+                } else {
+                    local.update { it.copy(error = Friendly("Nothing started", note ?: "The hub started no session.", isError = true)) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                local.update { it.copy(creating = false, error = explainCreateFailure(t)) }
+            }
+        }
+    }
+
     private fun current(): NewSessionUiState =
-        assemble(fleet.hosts.value, fleet.projects.value, fleet.status.value, local.value, fleet.capabilities.value)
+        assemble(
+            fleet.hosts.value,
+            fleet.projects.value,
+            fleet.status.value,
+            fleet.sessions.value,
+            local.value,
+            fleet.capabilities.value,
+        )
 
     private fun assemble(
         hosts: List<HostRow>,
         projects: List<ProjectRow>,
         status: ConnectionStatus,
+        sessions: List<SessionRow>,
         l: Local,
         caps: HubCapabilities,
     ): NewSessionUiState {
@@ -272,6 +373,17 @@ class NewSessionViewModel(
             .map { ProjectChoice(it.id, it.label) }
 
         val branchOk = !l.newWorktree || isBranchName(l.branch.trim())
+        // *Also start in…*: only with a project picked (the siblings are the
+        // other repositories), on a hub whose `work_link` takes
+        // `project_ids` — an older one would ignore it and start one.
+        val siblings = if (ticketKey != null && chosen != null && canWrite && caps.hasParam(WORK_LINK, PROJECT_IDS)) {
+            siblingCandidates(ticketKey, chosen.id, l.pastLinks, sessions, projects)
+        } else {
+            emptyList()
+        }
+        // A tick left over from another pick, or a candidate since gone,
+        // never reaches the hub: only what the form shows is started.
+        val ticked = l.siblings.filter { id -> siblings.any { it.id == id } }.take(MULTI_START_MAX - 1)
         val ready = if (ticketKey != null) {
             // The project is the hub's to pick unless the person chose one —
             // or the hub already said it cannot.
@@ -295,6 +407,8 @@ class NewSessionViewModel(
             status = status,
             error = l.error,
             ticketKey = ticketKey,
+            siblings = siblings,
+            siblingsTicked = ticked,
         )
     }
 
@@ -311,6 +425,43 @@ class NewSessionViewModel(
 }
 
 private const val START = "start"
+private const val LINKS = "links"
+private const val PROJECT_IDS = "project_ids"
+
+/** The hub's cap on one multi-repo start (`MULTI_START_MAX`): the picked project and seven siblings. */
+internal const val MULTI_START_MAX = 8
+
+/**
+ * The repositories [key] ran in before, other than [primary]: ended links'
+ * projects and live sessions on the key, newest first, only projects the
+ * fleet still lists. The desktop's `siblingCandidates`.
+ */
+internal fun siblingCandidates(
+    key: String,
+    primary: Long,
+    past: List<PastLink>,
+    sessions: List<SessionRow>,
+    projects: List<ProjectRow>,
+): List<ProjectChoice> {
+    val newest = LinkedHashMap<Long, Long>()
+    fun add(id: Long?, at: Long) {
+        if (id == null || id == primary) return
+        newest[id] = maxOf(newest[id] ?: Long.MIN_VALUE, at)
+    }
+    for (l in past) add(l.snapProjectId, l.endedAt ?: l.createdAt)
+    for (s in sessions) if (s.work?.key.equals(key, ignoreCase = true)) add(s.projectId, s.lastActivityAt ?: 0)
+    val byId = projects.associateBy { it.id }
+    return newest.entries
+        .sortedByDescending { it.value }
+        .mapNotNull { (id, _) -> byId[id]?.let { ProjectChoice(it.id, it.label) } }
+}
+
+/** One line on what a multi-repo start left out, or null when nothing — the desktop's `multiStartNote`. */
+internal fun multiStartNote(r: MultiStart, labelOf: (Long) -> String): String? {
+    val parts = r.skipped.map { "${labelOf(it.projectId)}: already running" } +
+        r.failed.map { "${labelOf(it.projectId)}: ${it.message}" }
+    return if (parts.isEmpty()) null else "Started ${r.started.size}; ${parts.joinToString("; ")}"
+}
 
 /** The project ids an `E_AMBIGUOUS` start offers — `{"candidates": [{"id", "owner", "repo"}]}`. */
 private fun projectCandidates(e: HubError.Tool): List<Long> =

@@ -4,6 +4,7 @@ import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
+import dev.claudefleet.mobile.model.TicketCard
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.withTicketsFrom
 import dev.claudefleet.mobile.net.HubCapabilities
@@ -48,6 +49,15 @@ data class SessionWorkUiState(
     val canHandover: Boolean = false,
     /** Where the last handover asked from this screen has got to, or null. */
     val handover: HandoverStatus? = null,
+    /**
+     * The confirmed work's ticket card (`work card`, claude-fleet M9.2), read
+     * when the sheet opens: its criteria, and what *Insert into composer*
+     * puts in the draft. Null until it answers, and for a key the hub has
+     * not cached.
+     */
+    val card: TicketCard? = null,
+    /** *Insert into composer*: a card to insert and a composer to put it in (a write token). */
+    val canInsert: Boolean = false,
 ) {
     /** What the chip draws: the confirmed work, else the guess. */
     val chip: WorkSummary? get() = work ?: suggested
@@ -83,6 +93,7 @@ class SessionWorkViewModel(
         val busy: Boolean = false,
         val error: Friendly? = null,
         val handover: HandoverStatus? = null,
+        val card: TicketCard? = null,
     )
 
     private val local = MutableStateFlow(Local())
@@ -115,7 +126,34 @@ class SessionWorkViewModel(
         firstOrNull { it.id == sessionId }?.withTicketsFrom(cache.associateBy { it.id })
 
     fun openSheet() {
-        if (state.value.chip != null) local.update { it.copy(sheetOpen = true) }
+        if (state.value.chip == null) return
+        local.update { it.copy(sheetOpen = true) }
+        readCard()
+    }
+
+    /**
+     * The confirmed work's card, once per key: a read from the hub's cache,
+     * open to any token. A key it has not cached, a hub without `card`, or a
+     * failure shows no card — the sheet has everything else to say.
+     */
+    private fun readCard() {
+        val key = row()?.work?.key ?: return
+        if (local.value.card?.key.equals(key, ignoreCase = true)) return
+        val caps = fleet.capabilities.value
+        if (!caps.work || !caps.has(WORK, CARD)) return
+        scope.launch {
+            val card = try {
+                actions.card(key).takeIf { it.cached }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: HubError.Tool) {
+                if (e.isUnknownAction()) fleet.actionMissing(WORK, CARD)
+                null
+            } catch (_: Throwable) {
+                null
+            }
+            if (card != null) local.update { it.copy(card = card) }
+        }
     }
 
     fun closeSheet() {
@@ -274,6 +312,10 @@ class SessionWorkViewModel(
             error = l.error,
             canHandover = work?.key != null && row.canBeAskedForHandover && allowed(caps, HANDOVER),
             handover = l.handover,
+            // The card read for this work's key only: after a relink, the
+            // old ticket's card is not this session's.
+            card = l.card?.takeIf { c -> c.key.equals(work?.key, ignoreCase = true) },
+            canInsert = canWrite && l.card?.takeIf { c -> c.key.equals(work?.key, ignoreCase = true) }?.composerText?.isNotBlank() == true,
         )
     }
 
@@ -284,6 +326,7 @@ class SessionWorkViewModel(
         const val LINK = "link"
         const val LOOKUP = "lookup"
         const val HANDOVER = "handover"
+        const val CARD = "card"
     }
 }
 

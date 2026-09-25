@@ -215,3 +215,44 @@ fun SessionRow.withTicketsFrom(tickets: Map<Long, Ticket>): SessionRow {
     val g = workSuggested?.let { it.refreshedBy(it.itemId?.let(tickets::get)) }
     return if (w == work && g == workSuggested) this else copy(work = w, workSuggested = g)
 }
+
+/**
+ * A link that ended on a key, as `work { action: links, key }` lists it —
+ * only what *Also start in…* reads: the project the session ran in, and when.
+ */
+@Serializable
+data class PastLink(
+    val id: Long = 0,
+    @SerialName("snap_project_id") val snapProjectId: Long? = null,
+    @SerialName("created_at") val createdAt: Long = 0,
+    @SerialName("ended_at") val endedAt: Long? = null,
+)
+
+/** A repository a multi-repo start skipped: the key already runs there. */
+@Serializable
+data class StartSkip(
+    @SerialName("project_id") val projectId: Long,
+    @SerialName("session_id") val sessionId: Long? = null,
+    val reason: String = "",
+)
+
+/** A repository a multi-repo start could not start in. */
+@Serializable
+data class StartFailure(
+    @SerialName("project_id") val projectId: Long,
+    val code: String = "",
+    val message: String = "",
+)
+
+/**
+ * `work_link { action: start, project_ids }` (claude-fleet M9.6): one sibling
+ * session per repository, all on one branch name — a report of what started,
+ * what was already running, and what failed.
+ */
+@Serializable
+data class MultiStart(
+    val key: String = "",
+    val started: List<SessionRow> = emptyList(),
+    val skipped: List<StartSkip> = emptyList(),
+    val failed: List<StartFailure> = emptyList(),
+)

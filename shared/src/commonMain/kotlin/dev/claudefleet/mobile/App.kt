@@ -452,16 +452,20 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         // `NewSessionViewModel.callScope`.
                         callScope = scope,
                         onCreated = nav::created,
+                        onNote = nav::noteForCreated,
                         onBack = { nav.back() },
                     )
                 }
                 is Screen.Session -> key(current.id) {
+                    val notice by nav.notice.collectAsState()
                     SessionRoute(
                         sessionId = current.id,
                         container = container,
                         repository = repository,
                         credentials = credentials,
                         onBack = { nav.back() },
+                        notice = notice?.takeIf { it.sessionId == current.id }?.text,
+                        onDismissNotice = nav::dismissNotice,
                     )
                 }
                 Screen.Hosts -> {
@@ -495,6 +499,7 @@ private fun NewSessionRoute(
     credentials: Credentials,
     callScope: CoroutineScope,
     onCreated: (Long) -> Unit,
+    onNote: (String) -> Unit,
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -509,6 +514,7 @@ private fun NewSessionRoute(
             callScope = callScope,
             ticketKey = ticketKey,
             workActions = container.workActions,
+            onNote = onNote,
         )
     }
     val state by vm.state.collectAsState()
@@ -524,6 +530,7 @@ private fun NewSessionRoute(
         onFriendlyNameChange = vm::onFriendlyNameChange,
         onCreate = { vm.create() },
         onDismissError = vm::dismissError,
+        onToggleSibling = vm::toggleSibling,
     )
 }
 
@@ -534,6 +541,8 @@ private fun SessionRoute(
     repository: FleetRepository,
     credentials: Credentials,
     onBack: () -> Unit,
+    notice: String? = null,
+    onDismissNotice: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val vm = remember(sessionId, repository, scope) {
@@ -606,6 +615,13 @@ private fun SessionRoute(
             onSetWork = { workVm.setWork(it) },
             onDismissError = workVm::dismissError,
             onHandover = { workVm.handover() },
+            onInsert = { text ->
+                // Into the draft, never sent: the person reads it and sends it.
+                vm.insertIntoDraft(text)
+                workVm.closeSheet()
+            },
         ),
+        notice = notice,
+        onDismissNotice = onDismissNotice,
     )
 }

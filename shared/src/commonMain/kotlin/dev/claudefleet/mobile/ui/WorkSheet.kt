@@ -40,6 +40,8 @@ data class SessionWorkHandlers(
     val onSetWork: (String) -> Unit = {},
     val onDismissError: () -> Unit = {},
     val onHandover: () -> Unit = {},
+    /** Put this text in the session's draft (the ticket card's `composer_text`); never sends. */
+    val onInsert: (String) -> Unit = {},
 )
 
 /**
@@ -75,6 +77,14 @@ fun WorkTicketSheet(state: SessionWorkUiState, handlers: SessionWorkHandlers) {
             if (shown.unavailable) {
                 Text("The tracker no longer answers for this ticket.", style = MaterialTheme.typography.bodySmall)
             }
+            state.card?.takeIf { !suggestion }?.let { card ->
+                if (card.acceptance.isNotEmpty()) {
+                    Text("Acceptance criteria", style = MaterialTheme.typography.labelMedium)
+                    for (line in card.acceptance) Text("• $line", style = MaterialTheme.typography.bodySmall)
+                } else if (!card.excerpt.isNullOrBlank()) {
+                    Text(card.excerpt, style = MaterialTheme.typography.bodySmall, maxLines = 6)
+                }
+            }
             Text(
                 text = (if (suggestion) "Suggested: " else "Why: ") + workWhy(shown),
                 style = MaterialTheme.typography.bodyMedium,
@@ -88,6 +98,10 @@ fun WorkTicketSheet(state: SessionWorkUiState, handlers: SessionWorkHandlers) {
                 if (state.canConfirm) Button(onClick = handlers.onConfirm, enabled = !state.busy) { Text("Confirm") }
                 if (state.canReject) OutlinedButton(onClick = handlers.onReject, enabled = !state.busy) { Text("Not this") }
                 if (state.canClear) OutlinedButton(onClick = handlers.onClear, enabled = !state.busy) { Text("Clear") }
+                val insert = state.card?.composerText
+                if (state.canInsert && !suggestion && insert != null) {
+                    OutlinedButton(onClick = { handlers.onInsert(insert) }, enabled = !state.busy) { Text("Insert into composer") }
+                }
                 if (state.canHandover && !suggestion) {
                     OutlinedButton(onClick = handlers.onHandover, enabled = !state.busy) { Text("Ask for a handover") }
                 }

@@ -7,7 +7,9 @@ import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.TimelineFrame
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.MultiStart
 import dev.claudefleet.mobile.model.OrgDirectory
+import dev.claudefleet.mobile.model.PastLink
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SessionRow
@@ -126,6 +128,21 @@ internal class FakeWorkActions : WorkActions {
     }
 
     override suspend fun handover(sessionId: Long) = record("handover $sessionId")
+
+    var multiAnswer: MultiStart? = null
+    var pastLinksAnswer: List<PastLink> = emptyList()
+    val pastLinkCalls = mutableListOf<String>()
+
+    override suspend fun startMulti(key: String, hostAlias: String, projectIds: List<Long>): MultiStart {
+        calls += "start_multi $key $hostAlias ${projectIds.joinToString(",")}"
+        fail?.let { throw it }
+        return multiAnswer ?: MultiStart(key = key, started = listOf(started))
+    }
+
+    override suspend fun pastLinks(key: String): List<PastLink> {
+        pastLinkCalls += key
+        return pastLinksAnswer
+    }
 }
 
 private val PAY7 = WorkSummary(linkId = 11, itemId = 70, key = "PAY-7", title = "Refund retries", source = "branch", state = "confirmed")
@@ -449,5 +466,62 @@ class SessionWorkViewModelTest {
         runCurrent()
         vm.handover().join()
         assertEquals(emptyList(), actions.calls)
+    }
+
+    // ---- the ticket card and Insert into composer (claude-fleet M9.2) ----
+
+    private val card7 = TicketCard(key = "PAY-7", cached = true, acceptance = listOf("Retries back off"), composerText = "Ticket PAY-7: Refund retries")
+
+    @Test
+    fun opening_the_sheet_reads_the_card_and_offers_insert_to_a_write_token() = runTest {
+        val actions = FakeWorkActions().apply { cardAnswer = card7 }
+        val vm = SessionWorkViewModel(5, WorkFleet(listOf(running())), actions, backgroundScope, canWrite = true)
+        runCurrent()
+        vm.openSheet()
+        runCurrent()
+        assertEquals(listOf("PAY-7"), actions.cardCalls)
+        assertEquals(listOf("Retries back off"), vm.state.value.card?.acceptance)
+        assertTrue(vm.state.value.canInsert)
+
+        vm.closeSheet()
+        vm.openSheet()
+        runCurrent()
+        assertEquals(listOf("PAY-7"), actions.cardCalls, "read once per key")
+
+        val readonly = SessionWorkViewModel(5, WorkFleet(listOf(running())), actions, backgroundScope, canWrite = false)
+        runCurrent()
+        readonly.openSheet()
+        runCurrent()
+        assertTrue(readonly.state.value.card != null, "the card is a read: any token sees it")
+        assertFalse(readonly.state.value.canInsert, "but a readonly token has no composer")
+    }
+
+    /** After a relink, the old ticket's card is not this session's. */
+    @Test
+    fun a_card_for_another_key_is_not_shown() = runTest {
+        val fleet = WorkFleet(listOf(running()))
+        val actions = FakeWorkActions().apply { cardAnswer = card7 }
+        val vm = SessionWorkViewModel(5, fleet, actions, backgroundScope, canWrite = true)
+        runCurrent()
+        vm.openSheet()
+        runCurrent()
+        assertTrue(vm.state.value.card != null)
+
+        fleet.sessions.value = listOf(running(work = PAY7.copy(linkId = 30, itemId = 90, key = "PAY-9")))
+        runCurrent()
+        assertNull(vm.state.value.card)
+        assertFalse(vm.state.value.canInsert)
+    }
+
+    /** A key the hub has not cached shows no card, and nothing to insert. */
+    @Test
+    fun an_uncached_card_is_not_shown() = runTest {
+        val actions = FakeWorkActions().apply { cardAnswer = TicketCard(key = "PAY-7", cached = false, composerText = "Ticket PAY-7") }
+        val vm = SessionWorkViewModel(5, WorkFleet(listOf(running())), actions, backgroundScope, canWrite = true)
+        runCurrent()
+        vm.openSheet()
+        runCurrent()
+        assertNull(vm.state.value.card)
+        assertFalse(vm.state.value.canInsert)
     }
 }

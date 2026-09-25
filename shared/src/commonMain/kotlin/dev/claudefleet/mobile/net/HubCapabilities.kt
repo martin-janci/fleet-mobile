@@ -8,6 +8,8 @@ import kotlinx.serialization.json.longOrNull
 data class ToolCatalog(
     val names: Set<String> = emptySet(),
     val actions: Map<String, Set<String>> = emptyMap(),
+    /** The argument names each tool's schema declares, when it declares any. */
+    val params: Map<String, Set<String>> = emptyMap(),
 )
 
 /**
@@ -31,6 +33,7 @@ data class HubCapabilities(
     val tools: Set<String> = emptySet(),
     val actions: Map<String, Set<String>> = emptyMap(),
     val missing: Map<String, Set<String>> = emptyMap(),
+    val params: Map<String, Set<String>> = emptyMap(),
 ) {
     val work: Boolean get() = WORK in tools
     val workLink: Boolean get() = WORK_LINK in tools
@@ -40,6 +43,15 @@ data class HubCapabilities(
             actions[tool]?.contains(action) != false &&
             action !in missing[tool].orEmpty()
 
+    /**
+     * Whether [tool]'s schema declares the argument [param]. Unlike an
+     * action, an argument a hub does not know is not refused — it is
+     * ignored — so a feature that rides a new argument (a multi-repo start's
+     * `project_ids`) is offered only when the schema names it; a schema that
+     * says nothing counts as "no".
+     */
+    fun hasParam(tool: String, param: String): Boolean = tool in tools && params[tool]?.contains(param) == true
+
     /** This connection learned [action] is not one [tool] has. */
     fun forgetting(tool: String, action: String): HubCapabilities =
         copy(missing = missing + (tool to (missing[tool].orEmpty() + action)))
@@ -48,7 +60,7 @@ data class HubCapabilities(
         const val WORK = "work"
         const val WORK_LINK = "work_link"
 
-        fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions)
+        fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions, params = catalog.params)
     }
 }
 

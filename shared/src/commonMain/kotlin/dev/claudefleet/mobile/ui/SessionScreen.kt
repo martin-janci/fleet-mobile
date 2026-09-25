@@ -143,6 +143,9 @@ fun SessionScreen(
     /** The ticket chip and its sheet; the default draws nothing (a hub without the work graph). */
     work: SessionWorkUiState = SessionWorkUiState(),
     workHandlers: SessionWorkHandlers = SessionWorkHandlers(),
+    /** A one-off line from the form that made this session — what a multi-repo start left out. */
+    notice: String? = null,
+    onDismissNotice: () -> Unit = {},
 ) {
     val turns = state.conversation.turns
     val listState = rememberLazyListState()
@@ -246,6 +249,7 @@ fun SessionScreen(
         )
         ConnectionBanner(status, state.hubReachable)
         ErrorBanner(state.error, onDismiss = onDismissError)
+        ErrorBanner(notice?.let { Friendly("Started, with gaps", it, isError = false) }, onDismiss = onDismissNotice)
         // Behind an open sheet a banner cannot be read: the sheet shows it instead.
         if (!work.sheetOpen) ErrorBanner(work.error, onDismiss = workHandlers.onDismissError)
         if (work.sheetOpen) WorkTicketSheet(work, workHandlers)

@@ -300,3 +300,18 @@ from the hub's cache. **Ask for a handover** is asynchronous on the hub, so
 follows `handover_*` for its session. `agent_inferred` links (Claude's answer
 to the classification nudge) read "suggested by Claude when asked".
 
+**M9 on the phone** adds the two hub M9 features left: a multi-repo start
+(M9.6) and *Insert into composer* (M9.2). In ticket mode, with a project
+picked, the form offers *Also start in…*: the repositories the key ran in
+before (`work { links, key }`'s `snap_project_id`, and live sessions on the
+key), newest first — the desktop's `siblingCandidates`. Ticking any sends one
+`work_link start { project_ids }`; the answer is a report, so the picked
+repository's session opens and what was skipped or failed is handed to that
+session's screen as a one-off note (`Navigator.noteForCreated`; a session's
+identity stays its id). It is offered only when `work_link`'s schema names
+`project_ids`: an older hub would ignore the argument and start one, so this
+is the first gate on an *argument* (`HubCapabilities.hasParam`) rather than
+an action. The session's work sheet reads the ticket card when it opens and
+offers *Insert into composer* to a write token: `composer_text` joins the
+draft after a blank line and is never sent.
+

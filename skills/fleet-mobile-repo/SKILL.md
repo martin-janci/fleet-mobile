@@ -136,7 +136,10 @@ missing feature should only hide a button. Instead, on every `ready`,
   acceptance criteria, and org labels / chips (M8.6), each hidden on its own
   when the hub does not list it.
 - `work_link` present → Confirm / Not this / Clear / Set work… / Start here /
-  Resume / Ask for a handover. The hub filters `tools/list` per caller, so a **readonly** token is
+  Resume / Ask for a handover. *Also start in…* (a multi-repo start) needs
+  more: `work_link`'s schema must name `project_ids` —
+  `HubCapabilities.hasParam`, because a hub ignores an argument it does not
+  know rather than refusing it. The hub filters `tools/list` per caller, so a **readonly** token is
   never shown `work_link` — and the UI checks `Credentials.canWrite` as well.
   Both, always: never call a tool the token cannot use.
 - **Actions.** `action` is a free string on hubs before M8.0. When the schema

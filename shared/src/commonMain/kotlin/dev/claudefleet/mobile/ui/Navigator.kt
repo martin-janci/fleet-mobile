@@ -102,7 +102,33 @@ class Navigator {
      * be a surprise. The session is on the list either way.
      */
     fun created(sessionId: Long) {
-        if (_screen.value is Screen.NewSession) open(sessionId)
+        val note = pendingNote
+        pendingNote = null
+        if (_screen.value is Screen.NewSession) {
+            _notice.value = note?.let { SessionNotice(sessionId, it) }
+            open(sessionId)
+        }
+    }
+
+    /**
+     * A line the form wants said on the session it is about to open — what a
+     * multi-repo start left out — filed just before [created]. Not part of
+     * [Screen.Session] (a session's identity is its id); [notice] carries it,
+     * for that session only, until dismissed.
+     */
+    fun noteForCreated(text: String) {
+        pendingNote = text
+    }
+
+    private var pendingNote: String? = null
+
+    private val _notice = MutableStateFlow<SessionNotice?>(null)
+
+    /** The note for a just-created session, or null. A session screen shows it only when the id is its own. */
+    val notice: StateFlow<SessionNotice?> = _notice.asStateFlow()
+
+    fun dismissNotice() {
+        _notice.value = null
     }
 
     /**
@@ -182,3 +208,6 @@ private fun tabOf(screen: Screen): Tab = when (screen) {
     Screen.Hosts -> Tab.Hosts
     Screen.Settings -> Tab.Settings
 }
+
+/** A one-off line for the session [sessionId]'s screen, from the form that made it. */
+data class SessionNotice(val sessionId: Long, val text: String)

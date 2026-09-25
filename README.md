@@ -262,11 +262,15 @@ costs one reconnect.
   - a **Tickets** sheet (My work, Current sprint, Recent, and a search by key or
     pasted URL) with **Open** for a ticket a session is already on, **Start
     here** for one nobody is, and **Resume** for past work. A tapped ticket
-    shows its acceptance criteria and the sessions that worked on it before;
+    shows its acceptance criteria and the sessions that worked on it before,
+    and **Start here** can also start it in the other repositories it ran in
+    — one sibling session each, on the same branch;
   - a **Today** sheet: what is waiting on you, in progress, shipped and stale
     since local midnight, and **Copy standup** — the desktop's text;
   - **Ask for a handover** on a linked session: Claude writes a handover note
     for whoever picks the work up next, and the sheet says when it is written;
+  - on a session's ticket, its acceptance criteria and **Insert into
+    composer**, which puts the ticket in the draft — never sent;
   - with two or more organisations, org chips that narrow the list and Today,
     and the org on each work heading and ticket.
 

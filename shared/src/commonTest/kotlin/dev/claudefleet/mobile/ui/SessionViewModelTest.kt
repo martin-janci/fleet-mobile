@@ -2500,4 +2500,25 @@ class SessionViewModelTest {
         runCurrent()
         assertTrue(vm.state.value.canAnswer, "live again once the management call has landed")
     }
+
+    /** Insert into composer (claude-fleet M9.2): into the draft after a blank line, never sent. */
+    @Test
+    fun an_insert_joins_the_draft_and_sends_nothing() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.insertIntoDraft("Ticket PAY-7: Refund")
+        runCurrent()
+        assertEquals("Ticket PAY-7: Refund", vm.state.value.draft)
+
+        vm.onDraftChange("look at this  ")
+        vm.insertIntoDraft("Ticket PAY-7: Refund")
+        runCurrent()
+        assertEquals("look at this\n\nTicket PAY-7: Refund", vm.state.value.draft)
+        assertEquals(emptyList(), actions.sentPrompts, "nothing reached send_prompt")
+
+        val readonly = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, canSendPrompts = false)
+        readonly.insertIntoDraft("Ticket PAY-7")
+        runCurrent()
+        assertEquals("", readonly.state.value.draft)
+    }
 }

@@ -2,8 +2,10 @@ package dev.claudefleet.mobile.net
 
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.MultiStart
 import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.PairResult
+import dev.claudefleet.mobile.model.PastLink
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SendPromptResult
@@ -136,15 +138,19 @@ class HubClient(
         val result = rpc("tools/list", JsonObject(emptyMap()), framed = false, requestTimeoutMs = null)
         val tools = (result["tools"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
         val names = tools.mapNotNull { (it["name"] as? JsonPrimitive)?.content }.toSet()
+        fun properties(tool: JsonObject) = (tool["inputSchema"] as? JsonObject)?.get("properties") as? JsonObject
         val actions = tools.mapNotNull { tool ->
             val name = (tool["name"] as? JsonPrimitive)?.content ?: return@mapNotNull null
-            val enum = (
-                ((tool["inputSchema"] as? JsonObject)?.get("properties") as? JsonObject)
-                    ?.get("action") as? JsonObject
-                )?.get("enum") as? JsonArray ?: return@mapNotNull null
+            val enum = (properties(tool)?.get("action") as? JsonObject)?.get("enum") as? JsonArray
+                ?: return@mapNotNull null
             name to enum.mapNotNull { (it as? JsonPrimitive)?.content }.toSet()
         }.toMap()
-        return ToolCatalog(names, actions)
+        val params = tools.mapNotNull { tool ->
+            val name = (tool["name"] as? JsonPrimitive)?.content ?: return@mapNotNull null
+            val props = properties(tool) ?: return@mapNotNull null
+            name to props.keys
+        }.toMap()
+        return ToolCatalog(names, actions, params)
     }
 
     /**
@@ -506,6 +512,33 @@ class HubClient(
                 projectId?.let { put("project_id", it) }
             },
         ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
+
+    /**
+     * Start work on [key] in several repositories at once (claude-fleet
+     * M9.6): one sibling session per project on [hostAlias], all on the same
+     * branch name. A repository where the key already runs is skipped
+     * (naming the session), one that fails is reported, and the rest still
+     * start — so the answer is a report, never all-or-nothing.
+     */
+    suspend fun startWorkMulti(key: String, hostAlias: String, projectIds: List<Long>): MultiStart =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "start")
+                put("key", key)
+                put("host_alias", hostAlias)
+                put("project_ids", JsonArray(projectIds.map { JsonPrimitive(it) }))
+            },
+        ) { json.decodeFromJsonElement(MultiStart.serializer(), it) }
+
+    /**
+     * The links that ended on [key] — past sessions on it, with the project
+     * each ran in (`snap_project_id`). What *Also start in…* offers.
+     */
+    suspend fun workPastLinks(key: String): List<PastLink> =
+        call("work", buildJsonObject { put("action", "links"); put("key", key) }) {
+            json.decodeFromJsonElement(ListSerializer(PastLink.serializer()), it)
+        }
 
     /** Resume past work on [key] — [mode] `last` continues the last conversation. */
     suspend fun resumeWork(key: String, mode: String = "last", hostAlias: String? = null): SessionRow =

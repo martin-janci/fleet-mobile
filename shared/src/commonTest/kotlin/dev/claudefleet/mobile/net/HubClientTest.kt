@@ -800,6 +800,13 @@ class HubClientTest {
 
         assertEquals(setOf("list_sessions", "work", "work_link"), catalog.names)
         assertEquals(mapOf("work" to setOf("links", "tickets", "lookup")), catalog.actions)
+        // Argument names, for a feature that rides a new one (M9.6's
+        // `project_ids`); a schema with no `properties` declares none.
+        assertEquals(mapOf("work" to setOf("action"), "work_link" to setOf("action")), catalog.params)
+        val caps = HubCapabilities.of(catalog)
+        assertTrue(caps.hasParam("work_link", "action"))
+        assertFalse(caps.hasParam("work_link", "project_ids"), "an argument the schema does not name is not there")
+        assertFalse(caps.hasParam("list_sessions", "view"), "no properties: no arguments known")
         assertEquals("/mcp/json", calls.path(0))
         val sent = Json.parseToJsonElement(calls.bodyText(0)).jsonObject
         assertEquals("tools/list", sent["method"]!!.jsonPrimitive.content)

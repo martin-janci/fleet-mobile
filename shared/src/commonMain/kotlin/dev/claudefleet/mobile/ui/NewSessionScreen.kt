@@ -26,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -64,6 +65,8 @@ fun NewSessionScreen(
     onCreate: () -> Unit,
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Tick or untick a sibling repository (ticket mode, M9.6). */
+    onToggleSibling: (Long) -> Unit = {},
 ) {
     val editable = !state.creating
     Column(modifier = modifier.fillMaxSize()) {
@@ -130,6 +133,25 @@ fun NewSessionScreen(
                     leadingContent = { RadioButton(selected = selected, onClick = null, enabled = editable) },
                     modifier = Modifier.clickable(enabled = editable) { onSelectProject(project.id) },
                 )
+            }
+
+            // A multi-repo start (M9.6): the other repositories this ticket
+            // ran in, each ticked one getting its own sibling session on the
+            // same branch name.
+            if (state.siblings.isNotEmpty()) {
+                item(key = "siblings-label") {
+                    HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
+                    SectionLabel("Also start in")
+                    Hint("Repositories ${state.ticketKey} ran in before. Each gets its own session on the same branch.")
+                }
+                items(state.siblings, key = { "sibling-${it.id}" }) { sibling ->
+                    val ticked = sibling.id in state.siblingsTicked
+                    ListItem(
+                        headlineContent = { Text(sibling.label) },
+                        leadingContent = { Checkbox(checked = ticked, onCheckedChange = null, enabled = editable) },
+                        modifier = Modifier.clickable(enabled = editable) { onToggleSibling(sibling.id) },
+                    )
+                }
             }
 
             // Starting work names the worktree after the ticket on the hub, and
@@ -206,7 +228,13 @@ fun NewSessionScreen(
                     Spacer(Modifier.width(8.dp))
                     Text(if (state.ticketKey != null) "Starting…" else "Creating…")
                 } else {
-                    Text(if (state.ticketKey != null) "Start here" else "Create session")
+                    Text(
+                        when {
+                            state.ticketKey == null -> "Create session"
+                            state.siblingsTicked.isNotEmpty() -> "Start in ${state.siblingsTicked.size + 1} repositories"
+                            else -> "Start here"
+                        },
+                    )
                 }
             }
         }

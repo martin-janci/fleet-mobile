@@ -11,8 +11,9 @@ import kotlinx.serialization.Serializable
  * [cached] false and nothing else to show.
  *
  * Every string is the tracker's text: drawn as plain text, never as markup.
- * The hub's `composer_text` (what the desktop inserts into its composer) is
- * not read: the phone does not type a ticket into a prompt.
+ * [composerText] is what **Insert into composer** puts in a session's draft
+ * (M9.2): the ticket's line and link, then its criteria or excerpt inside
+ * the hub's untrusted fence. It is only ever put in the draft, never sent.
  */
 @Serializable
 data class TicketCard(
@@ -25,6 +26,7 @@ data class TicketCard(
     val cached: Boolean = false,
     val acceptance: List<String> = emptyList(),
     val excerpt: String? = null,
+    @SerialName("composer_text") val composerText: String = "",
 ) {
     /** Whether the card has anything to say beyond the key and title. */
     val hasBody: Boolean get() = acceptance.isNotEmpty() || !excerpt.isNullOrBlank()

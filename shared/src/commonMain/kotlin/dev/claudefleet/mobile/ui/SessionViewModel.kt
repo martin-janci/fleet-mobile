@@ -544,6 +544,17 @@ class SessionViewModel(
     }
 
     /**
+     * **Insert into composer** (claude-fleet M9.2): [text] joins the draft
+     * after a blank line, or becomes it when the draft is empty. It is never
+     * sent from here — the person reads it, edits it, and sends it. A
+     * readonly screen has no composer, so nothing happens.
+     */
+    fun insertIntoDraft(text: String) {
+        if (readOnly || text.isBlank()) return
+        local.update { it.copy(draft = if (it.draft.isBlank()) text else it.draft.trimEnd() + "\n\n" + text) }
+    }
+
+    /**
      * The screen's own report of whether the reader is at the newest turn —
      * the truth [Local.atBottom] tracks for [newReply], and, on `true`, the
      * signal that any pending new-reply flag is resolved: the reader just

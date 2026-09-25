@@ -7,22 +7,27 @@ import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.NewSessionRequest
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.MultiStart
+import dev.claudefleet.mobile.model.PastLink
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.StartFailure
+import dev.claudefleet.mobile.model.StartSkip
+import dev.claudefleet.mobile.model.WorkSummary
+import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
+import dev.claudefleet.mobile.net.ToolCatalog
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import kotlin.test.Test
-import dev.claudefleet.mobile.net.HubCapabilities
-import dev.claudefleet.mobile.net.ToolCatalog
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
@@ -538,5 +543,146 @@ class NewSessionViewModelTest {
         hidden.create(); readonly.create()
         runCurrent()
         assertEquals(emptyList(), work.calls)
+    }
+
+    // ---- multi-repo start (claude-fleet M9.6): Also start in… ----
+
+    private val API = ProjectRow(4, owner = "me", repo = "api", lastSessionAt = 50)
+    private val WEB = ProjectRow(5, owner = "me", repo = "web", lastSessionAt = 40)
+    private val MULTI = HubCapabilities.of(
+        ToolCatalog(setOf("work", "work_link"), params = mapOf("work_link" to setOf("action", "key", "project_ids"))),
+    )
+
+    private fun multiFleet(sessions: List<SessionRow> = emptyList()) =
+        WorkFleet(sessions, caps = MULTI, hostRows = listOf(PINE), projectRows = listOf(REPO, API, WEB))
+
+    private fun multiVm(
+        fleet: WorkFleet,
+        work: FakeWorkActions,
+        scope: kotlinx.coroutines.CoroutineScope,
+        opened: MutableList<Long>,
+        notes: MutableList<String> = mutableListOf(),
+        canWrite: Boolean = true,
+    ) = NewSessionViewModel(
+        fleet, FakeCreate(), scope, canWrite, initialHost = "pine", onCreated = { opened += it },
+        ticketKey = "PAY-9", workActions = work, onNote = { notes += it },
+    )
+
+    /** The repositories the key ran in before, newest first, never the one picked, only ones the fleet lists. */
+    @Test
+    fun siblings_are_where_the_ticket_ran_before_newest_first() = runTest {
+        val work = FakeWorkActions().apply {
+            pastLinksAnswer = listOf(
+                PastLink(snapProjectId = 4, createdAt = 10, endedAt = 20),
+                PastLink(snapProjectId = 3, createdAt = 30, endedAt = 40),
+                PastLink(snapProjectId = 99, createdAt = 50, endedAt = 60),
+            )
+        }
+        val live = SessionRow(id = 7, projectId = 5, lastActivityAt = 100, work = WorkSummary(linkId = 1, key = "pay-9"))
+        val vm = multiVm(multiFleet(listOf(live)), work, backgroundScope, mutableListOf())
+        runCurrent()
+        assertEquals(listOf("PAY-9"), work.pastLinkCalls)
+        assertEquals(emptyList(), vm.state.value.siblings, "no project picked: nothing to be a sibling of")
+
+        vm.selectProject(3)
+        runCurrent()
+        assertEquals(listOf(5L, 4L), vm.state.value.siblings.map { it.id }, "web (live, newest), then api; never repo itself or an unknown 99")
+    }
+
+    @Test
+    fun a_multi_repo_start_opens_the_picked_repos_session_and_notes_the_rest() = runTest {
+        val work = FakeWorkActions().apply {
+            pastLinksAnswer = listOf(PastLink(snapProjectId = 4, createdAt = 1), PastLink(snapProjectId = 5, createdAt = 2))
+            multiAnswer = MultiStart(
+                key = "PAY-9",
+                started = listOf(SessionRow(id = 21, projectId = 4), SessionRow(id = 20, projectId = 3)),
+                skipped = listOf(StartSkip(projectId = 5, sessionId = 8, reason = "PAY-9 runs there")),
+            )
+        }
+        val opened = mutableListOf<Long>()
+        val notes = mutableListOf<String>()
+        val vm = multiVm(multiFleet(), work, backgroundScope, opened, notes)
+        runCurrent()
+        vm.selectProject(3)
+        vm.toggleSibling(4)
+        vm.toggleSibling(5)
+        runCurrent()
+        assertEquals(listOf(4L, 5L), vm.state.value.siblingsTicked)
+
+        vm.create()
+        runCurrent()
+        assertEquals(listOf("start_multi PAY-9 pine 3,4,5"), work.calls)
+        assertEquals(listOf(20L), opened, "the picked repository's session, not merely the first started")
+        assertEquals(listOf("Started 2; me/web: already running"), notes)
+    }
+
+    /** Nothing started but the key runs in one of them: that session opens, as a single start's E_EXISTS does. */
+    @Test
+    fun a_multi_repo_start_that_started_nothing_jumps_or_says_why() = runTest {
+        val work = FakeWorkActions().apply {
+            pastLinksAnswer = listOf(PastLink(snapProjectId = 4, createdAt = 1))
+            multiAnswer = MultiStart(key = "PAY-9", skipped = listOf(StartSkip(projectId = 3, sessionId = 8)), failed = listOf(StartFailure(4, "E_SSH", "pine is down")))
+        }
+        val opened = mutableListOf<Long>()
+        val vm = multiVm(multiFleet(), work, backgroundScope, opened)
+        runCurrent()
+        vm.selectProject(3)
+        vm.toggleSibling(4)
+        runCurrent()
+        vm.create()
+        runCurrent()
+        assertEquals(listOf(8L), opened)
+
+        work.multiAnswer = MultiStart(key = "PAY-9", failed = listOf(StartFailure(3, "E_SSH", "pine is down"), StartFailure(4, "E_SSH", "pine is down")))
+        vm.create()
+        runCurrent()
+        assertEquals(listOf(8L), opened, "nothing more opened")
+        assertEquals("Nothing started", vm.state.value.error?.title)
+        assertFalse(vm.state.value.creating)
+    }
+
+    /** A tick for a repository no longer on offer (another project picked, so it is now the primary) never reaches the hub. */
+    @Test
+    fun a_stale_tick_is_not_started() = runTest {
+        val work = FakeWorkActions().apply {
+            pastLinksAnswer = listOf(PastLink(snapProjectId = 4, createdAt = 1), PastLink(snapProjectId = 3, createdAt = 2))
+        }
+        val vm = multiVm(multiFleet(), work, backgroundScope, mutableListOf())
+        runCurrent()
+        vm.selectProject(3)
+        vm.toggleSibling(4)
+        vm.selectProject(4)
+        runCurrent()
+        assertEquals(emptyList(), vm.state.value.siblingsTicked, "4 is the primary now; 3 was never ticked")
+        vm.create()
+        runCurrent()
+        assertEquals(listOf("start PAY-9 pine 4"), work.calls, "a plain start")
+    }
+
+    /** A hub whose `work_link` does not name `project_ids` would ignore it and start one: no siblings offered. A readonly form reads nothing. */
+    @Test
+    fun siblings_need_a_hub_that_takes_project_ids_and_a_write_token() = runTest {
+        val work = FakeWorkActions().apply { pastLinksAnswer = listOf(PastLink(snapProjectId = 4, createdAt = 1)) }
+        val old = WorkFleet(hostRows = listOf(PINE), projectRows = listOf(REPO, API))
+        val vm = multiVm(old, work, backgroundScope, mutableListOf())
+        runCurrent()
+        vm.selectProject(3)
+        runCurrent()
+        assertEquals(emptyList(), vm.state.value.siblings)
+
+        val readonlyWork = FakeWorkActions()
+        multiVm(multiFleet(), readonlyWork, backgroundScope, mutableListOf(), canWrite = false)
+        runCurrent()
+        assertEquals(emptyList(), readonlyWork.pastLinkCalls)
+    }
+
+    @Test
+    fun the_note_names_what_was_left_out_or_is_null() {
+        val label = { id: Long -> "p$id" }
+        assertEquals(null, multiStartNote(MultiStart(started = listOf(SessionRow(id = 1))), label))
+        assertEquals(
+            "Started 1; p5: already running; p6: pine is down",
+            multiStartNote(MultiStart(started = listOf(SessionRow(id = 1)), skipped = listOf(StartSkip(5)), failed = listOf(StartFailure(6, message = "pine is down"))), label),
+        )
     }
 }

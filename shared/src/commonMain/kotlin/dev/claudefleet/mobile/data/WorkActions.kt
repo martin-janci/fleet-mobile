@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.data
 
+import dev.claudefleet.mobile.model.MultiStart
+import dev.claudefleet.mobile.model.PastLink
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
@@ -47,6 +49,12 @@ interface WorkActions {
     /** Resume [key]'s last conversation, on [hostAlias] or where the hub would put it. */
     suspend fun resume(key: String, hostAlias: String? = null): SessionRow
 
+    /** Start [key] in several repositories on [hostAlias] at once; a report, never all-or-nothing. */
+    suspend fun startMulti(key: String, hostAlias: String, projectIds: List<Long>): MultiStart
+
+    /** The links that ended on [key]: past sessions, with the project each ran in. */
+    suspend fun pastLinks(key: String): List<PastLink>
+
     /** Ask the session's Claude for a handover note on its work; the answer comes later. */
     suspend fun handover(sessionId: Long): SessionRow
 }
@@ -82,4 +90,9 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
         session.withClient { it.resumeWork(key, mode = "last", hostAlias = hostAlias) }
 
     override suspend fun handover(sessionId: Long): SessionRow = session.withClient { it.handoverWork(sessionId) }
+
+    override suspend fun startMulti(key: String, hostAlias: String, projectIds: List<Long>): MultiStart =
+        session.withClient { it.startWorkMulti(key, hostAlias, projectIds) }
+
+    override suspend fun pastLinks(key: String): List<PastLink> = session.withClient { it.workPastLinks(key) }
 }
