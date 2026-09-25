@@ -154,7 +154,22 @@ rule to keep: a `session:updated` **without** `work` or `work_suggested` means
 there is none — the hub strips nulls from every `/events` frame and skips an
 empty suggestion — so both are replaced with the row, never carried over the
 way `is_controller` is (which no frame ever carries). `FleetSnapshotTest` pins
-it with a null-stripped store-row fixture. Grouping by work mirrors the desktop's
+it with a null-stripped store-row fixture.
+
+**The standup text is the desktop's, byte for byte.** `standupText` and
+`scopeToday` in `model/Today.kt` port claude-fleet's `src/lib/today.ts`, and
+`shared/src/commonTest/fixtures/today-standup.json` is the fixture
+`StandupFixtureTest` holds them to. Its expected texts were produced by running
+`today.ts` itself (each case's `today` through `scopeToday`, with `scope_of` as
+the live rows' scopes, then `standupText`), not written by hand; claude-fleet
+keeps no copy of it. When `today.ts` changes, regenerate the file the same way
+and change the Kotlin until the test passes — never edit an expected text to
+suit the Kotlin. A generated source in `shared/build.gradle.kts` wraps the
+JSON into a Kotlin constant, so the test runs on Kotlin/Native too. The one case scoped by
+owner has no phone equivalent (the phone filters by org only) and is skipped
+by name.
+
+Grouping by work mirrors the desktop's
 `buildSessionsByWork` (`src/lib/sidebar_index.ts`); `SessionsViewModelTest`
 carries its cases by name, so extend both together.
 
