@@ -19,6 +19,7 @@ private fun row(
     branch: String? = null,
     tags: List<String> = emptyList(),
     activity: String? = null,
+    lastPrompt: String? = null,
     work: WorkSummary? = null,
     orgId: Long? = null,
     projectId: Long? = null,
@@ -32,6 +33,7 @@ private fun row(
     branch = branch,
     tags = tags,
     currentActivity = activity,
+    lastPrompt = lastPrompt,
     work = work,
     orgId = orgId,
     projectId = projectId,
@@ -186,6 +188,55 @@ class SessionFiltersTest {
         val r = row(tmuxName = "s1")
         assertFalse(r.kept(SessionFilters(query = "fleet-mobile"), project = null))
         assertTrue(r.kept(SessionFilters(query = "fleet-mobile"), project = "martin-janci/fleet-mobile"))
+    }
+
+    /**
+     * The activity is searched **as the screen shows it**, which is through
+     * [Activity.sanitize] and not as the hub sent it.
+     *
+     * `current_activity` is the hub's raw reading of the pane. It arrives
+     * wrapped in ANSI escapes, and for an idle session it is usually the
+     * REPL's own footer rather than anything the agent is doing — on the fleet
+     * this was written against, most rows carry
+     * `⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt`.
+     * `SessionRow.supportingLine` already drops all of that before drawing it,
+     * so a search over the raw field answers about text that is on no screen:
+     * `bypass` matched nearly every idle session in the fleet, and an escape
+     * sequence was searchable while being invisible.
+     */
+    @Test
+    fun a_query_matches_the_activity_as_the_screen_shows_it() {
+        val r = row(activity = "\u001B[38;5;244mReading SessionsViewModel.kt\u001B[0m")
+
+        assertTrue(r.kept(SessionFilters(query = "SessionsViewModel")), "the visible text is what matched")
+        assertFalse(r.kept(SessionFilters(query = "38;5")), "an escape sequence is on no screen")
+    }
+
+    @Test
+    fun a_query_cannot_match_the_repl_footer_the_screen_hides() {
+        val idle = row(
+            claudeStatus = "idle",
+            activity = "⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt · ← 3 agents",
+        )
+
+        assertFalse(idle.kept(SessionFilters(query = "bypass")), "chrome is not drawn, so it is not searched")
+        assertFalse(idle.kept(SessionFilters(query = "shift+tab")))
+    }
+
+    /**
+     * What was *asked* of an agent is the most memorable thing about a
+     * session and was not searchable at all.
+     *
+     * `displayName` covers it only for a background agent, whose name is
+     * derived from the prompt's first sixty characters; a session with a
+     * friendly name showed the prompt nowhere and matched it nowhere either.
+     */
+    @Test
+    fun a_query_matches_the_prompt_the_session_was_given() {
+        val r = row(tmuxName = "violet-mars", lastPrompt = "analyse the mobile app and make the UX friendlier")
+
+        assertTrue(r.kept(SessionFilters(query = "friendlier")))
+        assertTrue(r.kept(SessionFilters(query = "MOBILE APP")), "matching ignores case here too")
     }
 
     @Test

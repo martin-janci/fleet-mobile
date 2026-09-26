@@ -279,8 +279,27 @@ private fun SessionRow.matchesTime(filters: SessionFilters, nowSeconds: Long): B
 
 /**
  * Free-text match, case-insensitive, across everything the row shows or is
- * filed under: its name, the branch, its tags, the host, the project, and its
- * work's key and title. Blank matches everything.
+ * filed under: its name, the branch, its tags, the host, the project, its
+ * work's key and title, the prompt it was given, and what it is doing. Blank
+ * matches everything.
+ *
+ * Two of those fields are not taken as the hub sent them, and both reasons are
+ * the same one — **a search may only match what somebody could have read.**
+ *
+ *  - `current_activity` goes through [Activity.sanitize], which is what
+ *    [SessionRow.supportingLine] already draws. Raw, it carries ANSI escapes
+ *    and, for an idle session, the REPL's own footer: on the fleet this was
+ *    written against, most rows read
+ *    `⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt`, so
+ *    `bypass` matched nearly every idle session and an escape sequence was
+ *    searchable while being invisible. Sanitising can yield nothing at all,
+ *    which is the right answer: a row whose only "activity" is chrome has no
+ *    activity to search.
+ *  - `last_prompt` is included, and it was not before. What was *asked* of an
+ *    agent is the most memorable thing about a session, and [displayName]
+ *    covers it only for a background agent, whose name is the prompt's first
+ *    sixty characters; a session with a friendly name showed the prompt
+ *    nowhere and matched it nowhere either.
  */
 private fun SessionRow.matchesQuery(query: String, projectLabel: String?): Boolean {
     val q = query.trim()
@@ -294,7 +313,8 @@ private fun SessionRow.matchesQuery(query: String, projectLabel: String?): Boole
         projectLabel?.let { yield(it) }
         yieldAll(tags)
         work?.let { yield(it.label); yield(it.title) }
-        currentActivity?.let { yield(it) }
+        lastPrompt?.let { yield(it) }
+        Activity.sanitize(currentActivity)?.let { yield(it) }
     }
     return fields.any { it.contains(q, ignoreCase = true) }
 }
