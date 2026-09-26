@@ -32,8 +32,12 @@ import dev.claudefleet.mobile.model.PickedFile
  * [dev.claudefleet.mobile.model.SkipReason.OverTotal] instead of reading it.
  * That is what stops a multi-select of twenty 10 MB files from putting 200 MB
  * in the heap on the main thread — an OOM and an ANR on a mid-range phone —
- * before anything downstream is even asked. One pick now costs at most the
- * total plus whatever the file that crossed it had read: ~35 MB.
+ * before anything downstream is even asked. One pick now costs the 25 MB
+ * already accepted plus whatever the file that crossed the line had read:
+ * ~35 MB on iOS, where the read is memory-mapped, and nearer ~50 MB on
+ * Android, where `readCapped`'s `ByteArrayOutputStream` doubles its buffer and
+ * then copies again in `toByteArray()`, so the file in flight transiently
+ * costs about 2.6x its own size.
  *
  * The *running* total across picks is still the composer's, and has to be:
  * this function cannot see what an earlier pick already queued.

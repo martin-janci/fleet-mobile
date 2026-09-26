@@ -195,11 +195,13 @@ private sealed interface Outcome {
  * unreadable, and the other picks still arrive.
  *
  * The size is asked for *before* anything is read, so a file over the ceiling
- * costs nothing but a stat. Where the file system will not say — a provider
- * that does not publish `NSURLFileSizeKey` — the fallback is a **memory-mapped**
- * read: `NSDataReadingMappedIfSafe` gives an `NSData` backed by the file rather
- * than by a full copy in the heap, so `length` can be checked against the
- * ceiling before a single byte is copied into Kotlin.
+ * costs nothing but a stat — and a provider that does not publish
+ * `NSURLFileSizeKey` simply skips that shortcut rather than taking a different
+ * path afterwards. **Every** read is then memory-mapped:
+ * `NSDataReadingMappedIfSafe` gives an `NSData` backed by the file rather than
+ * by a full copy in the heap, so `length` is checked against the ceiling a
+ * second time — this time against the truth — before a single byte is copied
+ * into Kotlin. That is why an undeclared size is survivable and not a hole.
  *
  * `asCopy = true` put the file in this app's temp directory, so it is already
  * ours and needs no security-scoped access around it — and it is ours to

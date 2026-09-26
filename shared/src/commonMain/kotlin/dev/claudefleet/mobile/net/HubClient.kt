@@ -577,15 +577,44 @@ class HubClient(
         }
         val text = response.textWithin(MAX_RESPONSE_BYTES)
         // The hub answers a plain sentence on refusal, not JSON, and it is
-        // written to be shown — so the existing variants carry it as-is.
+        // written to be shown — so the variants below carry it as-is, scrubbed
+        // and capped by [redacted] first like every other body off the wire.
+        //
+        // Deliberately NOT `throwForStatus`, which is right for the MCP mount
+        // and wrong here on both refusals this route can give:
+        //
+        // - `401` there is already bare, and it must be bare here too: a 401
+        //   body is where a reverse proxy echoes the `Authorization` header
+        //   back at us, and `HubError.Unauthorized` is documented as never
+        //   carrying one. This was the only site in the app that passed it in.
+        // - `403` there means the hub's Host/Origin allowlist, and
+        //   `HubError.Forbidden` says exactly that in its message. This
+        //   route's 403 means something else entirely — a readonly credential
+        //   ("attaching needs a full token") or a peer token, which is refused
+        //   with no body at all. `Forbidden` would tell a person their address
+        //   was rejected by an allowlist that never looked at it, and bury the
+        //   true reason after "The hub added:". So the hub's own sentence is
+        //   the whole message instead, which is what `HubError.Tool` is for.
         when (response.status) {
-            HttpStatusCode.Unauthorized -> throw HubError.Unauthorized(text)
-            HttpStatusCode.Forbidden -> throw HubError.Forbidden(text, base)
+            HttpStatusCode.Unauthorized -> throw HubError.Unauthorized()
+            HttpStatusCode.Forbidden -> throw HubError.Tool(
+                FORBIDDEN_CODE,
+                redacted(text, token).ifBlank { UPLOAD_NOT_ALLOWED },
+            )
             else -> if (!response.status.isSuccess()) {
-                throw HubError.Http(response.status.value, text)
+                throw HubError.Http(response.status.value, redacted(text, token))
             }
         }
-        val path = (parseObject(text)["path"] as? JsonPrimitive)?.content
+        // A `2xx` means the bytes landed. If the answer is then unreadable,
+        // the one thing that is NOT true is "could not reach the hub" — which
+        // is what `parseObject`'s `Transport` would say, sending someone to
+        // check their network for a file that is already staged on the host.
+        val answer = try {
+            parseObject(text)
+        } catch (_: HubError.Transport) {
+            throw HubError.Http(response.status.value, STAGED_UNREADABLE)
+        }
+        val path = (answer["path"] as? JsonPrimitive)?.content
         return path ?: throw HubError.Http(response.status.value, "staged the file but did not say where")
     }
 
@@ -785,6 +814,29 @@ class HubClient(
         const val UNKNOWN_CODE = "E_UNKNOWN"
     }
 }
+
+/**
+ * The code a `POST /attachment` refusal is carried under. The route is not a
+ * tool and sends no `E_*` of its own, so the app supplies the one that matches
+ * what the status means — the same code the hub's tools use for "you may not
+ * do that" — and `friendly()` already knows to title it *"The hub refused
+ * that"* and let the hub's own sentence be the body.
+ */
+internal const val FORBIDDEN_CODE = "E_FORBIDDEN"
+
+/**
+ * Said in the app's own words when the hub refuses an upload with no body: a
+ * peer token is turned away by `refuses_peer` with a bare
+ * `StatusCode::FORBIDDEN`, so there is nothing of the hub's to show.
+ */
+internal const val UPLOAD_NOT_ALLOWED = "this credential may not attach files to a session"
+
+/**
+ * A `2xx` from `POST /attachment` that the app could not parse. It says what
+ * happened — the file is on the host — rather than what a `Transport` would
+ * have claimed, which is that the hub was never reached.
+ */
+internal const val STAGED_UNREADABLE = "the file was staged, but the hub's answer could not be read"
 
 /** Shared by the client and, later, the event stream. */
 internal val json = Json {

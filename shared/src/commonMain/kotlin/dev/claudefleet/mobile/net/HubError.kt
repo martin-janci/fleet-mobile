@@ -30,6 +30,10 @@ sealed class HubError(message: String, cause: Throwable? = null) : Exception(mes
      * offending `Authorization` header. A 401 body is therefore the single most
      * likely place for the token to come *back* at us, and nothing reads it —
      * `AppSession.withClient` branches on the type — so it does not come in.
+     *
+     * The invariant is a whole-repo one, not a per-call-site habit: every
+     * `401` in the app raises this **bare**, through `throwForStatus` or, for
+     * `POST /attachment`, at the route's own `when`.
      */
     data class Unauthorized(val detail: String = "") :
         HubError(
@@ -42,6 +46,11 @@ sealed class HubError(message: String, cause: Throwable? = null) : Exception(mes
     /**
      * `403` — the `Host`/`Origin` the request arrived with is not on the hub's
      * allowlist.
+     *
+     * **Only for that.** The message names a cause, so it is wrong for any
+     * other `403`: `POST /attachment` refuses a readonly or peer credential
+     * with the same status and raises a [Tool] instead, precisely so nobody is
+     * told an allowlist rejected an address it never looked at.
      *
      * [body] is very often **empty**, and the explanation cannot lean on it:
      * fleet's `authorize` layer refuses with a bare `StatusCode`, which axum
@@ -65,6 +74,14 @@ sealed class HubError(message: String, cause: Throwable? = null) : Exception(mes
     /**
      * The tool ran and said no: an MCP result with `isError: true` carrying an
      * `E_*` code, or a JSON-RPC `error` object. Both are one thing to a caller.
+     *
+     * Also the shape for a plain-HTTP route that refuses in a sentence written
+     * for a person — `POST /attachment`'s `403`, which means a readonly or a
+     * peer credential and not anything [Forbidden] describes. The point of
+     * putting it here is that [message] is the hub's own words and nothing
+     * else: no variant of this class prepends a cause to them, so none can
+     * prepend the wrong one. The [code] is then the app's, chosen to match
+     * what the status means; see `HubClient.FORBIDDEN_CODE`.
      */
     data class Tool(
         val code: String,

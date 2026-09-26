@@ -1006,4 +1006,81 @@ class HubClientTest {
         }
         assertTrue(e.message!!.contains("full token"), e.message!!)
     }
+
+    /**
+     * A `401` on this route must not carry its body, and this is the one place
+     * in the app that ever tried to. A reverse proxy in front of the hub is
+     * the thing that writes a 401 body, and what it writes is an echo of the
+     * request's headers — so the body is where the bearer token comes back at
+     * us. `HubError.Unauthorized` documents itself as never carrying one;
+     * before this, `uploadAttachment` handed it straight in, and the value
+     * reached a banner through `SessionViewModel.reason()` and a crash report
+     * through the data class's `toString()`.
+     */
+    @Test
+    fun an_unauthorized_upload_does_not_repeat_the_401_body() = runTest {
+        val leak = "401 Unauthorized — Authorization: Bearer tok-phone"
+        val (hub, _) = client { _ -> leak to HttpStatusCode.Unauthorized }
+        val e = assertFailsWith<HubError.Unauthorized> {
+            hub.uploadAttachment(7, dev.claudefleet.mobile.model.PickedFile("a.png", 1, byteArrayOf(1)))
+        }
+        assertEquals("", e.detail, "a 401 body must not come in at all")
+        assertFalse(e.message!!.contains("Bearer"), e.message!!)
+        assertFalse(e.message!!.contains("tok-phone"), e.message!!)
+        assertFalse(e.toString().contains("tok-phone"), e.toString())
+    }
+
+    /**
+     * This route's `403` is a credential the hub will not let write — a
+     * readonly token, or a peer's — and not the `Host`/`Origin` allowlist that
+     * `HubError.Forbidden`'s message is hard-wired to. Raising `Forbidden`
+     * here told a person their address had been rejected and appended the real
+     * reason after "The hub added:". The hub's own sentence is now the whole
+     * message.
+     */
+    @Test
+    fun a_forbidden_upload_says_what_the_hub_said_and_not_that_it_is_the_allowlist() = runTest {
+        val (hub, _) = client { _ -> "attaching needs a full token" to HttpStatusCode.Forbidden }
+        val e = assertFailsWith<HubError.Tool> {
+            hub.uploadAttachment(7, dev.claudefleet.mobile.model.PickedFile("a.png", 1, byteArrayOf(1)))
+        }
+        assertEquals("attaching needs a full token", e.message)
+        assertEquals(FORBIDDEN_CODE, e.code)
+        assertFalse(e.message.contains("allowed-hosts"), e.message)
+        assertFalse(e.message.contains(BASE), e.message)
+    }
+
+    /**
+     * `refuses_peer` turns a peer token away with a bare `StatusCode::FORBIDDEN`
+     * and no body at all, so there is nothing of the hub's to show and the app
+     * has to supply the sentence itself — the half a person used to be left
+     * with was the wrong half, the allowlist claim with nothing appended.
+     */
+    @Test
+    fun a_forbidden_upload_with_no_body_still_says_something_true() = runTest {
+        val (hub, _) = client { _ -> "" to HttpStatusCode.Forbidden }
+        val e = assertFailsWith<HubError.Tool> {
+            hub.uploadAttachment(7, dev.claudefleet.mobile.model.PickedFile("a.png", 1, byteArrayOf(1)))
+        }
+        assertEquals(UPLOAD_NOT_ALLOWED, e.message)
+        assertFalse(e.message.contains("allowed-hosts"), e.message)
+    }
+
+    /**
+     * The bytes landed — the status says so — and only the answer was
+     * unreadable. `parseObject` raises `Transport`, whose message is "could not
+     * reach the hub": the one thing that is certainly false, and the one that
+     * sends someone to check their network for a file already staged on the
+     * host.
+     */
+    @Test
+    fun a_staged_file_with_an_unreadable_answer_is_not_reported_as_unreachable() = runTest {
+        val (hub, _) = client { _ -> "<html>staged</html>" to HttpStatusCode.OK }
+        val e = assertFailsWith<HubError> {
+            hub.uploadAttachment(7, dev.claudefleet.mobile.model.PickedFile("a.png", 1, byteArrayOf(1)))
+        }
+        assertFalse(e is HubError.Transport, "the hub was reached: ${e.message}")
+        assertTrue(e.message!!.contains("staged"), e.message!!)
+        assertFalse(e.message!!.contains("could not reach"), e.message!!)
+    }
 }

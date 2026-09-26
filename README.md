@@ -571,10 +571,18 @@ not polish: get either wrong and the app does not work at all.
 9. **The file picker.** `ui/pick/FilePicker.ios.kt` is a
    `UIDocumentPickerViewController` in open mode with `asCopy = true`,
    presented over `LocalUIViewController`. It compiles for both iOS targets
-   and has never run. Two things a Mac should confirm: that the delegate
-   survives until the sheet closes — UIKit holds it weakly and the only strong
-   reference is the `remember` in the composition behind the sheet — and that
-   cancelling really does reach `documentPickerWasCancelled`, because that is
+   and has never run. UIKit holds `picker.delegate` **weakly**, and the
+   `remember` in the composition is not enough to keep it alive: the
+   composition can be torn down while the sheet is still up — a hub event over
+   the socket driving navigation underneath a modal does it — and the delegate
+   would go with it. So the file keeps a module-level `presenting` set as the
+   strong reference, added when the picker is launched and removed the moment
+   the delegate reports. What a Mac has to confirm is that the shipped
+   arrangement holds: that a pick still reports after navigating underneath the
+   open sheet, that `presenting` is emptied on both exits so nothing leaks a
+   delegate per pick, and that cancelling really does reach
+   `documentPickerWasCancelled` — including the swipe-to-dismiss, which arrives
+   as `presentationControllerDidDismiss` and not as a cancel, because that is
    what stops the caller waiting.
 
    **It sees Files, not Photos, and that is on purpose.** A screenshot lives
