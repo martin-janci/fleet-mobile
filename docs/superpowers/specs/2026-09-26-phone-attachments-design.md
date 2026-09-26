@@ -26,7 +26,16 @@ The desktop's road does not exist on a phone. Its pipeline is:
 Steps 1 and 3 assume the bytes and the SSH client are on the same machine. On
 a phone the bytes are on the phone and `fleet-core` is on the hub. Everything
 between — the budget, the staging directory, the git exclude, the filename
-rules — is host-side and reusable as it stands.
+rules — is host-side and reusable in substance.
+
+**But not yet reusable in place.** Only `service::attachments` (the budget,
+`ATTACH_DIR`, `root_script`, `stage_script`) is in `fleet-core`. The
+orchestration around it — `basenames_of`, `dedupe_names`,
+`resolve_worktree_root`, `run_script`, `transfer_all` — lives in
+`src-tauri/src/commands/upload.rs`, which is the desktop crate and not
+something the hub can call. Moving that half down into `fleet-core`, leaving
+the Tauri command as the thin wrapper the repo's own convention calls for, is
+the first task of the plan and a prerequisite for the route.
 
 ## Decision: a hub HTTP route, not an MCP tool
 
@@ -67,9 +76,10 @@ Answering `{ "path": "/abs/path/on/the/host/<name>" }`.
 - `DefaultBodyLimit::max(attachments::MAX_BYTES)`. The existing per-file
   ceiling (10 MB) becomes the route's body cap, so a file too big is refused
   by the transport rather than after it has been read.
-- The handler reuses, unchanged:
-  `service::attachments::check_budget`, `ATTACH_DIR`, `root_script`,
-  `stage_script`, and `transfer_all`'s remote branch.
+- The handler reuses `service::attachments::check_budget`, `ATTACH_DIR`,
+  `root_script` and `stage_script` unchanged, plus `resolve_worktree_root`,
+  `dedupe_names` and `transfer_all` once they have moved down from
+  `src-tauri` (above).
 - One file per request. Several attachments are several requests, and the
   25 MB batch ceiling is the phone's to enforce across them (see *Budgets*).
 
@@ -91,7 +101,7 @@ A fourth `expect`/`actual` family, alongside `Platform`, `Secrets` and
 // ui/pick/FilePicker.kt
 expect fun filePickerSupported(): Boolean
 
-data class PickedFile(val name: String, val size: Long, val bytes: ByteArray)
+class PickedFile(val name: String, val size: Long, val bytes: ByteArray)
 
 @Composable
 expect fun rememberFilePicker(onPicked: (List<PickedFile>) -> Unit): () -> Unit
@@ -204,7 +214,10 @@ and fixing it belongs in `claude-fleet`, not here.
   `MAX_BYTES` is refused by the limit layer.
 - Hostile-filename tests: traversal, absolute paths, empty, a name that is
   only dots, duplicates within one send.
-- A budget test crossing `MAX_TOTAL` across successive requests.
+- A `check_budget` test for the per-file ceiling at the route. Not one for
+  `MAX_TOTAL`: the route takes one file per request and holds no batch, so
+  the 25 MB ceiling is the phone's across its own sends (see *Budgets*) and
+  there is nothing host-side to assert it against.
 
 **`fleet-mobile`**
 - `commonTest` for the Kotlin `withAttachments` against the TS vectors.
@@ -217,15 +230,18 @@ and fixing it belongs in `claude-fleet`, not here.
 
 ## Work, in order
 
-1. **`claude-fleet`** — `POST /attachment`: route, handler, auth gate, limit,
+1. **`claude-fleet`** — move the transport-agnostic upload half out of
+   `src-tauri/src/commands/upload.rs` into `fleet-core`. Pure refactor, tests
+   travel with it, no behaviour change.
+2. **`claude-fleet`** — `POST /attachment`: route, handler, auth gate, limit,
    tests. Self-contained; nothing on the phone needs it to exist to compile.
-2. **`claude-fleet`** — document it in `docs/hub.md` under *Pair a phone*.
+3. **`claude-fleet`** — document it in `docs/hub.md` under *Pair a phone*.
    No `REGEN_HUB_VERDICTS` run: the verdict table covers Tauri commands, and
    this adds none.
-3. **`fleet-mobile`** — `withAttachments` + budget mirror in `commonMain`,
+4. **`fleet-mobile`** — `withAttachments` + budget mirror in `commonMain`,
    with tests. No UI yet.
-4. **`fleet-mobile`** — the `expect`/`actual` picker, both platforms.
-5. **`fleet-mobile`** — `HubClient.uploadAttachment`, then the composer UI
+5. **`fleet-mobile`** — the `expect`/`actual` picker, both platforms.
+6. **`fleet-mobile`** — `HubClient.uploadAttachment`, then the composer UI
    and its wiring into send.
 
-Steps 1–2 and 3 are independent and can run in parallel. 4 and 5 need 3.
+Steps 1–3 and 4 are independent and can run in parallel. 5 and 6 need 4.
