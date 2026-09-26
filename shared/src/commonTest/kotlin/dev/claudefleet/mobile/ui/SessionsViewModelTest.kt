@@ -9,9 +9,11 @@ import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionFilters
+import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.model.StatusFilter
 import dev.claudefleet.mobile.model.TimeWindow
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.WorkStatusFilter
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
@@ -989,6 +991,112 @@ class SessionFilterStateTest {
         assertFalse(vm.state.value.myWorkOnly)
         assertEquals(2, vm.state.value.shown)
         assertEquals(0, vm.state.value.filters.activeCount)
+    }
+    @Test
+    fun a_project_narrows_the_list_and_null_brings_every_project_back() = runTest {
+        val fleet = FakeFleet(
+            rows = listOf(session(1, project = 1), session(2, project = 2), session(3, project = null)),
+            projectRows = listOf(
+                ProjectRow(id = 1, owner = "martin-janci", repo = "claude-fleet"),
+                ProjectRow(id = 2, owner = "martin-janci", repo = "fleet-mobile"),
+            ),
+        )
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        assertEquals(
+            listOf("martin-janci/claude-fleet", "martin-janci/fleet-mobile"),
+            vm.state.value.projectChoices.map { it.label },
+        )
+        vm.setProjectFilter(2)
+        runCurrent()
+        assertEquals(1, vm.state.value.shown)
+        assertEquals(listOf("martin-janci/fleet-mobile"), vm.state.value.filterNames())
+
+        vm.setProjectFilter(null)
+        runCurrent()
+        assertEquals(3, vm.state.value.shown)
+    }
+
+    /**
+     * The chosen project stays a chip after its last session has gone, so the
+     * filter that is emptying the list can still be turned off where it was
+     * turned on.
+     */
+    @Test
+    fun a_chosen_project_stays_offered_after_its_last_session_ends() = runTest {
+        val fleet = FakeFleet(rows = listOf(session(1, project = 1), session(2, project = 2)))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.setProjectFilter(2)
+        runCurrent()
+        fleet.sessions.value = listOf(session(1, project = 1))
+        runCurrent()
+        assertEquals(0, vm.state.value.shown)
+        assertEquals(listOf(1L, 2L), vm.state.value.projectChoices.map { it.id })
+    }
+
+    @Test
+    fun ticket_status_and_archived_narrow_on_a_hub_with_the_work_graph() = runTest {
+        val todo = session(1).copy(work = WorkSummary(key = "ABC-1", statusCategory = StatusCategory.Todo))
+        val done = session(2).copy(
+            work = WorkSummary(key = "ABC-2", statusCategory = StatusCategory.Done, archivedAt = 5),
+        )
+        val fleet = FakeFleet(listOf(todo, done, session(3)))
+        fleet.capabilities.value = HubCapabilities.of(ToolCatalog(setOf("work")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.toggleWorkStatus(WorkStatusFilter.DONE)
+        runCurrent()
+        assertEquals(1, vm.state.value.shown)
+        vm.toggleArchived()
+        runCurrent()
+        assertEquals(0, vm.state.value.shown, "the one done session is archived")
+
+        vm.toggleWorkStatus(WorkStatusFilter.DONE)
+        runCurrent()
+        assertEquals(2, vm.state.value.shown, "only the archived session is left out")
+    }
+
+    /**
+     * Their controls live only on a hub with the work graph, so — like *My
+     * work* — a hub that loses it cannot leave them narrowing the list.
+     */
+    @Test
+    fun the_ticket_filters_stop_narrowing_when_the_work_graph_goes_away() = runTest {
+        val archived = session(1).copy(work = WorkSummary(key = "ABC-1", archivedAt = 5))
+        val fleet = FakeFleet(listOf(archived, session(2)))
+        fleet.capabilities.value = HubCapabilities.of(ToolCatalog(setOf("work")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.toggleArchived()
+        vm.toggleWorkStatus(WorkStatusFilter.TODO)
+        runCurrent()
+        assertEquals(0, vm.state.value.shown)
+
+        fleet.capabilities.value = HubCapabilities()
+        runCurrent()
+        assertEquals(2, vm.state.value.shown)
+        assertEquals(0, vm.state.value.filters.activeCount)
+    }
+}
+
+/** What the filter sheet is given to offer as projects. */
+class ProjectChoicesTest {
+
+    @Test
+    fun projects_are_offered_once_by_label_and_never_the_no_project_bin() {
+        val choices = projectChoices(
+            sessions = listOf(session(1, project = 2), session(2, project = 1), session(3, project = 2), session(4, project = null)),
+            projects = listOf(ProjectRow(id = 1, repo = "zeta"), ProjectRow(id = 2, owner = "acme", repo = "Api")),
+        )
+        assertEquals(listOf(ProjectFilterChoice(2, "acme/Api"), ProjectFilterChoice(1, "zeta")), choices)
+    }
+
+    /** A project `list_projects` has not named yet reads the way its group heading does. */
+    @Test
+    fun a_project_with_no_row_is_offered_under_its_id() {
+        val choices = projectChoices(sessions = listOf(session(1, project = 9)), projects = emptyList())
+        assertEquals(listOf("project #9"), choices.map { it.label })
     }
 }
 

@@ -16,6 +16,7 @@ import dev.claudefleet.mobile.model.TimeWindow
 import dev.claudefleet.mobile.model.byTriage
 import dev.claudefleet.mobile.model.matches
 import dev.claudefleet.mobile.model.Ticket
+import dev.claudefleet.mobile.model.WorkStatusFilter
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.withTicketsFrom
 import dev.claudefleet.mobile.model.unnamedProject
@@ -106,6 +107,9 @@ enum class GroupMode(val label: String) {
  */
 data class HostFilterChoice(val alias: String, val reachable: Boolean?)
 
+/** A project the filter sheet offers: its id, and the label its group heading carries. */
+data class ProjectFilterChoice(val id: Long, val label: String)
+
 /** Everything the fleet list draws. */
 data class SessionsUiState(
     val groups: List<HostGroup> = emptyList(),
@@ -147,6 +151,8 @@ data class SessionsUiState(
     val orgChoices: List<OrgInfo> = emptyList(),
     /** Every host the sheet can narrow to: the host list, plus any host only a session names. */
     val hostChoices: List<HostFilterChoice> = emptyList(),
+    /** Every project the sheet can narrow to: the ones the fleet's sessions are in, plus the chosen one. */
+    val projectChoices: List<ProjectFilterChoice> = emptyList(),
     /** The filter sheet is up. */
     val filtersOpen: Boolean = false,
     /** The search field is showing (it holds [SessionFilters.query]). */
@@ -164,6 +170,12 @@ data class SessionsUiState(
     val hostFilter: String? get() = filters.hostFilter
     val myWorkOnly: Boolean get() = filters.myWorkOnly
     val orgFilter: Long? get() = filters.orgFilter
+
+    /** The filters that are on, in words — the summary line and the empty state say the same thing. */
+    fun filterNames(): List<String> = filters.summary(
+        orgName = { id -> orgChoices.firstOrNull { it.id == id }?.name ?: "org #$id" },
+        projectName = { id -> projectChoices.firstOrNull { it.id == id }?.label ?: unnamedProject(id) },
+    )
 
     /** Rows are being hidden: what makes the "N of M" line worth drawing. */
     val narrowed: Boolean get() = filters.any && shown != total
@@ -366,6 +378,27 @@ class SessionsViewModel(
         }
     }
 
+    /**
+     * Only [projectId]'s sessions, or every project again with `null`. A view
+     * over rows already held, like the host filter — and, unlike it, owned
+     * here: no screen is scoped to a project.
+     */
+    fun setProjectFilter(projectId: Long?) {
+        filter { it.copy(projectFilter = projectId) }
+    }
+
+    /** Add [status] to the ticket statuses kept, or drop it. None chosen means any. */
+    fun toggleWorkStatus(status: WorkStatusFilter) {
+        filter { f ->
+            f.copy(workStatuses = if (status in f.workStatuses) f.workStatuses - status else f.workStatuses + status)
+        }
+    }
+
+    /** List sessions archived from the desktop's Tidy-up, or leave them out. The desktop's `hide archived`. */
+    fun toggleArchived() {
+        filter { it.copy(showArchived = !it.showArchived) }
+    }
+
     /** List background agents, or leave them out. The desktop's `bg on/off`. */
     fun toggleBackground() {
         filter { it.copy(showBackground = !it.showBackground) }
@@ -515,6 +548,10 @@ class SessionsViewModel(
         val filters = l.filters.copy(
             myWorkOnly = l.filters.myWorkOnly && myWorkAvailable,
             orgFilter = l.filters.orgFilter?.takeIf { f -> choices.any { it.id == f } },
+            // The ticket filters read the work graph's fields; a hub without
+            // it has no control for them on screen, so they are off.
+            workStatuses = if (work.available) l.filters.workStatuses else emptySet(),
+            showArchived = l.filters.showArchived || !work.available,
         )
         val myWork = work.myWork?.takeIf { filters.myWorkOnly }
         // Only a hub with the work graph has a ticket cache worth overlaying;
@@ -563,6 +600,7 @@ class SessionsViewModel(
             myWorkAvailable = myWorkAvailable,
             orgChoices = choices,
             hostChoices = hostChoices(sessions, hosts),
+            projectChoices = projectChoices(sessions, projects, filters.projectFilter),
             filtersOpen = l.filtersOpen,
             searchOpen = l.searchOpen,
         )
@@ -590,6 +628,25 @@ internal fun hostChoices(sessions: List<SessionRow>, hosts: List<HostRow>): List
     val known = hosts.filter { !it.hidden || it.alias in named }.map { HostFilterChoice(it.alias, it.reachable) }
     val extra = (named - known.mapTo(mutableSetOf()) { it.alias }).map { HostFilterChoice(it, null) }
     return (known + extra).filter { it.alias.isNotBlank() }.sortedBy { it.alias }
+}
+
+/**
+ * Every project the filter sheet can narrow to, by label: the ones [sessions]
+ * are in, plus [chosen] even once its last session has gone — the host
+ * filter's rule, so a filter that is on always has a chip on screen to turn it
+ * off. Sessions in no project are not offered: "no project" is a leftovers
+ * bin, and the search field finds a shell session by name.
+ */
+internal fun projectChoices(
+    sessions: List<SessionRow>,
+    projects: List<ProjectRow>,
+    chosen: Long? = null,
+): List<ProjectFilterChoice> {
+    val byId = projects.associateBy { it.id }
+    val ids = sessions.mapNotNullTo(LinkedHashSet()) { it.projectId }
+    chosen?.let(ids::add)
+    return ids.map { ProjectFilterChoice(it, projectLabel(it, byId)) }
+        .sortedWith(compareBy({ it.label.lowercase() }, { it.id }))
 }
 
 /**

@@ -441,6 +441,9 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                                 onSetHost = { alias ->
                                     if (alias == null) nav.clearHostFilter() else nav.showSessionsFor(alias)
                                 },
+                                onSetProject = sessions::setProjectFilter,
+                                onToggleWorkStatus = sessions::toggleWorkStatus,
+                                onToggleArchived = sessions::toggleArchived,
                                 onToggleOrg = sessions::toggleOrg,
                                 onToggleMyWork = sessions::toggleMyWorkOnly,
                                 onToggleBackground = sessions::toggleBackground,

@@ -47,6 +47,11 @@ data class WorkSummary(
     val suggestions: Int = 0,
     /** The work's organisation (M5): the tracker's, else the session's. An id; names come from `work orgs`. */
     @SerialName("org_id") val orgId: Long? = null,
+    /**
+     * The live session was archived from the desktop's Tidy-up (work graph
+     * M7): a UI-only mark, the session itself still runs. Unix seconds.
+     */
+    @SerialName("archived_at") val archivedAt: Long? = null,
 ) {
     /** What a chip says: the key, else the title, else nothing worth drawing. */
     val label: String get() = key?.takeIf { it.isNotBlank() } ?: title

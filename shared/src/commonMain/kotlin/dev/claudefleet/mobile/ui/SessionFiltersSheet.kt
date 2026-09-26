@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.StatusFilter
 import dev.claudefleet.mobile.model.TimeDirection
 import dev.claudefleet.mobile.model.TimeWindow
+import dev.claudefleet.mobile.model.WorkStatusFilter
 import dev.claudefleet.mobile.ui.theme.LocalStatusColors
 import dev.claudefleet.mobile.ui.theme.StatusTone
 
@@ -45,6 +46,9 @@ data class SessionFiltersHandlers(
     val onSetDirection: (TimeDirection) -> Unit = {},
     val onToggleStatus: (StatusFilter) -> Unit = {},
     val onSetHost: (String?) -> Unit = {},
+    val onSetProject: (Long?) -> Unit = {},
+    val onToggleWorkStatus: (WorkStatusFilter) -> Unit = {},
+    val onToggleArchived: () -> Unit = {},
     val onToggleOrg: (Long) -> Unit = {},
     val onToggleMyWork: () -> Unit = {},
     val onToggleBackground: () -> Unit = {},
@@ -156,6 +160,45 @@ fun SessionFiltersSheet(state: SessionsUiState, handlers: SessionFiltersHandlers
                     }
                 }
 
+                // The host rule again: one project is nothing to choose
+                // between, unless the list is already narrowed to it.
+                if (state.projectChoices.size > 1 || filters.projectFilter != null) {
+                    Section("Project") {
+                        ChipFlow {
+                            FilterChip(
+                                selected = filters.projectFilter == null,
+                                onClick = { handlers.onSetProject(null) },
+                                label = { Text("Any project") },
+                            )
+                            for (p in state.projectChoices) {
+                                FilterChip(
+                                    selected = filters.projectFilter == p.id,
+                                    onClick = { handlers.onSetProject(p.id) },
+                                    label = { Text(p.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    modifier = Modifier.widthIn(max = 240.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // The desktop's work filters (its "⚑ work" pill): the ticket's
+                // status, asked of the session's primary link. Only on a hub
+                // with the work graph, which is the only one whose rows carry it.
+                if (state.workAvailable) {
+                    Section("Ticket status") {
+                        ChipFlow {
+                            for (w in WorkStatusFilter.entries) {
+                                FilterChip(
+                                    selected = w in filters.workStatuses,
+                                    onClick = { handlers.onToggleWorkStatus(w) },
+                                    label = { Text(w.label) },
+                                )
+                            }
+                        }
+                    }
+                }
+
                 if (state.orgChoices.isNotEmpty()) {
                     Section("Organisation") {
                         ChipFlow {
@@ -178,6 +221,14 @@ fun SessionFiltersSheet(state: SessionsUiState, handlers: SessionFiltersHandlers
                             help = "Sessions on the tickets your tracker calls yours",
                             checked = filters.myWorkOnly,
                             onToggle = handlers.onToggleMyWork,
+                        )
+                    }
+                    if (state.workAvailable) {
+                        SwitchRow(
+                            label = "Archived sessions",
+                            help = "Sessions put away with the desktop's Tidy-up — still running",
+                            checked = filters.showArchived,
+                            onToggle = handlers.onToggleArchived,
                         )
                     }
                     SwitchRow(
