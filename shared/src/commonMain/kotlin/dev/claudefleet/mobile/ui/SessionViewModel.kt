@@ -5,10 +5,12 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.ALL_SESSIONS_CHANGED
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
+import dev.claudefleet.mobile.data.QuickReplyActions
 import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.Conversation
+import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.appending
 import dev.claudefleet.mobile.model.tailMarker
@@ -280,7 +282,7 @@ class SessionViewModel(
     private val scope: CoroutineScope,
     canSendPrompts: Boolean = true,
     private val clock: () -> Long = { epochSeconds() },
-    val quickReplies: QuickReplies = QuickReplies(EphemeralPrefs),
+    val quickReplies: QuickReplies = QuickReplies(EphemeralPrefs, EphemeralQuickReplies),
 ) {
     /**
      * The screen state this class owns, as opposed to what the fleet owns.
@@ -531,7 +533,64 @@ class SessionViewModel(
      * The first read, when the screen opens. A no-op against a refused hub —
      * see [requestRead].
      */
-    fun load(): Job = scope.launch { requestRead(first = true) }
+    fun load(): Job = scope.launch {
+        // The chip row is fleet state, so opening a screen is when this phone
+        // finds out about a chip written on the desktop (or on another
+        // phone). Launched beside the read rather than awaited inside it: the
+        // conversation must not wait on a row of buttons, and the cached row
+        // is already drawn.
+        refreshQuickReplies()
+        requestRead(first = true)
+    }
+
+    /**
+     * Pull the fleet's chip row. Silent on failure by design — the cached row
+     * stays up, and a banner about buttons over a conversation that loaded
+     * fine would be noise. An edit is the opposite case: see [editChips].
+     */
+    fun refreshQuickReplies(): Job = scope.launch {
+        // One tool reads and writes the list, so the hub classifies it as a
+        // write and hides it from a readonly token — which is also the token
+        // whose screen draws no chip row at all. Not calling it is the app's
+        // standing rule (only tools this token may use), not an optimisation.
+        // An older hub has no such tool either; `HubCapabilities` says so.
+        if (readOnly || !fleet.capabilities.value.quickReplies) return@launch
+        try {
+            quickReplies.refresh()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            // Cached chips stay on screen.
+        }
+    }
+
+    /** Save a new chip — the draft, or one written in the edit sheet. */
+    fun addQuickReply(chip: QuickReply): Job = editChips { quickReplies.add(chip) }
+
+    /** Drop a chip from the fleet's row. */
+    fun removeQuickReply(chip: QuickReply): Job = editChips { quickReplies.remove(chip) }
+
+    /** Edit a chip in place — label, text, or both. */
+    fun editQuickReply(original: QuickReply, edited: QuickReply): Job =
+        editChips { quickReplies.replace(original, edited) }
+
+    /**
+     * The one path a chip edit takes to the hub.
+     *
+     * Unlike [refreshQuickReplies] this reports: an edit is something the
+     * person just did, [QuickReplies] has already put the row back the way it
+     * was, and a chip that silently reappears after being deleted is the kind
+     * of thing that gets filed as "the buttons cannot be edited".
+     */
+    private fun editChips(block: suspend () -> Unit): Job = scope.launch {
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(error = friendly(t)) }
+        }
+    }
 
     /**
      * A later read, which folds any new turns onto what is already shown.
@@ -1123,4 +1182,16 @@ internal const val WAIT_SATISFIED: String = "satisfied"
 private object EphemeralPrefs : Prefs {
     override fun getStringList(key: String): List<String> = emptyList()
     override fun putStringList(key: String, value: List<String>) = Unit
+}
+
+/**
+ * The other half of that default: a [QuickReplyActions] with no hub behind
+ * it, which simply echoes what it is handed (and reads an empty list). Same
+ * reasoning as [EphemeralPrefs] — a construction with no opinion about quick
+ * replies should not need a transport — and echoing rather than throwing
+ * keeps an edit in such a construction a local no-op instead of an error the
+ * caller never asked about.
+ */
+private object EphemeralQuickReplies : QuickReplyActions {
+    override suspend fun quickReplies(set: List<QuickReply>?): List<QuickReply> = set ?: emptyList()
 }

@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.SessionUiState
@@ -73,9 +74,10 @@ class SessionHeaderLayoutTest {
                         onSetTags = {},
                         onRename = {},
                         onSendCommand = {},
-                        quickReplies = listOf("go on", "yes"),
+                        quickReplies = listOf(QuickReply.of("go on"), QuickReply.of("yes")),
                         onSendQuick = {},
                         onAddQuickReply = {},
+                        onEditQuickReply = { _, _ -> },
                         onRemoveQuickReply = {},
                         onOpenHistory = { emptyList() },
                     )
