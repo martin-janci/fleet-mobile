@@ -10,6 +10,7 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.model.QuickReply
+import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.SessionUiState
 import dev.claudefleet.mobile.ui.theme.FleetTheme
@@ -44,12 +45,24 @@ class QuickReplyChipsTest {
     private var sent = mutableListOf<String>()
     private var removed = mutableListOf<QuickReply>()
 
+    /**
+     * A live row, because `SessionUiState.canSendQuick` requires one: without
+     * it every chip draws disabled and a tap is correctly dropped, which the
+     * first cut of this file mistook for the gesture bug it exists to catch.
+     */
+    private val row = SessionRow(
+        id = 3,
+        tmuxName = "sess-3",
+        hostAlias = "mefistos",
+        claudeStatus = "idle",
+    )
+
     private fun screen(draft: String = "") {
         compose.setContent {
             FleetTheme {
                 SessionScreen(
                     sessionId = 3L,
-                    state = SessionUiState(loaded = true, draft = draft),
+                    state = SessionUiState(session = row, loaded = true, draft = draft),
                     status = ConnectionStatus.Connected(hubVersion = "test"),
                     onDraftChange = {},
                     onSend = {},
@@ -112,7 +125,10 @@ class QuickReplyChipsTest {
         compose.waitForIdle()
 
         compose.onNodeWithText("Quick replies").assertIsDisplayed()
-        compose.onNodeWithText("Go on").assertIsDisplayed()
+        compose.onNodeWithText("New chip").assertIsDisplayed()
+        // Two nodes say "Go on" now — the chip in the row behind the dialog,
+        // and its entry inside it — which is the dialog listing the chips.
+        assertEquals(2, compose.onAllNodesWithText("Go on").fetchSemanticsNodes().size)
     }
 
     @Test
