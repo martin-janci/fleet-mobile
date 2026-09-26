@@ -426,6 +426,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                             onToggleSearch = sessions::toggleSearch,
                             onSetQuery = sessions::setQuery,
                             onOpenFilters = { sessions.setFiltersOpen(true) },
+                            onToggleHost = sessions::toggleHost,
                             // Both, in this order, and this is the only place
                             // that knows to: `clearFilters` deliberately leaves
                             // the host alone because `Screen.Sessions.hostAlias`

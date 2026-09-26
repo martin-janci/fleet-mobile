@@ -74,6 +74,16 @@ data class HostGroup(
      */
     val reachable: Boolean?,
     val projects: List<ProjectGroup>,
+    /**
+     * Whether the person has folded this host away.
+     *
+     * A *drawing* decision, not a narrowing one: [projects] is still built and
+     * [sessionCount] still counts, and `SessionsScreen` is what skips emitting
+     * the items. Emptying the group here instead would make the count read
+     * zero on exactly the headings whose count is the only thing left to say —
+     * which is the one number that would stop anyone unfolding it again.
+     */
+    val collapsed: Boolean = false,
 ) {
     val sessionCount: Int get() = projects.sumOf { it.sessions.size }
 }
@@ -237,6 +247,8 @@ class SessionsViewModel(
         val groupMode: GroupMode = GroupMode.PROJECT,
         val filtersOpen: Boolean = false,
         val searchOpen: Boolean = false,
+        /** Hosts the person has folded away. Persisted; see [COLLAPSED_KEY]. */
+        val collapsedHosts: Set<String> = emptySet(),
     )
 
     /** What the hub's work graph adds to the picture: whether it is there, and *My work*. */
@@ -249,7 +261,11 @@ class SessionsViewModel(
     )
 
     private val local = MutableStateFlow(
-        Local(groupMode = readGroupMode(), filterAt = clock()),
+        Local(
+            groupMode = readGroupMode(),
+            filterAt = clock(),
+            collapsedHosts = prefs?.getStringList(COLLAPSED_KEY).orEmpty().toSet(),
+        ),
     )
 
     /**
@@ -446,6 +462,40 @@ class SessionsViewModel(
     }
 
     /**
+     * Fold one host's rows away, or unfold them.
+     *
+     * A view over rows already held: this never talks to the hub, and the
+     * host's heading and [HostGroup.sessionCount] stay whatever they were.
+     * Folding is not filtering — "which sessions exist on mefistos" and "show
+     * me none of them right now" are different questions, and this answers only
+     * the second.
+     *
+     * Remembered on the device for the same reason [setGroupMode] is: it is how
+     * a person reads the list rather than a question they are asking this
+     * minute. Unlike a filter it hides nothing permanently — the heading stays,
+     * with its count — so restoring it on launch cannot make a busy fleet look
+     * quiet.
+     *
+     * The read and the write are one `update {}` rather than a read of
+     * `local.value` followed by a write, so two taps cannot both observe the
+     * same value and both write the same answer, losing one. `updated` is
+     * assigned inside the lambda and read after: `update` may run its lambda
+     * more than once under contention, and the last run is the one that
+     * committed, so what is persisted is what the flow holds.
+     */
+    fun toggleHost(alias: String) {
+        var updated: Set<String> = emptySet()
+        local.update {
+            updated = if (alias in it.collapsedHosts) it.collapsedHosts - alias else it.collapsedHosts + alias
+            it.copy(collapsedHosts = updated)
+        }
+        // Sorted, so the stored value does not churn on a set whose iteration
+        // order is not promised — a store that rewrites the same content in a
+        // different order is a store that looks like it changed.
+        prefs?.putStringList(COLLAPSED_KEY, updated.sorted())
+    }
+
+    /**
      * Shape the list. Remembered on the device, because it is how a person
      * reads the list rather than a question they are asking this minute — and
      * unlike a filter it hides nothing, so restoring it on launch cannot make
@@ -599,6 +649,7 @@ class SessionsViewModel(
                 byWork,
                 myWork,
                 orgLabel = if (choices.isNotEmpty() && filters.orgFilter == null) work.orgs::name else null,
+                collapsedHosts = l.collapsedHosts,
             )
         }
         return SessionsUiState(
@@ -627,6 +678,7 @@ class SessionsViewModel(
     private companion object {
         const val BY_WORK_KEY = "sessions.by_work"
         const val GROUP_MODE_KEY = "sessions.group_mode"
+        const val COLLAPSED_KEY = "sessions.collapsed_hosts"
         const val ON = "on"
     }
 }
@@ -738,6 +790,7 @@ internal fun groupSessions(
     byWork: Boolean = false,
     myWork: Set<Long>? = null,
     orgLabel: ((Long) -> String)? = null,
+    collapsedHosts: Set<String> = emptySet(),
 ): List<HostGroup> {
     val byId = projects.associateBy { it.id }
     val kept = sessions.filter { row ->
@@ -758,6 +811,7 @@ internal fun groupSessions(
             HostGroup(
                 alias = alias,
                 reachable = reachability[alias],
+                collapsed = alias in collapsedHosts,
                 projects = workGroups(keyed, orgLabel) + rest.groupBy { it.projectId }
                     .map { (id, inProject) ->
                         ProjectGroup(
