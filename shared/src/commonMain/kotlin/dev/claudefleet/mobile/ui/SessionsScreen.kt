@@ -411,7 +411,7 @@ private fun FilterRow(
 @Composable
 private fun FilterSummary(state: SessionsUiState, onOpenFilters: () -> Unit, onClearAll: () -> Unit) {
     if (!state.filters.any) return
-    val names = state.filters.summary { id -> state.orgChoices.firstOrNull { it.id == id }?.name ?: "org #$id" }
+    val names = state.filterNames()
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -592,7 +592,7 @@ private fun SessionRowItem(
  */
 @Composable
 private fun EmptyFleet(state: SessionsUiState, onClearAll: () -> Unit, modifier: Modifier = Modifier.fillMaxSize()) {
-    val names = state.filters.summary { id -> state.orgChoices.firstOrNull { it.id == id }?.name ?: "org #$id" }
+    val names = state.filterNames()
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,

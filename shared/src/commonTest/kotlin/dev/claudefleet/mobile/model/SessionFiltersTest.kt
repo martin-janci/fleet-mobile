@@ -21,6 +21,7 @@ private fun row(
     activity: String? = null,
     work: WorkSummary? = null,
     orgId: Long? = null,
+    projectId: Long? = null,
 ) = SessionRow(
     id = id,
     tmuxName = tmuxName,
@@ -33,6 +34,7 @@ private fun row(
     currentActivity = activity,
     work = work,
     orgId = orgId,
+    projectId = projectId,
 )
 
 private fun SessionRow.kept(filters: SessionFilters, now: Long = NOW, project: String? = null) =
@@ -217,8 +219,11 @@ class SessionFiltersTest {
             hostFilter = "box",
             myWorkOnly = true,
             orgFilter = 3,
+            projectFilter = 4,
+            workStatuses = setOf(WorkStatusFilter.TODO, WorkStatusFilter.DONE),
+            showArchived = false,
         )
-        assertEquals(8, all.activeCount)
+        assertEquals(11, all.activeCount)
         assertTrue(all.any)
     }
 
@@ -264,6 +269,9 @@ class SessionFiltersTest {
             hostFilter = "box",
             myWorkOnly = true,
             orgFilter = 3,
+            projectFilter = 4,
+            workStatuses = setOf(WorkStatusFilter.IN_PROGRESS),
+            showArchived = false,
         ).cleared()
 
         assertEquals(SessionFilters(hostFilter = "box"), cleared)
@@ -295,5 +303,75 @@ class SessionFiltersTest {
     fun the_summary_names_statuses_in_the_sheets_order() {
         val f = SessionFilters(statuses = setOf(StatusFilter.STOPPED, StatusFilter.WORKING, StatusFilter.STUCK))
         assertEquals(listOf("Working/Stuck/Stopped"), f.summary())
+    }
+
+    // ---- the desktop's work filters and the project --------------------------
+
+    @Test
+    fun the_project_filter_keeps_only_its_own_and_never_a_session_in_no_project() {
+        val f = SessionFilters(projectFilter = 4)
+        assertTrue(row(projectId = 4).kept(f))
+        assertFalse(row(projectId = 5).kept(f))
+        assertFalse(row(projectId = null).kept(f))
+    }
+
+    /**
+     * The desktop's rule: a status filter asks about tickets, so a session
+     * with no work — or work the tracker gave no status — is not an answer.
+     */
+    @Test
+    fun a_ticket_status_keeps_only_work_in_that_bucket() {
+        val todo = row(work = WorkSummary(key = "ABC-1", statusCategory = StatusCategory.Todo))
+        val done = row(work = WorkSummary(key = "ABC-2", statusCategory = StatusCategory.Done))
+        val bare = row(work = WorkSummary(key = "ABC-3"))
+        val none = row(work = null)
+
+        val f = SessionFilters(workStatuses = setOf(WorkStatusFilter.TODO))
+        assertTrue(todo.kept(f))
+        assertFalse(done.kept(f))
+        assertFalse(bare.kept(f))
+        assertFalse(none.kept(f))
+
+        // OR-ed, like the session statuses.
+        val both = SessionFilters(workStatuses = setOf(WorkStatusFilter.TODO, WorkStatusFilter.DONE))
+        assertTrue(todo.kept(both))
+        assertTrue(done.kept(both))
+        assertFalse(bare.kept(both))
+
+        // None chosen asks nothing.
+        assertTrue(none.kept(SessionFilters()))
+    }
+
+    /** A status a later hub adds reads as Unknown, and no chip asks for that. */
+    @Test
+    fun an_unknown_ticket_status_matches_no_chip() {
+        val odd = row(work = WorkSummary(key = "ABC-4", statusCategory = StatusCategory.Unknown))
+        for (w in WorkStatusFilter.entries) assertFalse(odd.kept(SessionFilters(workStatuses = setOf(w))))
+    }
+
+    @Test
+    fun archived_sessions_are_listed_until_they_are_switched_off() {
+        val archived = row(work = WorkSummary(key = "ABC-5", archivedAt = NOW - 60))
+        val live = row(work = WorkSummary(key = "ABC-6"))
+        assertTrue(archived.kept(SessionFilters()))
+        val f = SessionFilters(showArchived = false)
+        assertFalse(archived.kept(f))
+        assertTrue(live.kept(f))
+        assertTrue(row(work = null).kept(f), "a session with no work was never archived")
+    }
+
+    @Test
+    fun the_summary_names_the_project_and_the_work_filters() {
+        val f = SessionFilters(
+            projectFilter = 4,
+            workStatuses = setOf(WorkStatusFilter.DONE, WorkStatusFilter.TODO),
+            showArchived = false,
+        )
+        assertEquals(
+            listOf("acme/api", "Ticket to do/done", "No archived"),
+            f.summary(projectName = { "acme/api" }),
+        )
+        // Without a name to hand, the project reads the way its group heading would.
+        assertEquals("project #4", f.summary().first())
     }
 }

@@ -52,6 +52,23 @@ enum class StatusFilter(val label: String, val wire: String?) {
 }
 
 /**
+ * A ticket's status bucket, as the filter sheet offers it — the desktop's
+ * work-filter status chips (`STATUS_FILTERS` in `src/lib/work_filters.ts`).
+ *
+ * Asked of the session's primary link ([WorkSummary.statusCategory], refreshed
+ * from the ticket cache), so a session with no work, or with work the tracker
+ * has not given a status, matches none of them — the desktop's rule too: a
+ * status filter is a question about tickets, and a row without one is not an
+ * answer to it. Selections are OR-ed, like [StatusFilter]'s; the desktop's
+ * single choice is the one-chip case of that.
+ */
+enum class WorkStatusFilter(val label: String, val category: StatusCategory) {
+    TODO("To do", StatusCategory.Todo),
+    IN_PROGRESS("In progress", StatusCategory.InProgress),
+    DONE("Done", StatusCategory.Done),
+}
+
+/**
  * Everything that narrows the fleet list, in one value.
  *
  * Deliberately *only* the narrowing. Grouping by work is not in here and never
@@ -80,6 +97,16 @@ data class SessionFilters(
     val hostFilter: String? = null,
     val myWorkOnly: Boolean = false,
     val orgFilter: Long? = null,
+    /** The project the list is narrowed to, or null for every project. */
+    val projectFilter: Long? = null,
+    /** Empty means any ticket status; otherwise a row's work must be in one of them. */
+    val workStatuses: Set<WorkStatusFilter> = emptySet(),
+    /**
+     * Sessions archived from the desktop's Tidy-up (work graph M7) are listed.
+     * The desktop's `hide archived` chip, the other way up to match
+     * [showBackground]: on means the rows are there.
+     */
+    val showArchived: Boolean = true,
 ) {
     /**
      * How many filters are on — what the *Filters* chip counts.
@@ -97,6 +124,9 @@ data class SessionFilters(
             hostFilter != null,
             myWorkOnly,
             orgFilter != null,
+            projectFilter != null,
+            workStatuses.isNotEmpty(),
+            !showArchived,
         ).count { it }
 
     /**
@@ -128,13 +158,22 @@ data class SessionFilters(
      * — the one place that says *what* is hiding rows. Ordered loosely by how
      * surprising each is to have left on.
      */
-    fun summary(orgName: (Long) -> String = { "org #$it" }): List<String> = buildList {
+    fun summary(
+        projectName: (Long) -> String = ::unnamedProject,
+        // Last, so the trailing-lambda form existing callers use keeps naming the org.
+        orgName: (Long) -> String = { "org #$it" },
+    ): List<String> = buildList {
         hostFilter?.let { add("Host $it") }
+        projectFilter?.let { add(projectName(it)) }
         if (needsAttentionOnly) add("Needs you")
         if (window != TimeWindow.ANY) add("${direction.label} ${window.label}")
         if (statuses.isNotEmpty()) add(statuses.sortedBy { it.ordinal }.joinToString("/") { it.label })
         if (myWorkOnly) add("My work")
         orgFilter?.let { add(orgName(it)) }
+        if (workStatuses.isNotEmpty()) {
+            add("Ticket " + workStatuses.sortedBy { it.ordinal }.joinToString("/") { it.label.lowercase() })
+        }
+        if (!showArchived) add("No archived")
         if (!showBackground) add("No background")
         if (query.isNotBlank()) add("\"${query.trim()}\"")
     }
@@ -154,6 +193,11 @@ fun SessionRow.matches(filters: SessionFilters, nowSeconds: Long, projectLabel: 
     if (filters.hostFilter != null && hostAlias != filters.hostFilter) return false
     if (!filters.showBackground && isBackground) return false
     if (filters.orgFilter != null && orgOf != filters.orgFilter) return false
+    if (filters.projectFilter != null && projectId != filters.projectFilter) return false
+    if (!filters.showArchived && work?.archivedAt != null) return false
+    if (filters.workStatuses.isNotEmpty() && filters.workStatuses.none { it.category == work?.statusCategory }) {
+        return false
+    }
     if (filters.statuses.isNotEmpty() && !matchesStatuses(filters.statuses)) return false
     if (!matchesTime(filters, nowSeconds)) return false
     if (!matchesQuery(filters.query, projectLabel)) return false
