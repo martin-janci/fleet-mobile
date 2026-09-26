@@ -7,6 +7,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -75,6 +76,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
+import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.tailMarker
 import dev.claudefleet.mobile.ui.components.BlockedCardView
 import dev.claudefleet.mobile.ui.components.CompactChip
@@ -94,6 +96,9 @@ import kotlin.time.Duration.Companion.milliseconds
 
 /** The conversation list, for the device test that checks it follows new output. */
 const val CONVERSATION_LIST: String = "conversation-list"
+
+/** The quick-reply chip row, for the device test that taps and long-presses it. */
+const val QUICK_REPLY_ROW: String = "quick-reply-row"
 
 /**
  * One session: what has been said, newest at the bottom, and a box to answer.
@@ -128,11 +133,20 @@ fun SessionScreen(
     onSetTags: (List<String>) -> Unit,
     onRename: (String) -> Unit,
     onSendCommand: (String) -> Unit,
-    /** The chip row's own content — see `ui/QuickReplies.kt`. */
-    quickReplies: List<String>,
+    /** The chip row's own content — the fleet's list, see `ui/QuickReplies.kt`. */
+    quickReplies: List<QuickReply>,
+    /**
+     * Whether this hub keeps the chip row at all (`quick_replies`). False
+     * against one older than that tool: the chips still draw and still send —
+     * they are cached on the device — but nothing offers to edit a list this
+     * hub has nowhere to put. Defaults true so the screen's own tests and
+     * previews need not know about it.
+     */
+    quickRepliesEditable: Boolean = true,
     onSendQuick: (String) -> Unit,
-    onAddQuickReply: (String) -> Unit,
-    onRemoveQuickReply: (String) -> Unit,
+    onAddQuickReply: (QuickReply) -> Unit,
+    onEditQuickReply: (QuickReply, QuickReply) -> Unit,
+    onRemoveQuickReply: (QuickReply) -> Unit,
     /**
      * Pulled fresh each time the field's leading icon opens the history
      * sheet — [dev.claudefleet.mobile.ui.QuickReplies.history] is a plain
@@ -329,8 +343,10 @@ fun SessionScreen(
                         chips = quickReplies,
                         draft = state.draft,
                         enabled = state.canSendQuick,
+                        editable = quickRepliesEditable,
                         onSendQuick = onSendQuick,
                         onAdd = onAddQuickReply,
+                        onEdit = onEditQuickReply,
                         onRemove = onRemoveQuickReply,
                     )
                 }
@@ -1210,78 +1226,247 @@ private fun HistoryDialog(entries: List<String>, onPick: (String) -> Unit, onDis
 }
 
 /**
- * The chip row above the composer: a [LazyRow] of [SuggestionChip]s, one tap
- * away from [onSendQuick], plus a trailing `+` chip that saves the current
- * draft as a new one. Long-pressing an existing chip opens
- * [EditQuickReplyDialog] rather than firing [onSendQuick] — see its own doc
- * for how "edit" and "remove" share one dialog. Visibility (hidden while
- * blocked or readonly) is the caller's decision, same as every other
- * card-vs-composer choice on this screen — see `SessionScreen`'s own body.
+ * The chip row above the composer: a [LazyRow] of quick replies, one tap away
+ * from [onSendQuick], then two trailing chips — `+`, which saves whatever is
+ * in the draft, and **Edit chips**, which opens [ManageQuickRepliesDialog].
+ *
+ * The visible **Edit chips** entry is the point. The only way to change this
+ * row used to be a long-press on a chip, which is invisible: nothing on the
+ * screen said the buttons could be edited at all, so as far as anyone using
+ * the app was concerned, they could not be. The long-press still works as a
+ * shortcut to the same editor.
+ *
+ * Visibility of the row (hidden while blocked or readonly) is the caller's
+ * decision, same as every other card-vs-composer choice on this screen — see
+ * `SessionScreen`'s own body.
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun QuickRepliesRow(
-    chips: List<String>,
+    chips: List<QuickReply>,
     draft: String,
     enabled: Boolean,
+    editable: Boolean,
     onSendQuick: (String) -> Unit,
-    onAdd: (String) -> Unit,
-    onRemove: (String) -> Unit,
+    onAdd: (QuickReply) -> Unit,
+    onEdit: (QuickReply, QuickReply) -> Unit,
+    onRemove: (QuickReply) -> Unit,
 ) {
-    var editing by remember { mutableStateOf<String?>(null) }
+    var editing by remember { mutableStateOf<QuickReply?>(null) }
+    var adding by remember { mutableStateOf(false) }
+    var managing by remember { mutableStateOf(false) }
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp),
+        modifier = Modifier.testTag(QUICK_REPLY_ROW),
     ) {
         items(chips) { chip ->
-            Box(
-                modifier = Modifier.combinedClickable(
-                    onClick = { if (enabled) onSendQuick(chip) },
-                    onLongClick = { editing = chip },
-                ),
-            ) {
-                // `SuggestionChip`'s own `onClick` is not what fires here —
-                // the `combinedClickable` above it is, so a chip's tap and
-                // its long-press are the same gesture recognizer rather than
-                // two independent ones that could both claim the same touch.
-                SuggestionChip(onClick = {}, enabled = enabled, label = { Text(chip) })
-            }
-        }
-        item {
-            SuggestionChip(
-                onClick = { onAdd(draft) },
-                enabled = enabled && draft.isNotBlank(),
-                label = { Text("+") },
+            QuickReplyChip(
+                caption = chip.caption,
+                enabled = enabled,
+                onClick = { onSendQuick(chip.text) },
+                onLongClick = if (editable) ({ editing = chip }) else null,
             )
+        }
+        if (editable) {
+            item {
+                // Not gated on `enabled`: saving the draft as a chip is a write
+                // to the fleet's chip list, not a prompt to this session, so a
+                // busy or disconnected session is no reason to refuse it.
+                SuggestionChip(
+                    onClick = { onAdd(QuickReply.of(draft)) },
+                    enabled = draft.isNotBlank(),
+                    label = { Text("+") },
+                )
+            }
+            item {
+                SuggestionChip(onClick = { managing = true }, label = { Text("Edit chips") })
+            }
         }
     }
     editing?.let { chip ->
         EditQuickReplyDialog(
             original = chip,
-            onSave = { edited -> onRemove(chip); onAdd(edited); editing = null },
+            onSave = { edited -> onEdit(chip, edited); editing = null },
             onRemove = { onRemove(chip); editing = null },
             onDismiss = { editing = null },
+        )
+    }
+    if (adding) {
+        EditQuickReplyDialog(
+            original = null,
+            onSave = { chip -> onAdd(chip); adding = false },
+            onRemove = null,
+            onDismiss = { adding = false },
+        )
+    }
+    if (managing) {
+        ManageQuickRepliesDialog(
+            chips = chips,
+            onEdit = { editing = it; managing = false },
+            onRemove = onRemove,
+            onAdd = { adding = true; managing = false },
+            onDismiss = { managing = false },
         )
     }
 }
 
 /**
- * A chip's long-press dialog: edit its text (removes the old chip and adds
- * the edited one — [dev.claudefleet.mobile.ui.QuickReplies] has no rename of
- * its own) or remove it outright.
+ * One chip, with a tap and a long-press that both actually arrive.
+ *
+ * The gesture sits in a Box drawn **on top of** the chip rather than around
+ * it. A `SuggestionChip` is itself clickable, and Compose hit-tests the
+ * innermost node first: with the chip inside a `combinedClickable` parent,
+ * the chip's own (empty) `onClick` swallowed the tap and the row's chips did
+ * nothing at all. A later sibling is hit first, so the overlay gets the
+ * gesture and the chip below it is left as the drawing.
+ *
+ * The overlay shares the chip's [MutableInteractionSource] and draws no
+ * indication of its own, so the press still ripples on the chip and not on an
+ * invisible rectangle over it.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QuickReplyChip(
+    caption: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    /** Null on a hub with no chip list to edit — see `quickRepliesEditable`. */
+    onLongClick: (() -> Unit)?,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    Box {
+        SuggestionChip(
+            onClick = {},
+            enabled = enabled,
+            label = { Text(caption, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            interactionSource = interaction,
+        )
+        Box(
+            modifier = Modifier.matchParentSize().combinedClickable(
+                interactionSource = interaction,
+                indication = null,
+                onLongClickLabel = onLongClick?.let { "Edit quick reply" },
+                onLongClick = onLongClick,
+                onClick = { if (enabled) onClick() },
+            ),
+        )
+    }
+}
+
+/**
+ * The chip row's editor: every chip with a way to change or delete it, and a
+ * way to write a new one.
+ *
+ * A dialog rather than a settings screen because this is where the chips are
+ * — the row is on the session screen and nowhere else, and a list of buttons
+ * is easiest to edit while looking at them. The list is the fleet's (the hub
+ * stores it), so an edit here shows up on the desktop and on any other phone.
  */
 @Composable
-private fun EditQuickReplyDialog(original: String, onSave: (String) -> Unit, onRemove: () -> Unit, onDismiss: () -> Unit) {
-    var text by remember { mutableStateOf(original) }
+private fun ManageQuickRepliesDialog(
+    chips: List<QuickReply>,
+    onEdit: (QuickReply) -> Unit,
+    onRemove: (QuickReply) -> Unit,
+    onAdd: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Quick reply") },
-        text = { TextField(value = text, onValueChange = { text = it }, singleLine = true) },
+        title = { Text("Quick replies") },
+        text = {
+            Column(modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
+                Text(
+                    "Shared with the desktop and your other devices.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                if (chips.isEmpty()) {
+                    Text("No chips yet.", style = MaterialTheme.typography.bodyMedium)
+                }
+                chips.forEach { chip ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f).clickable { onEdit(chip) }.padding(vertical = 8.dp)) {
+                            Text(chip.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            // Only when it says something the caption does not:
+                            // a chip whose label IS its prompt would otherwise
+                            // draw the same line twice.
+                            if (chip.label.isNotBlank() && chip.label != chip.text) {
+                                Text(
+                                    chip.text,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        TextButton(onClick = { onEdit(chip) }) { Text("Edit") }
+                        TextButton(onClick = { onRemove(chip) }) {
+                            Text("Remove", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    HorizontalDivider()
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onAdd) { Text("New chip") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
+/**
+ * Write one chip: the label the button shows, and the prompt it sends.
+ *
+ * [original] null is a new chip — the dialog then offers no Remove, because
+ * there is nothing yet to remove. The prompt field is multi-line: the built-in
+ * Review chip is a paragraph, and a single-line field made such a chip
+ * impossible to read, let alone edit, on a phone.
+ */
+@Composable
+private fun EditQuickReplyDialog(
+    original: QuickReply?,
+    onSave: (QuickReply) -> Unit,
+    onRemove: (() -> Unit)?,
+    onDismiss: () -> Unit,
+) {
+    var label by remember { mutableStateOf(original?.label.orEmpty()) }
+    var text by remember { mutableStateOf(original?.text.orEmpty()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (original == null) "New quick reply" else "Quick reply") },
+        text = {
+            Column {
+                TextField(
+                    value = label,
+                    onValueChange = { label = it },
+                    singleLine = true,
+                    label = { Text("Label (optional)") },
+                )
+                Spacer(Modifier.height(8.dp))
+                TextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("Prompt") },
+                    minLines = 2,
+                    maxLines = 6,
+                )
+            }
+        },
         confirmButton = {
-            TextButton(onClick = { onSave(text) }, enabled = text.isNotBlank()) { Text("Save") }
+            TextButton(
+                onClick = { onSave(QuickReply(label = label.trim(), text = text.trim())) },
+                enabled = text.isNotBlank(),
+            ) { Text("Save") }
         },
         dismissButton = {
-            TextButton(onClick = onRemove) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+            if (onRemove != null) {
+                TextButton(onClick = onRemove) {
+                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                }
+            } else {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
         },
     )
 }

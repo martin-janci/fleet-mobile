@@ -89,6 +89,7 @@ class ConversationItemsTest {
                     quickReplies = emptyList(),
                     onSendQuick = {},
                     onAddQuickReply = {},
+                    onEditQuickReply = { _, _ -> },
                     onRemoveQuickReply = {},
                     onOpenHistory = { emptyList() },
                 )

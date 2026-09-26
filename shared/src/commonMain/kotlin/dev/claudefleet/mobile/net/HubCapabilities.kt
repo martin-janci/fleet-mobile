@@ -38,6 +38,14 @@ data class HubCapabilities(
     /** The hub's agent (`ensure_operator`) — the desktop's ✦, on the phone. */
     val agent: Boolean get() = ENSURE_OPERATOR in tools
 
+    /**
+     * The hub keeps the composer's chip row (`quick_replies`). Absent on a hub
+     * older than that tool — the app then draws its cached chips and never
+     * tries to sync them — and absent for a `readonly` token, which the hub
+     * does not show a tool that can write.
+     */
+    val quickReplies: Boolean get() = QUICK_REPLIES in tools
+
     fun has(tool: String, action: String): Boolean =
         tool in tools &&
             actions[tool]?.contains(action) != false &&
@@ -51,6 +59,7 @@ data class HubCapabilities(
         const val WORK = "work"
         const val WORK_LINK = "work_link"
         const val ENSURE_OPERATOR = "ensure_operator"
+        const val QUICK_REPLIES = "quick_replies"
 
         fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions)
     }

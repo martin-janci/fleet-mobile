@@ -79,6 +79,11 @@ class ToolsTheAppMayCallTest {
         // (it may start the agent's session), so only a `full` pairing is
         // offered it — see `AgentViewModel`.
         "ensure_operator",
+        // The composer's shared chip row. `Access::Client` and not readonly
+        // (one tool both reads and replaces the list), so a `full` client may
+        // and a `readonly` one is never shown it — which is also the token
+        // that draws no chip row at all.
+        "quick_replies",
     )
 
     @Test
