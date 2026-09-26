@@ -8,6 +8,9 @@ import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.SessionFilters
+import dev.claudefleet.mobile.model.StatusFilter
+import dev.claudefleet.mobile.model.TimeWindow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.net.HubCapabilities
@@ -359,8 +362,7 @@ class SessionsViewModelTest {
             sessions = listOf(session(1, host = "box"), session(2, host = "pine")),
             hosts = emptyList(),
             projects = emptyList(),
-            needsAttentionOnly = false,
-            hostFilter = "pine",
+            filters = SessionFilters(hostFilter = "pine"),
         )
         assertEquals(listOf("pine"), groups.map { it.alias })
     }
@@ -372,8 +374,7 @@ class SessionsViewModelTest {
             sessions = listOf(session(1, host = "box")),
             hosts = emptyList(),
             projects = emptyList(),
-            needsAttentionOnly = false,
-            hostFilter = "pine",
+            filters = SessionFilters(hostFilter = "pine"),
         )
         assertTrue(groups.isEmpty())
     }
@@ -547,7 +548,7 @@ class NeedsAttentionToggleTest {
             keyed(4, "ABC-1", project = 2),
             keyed(5, "ABC-1", project = 1).copy(kind = "external"),
         )
-        val groups = groupSessions(rows, emptyList(), emptyList(), needsAttentionOnly = false, byWork = true)
+        val groups = groupSessions(rows, emptyList(), emptyList(), byWork = true)
 
         assertEquals(
             listOf("work:ABC-1" to listOf(4L, 1L), "work:DEF-2" to listOf(3L), "project #1" to listOf(5L, 2L)),
@@ -561,7 +562,7 @@ class NeedsAttentionToggleTest {
     fun a_suggestion_never_regroups_only_a_confirmed_link_makes_a_work_group() {
         val suggested = session(1).copy(workSuggested = linked("ABC-1"))
         val confirmed = keyed(2, "ABC-1")
-        val groups = groupSessions(listOf(suggested, confirmed), emptyList(), emptyList(), needsAttentionOnly = false, byWork = true)
+        val groups = groupSessions(listOf(suggested, confirmed), emptyList(), emptyList(), byWork = true)
 
         assertEquals(listOf("work:ABC-1" to listOf(2L), "project #1" to listOf(1L)), (groups to "box").labels())
     }
@@ -574,10 +575,10 @@ class NeedsAttentionToggleTest {
     fun filters_rows_but_a_hidden_keyed_session_never_reappears_under_its_project() {
         val rows = listOf(keyed(1, "ABC-1"), keyed(2, "ABC-1", host = "mefistos"), keyed(3, "ABC-1", claudeStatus = "blocked"))
 
-        val onHost = groupSessions(rows, emptyList(), emptyList(), needsAttentionOnly = false, hostFilter = "mefistos", byWork = true)
+        val onHost = groupSessions(rows, emptyList(), emptyList(), filters = SessionFilters(hostFilter = "mefistos"), byWork = true)
         assertEquals(listOf("work:ABC-1" to listOf(2L)), (onHost to "mefistos").labels())
 
-        val attention = groupSessions(rows, emptyList(), emptyList(), needsAttentionOnly = true, byWork = true)
+        val attention = groupSessions(rows, emptyList(), emptyList(), filters = SessionFilters(needsAttentionOnly = true), byWork = true)
         assertEquals(listOf("work:ABC-1" to listOf(3L)), (attention to "box").labels(), "session 1 is filtered out of both kinds of group")
     }
 
@@ -585,7 +586,7 @@ class NeedsAttentionToggleTest {
     @Test
     fun drops_a_group_with_no_visible_session() {
         val rows = listOf(keyed(1, "ABC-1"), keyed(2, "DEF-2", claudeStatus = "blocked"))
-        val groups = groupSessions(rows, emptyList(), emptyList(), needsAttentionOnly = true, byWork = true)
+        val groups = groupSessions(rows, emptyList(), emptyList(), filters = SessionFilters(needsAttentionOnly = true), byWork = true)
 
         assertEquals(listOf("work:DEF-2" to listOf(2L)), (groups to "box").labels())
     }
@@ -599,7 +600,7 @@ class NeedsAttentionToggleTest {
             keyed(3, "C-3"),
             keyed(4, "B-2"),
         )
-        val groups = groupSessions(rows, emptyList(), emptyList(), needsAttentionOnly = false, byWork = true)
+        val groups = groupSessions(rows, emptyList(), emptyList(), byWork = true)
 
         // B-2 wants a person; C-3 (id 3) was active more recently than A-1.
         assertEquals(listOf("work:B-2", "work:C-3", "work:A-1"), (groups to "box").labels().map { it.first })
@@ -609,7 +610,7 @@ class NeedsAttentionToggleTest {
     @Test
     fun a_key_with_an_unavailable_ticket_still_groups() {
         val gone = session(1).copy(work = linked("PAY-7", unavailable = true))
-        val group = groupSessions(listOf(gone), emptyList(), emptyList(), needsAttentionOnly = false, byWork = true)
+        val group = groupSessions(listOf(gone), emptyList(), emptyList(), byWork = true)
             .single().projects.single()
 
         assertEquals("PAY-7", group.label)
@@ -620,14 +621,14 @@ class NeedsAttentionToggleTest {
     @Test
     fun keys_group_case_insensitively() {
         val rows = listOf(keyed(1, "PAY-7"), session(2).copy(work = linked("pay-7")))
-        val groups = groupSessions(rows, emptyList(), emptyList(), needsAttentionOnly = false, byWork = true)
+        val groups = groupSessions(rows, emptyList(), emptyList(), byWork = true)
 
         assertEquals(1, groups.single().projects.size)
     }
 
     @Test
     fun without_by_work_a_keyed_session_stays_in_its_project() {
-        val groups = groupSessions(listOf(keyed(1, "ABC-1")), emptyList(), emptyList(), needsAttentionOnly = false)
+        val groups = groupSessions(listOf(keyed(1, "ABC-1")), emptyList(), emptyList())
         assertEquals(listOf("project #1" to listOf(1L)), (groups to "box").labels())
     }
 
@@ -643,7 +644,7 @@ class NeedsAttentionToggleTest {
         val fleet = FakeFleet(listOf(keyed(1, "ABC-1")))
         val vm = SessionsViewModel(fleet, backgroundScope, prefs = prefs)
 
-        vm.toggleByWork()
+        vm.setGroupMode(GroupMode.WORK)
         runCurrent()
         assertFalse(vm.state.value.workAvailable)
         assertFalse(vm.state.value.byWork, "an old hub: nothing to group by")
@@ -655,7 +656,7 @@ class NeedsAttentionToggleTest {
 
         val next = SessionsViewModel(workFleet(listOf(keyed(1, "ABC-1"))), backgroundScope, prefs = prefs)
         assertTrue(next.state.value.byWork, "the choice survives a relaunch")
-        next.toggleByWork()
+        next.setGroupMode(GroupMode.PROJECT)
         assertEquals(emptyList(), prefs.getStringList("sessions.by_work"))
     }
 
@@ -689,7 +690,7 @@ class NeedsAttentionToggleTest {
     fun a_work_heading_follows_the_ticket_cache() = runTest {
         val fleet = workFleet(listOf(session(1).copy(work = linked("PAY-7", itemId = 70).copy(statusName = "To Do"))))
         val vm = SessionsViewModel(fleet, backgroundScope)
-        vm.toggleByWork()
+        vm.setGroupMode(GroupMode.WORK)
         runCurrent()
         assertEquals("To Do", vm.state.value.groups.single().projects.single().work!!.statusName)
 
@@ -761,7 +762,7 @@ class NeedsAttentionToggleTest {
         val fleet = workFleet(listOf(keyed(1, "PAY-7").copy(orgId = 1), keyed(2, "ENG-2").copy(orgId = 2)))
         fleet.orgs.value = twoOrgs
         val vm = SessionsViewModel(fleet, backgroundScope)
-        vm.toggleByWork()
+        vm.setGroupMode(GroupMode.WORK)
         runCurrent()
         val labels = vm.state.value.groups.single().projects.associate { it.label to it.orgLabel }
         assertEquals(mapOf("PAY-7" to "Acme", "ENG-2" to "Side"), labels)
@@ -770,5 +771,403 @@ class NeedsAttentionToggleTest {
         vm.toggleOrg(1)
         runCurrent()
         assertEquals(listOf<String?>(null), vm.state.value.groups.single().projects.map { it.orgLabel })
+    }
+}
+
+/**
+ * The filters the sheet owns, driven through the view model.
+ *
+ * The narrowing rules themselves are `SessionFiltersTest`'s — this is about
+ * what the view model does around them: the counts the screen draws, the clock
+ * the window is measured against, and the filters that must not outlive the
+ * hub feature that offered them.
+ */
+class SessionFilterStateTest {
+
+    @Test
+    fun the_state_counts_what_is_shown_against_what_the_fleet_has() = runTest {
+        val fleet = FakeFleet(listOf(session(1, host = "box"), session(2, host = "pine"), session(3, host = "pine")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        assertEquals(3, vm.state.value.total)
+        assertEquals(3, vm.state.value.shown)
+        assertFalse(vm.state.value.narrowed, "nothing is on, so nothing is being hidden")
+
+        vm.setHostFilter("pine")
+        runCurrent()
+        assertEquals(2, vm.state.value.shown)
+        assertEquals(3, vm.state.value.total, "the total is the fleet's, not the filtered list's")
+        assertTrue(vm.state.value.narrowed)
+    }
+
+    /**
+     * A filter that happens to hide nothing is not "narrowed": the summary
+     * line exists to explain missing rows, and drawing "3 of 3" over a list
+     * with nothing missing is chrome that teaches people to ignore it.
+     */
+    @Test
+    fun a_filter_that_hides_nothing_does_not_claim_to() = runTest {
+        val fleet = FakeFleet(listOf(session(1, host = "box"), session(2, host = "box")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.setHostFilter("box")
+        runCurrent()
+        assertEquals(2, vm.state.value.shown)
+        assertFalse(vm.state.value.narrowed)
+        assertEquals(1, vm.state.value.filters.activeCount, "it is still on, it is just not hiding anything")
+    }
+
+    /**
+     * The one that matters. `nowSeconds` ticks every 30 seconds so ages stay
+     * honest, and if the activity window were measured against it, rows would
+     * cross the boundary and vanish under a thumb mid-scroll. The window is
+     * anchored when it is set and re-anchored on a refresh, so between those
+     * two the set of rows changes only because the fleet did.
+     */
+    @Test
+    fun the_activity_window_does_not_move_with_the_ticking_clock() = runTest {
+        var now = 10_000L
+        // Active 30 seconds ago: inside a one-hour window, and it stays inside
+        // for the rest of this test however far the display clock runs.
+        val fleet = FakeFleet(listOf(session(1, lastActivityAt = 9_970)))
+        val vm = SessionsViewModel(fleet, backgroundScope, clock = { now })
+
+        vm.setWindow(TimeWindow.H1)
+        runCurrent()
+        assertEquals(1, vm.state.value.shown)
+
+        // Two hours pass on the display clock. The row is now two hours old by
+        // the age the row itself draws — and still shown, because the window
+        // was anchored when it was asked for.
+        now += 7_200
+        advanceTimeBy(31_000)
+        runCurrent()
+        assertEquals(10_000L + 7_200, vm.state.value.nowSeconds, "the display clock did tick")
+        assertEquals(1, vm.state.value.shown, "the row left the window without anyone touching a control")
+    }
+
+    /** Pulling to refresh is the other thing that re-anchors it — that is what a pull asks for. */
+    @Test
+    fun a_refresh_re_anchors_the_activity_window() = runTest {
+        var now = 10_000L
+        val fleet = FakeFleet(listOf(session(1, lastActivityAt = 9_970)))
+        val vm = SessionsViewModel(fleet, backgroundScope, clock = { now })
+
+        vm.setWindow(TimeWindow.H1)
+        runCurrent()
+        assertEquals(1, vm.state.value.shown)
+
+        now += 7_200
+        vm.refresh().join()
+        runCurrent()
+        assertEquals(0, vm.state.value.shown, "after a pull, 'within an hour' means an hour from now")
+    }
+
+    @Test
+    fun setting_a_window_later_measures_from_then_and_not_from_launch() = runTest {
+        var now = 10_000L
+        val fleet = FakeFleet(listOf(session(1, lastActivityAt = 13_000)))
+        val vm = SessionsViewModel(fleet, backgroundScope, clock = { now })
+
+        // The row is stamped in the future of launch and in the past of now.
+        now = 16_000
+        vm.setWindow(TimeWindow.H1)
+        runCurrent()
+        assertEquals(1, vm.state.value.shown, "3000s old, well inside an hour of when the window was set")
+    }
+
+    @Test
+    fun the_search_field_clears_its_query_when_it_is_put_away() = runTest {
+        val vm = SessionsViewModel(FakeFleet(listOf(session(1))), backgroundScope)
+
+        vm.toggleSearch()
+        vm.setQuery("hub")
+        runCurrent()
+        assertTrue(vm.state.value.searchOpen)
+        assertEquals("hub", vm.state.value.filters.query)
+
+        vm.toggleSearch()
+        runCurrent()
+        assertFalse(vm.state.value.searchOpen)
+        assertEquals("", vm.state.value.filters.query, "a filter whose control is off screen cannot be undone")
+        assertEquals(0, vm.state.value.filters.activeCount)
+    }
+
+    /**
+     * `clearFilters` leaves the host alone on purpose — the navigator owns it
+     * (`Screen.Sessions.hostAlias`), and `App` calls both. A version of this
+     * that cleared the host here would put the two copies into disagreement,
+     * which is the stale-`returnTo` bug `Navigator.clearHostFilter` documents.
+     */
+    @Test
+    fun clearing_the_filters_leaves_the_host_for_the_navigator() = runTest {
+        val fleet = FakeFleet(listOf(session(1, host = "box"), session(2, host = "pine")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.setHostFilter("pine")
+        vm.toggleNeedsAttentionOnly()
+        vm.setWindow(TimeWindow.D1)
+        vm.toggleBackground()
+        runCurrent()
+        assertEquals(4, vm.state.value.filters.activeCount)
+
+        vm.clearFilters()
+        runCurrent()
+        assertEquals("pine", vm.state.value.hostFilter)
+        assertEquals(1, vm.state.value.filters.activeCount)
+        assertEquals(TimeWindow.ANY, vm.state.value.filters.window)
+        assertTrue(vm.state.value.filters.showBackground)
+    }
+
+    @Test
+    fun a_status_can_be_added_and_taken_away_again() = runTest {
+        val fleet = FakeFleet(listOf(session(1, claudeStatus = "blocked"), session(2, claudeStatus = "working")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.toggleStatus(StatusFilter.BLOCKED)
+        runCurrent()
+        assertEquals(1, vm.state.value.shown)
+
+        vm.toggleStatus(StatusFilter.WORKING)
+        runCurrent()
+        assertEquals(2, vm.state.value.shown, "two statuses are a union, not an intersection")
+
+        vm.toggleStatus(StatusFilter.WORKING)
+        vm.toggleStatus(StatusFilter.BLOCKED)
+        runCurrent()
+        assertEquals(2, vm.state.value.shown, "no status chosen means every status")
+        assertEquals(0, vm.state.value.filters.activeCount)
+    }
+
+    @Test
+    fun background_agents_can_be_left_out() = runTest {
+        val fleet = FakeFleet(listOf(session(1), session(2, name = "bg:abcd")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        assertEquals(2, vm.state.value.shown)
+        vm.toggleBackground()
+        runCurrent()
+        assertEquals(1, vm.state.value.shown)
+    }
+
+    @Test
+    fun the_search_reaches_the_project_name_the_row_does_not_carry() = runTest {
+        val fleet = FakeFleet(
+            rows = listOf(session(1, project = 1), session(2, project = 2)),
+            projectRows = listOf(
+                ProjectRow(id = 1, owner = "martin-janci", repo = "claude-fleet"),
+                ProjectRow(id = 2, owner = "martin-janci", repo = "fleet-mobile"),
+            ),
+        )
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.setQuery("mobile")
+        runCurrent()
+        assertEquals(1, vm.state.value.shown)
+        assertEquals(listOf(2L), vm.state.value.groups.single().projects.single().sessions.map { it.id })
+    }
+
+    /**
+     * The same rule the org chips and *By work* already follow: a filter whose
+     * control is gone is dropped rather than left narrowing a list with
+     * nothing on screen to explain it.
+     */
+    @Test
+    fun my_work_stops_narrowing_when_the_tracker_goes_away() = runTest {
+        val fleet = FakeFleet(listOf(session(1), session(2)))
+        fleet.capabilities.value = HubCapabilities.of(ToolCatalog(setOf("work")))
+        fleet.myWork.value = setOf(99)
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.toggleMyWorkOnly()
+        runCurrent()
+        assertTrue(vm.state.value.myWorkOnly)
+        assertEquals(0, vm.state.value.shown, "neither session is on ticket 99")
+
+        fleet.myWork.value = null
+        runCurrent()
+        assertFalse(vm.state.value.myWorkOnly)
+        assertEquals(2, vm.state.value.shown)
+        assertEquals(0, vm.state.value.filters.activeCount)
+    }
+}
+
+/** What the filter sheet is given to offer as hosts. */
+class HostChoicesTest {
+
+    @Test
+    fun the_host_list_is_offered_with_the_reachability_it_reported() {
+        val choices = hostChoices(
+            sessions = listOf(session(1, host = "box")),
+            hosts = listOf(HostRow(alias = "pine", reachable = true), HostRow(alias = "box", reachable = false)),
+        )
+        assertEquals(listOf("box", "pine"), choices.map { it.alias })
+        assertEquals(listOf(false, true), choices.map { it.reachable })
+    }
+
+    /**
+     * A host only a session names is offered, with **unknown** reachability —
+     * not `false`. Leaving it out would make its rows unreachable by the one
+     * filter meant to find them, and calling it unreachable is the accusation
+     * `HostGroup.reachable` exists to avoid.
+     */
+    @Test
+    fun a_host_only_a_session_names_is_offered_and_is_not_called_unreachable() {
+        val choices = hostChoices(listOf(session(1, host = "ghost")), hosts = emptyList())
+        assertEquals(listOf("ghost"), choices.map { it.alias })
+        assertEquals(listOf<Boolean?>(null), choices.map { it.reachable })
+    }
+
+    @Test
+    fun a_hidden_host_is_offered_only_while_it_has_sessions_on_screen() {
+        val hidden = HostRow(alias = "old", reachable = true, hidden = true)
+        assertTrue(hostChoices(emptyList(), listOf(hidden)).isEmpty())
+        assertEquals(listOf("old"), hostChoices(listOf(session(1, host = "old")), listOf(hidden)).map { it.alias })
+    }
+}
+
+/** The three views, and the queue that is not a grouping at all. */
+class GroupModeTest {
+
+    @Test
+    fun the_urgency_queue_is_flat_and_worst_first() = runTest {
+        val fleet = FakeFleet(
+            rows = listOf(
+                session(1, host = "box", claudeStatus = "working"),
+                session(2, host = "pine", claudeStatus = "blocked"),
+                session(3, host = "box", claudeStatus = "failed"),
+            ),
+        )
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.setGroupMode(GroupMode.URGENCY)
+        runCurrent()
+        assertEquals(listOf(2L, 3L, 1L), vm.state.value.urgent.map { it.id })
+        assertTrue(vm.state.value.groups.isEmpty(), "the queue has no headings to group under")
+        assertEquals(3, vm.state.value.shown)
+        assertFalse(vm.state.value.isEmpty, "a screen with a queue on it is not empty")
+    }
+
+    /** The queue is a view, not a filter: the same rows the tree would show. */
+    @Test
+    fun the_queue_narrows_by_exactly_the_same_filters_as_the_tree() = runTest {
+        val fleet = FakeFleet(
+            rows = listOf(
+                session(1, host = "box", claudeStatus = "blocked"),
+                session(2, host = "pine", claudeStatus = "blocked"),
+            ),
+        )
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.setHostFilter("pine")
+        runCurrent()
+        val inTree = vm.state.value.shown
+
+        vm.setGroupMode(GroupMode.URGENCY)
+        runCurrent()
+        assertEquals(inTree, vm.state.value.shown)
+        assertEquals(listOf(2L), vm.state.value.urgent.map { it.id })
+    }
+
+    @Test
+    fun the_cycle_skips_work_on_a_hub_without_the_work_graph() = runTest {
+        val vm = SessionsViewModel(FakeFleet(listOf(session(1))), backgroundScope)
+
+        vm.cycleGroupMode(workAvailable = false)
+        runCurrent()
+        assertEquals(GroupMode.URGENCY, vm.state.value.groupMode)
+
+        vm.cycleGroupMode(workAvailable = false)
+        runCurrent()
+        assertEquals(GroupMode.PROJECT, vm.state.value.groupMode)
+    }
+
+    @Test
+    fun the_cycle_visits_all_three_when_the_hub_has_the_work_graph() = runTest {
+        val fleet = FakeFleet(listOf(session(1)))
+        fleet.capabilities.value = HubCapabilities.of(ToolCatalog(setOf("work")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        val seen = buildList {
+            repeat(4) {
+                vm.cycleGroupMode(workAvailable = true)
+                runCurrent()
+                add(vm.state.value.groupMode)
+            }
+        }
+        assertEquals(
+            listOf(GroupMode.WORK, GroupMode.URGENCY, GroupMode.PROJECT, GroupMode.WORK),
+            seen,
+        )
+    }
+
+    /** `byWork` is still what the screen asks, so the work grouping is unchanged. */
+    @Test
+    fun the_work_grouping_still_answers_to_by_work() = runTest {
+        val fleet = FakeFleet(listOf(session(1)))
+        fleet.capabilities.value = HubCapabilities.of(ToolCatalog(setOf("work")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.setGroupMode(GroupMode.WORK)
+        runCurrent()
+        assertTrue(vm.state.value.byWork)
+
+        vm.setGroupMode(GroupMode.URGENCY)
+        runCurrent()
+        assertFalse(vm.state.value.byWork, "urgency is not work")
+    }
+
+    /** A hub that loses the work graph cannot leave the list in a mode whose chip is gone. */
+    @Test
+    fun the_work_view_falls_back_to_project_when_the_work_graph_goes_away() = runTest {
+        val fleet = FakeFleet(listOf(session(1)))
+        fleet.capabilities.value = HubCapabilities.of(ToolCatalog(setOf("work")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.setGroupMode(GroupMode.WORK)
+        runCurrent()
+        assertEquals(GroupMode.WORK, vm.state.value.groupMode)
+
+        fleet.capabilities.value = HubCapabilities()
+        runCurrent()
+        assertEquals(GroupMode.PROJECT, vm.state.value.groupMode)
+    }
+
+    /**
+     * A build that has been storing `sessions.by_work` for months is on
+     * people's phones. Reading only the new key would silently reset every one
+     * of them to project on upgrade.
+     */
+    @Test
+    fun a_view_stored_by_the_older_build_is_still_honoured() = runTest {
+        val prefs = FakePrefs()
+        prefs.putStringList("sessions.by_work", listOf("on"))
+        val fleet = FakeFleet(listOf(session(1)))
+        fleet.capabilities.value = HubCapabilities.of(ToolCatalog(setOf("work")))
+
+        val vm = SessionsViewModel(fleet, backgroundScope, prefs = prefs)
+        runCurrent()
+        assertEquals(GroupMode.WORK, vm.state.value.groupMode)
+    }
+
+    @Test
+    fun the_view_is_remembered_and_the_older_key_is_kept_in_step() = runTest {
+        val prefs = FakePrefs()
+        val fleet = FakeFleet(listOf(session(1)))
+        fleet.capabilities.value = HubCapabilities.of(ToolCatalog(setOf("work")))
+
+        SessionsViewModel(fleet, backgroundScope, prefs = prefs).setGroupMode(GroupMode.WORK)
+        assertEquals(listOf("WORK"), prefs.getStringList("sessions.group_mode"))
+        assertEquals(listOf("on"), prefs.getStringList("sessions.by_work"))
+
+        // Urgency has no representation in the old key, and is not work.
+        SessionsViewModel(fleet, backgroundScope, prefs = prefs).setGroupMode(GroupMode.URGENCY)
+        assertEquals(listOf("URGENCY"), prefs.getStringList("sessions.group_mode"))
+        assertEquals(emptyList(), prefs.getStringList("sessions.by_work"))
+
+        // And a fresh view model reads it back.
+        val reopened = SessionsViewModel(fleet, backgroundScope, prefs = prefs)
+        runCurrent()
+        assertEquals(GroupMode.URGENCY, reopened.state.value.groupMode)
     }
 }

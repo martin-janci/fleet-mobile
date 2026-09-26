@@ -74,14 +74,7 @@ class SessionsScreenTest {
     private fun show(s: SessionsUiState) {
         compose.setContent {
             FleetTheme {
-                SessionsScreen(
-                    state = s,
-                    onOpenSession = {},
-                    onToggleNeedsAttention = {},
-                    onClearHostFilter = {},
-                    onRefresh = {},
-                    onDismissError = {},
-                )
+                SessionsScreen(state = s)
             }
         }
         compose.waitForIdle()

@@ -210,6 +210,62 @@ object FleetIcons {
         }.build()
     }
 
+    /**
+     * A stroked magnifier: a circle with a handle running out of its
+     * lower-right at 45°.
+     *
+     * The two `arcTo` calls are a full circle written as two halves, the way
+     * [MoreVert]'s dots are — one arc cannot close a circle, and the mistake
+     * [Refresh]'s comment records (an arc whose *other* candidate centre put
+     * three quarters of it outside the box) is only possible when the sweep is
+     * ambiguous. Two half-turns between opposite points are not.
+     */
+    val Search: ImageVector by lazy {
+        ImageVector.Builder("Search", 24.dp, 24.dp, 24f, 24f).apply {
+            path(
+                fill = null,
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                // Lens: r = 6.5 centred on (10.5, 10.5), drawn as two halves.
+                moveTo(17f, 10.5f)
+                arcTo(6.5f, 6.5f, 0f, isMoreThanHalf = false, isPositiveArc = true, x1 = 4f, y1 = 10.5f)
+                arcTo(6.5f, 6.5f, 0f, isMoreThanHalf = false, isPositiveArc = true, x1 = 17f, y1 = 10.5f)
+                // Handle, from the lens's lower-right down to the corner.
+                moveTo(15.1f, 15.1f); lineTo(20.5f, 20.5f)
+            }
+        }.build()
+    }
+
+    /**
+     * Three stroked sliders — the "tune" glyph — for the filter sheet.
+     *
+     * Each row is a full-width rail with a short cross-tick standing on it at
+     * a different position, which is what distinguishes it from a plain
+     * hamburger at 24 dp. Circular knobs would read as dots at this size.
+     */
+    val Filters: ImageVector by lazy {
+        ImageVector.Builder("Filters", 24.dp, 24.dp, 24f, 24f).apply {
+            path(
+                fill = null,
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                // rail, then the knob standing on it: y = 6, 12, 18.
+                moveTo(3f, 6f); lineTo(21f, 6f)
+                moveTo(16f, 3.5f); lineTo(16f, 8.5f)
+                moveTo(3f, 12f); lineTo(21f, 12f)
+                moveTo(8f, 9.5f); lineTo(8f, 14.5f)
+                moveTo(3f, 18f); lineTo(21f, 18f)
+                moveTo(14f, 15.5f); lineTo(14f, 20.5f)
+            }
+        }.build()
+    }
+
     /** Three filled dots, stacked vertically: the overflow ("more") glyph. */
     val MoreVert: ImageVector by lazy {
         ImageVector.Builder("MoreVert", 24.dp, 24.dp, 24f, 24f).apply {
