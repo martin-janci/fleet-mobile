@@ -75,6 +75,10 @@ class ToolsTheAppMayCallTest {
         // offers what it decides; see `HubCapabilities`.
         "work",
         "work_link",
+        // The fleet's agent: `Access::Client` in `guard.rs`, not readonly
+        // (it may start the agent's session), so only a `full` pairing is
+        // offered it — see `AgentViewModel`.
+        "ensure_operator",
     )
 
     @Test

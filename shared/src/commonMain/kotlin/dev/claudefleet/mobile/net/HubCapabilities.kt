@@ -35,6 +35,9 @@ data class HubCapabilities(
     val work: Boolean get() = WORK in tools
     val workLink: Boolean get() = WORK_LINK in tools
 
+    /** The hub's agent (`ensure_operator`) — the desktop's ✦, on the phone. */
+    val agent: Boolean get() = ENSURE_OPERATOR in tools
+
     fun has(tool: String, action: String): Boolean =
         tool in tools &&
             actions[tool]?.contains(action) != false &&
@@ -47,6 +50,7 @@ data class HubCapabilities(
     companion object {
         const val WORK = "work"
         const val WORK_LINK = "work_link"
+        const val ENSURE_OPERATOR = "ensure_operator"
 
         fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions)
     }
