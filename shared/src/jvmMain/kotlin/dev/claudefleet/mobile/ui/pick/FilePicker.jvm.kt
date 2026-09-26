@@ -1,7 +1,7 @@
 package dev.claudefleet.mobile.ui.pick
 
 import androidx.compose.runtime.Composable
-import dev.claudefleet.mobile.model.PickedFile
+import dev.claudefleet.mobile.model.PickResult
 
 /**
  * No picker off a device.
@@ -19,7 +19,9 @@ actual fun filePickerSupported(): Boolean = false
  *
  * A launcher that answered by doing nothing would leave a caller's spinner
  * spinning, and that is exactly the promise the shared contract makes about a
- * cancelled pick. The stub keeps it.
+ * cancelled pick. The stub keeps it — and an empty [PickResult] is precisely
+ * "cancelled", which is the honest report for a platform that never opened a
+ * picker in the first place.
  */
 @Composable
-actual fun rememberFilePicker(onPicked: (List<PickedFile>) -> Unit): () -> Unit = { onPicked(emptyList()) }
+actual fun rememberFilePicker(onPicked: (PickResult) -> Unit): () -> Unit = { onPicked(PickResult()) }

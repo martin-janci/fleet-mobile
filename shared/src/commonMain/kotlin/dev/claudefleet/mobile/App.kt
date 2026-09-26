@@ -578,6 +578,8 @@ private fun SessionRoute(
         status = status,
         onDraftChange = vm::onDraftChange,
         onSend = { vm.send() },
+        onPicked = vm::onPicked,
+        onRemoveAttachment = vm::removeAttachment,
         onRefresh = { vm.refresh() },
         onBack = onBack,
         onDismissError = vm::dismissError,

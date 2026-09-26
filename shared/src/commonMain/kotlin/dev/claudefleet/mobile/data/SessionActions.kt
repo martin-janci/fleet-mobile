@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.model.Conversation
+import dev.claudefleet.mobile.model.PickedFile
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.WaitResult
 import kotlinx.coroutines.CancellationException
@@ -42,6 +43,16 @@ interface SessionActions {
 
     /** Press one key (`"Enter"` | `"Escape"` | `"C-c"`) instead of typing text. */
     suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult
+
+    /**
+     * Stage one file on the session's host; answers the absolute path it
+     * landed at, ready to be named in a prompt.
+     *
+     * A write, like [sendPrompt]: a readonly credential is refused it, and
+     * the composer hides the attach control for one rather than finding out
+     * from an error.
+     */
+    suspend fun uploadAttachment(sessionId: Long, file: PickedFile): String
 
     /** The visible tmux pane, capped to [maxLines] lines. */
     suspend fun capture(sessionId: Long, maxLines: Int = 40): String
@@ -94,6 +105,9 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
 
     override suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult =
         session.withClient { it.sendKeys(sessionId, key) }
+
+    override suspend fun uploadAttachment(sessionId: Long, file: PickedFile): String =
+        session.withClient { it.uploadAttachment(sessionId, file) }
 
     override suspend fun capture(sessionId: Long, maxLines: Int): String =
         session.withClient { it.capture(sessionId, maxLines) }

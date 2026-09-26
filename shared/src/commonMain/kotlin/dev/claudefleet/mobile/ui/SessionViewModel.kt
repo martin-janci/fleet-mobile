@@ -9,9 +9,15 @@ import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.Conversation
+import dev.claudefleet.mobile.model.PickResult
+import dev.claudefleet.mobile.model.PickedFile
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.appending
+import dev.claudefleet.mobile.model.checkBudget
+import dev.claudefleet.mobile.model.dedupedName
+import dev.claudefleet.mobile.model.skippedRefusal
 import dev.claudefleet.mobile.model.tailMarker
+import dev.claudefleet.mobile.model.withAttachments
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
@@ -60,6 +66,19 @@ data class SessionUiState(
      */
     val refreshing: Boolean = false,
     val sending: Boolean = false,
+    /**
+     * Files picked but not yet sent. Their bytes are still only on this
+     * phone: the upload is part of Send, so one queued and then removed was
+     * never transferred anywhere.
+     */
+    val attachments: List<PickedFile> = emptyList(),
+    /**
+     * The last refusal to show under the composer — a file over a ceiling, a
+     * file the picker could not bring back, an upload the hub bounced.
+     * Cleared by the next pick that is accepted, by removing a chip, and by a
+     * send that goes through.
+     */
+    val attachError: String? = null,
     /** True when this device's credential is `readonly` and may not send. */
     val readOnly: Boolean = false,
     /**
@@ -193,7 +212,22 @@ data class SessionUiState(
      * answer already in flight does — see [idle].
      */
     val canSend: Boolean
-        get() = idle(sending, answering, busy) && !readOnly && connected && session != null && draft.isNotBlank()
+        get() = idle(sending, answering, busy) && !readOnly && connected && session != null &&
+            (draft.isNotBlank() || attachments.isNotEmpty())
+
+    /**
+     * Whether the composer offers the attach control at all.
+     *
+     * Attaching is a write — the bytes are staged in the session's worktree —
+     * so a readonly credential does not get the button, exactly as it does
+     * not get Send. It is deliberately *not* gated on [connected]: queueing a
+     * file changes nothing on the hub, and a person who picks one while the
+     * radio is down should find it waiting when the hub comes back rather
+     * than find the button missing. The upload is gated, because it is part
+     * of Send and [canSend] carries that.
+     */
+    val canAttach: Boolean
+        get() = !readOnly && !sending && session != null
 
     /**
      * Whether the card's answer chips do anything — the other half of
@@ -299,6 +333,10 @@ class SessionViewModel(
         val loading: Boolean = false,
         val refreshing: Boolean = false,
         val sending: Boolean = false,
+        /** See [SessionUiState.attachments]. */
+        val attachments: List<PickedFile> = emptyList(),
+        /** See [SessionUiState.attachError]. */
+        val attachError: String? = null,
         val error: Friendly? = null,
         val silent: Boolean = false,
         /**
@@ -544,6 +582,91 @@ class SessionViewModel(
     }
 
     /**
+     * What one launch of the file picker produced — the whole of it, both
+     * what it brought and what it left behind.
+     *
+     * The picker refuses a file over [dev.claudefleet.mobile.model.ATTACH_MAX_BYTES]
+     * *before* reading it, which is what keeps "the bytes come back in memory"
+     * bounded, and it can fail to read one at all. Either way the file is
+     * named here rather than quietly missing: a person who picked six files
+     * and got five must be told which one went and why, and this is the only
+     * place with a screen to say it on.
+     *
+     * A [PickResult] with nothing in either list is a cancelled pick, and
+     * that alone: it leaves the queue and any standing refusal exactly as
+     * they were, because cancelling a picker is not an answer to anything.
+     */
+    fun onPicked(result: PickResult) {
+        if (result.files.isEmpty() && result.skipped.isEmpty()) return
+        // A pick answers the last one, so whatever refusal was standing goes
+        // first — otherwise a pick that is *only* skips would append its note
+        // to the previous pick's refusal and the two would be read as one
+        // sentence about one file. [attach] clears it too, but [attach]
+        // returns early on an empty list and a skips-only pick is exactly
+        // that.
+        local.update { it.copy(attachError = null) }
+        attach(result.files)
+        if (result.skipped.isEmpty()) return
+        val note = result.skipped.joinToString(" ") { skippedRefusal(it) }
+        // Appended rather than assigned: the batch that came back may itself
+        // have been refused by [attach] for the total, and both facts are
+        // about the same tap.
+        local.update { it.copy(attachError = listOfNotNull(it.attachError, note).joinToString(" ")) }
+    }
+
+    /**
+     * Queue files for the next send. Nothing leaves the phone here — the
+     * upload is part of Send, so a file queued and then removed was never
+     * transferred.
+     *
+     * The budget is checked across what is already queued as well, so three
+     * nine-megabyte files are refused on the third rather than after two of
+     * them are on the host. That check is the **only** thing enforcing
+     * [dev.claudefleet.mobile.model.ATTACH_MAX_TOTAL] anywhere on the phone:
+     * the picker bounds one file at a time and knows nothing about what an
+     * earlier pick already queued.
+     *
+     * A refused batch is refused whole and changes nothing, rather than being
+     * taken up to the ceiling and truncated: which files "fit" would depend
+     * on an order the person never chose.
+     *
+     * A file whose name is already taken — by the queue, or by an earlier
+     * file in this very batch — is **renamed**, not dropped: `a.png` becomes
+     * `a-1.png`, by the same rule the desktop's own `dedupe_names` uses. The
+     * names have to be unique (the chips are keyed by them, and the remove
+     * control addresses by them) and two files really can share one: an
+     * `IMG_0001.jpg` from each of two folders, in a single multi-select.
+     * Keeping the last one under the shared name would silently lose the
+     * other, which is precisely the failure this whole feature is built to
+     * avoid.
+     */
+    fun attach(files: List<PickedFile>) {
+        if (files.isEmpty()) return
+        // The merge and the budget are inside the `update`, not read from
+        // `local.value` first: the running total is a read-modify-write over
+        // the queue, and this file's rule is that every one of those is one
+        // atomic block. (The block is pure, so re-running it costs nothing.)
+        local.update { l ->
+            val taken = l.attachments.mapTo(mutableSetOf()) { it.name }
+            val renamed = files.map { f ->
+                val name = dedupedName(f.name, taken)
+                taken += name
+                if (name == f.name) f else PickedFile(name, f.size, f.bytes)
+            }
+            val next = l.attachments + renamed
+            val refusal = checkBudget(next.map { it.name to it.size })
+            if (refusal != null) l.copy(attachError = refusal) else l.copy(attachments = next, attachError = null)
+        }
+    }
+
+    /** Drop one queued file. Its bytes were never sent anywhere, so this is the whole of it. */
+    fun removeAttachment(name: String) {
+        local.update {
+            it.copy(attachments = it.attachments.filterNot { a -> a.name == name }, attachError = null)
+        }
+    }
+
+    /**
      * The screen's own report of whether the reader is at the newest turn —
      * the truth [Local.atBottom] tracks for [newReply], and, on `true`, the
      * signal that any pending new-reply flag is resolved: the reader just
@@ -666,8 +789,43 @@ class SessionViewModel(
         // its value trails the last `onDraftChange` by however long the
         // collector takes to be resumed. A send must not depend on that.
         if (!canSendNow(current)) return@launch
-        deliver(current.draft, clearDraft = true)
+        if (current.attachments.isEmpty()) {
+            deliver(current.draft, clearDraft = true)
+            return@launch
+        }
+        // Claim the write *before* the first upload. An upload suspends, and
+        // `sending` is the single-flight flag every other write on this
+        // screen reads — without this a second tap during a slow upload would
+        // start a second one.
+        local.update { it.copy(sending = true, error = null, attachError = null) }
+        // Upload first: the prompt names paths, so the paths have to exist.
+        // A failure here leaves the draft AND the chips alone — a prompt
+        // without its attachment is a worse outcome than a prompt not sent —
+        // and says which file it was, since a person with four chips up
+        // cannot act on "the upload failed".
+        val staged = mutableListOf<String>()
+        for (file in current.attachments) {
+            try {
+                staged += actions.uploadAttachment(sessionId, file)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                local.update {
+                    it.copy(sending = false, attachError = "${file.name} did not upload — ${reason(t)}")
+                }
+                return@launch
+            }
+        }
+        deliver(withAttachments(current.draft, staged), clearDraft = true, clearAttachments = true)
     }
+
+    /**
+     * The one line of a failure to put beside a file's name. [HubError]s are
+     * written to be shown; anything else is not, and gets the same neutral
+     * sentence [friendly] would have given it.
+     */
+    private fun reason(t: Throwable): String =
+        (t as? HubError)?.message ?: "the upload failed"
 
     /**
      * Send [text] through the same guarded, single-flight path as [send] —
@@ -713,12 +871,28 @@ class SessionViewModel(
      * this is a history of what was composed, not of every prompt this screen
      * ever sent.
      */
-    private suspend fun deliver(text: String, clearDraft: Boolean) {
+    private suspend fun deliver(text: String, clearDraft: Boolean, clearAttachments: Boolean = false) {
         local.update { it.copy(sending = true, error = null) }
         try {
             actions.sendPrompt(sessionId, text)
             quickReplies.remember(text)
-            local.update { it.copy(sending = false, draft = if (clearDraft) "" else it.draft) }
+            // The chips go only once their bytes are on the host *and* the
+            // prompt that names them has been accepted. Anything earlier and
+            // a failure would leave the person with neither the files nor a
+            // way to try again.
+            //
+            // The refusal goes on any send that lands, attachments or not: it
+            // is a line about a pick, and a delivered prompt has moved the
+            // screen past it. Left in, it sat under the composer for the rest
+            // of the session.
+            local.update {
+                it.copy(
+                    sending = false,
+                    draft = if (clearDraft) "" else it.draft,
+                    attachments = if (clearAttachments) emptyList() else it.attachments,
+                    attachError = null,
+                )
+            }
             requestRead(first = false)
         } catch (e: CancellationException) {
             throw e
@@ -811,7 +985,7 @@ class SessionViewModel(
     private fun canWriteNow(l: Local): Boolean = idle(l.sending, l.answering, l.busy) && !readOnly && connected()
 
     private fun canSendNow(l: Local): Boolean =
-        canWriteNow(l) && l.draft.isNotBlank() && row() != null
+        canWriteNow(l) && (l.draft.isNotBlank() || l.attachments.isNotEmpty()) && row() != null
 
     /** [isConnected] read from the live sources, for [send]'s own check. */
     private fun connected(): Boolean = isConnected(fleet.status.value, probe.value)
@@ -1027,6 +1201,8 @@ class SessionViewModel(
         loading = l.loading,
         refreshing = l.refreshing,
         sending = l.sending,
+        attachments = l.attachments,
+        attachError = l.attachError,
         readOnly = readOnly,
         connected = isConnected(status, probed),
         hubReachable = probed,

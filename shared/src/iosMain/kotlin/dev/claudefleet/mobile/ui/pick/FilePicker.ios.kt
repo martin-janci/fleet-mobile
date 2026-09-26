@@ -7,8 +7,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.uikit.LocalUIViewController
-import dev.claudefleet.mobile.model.ATTACH_MAX_BYTES
+import dev.claudefleet.mobile.model.ATTACH_MAX_TOTAL
+import dev.claudefleet.mobile.model.PickResult
 import dev.claudefleet.mobile.model.PickedFile
+import dev.claudefleet.mobile.model.SkipReason
+import dev.claudefleet.mobile.model.SkippedFile
+import dev.claudefleet.mobile.model.skipForSize
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
@@ -59,7 +63,7 @@ private val presenting = mutableSetOf<FilePickerDelegate>()
  * the framework and running it need macOS.
  */
 @Composable
-actual fun rememberFilePicker(onPicked: (List<PickedFile>) -> Unit): () -> Unit {
+actual fun rememberFilePicker(onPicked: (PickResult) -> Unit): () -> Unit {
     val host = LocalUIViewController.current
     // The lambda the delegate calls is read through a state, so a
     // recomposition with a new [onPicked] is seen by the delegate that is
@@ -112,7 +116,7 @@ actual fun rememberFilePicker(onPicked: (List<PickedFile>) -> Unit): () -> Unit 
  * one thing.
  */
 private class FilePickerDelegate(
-    private val onResult: (List<PickedFile>) -> Unit,
+    private val onResult: (PickResult) -> Unit,
 ) : NSObject(), UIDocumentPickerDelegateProtocol, UIAdaptivePresentationControllerDelegateProtocol {
 
     /**
@@ -132,34 +136,63 @@ private class FilePickerDelegate(
         presenting += this
     }
 
-    private fun report(files: List<PickedFile>) {
+    private fun report(result: PickResult) {
         if (reported) return
         reported = true
         presenting -= this
-        onResult(files)
+        onResult(result)
     }
 
     override fun documentPicker(
         controller: UIDocumentPickerViewController,
         didPickDocumentsAtURLs: List<*>,
     ) {
-        report(didPickDocumentsAtURLs.filterIsInstance<NSURL>().mapNotNull(::read))
+        val files = mutableListOf<PickedFile>()
+        val skipped = mutableListOf<SkippedFile>()
+        // One pick's own budget — see the Android actual's own loop for why
+        // this is here and not only in the composer: twenty 10 MB files in
+        // one multi-select is 200 MB read on the main thread before anything
+        // downstream is asked.
+        var used = 0L
+        for (url in didPickDocumentsAtURLs.filterIsInstance<NSURL>()) {
+            when (val outcome = read(url, ATTACH_MAX_TOTAL - used)) {
+                is Outcome.Took -> {
+                    files += outcome.file
+                    used += outcome.file.size
+                }
+                is Outcome.Left -> skipped += outcome.file
+            }
+        }
+        report(PickResult(files, skipped))
     }
 
     /** Cancelling must still report, so the caller can stop waiting. */
     override fun documentPickerWasCancelled(controller: UIDocumentPickerViewController) {
-        report(emptyList())
+        report(PickResult())
     }
 
     /** The sheet was swiped away rather than cancelled. Same answer. */
     override fun presentationControllerDidDismiss(presentationController: UIPresentationController) {
-        report(emptyList())
+        report(PickResult())
     }
 }
 
+/** One picked URL: either it came back whole, or it is named as left behind. */
+private sealed interface Outcome {
+    class Took(val file: PickedFile) : Outcome
+    class Left(val file: SkippedFile) : Outcome
+}
+
 /**
- * The bytes of one picked URL, or null if it is too big or Foundation would
- * not read it.
+ * The bytes of one picked URL, or a [SkippedFile] naming it — too big, too
+ * big for what [remaining] is left of this pick, or Foundation would not read
+ * it.
+ *
+ * It never throws. A throw here would escape `documentPicker`, so `report`
+ * would never fire, the delegate would stay in [presenting] forever and the
+ * caller would wait forever — and the rest of the batch, already read, would
+ * go with it. Anything unexpected therefore costs one file, reported as
+ * unreadable, and the other picks still arrive.
  *
  * The size is asked for *before* anything is read, so a file over the ceiling
  * costs nothing but a stat. Where the file system will not say — a provider
@@ -174,14 +207,20 @@ private class FilePickerDelegate(
  * here on, and leaving the copy behind would mean every pick grows `tmp/` until
  * iOS decides to purge it.
  */
-private fun read(url: NSURL): PickedFile? {
+private fun read(url: NSURL, remaining: Long): Outcome {
+    // Whatever else happens, the person chose this and must be told about it
+    // under some name.
+    val name = url.lastPathComponent ?: "file"
     try {
         val declared = url.fileSize()
-        if (declared != null && declared > ATTACH_MAX_BYTES) return null
+        if (declared != null) skipForSize(name, declared, remaining)?.let { return Outcome.Left(it) }
 
-        val data: NSData = NSData.dataWithContentsOfURL(url, NSDataReadingMappedIfSafe, null) ?: return null
+        val data: NSData = NSData.dataWithContentsOfURL(url, NSDataReadingMappedIfSafe, null)
+            ?: return Outcome.Left(SkippedFile(name, declared, SkipReason.Unreadable))
+        // The mapping is backed by the file, not by a copy in the heap, so
+        // this bound is checked before a single byte is copied into Kotlin.
+        skipForSize(name, data.length.toLong(), remaining)?.let { return Outcome.Left(it) }
         val length = data.length
-        if (length.toLong() > ATTACH_MAX_BYTES) return null
 
         // One source for the size: `length.convert()` rather than a separate
         // `toInt()`, so the array and the `memcpy` cannot disagree.
@@ -191,11 +230,15 @@ private fun read(url: NSURL): PickedFile? {
         if (length > 0uL) {
             bytes.usePinned { memcpy(it.addressOf(0), data.bytes, length) }
         }
-        return PickedFile(
-            name = url.lastPathComponent ?: "file",
-            size = bytes.size.toLong(),
-            bytes = bytes,
+        return Outcome.Took(
+            PickedFile(
+                name = name,
+                size = bytes.size.toLong(),
+                bytes = bytes,
+            ),
         )
+    } catch (t: Throwable) {
+        return Outcome.Left(SkippedFile(name, null, SkipReason.Unreadable))
     } finally {
         NSFileManager.defaultManager.removeItemAtURL(url, null)
     }

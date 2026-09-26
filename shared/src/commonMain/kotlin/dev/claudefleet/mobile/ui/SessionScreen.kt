@@ -69,6 +69,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
+import dev.claudefleet.mobile.model.PickResult
+import dev.claudefleet.mobile.model.fmtBytes
 import dev.claudefleet.mobile.model.tailMarker
 import dev.claudefleet.mobile.ui.components.BlockedCardView
 import dev.claudefleet.mobile.ui.components.CompactChip
@@ -80,6 +82,8 @@ import dev.claudefleet.mobile.ui.components.SpiralLoader
 import dev.claudefleet.mobile.ui.components.StatusStrip
 import dev.claudefleet.mobile.ui.components.WorkChip
 import dev.claudefleet.mobile.ui.components.contextIsTight
+import dev.claudefleet.mobile.ui.pick.filePickerSupported
+import dev.claudefleet.mobile.ui.pick.rememberFilePicker
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.data.ConnectionStatus
 import kotlinx.coroutines.CoroutineScope
@@ -110,6 +114,10 @@ fun SessionScreen(
     status: ConnectionStatus,
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
+    /** One launch of the file picker, whole — see [SessionViewModel.onPicked]. */
+    onPicked: (PickResult) -> Unit,
+    /** Drop one queued file; its bytes were never sent, so nothing is undone on the hub. */
+    onRemoveAttachment: (String) -> Unit,
     onRefresh: () -> Unit,
     onBack: () -> Unit,
     onDismissError: () -> Unit,
@@ -348,6 +356,8 @@ fun SessionScreen(
                     state = state,
                     onDraftChange = onDraftChange,
                     onSend = onSend,
+                    onPicked = onPicked,
+                    onRemoveAttachment = onRemoveAttachment,
                     onOpenHistory = onOpenHistory,
                 )
             }
@@ -1104,6 +1114,8 @@ private fun PromptBox(
     state: SessionUiState,
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
+    onPicked: (PickResult) -> Unit,
+    onRemoveAttachment: (String) -> Unit,
     onOpenHistory: () -> List<String>,
 ) {
     var showHistory by remember { mutableStateOf(false) }
@@ -1115,7 +1127,56 @@ private fun PromptBox(
             state.session == null -> "This session is gone."
             else -> null
         }
+        // One chip per queued file, above the field rather than inside it: a
+        // file name is as long as a file name, and four of them would leave
+        // the draft nowhere to be typed.
+        if (state.attachments.isNotEmpty()) {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+            ) {
+                // Keyed by name, which `SessionViewModel.attach` keeps unique
+                // across the queue for exactly this reason.
+                items(state.attachments, key = { it.name }) { a ->
+                    InputChip(
+                        selected = false,
+                        // The whole chip removes it. A trailing × inside a
+                        // chip is a ~16 dp target; the chip is the 32 dp one,
+                        // and there is nothing else the chip could do.
+                        onClick = { onRemoveAttachment(a.name) },
+                        label = { Text("${a.name} · ${fmtBytes(a.size)}", maxLines = 1) },
+                        trailingIcon = {
+                            Icon(
+                                FleetIcons.Close,
+                                contentDescription = "Remove ${a.name}",
+                                modifier = Modifier.size(InputChipDefaults.IconSize),
+                            )
+                        },
+                    )
+                }
+            }
+        }
+        // Its own line, in the error colour: this is the only word a person
+        // gets about a file the picker would not take, or an upload the hub
+        // bounced.
+        state.attachError?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+        }
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // `filePickerSupported()` is false on the JVM target, which is
+            // what the host tests compose against — without it they would
+            // render a button that cannot open anything.
+            if (state.canAttach && filePickerSupported()) {
+                val pick = rememberFilePicker(onPicked = onPicked)
+                IconButton(onClick = pick, modifier = Modifier.padding(bottom = 4.dp)) {
+                    Icon(FleetIcons.Add, contentDescription = "Attach a file")
+                }
+            }
             TextField(
                 value = state.draft,
                 onValueChange = onDraftChange,

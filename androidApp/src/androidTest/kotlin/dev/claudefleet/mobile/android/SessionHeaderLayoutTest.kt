@@ -63,6 +63,8 @@ class SessionHeaderLayoutTest {
                         status = ConnectionStatus.Connected(hubVersion = "test"),
                         onDraftChange = {},
                         onSend = {},
+                        onPicked = {},
+                        onRemoveAttachment = {},
                         onRefresh = {},
                         onBack = {},
                         onDismissError = {},

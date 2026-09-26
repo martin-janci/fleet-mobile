@@ -11,9 +11,14 @@ import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.ATTACH_MAX_BYTES
 import dev.claudefleet.mobile.model.PendingInput
 import dev.claudefleet.mobile.model.PendingOption
+import dev.claudefleet.mobile.model.PickResult
+import dev.claudefleet.mobile.model.PickedFile
 import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.SkipReason
+import dev.claudefleet.mobile.model.SkippedFile
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.WaitResult
@@ -197,6 +202,25 @@ private class FakeActions : SessionActions {
     var captures = 0
         private set
     var captureFails: Throwable? = null
+
+    /** Every `(sessionId, name, size)` an upload was attempted for, in order. */
+    val uploaded = mutableListOf<Triple<Long, String, Long>>()
+
+    /** Where a staged file is said to have landed, by name. */
+    var stagedPath: (String) -> String = { "/w/.claude-fleet-attachments/$it" }
+
+    /** When set, every upload throws this instead of staging anything. */
+    var uploadFails: Throwable? = null
+
+    /** Held open, an upload stays in flight so the composer's guard can be observed. */
+    var uploadGate: CompletableDeferred<Unit>? = null
+
+    override suspend fun uploadAttachment(sessionId: Long, file: PickedFile): String {
+        uploaded += Triple(sessionId, file.name, file.size)
+        uploadGate?.await()
+        uploadFails?.let { throw it }
+        return stagedPath(file.name)
+    }
 
     override suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult {
         sentKeys += key
@@ -2530,5 +2554,357 @@ class SessionViewModelTest {
         restarting.join()
         runCurrent()
         assertTrue(vm.state.value.canAnswer, "live again once the management call has landed")
+    }
+
+    // ---- attachments: the composer, task 8 ----
+    //
+    // The bytes never leave the phone before Send, the budget is a running
+    // total over the whole queue rather than one batch, and a file the picker
+    // would not take is named rather than quietly missing.
+
+    @Test
+    fun a_readonly_device_may_not_attach() = runTest {
+        val readonly = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope, canSendPrompts = false)
+        val writable = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope)
+        runCurrent()
+
+        assertFalse(readonly.state.value.canAttach)
+        // The other half: without this the assertion above would pass
+        // against a `canAttach` that is simply always false.
+        assertTrue(writable.state.value.canAttach, "a writable credential on a live session does get the control")
+    }
+
+    @Test
+    fun attaching_uploads_nothing_until_send() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+
+        vm.attach(listOf(PickedFile("a.png", 3, byteArrayOf(1, 2, 3))))
+        runCurrent()
+
+        assertEquals(listOf("a.png"), vm.state.value.attachments.map { it.name })
+        assertTrue(actions.uploaded.isEmpty(), "picking a file must not put it on anyone's disk")
+    }
+
+    @Test
+    fun a_file_removed_before_send_never_leaves_the_phone() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.attach(listOf(PickedFile("a.png", 3, byteArrayOf(1, 2, 3)), PickedFile("b.png", 3, byteArrayOf(4, 5, 6))))
+        vm.removeAttachment("a.png")
+        vm.onDraftChange("look")
+        runCurrent()
+
+        vm.send().join()
+        runCurrent()
+
+        assertEquals(listOf("b.png"), actions.uploaded.map { it.second })
+        assertEquals(
+            "look\n\nAttached files:\n/w/.claude-fleet-attachments/b.png",
+            actions.sentPrompts.single(),
+        )
+    }
+
+    @Test
+    fun an_oversized_file_is_refused_at_pick_time_and_never_queued() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+
+        vm.attach(listOf(PickedFile("huge.bin", ATTACH_MAX_BYTES + 1, ByteArray(0))))
+        runCurrent()
+
+        assertTrue(vm.state.value.attachments.isEmpty())
+        assertEquals("huge.bin is 10.0 MB — the limit is 10 MB.", vm.state.value.attachError)
+    }
+
+    /**
+     * The 25 MB ceiling is the composer's alone — the picker bounds one file
+     * at a time and knows nothing about what an earlier pick already queued.
+     * Three nine-megabyte files are therefore refused on the third, and the
+     * two that fit are still there to send.
+     */
+    @Test
+    fun the_total_is_checked_across_what_is_already_queued() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        val nine = 9L * 1024 * 1024
+
+        vm.attach(listOf(PickedFile("a.bin", nine, ByteArray(0))))
+        vm.attach(listOf(PickedFile("b.bin", nine, ByteArray(0))))
+        runCurrent()
+        assertEquals(listOf("a.bin", "b.bin"), vm.state.value.attachments.map { it.name })
+        assertNull(vm.state.value.attachError, "18 MB is under the 25 MB total")
+
+        vm.attach(listOf(PickedFile("c.bin", nine, ByteArray(0))))
+        runCurrent()
+
+        assertEquals(
+            listOf("a.bin", "b.bin"),
+            vm.state.value.attachments.map { it.name },
+            "the third is refused and the queue is left as it was",
+        )
+        assertEquals("c.bin would make 27.0 MB in total — the limit is 25 MB in total.", vm.state.value.attachError)
+    }
+
+    /** A batch that does not fit is refused whole, not taken up to the ceiling. */
+    @Test
+    fun a_batch_over_the_total_is_refused_whole() = runTest {
+        val vm = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope)
+        val nine = 9L * 1024 * 1024
+
+        vm.attach(
+            listOf(
+                PickedFile("a.bin", nine, ByteArray(0)),
+                PickedFile("b.bin", nine, ByteArray(0)),
+                PickedFile("c.bin", nine, ByteArray(0)),
+            ),
+        )
+        runCurrent()
+
+        assertTrue(vm.state.value.attachments.isEmpty(), "none of the batch is queued")
+        assertNotNull(vm.state.value.attachError)
+    }
+
+    /**
+     * The picker skips a file over the per-file ceiling without reading it,
+     * which is right — and used to mean it simply was not in the list, so a
+     * person who picked one large file saw what a person who cancelled saw.
+     */
+    @Test
+    fun a_file_the_picker_skipped_is_named_under_the_composer() = runTest {
+        val vm = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope)
+
+        vm.onPicked(
+            PickResult(
+                files = listOf(PickedFile("a.png", 3, byteArrayOf(1, 2, 3))),
+                skipped = listOf(SkippedFile("screen recording.mov", 240L * 1024 * 1024, SkipReason.TooBig)),
+            ),
+        )
+        runCurrent()
+
+        assertEquals(listOf("a.png"), vm.state.value.attachments.map { it.name }, "what survived is still queued")
+        assertEquals(
+            "screen recording.mov is 240.0 MB — the limit is 10 MB.",
+            vm.state.value.attachError,
+        )
+    }
+
+    @Test
+    fun a_file_the_picker_could_not_read_is_named_too() = runTest {
+        val vm = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope)
+
+        vm.onPicked(PickResult(skipped = listOf(SkippedFile("gone.txt", null, SkipReason.Unreadable))))
+        runCurrent()
+
+        assertEquals("gone.txt could not be read.", vm.state.value.attachError)
+    }
+
+    /** An empty result is a cancelled pick, and must not read as a refusal. */
+    @Test
+    fun a_cancelled_pick_leaves_the_queue_and_the_last_refusal_alone() = runTest {
+        val vm = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope)
+        vm.attach(listOf(PickedFile("a.png", 3, byteArrayOf(1, 2, 3))))
+        vm.attach(listOf(PickedFile("huge.bin", ATTACH_MAX_BYTES + 1, ByteArray(0))))
+        runCurrent()
+        val refusal = vm.state.value.attachError
+        assertNotNull(refusal, "setup: something was refused")
+
+        vm.onPicked(PickResult())
+        runCurrent()
+
+        assertEquals(listOf("a.png"), vm.state.value.attachments.map { it.name })
+        assertEquals(refusal, vm.state.value.attachError, "cancelling answers nothing, so it clears nothing")
+    }
+
+    /**
+     * Chips are keyed by name, so the queue may never hold two of one name —
+     * and the second file must not be the price of that. Two `IMG_0001.jpg`s
+     * from two folders in one multi-select is the real case.
+     */
+    @Test
+    fun two_files_of_one_name_in_a_batch_are_both_kept_under_deduped_names() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+
+        vm.attach(
+            listOf(
+                PickedFile("IMG_0001.jpg", 3, byteArrayOf(1, 2, 3)),
+                PickedFile("IMG_0001.jpg", 5, byteArrayOf(9, 9, 9, 9, 9)),
+            ),
+        )
+        vm.onDraftChange("two photos")
+        runCurrent()
+
+        assertEquals(listOf("IMG_0001.jpg", "IMG_0001-1.jpg"), vm.state.value.attachments.map { it.name })
+        assertEquals(listOf(3L, 5L), vm.state.value.attachments.map { it.size }, "neither file was dropped")
+
+        vm.send().join()
+        runCurrent()
+
+        assertEquals(listOf("IMG_0001.jpg", "IMG_0001-1.jpg"), actions.uploaded.map { it.second })
+    }
+
+    @Test
+    fun a_name_already_queued_from_an_earlier_pick_is_deduped_too() = runTest {
+        val vm = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope)
+
+        vm.attach(listOf(PickedFile("a.png", 3, byteArrayOf(1, 2, 3))))
+        vm.attach(listOf(PickedFile("a.png", 5, byteArrayOf(9, 9, 9, 9, 9))))
+        runCurrent()
+
+        assertEquals(listOf("a.png", "a-1.png"), vm.state.value.attachments.map { it.name })
+    }
+
+    /**
+     * A pick answers the last pick. Without the clear, a pick that is only
+     * skips appends its note to the previous refusal and the person reads two
+     * unrelated sentences as one.
+     */
+    @Test
+    fun a_new_pick_clears_the_previous_refusal() = runTest {
+        val vm = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope)
+        vm.attach(listOf(PickedFile("huge.bin", ATTACH_MAX_BYTES + 1, ByteArray(0))))
+        runCurrent()
+        assertNotNull(vm.state.value.attachError, "setup: a refusal is standing")
+
+        vm.onPicked(PickResult(skipped = listOf(SkippedFile("gone.txt", null, SkipReason.Unreadable))))
+        runCurrent()
+
+        assertEquals(
+            "gone.txt could not be read.",
+            vm.state.value.attachError,
+            "only this pick's own refusal, not the last one's as well",
+        )
+    }
+
+    /** A file that fits on its own but not in what is left of the pick's total. */
+    @Test
+    fun a_file_the_picker_had_no_room_for_says_so_in_the_totals_words() = runTest {
+        val vm = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope)
+
+        vm.onPicked(
+            PickResult(skipped = listOf(SkippedFile("h.bin", 8L * 1024 * 1024, SkipReason.OverTotal))),
+        )
+        runCurrent()
+
+        assertEquals("h.bin did not fit — the limit is 25 MB in total.", vm.state.value.attachError)
+    }
+
+    /** A delivered prompt has moved the screen past whatever the last pick said. */
+    @Test
+    fun a_send_with_no_attachments_still_clears_a_standing_refusal() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.attach(listOf(PickedFile("huge.bin", ATTACH_MAX_BYTES + 1, ByteArray(0))))
+        vm.onDraftChange("never mind the file")
+        runCurrent()
+        assertNotNull(vm.state.value.attachError, "setup: a refusal is standing")
+
+        vm.send().join()
+        runCurrent()
+
+        assertEquals(listOf("never mind the file"), actions.sentPrompts)
+        assertNull(vm.state.value.attachError)
+    }
+
+    @Test
+    fun a_send_uploads_each_attachment_and_names_it_in_the_prompt() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.attach(listOf(PickedFile("a.png", 3, byteArrayOf(1, 2, 3))))
+        vm.onDraftChange("look at this")
+        runCurrent()
+
+        vm.send().join()
+        runCurrent()
+
+        assertEquals(listOf(Triple(ID, "a.png", 3L)), actions.uploaded)
+        assertEquals(
+            "look at this\n\nAttached files:\n/w/.claude-fleet-attachments/a.png",
+            actions.sentPrompts.single(),
+        )
+        // Spent: the chips go once their bytes are on the host.
+        assertTrue(vm.state.value.attachments.isEmpty())
+        assertEquals("", vm.state.value.draft)
+    }
+
+    @Test
+    fun a_failed_upload_keeps_the_draft_and_the_chips() = runTest {
+        val actions = FakeActions()
+        actions.uploadFails = HubError.Tool("E_DENIED", "the hub refused the upload (403)")
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.attach(listOf(PickedFile("a.png", 3, byteArrayOf(1, 2, 3))))
+        vm.onDraftChange("look at this")
+        runCurrent()
+
+        vm.send().join()
+        runCurrent()
+
+        assertTrue(actions.sentPrompts.isEmpty(), "nothing should have been sent")
+        assertEquals("look at this", vm.state.value.draft)
+        assertEquals(1, vm.state.value.attachments.size)
+        assertEquals(
+            "a.png did not upload — the hub refused the upload (403)",
+            vm.state.value.attachError,
+            "the refusal has to say which file it was",
+        )
+        assertFalse(vm.state.value.sending, "and the composer is live again for another try")
+    }
+
+    /** The one that failed is named even when it is not the first one tried. */
+    @Test
+    fun a_failed_upload_names_the_file_that_failed() = runTest {
+        val actions = FakeActions()
+        actions.stagedPath = { name -> if (name == "b.png") throw HubError.Tool("E_IO", "no room on the host") else "/w/$name" }
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.attach(listOf(PickedFile("a.png", 1, byteArrayOf(1)), PickedFile("b.png", 1, byteArrayOf(2))))
+        vm.onDraftChange("two files")
+        runCurrent()
+
+        vm.send().join()
+        runCurrent()
+
+        assertEquals("b.png did not upload — no room on the host", vm.state.value.attachError)
+        assertEquals(listOf("a.png", "b.png"), vm.state.value.attachments.map { it.name }, "both chips stay")
+    }
+
+    /** An upload is a hub write, so a second tap during one must not start a second send. */
+    @Test
+    fun a_second_tap_during_an_upload_does_nothing() = runTest {
+        val actions = FakeActions()
+        val gate = CompletableDeferred<Unit>()
+        actions.uploadGate = gate
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.attach(listOf(PickedFile("a.png", 1, byteArrayOf(1))))
+        vm.onDraftChange("look")
+        runCurrent()
+
+        val first = vm.send()
+        runCurrent()
+        assertTrue(vm.state.value.sending, "setup: the upload is in flight")
+
+        vm.send().join()
+        runCurrent()
+        assertEquals(1, actions.uploaded.size, "the second tap must not upload the file again")
+
+        gate.complete(Unit)
+        first.join()
+        runCurrent()
+        assertEquals(1, actions.sentPrompts.size)
+    }
+
+    /** A queued file with nothing typed is still a prompt worth sending. */
+    @Test
+    fun a_file_with_no_text_can_still_be_sent() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.attach(listOf(PickedFile("a.png", 1, byteArrayOf(1))))
+        runCurrent()
+
+        assertTrue(vm.state.value.canSend)
+        vm.send().join()
+        runCurrent()
+
+        assertEquals("Attached files:\n/w/.claude-fleet-attachments/a.png", actions.sentPrompts.single())
     }
 }

@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.ui.pick
 
 import androidx.compose.runtime.Composable
+import dev.claudefleet.mobile.model.PickResult
 import dev.claudefleet.mobile.model.PickedFile
 
 /**
@@ -13,8 +14,9 @@ import dev.claudefleet.mobile.model.PickedFile
  * same reason `QrScanner` is: Android's `OpenMultipleDocuments` and iOS's
  * `UIDocumentPickerViewController` have nothing in common but the result.
  *
- * The bytes come back in memory. That is deliberate and bounded, and the bound
- * is enforced **here, at the picker**, not downstream: each actual asks the
+ * The bytes come back in memory. That is deliberate and bounded, and the
+ * **per-file** bound — and only that one — is enforced **here, at the
+ * picker**, not downstream: each actual asks the
  * platform how big a file is before opening it and skips anything over
  * [dev.claudefleet.mobile.model.ATTACH_MAX_BYTES] (10 MB) without reading a
  * byte of it — `OpenableColumns.SIZE` on Android, `NSURLFileSizeKey` on iOS.
@@ -24,12 +26,28 @@ import dev.claudefleet.mobile.model.PickedFile
  * bytes already do*, so without the check above it a 2 GB video would be one
  * tap from being read into memory on the main thread.
  *
- * **A file skipped for size is dropped silently.** It is simply absent from
- * the list, and this signature has no way to say which file went or why. That
- * is a known gap rather than an accepted one — telling the person *"screen
- * recording.mov is 240 MB — the limit is 10 MB"* is the composer's job, and it
- * is the composer that has the screen to say it on. Until it does, a person
- * who picks one large file sees the same thing as a person who cancelled.
+ * [dev.claudefleet.mobile.model.ATTACH_MAX_TOTAL] (25 MB) is bounded here
+ * too, but only **within one pick**: each actual spends a budget as it walks
+ * the selection and reports the remainder as
+ * [dev.claudefleet.mobile.model.SkipReason.OverTotal] instead of reading it.
+ * That is what stops a multi-select of twenty 10 MB files from putting 200 MB
+ * in the heap on the main thread — an OOM and an ANR on a mid-range phone —
+ * before anything downstream is even asked. One pick now costs at most the
+ * total plus whatever the file that crossed it had read: ~35 MB.
+ *
+ * The *running* total across picks is still the composer's, and has to be:
+ * this function cannot see what an earlier pick already queued.
+ * `SessionViewModel.attach` runs `checkBudget` over the queue plus the new
+ * batch and refuses the batch whole.
+ *
+ * **A file skipped for size is named, not dropped silently.** It comes back
+ * in [dev.claudefleet.mobile.model.PickResult.skipped] with whatever size the
+ * platform declared, and the composer turns it into the sentence — *"screen
+ * recording.mov is 240 MB — the limit is 10 MB"* — because the composer is
+ * what has a screen to say it on. That is why the callback carries a
+ * [dev.claudefleet.mobile.model.PickResult] rather than a bare list: a list
+ * can only be short, and a short list is indistinguishable from a cancelled
+ * pick.
  *
  * **On iOS this sees Files, not Photos.** The two are separate stores on an
  * iPhone, and `UIDocumentPickerViewController` browses only the first. A
@@ -52,16 +70,17 @@ expect fun filePickerSupported(): Boolean
  * cancelled — so a caller can always stop showing a spinner. Exactly one call
  * per launch.
  *
- * **An empty list means "cancelled" *or* "nothing survived"** — every file
- * over the ceiling, every read the platform refused. The two are not
- * distinguishable here, on purpose: separating them means a richer result
- * type, and the contract this signature makes is the one the composer is
- * already written against. A caller must treat an empty list as "carry on with
- * no attachment", never as "the person definitely tapped Cancel".
+ * **A wholly empty [dev.claudefleet.mobile.model.PickResult] — no files and
+ * nothing skipped — is the cancellation**, and the only thing that is. A pick
+ * where nothing survived comes back with an empty
+ * [dev.claudefleet.mobile.model.PickResult.files] and one
+ * [dev.claudefleet.mobile.model.SkippedFile] per casualty, so the composer can
+ * say what happened instead of leaving the person to wonder whether their tap
+ * registered.
  *
  * Multi-select on both platforms. The bytes are read before [onPicked] is
  * called, so what arrives is the file, not a handle to it that may have
  * expired by Send.
  */
 @Composable
-expect fun rememberFilePicker(onPicked: (List<PickedFile>) -> Unit): () -> Unit
+expect fun rememberFilePicker(onPicked: (PickResult) -> Unit): () -> Unit
