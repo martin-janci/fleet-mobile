@@ -27,6 +27,8 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.utils.io.readBuffer
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.io.readByteArray
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -108,7 +110,19 @@ class HubClient(
         // `Transport` is the right bucket — it covers a hub that "answered
         // something unintelligible" as well as one that could not be reached.
         return try {
-            deserialize(payloadOf(result))
+            // Off the caller's dispatcher, because on Android the caller is
+            // very often the *UI* one: a composition's `rememberCoroutineScope`
+            // carries `AndroidUiDispatcher.Main`, which not only runs the work
+            // on the main thread but resumes it on a frame callback. And this
+            // is not a little work — [payloadOf] depth-scans and parses the
+            // payload string the MCP result nests, then [deserialize] walks
+            // that tree into data classes, which for `list_sessions` on a
+            // fleet of dozens is measured in frames, not microseconds.
+            //
+            // Here rather than at each call site so it holds for every caller,
+            // including the ones that legitimately run on the UI scope (a
+            // screen's own action handlers).
+            withContext(Dispatchers.Default) { deserialize(payloadOf(result)) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: HubError) {
@@ -179,7 +193,10 @@ class HubClient(
         }
         throwForStatus(status, body, base, token)
 
-        val reply = jsonRpcReply(body)
+        // The envelope pass, off the caller's dispatcher for the same reason
+        // the payload pass is — see [call]. This one parses the whole reply
+        // text, so on a large answer it is the more expensive of the two.
+        val reply = withContext(Dispatchers.Default) { jsonRpcReply(body) }
         (reply["error"] as? JsonObject)?.let { throw rpcError(it) }
         return reply["result"] as? JsonObject
             ?: throw HubError.Transport(IllegalStateException("the hub's reply had neither a result nor an error"))
