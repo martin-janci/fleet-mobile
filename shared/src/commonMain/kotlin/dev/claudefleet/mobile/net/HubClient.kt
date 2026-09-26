@@ -4,6 +4,7 @@ import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.PairResult
+import dev.claudefleet.mobile.model.PickedFile
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SendPromptResult
@@ -23,7 +24,11 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.ByteArrayContent
 import io.ktor.http.contentType
+import io.ktor.http.encodeURLParameter
+import io.ktor.http.isSuccess
 import io.ktor.utils.io.readBuffer
 import kotlinx.coroutines.CancellationException
 import kotlinx.io.readByteArray
@@ -543,6 +548,46 @@ class HubClient(
      */
     suspend fun fleetHealth(): Boolean =
         call("fleet_health") { it.jsonObject["db_ready"]?.jsonPrimitive?.booleanOrNull == true }
+
+    /**
+     * Stage one file in a session's worktree and answer the absolute path it
+     * landed at, ready to go into a prompt.
+     *
+     * Not a `tools/call`: `POST /attachment` is its own route precisely so the
+     * bytes travel raw rather than base64 inside JSON-RPC. So it does not go
+     * through [send], which sets the MCP content type and Accept headers.
+     *
+     * The name rides in the query string, and the hub treats it as a
+     * suggestion — it is reduced to a bare filename there, so a name that
+     * looks like a path cannot address one.
+     */
+    suspend fun uploadAttachment(sessionId: Long, file: PickedFile): String {
+        val url = "$base/attachment?session_id=$sessionId&name=${file.name.encodeURLParameter()}"
+        val response: HttpResponse = try {
+            http.post(url) {
+                setBody(ByteArrayContent(file.bytes, ContentType.Application.OctetStream))
+                if (token != null) header(HttpHeaders.Authorization, "Bearer $token")
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: HubError) {
+            throw e
+        } catch (t: Throwable) {
+            throw HubError.Transport(t)
+        }
+        val text = response.textWithin(MAX_RESPONSE_BYTES)
+        // The hub answers a plain sentence on refusal, not JSON, and it is
+        // written to be shown — so the existing variants carry it as-is.
+        when (response.status) {
+            HttpStatusCode.Unauthorized -> throw HubError.Unauthorized(text)
+            HttpStatusCode.Forbidden -> throw HubError.Forbidden(text, base)
+            else -> if (!response.status.isSuccess()) {
+                throw HubError.Http(response.status.value, text)
+            }
+        }
+        val path = (parseObject(text)["path"] as? JsonPrimitive)?.content
+        return path ?: throw HubError.Http(response.status.value, "staged the file but did not say where")
+    }
 
     // ---- the wire ----
 

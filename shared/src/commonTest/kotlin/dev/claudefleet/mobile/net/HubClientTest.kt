@@ -8,6 +8,7 @@ import io.ktor.client.plugins.HttpTimeoutCapability
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.ByteArrayContent
 import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
@@ -974,5 +975,35 @@ class HubClientTest {
         val enumerated = HubCapabilities.of(ToolCatalog(setOf("work", "work_link"), mapOf("work_link" to setOf("link", "unlink"))))
         assertTrue(enumerated.has("work_link", "unlink"))
         assertFalse(enumerated.has("work_link", "confirm"), "a hub before M4 enumerates no confirm")
+    }
+
+    @Test
+    fun upload_attachment_posts_raw_bytes_and_returns_the_staged_path() = runTest {
+        // `client(...)` is the file's own MockEngine builder; `Calls` already
+        // records every request, so nothing new is needed to inspect one.
+        val (hub, calls) = client { _ ->
+            """{"path":"/w/proj/.claude-fleet-attachments/a.png"}""" to HttpStatusCode.OK
+        }
+        val path = hub.uploadAttachment(7, dev.claudefleet.mobile.model.PickedFile("a.png", 3, byteArrayOf(1, 2, 3)))
+        assertEquals("/w/proj/.claude-fleet-attachments/a.png", path)
+
+        val req = calls.requests.single()
+        val url = req.url.toString()
+        assertTrue(url.startsWith("$BASE/attachment"), url)
+        assertTrue(url.contains("session_id=7"), url)
+        assertTrue(url.contains("name=a.png"), url)
+        assertEquals("Bearer tok-phone", req.headers["Authorization"])
+        // Raw, not base64 and not JSON: the whole reason this is a route and not
+        // a tool. A TextContent body here means it went out as a string.
+        assertEquals(byteArrayOf(1, 2, 3).toList(), (req.body as ByteArrayContent).bytes().toList())
+    }
+
+    @Test
+    fun a_refused_upload_raises_rather_than_returning_a_path() = runTest {
+        val (hub, _) = client { _ -> "attaching needs a full token" to HttpStatusCode.Forbidden }
+        val e = assertFailsWith<HubError> {
+            hub.uploadAttachment(7, dev.claudefleet.mobile.model.PickedFile("a.png", 1, byteArrayOf(1)))
+        }
+        assertTrue(e.message!!.contains("full token"), e.message!!)
     }
 }
