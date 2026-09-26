@@ -48,6 +48,8 @@ data class SessionFiltersHandlers(
     val onSetHost: (String?) -> Unit = {},
     val onSetProject: (Long?) -> Unit = {},
     val onToggleWorkStatus: (WorkStatusFilter) -> Unit = {},
+    /** A tracker status name ("QA Review") chip, beside the three buckets. */
+    val onToggleWorkStatusName: (String) -> Unit = {},
     val onToggleArchived: () -> Unit = {},
     val onToggleOrg: (Long) -> Unit = {},
     val onToggleMyWork: () -> Unit = {},
@@ -194,6 +196,20 @@ fun SessionFiltersSheet(state: SessionsUiState, handlers: SessionFiltersHandlers
                                     onClick = { handlers.onToggleWorkStatus(w) },
                                     label = { Text(w.label) },
                                 )
+                            }
+                        }
+                        // The tracker's own columns, read off the sessions'
+                        // work: whatever the team's workflow has, nothing to set up.
+                        if (state.workStatusNameChoices.isNotEmpty()) {
+                            ChipFlow {
+                                for (name in state.workStatusNameChoices) {
+                                    FilterChip(
+                                        selected = filters.workStatusNames.any { it.equals(name, ignoreCase = true) },
+                                        onClick = { handlers.onToggleWorkStatusName(name) },
+                                        label = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                        modifier = Modifier.widthIn(max = 200.dp),
+                                    )
+                                }
                             }
                         }
                     }

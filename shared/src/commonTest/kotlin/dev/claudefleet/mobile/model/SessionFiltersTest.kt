@@ -342,6 +342,51 @@ class SessionFiltersTest {
         assertTrue(none.kept(SessionFilters()))
     }
 
+    /**
+     * The tracker's own status names ("QA Review"): matched case-insensitively,
+     * and OR-ed with the buckets — one ticket-status question, one filter.
+     */
+    @Test
+    fun a_tracker_status_name_keeps_only_work_in_that_column() {
+        val qa = row(work = WorkSummary(key = "ABC-1", statusCategory = StatusCategory.InProgress, statusName = "QA Review"))
+        val dev = row(work = WorkSummary(key = "ABC-2", statusCategory = StatusCategory.InProgress, statusName = "In Progress"))
+        val todo = row(work = WorkSummary(key = "ABC-3", statusCategory = StatusCategory.Todo, statusName = "To Do"))
+        val none = row(work = null)
+
+        val f = SessionFilters(workStatusNames = setOf("qa review"))
+        assertTrue(qa.kept(f))
+        assertFalse(dev.kept(f), "the bucket is the same; the column is not")
+        assertFalse(todo.kept(f))
+        assertFalse(none.kept(f))
+
+        val either = SessionFilters(workStatuses = setOf(WorkStatusFilter.TODO), workStatusNames = setOf("QA Review"))
+        assertTrue(qa.kept(either))
+        assertTrue(todo.kept(either))
+        assertFalse(dev.kept(either))
+        assertEquals(1, either.activeCount)
+        assertEquals(listOf("Ticket to do/QA Review"), either.summary())
+    }
+
+    @Test
+    fun status_names_are_offered_once_in_workflow_order() {
+        fun w(cat: StatusCategory?, name: String?) = row(work = WorkSummary(key = "K-1", statusCategory = cat, statusName = name))
+        assertEquals(
+            listOf("Backlog", "In Progress", "QA Review", "Done", "Parked"),
+            workStatusNames(
+                listOf(
+                    w(StatusCategory.Done, "Done"),
+                    w(StatusCategory.InProgress, "QA Review"),
+                    w(StatusCategory.InProgress, "qa review"),
+                    w(StatusCategory.Unknown, "Parked"),
+                    w(StatusCategory.Todo, "Backlog"),
+                    w(StatusCategory.InProgress, "In Progress"),
+                    w(StatusCategory.Todo, "  "),
+                    row(work = null),
+                ),
+            ),
+        )
+    }
+
     /** A status a later hub adds reads as Unknown, and no chip asks for that. */
     @Test
     fun an_unknown_ticket_status_matches_no_chip() {

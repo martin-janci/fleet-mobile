@@ -19,6 +19,7 @@ import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.WorkStatusFilter
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.withTicketsFrom
+import dev.claudefleet.mobile.model.workStatusNames
 import dev.claudefleet.mobile.model.unnamedProject
 import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
@@ -157,6 +158,8 @@ data class SessionsUiState(
     val filtersOpen: Boolean = false,
     /** The search field is showing (it holds [SessionFilters.query]). */
     val searchOpen: Boolean = false,
+    /** The tracker status names the sheet offers beside the three buckets ([workStatusNames]). */
+    val workStatusNameChoices: List<String> = emptyList(),
 ) {
     val isEmpty: Boolean get() = groups.isEmpty() && urgent.isEmpty()
 
@@ -394,6 +397,14 @@ class SessionsViewModel(
         }
     }
 
+    /** Add the tracker status [name] ("QA Review") to the ticket statuses kept, or drop it. */
+    fun toggleWorkStatusName(name: String) {
+        filter { f ->
+            val chosen = f.workStatusNames.firstOrNull { it.equals(name, ignoreCase = true) }
+            f.copy(workStatusNames = if (chosen != null) f.workStatusNames - chosen else f.workStatusNames + name)
+        }
+    }
+
     /** List sessions archived from the desktop's Tidy-up, or leave them out. The desktop's `hide archived`. */
     fun toggleArchived() {
         filter { it.copy(showArchived = !it.showArchived) }
@@ -542,6 +553,10 @@ class SessionsViewModel(
         val byWork = groupMode == GroupMode.WORK
         val myWorkAvailable = work.available && work.myWork != null
         val choices = orgChoices(sessions, work.orgs)
+        // Only a hub with the work graph has a ticket cache worth overlaying;
+        // without one these are the rows as they came.
+        val rows = if (work.available) sessions.map { it.withTicketsFrom(work.tickets) } else sessions
+        val statusNames = if (work.available) workStatusNames(rows) else emptyList()
         // Like the toggles above: a filter nobody can see is dropped, so a
         // hub that stops listing a second org cannot leave the list narrowed,
         // and neither can a *My work* filter whose tracker went away.
@@ -551,12 +566,14 @@ class SessionsViewModel(
             // The ticket filters read the work graph's fields; a hub without
             // it has no control for them on screen, so they are off.
             workStatuses = if (work.available) l.filters.workStatuses else emptySet(),
+            // A name no row's work is in any more has no chip to turn it off,
+            // so it stops narrowing — the desktop's rule for the same filter.
+            workStatusNames = l.filters.workStatusNames.filterTo(mutableSetOf()) { n ->
+                statusNames.any { it.equals(n, ignoreCase = true) }
+            },
             showArchived = l.filters.showArchived || !work.available,
         )
         val myWork = work.myWork?.takeIf { filters.myWorkOnly }
-        // Only a hub with the work graph has a ticket cache worth overlaying;
-        // without one these are the rows as they came.
-        val rows = if (work.available) sessions.map { it.withTicketsFrom(work.tickets) } else sessions
         val urgency = groupMode == GroupMode.URGENCY
         // The queue is flat, so it is filtered here rather than grouped: the
         // narrowing is the same `matches` the tree uses, with the same project
@@ -603,6 +620,7 @@ class SessionsViewModel(
             projectChoices = projectChoices(sessions, projects, filters.projectFilter),
             filtersOpen = l.filtersOpen,
             searchOpen = l.searchOpen,
+            workStatusNameChoices = statusNames,
         )
     }
 

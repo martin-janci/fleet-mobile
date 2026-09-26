@@ -75,6 +75,10 @@ class ToolsTheAppMayCallTest {
         // offers what it decides; see `HubCapabilities`.
         "work",
         "work_link",
+        // The fleet's agent: `Access::Client` in `guard.rs`, not readonly
+        // (it may start the agent's session), so only a `full` pairing is
+        // offered it — see `AgentViewModel`.
+        "ensure_operator",
         // The composer's shared chip row. `Access::Client` and not readonly
         // (one tool both reads and replaces the list), so a `full` client may
         // and a `readonly` one is never shown it — which is also the token

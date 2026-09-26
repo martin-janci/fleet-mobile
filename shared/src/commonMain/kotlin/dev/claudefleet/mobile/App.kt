@@ -29,9 +29,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.backhandler.BackHandler
 import androidx.lifecycle.compose.LifecycleStartEffect
+import dev.claudefleet.mobile.data.AgentActions
 import dev.claudefleet.mobile.data.AppSession
 import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.data.FleetRepository
+import dev.claudefleet.mobile.data.HubAgentActions
 import dev.claudefleet.mobile.data.HubNewSessionActions
 import dev.claudefleet.mobile.data.HubQuickReplyActions
 import dev.claudefleet.mobile.data.HubSessionActions
@@ -45,6 +47,7 @@ import dev.claudefleet.mobile.net.withHubTimeouts
 import dev.claudefleet.mobile.store.Credentials
 import dev.claudefleet.mobile.store.Prefs
 import dev.claudefleet.mobile.store.Secrets
+import dev.claudefleet.mobile.ui.AgentViewModel
 import dev.claudefleet.mobile.ui.HostsScreen
 import dev.claudefleet.mobile.ui.HostsViewModel
 import dev.claudefleet.mobile.ui.Navigator
@@ -146,6 +149,9 @@ class AppContainer(
 
     /** The work graph's calls, through the same `withClient` as every other. */
     val workActions: WorkActions = HubWorkActions(session)
+
+    /** The way into the hub's agent, through the same `withClient`. */
+    val agentActions: AgentActions = HubAgentActions(session)
 
     /**
      * The chip row and the draft history — one instance for the whole app,
@@ -349,6 +355,15 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
             onOpenSession = { nav.open(it) },
         )
     }
+    val agent = remember(repository, scope) {
+        AgentViewModel(
+            fleet = repository,
+            actions = container.agentActions,
+            scope = scope,
+            canWrite = credentials.canWrite,
+            onOpenSession = { nav.open(it) },
+        )
+    }
     val hosts = remember(repository, scope) { HostsViewModel(repository, scope) }
     val settings = remember(container, scope) {
         SettingsViewModel(container.session, scope, container.appVersion)
@@ -398,8 +413,10 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                     val state by sessions.state.collectAsState()
                     val ticketsState by tickets.state.collectAsState()
                     val todayState by today.state.collectAsState()
+                    val agentState by agent.state.collectAsState()
                     SessionsScreen(
                         state = state,
+                        agent = agentState,
                         handlers = SessionsHandlers(
                             onOpenSession = nav::open,
                             onToggleNeedsAttention = sessions::toggleNeedsAttentionOnly,
@@ -424,6 +441,8 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                             onNewSession = if (credentials.canWrite) ({ nav.newSession() }) else null,
                             onOpenTickets = if (ticketsState.available) ({ tickets.open() }) else null,
                             onOpenToday = if (todayState.available) ({ today.open() }) else null,
+                            onOpenAgent = if (agentState.available) ({ agent.open() }) else null,
+                            onDismissAgentError = agent::dismissError,
                         ),
                     )
                     if (state.filtersOpen) {
@@ -448,6 +467,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                                 },
                                 onSetProject = sessions::setProjectFilter,
                                 onToggleWorkStatus = sessions::toggleWorkStatus,
+                                onToggleWorkStatusName = sessions::toggleWorkStatusName,
                                 onToggleArchived = sessions::toggleArchived,
                                 onToggleOrg = sessions::toggleOrg,
                                 onToggleMyWork = sessions::toggleMyWorkOnly,

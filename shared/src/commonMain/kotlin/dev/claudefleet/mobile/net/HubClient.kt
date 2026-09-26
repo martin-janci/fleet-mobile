@@ -429,6 +429,15 @@ class HubClient(
             },
         ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
 
+    /**
+     * Find the hub's agent session — the desktop's ✦ — or start it, and
+     * return its row. Starting it writes the agent's project and MCP config on
+     * the hub's machine and launches Claude there, so it rides
+     * [LIFECYCLE_TOOLS] like [newSession].
+     */
+    suspend fun ensureOperator(): SessionRow =
+        call("ensure_operator") { json.decodeFromJsonElement(SessionRow.serializer(), it) }
+
     // ---- the work graph: `work` reads, `work_link` decides ----
     //
     // Every wrapper names its action outright, so `ToolsTheAppMayCallTest`
@@ -758,9 +767,10 @@ class HubClient(
          * `work_link` is here whole, not per action: `start` and `resume`
          * create a session (a worktree, perhaps a clone) and the hub bounds
          * the tool at `Deadline::Lifecycle`. A quick `confirm` riding the
-         * same mount costs nothing but the framing.
+         * same mount costs nothing but the framing. `ensure_operator` is
+         * `Deadline::Lifecycle` on the hub too: the first call starts Claude.
          */
-        val LIFECYCLE_TOOLS = setOf("new_session", "work_link")
+        val LIFECYCLE_TOOLS = setOf("new_session", "work_link", "ensure_operator")
         const val UNKNOWN_CODE = "E_UNKNOWN"
     }
 }

@@ -102,6 +102,12 @@ data class SessionsHandlers(
     val onOpenTickets: (() -> Unit)? = null,
     /** Open the Today sheet. Null hides the action — a hub without `work today`. */
     val onOpenToday: (() -> Unit)? = null,
+    /**
+     * Open the fleet's agent (the desktop's ✦). Null hides the action — a hub
+     * without `ensure_operator`, or a `readonly` pairing.
+     */
+    val onOpenAgent: (() -> Unit)? = null,
+    val onDismissAgentError: () -> Unit = {},
 )
 
 /**
@@ -129,6 +135,7 @@ fun SessionsScreen(
     state: SessionsUiState,
     handlers: SessionsHandlers = SessionsHandlers(),
     modifier: Modifier = Modifier,
+    agent: AgentUiState = AgentUiState(),
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         SessionsBar(
@@ -137,6 +144,8 @@ fun SessionsScreen(
             onToggleSearch = handlers.onToggleSearch,
             onOpenTickets = handlers.onOpenTickets,
             onOpenToday = handlers.onOpenToday,
+            onOpenAgent = handlers.onOpenAgent,
+            agentWaking = agent.waking,
         ) {
             if (state.searchOpen) {
                 SearchField(query = state.filters.query, onSetQuery = handlers.onSetQuery)
@@ -154,6 +163,7 @@ fun SessionsScreen(
         }
         ConnectionBanner(state.status)
         ErrorBanner(state.error, onDismiss = handlers.onDismissError)
+        ErrorBanner(agent.error, onDismiss = handlers.onDismissAgentError)
 
         // The empty state is INSIDE the pull-to-refresh, and inside the
         // `LazyColumn` at that. It used to return early, so the one screen a
@@ -235,6 +245,8 @@ private fun SessionsBar(
     onToggleSearch: () -> Unit,
     onOpenTickets: (() -> Unit)?,
     onOpenToday: (() -> Unit)?,
+    onOpenAgent: (() -> Unit)?,
+    agentWaking: Boolean,
     filters: @Composable () -> Unit,
 ) {
     val live = when (status) {
@@ -262,6 +274,13 @@ private fun SessionsBar(
             )
             if (onOpenToday != null) TextButton(onClick = onOpenToday) { Text("Today") }
             if (onOpenTickets != null) TextButton(onClick = onOpenTickets) { Text("Tickets") }
+            // The desktop's ✦: its agent is a session on the hub, and this
+            // opens it on the Session screen. The first press may start it.
+            if (onOpenAgent != null) {
+                TextButton(onClick = onOpenAgent, enabled = !agentWaking) {
+                    Text(if (agentWaking) "✦ Waking…" else "✦ Agent")
+                }
+            }
         },
         below = { filters() },
     )
