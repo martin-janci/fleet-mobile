@@ -82,6 +82,7 @@ import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.FleetTheme
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -253,9 +254,34 @@ private fun Splash() {
     }
 }
 
+/**
+ * A scope for view models and the repository: composition-lived, but **not**
+ * the UI dispatcher.
+ *
+ * `rememberCoroutineScope()` inherits the composition's context, and on Android
+ * that is `AndroidUiDispatcher.Main` — the main thread, resumed on a frame
+ * callback. Every view model here was built with one, so the SSE stream, every
+ * `tools/call`, every JSON parse and every re-derivation of the session list
+ * ran on the thread that also has to draw: work measured in frames, plus a
+ * frame of latency at each suspension point even when the work is trivial.
+ *
+ * `Dispatchers.Default` replaces only the dispatcher. The scope is still
+ * cancelled when the composition leaves, which is the property the call sites
+ * rely on — a background scope held by the container would outlive the screen
+ * and leak the stream.
+ *
+ * Safe because nothing reached from these scopes touches Compose state: the
+ * view models publish `StateFlow`s and the screens collect them with
+ * `collectAsState`, which hops back to the composition on its own. A scope used
+ * for UI work — a scroll animation, a snackbar — must stay the plain
+ * `rememberCoroutineScope()`; see `SessionScreen`.
+ */
+@Composable
+private fun rememberWorkScope(): CoroutineScope = rememberCoroutineScope { Dispatchers.Default }
+
 @Composable
 private fun PairRoute(container: AppContainer, onPaired: (PairedHub) -> Unit) {
-    val scope = rememberCoroutineScope()
+    val scope = rememberWorkScope()
     val vm = remember(container, scope) {
         PairViewModel(container.session, scope, cameraAvailable = qrScannerSupported())
     }
@@ -308,7 +334,7 @@ private fun PairRoute(container: AppContainer, onPaired: (PairedHub) -> Unit) {
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun FleetRoute(container: AppContainer, credentials: Credentials) {
-    val scope = rememberCoroutineScope()
+    val scope = rememberWorkScope()
     val repository = remember(credentials) { container.repository(credentials, scope) }
     LifecycleStartEffect(repository) {
         repository.start()
@@ -563,7 +589,7 @@ private fun NewSessionRoute(
     onCreated: (Long) -> Unit,
     onBack: () -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
+    val scope = rememberWorkScope()
     val vm = remember(repository, scope) {
         NewSessionViewModel(
             fleet = repository,
@@ -601,7 +627,7 @@ private fun SessionRoute(
     credentials: Credentials,
     onBack: () -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
+    val scope = rememberWorkScope()
     val vm = remember(sessionId, repository, scope) {
         SessionViewModel(
             sessionId = sessionId,
