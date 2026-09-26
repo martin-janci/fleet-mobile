@@ -64,6 +64,36 @@ class PlatformActualsTest {
         assertEquals(emptyList(), silent, "a refused camera permission is never reported here")
     }
 
+    /**
+     * Every platform with a file picker tells the caller when nothing was
+     * picked. Without it the attach spinner, started when the picker opened,
+     * never stops — and the screen is stuck on a sheet that has already gone.
+     *
+     * The two platforms keep the promise in two different ways and the scan
+     * accepts either, which is the point of checking for evidence rather than
+     * for one spelling:
+     *
+     *  - Android gets it from the contract. `OpenMultipleDocuments` calls its
+     *    result callback with an empty list on cancel, so passing the list
+     *    straight through is the whole implementation.
+     *  - iOS has to be told. `UIDocumentPickerViewController` reports a cancel
+     *    only through `documentPickerWasCancelled`, an *optional* delegate
+     *    method — leave it out and the picker closes in total silence. That is
+     *    the iOS-only break this test exists for, exactly like the refused
+     *    camera permission above: nothing in this build can run it.
+     */
+    @Test
+    fun every_platform_with_a_picker_reports_a_cancelled_pick() {
+        val pickers = Repo.shipped
+            .filter { it.name.startsWith("FilePicker.") && it.name != "FilePicker.kt" }
+            .map { it.name to withoutComments(it.readText()) }
+            .filter { (_, code) -> "fun filePickerSupported(): Boolean = true" in code }
+        assertEquals(listOf("FilePicker.android.kt", "FilePicker.ios.kt"), pickers.map { it.first }.sorted())
+
+        val silent = pickers.filterNot { (_, code) -> CANCELLED.containsMatchIn(code) }.map { it.first }
+        assertEquals(emptyList(), silent, "a cancelled pick is never reported here, so the caller waits forever")
+    }
+
     private fun withoutComments(source: String): String =
         source.replace(BLOCK_COMMENT, "").lines().joinToString("\n") { it.substringBefore("//") }
 
@@ -72,5 +102,6 @@ class PlatformActualsTest {
         val THROW = Regex("""throw\s+(\w+)\s*\(""")
         val SUBCLASS = Regex("""class\s+(\w+)\s*\([^)]*\)\s*:\s*SecretsUnavailable\s*\(""")
         val REFUSED = Regex("""\w*navailable\(\s*CAMERA_PERMISSION_REFUSED\s*\)""")
+        val CANCELLED = Regex("""documentPickerWasCancelled|ActivityResultContracts\.OpenMultipleDocuments\(\)""")
     }
 }

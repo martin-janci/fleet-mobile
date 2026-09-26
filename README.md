@@ -568,6 +568,22 @@ not polish: get either wrong and the app does not work at all.
    engine reaches `http://192.168.x.x:8899` once it has.
 8. **The app icon.** `Assets.xcassets/AppIcon.appiconset` declares the slot and
    holds no image. Xcode will warn.
+9. **The file picker.** `ui/pick/FilePicker.ios.kt` is a
+   `UIDocumentPickerViewController` in open mode with `asCopy = true`,
+   presented over `LocalUIViewController`. It compiles for both iOS targets
+   and has never run. Two things a Mac should confirm: that the delegate
+   survives until the sheet closes — UIKit holds it weakly and the only strong
+   reference is the `remember` in the composition behind the sheet — and that
+   cancelling really does reach `documentPickerWasCancelled`, because that is
+   what stops the caller waiting.
+
+   **It sees Files, not Photos, and that is on purpose.** A screenshot lives
+   in Photos, which `UIDocumentPickerViewController` does not browse, so on an
+   iPhone the most likely attachment of all is unreachable until someone saves
+   it to Files. Android has no such gap: its system picker lists Photos among
+   its providers. Closing it later means adding `PHPickerViewController` as a
+   second source producing the same `PickedFile`; nothing else in the design
+   moves.
 
 And the parts that need a **device or emulator on either platform**, or a
 **live hub**:
@@ -612,9 +628,11 @@ shared/          Kotlin Multiplatform: models, hub client, repository,
   commonMain/    everything shared
   commonTest/    everything testable without a device
   jvmTest/       the same, plus the source scans that guard the two hosts
-  androidMain/   EncryptedSharedPreferences, CameraX + ZXing scanner
+  androidMain/   EncryptedSharedPreferences, CameraX + ZXing scanner,
+                 the OpenMultipleDocuments file picker
   androidDeviceTest/  the one instrumentation test
-  iosMain/       Keychain, AVFoundation scanner, the ComposeUIViewController
+  iosMain/       Keychain, AVFoundation scanner, UIDocumentPicker,
+                 the ComposeUIViewController
 androidApp/      one Activity, the manifest, permissions and icons
 iosApp/          a SwiftUI App and a UIViewControllerRepresentable. Two files.
 docs/            the design this was built from, and what was measured

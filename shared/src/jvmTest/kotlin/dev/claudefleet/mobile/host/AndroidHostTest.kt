@@ -10,6 +10,21 @@ import kotlin.test.fail
 private fun File.isScanner(): Boolean = "${File.separator}scan${File.separator}" in path
 
 /**
+ * The two `ActivityResultContracts` that put a permission dialog on the screen.
+ *
+ * **Deliberately unqualified**, and do not "tidy" an `ActivityResultContracts\.`
+ * prefix back onto it. Importing the nested class directly —
+ * `import androidx.activity.result.contract.ActivityResultContracts.RequestPermission`
+ * — and writing a bare `RequestPermission()` compiles, asks for a permission,
+ * and is exactly what an IDE auto-import produces. There is no ktlint, detekt
+ * or spotless in this repository to discourage it. A qualified pattern would
+ * have a hole that the string sweep this replaced did not.
+ *
+ * `\b` on both sides so `RequestPermissionRationale` and friends do not match.
+ */
+private val PERMISSION_CONTRACT = Regex("""\bRequestMultiplePermissions\b|\bRequestPermission\b""")
+
+/**
  * The camera permission is requested when the scanner opens, and at no other
  * moment — above all not when the app starts.
  *
@@ -42,11 +57,30 @@ class TheCameraIsAskedForOnlyWhenTheScannerOpensTest {
         assertEquals(emptyList(), offenders, "the camera permission is the scanner's to ask for")
     }
 
+    /**
+     * A *permission* contract, rather than any `rememberLauncherForActivityResult`.
+     *
+     * This used to sweep for the launcher itself, which was a fair proxy while
+     * the scanner was the only thing in the app that started another activity
+     * for a result. The file picker
+     * (`ui/pick/FilePicker.android.kt`) is the second, and it asks for
+     * nothing: `OpenMultipleDocuments` runs outside this process and hands
+     * back a read grant per URI, so no storage permission is requested and
+     * none is needed. Failing it here would have said "a permission launcher
+     * outside the scanner" about code that requests no permission, and the
+     * only way to pass would have been to stop using the contract that makes
+     * the permission unnecessary.
+     *
+     * So the sweep now names what it actually forbids. `RequestPermission`
+     * and `RequestMultiplePermissions` are the only two contracts that put a
+     * permission dialog on the screen, and a new one of either outside the
+     * scanner still fails.
+     */
     @Test
     fun only_the_scanner_launches_a_permission_request() {
         val offenders = Repo.shipped
             .filterNot { it.isScanner() }
-            .filter { "rememberLauncherForActivityResult" in it.readText() }
+            .filter { file -> PERMISSION_CONTRACT.containsMatchIn(file.readText()) }
             .map { it.name }
 
         assertEquals(emptyList(), offenders, "a permission launcher outside the scanner")

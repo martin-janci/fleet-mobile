@@ -4,9 +4,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
 /**
- * The camera scanner: two of the app's three `expect` declarations, the third
- * being `platformName`. Secure storage is deliberately *not* one — `Secrets` is
- * an interface each platform's host constructs and hands in.
+ * The camera scanner: one of the app's four `expect`/`actual` families,
+ * alongside `Platform` (`platformName`, `epochSeconds`, `utcOffsetSeconds`),
+ * `Share` (`rememberShareText`) and `FilePicker` (`filePickerSupported`,
+ * `rememberFilePicker`). Secure storage is deliberately *not* one — `Secrets`
+ * is an interface each platform's host constructs and hands in.
  *
  * It is deliberately the *whole* scanner rather than a thin camera wrapper:
  * CameraX with ZXing on Android and an `AVCaptureSession` on iOS have nothing
