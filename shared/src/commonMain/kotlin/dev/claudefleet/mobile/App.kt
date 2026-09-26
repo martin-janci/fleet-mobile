@@ -467,6 +467,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                                 },
                                 onSetProject = sessions::setProjectFilter,
                                 onToggleWorkStatus = sessions::toggleWorkStatus,
+                                onToggleWorkStatusName = sessions::toggleWorkStatusName,
                                 onToggleArchived = sessions::toggleArchived,
                                 onToggleOrg = sessions::toggleOrg,
                                 onToggleMyWork = sessions::toggleMyWorkOnly,

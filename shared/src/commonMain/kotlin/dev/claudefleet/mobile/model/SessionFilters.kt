@@ -69,6 +69,31 @@ enum class WorkStatusFilter(val label: String, val category: StatusCategory) {
 }
 
 /**
+ * The tracker's own status names the rows' work is in ("QA Review"), one per
+ * name case-insensitively, in workflow order — to do, in progress, done, then
+ * anything else — and by name within each. These are the filter sheet's
+ * extra ticket-status chips, the desktop's `statusNamesOf`
+ * (`src/lib/work_filters.ts`): the three buckets lump a Jira workflow's
+ * columns together, and the one a team cares about is often in the middle.
+ */
+fun workStatusNames(rows: List<SessionRow>): List<String> {
+    val seen = LinkedHashMap<String, Pair<String, Int>>()
+    for (row in rows) {
+        val name = row.work?.statusName?.trim()?.takeIf { it.isNotEmpty() } ?: continue
+        val key = name.lowercase()
+        if (key in seen) continue
+        val rank = when (row.work.statusCategory) {
+            StatusCategory.Todo -> 0
+            StatusCategory.InProgress -> 1
+            StatusCategory.Done -> 2
+            else -> 3
+        }
+        seen[key] = name to rank
+    }
+    return seen.values.sortedWith(compareBy<Pair<String, Int>> { it.second }.thenBy { it.first.lowercase() }).map { it.first }
+}
+
+/**
  * Everything that narrows the fleet list, in one value.
  *
  * Deliberately *only* the narrowing. Grouping by work is not in here and never
@@ -102,6 +127,12 @@ data class SessionFilters(
     /** Empty means any ticket status; otherwise a row's work must be in one of them. */
     val workStatuses: Set<WorkStatusFilter> = emptySet(),
     /**
+     * Tracker status names ("QA Review"), matched case-insensitively. OR-ed
+     * with [workStatuses]: together they are one ticket-status question, and
+     * a row answers it by matching any chip chosen in either.
+     */
+    val workStatusNames: Set<String> = emptySet(),
+    /**
      * Sessions archived from the desktop's Tidy-up (work graph M7) are listed.
      * The desktop's `hide archived` chip, the other way up to match
      * [showBackground]: on means the rows are there.
@@ -125,7 +156,7 @@ data class SessionFilters(
             myWorkOnly,
             orgFilter != null,
             projectFilter != null,
-            workStatuses.isNotEmpty(),
+            workStatuses.isNotEmpty() || workStatusNames.isNotEmpty(),
             !showArchived,
         ).count { it }
 
@@ -170,8 +201,10 @@ data class SessionFilters(
         if (statuses.isNotEmpty()) add(statuses.sortedBy { it.ordinal }.joinToString("/") { it.label })
         if (myWorkOnly) add("My work")
         orgFilter?.let { add(orgName(it)) }
-        if (workStatuses.isNotEmpty()) {
-            add("Ticket " + workStatuses.sortedBy { it.ordinal }.joinToString("/") { it.label.lowercase() })
+        if (workStatuses.isNotEmpty() || workStatusNames.isNotEmpty()) {
+            val parts = workStatuses.sortedBy { it.ordinal }.map { it.label.lowercase() } +
+                workStatusNames.sortedBy { it.lowercase() }
+            add("Ticket " + parts.joinToString("/"))
         }
         if (!showArchived) add("No archived")
         if (!showBackground) add("No background")
@@ -195,13 +228,19 @@ fun SessionRow.matches(filters: SessionFilters, nowSeconds: Long, projectLabel: 
     if (filters.orgFilter != null && orgOf != filters.orgFilter) return false
     if (filters.projectFilter != null && projectId != filters.projectFilter) return false
     if (!filters.showArchived && work?.archivedAt != null) return false
-    if (filters.workStatuses.isNotEmpty() && filters.workStatuses.none { it.category == work?.statusCategory }) {
-        return false
-    }
+    if (!matchesWorkStatus(filters)) return false
     if (filters.statuses.isNotEmpty() && !matchesStatuses(filters.statuses)) return false
     if (!matchesTime(filters, nowSeconds)) return false
     if (!matchesQuery(filters.query, projectLabel)) return false
     return true
+}
+
+/** OR across the chosen ticket buckets and status names; none chosen asks nothing. */
+private fun SessionRow.matchesWorkStatus(filters: SessionFilters): Boolean {
+    if (filters.workStatuses.isEmpty() && filters.workStatusNames.isEmpty()) return true
+    if (filters.workStatuses.any { it.category == work?.statusCategory }) return true
+    val name = work?.statusName?.trim()?.lowercase() ?: return false
+    return filters.workStatusNames.any { it.trim().lowercase() == name }
 }
 
 /** OR across the chosen statuses; [StatusFilter.STUCK] asks a different field. */

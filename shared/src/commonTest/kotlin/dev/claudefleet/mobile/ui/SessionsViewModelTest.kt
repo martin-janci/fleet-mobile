@@ -1057,6 +1057,34 @@ class SessionFilterStateTest {
         assertEquals(2, vm.state.value.shown, "only the archived session is left out")
     }
 
+    @Test
+    fun the_tracker_status_names_are_offered_and_narrow_the_list() = runTest {
+        val qa = session(1).copy(work = WorkSummary(key = "ABC-1", statusCategory = StatusCategory.InProgress, statusName = "QA Review"))
+        val dev = session(2).copy(work = WorkSummary(key = "ABC-2", statusCategory = StatusCategory.InProgress, statusName = "In Progress"))
+        val fleet = FakeFleet(listOf(qa, dev, session(3)))
+        fleet.capabilities.value = HubCapabilities.of(ToolCatalog(setOf("work")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+        runCurrent()
+        assertEquals(listOf("In Progress", "QA Review"), vm.state.value.workStatusNameChoices)
+
+        vm.toggleWorkStatusName("QA Review")
+        runCurrent()
+        assertEquals(1, vm.state.value.shown)
+
+        // A name no session is in any more has no chip to clear it: it stops narrowing.
+        fleet.sessions.value = listOf(dev, session(3))
+        runCurrent()
+        assertEquals(2, vm.state.value.shown)
+        assertEquals(0, vm.state.value.filters.activeCount)
+
+        vm.toggleWorkStatusName("in progress")
+        runCurrent()
+        assertEquals(1, vm.state.value.shown)
+        vm.toggleWorkStatusName("In Progress")
+        runCurrent()
+        assertEquals(2, vm.state.value.shown, "the same name, either case, turns it off")
+    }
+
     /**
      * Their controls live only on a hub with the work graph, so — like *My
      * work* — a hub that loses it cannot leave them narrowing the list.
