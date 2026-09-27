@@ -892,6 +892,27 @@ class HubClientTest {
     }
 
     @Test
+    fun naming_and_renaming_local_work_send_the_hubs_arguments() = runTest {
+        val sent = mutableListOf<JsonObject>()
+        val client = clientAnswering { body -> sent += body.args(); """{"id":5,"tmux_name":"t","host_alias":"pine"}""" }
+
+        client.nameWork(5, "Ops cleanup")
+        client.nameWork(5, "Ops cleanup", key = " OPS-1 ")
+        client.renameWorkItem(42, "Ops, part two")
+
+        val (bare, keyed, rename) = sent
+        assertEquals("name", bare["action"]!!.jsonPrimitive.content)
+        assertEquals(5, bare["session_id"]!!.jsonPrimitive.int)
+        assertEquals("Ops cleanup", bare["title"]!!.jsonPrimitive.content)
+        assertFalse("key" in bare, "no key: none sent")
+        assertEquals("OPS-1", keyed["key"]!!.jsonPrimitive.content)
+        assertEquals("name", rename["action"]!!.jsonPrimitive.content)
+        assertEquals(42, rename["item_id"]!!.jsonPrimitive.int)
+        assertEquals("Ops, part two", rename["title"]!!.jsonPrimitive.content)
+        assertFalse("session_id" in rename, "a rename is of the item, not a session")
+    }
+
+    @Test
     fun start_and_resume_send_their_arguments_and_leave_out_what_was_not_chosen() = runTest {
         val sent = mutableListOf<JsonObject>()
         val client = clientAnswering { body -> sent += body.args(); """{"id":8,"tmux_name":"t","host_alias":"pine"}""" }

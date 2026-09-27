@@ -127,6 +127,12 @@ internal class FakeWorkActions : WorkActions {
     }
 
     override suspend fun handover(sessionId: Long) = record("handover $sessionId")
+
+    override suspend fun name(sessionId: Long, title: String, key: String?) = record("name $sessionId $title ${key ?: "-"}")
+
+    override suspend fun renameItem(itemId: Long, title: String) {
+        record("rename $itemId $title")
+    }
 }
 
 private val PAY7 = WorkSummary(linkId = 11, itemId = 70, key = "PAY-7", title = "Refund retries", source = "branch", state = "confirmed")
@@ -540,5 +546,120 @@ class SessionWorkViewModelTest {
         fleet.sessions.value = listOf(row(work = PAY7.copy(linkId = 13, itemId = 80, key = "PAY-8")))
         runCurrent()
         assertNull(vm.state.value.card, "PAY-7's card is not PAY-8's")
+    }
+
+    // ── naming local work on the phone (claude-fleet M13.4a, D20) ──────────
+
+    private val LOCAL = WorkSummary(linkId = 21, itemId = 42, key = "OPS-1", title = "Ops cleanup", source = "manual", state = "confirmed")
+
+    @Test
+    fun a_session_with_no_work_may_be_named_and_one_with_work_may_not() = runTest {
+        val actions = FakeWorkActions()
+        val bare = SessionWorkViewModel(5, WorkFleet(listOf(row(guess = PAY9_GUESS))), actions, backgroundScope, canWrite = true)
+        assertTrue(bare.state.value.canNameWork, "a guess is not work: naming is still offered")
+        assertFalse(bare.state.value.canRenameWork)
+
+        val linked = SessionWorkViewModel(5, WorkFleet(listOf(row(work = PAY7))), actions, backgroundScope, canWrite = true)
+        assertFalse(linked.state.value.canNameWork)
+    }
+
+    @Test
+    fun naming_sends_the_trimmed_title_and_the_key_only_when_given() = runTest {
+        val actions = FakeWorkActions()
+        val vm = SessionWorkViewModel(5, WorkFleet(listOf(row())), actions, backgroundScope, canWrite = true)
+
+        vm.nameWork("  Ops cleanup  ", "  ")
+        runCurrent()
+        vm.nameWork("Ops cleanup", " OPS-1 ")
+        runCurrent()
+
+        assertEquals(listOf("name 5 Ops cleanup -", "name 5 Ops cleanup OPS-1"), actions.calls)
+    }
+
+    @Test
+    fun a_bad_title_is_said_here_and_never_sent() = runTest {
+        val actions = FakeWorkActions()
+        val vm = SessionWorkViewModel(5, WorkFleet(listOf(row())), actions, backgroundScope, canWrite = true)
+
+        vm.nameWork("   ")
+        runCurrent()
+        assertEquals("Give the work a name", vm.state.value.error?.title)
+        vm.nameWork("x".repeat(WORK_TITLE_MAX + 1))
+        runCurrent()
+        assertEquals("That name is too long", vm.state.value.error?.title)
+        vm.nameWork("bad\u0007bell")
+        runCurrent()
+        assertEquals("That name has an unprintable character", vm.state.value.error?.title)
+        vm.nameWork("x".repeat(WORK_TITLE_MAX))
+        runCurrent()
+        assertEquals(1, actions.calls.size, "only the one within the rules is sent")
+    }
+
+    /** The non-negotiable again: a readonly token, or a hub without `name`, is offered neither and calls nothing. */
+    @Test
+    fun a_readonly_token_or_an_older_hub_cannot_name_or_rename() = runTest {
+        val actions = FakeWorkActions()
+        val ro = SessionWorkViewModel(5, WorkFleet(listOf(row())), actions, backgroundScope, canWrite = false)
+        assertFalse(ro.state.value.canNameWork)
+        ro.nameWork("Ops cleanup")
+        val roLocal = SessionWorkViewModel(5, WorkFleet(listOf(row(work = LOCAL))), actions, backgroundScope, canWrite = false)
+        assertFalse(roLocal.state.value.canRenameWork)
+        roLocal.renameWork("Ops")
+
+        val older = HubCapabilities.of(ToolCatalog(setOf("work", "work_link"), mapOf("work_link" to setOf("link", "unlink", "reject", "confirm"))))
+        val old = SessionWorkViewModel(5, WorkFleet(listOf(row()), older), actions, backgroundScope, canWrite = true)
+        assertFalse(old.state.value.canNameWork, "a hub before M11.1 has no name action")
+        old.nameWork("Ops cleanup")
+        runCurrent()
+        assertEquals(emptyList(), actions.calls)
+    }
+
+    @Test
+    fun only_local_work_is_offered_a_rename_and_it_renames_the_item() = runTest {
+        val actions = FakeWorkActions()
+        val ticket = SessionWorkViewModel(
+            5,
+            WorkFleet(listOf(row(work = PAY7.copy(statusCategory = null, url = "https://acme.atlassian.net/browse/PAY-7")))),
+            actions,
+            backgroundScope,
+            canWrite = true,
+        )
+        assertFalse(ticket.state.value.canRenameWork, "a ticket has a URL: not local")
+        val bareKey = SessionWorkViewModel(5, WorkFleet(listOf(row(work = LOCAL.copy(itemId = null)))), actions, backgroundScope, canWrite = true)
+        assertFalse(bareKey.state.value.canRenameWork, "a bare key has no item to rename")
+
+        val vm = SessionWorkViewModel(5, WorkFleet(listOf(row(work = LOCAL))), actions, backgroundScope, canWrite = true)
+        assertTrue(vm.state.value.canRenameWork)
+        vm.openSheet()
+        runCurrent()
+        vm.renameWork("  Ops cleanup, part two ")
+        runCurrent()
+        assertEquals(listOf("rename 42 Ops cleanup, part two"), actions.calls)
+        assertFalse(vm.state.value.sheetOpen, "the sheet closes; the row's own frame shows the new title")
+    }
+
+    @Test
+    fun a_key_that_is_a_ticket_says_to_set_work_instead() = runTest {
+        val ticketTaken = FakeWorkActions().apply {
+            fail = HubError.Tool(
+                "E_EXISTS",
+                "PAY-7 is a ticket",
+                kotlinx.serialization.json.buildJsonObject {
+                    put("item_id", kotlinx.serialization.json.JsonPrimitive(70))
+                    put("tracker", kotlinx.serialization.json.JsonPrimitive(true))
+                },
+            )
+        }
+        val vm = SessionWorkViewModel(5, WorkFleet(listOf(row())), ticketTaken, backgroundScope, canWrite = true)
+        vm.nameWork("Refund", "PAY-7")
+        runCurrent()
+        assertEquals("That key is a ticket", vm.state.value.error?.title)
+
+        val localTaken = FakeWorkActions().apply { fail = HubError.Tool("E_EXISTS", "OPS-1 is already local work") }
+        val vm2 = SessionWorkViewModel(5, WorkFleet(listOf(row())), localTaken, backgroundScope, canWrite = true)
+        vm2.nameWork("Ops", "OPS-1")
+        runCurrent()
+        assertEquals("That key is taken", vm2.state.value.error?.title)
+        assertEquals("OPS-1 is already local work", vm2.state.value.error?.body)
     }
 }
