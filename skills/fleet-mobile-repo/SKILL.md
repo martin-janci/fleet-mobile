@@ -150,6 +150,11 @@ missing feature should only hide a button. Instead, on every `ready`,
   not, an action counts as present until the hub answers `E_INVALID`
   "unknown … action", which `FleetState.actionMissing` records **for that
   connection** (the next `ready` asks again — it may be an upgraded hub).
+- **Strictly listed.** The Work view (M14) uses `HubCapabilities.lists(tool,
+  action)`, which — unlike `has` — does not count a free-string `action` as
+  present: the *My work* tab, the task screen and a session's *Tasks* appear
+  only when `work`'s enum names `tree` / `task` / `session_tasks`, so an older
+  hub never shows a tab that is then refused.
 - A hub that cannot answer `tools/list` reads as the old hub: nothing
   work-shaped is offered, and nothing errors. `HUB_VERSION_KEYS` stays only
   for the `send_prompt { keys }` chips.

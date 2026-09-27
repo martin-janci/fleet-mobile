@@ -98,6 +98,27 @@ refusal is a bug, not a flow.
    (which does not revoke it; revocation is the operator's, from the terminal),
    and the app's own version.
 
+6. **My work** (claude-fleet M14, read part) — shown only when the hub's
+   `tools/list` names `tree` in `work`'s action enum. One `work { tree }`
+   page answers every section header (org → group, with its count under the
+   filters) and fills the first sections; a section's *Load more* asks for
+   that section alone (`filters.org` + `filters.group`), from the top the
+   first time, because a cursor is bound to the filters it was answered for,
+   and by its own cursor after that. A refresh re-reads every grown section
+   to its size. Saved views are chips that apply `WorkTreeFilters` as they
+   are; the filter sheet builds the same object. The **task** screen reads
+   `work { task }` and reuses the Tickets sheet's Open / Continue (resume) /
+   Start here (the form in ticket mode), with the same gates. A session's
+   **Tasks** reads `work { session_tasks }`. The phone does not assume which
+   orgs exist: the filter's orgs and trackers are the page's `orgs` and
+   `trackers`, and *Unassigned* is offered only once the hub has shown
+   unassigned work. A phone bound to an org receives no `work:changed`
+   (claude-fleet #347), so the tab refreshes on focus, on a pull, on the
+   stream's return, and — debounced — on a `session:*` change to a session
+   it shows or one carrying work. Offline it keeps the last picture under
+   "Offline · as of HH:MM". The edits (set primary, unlink, add, place,
+   review decisions, view save) are a separate PR.
+
 ### Events
 
 The app subscribes on resume and drops the subscription on background. A

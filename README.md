@@ -283,6 +283,36 @@ costs one reconnect.
     the org on each work heading and ticket, and the org's colour as a thin
     bar at each session row's edge.
 
+- **My work** (a hub whose `work` lists `tree`; claude-fleet M14) — the other
+  way into the work graph: organisation → group → task → *every* session of
+  the task, including tasks with no session at all.
+  - Saved views (`work { views }`) as chips, applied as they are — the phone
+    does not save or edit one yet.
+  - A filter sheet with the desktop's filters: organisation, tracker, status,
+    *assigned to me*, sessions (with one, past only, none, suggested),
+    *something to review*, and a search by key or title.
+  - Collapsible org → group sections with their counts, compact task cards,
+    and **Load more** under each section (the hub's keyset cursor).
+  - A task screen with every session, its state and *why* it is linked, and
+    **Open**, **Continue** (resume, with a host picker) and **Start here** (the
+    New session form in ticket mode) — the same calls, gating and confirm as
+    the Tickets sheet.
+  - **Tasks** in a session's menu: every link of the session — primary, also
+    on, suggested, past and rejected — each opening its task.
+  - It reads again when the tab is opened, on a pull, when the stream comes
+    back, and when a session it shows (or one with work) changes. The hub
+    sends a phone paired with `--org` no `work:changed` (claude-fleet #347),
+    so the tab never waits for one. Offline, the last picture stays under
+    *Offline · as of 10:42*; there is no offline queue.
+  - A phone paired with `fleet-hub pair --org` sees only its organisation
+    (and unassigned work while the org's `bound_sees_unassigned` is on): the
+    tab draws what the hub answered and offers no org it was not told of.
+
+  This part is read-only: *Make primary*, *Remove*, *Add task…*, *Place in
+  group…*, the Review sheet and saving a view come in the Work view's edit
+  PR, and a source scan (`ToolsTheAppMayCallTest`) keeps their actions out
+  of the app until then.
+
   A ticket card is read-only (claude-fleet decision D15): **Copy** puts the
   key, title, status, link and criteria on the clipboard as plain text; the
   phone never sends a card into a session, and the tracker's text is drawn as
