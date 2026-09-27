@@ -161,6 +161,7 @@ fun SessionsScreen(
             )
             FilterSummary(state = state, onOpenFilters = handlers.onOpenFilters, onClearAll = handlers.onClearAll)
         }
+        HiddenAttentionBanner(count = state.hiddenAttention, onClearAll = handlers.onClearAll)
         ConnectionBanner(state.status)
         ErrorBanner(state.error, onDismiss = handlers.onDismissError)
         ErrorBanner(agent.error, onDismiss = handlers.onDismissAgentError)
@@ -448,6 +449,53 @@ private fun FilterSummary(state: SessionsUiState, onOpenFilters: () -> Unit, onC
         )
         TextButton(onClick = onClearAll, contentPadding = PaddingValues(horizontal = 8.dp)) {
             Text("Clear", style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+/**
+ * What the filters are keeping from you, when it is something that wants a
+ * person.
+ *
+ * This is the price of remembering filters between launches, paid in full and
+ * in the open. `SessionsViewModel.setGroupMode`'s KDoc states the objection —
+ * restoring a filter on launch *"can make a busy fleet look quiet"* — and this
+ * is the answer to it: the fleet may look quiet, but it cannot lie about being
+ * quiet, because the app says so above the list.
+ *
+ * Deliberately narrow. It counts only [SessionsUiState.hiddenAttention], the
+ * rows that are blocked or stuck; how many rows the filters hide in general is
+ * already on screen as *shown / total*. A banner that fired on every ordinary
+ * narrowing would be learnt and then ignored, which is the one thing this must
+ * not become.
+ *
+ * `errorContainer` rather than a softer tone: an agent that has stopped and is
+ * waiting for an answer nobody can see is a failure of the app's whole
+ * purpose, not a note about the view.
+ */
+@Composable
+private fun HiddenAttentionBanner(count: Int, onClearAll: () -> Unit) {
+    if (count <= 0) return
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(FleetIcons.Warning, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+            Text(
+                text = if (count == 1) {
+                    "1 session is waiting on you and is hidden by these filters."
+                } else {
+                    "$count sessions are waiting on you and are hidden by these filters."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onClearAll) { Text("Clear") }
         }
     }
 }

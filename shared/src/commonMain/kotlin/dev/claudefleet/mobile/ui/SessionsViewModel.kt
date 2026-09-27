@@ -21,6 +21,7 @@ import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.withTicketsFrom
 import dev.claudefleet.mobile.model.workStatusNames
 import dev.claudefleet.mobile.model.unnamedProject
+import dev.claudefleet.mobile.net.json
 import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -119,6 +120,23 @@ data class SessionsUiState(
     val filters: SessionFilters = SessionFilters(),
     /** How many rows in the **whole** fleet want a person, filtered or not. */
     val attentionCount: Int = 0,
+    /**
+     * How many rows that want a person are **not on screen** because of the
+     * current filters.
+     *
+     * The one number that makes a remembered filter safe to restore. A window
+     * set on Friday would otherwise open Monday's app on a fleet that looks
+     * calm while three agents sit blocked behind it — the objection
+     * [SessionsViewModel.setGroupMode]'s KDoc raises against storing filters at
+     * all. Counting them is the answer: the quiet fleet cannot be a lie when
+     * the app is the thing saying it is not one.
+     *
+     * Deliberately *not* "how many rows did the filter hide" — that is already
+     * on screen as [shown] against [total]. Only the rows that stop until
+     * somebody moves them count, or the warning fires on every ordinary
+     * narrowing and is learnt to be ignored.
+     */
+    val hiddenAttention: Int = 0,
     /**
      * How many sessions [groups] holds, and how many the fleet has in all.
      *
@@ -249,8 +267,33 @@ class SessionsViewModel(
     )
 
     private val local = MutableStateFlow(
-        Local(groupMode = readGroupMode(), filterAt = clock()),
+        Local(groupMode = readGroupMode(), filters = readFilters(), filterAt = clock()),
     )
+
+    /**
+     * The remembered filters, or none at all.
+     *
+     * Anything the build cannot read is *none*: the store outlives the version
+     * that wrote it, so a downgrade, or a build that has dropped a field, must
+     * not crash on the first frame with a value it put there itself. Opening on
+     * the whole fleet is the safe direction to be wrong in — it shows more than
+     * asked rather than less.
+     *
+     * It does **not** strip [SessionFilters.query] or
+     * [SessionFilters.hostFilter] a second time. [remember] is where that rule
+     * lives and the only place it is written, because a rule implemented twice
+     * is a rule neither copy is tested for: a mutation sweep removed each side
+     * in turn and the suite stayed green both times, since the other half was
+     * still doing the work.
+     */
+    private fun readFilters(): SessionFilters {
+        val stored = prefs?.getStringList(FILTERS_KEY)?.firstOrNull() ?: return SessionFilters()
+        return try {
+            json.decodeFromString(SessionFilters.serializer(), stored)
+        } catch (_: Exception) {
+            SessionFilters()
+        }
+    }
 
     /**
      * The remembered view.
@@ -339,7 +382,29 @@ class SessionsViewModel(
      * hour after the app opened measures from now rather than from launch.
      */
     private fun filter(f: (SessionFilters) -> SessionFilters) {
-        local.update { it.copy(filters = f(it.filters), filterAt = clock()) }
+        var updated = SessionFilters()
+        local.update {
+            updated = f(it.filters)
+            it.copy(filters = updated, filterAt = clock())
+        }
+        remember(updated)
+    }
+
+    /**
+     * Write the filters to the device, less the two that must not survive a
+     * launch.
+     *
+     * [SessionFilters.query] is a moment rather than a setting — an app
+     * reopened on Monday still filtered to something typed on Friday reads as
+     * broken, which is why `setSearchOpen(false)` already clears it within a
+     * session. [SessionFilters.hostFilter] is not a judgement call at all:
+     * `Screen.Sessions.hostAlias` is its one source of truth, so a stored copy
+     * would come back disagreeing with the navigator — the bug
+     * `Navigator.clearHostFilter` exists to prevent.
+     */
+    private fun remember(filters: SessionFilters) {
+        val storable = filters.copy(query = "", hostFilter = null)
+        prefs?.putStringList(FILTERS_KEY, listOf(json.encodeToString(SessionFilters.serializer(), storable)))
     }
 
     /** The search text. Blank searches for nothing and keeps every row. */
@@ -587,6 +652,17 @@ class SessionsViewModel(
                     (myWork == null || row.work?.itemId in myWork)
             }.byTriage(now = nowSeconds)
         }
+        // Counted against the same `matches` the two views use, so the number
+        // can never describe a row that either of them would have drawn. The
+        // host filter is included because it narrows like any other — and
+        // `onClearAll`, which is what the warning offers, already clears the
+        // navigator's copy along with the rest.
+        val hiddenAttention = rows.count { row ->
+            row.needsAttention && !(
+                row.matches(filters, l.filterAt, projectLabel(row.projectId, byId)) &&
+                    (myWork == null || row.work?.itemId in myWork)
+                )
+        }
         val groups = if (urgency) {
             emptyList()
         } else {
@@ -606,6 +682,7 @@ class SessionsViewModel(
             status = status,
             filters = filters,
             attentionCount = sessions.count { it.needsAttention },
+            hiddenAttention = hiddenAttention,
             shown = if (urgency) urgent.size else groups.sumOf { it.sessionCount },
             total = sessions.size,
             refreshing = l.refreshing,
@@ -627,6 +704,7 @@ class SessionsViewModel(
     private companion object {
         const val BY_WORK_KEY = "sessions.by_work"
         const val GROUP_MODE_KEY = "sessions.group_mode"
+        const val FILTERS_KEY = "sessions.filters"
         const val ON = "on"
     }
 }

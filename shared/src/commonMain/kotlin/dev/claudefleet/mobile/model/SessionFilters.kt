@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.model
 
+import kotlinx.serialization.Serializable
+
 /**
  * How wide a time window the activity filter asks for.
  *
@@ -10,6 +12,7 @@ package dev.claudefleet.mobile.model
  * sheet under a heading here, not in a dense desktop sidebar, and "8h" alone
  * does not say whether it means *within* or *beyond*. [TimeDirection] does.
  */
+@Serializable
 enum class TimeWindow(val label: String, val seconds: Long?) {
     ANY("Any time", null),
     H1("1 hour", 60 * 60),
@@ -28,6 +31,7 @@ enum class TimeWindow(val label: String, val seconds: Long?) {
  * sitting untouched for over an hour" is the triage question, and it cannot be
  * asked by narrowing a recency window.
  */
+@Serializable
 enum class TimeDirection(val label: String) {
     WITHIN("Active within"),
     BEYOND("Idle beyond"),
@@ -41,6 +45,7 @@ enum class TimeDirection(val label: String) {
  * A row can match both it and its status; selections are OR-ed, so that is not
  * a contradiction.
  */
+@Serializable
 enum class StatusFilter(val label: String, val wire: String?) {
     WORKING("Working", "working"),
     BLOCKED("Blocked", "blocked"),
@@ -62,6 +67,7 @@ enum class StatusFilter(val label: String, val wire: String?) {
  * answer to it. Selections are OR-ed, like [StatusFilter]'s; the desktop's
  * single choice is the one-chip case of that.
  */
+@Serializable
 enum class WorkStatusFilter(val label: String, val category: StatusCategory) {
     TODO("To do", StatusCategory.Todo),
     IN_PROGRESS("In progress", StatusCategory.InProgress),
@@ -108,6 +114,7 @@ fun workStatusNames(rows: List<SessionRow>): List<String> {
  * source of truth (see `Navigator.clearHostFilter`), so clearing it goes
  * through the navigator and [cleared] leaves it alone.
  */
+@Serializable
 data class SessionFilters(
     /** Free text, matched against the row and its project ([matches]). Blank matches everything. */
     val query: String = "",
