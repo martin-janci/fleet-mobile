@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.data
 
+import dev.claudefleet.mobile.model.LocalWorkItem
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
@@ -49,6 +50,15 @@ interface WorkActions {
 
     /** Ask the session's Claude for a handover note on its work; the answer comes later. */
     suspend fun handover(sessionId: Long): SessionRow
+
+    /** The local work items this token sees — which of a session's work the phone may rename. */
+    suspend fun localItems(): List<LocalWorkItem>
+
+    /** *Name this work…*: new local work on the session, with an optional [key]. */
+    suspend fun nameWork(sessionId: Long, title: String, key: String? = null): SessionRow
+
+    /** Rename local work item [itemId]. */
+    suspend fun renameWork(itemId: Long, title: String): LocalWorkItem
 }
 
 /** [WorkActions] against the paired hub, through [AppSession.withClient]. */
@@ -82,4 +92,12 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
         session.withClient { it.resumeWork(key, mode = "last", hostAlias = hostAlias) }
 
     override suspend fun handover(sessionId: Long): SessionRow = session.withClient { it.handoverWork(sessionId) }
+
+    override suspend fun localItems(): List<LocalWorkItem> = session.withClient { it.workLocalItems() }
+
+    override suspend fun nameWork(sessionId: Long, title: String, key: String?): SessionRow =
+        session.withClient { it.nameWork(sessionId, title, key) }
+
+    override suspend fun renameWork(itemId: Long, title: String): LocalWorkItem =
+        session.withClient { it.renameWorkItem(itemId, title) }
 }

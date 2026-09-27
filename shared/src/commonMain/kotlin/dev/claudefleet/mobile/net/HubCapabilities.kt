@@ -51,6 +51,17 @@ data class HubCapabilities(
             actions[tool]?.contains(action) != false &&
             action !in missing[tool].orEmpty()
 
+    /**
+     * [has], but only when the schema's `enum` names [action] outright: a
+     * free-string `action` is not taken as present. For an action newer than
+     * the enums themselves (`work_link name`, claude-fleet M11.1), where a hub
+     * that does not list it is an older hub, not a free-string one.
+     */
+    fun lists(tool: String, action: String): Boolean =
+        tool in tools &&
+            actions[tool]?.contains(action) == true &&
+            action !in missing[tool].orEmpty()
+
     /** This connection learned [action] is not one [tool] has. */
     fun forgetting(tool: String, action: String): HubCapabilities =
         copy(missing = missing + (tool to (missing[tool].orEmpty() + action)))

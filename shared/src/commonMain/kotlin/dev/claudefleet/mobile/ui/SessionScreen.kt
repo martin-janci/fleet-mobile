@@ -441,7 +441,7 @@ private fun SessionBar(
             // hub refuses every one of these calls against it with
             // `E_INVALID_STATE`) has no management action to offer at all —
             // see [SessionUiState.canManage].
-            if (state.canManage || work.canSetWork) {
+            if (state.canManage || work.canSetWork || work.canNameWork) {
                 SessionOverflowMenu(
                     state = state,
                     onRestart = onRestart,
@@ -450,6 +450,7 @@ private fun SessionBar(
                     onSetTags = onSetTags,
                     onRename = onRename,
                     onSetWork = workHandlers.onSetWork.takeIf { work.canSetWork },
+                    onNameWork = workHandlers.onNameWork.takeIf { work.canNameWork },
                 )
             }
         },
@@ -548,10 +549,13 @@ private fun SessionOverflowMenu(
     onRename: (String) -> Unit,
     /** *Set work…*; null when this token or this hub cannot link work. */
     onSetWork: ((String) -> Unit)? = null,
+    /** *Name this work…*; null when this token, this hub or this session's work rule it out. */
+    onNameWork: ((String, String?) -> Unit)? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
     var showSetWork by remember { mutableStateOf(false) }
+    var showNameWork by remember { mutableStateOf(false) }
     val manage = state.canManage
     var showTags by remember { mutableStateOf(false) }
     var showRestartConfirm by remember { mutableStateOf(false) }
@@ -567,6 +571,13 @@ private fun SessionOverflowMenu(
                 text = { Text("Set work…") },
                 enabled = state.connected,
                 onClick = { expanded = false; showSetWork = true },
+            )
+        }
+        if (onNameWork != null) {
+            DropdownMenuItem(
+                text = { Text("Name this work…") },
+                enabled = state.connected,
+                onClick = { expanded = false; showNameWork = true },
             )
         }
         if (manage) {
@@ -587,6 +598,13 @@ private fun SessionOverflowMenu(
         SetWorkDialog(
             onConfirm = { showSetWork = false; onSetWork(it) },
             onDismiss = { showSetWork = false },
+        )
+    }
+    if (showNameWork && onNameWork != null) {
+        NameWorkDialog(
+            withKey = true,
+            onConfirm = { title, key -> showNameWork = false; onNameWork(title, key) },
+            onDismiss = { showNameWork = false },
         )
     }
     ManageDialogs(

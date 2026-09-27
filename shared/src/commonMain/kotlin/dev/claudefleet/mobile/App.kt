@@ -709,6 +709,8 @@ private fun SessionRoute(
             onSetWork = { workVm.setWork(it) },
             onDismissError = workVm::dismissError,
             onHandover = { workVm.handover() },
+            onNameWork = { title, key -> workVm.nameWork(title, key) },
+            onRenameWork = { workVm.rename(it) },
         ),
     )
 }

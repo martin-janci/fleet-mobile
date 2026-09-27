@@ -891,6 +891,63 @@ class HubClientTest {
         assertEquals("billing migration", sent[4]["key"]!!.jsonPrimitive.content)
     }
 
+    /**
+     * `work_link name` (claude-fleet M11.1) takes exactly one of `session_id`
+     * (name new work) or `item_id` (rename): the hub refuses both or neither.
+     */
+    @Test
+    fun naming_sends_the_session_and_renaming_sends_only_the_item() = runTest {
+        val sent = mutableListOf<Pair<String, JsonObject>>()
+        val client = clientAnswering { body ->
+            sent += body.tool() to body.args()
+            when (body.args()["action"]!!.jsonPrimitive.content) {
+                "local_items" -> """[{"id":300,"key":null,"title":"Billing","created_at":1,"updated_at":2,"live_sessions":1}]"""
+                "name" -> if ("item_id" in body.args()) {
+                    """{"id":300,"source":"local","title":"Billing, part 2","status_category":"todo","created_at":1,"updated_at":3}"""
+                } else {
+                    """{"id":5,"tmux_name":"t","host_alias":"h"}"""
+                }
+                else -> error("unexpected call")
+            }
+        }
+
+        client.nameWork(5, "Billing")
+        client.nameWork(5, "Billing", key = "BILL-1")
+        client.nameWork(5, "Billing", key = " ")
+        val renamed = client.renameWorkItem(300, "Billing, part 2")
+        val items = client.workLocalItems()
+
+        assertEquals(listOf("work_link", "work_link", "work_link", "work_link", "work"), sent.map { it.first })
+        val (bare, keyed, blank, rename, list) = sent.map { it.second }
+        for (named in listOf(bare, keyed, blank)) {
+            assertEquals("name", named["action"]!!.jsonPrimitive.content)
+            assertEquals(5, named["session_id"]!!.jsonPrimitive.int)
+            assertEquals("Billing", named["title"]!!.jsonPrimitive.content)
+            assertFalse("item_id" in named)
+        }
+        assertFalse("key" in bare, "no key: the hub makes key-less local work")
+        assertEquals("BILL-1", keyed["key"]!!.jsonPrimitive.content)
+        assertFalse("key" in blank)
+        assertEquals("name", rename["action"]!!.jsonPrimitive.content)
+        assertEquals(300, rename["item_id"]!!.jsonPrimitive.int)
+        assertEquals("Billing, part 2", rename["title"]!!.jsonPrimitive.content)
+        assertFalse("session_id" in rename, "exactly one of session_id or item_id")
+        assertEquals("local_items", list["action"]!!.jsonPrimitive.content)
+        assertEquals("Billing, part 2", renamed.title)
+        assertEquals(listOf(300L), items.map { it.id })
+    }
+
+    @Test
+    fun a_schema_that_lists_an_action_is_what_lists_means() {
+        val free = HubCapabilities.of(ToolCatalog(setOf("work", "work_link")))
+        assertTrue(free.has("work_link", "name"))
+        assertFalse(free.lists("work_link", "name"), "a free-string action is not listed")
+        val listed = HubCapabilities.of(ToolCatalog(setOf("work", "work_link"), mapOf("work_link" to setOf("name"))))
+        assertTrue(listed.lists("work_link", "name"))
+        assertFalse(listed.forgetting("work_link", "name").lists("work_link", "name"))
+        assertFalse(HubCapabilities.of(ToolCatalog(setOf("work"), mapOf("work_link" to setOf("name")))).lists("work_link", "name"))
+    }
+
     @Test
     fun start_and_resume_send_their_arguments_and_leave_out_what_was_not_chosen() = runTest {
         val sent = mutableListOf<JsonObject>()

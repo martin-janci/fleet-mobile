@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.WorkActions
+import dev.claudefleet.mobile.model.LOCAL_WORK_TITLE_MAX
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.WorkSummary
@@ -21,6 +22,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 
 /** The ticket chip on a session screen, and the small sheet behind it. */
 data class SessionWorkUiState(
@@ -48,6 +52,19 @@ data class SessionWorkUiState(
     val canHandover: Boolean = false,
     /** Where the last handover asked from this screen has got to, or null. */
     val handover: HandoverStatus? = null,
+    /**
+     * **Name this work…** (`work_link name` with `session_id`, claude-fleet
+     * M11.1, decision D20): new local work for a session that has none
+     * confirmed. A write token and a hub whose schema *lists* `name` — an
+     * older hub never sees the entry.
+     */
+    val canNameWork: Boolean = false,
+    /**
+     * **Rename…** the session's work (`work_link name` with `item_id`): the
+     * same gates, and only for a local item — the hub's `local_items` says
+     * which. A tracker's title belongs to the tracker.
+     */
+    val canRename: Boolean = false,
 ) {
     /** What the chip draws: the confirmed work, else the guess. */
     val chip: WorkSummary? get() = work ?: suggested
@@ -83,6 +100,8 @@ class SessionWorkViewModel(
         val busy: Boolean = false,
         val error: Friendly? = null,
         val handover: HandoverStatus? = null,
+        /** Which work items are local, from `work local_items`; read when the sheet opens. */
+        val localItemIds: Set<Long> = emptySet(),
     )
 
     private val local = MutableStateFlow(Local())
@@ -115,7 +134,31 @@ class SessionWorkViewModel(
         firstOrNull { it.id == sessionId }?.withTicketsFrom(cache.associateBy { it.id })
 
     fun openSheet() {
-        if (state.value.chip != null) local.update { it.copy(sheetOpen = true) }
+        if (state.value.chip == null) return
+        local.update { it.copy(sheetOpen = true) }
+        readLocalItems()
+    }
+
+    /**
+     * Whether the session's work is local, and so may be renamed. Only read
+     * when a rename could be offered at all; a failure only leaves *Rename…*
+     * off — the sheet has nothing to say about it.
+     */
+    private fun readLocalItems() {
+        val caps = fleet.capabilities.value
+        if (row()?.work?.itemId == null || !nameAllowed(caps) || !caps.lists(WORK, LOCAL_ITEMS)) return
+        scope.launch {
+            try {
+                val ids = actions.localItems().map { it.id }.toSet()
+                local.update { it.copy(localItemIds = ids) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: HubError.Tool) {
+                if (e.isUnknownAction()) fleet.actionMissing(WORK, LOCAL_ITEMS)
+            } catch (_: Throwable) {
+                // Rename stays off; nothing else on the sheet depends on it.
+            }
+        }
     }
 
     fun closeSheet() {
@@ -211,6 +254,59 @@ class SessionWorkViewModel(
         }
     }
 
+    /**
+     * **Name this work…**: new local work with [title] (and an optional
+     * [key]) on this session. Only while the session has no confirmed work —
+     * naming over a ticket would bury it — and the title is one the hub
+     * takes; a title it would refuse is said here without asking.
+     */
+    fun nameWork(title: String, key: String? = null): Job = runName(renaming = false) {
+        if (row()?.work != null) return@runName
+        val t = checkedTitle(title) ?: return@runName
+        val named = actions.nameWork(sessionId, t, key?.trim()?.takeIf { it.isNotEmpty() })
+        // The new item is local by construction: Rename… is right without a re-read.
+        named.work?.itemId?.let { id -> local.update { it.copy(localItemIds = it.localItemIds + id) } }
+    }
+
+    /**
+     * **Rename…** the session's local work. The hub's `work:item` frame is
+     * what moves the chip's title, as every other decision's frame does.
+     */
+    fun rename(title: String): Job = runName(renaming = true) {
+        // The title as the sheet shows it: a rename's `work:item` updates the
+        // ticket cache, not the row.
+        val work = fleet.sessions.value.freshRow(fleet.tickets.value)?.work ?: return@runName
+        val id = work.itemId?.takeIf { it in local.value.localItemIds } ?: return@runName
+        val t = checkedTitle(title) ?: return@runName
+        if (t == work.title) return@runName
+        actions.renameWork(id, t)
+    }
+
+    /** The trimmed title, or null after saying why the hub would refuse it. */
+    private fun checkedTitle(raw: String): String? {
+        val problem = localWorkTitleProblem(raw) ?: return raw.trim()
+        local.update { it.copy(error = Friendly("Check the name", problem, isError = true)) }
+        return null
+    }
+
+    /** [runGated] for `name`: its own gate ([HubCapabilities.lists]) and its refusals said in words. */
+    private fun runName(renaming: Boolean, call: suspend () -> Unit): Job = scope.launch {
+        if (!nameAllowed(fleet.capabilities.value) || local.value.busy) return@launch
+        local.update { it.copy(busy = true, error = null) }
+        try {
+            call()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: HubError.Tool) {
+            if (e.isUnknownAction()) fleet.actionMissing(WORK_LINK, NAME)
+            local.update { it.copy(error = friendlyName(e, renaming)) }
+        } catch (t: Throwable) {
+            local.update { it.copy(error = friendly(t)) }
+        } finally {
+            local.update { it.copy(busy = false) }
+        }
+    }
+
     /** A URL the hub cannot resolve to a ticket: ask for the key rather than link the URL. */
     private fun refuseUrl() {
         local.update {
@@ -255,6 +351,14 @@ class SessionWorkViewModel(
     private fun allowed(caps: HubCapabilities, action: String): Boolean =
         canWrite && caps.work && caps.has(WORK_LINK, action)
 
+    /**
+     * `name` is newer than the action enums (M8.0), so a hub that does not
+     * list it is an older hub: hidden, never tried. [HubCapabilities.has]
+     * would take a free-string `action` as present.
+     */
+    private fun nameAllowed(caps: HubCapabilities): Boolean =
+        canWrite && caps.work && caps.lists(WORK_LINK, NAME)
+
     private fun row(): SessionRow? = fleet.sessions.value.firstOrNull { it.id == sessionId }
 
     private fun assemble(row: SessionRow?, caps: HubCapabilities, l: Local): SessionWorkUiState {
@@ -274,6 +378,8 @@ class SessionWorkViewModel(
             error = l.error,
             canHandover = work?.key != null && row.canBeAskedForHandover && allowed(caps, HANDOVER),
             handover = l.handover,
+            canNameWork = work == null && nameAllowed(caps),
+            canRename = work?.itemId != null && work.itemId in l.localItemIds && nameAllowed(caps),
         )
     }
 
@@ -284,6 +390,8 @@ class SessionWorkViewModel(
         const val LINK = "link"
         const val LOOKUP = "lookup"
         const val HANDOVER = "handover"
+        const val NAME = "name"
+        const val LOCAL_ITEMS = "local_items"
     }
 }
 
@@ -332,6 +440,53 @@ internal fun friendlyHandover(e: HubError.Tool): Friendly {
         )
         "E_EXISTS" -> Friendly("A handover is already on its way", e.message, isError = false, details = raw)
         "E_INVALID" -> Friendly("No handover for this session", e.message, isError = true, details = raw)
+        else -> friendlyWork(e)
+    }
+}
+
+/**
+ * Why the hub would refuse [raw] as a local work title, in words, or null
+ * when it would take it: the hub's own rules (trimmed, not empty, at most
+ * [LOCAL_WORK_TITLE_MAX] characters, no control characters).
+ */
+internal fun localWorkTitleProblem(raw: String): String? {
+    val t = raw.trim()
+    return when {
+        t.isEmpty() -> "Give the work a name."
+        // Characters as the hub counts them (code points), not UTF-16 units.
+        t.count { !it.isLowSurrogate() } > LOCAL_WORK_TITLE_MAX -> "Keep it to $LOCAL_WORK_TITLE_MAX characters."
+        t.any { it.isISOControl() } -> "Use one line of text, without tabs or line breaks."
+        else -> null
+    }
+}
+
+/**
+ * A `work_link name` refusal, said for what it means here. The hub's own
+ * messages name tool calls (`work_link { action: link, key }`), which are
+ * not a person's words; they stay under Details.
+ */
+internal fun friendlyName(e: HubError.Tool, renaming: Boolean): Friendly {
+    // An older hub's "unknown action" is about the hub, not this work.
+    if (e.isUnknownAction()) return friendlyWork(e)
+    val raw = explain(e)
+    val details = e.details as? JsonObject
+    return when (e.code) {
+        "E_EXISTS" -> if ((details?.get("tracker") as? JsonPrimitive)?.booleanOrNull == true) {
+            Friendly("That key is a ticket", "Use Set work… to link this session to it instead of naming new work.", isError = true, details = raw)
+        } else {
+            Friendly("That key is taken", "Other work already uses it. Pick another key, or use Set work… to link to that work.", isError = true, details = raw)
+        }
+        "E_INVALID" -> if (renaming && e.message.contains("tracker", ignoreCase = true)) {
+            Friendly("Only named work can be renamed", "This is a tracker's ticket: its title comes from the tracker.", isError = true, details = raw)
+        } else {
+            Friendly("The hub refused that name", e.message, isError = true, details = raw)
+        }
+        "E_NOTFOUND" -> if (renaming) {
+            Friendly("That work is gone", "The hub no longer lists it. Refresh and try again.", isError = true, details = raw)
+        } else {
+            Friendly("This session is gone", "It was killed or the fleet no longer lists it.", isError = true, details = raw)
+        }
+        "E_FORBIDDEN" -> Friendly("This device can't name work", "Name it on the desktop, or pair this phone with a full token.", isError = true, details = raw)
         else -> friendlyWork(e)
     }
 }

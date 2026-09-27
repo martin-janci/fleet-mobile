@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.net
 
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.LocalWorkItem
 import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.PairResult
 import dev.claudefleet.mobile.model.ProjectRow
@@ -533,6 +534,38 @@ class HubClient(
      * stops, and `handover_*` timeline frames say how it went.
      */
     suspend fun handoverWork(sessionId: Long): SessionRow = workLink("handover", sessionId) {}
+
+    /**
+     * *Name this work…* (claude-fleet M11.1): new local work — a title and no
+     * ticket — linked to the session, its primary when it has none. [key] is
+     * optional and left out when blank. Answers the updated row.
+     */
+    suspend fun nameWork(sessionId: Long, title: String, key: String? = null): SessionRow =
+        workLink("name", sessionId) {
+            put("title", title)
+            key?.takeIf { it.isNotBlank() }?.let { put("key", it) }
+        }
+
+    /**
+     * Rename a LOCAL work item (the same `name` action, by `item_id` and never
+     * with a `session_id`: the hub takes exactly one of them). A tracker's
+     * ticket is refused by the hub; its title belongs to the tracker.
+     */
+    suspend fun renameWorkItem(itemId: Long, title: String): LocalWorkItem =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "name")
+                put("item_id", itemId)
+                put("title", title)
+            },
+        ) { json.decodeFromJsonElement(LocalWorkItem.serializer(), it) }
+
+    /** The local work items this token sees (`work { action: local_items }`, M11.1). */
+    suspend fun workLocalItems(): List<LocalWorkItem> =
+        call("work", buildJsonObject { put("action", "local_items") }) {
+            json.decodeFromJsonElement(ListSerializer(LocalWorkItem.serializer()), it)
+        }
 
     /** Set the session's work by item id (a looked-up ticket) or by bare key. */
     suspend fun linkWork(sessionId: Long, itemId: Long? = null, key: String? = null): SessionRow =

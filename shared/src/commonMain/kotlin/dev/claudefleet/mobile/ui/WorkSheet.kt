@@ -40,6 +40,10 @@ data class SessionWorkHandlers(
     val onSetWork: (String) -> Unit = {},
     val onDismissError: () -> Unit = {},
     val onHandover: () -> Unit = {},
+    /** *Name this work…*: a title, and a key or null. */
+    val onNameWork: (String, String?) -> Unit = { _, _ -> },
+    /** *Rename…* the session's local work. */
+    val onRenameWork: (String) -> Unit = {},
 )
 
 /**
@@ -52,6 +56,7 @@ data class SessionWorkHandlers(
 fun WorkTicketSheet(state: SessionWorkUiState, handlers: SessionWorkHandlers) {
     val shown = state.chip ?: return
     val suggestion = state.work == null
+    var showRename by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
@@ -88,6 +93,9 @@ fun WorkTicketSheet(state: SessionWorkUiState, handlers: SessionWorkHandlers) {
                 if (state.canConfirm) Button(onClick = handlers.onConfirm, enabled = !state.busy) { Text("Confirm") }
                 if (state.canReject) OutlinedButton(onClick = handlers.onReject, enabled = !state.busy) { Text("Not this") }
                 if (state.canClear) OutlinedButton(onClick = handlers.onClear, enabled = !state.busy) { Text("Clear") }
+                if (state.canRename && !suggestion) {
+                    OutlinedButton(onClick = { showRename = true }, enabled = !state.busy) { Text("Rename…") }
+                }
                 if (state.canHandover && !suggestion) {
                     OutlinedButton(onClick = handlers.onHandover, enabled = !state.busy) { Text("Ask for a handover") }
                 }
@@ -96,6 +104,14 @@ fun WorkTicketSheet(state: SessionWorkUiState, handlers: SessionWorkHandlers) {
                 Text(it.sentence, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+    }
+    if (showRename && state.canRename) {
+        NameWorkDialog(
+            initialTitle = shown.title,
+            withKey = false,
+            onConfirm = { title, _ -> showRename = false; handlers.onRenameWork(title) },
+            onDismiss = { showRename = false },
+        )
     }
 }
 
@@ -124,6 +140,54 @@ fun SetWorkDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
         },
         confirmButton = {
             TextButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) { Text("Set") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * *Name this work…* (with an optional key) and *Rename…* (the title only):
+ * the confirm button stays off for a title the hub would refuse, and the
+ * reason is shown under the field.
+ */
+@Composable
+fun NameWorkDialog(
+    initialTitle: String = "",
+    withKey: Boolean,
+    onConfirm: (title: String, key: String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var title by remember { mutableStateOf(initialTitle) }
+    var key by remember { mutableStateOf("") }
+    val problem = localWorkTitleProblem(title)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (withKey) "Name this work" else "Rename work") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("What this work is") },
+                    singleLine = true,
+                    isError = problem != null && title.isNotEmpty(),
+                    supportingText = { if (problem != null && title.isNotEmpty()) Text(problem) },
+                )
+                if (withKey) {
+                    OutlinedTextField(
+                        value = key,
+                        onValueChange = { key = it },
+                        label = { Text("Key (optional)") },
+                        singleLine = true,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(title, key.takeIf { withKey && it.isNotBlank() }) },
+                enabled = problem == null,
+            ) { Text(if (withKey) "Name" else "Rename") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

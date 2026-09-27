@@ -220,3 +220,20 @@ fun SessionRow.withTicketsFrom(tickets: Map<Long, Ticket>): SessionRow {
     val g = workSuggested?.let { it.refreshedBy(it.itemId?.let(tickets::get)) }
     return if (w == work && g == workSuggested) this else copy(work = w, workSuggested = g)
 }
+
+/**
+ * Local work (claude-fleet M11.1): work with a title and no tracker ticket,
+ * named with *Name this work…*. What `work { action: local_items }` lists and
+ * what a rename (`work_link { action: name, item_id }`) answers — only the
+ * fields the phone reads; the rest of the hub's row is ignored.
+ */
+@Serializable
+data class LocalWorkItem(
+    val id: Long,
+    val key: String? = null,
+    /** A person's text: drawn as plain text only. */
+    val title: String = "",
+)
+
+/** The hub's longest local work title, in characters (claude-fleet `LOCAL_WORK_TITLE_MAX_CHARS`). */
+const val LOCAL_WORK_TITLE_MAX = 120
