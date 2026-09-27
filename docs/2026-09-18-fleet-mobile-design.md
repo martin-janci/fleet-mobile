@@ -300,6 +300,20 @@ from the hub's cache. **Ask for a handover** is asynchronous on the hub, so
 follows `handover_*` for its session. `agent_inferred` links (Claude's answer
 to the classification nudge) read "suggested by Claude when asked".
 
+**Multi-start (M13.4d, decision D15).** Ticket mode's New session form offers
+*Also start in* once a first project is picked: every other project, most
+recent first, up to seven more (the hub's `MULTI_START_MAX` is eight). It is
+gated on a full token, `work_link start`, and `project_ids` in the tool's
+schema properties (`HubCapabilities.accepts`) — a new argument of an old
+action, which an older hub would ignore rather than refuse. Start opens a
+confirm sheet (the count, the ticket's org or "not known on this phone", each
+project) and only its **Start** sends one `work_link start { project_ids }`.
+A clean answer opens the first session; anything partial stays on the form as
+a line per project, in the order asked, with **Open** where a session is. A
+`cross_org` refusal is said in the phone's own words and never retried:
+`force_cross_org` is a string no main source may contain
+(`ToolsTheAppMayCallTest`).
+
 **Share standup.** Beside *Copy standup*, the Today sheet's **Share** hands
 the same text to the platform share sheet (`rememberShareText`, an
 expect/actual: Android's chooser, iOS's `UIActivityViewController`, the

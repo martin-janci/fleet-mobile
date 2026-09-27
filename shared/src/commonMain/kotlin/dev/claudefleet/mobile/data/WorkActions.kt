@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.data
 
+import dev.claudefleet.mobile.model.MultiStart
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
@@ -44,6 +45,12 @@ interface WorkActions {
     /** Start work on [key] on [hostAlias]; [projectId] null lets the hub pick. */
     suspend fun start(key: String, hostAlias: String, projectId: Long? = null): SessionRow
 
+    /**
+     * Start work on [key] in each of [projectIds] on [hostAlias]: one sibling
+     * session per project. Never with `force_cross_org`.
+     */
+    suspend fun startMany(key: String, hostAlias: String, projectIds: List<Long>): MultiStart
+
     /** Resume [key]'s last conversation, on [hostAlias] or where the hub would put it. */
     suspend fun resume(key: String, hostAlias: String? = null): SessionRow
 
@@ -87,6 +94,9 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
 
     override suspend fun start(key: String, hostAlias: String, projectId: Long?): SessionRow =
         session.withClient { it.startWork(key, hostAlias, projectId) }
+
+    override suspend fun startMany(key: String, hostAlias: String, projectIds: List<Long>): MultiStart =
+        session.withClient { it.startWorkMany(key, hostAlias, projectIds) }
 
     override suspend fun resume(key: String, hostAlias: String?): SessionRow =
         session.withClient { it.resumeWork(key, mode = "last", hostAlias = hostAlias) }

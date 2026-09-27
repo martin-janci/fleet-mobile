@@ -6,7 +6,11 @@ import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.NewSessionRequest
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.MultiStart
+import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.StartSkip
+import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK_LINK
 import dev.claudefleet.mobile.net.HubError
@@ -58,7 +62,57 @@ data class NewSessionUiState(
      * project may be left to the hub.
      */
     val ticketKey: String? = null,
+    /**
+     * Multi-start (work graph M13.4d, decision D15): ticket mode, a full
+     * token, and a hub whose `work_link` takes `project_ids`. The extra
+     * projects are offered once a first project is picked.
+     */
+    val canMultiStart: Boolean = false,
+    /** The projects that may join the start — every other one, most recent first. */
+    val alsoIn: List<ProjectChoice> = emptyList(),
+    /** The ticked ones, in ticking order; at most [ALSO_IN_MAX]. */
+    val alsoInIds: List<Long> = emptyList(),
+    /** The ticket's organisation, when the phone knows it — shown beside the picker and on the confirm sheet. */
+    val orgLabel: String? = null,
+    /** The confirm sheet, while it is up: nothing is sent until it is confirmed. */
+    val confirm: MultiStartConfirm? = null,
+    /** What the last multi-start answered, project by project. */
+    val result: MultiStartResult? = null,
 )
+
+/** The confirm sheet: what will start, how many, and in which organisation. */
+data class MultiStartConfirm(
+    val key: String,
+    val host: String,
+    /** `owner/repo` of each project, the first-picked first. */
+    val projects: List<String>,
+    /** The ticket's organisation; null when the phone does not know it. */
+    val orgLabel: String?,
+) {
+    val count: Int get() = projects.size
+}
+
+/** How one project of a multi-start ended. */
+enum class StartOutcome { STARTED, STARTED_WITH_WARNING, ALREADY_RUNNING, OUT_OF_TIME, CROSS_ORG, REFUSED }
+
+/** One project's line in the result: what happened there, in words, and the session to open when there is one. */
+data class ProjectResult(
+    val projectId: Long,
+    val project: String,
+    val outcome: StartOutcome,
+    val text: String,
+    val sessionId: Long? = null,
+)
+
+data class MultiStartResult(val key: String, val projects: List<ProjectResult>) {
+    val startedCount: Int get() = projects.count { it.outcome == StartOutcome.STARTED || it.outcome == StartOutcome.STARTED_WITH_WARNING }
+}
+
+/** The hub's cap on one multi-start (`MULTI_START_MAX`), the first project included. */
+const val MULTI_START_MAX = 8
+
+/** How many projects may be ticked beside the first. */
+const val ALSO_IN_MAX = MULTI_START_MAX - 1
 
 /**
  * The New session form: a host, a project, optionally a fresh worktree, and
@@ -119,13 +173,30 @@ class NewSessionViewModel(
          * the same refusal.
          */
         val mustPickProject: Boolean = false,
+        /** Multi-start: the extra projects ticked, in ticking order. */
+        val alsoIn: List<Long> = emptyList(),
+        val confirming: Boolean = false,
+        val result: MultiStartResult? = null,
+    )
+
+    /** What ticket mode reads beyond the form: the hub's gates, and the ticket's org. */
+    private data class WorkView(
+        val caps: HubCapabilities,
+        val tickets: List<Ticket>,
+        val orgs: OrgDirectory,
     )
 
     private val local = MutableStateFlow(Local())
 
     val state: StateFlow<NewSessionUiState> =
-        combine(fleet.hosts, fleet.projects, fleet.status, local, fleet.capabilities) { hosts, projects, status, l, caps ->
-            assemble(hosts, projects, status, l, caps)
+        combine(
+            fleet.hosts,
+            fleet.projects,
+            fleet.status,
+            local,
+            combine(fleet.capabilities, fleet.tickets, fleet.orgs, ::WorkView),
+        ) { hosts, projects, status, l, work ->
+            assemble(hosts, projects, status, l, work)
         }.stateIn(scope, SharingStarted.Eagerly, current())
 
     /** Pick a host. One the hub cannot reach is ignored — the row is greyed for that reason. */
@@ -163,6 +234,74 @@ class NewSessionViewModel(
     }
 
     /**
+     * Tick or untick a project to start in beside the first. Past
+     * [ALSO_IN_MAX] a tick is ignored — the hub would refuse the whole start.
+     */
+    fun toggleAlsoIn(id: Long) {
+        if (!current().canMultiStart) return
+        local.update { l ->
+            when {
+                id in l.alsoIn -> l.copy(alsoIn = l.alsoIn - id)
+                l.alsoIn.size >= ALSO_IN_MAX -> l
+                else -> l.copy(alsoIn = l.alsoIn + id)
+            }
+        }
+    }
+
+    /** Back out of the confirm sheet; nothing was sent. */
+    fun cancelMultiStart() {
+        local.update { it.copy(confirming = false) }
+    }
+
+    /**
+     * The confirm sheet's **Start**: one `work_link start { project_ids }`
+     * for the first project and every ticked one.
+     *
+     * Everything started cleanly → the first session opens, as a single
+     * start's does. Anything else — a project already running, one refused,
+     * one out of time — stays on the form as a line per project, because
+     * leaving would hide exactly what went wrong. A cross-org refusal is said
+     * in words and is final: the phone never sends the start again with
+     * `force_cross_org` (decision D15).
+     */
+    fun confirmMultiStart(): Job? {
+        val s = current()
+        val confirm = s.confirm ?: return null
+        val actions = workActions ?: return null
+        val first = s.projectId ?: return null
+        if (!s.canCreate || !s.canMultiStart) return null
+        val ids = listOf(first) + s.alsoInIds
+        val labels = fleet.projects.value.associate { it.id to it.label }
+        local.update { it.copy(confirming = false, creating = true, error = null, result = null) }
+        return callScope.launch {
+            try {
+                val answer = actions.startMany(confirm.key, confirm.host, ids)
+                val result = multiStartResult(confirm.key, answer, ids, labels, confirm.orgLabel)
+                val clean = result.projects.all { it.outcome == StartOutcome.STARTED }
+                local.update { it.copy(creating = false, result = result.takeUnless { clean }) }
+                if (clean) result.projects.firstOrNull()?.sessionId?.let(onCreated)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                val tool = t as? HubError.Tool
+                if (tool != null && tool.isUnknownAction()) fleet.actionMissing(WORK_LINK, START)
+                val error = if (tool != null && tool.isCrossOrg()) crossOrgRefusal(confirm.key, confirm.orgLabel, t) else explainCreateFailure(t)
+                local.update { it.copy(creating = false, error = error) }
+            }
+        }
+    }
+
+    /** Open one session the multi-start made. */
+    fun openStarted(sessionId: Long) {
+        local.update { it.copy(result = null) }
+        onCreated(sessionId)
+    }
+
+    fun dismissResult() {
+        local.update { it.copy(result = null) }
+    }
+
+    /**
      * Ask the hub for the session, and hand its id to [onCreated].
      *
      * The form stays locked while the call runs — it can take minutes when the
@@ -170,7 +309,15 @@ class NewSessionViewModel(
      * nothing. A failure unlocks it with everything still filled in.
      */
     fun create(): Job? {
-        if (ticketKey != null) return startWork(ticketKey)
+        if (ticketKey != null) {
+            val s = current()
+            // Ticked projects: a multi-start, which is confirmed first.
+            if (s.canMultiStart && s.alsoInIds.isNotEmpty()) {
+                if (s.canCreate) local.update { it.copy(confirming = true, error = null) }
+                return null
+            }
+            return startWork(ticketKey)
+        }
         // `canCreate` is false while a create is in flight, so a second tap
         // stops here.
         val request = requestFrom(current()) ?: return null
@@ -240,15 +387,22 @@ class NewSessionViewModel(
     }
 
     private fun current(): NewSessionUiState =
-        assemble(fleet.hosts.value, fleet.projects.value, fleet.status.value, local.value, fleet.capabilities.value)
+        assemble(
+            fleet.hosts.value,
+            fleet.projects.value,
+            fleet.status.value,
+            local.value,
+            WorkView(fleet.capabilities.value, fleet.tickets.value, fleet.orgs.value),
+        )
 
     private fun assemble(
         hosts: List<HostRow>,
         projects: List<ProjectRow>,
         status: ConnectionStatus,
         l: Local,
-        caps: HubCapabilities,
+        work: WorkView,
     ): NewSessionUiState {
+        val caps = work.caps
         // Hidden is the desktop's "do not show me this". The exception is the
         // host the list was filtered to: the person tapped + on that host's own
         // list, and a form without it would contradict the screen behind it.
@@ -279,6 +433,36 @@ class NewSessionViewModel(
         } else {
             chosen != null && branchOk
         }
+        // Multi-start needs the first project named: `project_ids` is every
+        // repository, and the hub picks none of them.
+        val canMultiStart = ticketKey != null && canWrite && workActions != null &&
+            caps.has(WORK_LINK, START) && caps.accepts(WORK_LINK, PROJECT_IDS)
+        val others = if (canMultiStart && chosen != null) {
+            projects.filter { it.id != chosen.id }.sortedWith(MOST_RECENT_FIRST)
+        } else {
+            emptyList()
+        }
+        // A tick counts only while its project is still offered: never a
+        // start in a repository the form does not show.
+        val ticked = l.alsoIn.filter { id -> others.any { it.id == id } }
+        val alsoIn = others
+            .filter { query.isEmpty() || it.label.contains(query, ignoreCase = true) || it.id in ticked }
+            .map { ProjectChoice(it.id, it.label) }
+        val orgLabel = ticketKey?.let { key ->
+            work.tickets.firstOrNull { it.key == key }?.let(work.orgs::orgOf)?.let(work.orgs::name)
+        }
+        val canCreate = canWrite && !l.creating && host != null && ready
+        val byId = projects.associateBy { it.id }
+        val confirm = if (l.confirming && canCreate && host != null && ticketKey != null && chosen != null && ticked.isNotEmpty()) {
+            MultiStartConfirm(
+                key = ticketKey,
+                host = host,
+                projects = (listOf(chosen.id) + ticked).map { byId[it]?.label ?: unnamedLabel(it) },
+                orgLabel = orgLabel,
+            )
+        } else {
+            null
+        }
         return NewSessionUiState(
             hosts = offered.map { HostChoice(it.alias, it.reachable) },
             host = host,
@@ -291,10 +475,16 @@ class NewSessionViewModel(
             baseBranch = l.baseBranch,
             friendlyName = l.friendlyName,
             creating = l.creating,
-            canCreate = canWrite && !l.creating && host != null && ready,
+            canCreate = canCreate,
             status = status,
             error = l.error,
             ticketKey = ticketKey,
+            canMultiStart = canMultiStart,
+            alsoIn = alsoIn,
+            alsoInIds = ticked,
+            orgLabel = orgLabel,
+            confirm = confirm,
+            result = l.result,
         )
     }
 
@@ -311,6 +501,73 @@ class NewSessionViewModel(
 }
 
 private const val START = "start"
+private const val PROJECT_IDS = "project_ids"
+
+private fun unnamedLabel(id: Long) = ProjectRow(id).label
+
+/** The org rule's refusal: `details.cross_org`, as the hub's `check_cross_org` sets it. */
+private fun HubError.Tool.isCrossOrg(): Boolean =
+    ((details as? JsonObject)?.get("cross_org") as? JsonPrimitive)?.content == "true"
+
+/**
+ * A cross-org refusal, in words. It names what happened and where it can be
+ * done instead — and deliberately not the hub's own hint to pass
+ * `force_cross_org`, which the phone never does (decision D15).
+ */
+internal fun crossOrgWords(key: String, orgLabel: String?): String =
+    "Not started: this project belongs to a different organisation than $key" +
+        (orgLabel?.let { " ($it)" } ?: "") +
+        ". The phone does not start work across organisations; do it from the desktop if it is meant."
+
+private fun crossOrgRefusal(key: String, orgLabel: String?, t: HubError.Tool): Friendly =
+    Friendly("Another organisation", crossOrgWords(key, orgLabel), isError = true, details = explain(t))
+
+/**
+ * One line per project the person asked for, in the order they asked: the
+ * hub's four lists folded back onto the projects. A project the answer does
+ * not mention says so rather than vanishing.
+ */
+internal fun multiStartResult(
+    key: String,
+    answer: MultiStart,
+    asked: List<Long>,
+    labels: Map<Long, String>,
+    orgLabel: String?,
+): MultiStartResult {
+    fun label(id: Long) = labels[id] ?: unnamedLabel(id)
+    val warned = answer.warnings.associateBy { it.projectId }
+    val lines = mutableMapOf<Long, ProjectResult>()
+    for (row in answer.started) {
+        val id = row.projectId ?: continue
+        val warning = warned[id]
+        lines[id] = if (warning == null) {
+            ProjectResult(id, label(id), StartOutcome.STARTED, "Started", row.id)
+        } else {
+            ProjectResult(id, label(id), StartOutcome.STARTED_WITH_WARNING, "Started, but ${warning.message}", row.id)
+        }
+    }
+    for (skip in answer.skipped) {
+        val id = skip.projectId
+        lines[id] = if (skip.reason == StartSkip.SKIP_DEADLINE) {
+            ProjectResult(id, label(id), StartOutcome.OUT_OF_TIME, "Not started: the hub ran out of time before this one. Start again to add it.")
+        } else {
+            ProjectResult(id, label(id), StartOutcome.ALREADY_RUNNING, "Already running there — not started again.", skip.sessionId)
+        }
+    }
+    for (f in answer.failed) {
+        val id = f.projectId
+        lines[id] = if (f.crossOrg) {
+            ProjectResult(id, label(id), StartOutcome.CROSS_ORG, crossOrgWords(key, orgLabel))
+        } else {
+            ProjectResult(id, label(id), StartOutcome.REFUSED, "Not started: ${f.message}")
+        }
+    }
+    val ordered = asked.distinct().map { id ->
+        lines.remove(id) ?: ProjectResult(id, label(id), StartOutcome.REFUSED, "Not started: the hub did not say what happened here.")
+    }
+    // A session the hub made somewhere nobody asked is still shown, not lost.
+    return MultiStartResult(key, ordered + lines.values)
+}
 
 /** The project ids an `E_AMBIGUOUS` start offers — `{"candidates": [{"id", "owner", "repo"}]}`. */
 private fun projectCandidates(e: HubError.Tool): List<Long> =

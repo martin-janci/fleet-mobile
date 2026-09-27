@@ -268,6 +268,11 @@ costs one reconnect.
     text, to the clipboard or the system share sheet;
   - **Ask for a handover** on a linked session: Claude writes a handover note
     for whoever picks the work up next, and the sheet says when it is written;
+  - **Also start in** on *Start here*, for a full token on a hub that takes
+    `project_ids`: tick more projects beside the first, confirm on a sheet that
+    shows the count and the ticket's organisation, and see per project what
+    started, what already ran and what was refused. A project in another
+    organisation is refused in words; the phone never forces a cross-org start;
   - **Name this work…** in a session's menu when it has none: work with a
     title and no ticket (an optional key, like `OPS-1`), and **Rename** in the
     sheet of such local work (claude-fleet M11.1; on the phone since M13.4a,

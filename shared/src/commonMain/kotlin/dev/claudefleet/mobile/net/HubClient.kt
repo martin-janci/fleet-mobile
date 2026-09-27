@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.net
 
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.MultiStart
 import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.PairResult
 import dev.claudefleet.mobile.model.ProjectRow
@@ -38,11 +39,13 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /**
@@ -151,15 +154,19 @@ class HubClient(
         val result = rpc("tools/list", JsonObject(emptyMap()), framed = false, requestTimeoutMs = null)
         val tools = (result["tools"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
         val names = tools.mapNotNull { (it["name"] as? JsonPrimitive)?.content }.toSet()
+        fun JsonObject.properties() = (this["inputSchema"] as? JsonObject)?.get("properties") as? JsonObject
         val actions = tools.mapNotNull { tool ->
             val name = (tool["name"] as? JsonPrimitive)?.content ?: return@mapNotNull null
-            val enum = (
-                ((tool["inputSchema"] as? JsonObject)?.get("properties") as? JsonObject)
-                    ?.get("action") as? JsonObject
-                )?.get("enum") as? JsonArray ?: return@mapNotNull null
+            val enum = (tool.properties()?.get("action") as? JsonObject)?.get("enum") as? JsonArray
+                ?: return@mapNotNull null
             name to enum.mapNotNull { (it as? JsonPrimitive)?.content }.toSet()
         }.toMap()
-        return ToolCatalog(names, actions)
+        val params = tools.mapNotNull { tool ->
+            val name = (tool["name"] as? JsonPrimitive)?.content ?: return@mapNotNull null
+            val properties = tool.properties() ?: return@mapNotNull null
+            name to properties.keys
+        }.toMap()
+        return ToolCatalog(names, actions, params)
     }
 
     /**
@@ -583,6 +590,27 @@ class HubClient(
                 projectId?.let { put("project_id", it) }
             },
         ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
+
+    /**
+     * Start work on [key] in several repositories at once (claude-fleet M9.6,
+     * `work_link start { project_ids }`): one sibling session per project on
+     * [hostAlias], all on one branch name. The answer says, per project, what
+     * started, what was skipped and what was refused.
+     *
+     * Never with `force_cross_org`: a repository the org rule refuses comes
+     * back in [MultiStart.failed], and the phone says so and stops there
+     * (decision D15). No brief, as with [startWork].
+     */
+    suspend fun startWorkMany(key: String, hostAlias: String, projectIds: List<Long>): MultiStart =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "start")
+                put("key", key)
+                put("host_alias", hostAlias)
+                putJsonArray("project_ids") { projectIds.forEach { add(it) } }
+            },
+        ) { json.decodeFromJsonElement(MultiStart.serializer(), it) }
 
     /** Resume past work on [key] — [mode] `last` continues the last conversation. */
     suspend fun resumeWork(key: String, mode: String = "last", hostAlias: String? = null): SessionRow =
