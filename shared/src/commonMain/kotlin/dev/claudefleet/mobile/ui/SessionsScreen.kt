@@ -42,6 +42,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -51,10 +55,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.WorkSummary
+import dev.claudefleet.mobile.model.orgOf
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
@@ -201,6 +207,7 @@ fun SessionsScreen(
                         nowSeconds = state.nowSeconds,
                         showWork = true,
                         showHost = true,
+                        orgColor = row.orgOf?.let(state.orgColors::get),
                         onClick = { handlers.onOpenSession(row.id) },
                     )
                 }
@@ -219,6 +226,7 @@ fun SessionsScreen(
                                 nowSeconds = state.nowSeconds,
                                 // Under its work heading the key is already said.
                                 showWork = project.work == null,
+                                orgColor = row.orgOf?.let(state.orgColors::get),
                                 onClick = { handlers.onOpenSession(row.id) },
                             )
                         }
@@ -540,9 +548,13 @@ private fun SessionRowItem(
     onClick: () -> Unit,
     /** Name the host on the row itself — for the urgency queue, which has no host heading. */
     showHost: Boolean = false,
+    /** The row's org colour (ARGB), drawn as a thin bar at its start edge; null draws none. */
+    orgColor: Long? = null,
 ) {
     ListItem(
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .then(if (orgColor != null) Modifier.orgBar(Color(orgColor)) else Modifier),
         leadingContent = { StatusDot(row.claudeStatus, row.stuckKind) },
         headlineContent = {
             Column {
@@ -654,3 +666,11 @@ internal fun workHeaderDescription(work: WorkSummary, attention: Int, orgLabel: 
     if (work.unavailable) add("ticket unavailable")
     if (attention > 0) add(if (attention == 1) "1 session needs you" else "$attention sessions need you")
 }.joinToString(", ")
+
+/** An org's colour as a 3 dp bar down a row's start edge, as the desktop draws it. */
+private fun Modifier.orgBar(color: Color): Modifier = drawBehind {
+    val x = if (layoutDirection == LayoutDirection.Rtl) size.width - ORG_BAR_WIDTH.toPx() else 0f
+    drawRect(color, topLeft = Offset(x, 0f), size = Size(ORG_BAR_WIDTH.toPx(), size.height))
+}
+
+private val ORG_BAR_WIDTH = 3.dp

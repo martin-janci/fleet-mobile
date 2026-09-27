@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.ui.components.ErrorBanner
+import dev.claudefleet.mobile.ui.components.TicketCardBody
 import dev.claudefleet.mobile.ui.components.WorkStatusDot
 
 /** What the session screen can do about its work — every one a no-op until wired. */
@@ -83,6 +84,8 @@ fun WorkTicketSheet(state: SessionWorkUiState, handlers: SessionWorkHandlers) {
             if (suggestion && shown.suggestions > 1) {
                 Text("${shown.suggestions} suggestions — decide the rest on the desktop.", style = MaterialTheme.typography.bodySmall)
             }
+            // The ticket's card (M10.5): read-only, with Copy, never Send.
+            state.card?.let { TicketCardBody(it) }
             OpenTicketButton(shown)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (state.canConfirm) Button(onClick = handlers.onConfirm, enabled = !state.busy) { Text("Confirm") }

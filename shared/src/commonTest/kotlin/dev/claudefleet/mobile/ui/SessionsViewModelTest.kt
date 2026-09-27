@@ -725,6 +725,20 @@ class NeedsAttentionToggleTest {
         assertEquals(listOf("Acme", "Side"), vm.state.value.orgChoices.map { it.name })
     }
 
+    /** M10.5: a row's org colour bar, only while the list shows two or more orgs, and only a colour that parses. */
+    @Test
+    fun org_colours_are_given_only_beside_the_org_chips() = runTest {
+        val fleet = workFleet(listOf(session(1).copy(orgId = 1)))
+        fleet.orgs.value = OrgDirectory.of(listOf(OrgDetail(1, "Acme", "#2266ff"), OrgDetail(2, "Side", "teal"), OrgDetail(3, "Lab", "#f00")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+        runCurrent()
+        assertEquals(emptyMap(), vm.state.value.orgColors, "one org: a colour tells nothing apart")
+
+        fleet.sessions.value = listOf(session(1).copy(orgId = 1), session(2).copy(orgId = 2), session(3).copy(orgId = 3))
+        runCurrent()
+        assertEquals(mapOf(1L to 0xFF2266FFL, 3L to 0xFFFF0000L), vm.state.value.orgColors, "Side's colour does not parse: no bar")
+    }
+
     @Test
     fun an_org_narrows_the_list_and_tapping_it_again_clears_it() = runTest {
         val fleet = workFleet(listOf(session(1).copy(orgId = 1), session(2).copy(orgId = 2), session(3)))

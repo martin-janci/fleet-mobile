@@ -58,3 +58,19 @@ data class OrgDirectory(
  * whose phone view leaves `org_id` out — its work links still carry one.
  */
 val SessionRow.orgOf: Long? get() = orgId ?: work?.orgId
+
+/**
+ * An org's colour as the desktop stores it (`#rgb` or `#rrggbb`, claude-fleet
+ * M5), as an opaque ARGB value for the row's colour bar; null for anything
+ * else, which draws no bar rather than a guessed one.
+ */
+fun orgColorArgb(hex: String?): Long? {
+    val digits = hex?.trim()?.removePrefix("#") ?: return null
+    if (digits.any { it !in '0'..'9' && it.lowercaseChar() !in 'a'..'f' }) return null
+    val rgb = when (digits.length) {
+        3 -> digits.map { "$it$it" }.joinToString("")
+        6 -> digits
+        else -> return null
+    }
+    return 0xFF000000L or rgb.toLong(16)
+}

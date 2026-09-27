@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.TicketCard
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.withTicketsFrom
@@ -48,6 +49,13 @@ data class SessionWorkUiState(
     val canHandover: Boolean = false,
     /** Where the last handover asked from this screen has got to, or null. */
     val handover: HandoverStatus? = null,
+    /**
+     * The chip's ticket card (`work card`, claude-fleet M9.2 / M10.5): its
+     * acceptance criteria from the hub's cache, read when the sheet opens.
+     * A read, so a readonly token gets it too; null while loading, when the
+     * hub has no `card`, or when nothing is cached for the key.
+     */
+    val card: TicketCard? = null,
 ) {
     /** What the chip draws: the confirmed work, else the guess. */
     val chip: WorkSummary? get() = work ?: suggested
@@ -83,6 +91,7 @@ class SessionWorkViewModel(
         val busy: Boolean = false,
         val error: Friendly? = null,
         val handover: HandoverStatus? = null,
+        val card: TicketCard? = null,
     )
 
     private val local = MutableStateFlow(Local())
@@ -114,8 +123,35 @@ class SessionWorkViewModel(
     private fun List<SessionRow>.freshRow(cache: List<Ticket>): SessionRow? =
         firstOrNull { it.id == sessionId }?.withTicketsFrom(cache.associateBy { it.id })
 
-    fun openSheet() {
-        if (state.value.chip != null) local.update { it.copy(sheetOpen = true) }
+    fun openSheet(): Job? {
+        val key = state.value.chip?.key
+        if (state.value.chip == null) return null
+        local.update { it.copy(sheetOpen = true) }
+        return loadCard(key)
+    }
+
+    /**
+     * Read the chip's ticket card for the sheet. It is extra: a failure or a
+     * hub without `card` leaves the sheet as it was, and says nothing. An
+     * older hub that refuses the action as unknown loses it for the rest of
+     * the connection, like every other action here.
+     */
+    private fun loadCard(key: String?): Job? {
+        if (key == null || !fleet.capabilities.value.has(WORK, CARD)) return null
+        // A card already read for this key stays until a fresher one arrives.
+        if (local.value.card?.key != key) local.update { it.copy(card = null) }
+        return scope.launch {
+            val card = try {
+                actions.card(key).takeIf { it.cached }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                if (t is HubError.Tool && t.isUnknownAction()) fleet.actionMissing(WORK, CARD)
+                null
+            }
+            // The chip may have moved to another ticket while this was read.
+            if (state.value.chip?.key == key) local.update { it.copy(card = card) }
+        }
     }
 
     fun closeSheet() {
@@ -274,6 +310,8 @@ class SessionWorkViewModel(
             error = l.error,
             canHandover = work?.key != null && row.canBeAskedForHandover && allowed(caps, HANDOVER),
             handover = l.handover,
+            // Only the card of the ticket the chip shows now.
+            card = l.card?.takeIf { it.key == (work ?: guess)?.key },
         )
     }
 
@@ -284,6 +322,7 @@ class SessionWorkViewModel(
         const val LINK = "link"
         const val LOOKUP = "lookup"
         const val HANDOVER = "handover"
+        const val CARD = "card"
     }
 }
 

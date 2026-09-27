@@ -28,4 +28,29 @@ data class TicketCard(
 ) {
     /** Whether the card has anything to say beyond the key and title. */
     val hasBody: Boolean get() = acceptance.isNotEmpty() || !excerpt.isNullOrBlank()
+
+    /**
+     * What **Copy** puts on the clipboard (claude-fleet M10.5): the key and
+     * title, the status, the link, then the acceptance criteria — or the
+     * excerpt when there are none. Plain text, the tracker's words as they
+     * are; the phone copies a card and never sends one.
+     *
+     * The link is only included when it is `http(s)`, the same rule the
+     * sheets' *Open in browser* follows.
+     */
+    val copyText: String
+        get() = buildString {
+            append(key)
+            if (title.isNotBlank()) append(" · ").append(title.trim())
+            statusName?.takeIf { it.isNotBlank() }?.let { append("\nStatus: ").append(it.trim()) }
+            url?.takeIf { it.startsWith("https://") || it.startsWith("http://") }?.let { append('\n').append(it) }
+            val criteria = acceptance.map { it.trim() }.filter { it.isNotEmpty() }
+            when {
+                criteria.isNotEmpty() -> {
+                    append("\n\nAcceptance criteria")
+                    for (line in criteria) append("\n- ").append(line)
+                }
+                !excerpt.isNullOrBlank() -> append("\n\n").append(excerpt.trim())
+            }
+        }
 }
