@@ -204,6 +204,12 @@ kotlin {
             implementation(libs.ktor.client.mock)
         }
 
+        // The live-hub integration test (`net/LiveHubTest.kt`) drives a real
+        // `fleet-hub` through the engine Android ships, not the mock one.
+        jvmTest.dependencies {
+            implementation(libs.ktor.client.okhttp)
+        }
+
         androidMain.dependencies {
             implementation(libs.ktor.client.okhttp)
             // EncryptedSharedPreferences, and the Keystore-backed master key
