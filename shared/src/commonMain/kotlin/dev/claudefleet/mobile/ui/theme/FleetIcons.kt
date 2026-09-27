@@ -53,6 +53,28 @@ object FleetIcons {
         }.build()
     }
 
+    /** *My work*: a checklist — three ticked rows. */
+    val Work: ImageVector by lazy {
+        ImageVector.Builder("Work", 24.dp, 24.dp, 24f, 24f).apply {
+            path(
+                fill = null,
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                // ticks
+                moveTo(3f, 6f); lineTo(4.5f, 7.5f); lineTo(7f, 5f)
+                moveTo(3f, 12f); lineTo(4.5f, 13.5f); lineTo(7f, 11f)
+                moveTo(3f, 18f); lineTo(4.5f, 19.5f); lineTo(7f, 17f)
+                // rows
+                moveTo(10f, 6f); lineTo(21f, 6f)
+                moveTo(10f, 12f); lineTo(21f, 12f)
+                moveTo(10f, 18f); lineTo(21f, 18f)
+            }
+        }.build()
+    }
+
     /** A gear: a filled ring plus eight radial teeth. */
     val Settings: ImageVector by lazy {
         ImageVector.Builder("Settings", 24.dp, 24.dp, 24f, 24f).apply {

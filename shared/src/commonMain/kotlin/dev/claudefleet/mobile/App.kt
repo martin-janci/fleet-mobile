@@ -16,6 +16,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -39,6 +40,8 @@ import dev.claudefleet.mobile.data.HubQuickReplyActions
 import dev.claudefleet.mobile.data.HubSessionActions
 import dev.claudefleet.mobile.data.HubWorkActions
 import dev.claudefleet.mobile.data.WorkActions
+import dev.claudefleet.mobile.data.HubWorkViewActions
+import dev.claudefleet.mobile.data.WorkViewActions
 import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.net.HubClient
@@ -77,6 +80,16 @@ import dev.claudefleet.mobile.ui.TicketsSheet
 import dev.claudefleet.mobile.ui.TicketsViewModel
 import dev.claudefleet.mobile.ui.TodayHandlers
 import dev.claudefleet.mobile.ui.TodaySheet
+import dev.claudefleet.mobile.ui.SessionTasksHandlers
+import dev.claudefleet.mobile.ui.SessionTasksViewModel
+import dev.claudefleet.mobile.ui.WorkFiltersHandlers
+import dev.claudefleet.mobile.ui.WorkFiltersSheet
+import dev.claudefleet.mobile.ui.WorkScreen
+import dev.claudefleet.mobile.ui.WorkTaskHandlers
+import dev.claudefleet.mobile.ui.WorkTaskScreen
+import dev.claudefleet.mobile.ui.WorkTaskViewModel
+import dev.claudefleet.mobile.ui.WorkTreeHandlers
+import dev.claudefleet.mobile.ui.WorkTreeViewModel
 import dev.claudefleet.mobile.ui.TodayViewModel
 import dev.claudefleet.mobile.ui.scan.qrScannerSupported
 import dev.claudefleet.mobile.ui.theme.FleetIcons
@@ -151,6 +164,9 @@ class AppContainer(
 
     /** The work graph's calls, through the same `withClient` as every other. */
     val workActions: WorkActions = HubWorkActions(session)
+
+    /** The Work view's reads (M14), through the same `withClient`. */
+    val workViewActions: WorkViewActions = HubWorkViewActions(session)
 
     /** The way into the hub's agent, through the same `withClient`. */
     val agentActions: AgentActions = HubAgentActions(session)
@@ -358,7 +374,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     // app handles back, and on a tab it does not, which lets Android close the
     // app and iOS do whatever it does with an unclaimed swipe. That is why the
     // return value still does not need reading here.
-    BackHandler(enabled = screen is Screen.Session || screen is Screen.NewSession) { nav.back() }
+    BackHandler(enabled = screen is Screen.Session || screen is Screen.NewSession || screen is Screen.Task) { nav.back() }
 
     val sessions = remember(repository, scope) { SessionsViewModel(repository, scope, prefs = container.prefs) }
     // The fleet's scope, like the New session form's `callScope`: a resume
@@ -391,6 +407,15 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
             onOpenSession = { nav.open(it) },
         )
     }
+    // The fleet's scope: the tab keeps its last picture across a trip to
+    // another tab, which is what the stale banner draws when offline.
+    val workTree = remember(repository, scope) { WorkTreeViewModel(repository, container.workViewActions, scope) }
+    val caps by repository.capabilities.collectAsState()
+    // A hub that stops listing `work { tree }` (a different, older hub after
+    // re-pairing, or a reconnect to a downgraded one) takes the tab with it.
+    LaunchedEffect(caps.workView, screen) {
+        if (!caps.workView && (screen is Screen.Work || screen is Screen.Task)) nav.select(Tab.Sessions)
+    }
     val hosts = remember(repository, scope) { HostsViewModel(repository, scope) }
     val settings = remember(container, scope) {
         SettingsViewModel(container.session, scope, container.appVersion)
@@ -401,24 +426,27 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
             NavigationBar {
                 val attention by sessions.state.collectAsState()
                 for (entry in Tab.entries) {
+                    // *My work* only where the hub's schema lists `work { tree }`.
+                    if (entry == Tab.Work && !caps.workView) continue
                     NavigationBarItem(
                         selected = tab == entry,
                         onClick = { nav.select(entry) },
                         icon = {
                             val icon = when (entry) {
                                 Tab.Sessions -> FleetIcons.Sessions
+                                Tab.Work -> FleetIcons.Work
                                 Tab.Hosts -> FleetIcons.Hosts
                                 Tab.Settings -> FleetIcons.Settings
                             }
                             if (entry == Tab.Sessions && attention.attentionCount > 0) {
                                 BadgedBox(badge = { Badge { Text("${attention.attentionCount}") } }) {
-                                    Icon(icon, contentDescription = entry.name)
+                                    Icon(icon, contentDescription = entry.label)
                                 }
                             } else {
-                                Icon(icon, contentDescription = entry.name)
+                                Icon(icon, contentDescription = entry.label)
                             }
                         },
-                        label = { Text(entry.name) },
+                        label = { Text(entry.label) },
                     )
                 }
             }
@@ -556,6 +584,56 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         repository = repository,
                         credentials = credentials,
                         onBack = { nav.back() },
+                        onOpenTask = nav::openTask,
+                    )
+                }
+                Screen.Work -> {
+                    // Focus is a read: the hub sends a phone bound to an org
+                    // no `work:changed`, so arriving here is what refreshes.
+                    DisposableEffect(Unit) {
+                        workTree.onFocus()
+                        onDispose { workTree.onBlur() }
+                    }
+                    val state by workTree.state.collectAsState()
+                    WorkScreen(
+                        state = state,
+                        handlers = WorkTreeHandlers(
+                            onPull = { workTree.pull() },
+                            onOpenTask = nav::openTask,
+                            onApplyView = { workTree.applyView(it) },
+                            onOpenFilters = { workTree.setFiltersOpen(true) },
+                            onToggleOrg = workTree::toggleOrg,
+                            onToggleSection = workTree::toggleSection,
+                            onLoadMore = { workTree.loadMore(it) },
+                            onDismissError = workTree::dismissError,
+                        ),
+                    )
+                    if (state.filtersOpen) {
+                        WorkFiltersSheet(
+                            state = state,
+                            handlers = WorkFiltersHandlers(
+                                onClose = { workTree.setFiltersOpen(false) },
+                                onSetOrg = { workTree.setOrg(it) },
+                                onSetTracker = { workTree.setTracker(it) },
+                                onSetStatus = { workTree.setStatus(it) },
+                                onSetHas = { workTree.setHas(it) },
+                                onToggleMine = { workTree.toggleMine() },
+                                onToggleReview = { workTree.toggleReview() },
+                                onSetQuery = workTree::setQuery,
+                                onClearAll = { workTree.clearFilters() },
+                            ),
+                        )
+                    }
+                }
+                is Screen.Task -> key(current.taskId) {
+                    WorkTaskRoute(
+                        taskId = current.taskId,
+                        container = container,
+                        repository = repository,
+                        credentials = credentials,
+                        onBack = { nav.back() },
+                        onOpenSession = nav::open,
+                        onStartHere = { nav.newSession(ticketKey = it) },
                     )
                 }
                 Screen.Hosts -> {
@@ -629,12 +707,56 @@ private fun NewSessionRoute(
 }
 
 @Composable
+private fun WorkTaskRoute(
+    taskId: String,
+    container: AppContainer,
+    repository: FleetRepository,
+    credentials: Credentials,
+    onBack: () -> Unit,
+    onOpenSession: (Long) -> Unit,
+    onStartHere: (String) -> Unit,
+) {
+    val scope = rememberWorkScope()
+    val vm = remember(taskId, repository, scope) {
+        WorkTaskViewModel(
+            taskId = taskId,
+            fleet = repository,
+            viewActions = container.workViewActions,
+            workActions = container.workActions,
+            scope = scope,
+            // `work_link` is not readonly: Continue and Start here are never
+            // offered to a readonly credential, as on the Tickets sheet.
+            canWrite = credentials.canWrite,
+            onOpenSession = onOpenSession,
+            onStartHere = onStartHere,
+        )
+    }
+    LaunchedEffect(taskId) { vm.load() }
+    val state by vm.state.collectAsState()
+    val status by repository.status.collectAsState()
+    WorkTaskScreen(
+        state = state,
+        status = status,
+        handlers = WorkTaskHandlers(
+            onBack = onBack,
+            onRefresh = { vm.load() },
+            onOpen = vm::open,
+            onStartHere = vm::startHere,
+            onResumeHost = vm::selectResumeHost,
+            onContinue = { vm.continueWork() },
+            onDismissError = vm::dismissError,
+        ),
+    )
+}
+
+@Composable
 private fun SessionRoute(
     sessionId: Long,
     container: AppContainer,
     repository: FleetRepository,
     credentials: Credentials,
     onBack: () -> Unit,
+    onOpenTask: (String) -> Unit,
 ) {
     val scope = rememberWorkScope()
     val vm = remember(sessionId, repository, scope) {
@@ -663,10 +785,14 @@ private fun SessionRoute(
             canWrite = credentials.canWrite,
         )
     }
+    val tasksVm = remember(sessionId, repository, scope) {
+        SessionTasksViewModel(sessionId, repository, container.workViewActions, scope, onOpenTask = onOpenTask)
+    }
     LaunchedEffect(sessionId) { vm.load() }
 
     val state by vm.state.collectAsState()
     val work by workVm.state.collectAsState()
+    val tasks by tasksVm.state.collectAsState()
     val status by repository.status.collectAsState()
     // Collected here, not folded into `SessionUiState`: `QuickReplies.chips`
     // is its own `StateFlow`, one per app rather than one per session, and
@@ -720,5 +846,12 @@ private fun SessionRoute(
             onNameWork = { title, key -> workVm.nameWork(title, key) },
             onRenameWork = { workVm.renameWork(it) },
         ),
+        tasks = tasks,
+        tasksHandlers = SessionTasksHandlers(
+            onClose = tasksVm::close,
+            onOpenTask = tasksVm::openTask,
+            onDismissError = tasksVm::dismissError,
+        ),
+        onOpenTasks = { tasksVm.open() },
     )
 }

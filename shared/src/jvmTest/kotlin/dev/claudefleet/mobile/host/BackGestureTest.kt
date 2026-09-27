@@ -69,7 +69,7 @@ class TheBackGestureReachesTheNavigatorTest {
         val call = Regex("""BackHandler\(enabled = ([^)]+)\)""").find(app)
             ?: fail("BackHandler is not called with an explicit `enabled`")
 
-        assertEquals("screen is Screen.Session || screen is Screen.NewSession", call.groupValues[1].trim())
+        assertEquals("screen is Screen.Session || screen is Screen.NewSession || screen is Screen.Task", call.groupValues[1].trim())
         assertTrue(
             Regex("""BackHandler\([^)]*\)\s*\{\s*nav\.back\(\)\s*\}""").containsMatchIn(app),
             "the handler must call nav.back() and nothing else",

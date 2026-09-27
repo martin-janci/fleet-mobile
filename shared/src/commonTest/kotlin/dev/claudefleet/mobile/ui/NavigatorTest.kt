@@ -279,4 +279,98 @@ class NavigatorTest {
         nav.back()
         assertEquals(Screen.Sessions("pine"), nav.screen.value, "back lands on the list, never on a form that would start it again")
     }
+
+    // ---- the Work view (M14.4) ----
+
+    @Test
+    fun the_work_tab_opens_on_the_tree_and_a_task_keeps_it_lit() {
+        val nav = Navigator()
+        nav.select(Tab.Work)
+        assertEquals(Screen.Work, nav.screen.value)
+        assertEquals(Tab.Work, nav.tab.value)
+        assertFalse(nav.back(), "the tab's own screen: back is the platform's")
+
+        nav.openTask("item:70")
+        assertEquals(Screen.Task("item:70"), nav.screen.value)
+        assertEquals(Tab.Work, nav.tab.value)
+    }
+
+    /** Work → task → session → back → task → back → Work: each back is one step. */
+    @Test
+    fun a_session_opened_from_a_task_backs_out_to_the_task_then_the_tree() {
+        val nav = Navigator()
+        nav.select(Tab.Work)
+        nav.openTask("item:70")
+        nav.open(7)
+        assertEquals(Screen.Session(7), nav.screen.value)
+        assertEquals(Tab.Work, nav.tab.value, "a session opened from My work keeps My work lit")
+
+        assertTrue(nav.back())
+        assertEquals(Screen.Task("item:70"), nav.screen.value)
+        assertTrue(nav.back())
+        assertEquals(Screen.Work, nav.screen.value)
+        assertFalse(nav.back())
+    }
+
+    /** A session's Tasks section opens a task over the session; back returns to the session, then its list. */
+    @Test
+    fun a_task_opened_from_a_session_backs_out_to_the_session() {
+        val nav = Navigator()
+        nav.showSessionsFor("pine")
+        nav.open(7)
+        nav.openTask("item:90")
+        assertEquals(Tab.Sessions, nav.tab.value)
+
+        assertTrue(nav.back())
+        assertEquals(Screen.Session(7), nav.screen.value)
+        assertTrue(nav.back())
+        assertEquals(Screen.Sessions("pine"), nav.screen.value)
+    }
+
+    /** A task's Start here: the form in ticket mode over the task, and back from what it made lands on the task. */
+    @Test
+    fun start_here_from_a_task_returns_to_the_task_never_the_form() {
+        val nav = Navigator()
+        nav.select(Tab.Work)
+        nav.openTask("item:90")
+        nav.newSession(ticketKey = "PAY-9")
+        assertEquals(Screen.NewSession(hostAlias = null, ticketKey = "PAY-9"), nav.screen.value)
+        assertEquals(Tab.Work, nav.tab.value)
+
+        nav.created(41)
+        assertTrue(nav.back())
+        assertEquals(Screen.Task("item:90"), nav.screen.value)
+    }
+
+    @Test
+    fun a_plain_new_session_is_never_opened_over_a_task() {
+        val nav = Navigator()
+        nav.select(Tab.Work)
+        nav.openTask("item:90")
+        nav.newSession()
+        assertEquals(Screen.Task("item:90"), nav.screen.value)
+    }
+
+    @Test
+    fun switching_tabs_from_a_task_forgets_it() {
+        val nav = Navigator()
+        nav.select(Tab.Work)
+        nav.openTask("item:70")
+        nav.open(7)
+        nav.select(Tab.Hosts)
+        assertFalse(nav.back())
+        nav.select(Tab.Work)
+        assertEquals(Screen.Work, nav.screen.value)
+        assertFalse(nav.back())
+    }
+
+    /** Opening the session already showing (an `E_EXISTS` jump to itself) does not stack it twice. */
+    @Test
+    fun opening_the_session_already_showing_is_one_back_away_from_where_it_came() {
+        val nav = Navigator()
+        nav.open(7)
+        nav.open(7)
+        assertTrue(nav.back())
+        assertEquals(Screen.Sessions(), nav.screen.value)
+    }
 }

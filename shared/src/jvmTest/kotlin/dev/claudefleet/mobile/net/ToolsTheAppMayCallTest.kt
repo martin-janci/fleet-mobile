@@ -108,6 +108,35 @@ class ToolsTheAppMayCallTest {
     }
 
     /**
+     * The Work view's first phone PR is read-only (claude-fleet M14.4, read
+     * part): `work { tree | task | session_tasks | views }` and nothing
+     * that decides. Its edits — Make primary, Remove, Add task, Place, the
+     * review decisions, saving a view — are the second PR, which removes
+     * this test as it adds them. Until then no source set may write the
+     * action a request would need.
+     */
+    @Test
+    fun no_source_set_sends_a_work_view_write_yet() {
+        val writes = listOf(
+            "set_primary",
+            "reconsider",
+            "decide_batch",
+            "place",
+            "assign_org",
+            "rule_save",
+            "rule_delete",
+            "view_save",
+            "view_delete",
+            "ack",
+        )
+        val offences = sharedSources().flatMap { file ->
+            val text = file.readText()
+            writes.filter { "\"$it\"" in text }.map { "${file.name}: \"$it\"" }
+        }
+        assertEquals(emptyList(), offences, "the Work view's writes wait for the edit PR")
+    }
+
+    /**
      * The other half, and the stronger one: an allow-list. A new tool call has
      * to be added here deliberately, rather than merely not being on a list of
      * things someone thought to forbid.

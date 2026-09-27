@@ -25,10 +25,24 @@ sealed interface Screen {
     ) : Screen
     data object Hosts : Screen
     data object Settings : Screen
+
+    /** The *My work* tab (claude-fleet M14): org → group → task. */
+    data object Work : Screen
+
+    /** One task of the Work view, `item:<id>` or `ref:<KEY>`, pushed over what opened it. */
+    data class Task(val taskId: String) : Screen
 }
 
-/** The three destinations in the bottom bar. */
-enum class Tab { Sessions, Hosts, Settings }
+/**
+ * The destinations in the bottom bar. [Work] is drawn only when the hub's
+ * schema lists `work { tree }`; see `HubCapabilities.workView`.
+ */
+enum class Tab(val label: String) {
+    Sessions("Sessions"),
+    Work("My work"),
+    Hosts("Hosts"),
+    Settings("Settings"),
+}
 
 /**
  * Where the app is, as a small object rather than as Compose state.
@@ -61,27 +75,60 @@ class Navigator {
     val tab: StateFlow<Tab> = _tab.asStateFlow()
 
     /**
-     * Where [back] returns to from an open session — the Sessions screen as
-     * it stood, filter and all, the moment [open] was called. Not a field on
-     * [Screen.Session] itself: a session's identity is just its id, and
-     * carrying a filter it has nothing to do with would make two opens of
+     * Where [back] returns to, newest last: the screens a pushed screen was
+     * opened over. Empty on a tab's own screen — that is what makes [back]
+     * answer false there. A list is kept as it stood, filter and all, so a
+     * session opened from a host-filtered list comes back to that filter.
+     *
+     * Not a field on [Screen.Session] itself: a session's identity is just
+     * its id, and carrying where it was opened from would make two opens of
      * the same session unequal depending on how you got there.
      */
-    private var returnTo: Screen.Sessions = Screen.Sessions()
+    private val stack = mutableListOf<Screen>()
 
     /** Open one session's screen. */
     fun open(sessionId: Long) {
-        (_screen.value as? Screen.Sessions)?.let { returnTo = it }
+        val current = _screen.value
+        if (current == Screen.Session(sessionId)) return
+        when (current) {
+            // The form is never a place to come back to: the list under it is.
+            is Screen.NewSession -> Unit
+            // A call that finished after the person went to Hosts or
+            // Settings: the session belongs to the fleet list.
+            Screen.Hosts, Screen.Settings -> {
+                stack.clear()
+                stack += Screen.Sessions()
+            }
+            else -> stack += current
+        }
         go(Screen.Session(sessionId))
     }
 
     /**
-     * Open the New session form over the list. Only from the list: that is
+     * Open one task of the Work view, over whatever showed it: the *My
+     * work* tab, another task, or a session's *Tasks* section.
+     */
+    fun openTask(taskId: String) {
+        val current = _screen.value
+        if (current == Screen.Task(taskId)) return
+        when (current) {
+            is Screen.NewSession -> return
+            Screen.Hosts, Screen.Settings, is Screen.Sessions -> {
+                stack.clear()
+                stack += current
+            }
+            else -> stack += current
+        }
+        go(Screen.Task(taskId))
+    }
+
+    /**
+     * Open the New session form over the list. Only from the list (or, in ticket mode, a task): that is
      * where the button is, and where [back] and the created session's own back
      * both return to.
      *
      * The form itself is never a place to come back to. [open] from it leaves
-     * [returnTo] as the list, so backing out of the session it just created
+     * the list underneath, so backing out of the session it just created
      * lands on the list rather than on a form that would make a second one.
      *
      * [ticketKey] is the Tickets sheet's **Start here**: the same form, in
@@ -89,9 +136,15 @@ class Navigator {
      * session.
      */
     fun newSession(ticketKey: String? = null) {
-        val list = _screen.value as? Screen.Sessions ?: return
-        returnTo = list
-        go(Screen.NewSession(hostAlias = list.hostAlias, ticketKey = ticketKey))
+        val current = _screen.value
+        val host = when (current) {
+            is Screen.Sessions -> current.hostAlias
+            // A task's **Start here** (M14.4): the same form in ticket mode.
+            is Screen.Task -> if (ticketKey == null) return else null
+            else -> return
+        }
+        stack += current
+        go(Screen.NewSession(hostAlias = host, ticketKey = ticketKey))
     }
 
     /**
@@ -112,16 +165,15 @@ class Navigator {
      * to inside the app, and saying so is what lets the Android host hand the
      * gesture to the system instead of swallowing it.
      *
-     * Restores [returnTo] rather than a bare `Screen.Sessions()`, so a session
+     * Restores the screen underneath rather than a bare `Screen.Sessions()`, so a session
      * opened from a host-filtered list comes back to that same filter instead
      * of silently clearing it. Only a tab reselect or the filter's own clear
      * chip may drop it — not the unrelated act of looking at a session and
      * returning.
      */
     fun back(): Boolean {
-        val current = _screen.value
-        if (current !is Screen.Session && current !is Screen.NewSession) return false
-        go(returnTo)
+        val previous = stack.removeLastOrNull() ?: return false
+        go(previous)
         return true
     }
 
@@ -134,9 +186,11 @@ class Navigator {
      * lands on the unfiltered list, never the one a host tap set up earlier.
      */
     fun select(tab: Tab) {
+        stack.clear()
         go(
             when (tab) {
                 Tab.Sessions -> Screen.Sessions()
+                Tab.Work -> Screen.Work
                 Tab.Hosts -> Screen.Hosts
                 Tab.Settings -> Screen.Settings
             },
@@ -149,6 +203,7 @@ class Navigator {
      * the tab indicator follows it there without a separate `select` call.
      */
     fun showSessionsFor(alias: String) {
+        stack.clear()
         go(Screen.Sessions(hostAlias = alias))
     }
 
@@ -162,7 +217,7 @@ class Navigator {
      * fix this closes found that the chip used to call `setHostFilter(null)`
      * directly on the view model, leaving [screen] still holding the old
      * `Screen.Sessions(alias)`. [open] reads `_screen.value` to build
-     * [returnTo], so it captured the stale filter, and [back] restored it —
+     * its `returnTo`, so it captured the stale filter, and [back] restored it —
      * the filter came back the moment a session was opened and closed. With
      * one source of truth for the filter (this screen, not a second copy in
      * the view model), [open] can only ever capture what this actually set.
@@ -173,12 +228,15 @@ class Navigator {
 
     private fun go(screen: Screen) {
         _screen.value = screen
-        _tab.value = tabOf(screen)
+        // A pushed screen belongs to the tab at the bottom of the stack: a
+        // session opened from *My work* keeps *My work* lit.
+        _tab.value = tabOf(stack.firstOrNull() ?: screen)
     }
 }
 
 private fun tabOf(screen: Screen): Tab = when (screen) {
     is Screen.Sessions, is Screen.Session, is Screen.NewSession -> Tab.Sessions
+    Screen.Work, is Screen.Task -> Tab.Work
     Screen.Hosts -> Tab.Hosts
     Screen.Settings -> Tab.Settings
 }

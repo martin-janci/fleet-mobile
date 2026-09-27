@@ -157,6 +157,14 @@ fun SessionScreen(
     /** The ticket chip and its sheet; the default draws nothing (a hub without the work graph). */
     work: SessionWorkUiState = SessionWorkUiState(),
     workHandlers: SessionWorkHandlers = SessionWorkHandlers(),
+    /**
+     * The read-only *Tasks* section (claude-fleet M14.4): every link of the
+     * session. The default is a hub without `work { session_tasks }`, which
+     * offers no menu entry.
+     */
+    tasks: SessionTasksUiState = SessionTasksUiState(),
+    tasksHandlers: SessionTasksHandlers = SessionTasksHandlers(),
+    onOpenTasks: () -> Unit = {},
 ) {
     val turns = state.conversation.turns
     val listState = rememberLazyListState()
@@ -257,12 +265,14 @@ fun SessionScreen(
             onSendCommand = onSendCommand,
             work = work,
             workHandlers = workHandlers,
+            onOpenTasks = onOpenTasks.takeIf { tasks.available },
         )
         ConnectionBanner(status, state.hubReachable)
         ErrorBanner(state.error, onDismiss = onDismissError)
         // Behind an open sheet a banner cannot be read: the sheet shows it instead.
         if (!work.sheetOpen) ErrorBanner(work.error, onDismiss = workHandlers.onDismissError)
         if (work.sheetOpen) WorkTicketSheet(work, workHandlers)
+        if (tasks.open) SessionTasksSheet(tasks, tasksHandlers)
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             if (state.loaded && turns.isEmpty()) {
@@ -400,6 +410,7 @@ private fun SessionBar(
     onSendCommand: (String) -> Unit,
     work: SessionWorkUiState,
     workHandlers: SessionWorkHandlers,
+    onOpenTasks: (() -> Unit)? = null,
 ) {
     val busy = state.loading || state.refreshing
     val angle = refreshAngle(busy)
@@ -441,7 +452,7 @@ private fun SessionBar(
             // hub refuses every one of these calls against it with
             // `E_INVALID_STATE`) has no management action to offer at all —
             // see [SessionUiState.canManage].
-            if (state.canManage || work.canSetWork || work.canNameWork) {
+            if (state.canManage || work.canSetWork || work.canNameWork || onOpenTasks != null) {
                 SessionOverflowMenu(
                     state = state,
                     onRestart = onRestart,
@@ -451,6 +462,7 @@ private fun SessionBar(
                     onRename = onRename,
                     onSetWork = workHandlers.onSetWork.takeIf { work.canSetWork },
                     onNameWork = workHandlers.onNameWork.takeIf { work.canNameWork },
+                    onOpenTasks = onOpenTasks,
                 )
             }
         },
@@ -551,6 +563,8 @@ private fun SessionOverflowMenu(
     onSetWork: ((String) -> Unit)? = null,
     /** *Name this work…*; null unless the session has no work and this token and hub may name it. */
     onNameWork: ((String, String?) -> Unit)? = null,
+    /** *Tasks*: every link of the session, read-only; null on a hub without `work { session_tasks }`. */
+    onOpenTasks: (() -> Unit)? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
@@ -566,6 +580,12 @@ private fun SessionOverflowMenu(
         Icon(FleetIcons.MoreVert, contentDescription = "Session actions")
     }
     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        if (onOpenTasks != null) {
+            DropdownMenuItem(
+                text = { Text("Tasks") },
+                onClick = { expanded = false; onOpenTasks() },
+            )
+        }
         if (onSetWork != null) {
             DropdownMenuItem(
                 text = { Text("Set work…") },
