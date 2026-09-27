@@ -10,10 +10,17 @@ import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.SessionTaskLink
+import dev.claudefleet.mobile.model.SessionTasks
+import dev.claudefleet.mobile.model.TaskBrief
+import dev.claudefleet.mobile.model.TaskDetail
+import dev.claudefleet.mobile.model.TaskLink
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.TicketCard
 import dev.claudefleet.mobile.model.Today
 import dev.claudefleet.mobile.model.TrackerRow
+import dev.claudefleet.mobile.model.TreePage
+import dev.claudefleet.mobile.model.WorkView
 import dev.claudefleet.mobile.model.WaitResult
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
@@ -44,6 +51,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
@@ -519,6 +527,60 @@ class HubClient(
     suspend fun workOrgs(): List<OrgDetail> =
         call("work", buildJsonObject { put("action", "orgs") }) {
             json.decodeFromJsonElement(ListSerializer(OrgDetail.serializer()), it)
+        }
+
+    // ---- the Work view (claude-fleet M14.1b): reads only ----
+    //
+    // Offered only when the hub's schema lists the action in `work`'s enum
+    // (`HubCapabilities.lists`); an older hub has none of them.
+
+    /**
+     * One page of the Work view: tasks with their sessions, and every
+     * section's header under [filters]. [cursor] is the last page's
+     * `next_cursor`, valid only with the same [filters]; [perTask] caps the
+     * sessions listed under each task (the task screen reads them all).
+     */
+    suspend fun workTree(filters: JsonObject, cursor: String? = null, limit: Int? = null, perTask: Int? = null): TreePage =
+        call(
+            "work",
+            buildJsonObject {
+                put("action", "tree")
+                if (filters.isNotEmpty()) put("filters", filters)
+                cursor?.let { put("cursor", it) }
+                limit?.let { put("limit", it) }
+                perTask?.let { put("per_task", it) }
+            },
+        ) { json.decodeFromJsonElement(TreePage.serializer(), it) }
+
+    /** One task (`item:<id>` or `ref:<KEY>`) with every session and why it is linked. */
+    suspend fun workTask(taskId: String): TaskDetail =
+        call("work", buildJsonObject { put("action", "task"); put("task_id", taskId) }) {
+            json.decodeFromJsonElement(TaskDetail.serializer(), it)
+        }
+
+    /**
+     * Every link of one session, each with its task. A link's fields sit
+     * beside `task` in one object on the wire, so each half is read from it.
+     */
+    suspend fun workSessionTasks(sessionId: Long): SessionTasks =
+        call("work", buildJsonObject { put("action", "session_tasks"); put("session_id", sessionId) }) { payload ->
+            val o = payload.jsonObject
+            SessionTasks(
+                sessionId = (o["session_id"] as? JsonPrimitive)?.longOrNull ?: sessionId,
+                primaryLinkId = (o["primary_link_id"] as? JsonPrimitive)?.longOrNull,
+                links = (o["links"] as? JsonArray).orEmpty().map { link ->
+                    SessionTaskLink(
+                        link = json.decodeFromJsonElement(TaskLink.serializer(), link),
+                        task = json.decodeFromJsonElement(TaskBrief.serializer(), link.jsonObject.getValue("task")),
+                    )
+                },
+            )
+        }
+
+    /** The saved views this token sees (a phone bound to an org: its org's). */
+    suspend fun workViews(): List<WorkView> =
+        call("work", buildJsonObject { put("action", "views") }) {
+            json.decodeFromJsonElement(ListSerializer(WorkView.serializer()), it)
         }
 
     /** Accept a suggestion: it becomes the session's work. Answers the updated row. */

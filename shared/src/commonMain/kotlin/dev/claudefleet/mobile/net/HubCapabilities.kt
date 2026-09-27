@@ -60,6 +60,20 @@ data class HubCapabilities(
             actions[tool]?.contains(action) != false &&
             action !in missing[tool].orEmpty()
 
+    /**
+     * [action] is in [tool]'s schema enum — strictly: unlike [has], a tool
+     * whose `action` is a free string does not count. The Work view's gate
+     * (claude-fleet M14): a hub that predates it must hide the tab, not
+     * learn from a refusal after the tab is already on screen.
+     */
+    fun lists(tool: String, action: String): Boolean =
+        tool in tools &&
+            actions[tool]?.contains(action) == true &&
+            action !in missing[tool].orEmpty()
+
+    /** The *My work* tab: `work` lists `tree`. */
+    val workView: Boolean get() = lists(WORK, WORK_TREE)
+
     fun accepts(tool: String, param: String): Boolean = tool in tools && params[tool]?.contains(param) == true
 
     /** This connection learned [action] is not one [tool] has. */
@@ -71,6 +85,10 @@ data class HubCapabilities(
         const val WORK_LINK = "work_link"
         const val ENSURE_OPERATOR = "ensure_operator"
         const val QUICK_REPLIES = "quick_replies"
+        const val WORK_TREE = "tree"
+        const val WORK_TASK = "task"
+        const val WORK_SESSION_TASKS = "session_tasks"
+        const val WORK_VIEWS = "views"
 
         fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions, params = catalog.params)
     }
