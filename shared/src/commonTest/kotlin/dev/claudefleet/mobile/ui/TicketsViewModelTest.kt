@@ -139,10 +139,70 @@ class TicketsViewModelTest {
         assertEquals("pine", detail.resumeHost, "the hub's own suggestion is the default")
         tickets.selectResumeHost("hetzner")
         tickets.resume()
+        tickets.confirmResume()
         runCurrent()
 
         assertEquals(listOf("resume_plan PAY-9", "resume PAY-9 hetzner"), actions.calls)
         assertEquals(listOf(99L), nav.opened)
+    }
+
+    /** Resume starts a session: the tap only asks, and says what and where. */
+    @Test
+    fun resume_asks_before_it_calls_the_hub() = runTest {
+        val nav = Nav()
+        val actions = FakeWorkActions().apply { planAnswer = plan() }
+        val tickets = vm(WorkFleet(), actions, backgroundScope, nav)
+        tickets.select(PAY9)
+        runCurrent()
+
+        tickets.resume()
+        runCurrent()
+
+        assertEquals(listOf("resume_plan PAY-9"), actions.calls, "nothing is resumed on the tap alone")
+        assertEquals(emptyList(), nav.opened)
+        val ask = assertNotNull(tickets.state.value.confirmResume)
+        assertEquals(ResumeConfirm("PAY-9", "Ledger", "pine"), ask)
+        assertEquals("This starts a session on pine that picks up the last conversation on PAY-9 · Ledger.", resumeQuestion(ask))
+
+        tickets.confirmResume()
+        runCurrent()
+        assertEquals(listOf("resume_plan PAY-9", "resume PAY-9 pine"), actions.calls)
+        assertNull(tickets.state.value.confirmResume)
+    }
+
+    @Test
+    fun a_cancelled_resume_calls_nothing() = runTest {
+        val nav = Nav()
+        val actions = FakeWorkActions().apply { planAnswer = plan() }
+        val tickets = vm(WorkFleet(), actions, backgroundScope, nav)
+        tickets.select(PAY9)
+        runCurrent()
+
+        tickets.resume()
+        tickets.cancelResume()
+        assertNull(tickets.state.value.confirmResume)
+        tickets.confirmResume()
+        runCurrent()
+
+        assertEquals(listOf("resume_plan PAY-9"), actions.calls)
+        assertEquals(emptyList(), nav.opened)
+    }
+
+    /** A question asked about one ticket is not an answer for another. */
+    @Test
+    fun selecting_another_ticket_drops_the_question() = runTest {
+        val actions = FakeWorkActions().apply { planAnswer = plan() }
+        val tickets = vm(WorkFleet(), actions, backgroundScope, Nav())
+        tickets.select(PAY9)
+        runCurrent()
+        tickets.resume()
+
+        tickets.select(PAY7)
+        runCurrent()
+        assertNull(tickets.state.value.confirmResume)
+        tickets.confirmResume()
+        runCurrent()
+        assertFalse(actions.calls.any { it.startsWith("resume ") }, actions.calls.toString())
     }
 
     @Test
@@ -180,6 +240,7 @@ class TicketsViewModelTest {
         tickets.select(PAY9)
         runCurrent()
         tickets.resume()
+        tickets.confirmResume()
         runCurrent()
 
         assertEquals(listOf(41L), nav.opened)
@@ -202,6 +263,7 @@ class TicketsViewModelTest {
         tickets.select(PAY9)
         runCurrent()
         tickets.resume()
+        tickets.confirmResume()
         runCurrent()
 
         assertEquals(emptyList(), nav.opened)
@@ -222,8 +284,9 @@ class TicketsViewModelTest {
         runCurrent()
 
         assertFalse(tickets.state.value.selected!!.canStart || tickets.state.value.selected!!.canResume)
-        tickets.startHere(); tickets.resume()
+        tickets.startHere(); tickets.resume(); tickets.confirmResume()
         runCurrent()
+        assertNull(tickets.state.value.confirmResume, "nothing to ask a readonly token")
         assertEquals(emptyList(), nav.started)
         assertEquals(listOf("resume_plan PAY-9"), actions.calls, "reading the plan is fine; nothing was written")
     }

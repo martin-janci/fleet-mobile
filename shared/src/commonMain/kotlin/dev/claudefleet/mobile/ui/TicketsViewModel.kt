@@ -57,6 +57,13 @@ data class TicketDetail(
     val pastWork: List<ResumeCandidate> = emptyList(),
 )
 
+/**
+ * **Resume**, waiting on the person's yes: what it will pick up and where.
+ * The tap only asks; [TicketsViewModel.confirmResume] is what calls the hub,
+ * and it resumes exactly this key on exactly this host.
+ */
+data class ResumeConfirm(val key: String, val title: String, val host: String?)
+
 data class TicketsUiState(
     /** The hub has the work graph at all; without it the sheet is never offered. */
     val available: Boolean = false,
@@ -69,6 +76,8 @@ data class TicketsUiState(
     val selected: TicketDetail? = null,
     val busy: Boolean = false,
     val error: Friendly? = null,
+    /** A Resume asked for and not yet confirmed or cancelled; the sheet asks while it is set. */
+    val confirmResume: ResumeConfirm? = null,
     /**
      * Ticket id → the name of its org (by its tracker), when the hub has two
      * or more orgs; empty otherwise, which draws no org labels at all.
@@ -84,8 +93,8 @@ data class TicketsUiState(
  * Per ticket: **Open** when a session is already on it; otherwise **Start
  * here** (the New session form in ticket mode); and **Resume** when there is
  * past work, with a host picker and nothing else — the phone never edits the
- * hub's brief. A resume the hub refuses with `E_EXISTS` opens the session it
- * names instead.
+ * hub's brief. Resume asks before it calls. A resume the hub refuses with
+ * `E_EXISTS` opens the session it names instead.
  *
  * Every title and description here is third-party text: the screen draws it
  * as plain text only.
@@ -111,6 +120,7 @@ class TicketsViewModel(
         val plan: ResumePlan? = null,
         val card: TicketCard? = null,
         val resumeHost: String? = null,
+        val confirmResume: ResumeConfirm? = null,
         val busy: Boolean = false,
         val error: Friendly? = null,
     )
@@ -183,7 +193,9 @@ class TicketsViewModel(
      * offers no Resume.
      */
     fun select(ticket: Ticket?): Job? {
-        local.update { it.copy(selectedId = ticket?.id, selected = ticket, plan = null, card = null, resumeHost = null) }
+        local.update {
+            it.copy(selectedId = ticket?.id, selected = ticket, plan = null, card = null, resumeHost = null, confirmResume = null)
+        }
         val key = ticket?.key ?: return null
         val caps = fleet.capabilities.value
         return scope.launch {
@@ -217,7 +229,7 @@ class TicketsViewModel(
     }
 
     fun selectResumeHost(alias: String) {
-        local.update { it.copy(resumeHost = alias) }
+        local.update { it.copy(resumeHost = alias, confirmResume = null) }
     }
 
     /** **Open**: the session already on the ticket. */
@@ -237,19 +249,38 @@ class TicketsViewModel(
     }
 
     /**
-     * **Resume** the last conversation on the chosen host. It runs in this
-     * view model's scope, which the caller keeps as the fleet's — backing out
-     * never cancels a resume half made.
+     * **Resume**: ask first. Resuming starts a session on a host, so the tap
+     * only puts up the question — which key, on which host — and
+     * [confirmResume] is what calls the hub.
      */
-    fun resume(): Job? {
+    fun resume() {
+        val detail = state.value.selected ?: return
+        val key = detail.ticket.key ?: return
+        if (!detail.canResume || local.value.busy) return
+        local.update { it.copy(confirmResume = ResumeConfirm(key, detail.ticket.title, it.resumeHost)) }
+    }
+
+    /** The person said no: nothing is resumed. */
+    fun cancelResume() {
+        local.update { it.copy(confirmResume = null) }
+    }
+
+    /**
+     * The person said yes: resume the last conversation on the key and host
+     * the question named. It runs in this view model's scope, which the
+     * caller keeps as the fleet's — backing out never cancels a resume half
+     * made. Checked again here: a ticket that has since gone live, or a
+     * token that may not, resumes nothing.
+     */
+    fun confirmResume(): Job? {
+        val ask = local.value.confirmResume ?: return null
+        local.update { it.copy(confirmResume = null) }
         val detail = state.value.selected ?: return null
-        val key = detail.ticket.key ?: return null
-        if (!detail.canResume || local.value.busy) return null
-        val host = local.value.resumeHost
+        if (detail.ticket.key != ask.key || !detail.canResume || local.value.busy) return null
         local.update { it.copy(busy = true, error = null) }
         return scope.launch {
             try {
-                val row = actions.resume(key, host)
+                val row = actions.resume(ask.key, ask.host)
                 local.update { it.copy(busy = false) }
                 close()
                 onOpenSession(row.id)
@@ -325,6 +356,7 @@ class TicketsViewModel(
             selected = selected,
             busy = l.busy,
             error = l.error,
+            confirmResume = l.confirmResume?.takeIf { selected?.canResume == true && selected.ticket.key == it.key },
             ticketOrgs = ticketOrgs,
         )
     }

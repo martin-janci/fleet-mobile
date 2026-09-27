@@ -529,7 +529,9 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                                 onOpenLive = tickets::openLive,
                                 onStartHere = tickets::startHere,
                                 onResumeHost = tickets::selectResumeHost,
-                                onResume = { tickets.resume() },
+                                onResume = tickets::resume,
+                                onConfirmResume = { tickets.confirmResume() },
+                                onCancelResume = tickets::cancelResume,
                                 onDismissError = tickets::dismissError,
                             ),
                         )

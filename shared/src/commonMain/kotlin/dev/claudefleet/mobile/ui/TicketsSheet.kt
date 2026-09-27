@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -23,6 +24,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,7 +48,10 @@ data class TicketsHandlers(
     val onOpenLive: () -> Unit = {},
     val onStartHere: () -> Unit = {},
     val onResumeHost: (String) -> Unit = {},
+    /** Asks first: puts up [TicketsUiState.confirmResume]. */
     val onResume: () -> Unit = {},
+    val onConfirmResume: () -> Unit = {},
+    val onCancelResume: () -> Unit = {},
     val onDismissError: () -> Unit = {},
 )
 
@@ -58,6 +63,7 @@ data class TicketsHandlers(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TicketsSheet(state: TicketsUiState, handlers: TicketsHandlers) {
+    state.confirmResume?.let { ResumeConfirmDialog(it, handlers) }
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Text("Tickets", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp))
@@ -201,6 +207,28 @@ private fun TicketActions(detail: TicketDetail, busy: Boolean, handlers: Tickets
             }
         }
     }
+}
+
+/**
+ * **Resume**'s question: it starts a session, so it is asked like Restart.
+ * The ticket's title is the tracker's text, drawn as plain text.
+ */
+@Composable
+private fun ResumeConfirmDialog(ask: ResumeConfirm, handlers: TicketsHandlers) {
+    AlertDialog(
+        onDismissRequest = handlers.onCancelResume,
+        title = { Text("Resume ${ask.key}?") },
+        text = { Text(resumeQuestion(ask)) },
+        confirmButton = { TextButton(onClick = handlers.onConfirmResume) { Text("Resume") } },
+        dismissButton = { TextButton(onClick = handlers.onCancelResume) { Text("Cancel") } },
+    )
+}
+
+/** What Resume will do, in a sentence. */
+internal fun resumeQuestion(ask: ResumeConfirm): String {
+    val what = if (ask.title.isNotBlank()) "${ask.key} · ${ask.title}" else ask.key
+    val where = ask.host?.takeIf { it.isNotBlank() }?.let { " on $it" } ?: ""
+    return "This starts a session$where that picks up the last conversation on $what."
 }
 
 /** How many past sessions the detail lists; the desktop has the rest. */
