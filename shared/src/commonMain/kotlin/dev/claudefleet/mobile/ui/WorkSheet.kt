@@ -40,6 +40,10 @@ data class SessionWorkHandlers(
     val onSetWork: (String) -> Unit = {},
     val onDismissError: () -> Unit = {},
     val onHandover: () -> Unit = {},
+    /** **Name this work…**: a title, and an optional key. */
+    val onNameWork: (title: String, key: String?) -> Unit = { _, _ -> },
+    /** **Rename** the session's local work. */
+    val onRenameWork: (String) -> Unit = {},
 )
 
 /**
@@ -52,6 +56,17 @@ data class SessionWorkHandlers(
 fun WorkTicketSheet(state: SessionWorkUiState, handlers: SessionWorkHandlers) {
     val shown = state.chip ?: return
     val suggestion = state.work == null
+    var renaming by remember { mutableStateOf(false) }
+    if (renaming) {
+        WorkTitleDialog(
+            heading = "Rename work",
+            initialTitle = shown.title,
+            askKey = false,
+            confirmLabel = "Rename",
+            onConfirm = { title, _ -> renaming = false; handlers.onRenameWork(title) },
+            onDismiss = { renaming = false },
+        )
+    }
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
@@ -91,6 +106,9 @@ fun WorkTicketSheet(state: SessionWorkUiState, handlers: SessionWorkHandlers) {
                 if (state.canHandover && !suggestion) {
                     OutlinedButton(onClick = handlers.onHandover, enabled = !state.busy) { Text("Ask for a handover") }
                 }
+                if (state.canRenameWork && !suggestion) {
+                    OutlinedButton(onClick = { renaming = true }, enabled = !state.busy) { Text("Rename") }
+                }
             }
             state.handover?.let {
                 Text(it.sentence, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -124,6 +142,56 @@ fun SetWorkDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
         },
         confirmButton = {
             TextButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) { Text("Set") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * **Name this work…** and **Rename**: a title for local work (claude-fleet
+ * M11.1; on the phone since M13.4a), and — when naming — an optional key.
+ * The hub owns the rules; the view model checks the title first so a bad
+ * one is said at once.
+ */
+@Composable
+fun WorkTitleDialog(
+    heading: String,
+    initialTitle: String,
+    askKey: Boolean,
+    confirmLabel: String,
+    onConfirm: (title: String, key: String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var title by remember { mutableStateOf(initialTitle) }
+    var key by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(heading) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("What is this work?") },
+                    singleLine = true,
+                    supportingText = { Text("${title.trim().length} / $WORK_TITLE_MAX") },
+                    isError = title.trim().length > WORK_TITLE_MAX,
+                )
+                if (askKey) {
+                    OutlinedTextField(
+                        value = key,
+                        onValueChange = { key = it },
+                        label = { Text("Key (optional), like OPS-1") },
+                        singleLine = true,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(title, key.takeIf { askKey && it.isNotBlank() }) },
+                enabled = title.isNotBlank(),
+            ) { Text(confirmLabel) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
