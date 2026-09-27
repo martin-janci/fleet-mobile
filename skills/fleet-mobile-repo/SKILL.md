@@ -136,7 +136,7 @@ missing feature should only hide a button. Instead, on every `ready`,
   acceptance criteria, and org labels / chips (M8.6), each hidden on its own
   when the hub does not list it.
 - `work_link` present → Confirm / Not this / Clear / Set work… / Start here /
-  Resume / Ask for a handover. The hub filters `tools/list` per caller, so a **readonly** token is
+  Resume / Ask for a handover / Name this work… / Rename…. The hub filters `tools/list` per caller, so a **readonly** token is
   never shown `work_link` — and the UI checks `Credentials.canWrite` as well.
   Both, always: never call a tool the token cannot use.
 - **Actions.** `action` is a free string on hubs before M8.0. When the schema
@@ -144,6 +144,9 @@ missing feature should only hide a button. Instead, on every `ready`,
   not, an action counts as present until the hub answers `E_INVALID`
   "unknown … action", which `FleetState.actionMissing` records **for that
   connection** (the next `ready` asks again — it may be an upgraded hub).
+  `HubCapabilities.lists(tool, action)` is the strict form — the `enum` must
+  name it — for an action newer than the enums (`work_link name`), where an
+  unlisted action means an older hub, not a free-string one.
 - A hub that cannot answer `tools/list` reads as the old hub: nothing
   work-shaped is offered, and nothing errors. `HUB_VERSION_KEYS` stays only
   for the `send_prompt { keys }` chips.

@@ -300,6 +300,21 @@ from the hub's cache. **Ask for a handover** is asynchronous on the hub, so
 follows `handover_*` for its session. `agent_inferred` links (Claude's answer
 to the classification nudge) read "suggested by Claude when asked".
 
+**Naming local work** (claude-fleet M13.4a, decision D20; the hub's M11.1).
+*Name this work…* (`work_link name` with `session_id`, a title and an
+optional key) is in the session menu while the session has no confirmed work;
+*Rename…* (`work_link name` with `item_id`, never both) is on the work sheet
+when the hub's `work local_items`, read as the sheet opens, lists the
+session's item — a tracker's title is the tracker's. Both need a write token
+and a hub whose schema **lists** `name` (`HubCapabilities.lists`, stricter than
+`has`: `name` is newer than the action enums, so an unlisted one is an older
+hub). No hub change. A title the hub would refuse (empty, over 120
+characters, a control character) is said on the phone and never sent; the
+hub's refusals (`E_EXISTS` for a key a ticket or other local work has,
+`E_INVALID`, `E_NOTFOUND`, `E_FORBIDDEN`) are said in words by `friendlyName`,
+its own text under Details. The chip moves on the hub's `session:updated` /
+`work:item` frames, as for every other decision.
+
 **Share standup.** Beside *Copy standup*, the Today sheet's **Share** hands
 the same text to the platform share sheet (`rememberShareText`, an
 expect/actual: Android's chooser, iOS's `UIActivityViewController`, the

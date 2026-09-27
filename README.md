@@ -268,6 +268,9 @@ costs one reconnect.
     text, to the clipboard or the system share sheet;
   - **Ask for a handover** on a linked session: Claude writes a handover note
     for whoever picks the work up next, and the sheet says when it is written;
+  - **Name this work…** in the menu of a session with no work (a title and an
+    optional key, no ticket), and **Rename…** on the sheet for work named that
+    way — a full token only, and only on a hub that lists `work_link name`;
   - with two or more organisations, org chips that narrow the list and Today,
     and the org on each work heading and ticket.
 
