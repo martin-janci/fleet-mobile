@@ -31,7 +31,7 @@ internal object WorkTreeJson {
    "group":{"id":"tracker:1:ABC","label":"ABC","source":"tracker","tracker_value":"ABC","editable":true},
    "counts":{"active":0,"ended":0,"suggested":0},"placement_version":0},
   {"task_id":"item:77","item_id":77,"title":"Ops cleanup","kind":"local","org_id":2,"org_source":"sessions",
-   "group":{"id":"manual:Ops","label":"Ops","source":"manual","editable":true},
+   "group":{"id":"label:Ops","label":"Ops","source":"manual","editable":true},
    "counts":{"active":0,"ended":1,"suggested":0},"placement_version":4},
   {"task_id":"ref:OLD-1","key":"OLD-1","kind":"ref","org_source":"none",
    "group":{"id":"key:OLD","label":"OLD","source":"key","editable":true},
@@ -39,8 +39,8 @@ internal object WorkTreeJson {
  ],
  "groups":[
   {"org_id":1,"org_name":"Acme","group":{"id":"tracker:1:ABC","label":"ABC","source":"tracker","tracker_value":"ABC","editable":true},"count":3},
-  {"org_id":1,"org_name":"Acme","group":{"id":"rule:Payments","label":"Payments","source":"rule","rule_id":3,"editable":true},"count":1},
-  {"org_id":2,"org_name":"Globex","group":{"id":"manual:Ops","label":"Ops","source":"manual","editable":true},"count":1},
+  {"org_id":1,"org_name":"Acme","group":{"id":"label:Payments","label":"Payments","source":"rule","rule_id":3,"editable":true},"count":1},
+  {"org_id":2,"org_name":"Globex","group":{"id":"label:Ops","label":"Ops","source":"manual","editable":true},"count":1},
   {"group":{"id":"key:OLD","label":"OLD","source":"key","editable":true},"count":1},
   {"group":{"id":"none","label":"","source":"a_source_from_later"},"count":2}
  ],
@@ -64,7 +64,7 @@ internal object WorkTreeJson {
 {"task":{"task_id":"item:12","item_id":12,"key":"ABC-12","title":"Login fails","kind":"tracker","tracker_id":1,"tracker_name":"Jira (acme)",
    "tracker_state":"ok","status_category":"in_progress","status_name":"In Review","org_id":1,"org_source":"tracker","org_fenced":true,
    "group":{"id":"tracker:1:ABC","label":"ABC","source":"tracker","tracker_value":"ABC","editable":true},
-   "counts":{"active":1,"ended":1,"suggested":1},"placement_version":0,"repos":["acme/api"],
+   "counts":{"active":1,"ended":1,"suggested":1},"placement_version":2,"repos":["acme/api"],
    "sessions":[
      {"link_id":42,"link_version":3,"state":"active","primary":true,"session_id":7,"name":"api","host":"mefistos","source":"manual",
       "why":"set by hand","evidence":[{"kind":"branch","value":"abc-12-login"}],"resumable":true},

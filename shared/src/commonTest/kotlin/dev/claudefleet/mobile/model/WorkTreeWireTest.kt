@@ -78,4 +78,13 @@ class WorkTreeWireTest {
         assertEquals(listOf("h1"), i.hostsLosing)
         assertTrue(!i.impactToken.isNullOrBlank())
     }
+
+    /** A session row's `work_rev` (M14): read when sent, 0 when the hub leaves it out. */
+    @Test
+    fun a_session_rows_work_rev_is_read_and_defaults_to_zero() {
+        val sent = json.decodeFromString(SessionRow.serializer(), """{"id":7,"tmux_name":"api","work_rev":8123456789012}""")
+        assertEquals(8_123_456_789_012L, sent.workRev)
+        val omitted = json.decodeFromString(SessionRow.serializer(), """{"id":7,"tmux_name":"api"}""")
+        assertEquals(0L, omitted.workRev)
+    }
 }

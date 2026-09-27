@@ -600,6 +600,9 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         credentials = credentials,
                         onBack = { nav.back() },
                         onOpenTask = nav::openTask,
+                        // The fleet's scope: a change to the session's tasks
+                        // is not cancelled by leaving the session.
+                        callScope = scope,
                     )
                 }
                 Screen.Work -> {
@@ -643,6 +646,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                             handlers = ReviewHandlers(
                                 onClose = review::close,
                                 onReload = { review.reload() },
+                                onLoadMore = { review.loadMore() },
                                 onConfirm = { review.confirm(it) },
                                 onReject = { review.reject(it) },
                                 onKeep = { review.keep(it) },
@@ -665,6 +669,9 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         repository = repository,
                         credentials = credentials,
                         knownGroups = myWork::knownGroups,
+                        // The fleet's scope: a placement or a resume is not
+                        // cancelled by backing out of the task.
+                        callScope = scope,
                         onOpenSession = nav::open,
                         onStartHere = { nav.newSession(ticketKey = it) },
                         onBack = { nav.back() },
@@ -740,6 +747,7 @@ private fun TaskRoute(
     repository: FleetRepository,
     credentials: Credentials,
     knownGroups: () -> List<GroupRef>,
+    callScope: CoroutineScope,
     onOpenSession: (Long) -> Unit,
     onStartHere: (String) -> Unit,
     onBack: () -> Unit,
@@ -757,6 +765,7 @@ private fun TaskRoute(
             knownGroups = knownGroups,
             onOpenSession = onOpenSession,
             onStartHere = onStartHere,
+            callScope = callScope,
         )
     }
     val state by vm.state.collectAsState()
@@ -772,7 +781,7 @@ private fun TaskRoute(
             onStartHere = vm::startHere,
             onOpenPlace = vm::openPlace,
             onClosePlace = vm::closePlace,
-            onPlace = { vm.place(it) },
+            onPlace = { group, note -> vm.place(group, note) },
             onClearPlacement = { vm.clearPlacement() },
             onDismissError = vm::dismissError,
         ),
@@ -787,6 +796,7 @@ private fun SessionRoute(
     credentials: Credentials,
     onBack: () -> Unit,
     onOpenTask: (String) -> Unit,
+    callScope: CoroutineScope,
 ) {
     val scope = rememberWorkScope()
     val vm = remember(sessionId, repository, scope) {
@@ -823,6 +833,7 @@ private fun SessionRoute(
             scope = scope,
             canWrite = credentials.canWrite,
             onOpenTask = onOpenTask,
+            callScope = callScope,
         )
     }
     LaunchedEffect(sessionId) { vm.load() }

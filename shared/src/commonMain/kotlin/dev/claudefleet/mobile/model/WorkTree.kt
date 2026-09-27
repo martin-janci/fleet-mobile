@@ -200,7 +200,10 @@ internal object ReviewKindSerializer : WireEnumSerializer<ReviewKind>("ReviewKin
 /** A task's project / group: navigation only, never a boundary. */
 @Serializable
 data class GroupRef(
-    /** `manual:<label>`, `rule:<label>`, `tracker:<id>:<container>`, `repo:<owner/repo>`, `key:<PREFIX>`, `none`. */
+    /**
+     * `label:<label>` (a person's placement or a rule — [source] says which),
+     * `tracker:<id>:<container>`, `repo:<owner/repo>`, `key:<PREFIX>`, `none`.
+     */
     val id: String = NO_GROUP,
     val label: String = "",
     val source: GroupSource = GroupSource.None,

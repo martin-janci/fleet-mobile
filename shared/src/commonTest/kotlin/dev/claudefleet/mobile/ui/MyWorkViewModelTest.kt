@@ -3,6 +3,10 @@
 package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.model.GroupRef
+import dev.claudefleet.mobile.model.GroupSource
+import dev.claudefleet.mobile.model.ReviewPage
+import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.IdOrWord
 import dev.claudefleet.mobile.model.WorkTreeFilters
 import dev.claudefleet.mobile.model.WorkTreePage
@@ -13,6 +17,7 @@ import dev.claudefleet.mobile.net.ToolCatalog
 import dev.claudefleet.mobile.net.json
 import dev.claudefleet.mobile.store.FakePrefs
 import dev.claudefleet.mobile.store.Prefs
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -29,7 +34,7 @@ private fun page(text: String): WorkTreePage = json.decodeFromString(WorkTreePag
 private const val DEBOUNCE = 2_000L
 
 private fun TestScope.myWork(
-    fleet: WorkFleet = WorkFleet(),
+    fleet: WorkFleet = WorkFleet(caps = WorkFleet.WORK_VIEW),
     actions: FakeWorkActions = FakeWorkActions().answeringTree(),
     canWrite: Boolean = true,
     prefs: Prefs? = FakePrefs(),
@@ -162,7 +167,7 @@ class MyWorkViewModelTest {
     /** Offline: the last page stays, says how old it is, and nothing can be written. */
     @Test
     fun offline_keeps_the_last_page_and_says_as_of_when() = runTest {
-        val fleet = WorkFleet()
+        val fleet = WorkFleet(caps = WorkFleet.WORK_VIEW)
         val actions = FakeWorkActions().answeringTree()
         val vm = myWork(fleet = fleet, actions = actions)
         vm.attach()
@@ -179,15 +184,21 @@ class MyWorkViewModelTest {
         assertEquals(3, s.orgs.size, "the picture stays")
         assertFalse(s.canSaveView, "no write while not connected — and nothing queues")
         assertNull(vm.saveView("Mine"))
+        runCurrent()
+        assertEquals(OFFLINE_WRITE, vm.state.value.error, "a write tapped offline is refused out loud, not dropped")
         vm.loadMore("1|tracker:1:ABC")
         runCurrent()
         assertEquals(1, actions.treeCalls.size, "no read while offline either")
     }
 
-    /** A reconnect re-reads; a burst of `work:*` and session frames re-reads once, after the debounce. */
+    /**
+     * A reconnect re-reads; a burst of `work:*` frames re-reads at once and
+     * once more at the end of the throttle window — never once per frame,
+     * and never held back for as long as frames keep coming.
+     */
     @Test
-    fun it_refetches_on_reconnect_and_once_per_burst_of_changes() = runTest {
-        val fleet = WorkFleet()
+    fun it_refetches_on_reconnect_and_throttles_a_burst_of_changes() = runTest {
+        val fleet = WorkFleet(caps = WorkFleet.WORK_VIEW)
         val actions = FakeWorkActions().answeringTree()
         val vm = myWork(fleet = fleet, actions = actions)
         vm.attach()
@@ -201,19 +212,134 @@ class MyWorkViewModelTest {
         assertEquals(2, actions.treeCalls.size, "the ready after a drop reloads")
 
         fleet.workChanges.emit(1)
-        fleet.sessionChanges.emit(5)
         fleet.workChanges.emit(2)
+        fleet.workChanges.emit(3)
         runCurrent()
-        assertEquals(2, actions.treeCalls.size, "debounced, not per frame")
+        assertEquals(3, actions.treeCalls.size, "the first change re-reads at once")
         advanceTimeBy(DEBOUNCE + 1)
         runCurrent()
-        assertEquals(3, actions.treeCalls.size)
+        assertEquals(4, actions.treeCalls.size, "the rest of the burst: one more, at the end of the window")
+
+        // A frame every half window for five windows: a debounce would never
+        // fire; the throttle re-reads once per window.
+        repeat(10) {
+            fleet.workChanges.emit(10L + it)
+            advanceTimeBy(DEBOUNCE / 2)
+            runCurrent()
+        }
+        assertTrue(actions.treeCalls.size in 8..10, "kept current under a steady stream: ${actions.treeCalls.size}")
 
         vm.detach()
-        fleet.workChanges.emit(3)
+        val before = actions.treeCalls.size
+        fleet.workChanges.emit(99)
         advanceTimeBy(DEBOUNCE + 1)
         runCurrent()
-        assertEquals(3, actions.treeCalls.size, "not showing: not following")
+        assertEquals(before, actions.treeCalls.size, "not showing: not following")
+    }
+
+    /**
+     * A session row re-reads the tree only when its work moved — its links
+     * (`work_rev`), guess, org, or its being alive — never for the status and
+     * activity churn of a working session.
+     */
+    @Test
+    fun only_a_change_to_a_rows_work_rereads_not_its_status() = runTest {
+        val row = SessionRow(id = 5, tmuxName = "dev", hostAlias = "pine", claudeStatus = "working", workRev = 7)
+        val fleet = WorkFleet(rows = listOf(row), caps = WorkFleet.WORK_VIEW)
+        val actions = FakeWorkActions().answeringTree()
+        val vm = myWork(fleet = fleet, actions = actions)
+        vm.attach()
+        runCurrent()
+        assertEquals(1, actions.treeCalls.size)
+
+        for (status in listOf("idle", "working", "blocked", "working")) {
+            fleet.sessions.value = listOf(row.copy(claudeStatus = status, currentActivity = "step $status", contextPct = 40.0))
+            fleet.sessionChanges.emit(5)
+            advanceTimeBy(DEBOUNCE + 1)
+            runCurrent()
+        }
+        assertEquals(1, actions.treeCalls.size, "status churn is not a work change")
+
+        fleet.sessions.value = listOf(row.copy(workRev = 8))
+        runCurrent()
+        assertEquals(2, actions.treeCalls.size, "a secondary link moved (work_rev): re-read")
+
+        fleet.sessions.value = listOf(row.copy(workRev = 8), row.copy(id = 6, workRev = 0))
+        advanceTimeBy(DEBOUNCE + 1)
+        runCurrent()
+        assertEquals(3, actions.treeCalls.size, "a session appeared")
+    }
+
+    /** A `work:changed` is never held behind session rows: each kind is throttled apart. */
+    @Test
+    fun a_work_frame_is_not_held_behind_session_churn() = runTest {
+        val row = SessionRow(id = 5, tmuxName = "dev", hostAlias = "pine", workRev = 1)
+        val fleet = WorkFleet(rows = listOf(row), caps = WorkFleet.WORK_VIEW)
+        val actions = FakeWorkActions().answeringTree()
+        val vm = myWork(fleet = fleet, actions = actions)
+        vm.attach()
+        runCurrent()
+
+        fleet.sessions.value = listOf(row.copy(workRev = 2))
+        runCurrent()
+        assertEquals(2, actions.treeCalls.size)
+        fleet.workChanges.emit(1)
+        runCurrent()
+        assertEquals(3, actions.treeCalls.size, "read at once, not after the session window")
+    }
+
+    /**
+     * Refresh vs Load more: a section page that answers after a refresh
+     * replaced the list is dropped, never appended to a list it was not
+     * read against.
+     */
+    @Test
+    fun a_load_more_that_lands_after_a_refresh_is_dropped() = runTest {
+        val actions = FakeWorkActions().answeringTree()
+        val hold = CompletableDeferred<Unit>()
+        actions.treeGate = { call -> if (call.filters.group != null) hold.await() }
+        val vm = myWork(actions = actions)
+        vm.attach()
+        runCurrent()
+        val before = vm.state.value.orgs[0].groups[0].tasks.map { it.taskId }
+
+        vm.loadMore("1|tracker:1:ABC")
+        runCurrent()
+        assertTrue(vm.state.value.orgs[0].groups[0].loadingMore)
+        vm.refresh()
+        runCurrent()
+        hold.complete(Unit)
+        runCurrent()
+
+        val section = vm.state.value.orgs[0].groups[0]
+        assertEquals(before, section.tasks.map { it.taskId }, "the stale page is not appended")
+        assertFalse(section.loadingMore)
+        vm.loadMore("1|tracker:1:ABC")
+        runCurrent()
+        assertEquals(listOf("item:12", "item:13", "item:14"), vm.state.value.orgs[0].groups[0].tasks.map { it.taskId }, "a fresh Load more still works")
+    }
+
+    /** The Work tab's badge follows the hub while the tab is not showing: on a work change and on a reconnect. */
+    @Test
+    fun the_badge_follows_work_changes_and_reconnects_while_detached() = runTest {
+        val fleet = WorkFleet(caps = WorkFleet.WORK_VIEW)
+        val actions = FakeWorkActions().answeringTree().apply { reviewAnswer = ReviewPage(total = 2) }
+        val vm = myWork(fleet = fleet, actions = actions)
+        runCurrent()
+        assertEquals(2, vm.state.value.reviewCount, "read on the first connect, tab or no tab")
+        assertTrue(actions.treeCalls.isEmpty(), "the tree itself waits for the tab")
+
+        actions.reviewAnswer = ReviewPage(total = 5)
+        fleet.workChanges.emit(1)
+        runCurrent()
+        assertEquals(5, vm.state.value.reviewCount)
+
+        actions.reviewAnswer = ReviewPage(total = 1)
+        fleet.status.value = ConnectionStatus.Offline("stopped")
+        runCurrent()
+        fleet.status.value = ConnectionStatus.Connected("0.9.3")
+        runCurrent()
+        assertEquals(1, vm.state.value.reviewCount, "a resume (a reconnect) re-reads it")
     }
 
     @Test
@@ -276,6 +402,22 @@ class MyWorkViewModelTest {
         assertNull(vm.state.value.error, "a reload that answers clears it")
     }
 
+    /**
+     * A hub whose `work` takes a free-string action (before M8.0) may not
+     * have the Work view at all: no tab to be refused, and nothing is read.
+     */
+    @Test
+    fun a_hub_that_does_not_list_tree_in_its_enum_has_no_work_tab() = runTest {
+        val actions = FakeWorkActions().answeringTree()
+        val vm = myWork(fleet = WorkFleet(caps = WorkFleet.FULL), actions = actions)
+
+        vm.attach()
+        runCurrent()
+
+        assertFalse(vm.state.value.available)
+        assertTrue(actions.treeCalls.isEmpty())
+    }
+
     /** No `tree` in the hub's enum: no tab, and nothing is read. */
     @Test
     fun a_hub_without_the_tree_action_has_no_work_tab() = runTest {
@@ -290,10 +432,10 @@ class MyWorkViewModelTest {
         assertTrue(actions.treeCalls.isEmpty())
     }
 
-    /** A free-string hub that refuses `tree` as unknown has it forgotten: the tab goes. */
+    /** A hub that lists `tree` but refuses it as unknown has it forgotten: the tab goes. */
     @Test
     fun an_unknown_tree_action_is_forgotten_for_the_connection() = runTest {
-        val fleet = WorkFleet()
+        val fleet = WorkFleet(caps = WorkFleet.WORK_VIEW)
         val actions = FakeWorkActions().apply { failTree = HubError.Tool("E_INVALID", "unknown work action \"tree\"; one of links, tickets") }
         val vm = myWork(fleet = fleet, actions = actions)
 
@@ -318,14 +460,23 @@ class MyWorkViewModelTest {
         assertEquals(3, vm.state.value.reviewCount)
     }
 
-    /** The groups Place in group… offers: the tree's, by label, without "No group". */
+    /**
+     * The groups Place in group… offers: only `label:` groups a person or a
+     * rule made — never the tracker's ABC or the key group OLD, which are
+     * where a task sits by itself — and never "No group".
+     */
     @Test
-    fun known_groups_are_the_trees_labels() = runTest {
+    fun known_groups_are_only_placements_and_rules() = runTest {
         val vm = myWork()
         vm.attach()
         runCurrent()
 
-        assertEquals(listOf("ABC", "Payments", "Ops", "OLD"), vm.knownGroups().map { it.title })
+        assertEquals(listOf("Payments", "Ops"), vm.knownGroups().map { it.title })
+        assertEquals(listOf("Payments", "Ops"), placeableGroups(vm.knownGroups()))
+        assertEquals(
+            emptyList(),
+            placeableGroups(listOf(GroupRef("tracker:1:ABC", "ABC", GroupSource.Tracker), GroupRef("repo:acme/api", "acme/api", GroupSource.Repo), GroupRef("key:OLD", "OLD", GroupSource.Key))),
+        )
     }
 
     @Test

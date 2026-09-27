@@ -215,12 +215,12 @@ class ReviewViewModel(
     }
 
     /** **Confirm** a suggestion under its version — as the primary only for a session with none. */
-    fun confirm(item: ReviewItem): Job? = decide(CONFIRM, "Confirmed ${item.task.label}") {
+    fun confirm(item: ReviewItem): Job? = decide(CONFIRM, undoOf(item, "Confirmed ${item.task.label}")) {
         decideOne(item, CONFIRM, primary = takesPrimary(item.sessionId, local.value.items))
     }
 
     /** **Reject** ("Not this") under its version. */
-    fun reject(item: ReviewItem): Job? = decide(REJECT, "Rejected ${item.task.label}") {
+    fun reject(item: ReviewItem): Job? = decide(REJECT, undoOf(item, "Rejected ${item.task.label}")) {
         decideOne(item, REJECT, primary = null)
     }
 
@@ -255,7 +255,7 @@ class ReviewViewModel(
      */
     fun change(item: ReviewItem, alternative: ReviewAlternative): Job? {
         if (!allowed(fleet.capabilities.value, fleet.status.value, REJECT)) return null.also { refuseOffline(REJECT) }
-        return decide(LINK, "Changed to ${alternative.label}") {
+        return decide(LINK, undoOf(item, "Changed to ${alternative.label}")) {
             val itemId = alternative.taskId.removePrefix(ITEM_PREFIX).takeIf { alternative.taskId.startsWith(ITEM_PREFIX) }?.toLongOrNull()
             val key = alternative.taskId.removePrefix(REF_PREFIX).takeIf { alternative.taskId.startsWith(REF_PREFIX) }
                 ?: alternative.key
@@ -296,7 +296,7 @@ class ReviewViewModel(
         val items = local.value.items
         val batch = items.filter { it.kind == ReviewKind.Suggestion }.take(MAX_BATCH)
         if (batch.isEmpty()) return null
-        val decisions = batchDecisions(batch, items) { fleet.sessions.value.firstOrNull { row -> row.id == it }?.work == null && fleet.sessions.value.any { row -> row.id == it } }
+        val decisions = batchConfirmDecisions(batch) { takesPrimary(it, items) }
         local.update { it.copy(busy = true, error = null, conflict = false, undo = null) }
         return scope.launch {
             try {
@@ -330,7 +330,7 @@ class ReviewViewModel(
      * takes someone's primary.
      */
     private fun takesPrimary(sessionId: Long, items: List<ReviewItem>): Boolean =
-        sessionHasNoPrimary(sessionId, items) { id ->
+        reviewSessionHasNoPrimary(sessionId, items) { id ->
             val row = fleet.sessions.value.firstOrNull { it.id == id }
             row != null && row.work == null
         }
@@ -367,25 +367,17 @@ class ReviewViewModel(
     /**
      * One decision: gated (refused with a message while offline), never
      * shown as done before the hub answers, then the list is re-read. [call]
-     * answers the link's version after it, when known; with [undoLabel] that
-     * is what an Undo is offered under.
+     * answers the link's version after it, when known; with [undoOf] that is
+     * what an Undo is offered under. No version, no Undo.
      */
-    private fun decide(action: String, undoLabel: String?, call: suspend () -> Long?): Job? {
+    private fun decide(action: String, undoOf: ((Long) -> UndoOffer)?, call: suspend () -> Long?): Job? {
         if (local.value.busy) return null
         if (!allowed(fleet.capabilities.value, fleet.status.value, action)) return null.also { refuseOffline(action) }
         local.update { it.copy(busy = true, error = null, conflict = false) }
         return scope.launch {
             try {
                 val version = call()
-                local.update { l ->
-                    val undo = if (undoLabel != null && version != null) {
-                        l.items.firstOrNull { it.linkId == targetOf(action, l, undoLabel) }?.let { null }
-                        null
-                    } else {
-                        null
-                    }
-                    l.copy(undo = undo, changing = null)
-                }
+                local.update { it.copy(undo = version?.let { v -> undoOf?.invoke(v) }, changing = null) }
                 onChanged()
                 load()
             } catch (e: CancellationException) {
@@ -398,7 +390,98 @@ class ReviewViewModel(
             }
         }
     }
-PLACEHOLDER_REST/** A batch refusal with no message of its own, in words. */
+    private fun undoOf(item: ReviewItem, label: String): (Long) -> UndoOffer = { version ->
+        UndoOffer(item.sessionId, item.linkId, label, version)
+    }
+
+    /** A decision this token and hub may make, tapped while offline: said, never silently dropped. */
+    private fun refuseOffline(action: String) {
+        if (canWrite && fleet.capabilities.value.has(WORK_LINK, action) && !fleet.status.value.isConnected()) {
+            local.update { it.copy(error = OFFLINE_WRITE, conflict = false) }
+        }
+    }
+
+    private fun allowed(caps: HubCapabilities, status: ConnectionStatus, action: String): Boolean =
+        canWrite && status.isConnected() && caps.has(WORK_LINK, action)
+
+    private fun assemble(caps: HubCapabilities, status: ConnectionStatus, l: Local): ReviewUiState {
+        if (!caps.has(WORK, REVIEW)) return ReviewUiState()
+        val connected = status.isConnected()
+        val canBatch = allowed(caps, status, DECIDE_BATCH)
+        return ReviewUiState(
+            available = true,
+            open = l.open,
+            loading = l.loading,
+            loaded = l.loaded,
+            items = l.items,
+            total = l.total,
+            hasMore = l.cursor != null,
+            loadingMore = l.loadingMore,
+            connected = connected,
+            stale = if (!connected && l.loaded) l.asOf?.let { staleLine(it, utcOffset(it)) } else null,
+            canConfirm = allowed(caps, status, CONFIRM),
+            canReject = allowed(caps, status, REJECT),
+            canKeep = allowed(caps, status, ACK),
+            canRemove = allowed(caps, status, UNLINK),
+            canMakePrimary = allowed(caps, status, SET_PRIMARY),
+            canChange = allowed(caps, status, LINK) && allowed(caps, status, REJECT),
+            canBatch = canBatch,
+            batchCount = if (canBatch) l.items.count { it.kind == ReviewKind.Suggestion }.coerceAtMost(MAX_BATCH) else 0,
+            failures = l.failures,
+            undo = l.undo,
+            canUndo = l.undo != null && allowed(caps, status, RECONSIDER),
+            changing = l.changing,
+            busy = l.busy,
+            error = l.error,
+            conflict = l.conflict,
+        )
+    }
+
+    private companion object {
+        const val REVIEW = "review"
+        const val CONFIRM = "confirm"
+        const val REJECT = "reject"
+        const val ACK = "ack"
+        const val UNLINK = "unlink"
+        const val LINK = "link"
+        const val SET_PRIMARY = "set_primary"
+        const val RECONSIDER = "reconsider"
+        const val DECIDE_BATCH = "decide_batch"
+        const val ITEM_PREFIX = "item:"
+        const val REF_PREFIX = "ref:"
+        const val PAGE = 50
+
+        /** The most one read may ask for. */
+        const val MAX_LIMIT = 200
+
+        /** The hub's ceiling for one batch. */
+        const val MAX_BATCH = 100
+    }
+}
+
+/**
+ * Whether [sessionId] has no primary, as far as the Review sheet can tell:
+ * the inbox lists it as *no primary*, or [rowHasNoWork] says its row is on
+ * hand and carries no work (a row's `work` is its primary link).
+ */
+internal fun reviewSessionHasNoPrimary(sessionId: Long, items: List<ReviewItem>, rowHasNoWork: (Long) -> Boolean): Boolean =
+    items.any { it.sessionId == sessionId && it.kind == ReviewKind.NoPrimary } || rowHasNoWork(sessionId)
+
+/**
+ * *Confirm all shown*'s decisions, each under its own version. `primary` is
+ * always explicit — the hub's default takes the primary — and true only for
+ * the first decision of a session [hasNoPrimary] says has none: the one
+ * primary that session gets, never a second decision stealing it back.
+ */
+internal fun batchConfirmDecisions(batch: List<ReviewItem>, hasNoPrimary: (Long) -> Boolean): List<WorkDecision> {
+    val granted = mutableSetOf<Long>()
+    return batch.map { item ->
+        val primary = hasNoPrimary(item.sessionId) && granted.add(item.sessionId)
+        WorkDecision(item.sessionId, item.linkId, "confirm", expectedVersion = item.linkVersion, primary = primary)
+    }
+}
+
+/** A batch refusal with no message of its own, in words. */
 internal fun failureWords(code: String?): String = when (code) {
     E_CONFLICT -> "Changed on another device — reload to see it now."
     "E_FORBIDDEN" -> "The hub refused this one."

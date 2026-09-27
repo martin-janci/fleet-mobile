@@ -67,7 +67,7 @@ fun SessionTasksSheet(state: SessionTasksUiState, handlers: SessionTasksHandlers
             Text("Tasks", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp))
             if (!state.connected) {
                 Text(
-                    "Not connected — changes wait until the hub is back.",
+                    "Offline — nothing can be changed until the hub is back; nothing is queued.",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
                 )

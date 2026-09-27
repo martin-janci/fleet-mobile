@@ -2,8 +2,8 @@
 
 package dev.claudefleet.mobile.ui
 
-import dev.claudefleet.mobile.data.ALL_SESSIONS_CHANGED
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.SessionTasks
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.net.HubError
@@ -140,6 +140,35 @@ class SessionTasksViewModelTest {
         assertEquals(listOf("link 7 70 primary=false", "link 7 ops-9 primary=true"), actions.workArgs)
     }
 
+    /**
+     * Before the session's links are read, whether it has a primary is
+     * unknown — and an unknown never takes one: added and confirmed as
+     * secondary, always saying so (the hub's default takes the primary).
+     */
+    @Test
+    fun before_the_links_are_read_nothing_is_added_as_primary() = runTest {
+        val actions = FakeWorkActions().apply { failSessionTasks = HubError.Tool("E_INTERNAL", "the hub is slow") }
+        val vm = tasksVm(actions = actions)
+        runCurrent()
+        assertFalse(vm.state.value.loaded)
+
+        vm.add(Ticket(id = 70, key = "PAY-7", title = "Refund"))
+        runCurrent()
+        vm.setAddQuery("OPS-9")
+        vm.addTyped()
+        runCurrent()
+        vm.confirm(LINKS.links.first { it.state == dev.claudefleet.mobile.model.LinkState.Suggested })
+        runCurrent()
+
+        assertEquals(
+            listOf("link 7 70 primary=false", "link 7 OPS-9 primary=false", "confirm 7 45 primary=false v=2"),
+            actions.workArgs,
+        )
+        assertFalse(sessionHasNoPrimary(null), "not read is not \"none\"")
+        assertTrue(sessionHasNoPrimary(SessionTasks(sessionId = 7)))
+        assertFalse(sessionHasNoPrimary(LINKS.copy(primaryLinkId = null)), "a link marked primary counts though the id is missing")
+    }
+
     /** The add list: the cache and My work / Recent, narrowed by the search, without what is already linked. */
     @Test
     fun the_add_list_is_searchable_and_leaves_out_linked_tasks() = runTest {
@@ -190,31 +219,39 @@ class SessionTasksViewModelTest {
 
         assertFalse(vm.state.value.canMakePrimary)
         assertNull(vm.makePrimary(vm.state.value.active[1]))
+        runCurrent()
         assertTrue(actions.calls.isEmpty())
+        assertEquals(OFFLINE_WRITE, vm.state.value.error, "refused out loud, never queued")
     }
 
-    /** This session's row changing re-reads its links; another session's does not. */
+    /**
+     * This session's *work* changing (its `work_rev`: a secondary link moved)
+     * re-reads its links; its status churn does not, and neither does
+     * another session's work.
+     */
     @Test
-    fun it_rereads_on_its_own_sessions_changes_only() = runTest {
-        val fleet = WorkFleet()
+    fun it_rereads_when_its_own_work_changes_only() = runTest {
+        val seven = SessionRow(id = 7, tmuxName = "api", hostAlias = "mefistos", claudeStatus = "working", workRev = 3)
+        val eight = SessionRow(id = 8, tmuxName = "web", hostAlias = "pine", workRev = 1)
+        val fleet = WorkFleet(rows = listOf(seven, eight))
         val actions = FakeWorkActions().apply { sessionTasksAnswer = LINKS }
         tasksVm(fleet = fleet, actions = actions)
         runCurrent()
 
-        fleet.sessionChanges.emit(8)
+        fleet.sessions.value = listOf(seven, eight.copy(workRev = 2))
         advanceTimeBy(301)
         runCurrent()
-        assertEquals(1, actions.sessionTasksCalls)
+        assertEquals(1, actions.sessionTasksCalls, "another session's work")
 
+        fleet.sessions.value = listOf(seven.copy(claudeStatus = "idle", currentActivity = "done"), eight.copy(workRev = 2))
         fleet.sessionChanges.emit(7)
         advanceTimeBy(301)
         runCurrent()
-        assertEquals(2, actions.sessionTasksCalls)
+        assertEquals(1, actions.sessionTasksCalls, "its own status churn")
 
-        fleet.sessionChanges.emit(ALL_SESSIONS_CHANGED)
-        advanceTimeBy(301)
+        fleet.sessions.value = listOf(seven.copy(claudeStatus = "idle", currentActivity = "done", workRev = 4), eight.copy(workRev = 2))
         runCurrent()
-        assertEquals(3, actions.sessionTasksCalls)
+        assertEquals(2, actions.sessionTasksCalls, "its work_rev moved: at once")
     }
 
     @Test

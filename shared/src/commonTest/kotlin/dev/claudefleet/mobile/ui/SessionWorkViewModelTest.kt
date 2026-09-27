@@ -16,6 +16,7 @@ import dev.claudefleet.mobile.model.TicketCard
 import dev.claudefleet.mobile.model.Today
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.BatchResult
+import dev.claudefleet.mobile.model.DecisionResult
 import dev.claudefleet.mobile.model.OrgImpact
 import dev.claudefleet.mobile.model.ReviewPage
 import dev.claudefleet.mobile.model.RulePreview
@@ -78,6 +79,22 @@ internal class WorkFleet(
 
     companion object {
         val FULL = HubCapabilities.of(ToolCatalog(setOf("work", "work_link")))
+
+        /**
+         * A hub with the Work view: `work`'s schema enumerates its actions
+         * (every hub with `tree` does), `work_link` takes a free string.
+         */
+        val WORK_VIEW = HubCapabilities.of(
+            ToolCatalog(
+                setOf("work", "work_link"),
+                mapOf(
+                    "work" to setOf(
+                        "tickets", "lookup", "resume_plan", "today", "card", "orgs",
+                        "tree", "task", "session_tasks", "review", "rules", "rule_preview", "views", "org_impact",
+                    ),
+                ),
+            ),
+        )
     }
 }
 
@@ -173,15 +190,22 @@ internal class FakeWorkActions : WorkActions {
     var taskCalls = 0
     var sessionTasksAnswer = SessionTasks()
     var sessionTasksCalls = 0
+    var failSessionTasks: Throwable? = null
     var reviewAnswer = ReviewPage()
     var reviewCalls = 0
     var rulesAnswer: List<WorkRule> = emptyList()
     var viewsAnswer: List<WorkView> = emptyList()
-    var batchAnswer = BatchResult()
+    /** Null answers every decision `ok`, at its expected version + 1 — what the hub's answer would be. */
+    var batchAnswer: BatchResult? = null
+    val batches = mutableListOf<List<WorkDecision>>()
     var placeAnswer: WorkTask? = null
     /** Fails the next write only (a conflict, say), then clears itself. */
     var failWrite: Throwable? = null
     val savedViews = mutableListOf<WorkViewDraft>()
+    /** Runs inside every tree read before it answers: a test holds a read open with it. */
+    var treeGate: suspend (TreeCall) -> Unit = {}
+    /** Runs inside every write before it answers: a test holds a write open with it. */
+    var writeGate: suspend () -> Unit = {}
 
     data class TreeCall(val filters: WorkTreeFilters, val cursor: String?, val limit: Int?, val perTask: Int?)
 
@@ -193,7 +217,9 @@ internal class FakeWorkActions : WorkActions {
     }
 
     override suspend fun tree(filters: WorkTreeFilters, cursor: String?, limit: Int?, perTask: Int?): WorkTreePage {
-        treeCalls += TreeCall(filters, cursor, limit, perTask)
+        val call = TreeCall(filters, cursor, limit, perTask)
+        treeCalls += call
+        treeGate(call)
         failTree?.let { throw it }
         return treeAnswer(filters, cursor)
     }
@@ -206,6 +232,7 @@ internal class FakeWorkActions : WorkActions {
 
     override suspend fun sessionTasks(sessionId: Long): SessionTasks {
         sessionTasksCalls += 1
+        failSessionTasks?.let { throw it }
         return sessionTasksAnswer
     }
 
@@ -225,18 +252,23 @@ internal class FakeWorkActions : WorkActions {
     override suspend fun setPrimary(sessionId: Long, linkId: Long, expectedPrimary: Long?) =
         write("set_primary $sessionId $linkId expected=$expectedPrimary")
 
-    override suspend fun reconsider(sessionId: Long, linkId: Long, expectedVersion: Long?) = write("reconsider $sessionId $linkId")
+    override suspend fun reconsider(sessionId: Long, linkId: Long, expectedVersion: Long?): SessionRow {
+        workArgs += "reconsider $sessionId $linkId v=$expectedVersion"
+        return write("reconsider $sessionId $linkId")
+    }
 
     override suspend fun ack(sessionId: Long, linkId: Long, expectedVersion: Long?) = write("ack $sessionId $linkId v=$expectedVersion")
 
     override suspend fun decideBatch(decisions: List<WorkDecision>): BatchResult {
         calls += "decide_batch " + decisions.joinToString(",") { "${it.decision}:${it.linkId}@${it.expectedVersion}" }
+        batches += decisions
         failWrite?.let { failWrite = null; throw it }
-        return batchAnswer
+        return batchAnswer ?: BatchResult(decisions.map { DecisionResult(linkId = it.linkId, ok = true, version = (it.expectedVersion ?: 0) + 1) })
     }
 
     override suspend fun place(taskId: String, group: String, expectedVersion: Long, note: String?): WorkTask {
-        calls += "place $taskId \"$group\" v=$expectedVersion"
+        calls += "place $taskId \"$group\" v=$expectedVersion" + (note?.let { " note=\"$it\"" } ?: "")
+        writeGate()
         failWrite?.let { failWrite = null; throw it }
         return placeAnswer ?: WorkTask(taskId = taskId)
     }

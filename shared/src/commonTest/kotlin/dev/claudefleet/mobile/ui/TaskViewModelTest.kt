@@ -10,6 +10,10 @@ import dev.claudefleet.mobile.model.TaskDetail
 import dev.claudefleet.mobile.model.WorkTask
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.json
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -42,18 +46,29 @@ private fun TestScope.taskVm(
     actions: FakeWorkActions = FakeWorkActions().apply { taskAnswer = DETAIL },
     canWrite: Boolean = true,
     nav: TaskNav = TaskNav(),
+    scope: CoroutineScope = backgroundScope,
+    callScope: CoroutineScope = scope,
 ) = TaskViewModel(
     taskId = "item:12",
     fleet = fleet,
     actions = actions,
-    scope = backgroundScope,
+    scope = scope,
     canWrite = canWrite,
-    knownGroups = { listOf(GroupRef("rule:Payments", "Payments", GroupSource.Rule), GroupRef("manual:Ops", "Ops", GroupSource.Manual)) },
+    knownGroups = {
+        listOf(
+            GroupRef("label:Payments", "Payments", GroupSource.Rule),
+            GroupRef("label:Ops", "Ops", GroupSource.Manual),
+            // Derived: where a task sits by itself, never offered as a placement.
+            GroupRef("tracker:1:ABC", "ABC", GroupSource.Tracker),
+            GroupRef("repo:acme/api", "acme/api", GroupSource.Repo),
+        )
+    },
     onOpenSession = { nav.opened += it },
     onStartHere = { nav.started += it },
     clock = { 1_790_000_000 },
     utcOffset = { 0 },
     refreshDebounceMs = 500,
+    callScope = callScope,
 )
 
 class TaskViewModelTest {
@@ -71,28 +86,82 @@ class TaskViewModelTest {
         assertEquals("Org 1 · from its tracker", s.orgLine)
         assertEquals("ABC · from the tracker (ABC)", s.groupLine)
         assertTrue(s.trackerControlled, "the tracker's own group is labelled as such")
-        assertEquals(listOf("Payments", "Ops"), s.knownGroups)
+        assertEquals(listOf("Payments", "Ops"), s.knownGroups, "only a person's or a rule's groups — never the tracker's or a repository's")
         assertFalse(s.canContinue || s.canStart, "a live session is on it: Open, not a second one")
         assertTrue(s.canPlace)
     }
 
-    /** Place sends the task's `placement_version`; it is shown only after the hub answers, then re-read. */
+    /**
+     * Place sends the placement's version, and the placement's note back
+     * unchanged (the hub clears a note a `place` leaves out); it is shown
+     * only after the hub answers, then re-read.
+     */
     @Test
-    fun placing_sends_the_placement_version_and_rereads() = runTest {
+    fun placing_sends_the_placement_version_and_keeps_the_note() = runTest {
         val actions = FakeWorkActions().apply {
             taskAnswer = DETAIL
-            placeAnswer = DETAIL.task.copy(group = GroupRef("manual:Payments", "Payments", GroupSource.Manual), placementVersion = 1, sessions = emptyList())
+            placeAnswer = DETAIL.task.copy(group = GroupRef("label:Payments", "Payments", GroupSource.Manual), placementVersion = 3, sessions = emptyList())
         }
         val vm = taskVm(actions = actions)
         runCurrent()
+        assertEquals("moved for the audit", vm.state.value.placementNote)
         vm.openPlace()
 
         vm.place(" Payments ")
         runCurrent()
 
-        assertEquals(listOf("place item:12 \"Payments\" v=0"), actions.calls)
+        assertEquals(listOf("place item:12 \"Payments\" v=2 note=\"moved for the audit\""), actions.calls)
         assertEquals(2, actions.taskCalls, "the answer is followed by a re-read")
         assertFalse(vm.state.value.placeOpen)
+    }
+
+    /** An edited note is sent as edited; an emptied one is dropped on purpose; clearing the placement drops it too. */
+    @Test
+    fun an_edited_note_is_sent_and_clearing_drops_it() = runTest {
+        val placed = DETAIL.copy(task = DETAIL.task.copy(group = GroupRef("label:Ops", "Ops", GroupSource.Manual)))
+        val actions = FakeWorkActions().apply { taskAnswer = placed }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+
+        vm.place("Ops", note = " for the release ")
+        runCurrent()
+        vm.place("Ops", note = "")
+        runCurrent()
+        vm.clearPlacement()
+        runCurrent()
+
+        assertEquals(
+            listOf("place item:12 \"Ops\" v=2 note=\"for the release\"", "place item:12 \"Ops\" v=2", "place item:12 \"\" v=2"),
+            actions.calls,
+        )
+    }
+
+    /**
+     * A placement runs in the fleet's scope: backing out of the task while it
+     * is on the wire does not cancel it, and nothing is re-read for a screen
+     * that is gone.
+     */
+    @Test
+    fun a_placement_outlives_the_screen_that_sent_it() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        var answered = false
+        val actions = FakeWorkActions().apply {
+            taskAnswer = DETAIL
+            writeGate = { gate.await(); answered = true }
+        }
+        val screen = CoroutineScope(backgroundScope.coroutineContext + Job(backgroundScope.coroutineContext[Job]))
+        val vm = taskVm(actions = actions, scope = screen, callScope = backgroundScope)
+        runCurrent()
+        vm.place("Ops")
+        runCurrent()
+
+        screen.cancel()
+        gate.complete(Unit)
+        runCurrent()
+
+        assertEquals(1, actions.calls.count { it.startsWith("place") }, "sent once")
+        assertTrue(answered, "and answered, though the screen is gone")
+        assertEquals(1, actions.taskCalls, "no re-read for a screen that no longer exists")
     }
 
     /** Another device placed it first: nothing is shown as saved, the sheet stays, and the hub's sentence says why. */
@@ -122,7 +191,7 @@ class TaskViewModelTest {
 
     @Test
     fun a_placement_by_hand_can_be_cleared_back_to_what_is_derived() = runTest {
-        val placed = DETAIL.copy(task = DETAIL.task.copy(group = GroupRef("manual:Ops", "Ops", GroupSource.Manual), placementVersion = 2))
+        val placed = DETAIL.copy(task = DETAIL.task.copy(group = GroupRef("label:Ops", "Ops", GroupSource.Manual), placementVersion = 2))
         val actions = FakeWorkActions().apply { taskAnswer = placed }
         val vm = taskVm(actions = actions)
         runCurrent()
@@ -153,6 +222,7 @@ class TaskViewModelTest {
         assertNull(offline.place("Ops"))
         runCurrent()
         assertTrue(actions.calls.isEmpty())
+        assertEquals(OFFLINE_WRITE, offline.state.value.error, "refused out loud, never queued")
     }
 
     /** Only past work: **Continue** resumes it and opens what the hub made; **Start here** opens the form. */
@@ -171,6 +241,37 @@ class TaskViewModelTest {
         assertEquals(listOf("resume ABC-12 -"), actions.calls)
         assertEquals(listOf(99L), nav.opened)
         assertEquals(listOf("ABC-12"), nav.started)
+    }
+
+    /**
+     * Continue needs an *ended* link that can resume: a rejected link (the
+     * session was never on this task) does not enable it, nor does an ended
+     * link whose session still lives (it holds the conversation), nor a
+     * suggestion.
+     */
+    @Test
+    fun only_an_ended_resumable_link_no_live_session_holds_enables_continue() = runTest {
+        val ended = PAST_ONLY.task.sessions.first { it.state == LinkState.Ended }
+        val rejected = PAST_ONLY.task.sessions.first { it.state == LinkState.Rejected }
+        fun only(vararg links: dev.claudefleet.mobile.model.WorkTaskLink) =
+            PAST_ONLY.copy(task = PAST_ONLY.task.copy(sessions = links.toList(), counts = PAST_ONLY.task.counts.copy(active = 0, suggested = 0)))
+
+        val cases = listOf(
+            only(rejected.copy(resumable = true, sessionId = 8)) to false,
+            only(ended.copy(sessionId = 8)) to false,
+            only(ended.copy(state = LinkState.Suggested, sessionId = 8, resumable = true)) to false,
+            only(ended.copy(resumable = false)) to false,
+            only(ended, rejected.copy(resumable = true)) to true,
+        )
+        for ((detail, expected) in cases) {
+            val vm = taskVm(actions = FakeWorkActions().apply { taskAnswer = detail })
+            runCurrent()
+            assertEquals(expected, vm.state.value.canContinue, detail.task.sessions.joinToString { "${it.state}/${it.sessionId}/${it.resumable}" })
+        }
+        // A live, confirmed link to a live session: Open, never Continue.
+        val live = taskVm()
+        runCurrent()
+        assertFalse(live.state.value.canContinue)
     }
 
     @Test
@@ -213,7 +314,7 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun a_work_change_rereads_the_task_after_the_debounce() = runTest {
+    fun a_work_change_rereads_the_task_at_once_then_throttled() = runTest {
         val fleet = WorkFleet()
         val actions = FakeWorkActions().apply { taskAnswer = DETAIL }
         taskVm(fleet = fleet, actions = actions)
@@ -222,10 +323,12 @@ class TaskViewModelTest {
 
         fleet.workChanges.emit(1)
         fleet.workChanges.emit(2)
+        runCurrent()
+        assertEquals(2, actions.taskCalls, "the first change re-reads at once")
         advanceTimeBy(501)
         runCurrent()
 
-        assertEquals(2, actions.taskCalls)
+        assertEquals(3, actions.taskCalls, "the rest of the burst folds into one more")
     }
 
     @Test

@@ -11,6 +11,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -27,11 +29,13 @@ import dev.claudefleet.mobile.model.ReviewAlternative
 import dev.claudefleet.mobile.model.ReviewItem
 import dev.claudefleet.mobile.model.ReviewKind
 import dev.claudefleet.mobile.ui.components.ErrorBanner
+import dev.claudefleet.mobile.ui.theme.FleetIcons
 
 /** Everything the Review sheet reports. */
 data class ReviewHandlers(
     val onClose: () -> Unit = {},
     val onReload: () -> Unit = {},
+    val onLoadMore: () -> Unit = {},
     val onConfirm: (ReviewItem) -> Unit = {},
     val onReject: (ReviewItem) -> Unit = {},
     val onKeep: (ReviewItem) -> Unit = {},
@@ -48,24 +52,29 @@ data class ReviewHandlers(
 /**
  * The Review sheet: one card per thing to decide, with the hub's reason;
  * *Undo* for the last decision; *Confirm all shown* with the hub's answer
- * card by card.
+ * card by card; *Load more* for the cards past the first page. Every card
+ * stays until it is decided — nothing moves on by itself. Offline the cards
+ * stay under "Offline · as of", and a decision is refused, never queued.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ReviewSheet(state: ReviewUiState, handlers: ReviewHandlers) {
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                "Review" + if (state.total > 0) " (${state.total})" else "",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(horizontal = 24.dp),
-            )
-            if (!state.connected) {
+            Row(modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Not connected — decisions wait until the hub is back.",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+                    "To review" + if (state.total > 0) " · ${state.total}" else "",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f),
                 )
+                IconButton(onClick = handlers.onReload, enabled = state.connected && !state.loading) {
+                    Icon(FleetIcons.Refresh, contentDescription = "Refresh")
+                }
+            }
+            if (state.stale != null) {
+                StaleNotice("${state.stale} — nothing can be decided until the hub is back; nothing is queued.")
+            } else if (!state.connected) {
+                StaleNotice("Offline — nothing can be decided until the hub is back; nothing is queued.")
             }
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
             if (state.error != null && state.conflict) ReloadRow(handlers.onReload)
@@ -95,6 +104,17 @@ fun ReviewSheet(state: ReviewUiState, handlers: ReviewHandlers) {
             LazyColumn(modifier = Modifier.fillMaxWidth()) {
                 items(state.items, key = { it.reviewId.ifBlank { "link:${it.linkId}" } }) { item ->
                     ReviewCard(item, state, handlers)
+                }
+                if (state.hasMore) {
+                    item(key = "more") {
+                        TextButton(
+                            onClick = handlers.onLoadMore,
+                            enabled = state.connected && !state.loadingMore,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                        ) {
+                            Text(if (state.loadingMore) "Loading…" else "Load more (${state.items.size} of ${state.total})")
+                        }
+                    }
                 }
             }
         }

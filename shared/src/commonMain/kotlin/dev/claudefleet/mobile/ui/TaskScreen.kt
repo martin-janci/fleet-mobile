@@ -53,7 +53,8 @@ data class TaskHandlers(
     val onStartHere: () -> Unit = {},
     val onOpenPlace: () -> Unit = {},
     val onClosePlace: () -> Unit = {},
-    val onPlace: (String) -> Unit = {},
+    /** A group label, and the note as the sheet has it (the placement's own unless edited). */
+    val onPlace: (String, String) -> Unit = { _, _ -> },
     val onClearPlacement: () -> Unit = {},
     val onDismissError: () -> Unit = {},
 )
@@ -212,11 +213,17 @@ private fun kindWords(task: dev.claudefleet.mobile.model.WorkTask): String = whe
     else -> ""
 }
 
-/** *Place in group…*: a list of the groups the tree knows, or a new label. Never drag and drop. */
+/**
+ * *Place in group…*: a list of the groups people and rules made, or a new
+ * label — never a tracker's or a repository's group, which is where a task
+ * sits by itself. The placement's note comes along unless edited here.
+ * Never drag and drop.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PlaceSheet(state: TaskUiState, handlers: TaskHandlers) {
     var label by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf(state.placementNote) }
     val choices = state.knownGroups.filter { label.isBlank() || it.contains(label.trim(), ignoreCase = true) }
     ModalBottomSheet(onDismissRequest = handlers.onClosePlace) {
         Column(modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -233,14 +240,24 @@ private fun PlaceSheet(state: TaskUiState, handlers: TaskHandlers) {
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            Button(onClick = { handlers.onPlace(label) }, enabled = label.isNotBlank() && !state.busy && state.connected) {
+            OutlinedTextField(
+                value = note,
+                onValueChange = { note = it },
+                label = { Text("Note (optional)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (!state.connected) {
+                Text("Offline — nothing can be placed until the hub is back; nothing is queued.", style = MaterialTheme.typography.bodySmall)
+            }
+            Button(onClick = { handlers.onPlace(label, note) }, enabled = label.isNotBlank() && !state.busy && state.connected) {
                 Text("Place in “${label.trim()}”")
             }
             Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
                 LazyColumn(modifier = Modifier.fillMaxWidth()) {
                     items(choices, key = { it }) { g ->
                         ListItem(
-                            modifier = Modifier.clickable(enabled = !state.busy && state.connected) { handlers.onPlace(g) },
+                            modifier = Modifier.clickable(enabled = !state.busy && state.connected) { handlers.onPlace(g, note) },
                             headlineContent = { Text(g) },
                         )
                     }

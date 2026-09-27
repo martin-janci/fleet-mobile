@@ -214,7 +214,7 @@ fun MyWorkScreen(
 }
 
 @Composable
-private fun StaleNotice(text: String) {
+internal fun StaleNotice(text: String) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceVariant,
