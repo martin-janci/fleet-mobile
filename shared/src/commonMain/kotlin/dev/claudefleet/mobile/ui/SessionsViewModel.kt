@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.OrgDirectory
+import dev.claudefleet.mobile.model.orgColorArgb
 import dev.claudefleet.mobile.model.OrgInfo
 import dev.claudefleet.mobile.model.orgOf
 import dev.claudefleet.mobile.model.ProjectRow
@@ -178,6 +179,13 @@ data class SessionsUiState(
      * only when there are two or more; empty hides it.
      */
     val orgChoices: List<OrgInfo> = emptyList(),
+    /**
+     * Org id → the org's colour (opaque ARGB) for the bar at a row's edge
+     * (claude-fleet M10.5), filled only when [orgChoices] is: with one org or
+     * none, a colour tells nothing apart. An org with no colour, or one that is
+     * not `#rgb` / `#rrggbb`, has no entry and draws no bar.
+     */
+    val orgColors: Map<Long, Long> = emptyMap(),
     /** Every host the sheet can narrow to: the host list, plus any host only a session names. */
     val hostChoices: List<HostFilterChoice> = emptyList(),
     /** Every project the sheet can narrow to: the ones the fleet's sessions are in, plus the chosen one. */
@@ -745,6 +753,7 @@ class SessionsViewModel(
             urgent = urgent,
             myWorkAvailable = myWorkAvailable,
             orgChoices = choices,
+            orgColors = orgColors(choices),
             hostChoices = hostChoices(sessions, hosts),
             projectChoices = projectChoices(sessions, projects, filters.projectFilter),
             filtersOpen = l.filtersOpen,
@@ -808,6 +817,10 @@ internal fun orgChoices(sessions: List<SessionRow>, orgs: OrgDirectory): List<Or
     if (ids.size < 2) return emptyList()
     return ids.map { orgs.orgs[it] ?: OrgInfo(it, orgs.name(it)) }.sortedBy { it.name.lowercase() }
 }
+
+/** The bar colours of [choices], by org id: only the orgs whose colour parses. */
+internal fun orgColors(choices: List<OrgInfo>): Map<Long, Long> =
+    choices.mapNotNull { o -> orgColorArgb(o.color)?.let { o.id to it } }.toMap()
 
 /** The label a project group carries, given what `list_projects` last said. */
 private fun projectLabel(id: Long?, byId: Map<Long, ProjectRow>): String = when (id) {

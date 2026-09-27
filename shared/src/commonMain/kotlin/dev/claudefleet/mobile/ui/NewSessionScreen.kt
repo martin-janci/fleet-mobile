@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -64,6 +65,7 @@ fun NewSessionScreen(
     onCreate: () -> Unit,
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
+    multiStart: MultiStartHandlers = MultiStartHandlers(),
 ) {
     val editable = !state.creating
     Column(modifier = modifier.fillMaxSize()) {
@@ -130,6 +132,29 @@ fun NewSessionScreen(
                     leadingContent = { RadioButton(selected = selected, onClick = null, enabled = editable) },
                     modifier = Modifier.clickable(enabled = editable) { onSelectProject(project.id) },
                 )
+            }
+
+            // Multi-start (M13.4d): once a first project is picked, the others
+            // it may also start in. Ticks only — the confirm sheet sends.
+            if (state.canMultiStart && state.projectId != null) {
+                item(key = "also-in-label") {
+                    HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
+                    SectionLabel("Also start in")
+                    Hint(
+                        "One session in each, on the same branch — up to $ALSO_IN_MAX more. " +
+                            (state.orgLabel?.let { "${state.ticketKey} is $it's; a project in another organisation is refused." }
+                                ?: "A project in another organisation than the ticket's is refused."),
+                    )
+                }
+                items(state.alsoIn, key = { "also-${it.id}" }) { project ->
+                    val ticked = project.id in state.alsoInIds
+                    val allowed = ticked || state.alsoInIds.size < ALSO_IN_MAX
+                    ListItem(
+                        headlineContent = { Text(project.label) },
+                        leadingContent = { Checkbox(checked = ticked, onCheckedChange = null, enabled = editable && allowed) },
+                        modifier = Modifier.clickable(enabled = editable && allowed) { multiStart.onToggle(project.id) },
+                    )
+                }
             }
 
             // Starting work names the worktree after the ticket on the hub, and
@@ -206,12 +231,30 @@ fun NewSessionScreen(
                     Spacer(Modifier.width(8.dp))
                     Text(if (state.ticketKey != null) "Starting…" else "Creating…")
                 } else {
-                    Text(if (state.ticketKey != null) "Start here" else "Create session")
+                    Text(
+                        when {
+                            state.alsoInIds.isNotEmpty() -> "Start in ${state.alsoInIds.size + 1} projects…"
+                            state.ticketKey != null -> "Start here"
+                            else -> "Create session"
+                        },
+                    )
                 }
             }
         }
     }
+
+    state.confirm?.let { MultiStartConfirmSheet(it, onConfirm = multiStart.onConfirm, onCancel = multiStart.onCancel) }
+    state.result?.let { MultiStartResultSheet(it, onOpen = multiStart.onOpen, onDone = multiStart.onDone) }
 }
+
+/** The multi-start taps — every one a no-op until wired. */
+data class MultiStartHandlers(
+    val onToggle: (Long) -> Unit = {},
+    val onConfirm: () -> Unit = {},
+    val onCancel: () -> Unit = {},
+    val onOpen: (Long) -> Unit = {},
+    val onDone: () -> Unit = {},
+)
 
 @Composable
 private fun SectionLabel(text: String) {

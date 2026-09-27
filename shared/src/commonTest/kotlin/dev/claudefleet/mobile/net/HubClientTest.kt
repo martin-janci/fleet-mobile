@@ -15,6 +15,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -1111,6 +1112,60 @@ class HubClientTest {
 
         assertEquals("E_CONFLICT", e.code)
         assertEquals(42, e.details!!.jsonObject["link_id"]!!.jsonPrimitive.int)
+    }
+
+    /**
+     * Multi-start (claude-fleet M9.6, phone M13.4d): one `work_link start`
+     * with every project in `project_ids`, and never `force_cross_org` — the
+     * phone says a cross-org refusal in words and stops (decision D15). The
+     * answer is the hub's `MultiStart`, partial lists and all.
+     */
+    @Test
+    fun a_multi_start_sends_project_ids_never_force_cross_org_and_reads_every_list() = runTest {
+        val sent = mutableListOf<JsonObject>()
+        val client = clientAnswering { body ->
+            assertEquals("work_link", body.tool())
+            sent += body.args()
+            """{"key":"PAY-9","started":[{"id":61,"tmux_name":"pay-9","host_alias":"pine","project_id":3}],""" +
+                """"warnings":[{"project_id":3,"session_id":61,"code":"E_INTERNAL","message":"the link failed"}],""" +
+                """"skipped":[{"project_id":4,"session_id":41,"reason":"already runs"},{"project_id":6,"reason":"deadline"}],""" +
+                """"failed":[{"project_id":5,"code":"E_FORBIDDEN","message":"another org","cross_org":true},""" +
+                """{"project_id":7,"code":"E_NOTFOUND","message":"no checkout"}]}"""
+        }
+
+        val r = client.startWorkMany("PAY-9", hostAlias = "pine", projectIds = listOf(3, 4, 5, 6, 7))
+
+        val args = sent.single()
+        assertEquals("start", args["action"]!!.jsonPrimitive.content)
+        assertEquals("PAY-9", args["key"]!!.jsonPrimitive.content)
+        assertEquals("pine", args["host_alias"]!!.jsonPrimitive.content)
+        assertEquals(listOf(3, 4, 5, 6, 7), args["project_ids"]!!.jsonArray.map { it.jsonPrimitive.int })
+        assertFalse("force_cross_org" in args, "the phone never forces a cross-org start")
+        for (never in listOf("project_id", "brief", "with_brief")) assertFalse(never in args, never)
+
+        assertEquals(listOf(61L), r.started.map { it.id })
+        assertEquals(3L, r.started.single().projectId)
+        assertEquals("the link failed", r.warnings.single().message)
+        assertEquals(listOf(41L, null), r.skipped.map { it.sessionId })
+        assertEquals(listOf(true, false), r.failed.map { it.crossOrg }, "cross_org is absent unless true")
+    }
+
+    /** `project_ids` is a new argument of an old action: the gate is the schema's property list. */
+    @Test
+    fun the_tool_catalog_reads_each_tools_argument_names() = runTest {
+        val tools = """{"jsonrpc":"2.0","id":1,"result":{"tools":[""" +
+            """{"name":"list_sessions","inputSchema":{"type":"object"}},""" +
+            """{"name":"work_link","inputSchema":{"properties":{"action":{"type":"string","enum":["start"]},""" +
+            """"project_id":{"type":"integer"},"project_ids":{"type":"array"}}}}]}}"""
+        val (hub, _) = client { tools to HttpStatusCode.OK }
+
+        val caps = HubCapabilities.of(hub.toolCatalog())
+
+        assertTrue(caps.accepts("work_link", "project_ids"))
+        assertFalse(caps.accepts("work_link", "force_cross_org"))
+        assertFalse(caps.accepts("list_sessions", "project_ids"), "a schema without properties lists none")
+        assertFalse(HubCapabilities().accepts("work_link", "project_ids"), "the old hub: nothing")
+        assertTrue(caps.forgetting("work_link", "resume").accepts("work_link", "project_ids"), "forgetting an action keeps the arguments")
     }
 
     /** Starting work creates a session — a worktree, perhaps a clone — so it rides the lifecycle mount. */

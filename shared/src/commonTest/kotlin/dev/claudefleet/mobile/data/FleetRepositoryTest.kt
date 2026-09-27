@@ -89,6 +89,14 @@ private class FakeHub(
     /** Makes `list_sessions` answer 502, so every refresh fails at its first call. */
     var failSessions = false
 
+    /**
+     * When set, `list_sessions` reads its answer, completes [sessionsRead] and
+     * then waits on this before replying — a barrier that holds a re-list
+     * between "the hub read its rows" and "the phone got them".
+     */
+    var sessionsGate: CompletableDeferred<Unit>? = null
+    val sessionsRead = CompletableDeferred<Unit>()
+
     val client: HubClient = HubClient(
         HttpClient(
             MockEngine { request ->
@@ -103,7 +111,15 @@ private class FakeHub(
                     "\"trackers\"" in body -> trackersJson
                     "\"orgs\"" in body -> { orgsCalls += 1; orgsJson }
                     "\"tickets\"" in body -> { mineCalls += 1; mineJson }
-                    "list_sessions" in body -> { sessionCalls += 1; sessionsJson }
+                    "list_sessions" in body -> {
+                        sessionCalls += 1
+                        val rows = sessionsJson
+                        sessionsGate?.let { gate ->
+                            sessionsRead.complete(Unit)
+                            gate.await()
+                        }
+                        rows
+                    }
                     "list_hosts" in body -> { hostCalls += 1; hostsJson }
                     "list_projects" in body -> { projectCalls += 1; projectsJson }
                     else -> "[]"
@@ -308,6 +324,46 @@ class FleetRepositoryTest {
         val sessions = repository.sessions.first { it.size == 1 }
 
         assertEquals(listOf(2L), sessions.map { it.id })
+        repository.stop()
+    }
+
+    /**
+     * A pull-to-refresh runs beside the stream, and a frame can land between
+     * the hub reading its rows for the re-list and the phone publishing them.
+     * The re-list's older rows used to overwrite that frame: a session killed
+     * in that window came back from the dead, and since `session:killed` is
+     * the last frame a session ever gets, it stayed on screen until the next
+     * re-list — with `lastEventId` already past the frame that removed it.
+     */
+    @Test
+    fun a_frame_applied_while_a_refresh_is_in_flight_survives_the_refresh() = runTest {
+        val hub = FakeHub(sessionsJson = sessionRows(1, 2))
+        val killNow = CompletableDeferred<Unit>()
+        val stream = FakeStream {
+            emit(READY)
+            killNow.await()
+            emit(HubEvent.Row("session:killed", Json.parseToJsonElement("""{"id":1}"""), "7-12"))
+            awaitCancellation()
+        }
+        val repository = repo(hub, stream, backgroundScope)
+        repository.start()
+        repository.status.first { it is ConnectionStatus.Connected }
+
+        // The hub reads rows 1 and 2 for the pull, and the reply is held.
+        val gate = CompletableDeferred<Unit>()
+        hub.sessionsGate = gate
+        val pull = async { repository.refresh() }
+        hub.sessionsRead.await()
+
+        // Session 1 is killed after the read; its frame is applied now.
+        killNow.complete(Unit)
+        repository.sessions.first { rows -> rows.none { it.id == 1L } }
+
+        // The re-list's answer lands last.
+        gate.complete(Unit)
+        pull.await()
+
+        assertEquals(listOf(2L), repository.sessions.value.map { it.id }, "the killed session must stay gone")
         repository.stop()
     }
 

@@ -4,10 +4,14 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
-/** What one `tools/list` answered: tool names, and the `action` enum of each tool whose schema has one. */
+/**
+ * What one `tools/list` answered: tool names, the `action` enum of each tool
+ * whose schema has one, and the argument names each tool's schema lists.
+ */
 data class ToolCatalog(
     val names: Set<String> = emptySet(),
     val actions: Map<String, Set<String>> = emptyMap(),
+    val params: Map<String, Set<String>> = emptyMap(),
 )
 
 /**
@@ -24,6 +28,10 @@ data class ToolCatalog(
  *    free-string `action` (a hub before M8.0) is taken as present until the
  *    hub refuses it with "unknown … action", which [forgetting] records for
  *    the rest of the connection.
+ *  - [accepts] — one argument of a tool, for a feature that is a new
+ *    argument of an old action (multi-start's `project_ids`). Absent from the
+ *    schema means absent: an older hub would ignore the argument, not refuse
+ *    it, so there is no refusal to learn from.
  *
  * The default is the old hub: nothing discovered, every work feature hidden.
  */
@@ -31,6 +39,7 @@ data class HubCapabilities(
     val tools: Set<String> = emptySet(),
     val actions: Map<String, Set<String>> = emptyMap(),
     val missing: Map<String, Set<String>> = emptyMap(),
+    val params: Map<String, Set<String>> = emptyMap(),
 ) {
     val work: Boolean get() = WORK in tools
     val workLink: Boolean get() = WORK_LINK in tools
@@ -61,6 +70,8 @@ data class HubCapabilities(
     fun lists(tool: String, action: String): Boolean =
         has(tool, action) && actions[tool]?.contains(action) == true
 
+    fun accepts(tool: String, param: String): Boolean = tool in tools && params[tool]?.contains(param) == true
+
     /** This connection learned [action] is not one [tool] has. */
     fun forgetting(tool: String, action: String): HubCapabilities =
         copy(missing = missing + (tool to (missing[tool].orEmpty() + action)))
@@ -71,7 +82,7 @@ data class HubCapabilities(
         const val ENSURE_OPERATOR = "ensure_operator"
         const val QUICK_REPLIES = "quick_replies"
 
-        fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions)
+        fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions, params = catalog.params)
     }
 }
 
@@ -84,7 +95,20 @@ fun HubError.Tool.isUnknownAction(): Boolean =
     code == "E_INVALID" && message.contains("unknown", ignoreCase = true) &&
         message.contains("action", ignoreCase = true)
 
-/** The session an `E_EXISTS` refusal names — "that work is live there; jump to it" — or null. */
+/**
+ * The session an `E_EXISTS` refusal names — "that work is live there; jump to
+ * it" — or null. Also null when the refusal names an [orphanSessionId]: the
+ * call made a session of its own before it lost, and a jump past it would
+ * leave that one running unlinked with nobody told.
+ */
 fun HubError.Tool.existingSessionId(): Long? =
-    if (code != "E_EXISTS") null
+    if (code != "E_EXISTS" || orphanSessionId() != null) null
     else ((details as? JsonObject)?.get("session_id") as? JsonPrimitive)?.longOrNull
+
+/**
+ * The session a `start` or `resume` made and could not link — it lost a race
+ * to another client, or the link failed — which the hub names so nobody has
+ * to find it. Its message names it too, which is what the screen shows.
+ */
+fun HubError.Tool.orphanSessionId(): Long? =
+    ((details as? JsonObject)?.get("orphan_session_id") as? JsonPrimitive)?.longOrNull

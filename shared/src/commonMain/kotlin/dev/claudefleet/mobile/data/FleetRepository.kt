@@ -30,6 +30,10 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -241,13 +245,46 @@ class FleetRepository(
         // replay older rows over newer ones. Cleared up front so a refresh
         // that fails still leaves no id promising continuity it cannot give.
         lastEventId = null
-        coroutineScope {
-            val sessions = async { client.listSessions() }
-            val hosts = async { client.listHosts() }
-            val projects = async { client.listProjects() }
-            publish(FleetSnapshot(sessions.await(), hosts.await(), projects.await(), tickets = emptyList()))
+        // Every frame applied while this re-list is in flight, so they can be
+        // applied again on top of its answer — see [relistsInFlight].
+        val applied = mutableListOf<HubEvent.Row>()
+        snapshotLock.withLock { relistsInFlight += applied }
+        try {
+            coroutineScope {
+                val sessions = async { client.listSessions() }
+                val hosts = async { client.listHosts() }
+                val projects = async { client.listProjects() }
+                val fresh = FleetSnapshot(sessions.await(), hosts.await(), projects.await(), tickets = emptyList())
+                snapshotLock.withLock {
+                    publish(applied.fold(fresh) { snapshot, frame -> snapshot.applying(frame) })
+                    relistsInFlight -= applied
+                }
+            }
+        } finally {
+            withContext(NonCancellable) { snapshotLock.withLock { relistsInFlight -= applied } }
         }
     }
+
+    /**
+     * Guards read-modify-write of the snapshot: a frame from [follow] and the
+     * answer of a [refresh] running beside it (pull-to-refresh) touch the same
+     * flows from different coroutines.
+     */
+    private val snapshotLock = Mutex()
+
+    /**
+     * One list per re-list in flight, collecting every frame applied while it
+     * waits on the hub.
+     *
+     * A re-list answers rows the hub read *before* those frames were applied,
+     * so publishing it as-is rolled them back — a session killed in that
+     * window came back, and nothing would ever remove it again, because
+     * `session:killed` is the last frame a session gets. The frames are
+     * applied again on top of the fresh rows instead. Replaying one the rows
+     * already include is harmless: each frame carries its whole row, in hub
+     * order, so the last one applied is the newest.
+     */
+    private val relistsInFlight = mutableListOf<MutableList<HubEvent.Row>>()
 
     /**
      * The `id:` of the last row frame applied to the snapshot, which the next
@@ -347,8 +384,11 @@ class FleetRepository(
                             _sessionChanges.tryEmit(ALL_SESSIONS_CHANGED)
                         }
                         is HubEvent.Row -> {
-                            publish(snapshot().applying(event))
-                            event.id?.let { lastEventId = it }
+                            snapshotLock.withLock {
+                                publish(snapshot().applying(event))
+                                relistsInFlight.forEach { it += event }
+                                event.id?.let { lastEventId = it }
+                            }
                             event.sessionId()?.let { _sessionChanges.tryEmit(it) }
                             event.timelineFrame()?.let { _timeline.tryEmit(it) }
                             // Any `work:*` frame — `work:changed` above all,

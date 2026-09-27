@@ -63,6 +63,7 @@ import dev.claudefleet.mobile.ui.TaskViewModel
 import dev.claudefleet.mobile.model.GroupRef
 import dev.claudefleet.mobile.ui.HostsScreen
 import dev.claudefleet.mobile.ui.HostsViewModel
+import dev.claudefleet.mobile.ui.MultiStartHandlers
 import dev.claudefleet.mobile.ui.Navigator
 import dev.claudefleet.mobile.ui.NewSessionScreen
 import dev.claudefleet.mobile.ui.NewSessionViewModel
@@ -737,6 +738,13 @@ private fun NewSessionRoute(
         onFriendlyNameChange = vm::onFriendlyNameChange,
         onCreate = { vm.create() },
         onDismissError = vm::dismissError,
+        multiStart = MultiStartHandlers(
+            onToggle = vm::toggleAlsoIn,
+            onConfirm = { vm.confirmMultiStart() },
+            onCancel = vm::cancelMultiStart,
+            onOpen = vm::openStarted,
+            onDone = vm::dismissResult,
+        ),
     )
 }
 

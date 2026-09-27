@@ -25,6 +25,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -490,6 +491,33 @@ class NewSessionViewModelTest {
 
         assertEquals(listOf(41L), opened)
         assertNull(vm.state.value.error)
+        assertFalse(vm.state.value.creating)
+    }
+
+    /**
+     * A lost race is `E_EXISTS` too, but this start's own session was made
+     * and runs unlinked (`orphan_session_id`). Jumping to the winner and
+     * closing the form hid that session from the person entirely; the form
+     * stays and says what the hub said, which names both.
+     */
+    @Test
+    fun a_lost_start_race_names_the_session_it_left_instead_of_jumping_past_it() = runTest {
+        val work = FakeWorkActions().apply {
+            fail = HubError.Tool(
+                "E_EXISTS",
+                "PAY-9 already has a live session (w on pine); the session this start made (dev-pay-9) is not linked to it",
+                buildJsonObject { put("session_id", 41); put("orphan_session_id", 42) },
+            )
+        }
+        val opened = mutableListOf<Long>()
+        val vm = ticketVm(WorkFleet(hostRows = listOf(PINE)), work, backgroundScope, opened)
+        runCurrent()
+        vm.create()
+        runCurrent()
+
+        assertEquals(emptyList(), opened, "no silent jump past the orphan")
+        val error = assertNotNull(vm.state.value.error)
+        assertTrue("dev-pay-9" in error.body, error.body)
         assertFalse(vm.state.value.creating)
     }
 
