@@ -23,6 +23,7 @@ import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -181,6 +182,29 @@ class TicketsViewModelTest {
 
         assertEquals(listOf(41L), nav.opened)
         assertNull(tickets.state.value.error)
+    }
+
+    /** A resume that lost to a start names the session it made; the sheet says so. */
+    @Test
+    fun a_resume_that_lost_the_race_names_its_orphan_instead_of_jumping() = runTest {
+        val nav = Nav()
+        val actions = FakeWorkActions().apply {
+            planAnswer = plan()
+            fail = HubError.Tool(
+                "E_EXISTS",
+                "PAY-9 is live in w on pine — jump to it; the session this resume made (dev-pay-9-r) is not linked to it",
+                buildJsonObject { put("session_id", 41); put("orphan_session_id", 43) },
+            )
+        }
+        val tickets = vm(WorkFleet(), actions, backgroundScope, nav)
+        tickets.select(PAY9)
+        runCurrent()
+        tickets.resume()
+        runCurrent()
+
+        assertEquals(emptyList(), nav.opened)
+        val error = assertNotNull(tickets.state.value.error)
+        assertTrue("dev-pay-9-r" in error.body, error.body)
     }
 
     @Test

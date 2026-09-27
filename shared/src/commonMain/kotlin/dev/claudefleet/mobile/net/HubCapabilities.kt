@@ -74,7 +74,20 @@ fun HubError.Tool.isUnknownAction(): Boolean =
     code == "E_INVALID" && message.contains("unknown", ignoreCase = true) &&
         message.contains("action", ignoreCase = true)
 
-/** The session an `E_EXISTS` refusal names — "that work is live there; jump to it" — or null. */
+/**
+ * The session an `E_EXISTS` refusal names — "that work is live there; jump to
+ * it" — or null. Also null when the refusal names an [orphanSessionId]: the
+ * call made a session of its own before it lost, and a jump past it would
+ * leave that one running unlinked with nobody told.
+ */
 fun HubError.Tool.existingSessionId(): Long? =
-    if (code != "E_EXISTS") null
+    if (code != "E_EXISTS" || orphanSessionId() != null) null
     else ((details as? JsonObject)?.get("session_id") as? JsonPrimitive)?.longOrNull
+
+/**
+ * The session a `start` or `resume` made and could not link — it lost a race
+ * to another client, or the link failed — which the hub names so nobody has
+ * to find it. Its message names it too, which is what the screen shows.
+ */
+fun HubError.Tool.orphanSessionId(): Long? =
+    ((details as? JsonObject)?.get("orphan_session_id") as? JsonPrimitive)?.longOrNull
