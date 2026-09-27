@@ -56,6 +56,16 @@ interface WorkActions {
 
     /** Ask the session's Claude for a handover note on its work; the answer comes later. */
     suspend fun handover(sessionId: Long): SessionRow
+
+    /**
+     * **Name this work…** (claude-fleet M11.1, on the phone since M13.4a / D20):
+     * new local work — a title and no ticket — linked to the session. [key]
+     * is optional; the hub refuses one a ticket or another local item has.
+     */
+    suspend fun name(sessionId: Long, title: String, key: String? = null): SessionRow
+
+    /** Rename local work item [itemId] (never a ticket: the hub refuses one). */
+    suspend fun renameItem(itemId: Long, title: String)
 }
 
 /** [WorkActions] against the paired hub, through [AppSession.withClient]. */
@@ -92,4 +102,9 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
         session.withClient { it.resumeWork(key, mode = "last", hostAlias = hostAlias) }
 
     override suspend fun handover(sessionId: Long): SessionRow = session.withClient { it.handoverWork(sessionId) }
+
+    override suspend fun name(sessionId: Long, title: String, key: String?): SessionRow =
+        session.withClient { it.nameWork(sessionId, title, key) }
+
+    override suspend fun renameItem(itemId: Long, title: String) = session.withClient { it.renameWorkItem(itemId, title) }
 }

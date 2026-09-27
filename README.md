@@ -273,6 +273,10 @@ costs one reconnect.
     shows the count and the ticket's organisation, and see per project what
     started, what already ran and what was refused. A project in another
     organisation is refused in words; the phone never forces a cross-org start;
+  - **Name this work…** in a session's menu when it has none: work with a
+    title and no ticket (an optional key, like `OPS-1`), and **Rename** in the
+    sheet of such local work (claude-fleet M11.1; on the phone since M13.4a,
+    decision D20). A key that is already a ticket's says to use *Set work…*;
   - with two or more organisations, org chips that narrow the list and Today,
     and the org on each work heading and ticket.
 

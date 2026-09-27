@@ -541,6 +541,33 @@ class HubClient(
      */
     suspend fun handoverWork(sessionId: Long): SessionRow = workLink("handover", sessionId) {}
 
+    /**
+     * **Name this work…**: new local work (a title, no ticket) linked to the
+     * session (claude-fleet M11.1). [key] is left out when null or blank.
+     * Answers the updated row.
+     */
+    suspend fun nameWork(sessionId: Long, title: String, key: String? = null): SessionRow =
+        workLink("name", sessionId) {
+            put("title", title)
+            key?.trim()?.takeIf { it.isNotEmpty() }?.let { put("key", it) }
+        }
+
+    /**
+     * Rename a local work item. The hub answers the item; nothing on the phone
+     * reads it — the rows that show the item change by their own
+     * `session:updated` frames.
+     */
+    suspend fun renameWorkItem(itemId: Long, title: String) {
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "name")
+                put("item_id", itemId)
+                put("title", title)
+            },
+        ) { }
+    }
+
     /** Set the session's work by item id (a looked-up ticket) or by bare key. */
     suspend fun linkWork(sessionId: Long, itemId: Long? = null, key: String? = null): SessionRow =
         workLink("link", sessionId) {
