@@ -275,6 +275,50 @@ class TicketsViewModelTest {
         assertEquals(BannerTone.Info, bannerTone(error), "a note naming the orphan reaches the screen")
     }
 
+    /** The plan's own reason for refusing `last` is shown where Resume would have been. */
+    @Test
+    fun a_plan_that_cannot_resume_last_says_why() = runTest {
+        val actions = FakeWorkActions().apply {
+            planAnswer = plan().copy(modes = listOf(ResumeMode("last", ok = false, reason = "its transcripts were purged"), ResumeMode("fresh", ok = true)))
+        }
+        val tickets = vm(WorkFleet(), actions, backgroundScope, Nav())
+        tickets.select(PAY9)
+        runCurrent()
+
+        val detail = tickets.state.value.selected!!
+        assertFalse(detail.canResume)
+        assertEquals("Can't resume the last conversation: its transcripts were purged", detail.resumeWhyNot)
+    }
+
+    @Test
+    fun a_plan_that_can_resume_has_no_reason_to_give() = runTest {
+        val actions = FakeWorkActions().apply { planAnswer = plan() }
+        val tickets = vm(WorkFleet(), actions, backgroundScope, Nav())
+        tickets.select(PAY9)
+        runCurrent()
+
+        assertNull(tickets.state.value.selected!!.resumeWhyNot)
+    }
+
+    /** A ticket whose tracker was removed says so, rather than only being struck through. */
+    @Test
+    fun an_unavailable_ticket_says_why() = runTest {
+        val fleet = WorkFleet()
+        fleet.trackers.value = listOf(dev.claudefleet.mobile.model.TrackerRow(id = 4, name = "Linear", state = "unreachable"))
+        val tickets = vm(fleet, FakeWorkActions(), backgroundScope, Nav())
+
+        tickets.select(PAY9.copy(trackerId = 4, unavailableReason = "tracker_removed"))
+        runCurrent()
+        assertEquals(listOf("Its tracker was removed from fleet."), tickets.state.value.selected!!.trouble)
+
+        tickets.select(PAY9.copy(trackerId = 4))
+        runCurrent()
+        assertEquals(
+            listOf("Tracker Linear: fleet cannot reach it, so statuses here may be out of date."),
+            tickets.state.value.selected!!.trouble,
+        )
+    }
+
     @Test
     fun a_readonly_token_gets_neither_start_nor_resume() = runTest {
         val actions = FakeWorkActions().apply { planAnswer = plan() }

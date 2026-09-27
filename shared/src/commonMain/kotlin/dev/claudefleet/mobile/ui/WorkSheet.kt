@@ -86,7 +86,7 @@ fun WorkTicketSheet(state: SessionWorkUiState, handlers: SessionWorkHandlers) {
             if (current != null) {
                 WorkHeading(current, MaterialTheme.typography.titleMedium)
                 ErrorBanner(state.error, onDismiss = handlers.onDismissError)
-                WorkDetails(current, "Why: " + workWhy(current))
+                WorkDetails(current, "Why: " + workWhy(current), state.workTrouble)
                 // The ticket's card (M10.5): read-only, with Copy, never Send.
                 state.card?.let { TicketCardBody(it) }
                 OpenTicketButton(current)
@@ -106,14 +106,14 @@ fun WorkTicketSheet(state: SessionWorkUiState, handlers: SessionWorkHandlers) {
                     HorizontalDivider()
                     Text("Also suggested", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
                     WorkHeading(it.work, MaterialTheme.typography.titleSmall)
-                    WorkDetails(it.work, "Why suggested: " + it.why)
+                    WorkDetails(it.work, "Why suggested: " + it.why, it.trouble)
                     OpenTicketButton(it.work)
                     SuggestionDecisions(it, state.busy, handlers)
                 }
             } else if (suggestion != null) {
                 WorkHeading(suggestion.work, MaterialTheme.typography.titleMedium)
                 ErrorBanner(state.error, onDismiss = handlers.onDismissError)
-                WorkDetails(suggestion.work, "Suggested: " + suggestion.why)
+                WorkDetails(suggestion.work, "Suggested: " + suggestion.why, suggestion.trouble)
                 state.card?.let { TicketCardBody(it) }
                 OpenTicketButton(suggestion.work)
                 SuggestionDecisions(suggestion, state.busy, handlers)
@@ -138,14 +138,17 @@ private fun WorkHeading(work: WorkSummary, style: TextStyle) {
     }
 }
 
-/** The ticket's title, whether its tracker still answers, and [why] it is here. */
+/**
+ * The ticket's title, what is wrong with it or its tracker ([trouble], the
+ * hub's reasons as plain text), and [why] it is here.
+ */
 @Composable
-private fun WorkDetails(work: WorkSummary, why: String) {
+private fun WorkDetails(work: WorkSummary, why: String, trouble: List<String>) {
     if (work.title.isNotBlank() && work.key != null) {
         Text(work.title, style = MaterialTheme.typography.bodyLarge)
     }
-    if (work.unavailable) {
-        Text("The tracker no longer answers for this ticket.", style = MaterialTheme.typography.bodySmall)
+    for (line in trouble) {
+        Text(line, style = MaterialTheme.typography.bodySmall)
     }
     Text(
         text = why,

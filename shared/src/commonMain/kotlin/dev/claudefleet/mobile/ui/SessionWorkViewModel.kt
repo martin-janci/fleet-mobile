@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.TicketCard
 import dev.claudefleet.mobile.model.Ticket
+import dev.claudefleet.mobile.model.TrackerRow
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.withTicketsFrom
 import dev.claudefleet.mobile.net.HubCapabilities
@@ -73,6 +74,12 @@ data class SessionWorkUiState(
     val canNameWork: Boolean = false,
     /** **Rename** the session's work: it is a local item (no ticket), same gate. */
     val canRenameWork: Boolean = false,
+    /**
+     * What to say about [work]'s ticket and tracker, as plain text: why the
+     * tracker no longer answers for it, and a tracker in trouble — see
+     * [workTrouble]. Empty when all is well.
+     */
+    val workTrouble: List<String> = emptyList(),
 ) {
     /** What the chip draws: the confirmed work, else the guess. */
     val chip: WorkSummary? get() = work ?: suggested
@@ -102,6 +109,8 @@ data class SuggestionRow(
     val besideConfirmed: Boolean,
     val canConfirm: Boolean,
     val canReject: Boolean,
+    /** [workTrouble] for the suggested ticket. */
+    val trouble: List<String> = emptyList(),
 ) {
     /** The link Confirm and Not this address — this row's, never the confirmed one's. */
     val linkId: Long get() = work.linkId
@@ -157,13 +166,24 @@ class SessionWorkViewModel(
     }
 
     val state: StateFlow<SessionWorkUiState> =
-        combine(fleet.sessions, fleet.capabilities, fleet.tickets, local) { rows, caps, cache, l ->
-            assemble(rows.freshRow(cache), caps, l)
+        combine(fleet.sessions, fleet.capabilities, fleet.tickets, fleet.trackers, local) { rows, caps, cache, trackers, l ->
+            assemble(rows.freshRow(cache), caps, Trouble(cache, trackers), l)
         }.stateIn(
             scope,
             SharingStarted.Eagerly,
-            assemble(fleet.sessions.value.freshRow(fleet.tickets.value), fleet.capabilities.value, local.value),
+            assemble(
+                fleet.sessions.value.freshRow(fleet.tickets.value),
+                fleet.capabilities.value,
+                Trouble(fleet.tickets.value, fleet.trackers.value),
+                local.value,
+            ),
         )
+
+    /** What [assemble] needs to say what is wrong with a ticket: the ticket cache and the trackers' states. */
+    private class Trouble(cache: List<Ticket>, private val trackers: List<TrackerRow>) {
+        private val byId = cache.associateBy { it.id }
+        fun of(work: WorkSummary): List<String> = workTrouble(work, work.itemId?.let(byId::get), trackers)
+    }
 
     /** This session's row, its work refreshed from the ticket cache — the list does the same. */
     private fun List<SessionRow>.freshRow(cache: List<Ticket>): SessionRow? =
@@ -404,7 +424,7 @@ class SessionWorkViewModel(
 
     private fun row(): SessionRow? = fleet.sessions.value.firstOrNull { it.id == sessionId }
 
-    private fun assemble(row: SessionRow?, caps: HubCapabilities, l: Local): SessionWorkUiState {
+    private fun assemble(row: SessionRow?, caps: HubCapabilities, trouble: Trouble, l: Local): SessionWorkUiState {
         // No work graph: nothing to draw, even if a row somehow carries one.
         if (row == null || !caps.work) return SessionWorkUiState(error = l.error)
         val work = row.work
@@ -416,6 +436,7 @@ class SessionWorkViewModel(
                 besideConfirmed = work != null,
                 canConfirm = allowed(caps, CONFIRM),
                 canReject = allowed(caps, REJECT),
+                trouble = trouble.of(it),
             )
         }
         return SessionWorkUiState(
@@ -435,6 +456,7 @@ class SessionWorkViewModel(
             card = l.card?.takeIf { it.key == (work ?: guess)?.key },
             canNameWork = work == null && allowed(caps, NAME),
             canRenameWork = work?.isLocal == true && allowed(caps, NAME),
+            workTrouble = work?.let(trouble::of).orEmpty(),
         )
     }
 

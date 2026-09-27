@@ -7,6 +7,7 @@ import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
+import dev.claudefleet.mobile.model.TrackerRow
 import dev.claudefleet.mobile.net.EventStream
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubClient
@@ -160,6 +161,9 @@ class FleetRepository(
 
     private val _orgs = MutableStateFlow(OrgDirectory.EMPTY)
     override val orgs: StateFlow<OrgDirectory> = _orgs.asStateFlow()
+
+    private val _trackers = MutableStateFlow<List<TrackerRow>>(emptyList())
+    override val trackers: StateFlow<List<TrackerRow>> = _trackers.asStateFlow()
 
     // Buffered and lossy for the reason `_sessionChanges` is: a timeline
     // entry is news for whichever screen is waiting on one, and emitting must
@@ -347,6 +351,7 @@ class FleetRepository(
                                 _capabilities.value = HubCapabilities()
                                 _myWork.value = null
                                 _orgs.value = OrgDirectory.EMPTY
+                                _trackers.value = emptyList()
                                 _status.value = ConnectionStatus.Refused(refusal)
                                 return@collect
                             }
@@ -441,6 +446,7 @@ class FleetRepository(
             _capabilities.value = caps
             myWorkRead?.cancel()
             _orgs.value = readOrgs(caps)
+            if (!caps.work) _trackers.value = emptyList()
             _myWork.value = if (caps.work) readMyWork() else null
         }
     }
@@ -481,10 +487,14 @@ class FleetRepository(
      * The item ids in the hub's *My work* view, or null when there is none to
      * ask for — no tracker — or the read failed, which hides the chip rather
      * than filtering the list to nothing. The tickets it answers refill the
-     * cache.
+     * cache. The tracker list it asks first is kept as [trackers], for the
+     * state a ticket's tracker is in; a failed read empties it rather than
+     * leaving an old state standing.
      */
     private suspend fun readMyWork(): Set<Long>? = try {
-        if (client.workTrackers().isEmpty()) {
+        val connected = client.workTrackers()
+        _trackers.value = connected
+        if (connected.isEmpty()) {
             null
         } else {
             client.workTickets(MY_WORK).also { rememberTickets(it) }.map { it.id }.toSet()
@@ -492,6 +502,7 @@ class FleetRepository(
     } catch (e: CancellationException) {
         throw e
     } catch (_: Throwable) {
+        _trackers.value = emptyList()
         null
     }
 

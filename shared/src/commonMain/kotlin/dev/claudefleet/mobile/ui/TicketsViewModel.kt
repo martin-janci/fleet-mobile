@@ -8,6 +8,7 @@ import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.TicketCard
+import dev.claudefleet.mobile.model.TrackerRow
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK_LINK
@@ -55,6 +56,14 @@ data class TicketDetail(
      * before is worth reading either way.
      */
     val pastWork: List<ResumeCandidate> = emptyList(),
+    /**
+     * Why Resume is not offered, in the hub's words ([resumeWhyNot]): the
+     * plan's `last` mode said no, and why. Null when it said yes or gave
+     * no reason, and while a session is live on the ticket.
+     */
+    val resumeWhyNot: String? = null,
+    /** What is wrong with the ticket or its tracker, as plain text ([ticketTrouble]). */
+    val trouble: List<String> = emptyList(),
 )
 
 /**
@@ -128,12 +137,25 @@ class TicketsViewModel(
     private val local = MutableStateFlow(Local())
 
     val state: StateFlow<TicketsUiState> =
-        combine(fleet.capabilities, fleet.tickets, fleet.sessions, fleet.orgs, local) { caps, cache, sessions, orgs, l ->
-            assemble(caps, cache, sessions, orgs, l)
+        combine(
+            fleet.capabilities,
+            fleet.tickets,
+            fleet.sessions,
+            combine(fleet.orgs, fleet.trackers, ::Pair),
+            local,
+        ) { caps, cache, sessions, (orgs, trackers), l ->
+            assemble(caps, cache, sessions, orgs, trackers, l)
         }.stateIn(
             scope,
             SharingStarted.Eagerly,
-            assemble(fleet.capabilities.value, fleet.tickets.value, fleet.sessions.value, fleet.orgs.value, local.value),
+            assemble(
+                fleet.capabilities.value,
+                fleet.tickets.value,
+                fleet.sessions.value,
+                fleet.orgs.value,
+                fleet.trackers.value,
+                local.value,
+            ),
         )
 
     /** Open the sheet and read the three views. */
@@ -309,6 +331,7 @@ class TicketsViewModel(
         cache: List<Ticket>,
         sessions: List<SessionRow>,
         orgs: OrgDirectory,
+        trackers: List<TrackerRow>,
         l: Local,
     ): TicketsUiState {
         if (!caps.work) return TicketsUiState()
@@ -338,6 +361,8 @@ class TicketsViewModel(
                 resumeHost = l.resumeHost,
                 card = l.card,
                 pastWork = l.plan?.candidates.orEmpty().sortedByDescending { it.endedAt ?: Long.MIN_VALUE },
+                resumeWhyNot = resumeWhyNot(plan),
+                trouble = ticketTrouble(ticket, trackers),
             )
         }
         val shown = l.sections.flatMap { it.tickets } + listOfNotNull(l.found, l.selected)

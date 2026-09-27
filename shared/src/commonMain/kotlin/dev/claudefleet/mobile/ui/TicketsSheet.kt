@@ -165,6 +165,11 @@ private fun TicketActions(detail: TicketDetail, busy: Boolean, handlers: Tickets
                     )
                 }
             }
+            // The hub's reasons, as plain text: why the ticket is struck
+            // through, and a tracker whose statuses may be stale.
+            for (line in detail.trouble) {
+                Text(line, style = MaterialTheme.typography.bodySmall)
+            }
             val card = detail.card
             if (card != null && card.hasBody) {
                 TicketCardBody(card)
@@ -195,6 +200,9 @@ private fun TicketActions(detail: TicketDetail, busy: Boolean, handlers: Tickets
                         )
                     }
                 }
+            }
+            detail.resumeWhyNot?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (detail.liveSessionId != null) Button(onClick = handlers.onOpenLive) { Text("Open") }

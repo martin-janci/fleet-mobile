@@ -15,6 +15,7 @@ import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.TicketCard
 import dev.claudefleet.mobile.model.Today
+import dev.claudefleet.mobile.model.TrackerRow
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
@@ -52,6 +53,7 @@ internal class WorkFleet(
     override val tickets = MutableStateFlow<List<Ticket>>(emptyList())
     override val myWork = MutableStateFlow<Set<Long>?>(null)
     override val orgs = MutableStateFlow(OrgDirectory.EMPTY)
+    override val trackers = MutableStateFlow<List<TrackerRow>>(emptyList())
     override val timeline = MutableSharedFlow<TimelineFrame>(extraBufferCapacity = 16)
     val remembered = mutableListOf<Ticket>()
 
@@ -245,6 +247,37 @@ class SessionWorkViewModelTest {
         vm.confirm(); vm.reject(); vm.confirm(PAY7.linkId)
         runCurrent()
         assertEquals(emptyList(), actions.calls, "the confirmed link is never decided as a guess")
+    }
+
+    /**
+     * A struck-through ticket says why, in the hub's words: the cache's
+     * `unavailable_reason`, and a tracker that is not `ok`. The sheet used to
+     * say only "the tracker no longer answers".
+     */
+    @Test
+    fun the_sheet_says_why_a_ticket_is_unavailable_and_what_ails_its_tracker() = runTest {
+        val gone = PAY7.copy(unavailable = true)
+        val fleet = WorkFleet(listOf(row(work = gone, guess = PAY9_GUESS)))
+        val vm = SessionWorkViewModel(5, fleet, FakeWorkActions(), backgroundScope, canWrite = true)
+        assertEquals(listOf("The tracker no longer answers for this ticket."), vm.state.value.workTrouble, "the flag alone")
+
+        fleet.tickets.value = listOf(
+            Ticket(id = 70, key = "PAY-7", trackerId = 3, unavailableAt = 1_700_000_000, unavailableReason = "not_found_or_no_permission"),
+            Ticket(id = 90, key = "PAY-9", trackerId = 3),
+        )
+        fleet.trackers.value = listOf(TrackerRow(id = 3, provider = "jira", name = "Acme Jira", state = "auth_failed"))
+        runCurrent()
+
+        val tracker = "Tracker Acme Jira: fleet's sign-in to it was refused, so statuses here may be out of date."
+        assertEquals(
+            listOf("The tracker no longer finds this ticket, or fleet is no longer allowed to see it.", tracker),
+            vm.state.value.workTrouble,
+        )
+        assertEquals(listOf(tracker), vm.state.value.suggestion?.trouble, "the suggested ticket's tracker is said too")
+
+        fleet.trackers.value = listOf(TrackerRow(id = 3, name = "Acme Jira", state = "ok"))
+        runCurrent()
+        assertEquals(emptyList(), vm.state.value.suggestion?.trouble, "a tracker that is ok says nothing")
     }
 
     @Test
