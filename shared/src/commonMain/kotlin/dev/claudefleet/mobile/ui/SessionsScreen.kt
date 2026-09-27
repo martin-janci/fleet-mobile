@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -43,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -92,6 +94,8 @@ data class SessionsHandlers(
     val onToggleSearch: () -> Unit = {},
     val onSetQuery: (String) -> Unit = {},
     val onOpenFilters: () -> Unit = {},
+    /** Fold a host's rows away, or unfold them. The heading and its count stay. */
+    val onToggleHost: (String) -> Unit = {},
     /**
      * Every filter off, the host one included — which is why this is one
      * handler and not [SessionsViewModel.clearFilters]: the host filter is the
@@ -167,6 +171,7 @@ fun SessionsScreen(
             )
             FilterSummary(state = state, onOpenFilters = handlers.onOpenFilters, onClearAll = handlers.onClearAll)
         }
+        HiddenAttentionBanner(count = state.hiddenAttention, onClearAll = handlers.onClearAll)
         ConnectionBanner(state.status)
         ErrorBanner(state.error, onDismiss = handlers.onDismissError)
         ErrorBanner(agent.error, onDismiss = handlers.onDismissAgentError)
@@ -213,9 +218,20 @@ fun SessionsScreen(
                 }
                 for (host in state.groups) {
                     stickyHeader(key = "host-${host.alias}") {
-                        HostHeader(alias = host.alias, reachable = host.reachable, sessions = host.sessionCount)
+                        HostHeader(
+                            alias = host.alias,
+                            reachable = host.reachable,
+                            sessions = host.sessionCount,
+                            collapsed = host.collapsed,
+                            onClick = { handlers.onToggleHost(host.alias) },
+                        )
                     }
-                    for (project in host.projects) {
+                    // A folded host emits no items at all — which is the point:
+                    // the cost of a machine you are not working on today drops
+                    // from a screen of scrolling to one 40dp heading. The group
+                    // still holds its rows, so unfolding is immediate and the
+                    // count above is honest.
+                    for (project in if (host.collapsed) emptyList() else host.projects) {
                         item(key = "${host.alias}-${project.id}") {
                             val work = project.work
                             if (work != null) WorkHeader(work, project.attentionCount, project.orgLabel) else ProjectHeader(project.label)
@@ -460,19 +476,94 @@ private fun FilterSummary(state: SessionsUiState, onOpenFilters: () -> Unit, onC
     }
 }
 
+/**
+ * What the filters are keeping from you, when it is something that wants a
+ * person.
+ *
+ * This is the price of remembering filters between launches, paid in full and
+ * in the open. `SessionsViewModel.setGroupMode`'s KDoc states the objection —
+ * restoring a filter on launch *"can make a busy fleet look quiet"* — and this
+ * is the answer to it: the fleet may look quiet, but it cannot lie about being
+ * quiet, because the app says so above the list.
+ *
+ * Deliberately narrow. It counts only [SessionsUiState.hiddenAttention], the
+ * rows that are blocked or stuck; how many rows the filters hide in general is
+ * already on screen as *shown / total*. A banner that fired on every ordinary
+ * narrowing would be learnt and then ignored, which is the one thing this must
+ * not become.
+ *
+ * `errorContainer` rather than a softer tone: an agent that has stopped and is
+ * waiting for an answer nobody can see is a failure of the app's whole
+ * purpose, not a note about the view.
+ */
 @Composable
-private fun HostHeader(alias: String, reachable: Boolean?, sessions: Int) {
+private fun HiddenAttentionBanner(count: Int, onClearAll: () -> Unit) {
+    if (count <= 0) return
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(FleetIcons.Warning, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+            Text(
+                text = if (count == 1) {
+                    "1 session is waiting on you and is hidden by these filters."
+                } else {
+                    "$count sessions are waiting on you and are hidden by these filters."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onClearAll) { Text("Clear") }
+        }
+    }
+}
+
+/**
+ * One machine's heading, and the tap that folds it.
+ *
+ * The chevron is `FleetIcons.ArrowBack` rotated rather than a fourteenth hand
+ * drawn path — the rotation convention is the one `SessionScreen`'s turn
+ * stepper already uses: positive is clockwise, so 180° is the right-pointing
+ * arrow a folded section wants and -90° is the down-pointing one an open
+ * section wants.
+ */
+@Composable
+private fun HostHeader(
+    alias: String,
+    reachable: Boolean?,
+    sessions: Int,
+    collapsed: Boolean,
+    onClick: () -> Unit,
+) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(40.dp).padding(horizontal = 16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(40.dp)
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(
-                text = alias,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    FleetIcons.ArrowBack,
+                    contentDescription = if (collapsed) "Unfold $alias" else "Fold $alias away",
+                    modifier = Modifier.size(18.dp).rotate(if (collapsed) 180f else -90f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text = alias,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
             // A host that is not in `list_hosts` is unknown, not unreachable,
             // and says nothing rather than accusing it of being down.
             Text(

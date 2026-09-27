@@ -22,6 +22,7 @@ import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.withTicketsFrom
 import dev.claudefleet.mobile.model.workStatusNames
 import dev.claudefleet.mobile.model.unnamedProject
+import dev.claudefleet.mobile.net.json
 import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -75,6 +76,16 @@ data class HostGroup(
      */
     val reachable: Boolean?,
     val projects: List<ProjectGroup>,
+    /**
+     * Whether the person has folded this host away.
+     *
+     * A *drawing* decision, not a narrowing one: [projects] is still built and
+     * [sessionCount] still counts, and `SessionsScreen` is what skips emitting
+     * the items. Emptying the group here instead would make the count read
+     * zero on exactly the headings whose count is the only thing left to say —
+     * which is the one number that would stop anyone unfolding it again.
+     */
+    val collapsed: Boolean = false,
 ) {
     val sessionCount: Int get() = projects.sumOf { it.sessions.size }
 }
@@ -120,6 +131,23 @@ data class SessionsUiState(
     val filters: SessionFilters = SessionFilters(),
     /** How many rows in the **whole** fleet want a person, filtered or not. */
     val attentionCount: Int = 0,
+    /**
+     * How many rows that want a person are **not on screen** because of the
+     * current filters.
+     *
+     * The one number that makes a remembered filter safe to restore. A window
+     * set on Friday would otherwise open Monday's app on a fleet that looks
+     * calm while three agents sit blocked behind it — the objection
+     * [SessionsViewModel.setGroupMode]'s KDoc raises against storing filters at
+     * all. Counting them is the answer: the quiet fleet cannot be a lie when
+     * the app is the thing saying it is not one.
+     *
+     * Deliberately *not* "how many rows did the filter hide" — that is already
+     * on screen as [shown] against [total]. Only the rows that stop until
+     * somebody moves them count, or the warning fires on every ordinary
+     * narrowing and is learnt to be ignored.
+     */
+    val hiddenAttention: Int = 0,
     /**
      * How many sessions [groups] holds, and how many the fleet has in all.
      *
@@ -245,6 +273,8 @@ class SessionsViewModel(
         val groupMode: GroupMode = GroupMode.PROJECT,
         val filtersOpen: Boolean = false,
         val searchOpen: Boolean = false,
+        /** Hosts the person has folded away. Persisted; see [COLLAPSED_KEY]. */
+        val collapsedHosts: Set<String> = emptySet(),
     )
 
     /** What the hub's work graph adds to the picture: whether it is there, and *My work*. */
@@ -257,8 +287,38 @@ class SessionsViewModel(
     )
 
     private val local = MutableStateFlow(
-        Local(groupMode = readGroupMode(), filterAt = clock()),
+        Local(
+            groupMode = readGroupMode(),
+            filters = readFilters(),
+            filterAt = clock(),
+            collapsedHosts = prefs?.getStringList(COLLAPSED_KEY).orEmpty().toSet(),
+        ),
     )
+
+    /**
+     * The remembered filters, or none at all.
+     *
+     * Anything the build cannot read is *none*: the store outlives the version
+     * that wrote it, so a downgrade, or a build that has dropped a field, must
+     * not crash on the first frame with a value it put there itself. Opening on
+     * the whole fleet is the safe direction to be wrong in — it shows more than
+     * asked rather than less.
+     *
+     * It does **not** strip [SessionFilters.query] or
+     * [SessionFilters.hostFilter] a second time. [remember] is where that rule
+     * lives and the only place it is written, because a rule implemented twice
+     * is a rule neither copy is tested for: a mutation sweep removed each side
+     * in turn and the suite stayed green both times, since the other half was
+     * still doing the work.
+     */
+    private fun readFilters(): SessionFilters {
+        val stored = prefs?.getStringList(FILTERS_KEY)?.firstOrNull() ?: return SessionFilters()
+        return try {
+            json.decodeFromString(SessionFilters.serializer(), stored)
+        } catch (_: Exception) {
+            SessionFilters()
+        }
+    }
 
     /**
      * The remembered view.
@@ -347,7 +407,29 @@ class SessionsViewModel(
      * hour after the app opened measures from now rather than from launch.
      */
     private fun filter(f: (SessionFilters) -> SessionFilters) {
-        local.update { it.copy(filters = f(it.filters), filterAt = clock()) }
+        var updated = SessionFilters()
+        local.update {
+            updated = f(it.filters)
+            it.copy(filters = updated, filterAt = clock())
+        }
+        remember(updated)
+    }
+
+    /**
+     * Write the filters to the device, less the two that must not survive a
+     * launch.
+     *
+     * [SessionFilters.query] is a moment rather than a setting — an app
+     * reopened on Monday still filtered to something typed on Friday reads as
+     * broken, which is why `setSearchOpen(false)` already clears it within a
+     * session. [SessionFilters.hostFilter] is not a judgement call at all:
+     * `Screen.Sessions.hostAlias` is its one source of truth, so a stored copy
+     * would come back disagreeing with the navigator — the bug
+     * `Navigator.clearHostFilter` exists to prevent.
+     */
+    private fun remember(filters: SessionFilters) {
+        val storable = filters.copy(query = "", hostFilter = null)
+        prefs?.putStringList(FILTERS_KEY, listOf(json.encodeToString(SessionFilters.serializer(), storable)))
     }
 
     /** The search text. Blank searches for nothing and keeps every row. */
@@ -451,6 +533,40 @@ class SessionsViewModel(
      */
     fun setHostFilter(alias: String?) {
         filter { it.copy(hostFilter = alias) }
+    }
+
+    /**
+     * Fold one host's rows away, or unfold them.
+     *
+     * A view over rows already held: this never talks to the hub, and the
+     * host's heading and [HostGroup.sessionCount] stay whatever they were.
+     * Folding is not filtering — "which sessions exist on mefistos" and "show
+     * me none of them right now" are different questions, and this answers only
+     * the second.
+     *
+     * Remembered on the device for the same reason [setGroupMode] is: it is how
+     * a person reads the list rather than a question they are asking this
+     * minute. Unlike a filter it hides nothing permanently — the heading stays,
+     * with its count — so restoring it on launch cannot make a busy fleet look
+     * quiet.
+     *
+     * The read and the write are one `update {}` rather than a read of
+     * `local.value` followed by a write, so two taps cannot both observe the
+     * same value and both write the same answer, losing one. `updated` is
+     * assigned inside the lambda and read after: `update` may run its lambda
+     * more than once under contention, and the last run is the one that
+     * committed, so what is persisted is what the flow holds.
+     */
+    fun toggleHost(alias: String) {
+        var updated: Set<String> = emptySet()
+        local.update {
+            updated = if (alias in it.collapsedHosts) it.collapsedHosts - alias else it.collapsedHosts + alias
+            it.copy(collapsedHosts = updated)
+        }
+        // Sorted, so the stored value does not churn on a set whose iteration
+        // order is not promised — a store that rewrites the same content in a
+        // different order is a store that looks like it changed.
+        prefs?.putStringList(COLLAPSED_KEY, updated.sorted())
     }
 
     /**
@@ -595,6 +711,17 @@ class SessionsViewModel(
                     (myWork == null || row.work?.itemId in myWork)
             }.byTriage(now = nowSeconds)
         }
+        // Counted against the same `matches` the two views use, so the number
+        // can never describe a row that either of them would have drawn. The
+        // host filter is included because it narrows like any other — and
+        // `onClearAll`, which is what the warning offers, already clears the
+        // navigator's copy along with the rest.
+        val hiddenAttention = rows.count { row ->
+            row.needsAttention && !(
+                row.matches(filters, l.filterAt, projectLabel(row.projectId, byId)) &&
+                    (myWork == null || row.work?.itemId in myWork)
+                )
+        }
         val groups = if (urgency) {
             emptyList()
         } else {
@@ -607,6 +734,7 @@ class SessionsViewModel(
                 byWork,
                 myWork,
                 orgLabel = if (choices.isNotEmpty() && filters.orgFilter == null) work.orgs::name else null,
+                collapsedHosts = l.collapsedHosts,
             )
         }
         return SessionsUiState(
@@ -614,6 +742,7 @@ class SessionsViewModel(
             status = status,
             filters = filters,
             attentionCount = sessions.count { it.needsAttention },
+            hiddenAttention = hiddenAttention,
             shown = if (urgency) urgent.size else groups.sumOf { it.sessionCount },
             total = sessions.size,
             refreshing = l.refreshing,
@@ -636,6 +765,8 @@ class SessionsViewModel(
     private companion object {
         const val BY_WORK_KEY = "sessions.by_work"
         const val GROUP_MODE_KEY = "sessions.group_mode"
+        const val COLLAPSED_KEY = "sessions.collapsed_hosts"
+        const val FILTERS_KEY = "sessions.filters"
         const val ON = "on"
     }
 }
@@ -751,6 +882,7 @@ internal fun groupSessions(
     byWork: Boolean = false,
     myWork: Set<Long>? = null,
     orgLabel: ((Long) -> String)? = null,
+    collapsedHosts: Set<String> = emptySet(),
 ): List<HostGroup> {
     val byId = projects.associateBy { it.id }
     val kept = sessions.filter { row ->
@@ -771,6 +903,7 @@ internal fun groupSessions(
             HostGroup(
                 alias = alias,
                 reachable = reachability[alias],
+                collapsed = alias in collapsedHosts,
                 projects = workGroups(keyed, orgLabel) + rest.groupBy { it.projectId }
                     .map { (id, inProject) ->
                         ProjectGroup(

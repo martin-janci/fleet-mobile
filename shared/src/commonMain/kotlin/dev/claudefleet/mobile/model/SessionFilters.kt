@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.model
 
+import kotlinx.serialization.Serializable
+
 /**
  * How wide a time window the activity filter asks for.
  *
@@ -10,6 +12,7 @@ package dev.claudefleet.mobile.model
  * sheet under a heading here, not in a dense desktop sidebar, and "8h" alone
  * does not say whether it means *within* or *beyond*. [TimeDirection] does.
  */
+@Serializable
 enum class TimeWindow(val label: String, val seconds: Long?) {
     ANY("Any time", null),
     H1("1 hour", 60 * 60),
@@ -28,6 +31,7 @@ enum class TimeWindow(val label: String, val seconds: Long?) {
  * sitting untouched for over an hour" is the triage question, and it cannot be
  * asked by narrowing a recency window.
  */
+@Serializable
 enum class TimeDirection(val label: String) {
     WITHIN("Active within"),
     BEYOND("Idle beyond"),
@@ -41,6 +45,7 @@ enum class TimeDirection(val label: String) {
  * A row can match both it and its status; selections are OR-ed, so that is not
  * a contradiction.
  */
+@Serializable
 enum class StatusFilter(val label: String, val wire: String?) {
     WORKING("Working", "working"),
     BLOCKED("Blocked", "blocked"),
@@ -62,6 +67,7 @@ enum class StatusFilter(val label: String, val wire: String?) {
  * answer to it. Selections are OR-ed, like [StatusFilter]'s; the desktop's
  * single choice is the one-chip case of that.
  */
+@Serializable
 enum class WorkStatusFilter(val label: String, val category: StatusCategory) {
     TODO("To do", StatusCategory.Todo),
     IN_PROGRESS("In progress", StatusCategory.InProgress),
@@ -108,6 +114,7 @@ fun workStatusNames(rows: List<SessionRow>): List<String> {
  * source of truth (see `Navigator.clearHostFilter`), so clearing it goes
  * through the navigator and [cleared] leaves it alone.
  */
+@Serializable
 data class SessionFilters(
     /** Free text, matched against the row and its project ([matches]). Blank matches everything. */
     val query: String = "",
@@ -279,8 +286,27 @@ private fun SessionRow.matchesTime(filters: SessionFilters, nowSeconds: Long): B
 
 /**
  * Free-text match, case-insensitive, across everything the row shows or is
- * filed under: its name, the branch, its tags, the host, the project, and its
- * work's key and title. Blank matches everything.
+ * filed under: its name, the branch, its tags, the host, the project, its
+ * work's key and title, the prompt it was given, and what it is doing. Blank
+ * matches everything.
+ *
+ * Two of those fields are not taken as the hub sent them, and both reasons are
+ * the same one — **a search may only match what somebody could have read.**
+ *
+ *  - `current_activity` goes through [Activity.sanitize], which is what
+ *    [SessionRow.supportingLine] already draws. Raw, it carries ANSI escapes
+ *    and, for an idle session, the REPL's own footer: on the fleet this was
+ *    written against, most rows read
+ *    `⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt`, so
+ *    `bypass` matched nearly every idle session and an escape sequence was
+ *    searchable while being invisible. Sanitising can yield nothing at all,
+ *    which is the right answer: a row whose only "activity" is chrome has no
+ *    activity to search.
+ *  - `last_prompt` is included, and it was not before. What was *asked* of an
+ *    agent is the most memorable thing about a session, and [displayName]
+ *    covers it only for a background agent, whose name is the prompt's first
+ *    sixty characters; a session with a friendly name showed the prompt
+ *    nowhere and matched it nowhere either.
  */
 private fun SessionRow.matchesQuery(query: String, projectLabel: String?): Boolean {
     val q = query.trim()
@@ -294,7 +320,8 @@ private fun SessionRow.matchesQuery(query: String, projectLabel: String?): Boole
         projectLabel?.let { yield(it) }
         yieldAll(tags)
         work?.let { yield(it.label); yield(it.title) }
-        currentActivity?.let { yield(it) }
+        lastPrompt?.let { yield(it) }
+        Activity.sanitize(currentActivity)?.let { yield(it) }
     }
     return fields.any { it.contains(q, ignoreCase = true) }
 }

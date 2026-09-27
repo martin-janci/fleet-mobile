@@ -1321,3 +1321,294 @@ class GroupModeTest {
         assertEquals(GroupMode.URGENCY, reopened.state.value.groupMode)
     }
 }
+
+/**
+ * What the list remembers between launches, and the one thing that makes
+ * remembering a filter safe.
+ *
+ * Grouping was already remembered, and its KDoc says why it could be: *unlike
+ * a filter it hides nothing, so restoring it on launch cannot make a busy
+ * fleet look quiet.* That sentence is the whole objection to remembering
+ * filters, and it is a real one — a window set on Friday would, on Monday,
+ * open the app on a fleet that looks calm while three agents sit blocked
+ * behind it.
+ *
+ * So the filters are remembered **and** the objection is answered directly:
+ * [SessionsUiState.hiddenAttention] counts the rows that want a person and are
+ * not on screen, and the screen says so above the list. The quiet fleet cannot
+ * be a lie, because the app is the thing saying it is not one.
+ */
+class WhatTheListRemembersTest {
+
+    @Test
+    fun the_filters_come_back_on_the_next_launch() = runTest {
+        val prefs = FakePrefs()
+        SessionsViewModel(FakeFleet(), backgroundScope, prefs = prefs).apply {
+            setWindow(TimeWindow.H8)
+            toggleBackground()
+        }
+
+        val next = SessionsViewModel(FakeFleet(), backgroundScope, prefs = prefs).state.value.filters
+        assertEquals(TimeWindow.H8, next.window)
+        assertFalse(next.showBackground)
+    }
+
+    /**
+     * A search is a moment, not a setting. An app reopened on Monday still
+     * filtered to something typed on Friday reads as broken rather than
+     * helpful — and `setSearchOpen(false)` already clears it within a session
+     * for the same reason.
+     */
+    @Test
+    fun a_search_is_not_remembered() = runTest {
+        val prefs = FakePrefs()
+        SessionsViewModel(FakeFleet(), backgroundScope, prefs = prefs).setQuery("violet-mars")
+
+        assertEquals("", SessionsViewModel(FakeFleet(), backgroundScope, prefs = prefs).state.value.filters.query)
+    }
+
+    /**
+     * Nor is the host filter, and that one is not a judgement call:
+     * `Screen.Sessions.hostAlias` is its one source of truth. A stored copy
+     * would come back disagreeing with the navigator, which is the bug
+     * `Navigator.clearHostFilter` exists to prevent.
+     */
+    @Test
+    fun the_host_filter_is_not_remembered() = runTest {
+        val prefs = FakePrefs()
+        SessionsViewModel(FakeFleet(), backgroundScope, prefs = prefs).setHostFilter("mefistos")
+
+        assertNull(SessionsViewModel(FakeFleet(), backgroundScope, prefs = prefs).state.value.filters.hostFilter)
+    }
+
+    @Test
+    fun clearing_the_filters_clears_what_was_stored() = runTest {
+        val prefs = FakePrefs()
+        SessionsViewModel(FakeFleet(), backgroundScope, prefs = prefs).apply {
+            setWindow(TimeWindow.H8)
+            clearFilters()
+        }
+
+        assertEquals(TimeWindow.ANY, SessionsViewModel(FakeFleet(), backgroundScope, prefs = prefs).state.value.filters.window)
+    }
+
+    /**
+     * The store outlives the build that wrote it. A downgrade, or a build that
+     * has dropped a field, must not crash on the first frame with a value it
+     * put there itself — it opens on the whole fleet instead, which is the
+     * safe direction to be wrong in.
+     */
+    @Test
+    fun a_stored_value_this_build_cannot_read_opens_on_the_whole_fleet() = runTest {
+        val prefs = FakePrefs()
+        prefs.putStringList("sessions.filters", listOf("{\"window\":\"A_FORTNIGHT\",\"nonsense\":true"))
+
+        val filters = SessionsViewModel(FakeFleet(), backgroundScope, prefs = prefs).state.value.filters
+        assertEquals(SessionFilters(), filters)
+    }
+}
+
+/**
+ * The count that makes a remembered filter safe to restore.
+ *
+ * Not a general "how many rows did the filter hide" — that number is already
+ * on screen as *shown / total*. This one counts only the rows that **want a
+ * person**, because those are the rows whose absence is not a tidy list but a
+ * missed page.
+ */
+class SessionsHiddenAttentionTest {
+
+    @Test
+    fun a_filter_that_hides_a_blocked_session_says_so() = runTest {
+        val fleet = FakeFleet(
+            rows = listOf(
+                session(1, host = "box", claudeStatus = "blocked"),
+                session(2, host = "pine", claudeStatus = "working"),
+            ),
+        )
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.setHostFilter("pine")
+        runCurrent()
+
+        assertEquals(1, vm.state.value.hiddenAttention)
+    }
+
+    @Test
+    fun a_stuck_session_counts_as_wanting_a_person() = runTest {
+        val fleet = FakeFleet(
+            rows = listOf(session(1, host = "box", stuckKind = "press_enter"), session(2, host = "pine")),
+        )
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.setHostFilter("pine")
+        runCurrent()
+
+        assertEquals(1, vm.state.value.hiddenAttention)
+    }
+
+    @Test
+    fun a_blocked_session_that_is_on_screen_is_not_counted() = runTest {
+        val fleet = FakeFleet(rows = listOf(session(1, host = "box", claudeStatus = "blocked")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.setHostFilter("box")
+        runCurrent()
+
+        assertEquals(0, vm.state.value.hiddenAttention, message = "it is right there")
+    }
+
+    @Test
+    fun no_filters_hide_nothing() = runTest {
+        val fleet = FakeFleet(rows = listOf(session(1, claudeStatus = "blocked"), session(2)))
+
+        assertEquals(0, SessionsViewModel(fleet, backgroundScope).state.value.hiddenAttention)
+    }
+
+    /**
+     * A working session behind a filter is not a page. Only the rows that stop
+     * until somebody moves them count, or the warning would fire on every
+     * ordinary narrowing and be learnt to ignore — which is the one thing it
+     * must not be.
+     */
+    @Test
+    fun an_ordinary_session_behind_a_filter_is_not_a_warning() = runTest {
+        val fleet = FakeFleet(
+            rows = listOf(session(1, host = "box", claudeStatus = "working"), session(2, host = "pine")),
+        )
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.setHostFilter("pine")
+        runCurrent()
+
+        assertEquals(0, vm.state.value.hiddenAttention)
+    }
+}
+
+/**
+ * Folding a host away.
+ *
+ * A grouped list is only readable while the headings are fewer than the
+ * screen: on the fleet this was measured against — fifty-six sessions across
+ * five machines and thirteen projects — the machine you are not working on
+ * today still costs you a screen of scrolling to get past. Folding is the
+ * cheapest answer that keeps the row there rather than filtering it away,
+ * because "which sessions exist on mefistos" and "show me none of them right
+ * now" are different questions.
+ *
+ * A folded host keeps its heading **and its count**: the count is the whole of
+ * what the heading has left to say, and it is what makes unfolding worth a tap.
+ */
+class CollapsingAHostTest {
+
+    @Test
+    fun a_folded_host_says_it_is_folded_and_still_counts_its_sessions() = runTest {
+        val fleet = FakeFleet(
+            rows = listOf(session(1, host = "box"), session(2, host = "box"), session(3, host = "pine")),
+        )
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.toggleHost("box")
+        runCurrent()
+
+        val groups = vm.state.value.groups.associateBy { it.alias }
+        assertTrue(groups.getValue("box").collapsed)
+        assertFalse(groups.getValue("pine").collapsed)
+        assertEquals(2, groups.getValue("box").sessionCount, "the count is what the folded heading promises")
+    }
+
+    /**
+     * The rows are still *there*, and that is deliberate rather than an
+     * oversight: folding is a drawing decision, so the screen skips the items
+     * and the fold stays honest about what the host holds. Emptying the group
+     * here is what would make [HostGroup.sessionCount] read zero, which is the
+     * one number that would stop anyone unfolding it again.
+     */
+    @Test
+    fun folding_hides_rows_on_the_screen_and_not_in_the_state() = runTest {
+        val fleet = FakeFleet(rows = listOf(session(1, host = "box")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.toggleHost("box")
+        runCurrent()
+
+        val box = vm.state.value.groups.single()
+        assertTrue(box.collapsed)
+        assertEquals(listOf(1L), box.projects.flatMap { it.sessions }.map { it.id })
+    }
+
+    @Test
+    fun folding_a_host_that_is_not_there_changes_nothing() = runTest {
+        val fleet = FakeFleet(rows = listOf(session(1, host = "box")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.toggleHost("a-machine-that-left-the-fleet")
+        runCurrent()
+
+        assertFalse(vm.state.value.groups.single().collapsed)
+    }
+
+    /**
+     * Two taps land on two different answers.
+     *
+     * The flip reads a value in order to write its opposite, so it does both in
+     * one `update {}` — the rule this class's neighbours already state. Two
+     * taps with nothing in between must cancel rather than the second one
+     * reading the first's stale value and writing the same answer again.
+     */
+    @Test
+    fun every_tap_moves_the_fold() = runTest {
+        val vm = SessionsViewModel(FakeFleet(rows = listOf(session(1, host = "box"))), backgroundScope)
+
+        vm.toggleHost("box")
+        vm.toggleHost("box")
+        runCurrent()
+        assertFalse(vm.state.value.groups.single().collapsed, "two taps cancel; neither may be lost")
+
+        vm.toggleHost("box")
+        runCurrent()
+        assertTrue(vm.state.value.groups.single().collapsed, "and a third still flips it")
+    }
+
+    /** Folding is a view over rows already in hand; it must not cost a call. */
+    @Test
+    fun folding_does_not_talk_to_the_hub() = runTest {
+        val fleet = FakeFleet(rows = listOf(session(1, host = "box")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.toggleHost("box")
+        runCurrent()
+
+        assertEquals(0, fleet.refreshes)
+    }
+
+    /**
+     * And it survives the app closing, through the same [dev.claudefleet.mobile.store.Prefs]
+     * the group mode already uses. A second view model over the same store is
+     * what a relaunch is; asserting the first one's own state would prove
+     * nothing about the store.
+     */
+    @Test
+    fun a_folded_host_is_still_folded_on_the_next_launch() = runTest {
+        val prefs = FakePrefs()
+        val fleet = FakeFleet(rows = listOf(session(1, host = "box"), session(2, host = "pine")))
+        SessionsViewModel(fleet, backgroundScope, prefs = prefs).toggleHost("box")
+
+        val next = SessionsViewModel(fleet, backgroundScope, prefs = prefs).state.value.groups.associateBy { it.alias }
+        assertTrue(next.getValue("box").collapsed)
+        assertFalse(next.getValue("pine").collapsed)
+    }
+
+    @Test
+    fun unfolding_is_remembered_too() = runTest {
+        val prefs = FakePrefs()
+        val fleet = FakeFleet(rows = listOf(session(1, host = "box")))
+        SessionsViewModel(fleet, backgroundScope, prefs = prefs).toggleHost("box")
+        SessionsViewModel(fleet, backgroundScope, prefs = prefs).toggleHost("box")
+
+        assertFalse(
+            SessionsViewModel(fleet, backgroundScope, prefs = prefs).state.value.groups.single().collapsed,
+            "the store must lose the alias, not merely stop reading it",
+        )
+    }
+}
