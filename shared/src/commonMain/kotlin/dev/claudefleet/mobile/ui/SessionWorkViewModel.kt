@@ -34,9 +34,14 @@ data class SessionWorkUiState(
     /** The hub's undecided guess, or null. */
     val suggested: WorkSummary? = null,
     val sheetOpen: Boolean = false,
-    /** Accept the guess (`work_link confirm`). */
+    /**
+     * The guess as the sheet draws it, with the Confirm / Not this that
+     * decide it — see [SuggestionRow]. Null when there is no guess.
+     */
+    val suggestion: SuggestionRow? = null,
+    /** Accept the guess (`work_link confirm`); the same as [SuggestionRow.canConfirm]. */
     val canConfirm: Boolean = false,
-    /** "Not this" (`work_link reject`). */
+    /** "Not this" (`work_link reject`); the same as [SuggestionRow.canReject]. */
     val canReject: Boolean = false,
     /** Clear the confirmed link (`work_link unlink`). */
     val canClear: Boolean = false,
@@ -71,6 +76,35 @@ data class SessionWorkUiState(
 ) {
     /** What the chip draws: the confirmed work, else the guess. */
     val chip: WorkSummary? get() = work ?: suggested
+}
+
+/**
+ * A suggestion as the sheet draws it, and the only thing its Confirm and
+ * Not this are bound to.
+ *
+ * The hub can stamp a row with confirmed `work` *and* a `work_suggested`
+ * guess at once. The sheet used to show the confirmed ticket and its "Why:"
+ * while its Confirm / Not this acted on the guess, which was not drawn
+ * anywhere — a person read one ticket and decided another. Those decisions
+ * become the labels suggestions are judged by, so a button here must never
+ * act on a link that is not on screen beside it: the row carries the guess,
+ * its reasons, and the gates together, and the sheet hands [linkId] back
+ * with the tap.
+ */
+data class SuggestionRow(
+    val work: WorkSummary,
+    /** [workWhy] of [work]: its source, rule and strength. */
+    val why: String,
+    /**
+     * The session also has confirmed work, which the sheet draws as the
+     * current one; this row is then drawn apart from it, as a suggestion.
+     */
+    val besideConfirmed: Boolean,
+    val canConfirm: Boolean,
+    val canReject: Boolean,
+) {
+    /** The link Confirm and Not this address — this row's, never the confirmed one's. */
+    val linkId: Long get() = work.linkId
 }
 
 /**
@@ -174,11 +208,17 @@ class SessionWorkViewModel(
         local.update { it.copy(error = null) }
     }
 
-    /** Accept the suggestion the chip is showing. */
-    fun confirm(): Job = decide(CONFIRM) { actions.confirm(sessionId, it.linkId) }
+    /**
+     * Accept the suggestion drawn with link [linkId] — by default the one
+     * [SessionWorkUiState.suggestion] shows now. The sheet passes the id it
+     * drew, so a tap decides what the person was reading.
+     */
+    fun confirm(linkId: Long? = state.value.suggestion?.linkId): Job =
+        decide(CONFIRM, linkId) { actions.confirm(sessionId, it.linkId) }
 
     /** "Not this" — a sticky rejection: the hub never suggests it for this session again. */
-    fun reject(): Job = decide(REJECT) { actions.reject(sessionId, it.linkId) }
+    fun reject(linkId: Long? = state.value.suggestion?.linkId): Job =
+        decide(REJECT, linkId) { actions.reject(sessionId, it.linkId) }
 
     /** Clear the confirmed link. */
     fun clear(): Job = runGated(UNLINK) {
@@ -320,8 +360,19 @@ class SessionWorkViewModel(
         }
     }
 
-    private fun decide(action: String, call: suspend (WorkSummary) -> Unit): Job = runGated(action) {
+    /**
+     * Decide the row's guess — only if it is still the one drawn as [linkId].
+     * A `session:updated` can replace the guess between the frame the person
+     * read and their tap; deciding the new one unseen is exactly the mistake
+     * [SuggestionRow] exists to prevent, so the tap is declined and said.
+     */
+    private fun decide(action: String, linkId: Long?, call: suspend (WorkSummary) -> Unit): Job = runGated(action) {
         val guess = row()?.workSuggested ?: return@runGated
+        if (linkId == null) return@runGated
+        if (guess.linkId != linkId) {
+            local.update { it.copy(error = SUGGESTION_CHANGED) }
+            return@runGated
+        }
         call(guess)
         local.update { it.copy(sheetOpen = false) }
     }
@@ -358,12 +409,22 @@ class SessionWorkViewModel(
         if (row == null || !caps.work) return SessionWorkUiState(error = l.error)
         val work = row.work
         val guess = row.workSuggested
+        val suggestion = guess?.let {
+            SuggestionRow(
+                work = it,
+                why = workWhy(it),
+                besideConfirmed = work != null,
+                canConfirm = allowed(caps, CONFIRM),
+                canReject = allowed(caps, REJECT),
+            )
+        }
         return SessionWorkUiState(
             work = work,
             suggested = guess,
             sheetOpen = l.sheetOpen && (work != null || guess != null),
-            canConfirm = guess != null && allowed(caps, CONFIRM),
-            canReject = guess != null && allowed(caps, REJECT),
+            suggestion = suggestion,
+            canConfirm = suggestion?.canConfirm == true,
+            canReject = suggestion?.canReject == true,
             canClear = work != null && allowed(caps, UNLINK),
             canSetWork = allowed(caps, LINK),
             busy = l.busy,
@@ -378,6 +439,12 @@ class SessionWorkViewModel(
     }
 
     private companion object {
+        /** A tap on a suggestion the hub has since replaced: nothing was decided. */
+        val SUGGESTION_CHANGED = Friendly(
+            "The suggestion changed",
+            "Nothing was decided. Look at the new one before you choose.",
+            isError = false,
+        )
         const val CONFIRM = "confirm"
         const val REJECT = "reject"
         const val UNLINK = "unlink"

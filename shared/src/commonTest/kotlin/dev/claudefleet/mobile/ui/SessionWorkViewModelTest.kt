@@ -170,6 +170,83 @@ class SessionWorkViewModelTest {
         assertEquals(listOf("confirm 5 12", "reject 5 12"), actions.calls, "the suggestion's link, never the confirmed one")
     }
 
+    /**
+     * The hub can stamp a row with confirmed work *and* a guess. The sheet
+     * draws the confirmed ticket as current and the guess in a block of its
+     * own, and Confirm / Not this are bound to the guess that block draws —
+     * never to a link the person cannot see.
+     */
+    @Test
+    fun with_confirmed_work_and_a_guess_the_decisions_sit_with_the_drawn_guess() = runTest {
+        val actions = FakeWorkActions()
+        val vm = SessionWorkViewModel(5, WorkFleet(listOf(row(work = PAY7, guess = PAY9_GUESS))), actions, backgroundScope, canWrite = true)
+
+        val s = vm.state.value
+        assertEquals("PAY-7", s.work?.key, "the confirmed work is drawn as the current one")
+        assertEquals("PAY-7", s.chip?.key)
+        val drawn = assertNotNull(s.suggestion, "the guess the buttons decide is drawn too")
+        assertEquals(PAY9_GUESS, drawn.work)
+        assertEquals("PAY-9", drawn.work.label)
+        assertEquals("Ledger", drawn.work.title)
+        assertEquals("linked from a prompt · rule R5", drawn.why, "its own reasons, not the confirmed link's")
+        assertTrue(drawn.besideConfirmed, "drawn apart from the confirmed work")
+        assertTrue(drawn.canConfirm && drawn.canReject)
+        assertEquals(12L, drawn.linkId)
+
+        vm.confirm(drawn.linkId)
+        runCurrent()
+        vm.reject(drawn.linkId)
+        runCurrent()
+
+        assertEquals(listOf("confirm 5 12", "reject 5 12"), actions.calls)
+    }
+
+    @Test
+    fun a_guess_on_its_own_is_the_sheets_main_ticket() = runTest {
+        val vm = SessionWorkViewModel(5, WorkFleet(listOf(row(guess = PAY9_GUESS))), FakeWorkActions(), backgroundScope, canWrite = true)
+
+        val drawn = assertNotNull(vm.state.value.suggestion)
+        assertFalse(drawn.besideConfirmed)
+        assertEquals(drawn.work, vm.state.value.chip, "the chip and the buttons are about the same ticket")
+    }
+
+    /**
+     * A `session:updated` can replace the guess between the frame the person
+     * read and their tap. The tap names the link it was drawn with, and a
+     * link that is no longer the guess is not decided — the new guess would
+     * be decided unseen.
+     */
+    @Test
+    fun a_guess_replaced_before_the_tap_is_not_decided_unseen() = runTest {
+        val fleet = WorkFleet(listOf(row(work = PAY7, guess = PAY9_GUESS)))
+        val actions = FakeWorkActions()
+        val vm = SessionWorkViewModel(5, fleet, actions, backgroundScope, canWrite = true)
+        val drawnId = vm.state.value.suggestion!!.linkId
+
+        fleet.sessions.value = listOf(row(work = PAY7, guess = PAY9_GUESS.copy(linkId = 13, key = "PAY-10", title = "Payouts")))
+        runCurrent()
+        vm.confirm(drawnId)
+        runCurrent()
+        vm.reject(drawnId)
+        runCurrent()
+
+        assertEquals(emptyList(), actions.calls)
+        assertEquals("The suggestion changed", vm.state.value.error?.title)
+        assertEquals(BannerTone.Info, bannerTone(vm.state.value.error), "said, as a note")
+        assertEquals(13L, vm.state.value.suggestion?.linkId, "the new guess is what is drawn now")
+    }
+
+    @Test
+    fun without_a_guess_there_is_nothing_to_decide() = runTest {
+        val actions = FakeWorkActions()
+        val vm = SessionWorkViewModel(5, WorkFleet(listOf(row(work = PAY7))), actions, backgroundScope, canWrite = true)
+
+        assertNull(vm.state.value.suggestion)
+        vm.confirm(); vm.reject(); vm.confirm(PAY7.linkId)
+        runCurrent()
+        assertEquals(emptyList(), actions.calls, "the confirmed link is never decided as a guess")
+    }
+
     @Test
     fun clear_unlinks_the_confirmed_link() = runTest {
         val actions = FakeWorkActions()

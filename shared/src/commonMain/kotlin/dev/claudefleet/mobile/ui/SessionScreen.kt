@@ -512,6 +512,16 @@ private fun SessionBar(
                             modifier = Modifier.align(Alignment.CenterVertically),
                         )
                     }
+                    // A guess beside confirmed work gets its own dashed chip,
+                    // so the suggestion the sheet asks about is on screen too.
+                    work.suggestion?.takeIf { it.besideConfirmed }?.let { guess ->
+                        WorkChip(
+                            work = guess.work,
+                            suggested = true,
+                            onClick = workHandlers.onOpen,
+                            modifier = Modifier.align(Alignment.CenterVertically),
+                        )
+                    }
                     if (tight) CompactChip(onCompact = { onSendCommand("/compact") })
                     // A `safe_kill_session` retirement in progress — shown for
                     // as long as the row carries one, independent of which
