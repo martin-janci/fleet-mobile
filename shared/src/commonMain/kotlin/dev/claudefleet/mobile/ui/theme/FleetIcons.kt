@@ -341,4 +341,32 @@ object FleetIcons {
             }
         }.build()
     }
+
+    /**
+     * The Work tab: a clipboard holding a checklist — tasks, not sessions.
+     * Stroke-only like [Copy], so it tints the way the other tab glyphs do.
+     */
+    val Work: ImageVector by lazy {
+        ImageVector.Builder("Work", 24.dp, 24.dp, 24f, 24f).apply {
+            path(
+                fill = null,
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                // the board
+                moveTo(7f, 4f); lineTo(5f, 4f); quadTo(4f, 4f, 4f, 5f)
+                lineTo(4f, 20f); quadTo(4f, 21f, 5f, 21f); lineTo(19f, 21f)
+                quadTo(20f, 21f, 20f, 20f); lineTo(20f, 5f); quadTo(20f, 4f, 19f, 4f); lineTo(17f, 4f)
+                // the clip
+                moveTo(9f, 3f); lineTo(15f, 3f); lineTo(15f, 6f); lineTo(9f, 6f); close()
+                // two ticked lines
+                moveTo(7.5f, 11f); lineTo(8.5f, 12f); lineTo(10.5f, 10f)
+                moveTo(12.5f, 11f); lineTo(16.5f, 11f)
+                moveTo(7.5f, 16f); lineTo(8.5f, 17f); lineTo(10.5f, 15f)
+                moveTo(12.5f, 16f); lineTo(16.5f, 16f)
+            }
+        }.build()
+    }
 }

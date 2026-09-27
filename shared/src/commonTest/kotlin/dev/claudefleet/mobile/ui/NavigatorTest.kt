@@ -279,4 +279,120 @@ class NavigatorTest {
         nav.back()
         assertEquals(Screen.Sessions("pine"), nav.screen.value, "back lands on the list, never on a form that would start it again")
     }
+
+    // ---- the Work view (claude-fleet M14) ----
+
+    @Test
+    fun the_work_tab_is_a_root_like_the_others() {
+        val nav = Navigator()
+        nav.select(Tab.Work)
+
+        assertEquals(Screen.Work, nav.screen.value)
+        assertEquals(Tab.Work, nav.tab.value)
+        assertFalse(nav.back(), "a tab: the platform's to handle")
+    }
+
+    /** Task → session → back lands on the task, and back again on the Work view — with the Work tab lit throughout. */
+    @Test
+    fun task_then_session_then_back_returns_to_the_task_then_to_work() {
+        val nav = Navigator()
+        nav.select(Tab.Work)
+        nav.openTask("item:12")
+        assertEquals(Screen.Task("item:12"), nav.screen.value)
+
+        nav.open(7)
+        assertEquals(Tab.Work, nav.tab.value, "a session opened from a task keeps the Work tab lit")
+
+        assertTrue(nav.back())
+        assertEquals(Screen.Task("item:12"), nav.screen.value)
+        assertTrue(nav.back())
+        assertEquals(Screen.Work, nav.screen.value)
+        assertFalse(nav.back())
+    }
+
+    /** A task opened from a session's Tasks comes back to that session, then to the list it was opened from. */
+    @Test
+    fun a_task_opened_from_a_session_returns_to_the_session() {
+        val nav = Navigator()
+        nav.showSessionsFor("pine")
+        nav.open(7)
+        nav.openTask("ref:OPS-1")
+
+        nav.open(9)
+        assertTrue(nav.back())
+        assertEquals(Screen.Task("ref:OPS-1"), nav.screen.value)
+        assertTrue(nav.back())
+        assertEquals(Screen.Session(7), nav.screen.value)
+        assertTrue(nav.back())
+        assertEquals(Screen.Sessions("pine"), nav.screen.value)
+    }
+
+    /** Start here from a task: the form in ticket mode, and back from the made session lands on the task, never the form. */
+    @Test
+    fun start_here_from_a_task_returns_to_the_task() {
+        val nav = Navigator()
+        nav.select(Tab.Work)
+        nav.openTask("item:12")
+
+        nav.newSession(ticketKey = "ABC-12")
+        assertEquals(Screen.NewSession(hostAlias = null, ticketKey = "ABC-12"), nav.screen.value)
+        assertEquals(Tab.Work, nav.tab.value)
+        nav.created(41)
+        assertEquals(Screen.Session(41), nav.screen.value)
+
+        assertTrue(nav.back())
+        assertEquals(Screen.Task("item:12"), nav.screen.value)
+    }
+
+    /** A plain New session is the list's; a task offers only ticket mode. */
+    @Test
+    fun a_plain_new_session_from_a_task_does_nothing() {
+        val nav = Navigator()
+        nav.select(Tab.Work)
+        nav.openTask("item:12")
+
+        nav.newSession()
+
+        assertEquals(Screen.Task("item:12"), nav.screen.value)
+    }
+
+    @Test
+    fun switching_tabs_forgets_the_way_back() {
+        val nav = Navigator()
+        nav.select(Tab.Work)
+        nav.openTask("item:12")
+        nav.open(7)
+
+        nav.select(Tab.Sessions)
+        nav.open(8)
+        assertTrue(nav.back())
+
+        assertEquals(Screen.Sessions(), nav.screen.value, "not the task from the other tab")
+    }
+
+    /** The hub stopped serving the Work view: a lit Work tab goes back to the list; any other tab stays. */
+    @Test
+    fun losing_the_work_view_leaves_the_work_tab() {
+        val nav = Navigator()
+        nav.select(Tab.Hosts)
+        nav.workUnavailable()
+        assertEquals(Screen.Hosts, nav.screen.value)
+
+        nav.select(Tab.Work)
+        nav.openTask("item:12")
+        nav.workUnavailable()
+        assertEquals(Screen.Sessions(), nav.screen.value)
+        assertEquals(Tab.Sessions, nav.tab.value)
+    }
+
+    @Test
+    fun opening_the_task_already_showing_adds_no_step() {
+        val nav = Navigator()
+        nav.select(Tab.Work)
+        nav.openTask("item:12")
+        nav.openTask("item:12")
+
+        assertTrue(nav.back())
+        assertEquals(Screen.Work, nav.screen.value)
+    }
 }

@@ -55,9 +55,10 @@ class TheBackGestureReachesTheNavigatorTest {
     }
 
     /**
-     * Enabled on the two screens pushed over the list — a session and the New
-     * session form — and nowhere else, which is the navigator's contract
-     * expressed where the platform can see it.
+     * Enabled on the three screens pushed over a tab — a session, the New
+     * session form, and a task (the Work view's detail) — and nowhere else,
+     * which is the navigator's contract (`isPushed`) expressed where the
+     * platform can see it.
      *
      * On a tab the handler must be *disabled* rather than enabled-and-ignoring:
      * a disabled handler lets the gesture reach the system, which is how Android
@@ -69,7 +70,7 @@ class TheBackGestureReachesTheNavigatorTest {
         val call = Regex("""BackHandler\(enabled = ([^)]+)\)""").find(app)
             ?: fail("BackHandler is not called with an explicit `enabled`")
 
-        assertEquals("screen is Screen.Session || screen is Screen.NewSession", call.groupValues[1].trim())
+        assertEquals("screen is Screen.Session || screen is Screen.NewSession || screen is Screen.Task", call.groupValues[1].trim())
         assertTrue(
             Regex("""BackHandler\([^)]*\)\s*\{\s*nav\.back\(\)\s*\}""").containsMatchIn(app),
             "the handler must call nav.back() and nothing else",
