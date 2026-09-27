@@ -1470,3 +1470,131 @@ class SessionsHiddenAttentionTest {
         assertEquals(0, vm.state.value.hiddenAttention)
     }
 }
+
+/**
+ * Folding a host away.
+ *
+ * A grouped list is only readable while the headings are fewer than the
+ * screen: on the fleet this was measured against — fifty-six sessions across
+ * five machines and thirteen projects — the machine you are not working on
+ * today still costs you a screen of scrolling to get past. Folding is the
+ * cheapest answer that keeps the row there rather than filtering it away,
+ * because "which sessions exist on mefistos" and "show me none of them right
+ * now" are different questions.
+ *
+ * A folded host keeps its heading **and its count**: the count is the whole of
+ * what the heading has left to say, and it is what makes unfolding worth a tap.
+ */
+class CollapsingAHostTest {
+
+    @Test
+    fun a_folded_host_says_it_is_folded_and_still_counts_its_sessions() = runTest {
+        val fleet = FakeFleet(
+            rows = listOf(session(1, host = "box"), session(2, host = "box"), session(3, host = "pine")),
+        )
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.toggleHost("box")
+        runCurrent()
+
+        val groups = vm.state.value.groups.associateBy { it.alias }
+        assertTrue(groups.getValue("box").collapsed)
+        assertFalse(groups.getValue("pine").collapsed)
+        assertEquals(2, groups.getValue("box").sessionCount, "the count is what the folded heading promises")
+    }
+
+    /**
+     * The rows are still *there*, and that is deliberate rather than an
+     * oversight: folding is a drawing decision, so the screen skips the items
+     * and the fold stays honest about what the host holds. Emptying the group
+     * here is what would make [HostGroup.sessionCount] read zero, which is the
+     * one number that would stop anyone unfolding it again.
+     */
+    @Test
+    fun folding_hides_rows_on_the_screen_and_not_in_the_state() = runTest {
+        val fleet = FakeFleet(rows = listOf(session(1, host = "box")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.toggleHost("box")
+        runCurrent()
+
+        val box = vm.state.value.groups.single()
+        assertTrue(box.collapsed)
+        assertEquals(listOf(1L), box.projects.flatMap { it.sessions }.map { it.id })
+    }
+
+    @Test
+    fun folding_a_host_that_is_not_there_changes_nothing() = runTest {
+        val fleet = FakeFleet(rows = listOf(session(1, host = "box")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.toggleHost("a-machine-that-left-the-fleet")
+        runCurrent()
+
+        assertFalse(vm.state.value.groups.single().collapsed)
+    }
+
+    /**
+     * Two taps land on two different answers.
+     *
+     * The flip reads a value in order to write its opposite, so it does both in
+     * one `update {}` — the rule this class's neighbours already state. Two
+     * taps with nothing in between must cancel rather than the second one
+     * reading the first's stale value and writing the same answer again.
+     */
+    @Test
+    fun every_tap_moves_the_fold() = runTest {
+        val vm = SessionsViewModel(FakeFleet(rows = listOf(session(1, host = "box"))), backgroundScope)
+
+        vm.toggleHost("box")
+        vm.toggleHost("box")
+        runCurrent()
+        assertFalse(vm.state.value.groups.single().collapsed, "two taps cancel; neither may be lost")
+
+        vm.toggleHost("box")
+        runCurrent()
+        assertTrue(vm.state.value.groups.single().collapsed, "and a third still flips it")
+    }
+
+    /** Folding is a view over rows already in hand; it must not cost a call. */
+    @Test
+    fun folding_does_not_talk_to_the_hub() = runTest {
+        val fleet = FakeFleet(rows = listOf(session(1, host = "box")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.toggleHost("box")
+        runCurrent()
+
+        assertEquals(0, fleet.refreshes)
+    }
+
+    /**
+     * And it survives the app closing, through the same [dev.claudefleet.mobile.store.Prefs]
+     * the group mode already uses. A second view model over the same store is
+     * what a relaunch is; asserting the first one's own state would prove
+     * nothing about the store.
+     */
+    @Test
+    fun a_folded_host_is_still_folded_on_the_next_launch() = runTest {
+        val prefs = FakePrefs()
+        val fleet = FakeFleet(rows = listOf(session(1, host = "box"), session(2, host = "pine")))
+        SessionsViewModel(fleet, backgroundScope, prefs = prefs).toggleHost("box")
+
+        val next = SessionsViewModel(fleet, backgroundScope, prefs = prefs).state.value.groups.associateBy { it.alias }
+        assertTrue(next.getValue("box").collapsed)
+        assertFalse(next.getValue("pine").collapsed)
+    }
+
+    @Test
+    fun unfolding_is_remembered_too() = runTest {
+        val prefs = FakePrefs()
+        val fleet = FakeFleet(rows = listOf(session(1, host = "box")))
+        SessionsViewModel(fleet, backgroundScope, prefs = prefs).toggleHost("box")
+        SessionsViewModel(fleet, backgroundScope, prefs = prefs).toggleHost("box")
+
+        assertFalse(
+            SessionsViewModel(fleet, backgroundScope, prefs = prefs).state.value.groups.single().collapsed,
+            "the store must lose the alias, not merely stop reading it",
+        )
+    }
+}
