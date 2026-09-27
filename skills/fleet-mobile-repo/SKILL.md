@@ -136,9 +136,15 @@ missing feature should only hide a button. Instead, on every `ready`,
   acceptance criteria, and org labels / chips (M8.6), each hidden on its own
   when the hub does not list it.
 - `work_link` present → Confirm / Not this / Clear / Set work… / Start here /
-  Resume / Ask for a handover. The hub filters `tools/list` per caller, so a **readonly** token is
+  Resume / Also start in / Ask for a handover. The hub filters `tools/list` per caller, so a **readonly** token is
   never shown `work_link` — and the UI checks `Credentials.canWrite` as well.
   Both, always: never call a tool the token cannot use.
+- **Arguments.** `HubCapabilities.accepts(tool, param)` reads the schema's
+  `properties`, for a feature that is a new argument of an old action
+  (multi-start's `project_ids`). Absent means absent: an older hub ignores an
+  unknown argument instead of refusing it, so there is nothing to learn from.
+  `force_cross_org` is never sent (D15); `ToolsTheAppMayCallTest` fails on the
+  quoted string.
 - **Actions.** `action` is a free string on hubs before M8.0. When the schema
   has an `enum`, `HubCapabilities.has(tool, action)` reads it; when it does
   not, an action counts as present until the hub answers `E_INVALID`

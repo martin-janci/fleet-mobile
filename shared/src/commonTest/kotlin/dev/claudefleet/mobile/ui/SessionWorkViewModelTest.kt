@@ -7,6 +7,7 @@ import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.TimelineFrame
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.MultiStart
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.ResumePlan
@@ -105,6 +106,15 @@ internal class FakeWorkActions : WorkActions {
     override suspend fun link(sessionId: Long, itemId: Long?, key: String?) = record("link $sessionId ${itemId ?: key}")
     override suspend fun start(key: String, hostAlias: String, projectId: Long?) = record("start $key $hostAlias ${projectId ?: "-"}")
     override suspend fun resume(key: String, hostAlias: String?) = record("resume $key ${hostAlias ?: "-"}")
+
+    /** What a multi-start answers; the call is recorded as `start_many KEY host [ids]`. */
+    var manyAnswer = MultiStart()
+
+    override suspend fun startMany(key: String, hostAlias: String, projectIds: List<Long>): MultiStart {
+        calls += "start_many $key $hostAlias $projectIds"
+        fail?.let { throw it }
+        return manyAnswer
+    }
 
     // The reads M8.6 added are kept out of [calls], which the older tests
     // pin exactly: a card read beside a resume plan is not a decision.

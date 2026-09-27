@@ -96,6 +96,18 @@ class ToolsTheAppMayCallTest {
     }
 
     /**
+     * Decision D15 (work graph M13.4d): a cross-org refusal is said on the
+     * phone and never overridden from it. `force_cross_org` is the one
+     * argument that would override it, so no source set may write the string
+     * a request would need — whatever the call site, whatever the button.
+     */
+    @Test
+    fun no_source_set_can_send_force_cross_org() {
+        val offences = sharedSources().filter { "\"force_cross_org\"" in it.readText() }.map { it.name }
+        assertEquals(emptyList(), offences, "the phone never retries a start with force_cross_org")
+    }
+
+    /**
      * The other half, and the stronger one: an allow-list. A new tool call has
      * to be added here deliberately, rather than merely not being on a list of
      * things someone thought to forbid.
