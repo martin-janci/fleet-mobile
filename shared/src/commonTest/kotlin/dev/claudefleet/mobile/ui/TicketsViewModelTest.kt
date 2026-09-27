@@ -16,6 +16,8 @@ import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.ToolCatalog
+import dev.claudefleet.mobile.ui.components.BannerTone
+import dev.claudefleet.mobile.ui.components.bannerTone
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.buildJsonObject
@@ -205,6 +207,10 @@ class TicketsViewModelTest {
         assertEquals(emptyList(), nav.opened)
         val error = assertNotNull(tickets.state.value.error)
         assertTrue("dev-pay-9-r" in error.body, error.body)
+        assertEquals("Someone else got there first", error.title)
+        // Stored is not shown: the sheet's banner must actually draw it — as
+        // a note, since nothing failed that the person could retry.
+        assertEquals(BannerTone.Info, bannerTone(error), "a note naming the orphan reaches the screen")
     }
 
     @Test

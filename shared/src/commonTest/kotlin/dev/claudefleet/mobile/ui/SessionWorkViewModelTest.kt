@@ -20,6 +20,8 @@ import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.json
 import dev.claudefleet.mobile.net.ToolCatalog
+import dev.claudefleet.mobile.ui.components.BannerTone
+import dev.claudefleet.mobile.ui.components.bannerTone
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
@@ -442,6 +444,7 @@ class SessionWorkViewModelTest {
         runCurrent()
         assertEquals("A handover is already on its way", vm.state.value.error?.title)
         assertFalse(vm.state.value.error!!.isError)
+        assertEquals(BannerTone.Info, bannerTone(vm.state.value.error), "not an error, but still drawn")
     }
 
     /** A free-string hub that does not know `handover` hides the button for the connection, and nothing else. */

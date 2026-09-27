@@ -12,6 +12,7 @@ import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK_LINK
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.isUnknownAction
+import dev.claudefleet.mobile.net.orphanSessionId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -490,6 +491,10 @@ internal fun friendlyWork(t: Throwable): Friendly {
         t.isUnknownAction() -> Friendly("This hub can't do that yet", "Update the hub to use it from the phone.", isError = true, details = raw)
         t.code == "E_NOTFOUND" -> Friendly("Not found", t.message, isError = true, details = raw)
         t.code == "E_INVALID" -> Friendly("The hub refused that", t.message, isError = true, details = raw)
+        // A start or resume that lost a race made a session of its own first;
+        // the hub's message names it, and the person should know it is there.
+        t.code == "E_EXISTS" && t.orphanSessionId() != null ->
+            Friendly("Someone else got there first", t.message, isError = false, details = raw)
         t.code == "E_EXISTS" -> Friendly("Already running", t.message, isError = false, details = raw)
         t.code == "E_AMBIGUOUS" -> Friendly("Pick one", t.message, isError = true, details = raw)
         else -> friendly(t)
