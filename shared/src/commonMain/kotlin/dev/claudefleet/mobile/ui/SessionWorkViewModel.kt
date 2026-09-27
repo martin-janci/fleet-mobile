@@ -21,6 +21,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 
 /** The ticket chip on a session screen, and the small sheet behind it. */
 data class SessionWorkUiState(
@@ -48,6 +51,14 @@ data class SessionWorkUiState(
     val canHandover: Boolean = false,
     /** Where the last handover asked from this screen has got to, or null. */
     val handover: HandoverStatus? = null,
+    /**
+     * **Name this work…** (`work_link name`, claude-fleet M11.1; on the phone
+     * since M13.4a, decision D20): the session has no confirmed work, and a
+     * write token on a hub that lists the action.
+     */
+    val canNameWork: Boolean = false,
+    /** **Rename** the session's work: it is a local item (no ticket), same gate. */
+    val canRenameWork: Boolean = false,
 ) {
     /** What the chip draws: the confirmed work, else the guess. */
     val chip: WorkSummary? get() = work ?: suggested
@@ -211,6 +222,54 @@ class SessionWorkViewModel(
         }
     }
 
+    /**
+     * **Name this work…**: new local work with [title] (and, optionally, a
+     * [key]) linked to this session. The title is checked here first, in the
+     * hub's own terms, so a bad one is said without a round trip.
+     */
+    fun nameWork(title: String, key: String? = null): Job = scope.launch {
+        if (!state.value.canNameWork) return@launch
+        val t = title.trim()
+        titleProblem(t)?.let { problem ->
+            local.update { it.copy(error = problem) }
+            return@launch
+        }
+        guarded(NAME, ::friendlyName) { actions.name(sessionId, t, key?.trim()?.takeIf { it.isNotEmpty() }) }
+    }
+
+    /** **Rename** the session's local work to [title]. */
+    fun renameWork(title: String): Job = scope.launch {
+        if (!state.value.canRenameWork) return@launch
+        val itemId = row()?.work?.takeIf { it.isLocal }?.itemId ?: return@launch
+        val t = title.trim()
+        titleProblem(t)?.let { problem ->
+            local.update { it.copy(error = problem) }
+            return@launch
+        }
+        guarded(NAME, ::friendlyName) {
+            actions.renameItem(itemId, t)
+            local.update { it.copy(sheetOpen = false) }
+        }
+    }
+
+    /** One gated call with its own refusal wording; [runGated]'s shape, inline. */
+    private suspend fun guarded(action: String, words: (HubError.Tool) -> Friendly, call: suspend () -> Unit) {
+        if (!allowed(fleet.capabilities.value, action) || local.value.busy) return
+        local.update { it.copy(busy = true, error = null) }
+        try {
+            call()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: HubError.Tool) {
+            if (e.isUnknownAction()) fleet.actionMissing(WORK_LINK, action)
+            local.update { it.copy(error = words(e)) }
+        } catch (t: Throwable) {
+            local.update { it.copy(error = friendly(t)) }
+        } finally {
+            local.update { it.copy(busy = false) }
+        }
+    }
+
     /** A URL the hub cannot resolve to a ticket: ask for the key rather than link the URL. */
     private fun refuseUrl() {
         local.update {
@@ -274,6 +333,8 @@ class SessionWorkViewModel(
             error = l.error,
             canHandover = work?.key != null && row.canBeAskedForHandover && allowed(caps, HANDOVER),
             handover = l.handover,
+            canNameWork = work == null && allowed(caps, NAME),
+            canRenameWork = work?.isLocal == true && allowed(caps, NAME),
         )
     }
 
@@ -284,6 +345,7 @@ class SessionWorkViewModel(
         const val LINK = "link"
         const val LOOKUP = "lookup"
         const val HANDOVER = "handover"
+        const val NAME = "name"
     }
 }
 
@@ -332,6 +394,47 @@ internal fun friendlyHandover(e: HubError.Tool): Friendly {
         )
         "E_EXISTS" -> Friendly("A handover is already on its way", e.message, isError = false, details = raw)
         "E_INVALID" -> Friendly("No handover for this session", e.message, isError = true, details = raw)
+        else -> friendlyWork(e)
+    }
+}
+
+/** The hub's rule for a local work title (claude-fleet M11.1): trimmed, 1–120 characters, nothing unprintable. */
+internal const val WORK_TITLE_MAX = 120
+
+/** Why [title] (already trimmed) would be refused, or null. */
+internal fun titleProblem(title: String): Friendly? = when {
+    title.isEmpty() -> Friendly("Give the work a name", "A few words saying what it is.", isError = true)
+    title.length > WORK_TITLE_MAX -> Friendly("That name is too long", "At most $WORK_TITLE_MAX characters.", isError = true)
+    title.any { it.isISOControl() } -> Friendly("That name has an unprintable character", "Type it again without it.", isError = true)
+    else -> null
+}
+
+/**
+ * Local work is an item with no ticket behind it: no tracker status and no
+ * link to open — the desktop's test too. The hub refuses renaming a ticket
+ * anyway.
+ */
+val WorkSummary.isLocal: Boolean
+    get() = itemId != null && statusCategory == null && url == null
+
+/**
+ * A naming refusal, said for what it means here. The hub's `E_EXISTS` has
+ * two meanings: the key belongs to a **ticket** (details `tracker: true`) —
+ * that work already exists and wants *Set work…* — or to other local work.
+ */
+internal fun friendlyName(e: HubError.Tool): Friendly {
+    if (e.isUnknownAction()) return friendlyWork(e)
+    val raw = explain(e)
+    val ticket = ((e.details as? JsonObject)?.get("tracker") as? JsonPrimitive)?.booleanOrNull == true
+    return when {
+        e.code == "E_EXISTS" && ticket -> Friendly(
+            "That key is a ticket",
+            "Use Set work… with it instead: the ticket is the work.",
+            isError = true,
+            details = raw,
+        )
+        e.code == "E_EXISTS" -> Friendly("That key is taken", e.message, isError = true, details = raw)
+        e.code == "E_INVALID" -> Friendly("The hub refused that name", e.message, isError = true, details = raw)
         else -> friendlyWork(e)
     }
 }

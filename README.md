@@ -268,6 +268,10 @@ costs one reconnect.
     text, to the clipboard or the system share sheet;
   - **Ask for a handover** on a linked session: Claude writes a handover note
     for whoever picks the work up next, and the sheet says when it is written;
+  - **Name this work…** in a session's menu when it has none: work with a
+    title and no ticket (an optional key, like `OPS-1`), and **Rename** in the
+    sheet of such local work (claude-fleet M11.1; on the phone since M13.4a,
+    decision D20). A key that is already a ticket's says to use *Set work…*;
   - with two or more organisations, org chips that narrow the list and Today,
     and the org on each work heading and ticket.
 
