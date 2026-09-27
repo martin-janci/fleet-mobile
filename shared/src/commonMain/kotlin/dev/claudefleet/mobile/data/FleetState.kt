@@ -121,6 +121,20 @@ interface FleetState {
      */
     val timeline: Flow<TimelineFrame> get() = emptyFlow()
 
+    /**
+     * A tick for every `work:*` frame — `work:changed` (a placement, rule,
+     * view or org moved; ids only), `work:item`, `work:tracker…` — as they
+     * arrive. The Work view re-reads its visible page on one (debounced), the
+     * way a session screen re-reads its conversation on [sessionChanges]. A
+     * hot flow for the same reason: a screen not collecting missed it, and
+     * its own `ready` reload covers the gap.
+     *
+     * The value is a counter and means nothing on its own; what a frame names
+     * is not read, because every Work screen re-reads whole rather than
+     * patching by id.
+     */
+    val workChanges: Flow<Long> get() = emptyFlow()
+
     /** The hub refused [action] of [tool] as unknown: hide it for the rest of this connection. */
     fun actionMissing(tool: String, action: String) {}
 

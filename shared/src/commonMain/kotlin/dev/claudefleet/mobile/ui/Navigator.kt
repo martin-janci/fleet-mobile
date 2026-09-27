@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.ui
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 /** Which of the app's screens is showing. */
 sealed interface Screen {
@@ -25,10 +26,19 @@ sealed interface Screen {
     ) : Screen
     data object Hosts : Screen
     data object Settings : Screen
+
+    /** The Work view (claude-fleet M14): org → group → task. A tab of its own. */
+    data object Work : Screen
+
+    /** One task and all of its sessions, pushed over the Work view (or a session's Tasks). */
+    data class Task(val taskId: String) : Screen
 }
 
-/** The three destinations in the bottom bar. */
-enum class Tab { Sessions, Hosts, Settings }
+/**
+ * The destinations in the bottom bar. [Work] is drawn only when the hub
+ * serves the Work view (`work { tree }`) — see `App.kt`.
+ */
+enum class Tab { Sessions, Work, Hosts, Settings }
 
 /**
  * Where the app is, as a small object rather than as Compose state.
@@ -45,10 +55,44 @@ enum class Tab { Sessions, Hosts, Settings }
  * once you are in.
  */
 class Navigator {
+    /**
+     * Everything this navigator knows, as one value: which screen, which tab
+     * is lit, and where back goes. Every move is one [MutableStateFlow.update]
+     * of it — a compare-and-set that retries on contention — so two moves at
+     * once (a tap on the main thread, a view model's callback from a
+     * background dispatcher as a write lands) can neither lose one another
+     * nor leave the history half edited. [screen] and [tab] are then published
+     * from it ([publish]).
+     */
+    private data class NavState(
+        val screen: Screen = Screen.Sessions(),
+        val tab: Tab = Tab.Sessions,
+        /**
+         * Where [back] returns to, most recent last — the screens a pushed one
+         * (a session, the form, a task) was opened *from*, each as it stood: the
+         * Sessions screen filter and all, the Work view, or a task. Task → session
+         * → back lands on the task, and back again on the Work view.
+         *
+         * Only places are remembered, never a pushed screen that is merely being
+         * replaced: opening a session from another session, or the session the
+         * New session form just created, keeps what is under it. The form itself
+         * is never a place to come back to — backing out of the session it made
+         * lands under the form, not on a form that would make a second one.
+         *
+         * Not a field on [Screen.Session] itself: a session's identity is just
+         * its id, and carrying where it was opened from would make two opens of
+         * the same session unequal depending on how you got there. Bounded, so a
+         * walk task → session → task → … cannot grow it for ever.
+         */
+        val history: List<Screen> = emptyList(),
+    )
+
+    private val nav = MutableStateFlow(NavState())
+
     private val _screen = MutableStateFlow<Screen>(Screen.Sessions())
     val screen: StateFlow<Screen> = _screen.asStateFlow()
 
-    private val _tab = MutableStateFlow(tabOf(_screen.value))
+    private val _tab = MutableStateFlow(Tab.Sessions)
 
     /**
      * Which tab is lit. A session belongs to the list it was opened from, so
@@ -61,37 +105,57 @@ class Navigator {
     val tab: StateFlow<Tab> = _tab.asStateFlow()
 
     /**
-     * Where [back] returns to from an open session — the Sessions screen as
-     * it stood, filter and all, the moment [open] was called. Not a field on
-     * [Screen.Session] itself: a session's identity is just its id, and
-     * carrying a filter it has nothing to do with would make two opens of
-     * the same session unequal depending on how you got there.
+     * Remember [screen] to come back to, if it is a place rather than a
+     * pushed screen being replaced. A session counts as a place only for a
+     * task opened from its *Tasks* ([sessionIsAPlace]): back from the task
+     * returns to that session.
      */
-    private var returnTo: Screen.Sessions = Screen.Sessions()
+    private fun NavState.pushing(screen: Screen, sessionIsAPlace: Boolean = false): NavState {
+        if (screen is Screen.NewSession) return this
+        if (screen is Screen.Session && !sessionIsAPlace) return this
+        return copy(history = (history + screen).takeLast(MAX_HISTORY))
+    }
 
     /** Open one session's screen. */
-    fun open(sessionId: Long) {
-        (_screen.value as? Screen.Sessions)?.let { returnTo = it }
-        go(Screen.Session(sessionId))
+    fun open(sessionId: Long) = move { it.pushing(it.screen).going(Screen.Session(sessionId)) }
+
+    /**
+     * Open one task's screen (the Work view): from the Work view, from a
+     * session's *Tasks*, or from another task. Not from the form, which is
+     * about a session still being made.
+     */
+    fun openTask(taskId: String) = move { s ->
+        val current = s.screen
+        when {
+            current is Screen.NewSession || taskId.isBlank() -> s
+            current == Screen.Task(taskId) -> s
+            else -> s.pushing(current, sessionIsAPlace = true).going(Screen.Task(taskId))
+        }
     }
 
     /**
-     * Open the New session form over the list. Only from the list: that is
-     * where the button is, and where [back] and the created session's own back
+     * Open the New session form over the list — or, in ticket mode, over a
+     * task's screen (its **Start here**). Only from those two: that is where
+     * the buttons are, and where [back] and the created session's own back
      * both return to.
      *
-     * The form itself is never a place to come back to. [open] from it leaves
-     * [returnTo] as the list, so backing out of the session it just created
-     * lands on the list rather than on a form that would make a second one.
+     * The form itself is never a place to come back to. [open] from it keeps
+     * what was under it, so backing out of the session it just created lands
+     * on the list (or the task) rather than on a form that would make a
+     * second one.
      *
-     * [ticketKey] is the Tickets sheet's **Start here**: the same form, in
-     * ticket mode, and [created] opens what it makes exactly as for a plain
-     * session.
+     * [ticketKey] is the Tickets sheet's or a task's **Start here**: the same
+     * form, in ticket mode, and [created] opens what it makes exactly as for
+     * a plain session.
      */
-    fun newSession(ticketKey: String? = null) {
-        val list = _screen.value as? Screen.Sessions ?: return
-        returnTo = list
-        go(Screen.NewSession(hostAlias = list.hostAlias, ticketKey = ticketKey))
+    fun newSession(ticketKey: String? = null) = move { s ->
+        val current = s.screen
+        val host = when (current) {
+            is Screen.Sessions -> current.hostAlias
+            is Screen.Task -> if (ticketKey != null) null else return@move s
+            else -> return@move s
+        }
+        s.pushing(current).going(Screen.NewSession(hostAlias = host, ticketKey = ticketKey))
     }
 
     /**
@@ -99,10 +163,11 @@ class Navigator {
      * what is showing. The call outlives the form (see
      * `NewSessionViewModel.callScope`), so it can finish after the person has
      * backed out or switched tabs, and yanking them into a session then would
-     * be a surprise. The session is on the list either way.
+     * be a surprise. The session is on the list either way. The check and the
+     * move are one step, so a back racing it cannot be undone by it.
      */
-    fun created(sessionId: Long) {
-        if (_screen.value is Screen.NewSession) open(sessionId)
+    fun created(sessionId: Long) = move { s ->
+        if (s.screen is Screen.NewSession) s.pushing(s.screen).going(Screen.Session(sessionId)) else s
     }
 
     /**
@@ -112,17 +177,25 @@ class Navigator {
      * to inside the app, and saying so is what lets the Android host hand the
      * gesture to the system instead of swallowing it.
      *
-     * Restores [returnTo] rather than a bare `Screen.Sessions()`, so a session
-     * opened from a host-filtered list comes back to that same filter instead
-     * of silently clearing it. Only a tab reselect or the filter's own clear
-     * chip may drop it — not the unrelated act of looking at a session and
-     * returning.
+     * Restores the screen the pushed one was opened from rather than a bare
+     * `Screen.Sessions()`, so a session opened from a host-filtered list comes
+     * back to that same filter instead of silently clearing it, and one
+     * opened from a task comes back to the task. Only a tab reselect or the
+     * filter's own clear chip may drop a filter — not the unrelated act of
+     * looking at a session and returning.
      */
     fun back(): Boolean {
-        val current = _screen.value
-        if (current !is Screen.Session && current !is Screen.NewSession) return false
-        go(returnTo)
-        return true
+        var handled = false
+        move { s ->
+            handled = isPushed(s.screen)
+            if (!handled) {
+                s
+            } else {
+                val to = s.history.lastOrNull() ?: rootOf(s.tab)
+                s.copy(history = s.history.dropLast(1)).going(to)
+            }
+        }
+        return handled
     }
 
     /**
@@ -133,24 +206,14 @@ class Navigator {
      * same kind of state and leaves the same way — reselecting Sessions always
      * lands on the unfiltered list, never the one a host tap set up earlier.
      */
-    fun select(tab: Tab) {
-        go(
-            when (tab) {
-                Tab.Sessions -> Screen.Sessions()
-                Tab.Hosts -> Screen.Hosts
-                Tab.Settings -> Screen.Settings
-            },
-        )
-    }
+    fun select(tab: Tab) = move { it.copy(history = emptyList()).going(rootOf(tab)) }
 
     /**
      * Jump to the Sessions tab filtered to one host — what tapping a host row
-     * on the Hosts screen does. Goes through [go] like every other move, so
+     * on the Hosts screen does. Goes through [going] like every other move, so
      * the tab indicator follows it there without a separate `select` call.
      */
-    fun showSessionsFor(alias: String) {
-        go(Screen.Sessions(hostAlias = alias))
-    }
+    fun showSessionsFor(alias: String) = move { it.copy(history = emptyList()).going(Screen.Sessions(hostAlias = alias)) }
 
     /**
      * Clear the current host filter — the Sessions bar's own clear-chip
@@ -161,24 +224,72 @@ class Navigator {
      * This is [Screen] itself, not [SessionsViewModel]'s filter: the review
      * fix this closes found that the chip used to call `setHostFilter(null)`
      * directly on the view model, leaving [screen] still holding the old
-     * `Screen.Sessions(alias)`. [open] reads `_screen.value` to build
-     * [returnTo], so it captured the stale filter, and [back] restored it —
+     * `Screen.Sessions(alias)`. [open] reads the current screen to build
+     * the history, so it captured the stale filter, and [back] restored it —
      * the filter came back the moment a session was opened and closed. With
      * one source of truth for the filter (this screen, not a second copy in
      * the view model), [open] can only ever capture what this actually set.
      */
-    fun clearHostFilter() {
-        if (_screen.value is Screen.Sessions) go(Screen.Sessions())
+    fun clearHostFilter() = move { if (it.screen is Screen.Sessions) it.going(Screen.Sessions()) else it }
+
+    /**
+     * The Work tab went away — the hub stopped serving `work { tree }`, or a
+     * reconnect landed on an older hub. A Work screen has nothing to draw
+     * then, so the app goes to the list rather than leaving a lit tab that
+     * is no longer in the bar.
+     */
+    fun workUnavailable() = move { if (it.tab == Tab.Work) it.copy(history = emptyList()).going(rootOf(Tab.Sessions)) else it }
+
+    private fun NavState.going(screen: Screen): NavState = copy(
+        screen = screen,
+        // A session or the form belongs to the tab it was opened from — the
+        // Work tab stays lit over a session opened from a task.
+        tab = tabOf(screen) ?: history.lastOrNull()?.let(::tabOf) ?: tab,
+    )
+
+    /** One move: an atomic step of [nav], then [publish]. */
+    private inline fun move(crossinline step: (NavState) -> NavState) {
+        nav.update { step(it) }
+        publish()
     }
 
-    private fun go(screen: Screen) {
-        _screen.value = screen
-        _tab.value = tabOf(screen)
+    /**
+     * Copy [nav] into [screen] and [tab]. Two threads publishing at once may
+     * write in either order, so each checks afterwards that what it wrote is
+     * still the latest and writes again if not: the last word is always the
+     * newest state.
+     */
+    private fun publish() {
+        while (true) {
+            val s = nav.value
+            _screen.value = s.screen
+            _tab.value = s.tab
+            if (nav.value == s) return
+        }
+    }
+
+    private companion object {
+        /** How many places back remembers; a longer walk forgets its oldest step. */
+        const val MAX_HISTORY = 16
     }
 }
 
-private fun tabOf(screen: Screen): Tab = when (screen) {
-    is Screen.Sessions, is Screen.Session, is Screen.NewSession -> Tab.Sessions
+/** A screen pushed over a tab, which back leaves; a tab's own screen is not one. */
+internal fun isPushed(screen: Screen): Boolean =
+    screen is Screen.Session || screen is Screen.NewSession || screen is Screen.Task
+
+private fun rootOf(tab: Tab): Screen = when (tab) {
+    Tab.Sessions -> Screen.Sessions()
+    Tab.Work -> Screen.Work
+    Tab.Hosts -> Screen.Hosts
+    Tab.Settings -> Screen.Settings
+}
+
+/** The tab a screen lights, or null for one that belongs to whichever it was opened from. */
+private fun tabOf(screen: Screen): Tab? = when (screen) {
+    is Screen.Sessions -> Tab.Sessions
+    is Screen.Session, is Screen.NewSession -> null
+    Screen.Work, is Screen.Task -> Tab.Work
     Screen.Hosts -> Tab.Hosts
     Screen.Settings -> Tab.Settings
 }

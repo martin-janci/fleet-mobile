@@ -16,6 +16,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -48,6 +49,18 @@ import dev.claudefleet.mobile.store.Credentials
 import dev.claudefleet.mobile.store.Prefs
 import dev.claudefleet.mobile.store.Secrets
 import dev.claudefleet.mobile.ui.AgentViewModel
+import dev.claudefleet.mobile.ui.MyWorkHandlers
+import dev.claudefleet.mobile.ui.MyWorkScreen
+import dev.claudefleet.mobile.ui.MyWorkViewModel
+import dev.claudefleet.mobile.ui.ReviewHandlers
+import dev.claudefleet.mobile.ui.ReviewSheet
+import dev.claudefleet.mobile.ui.ReviewViewModel
+import dev.claudefleet.mobile.ui.SessionTasksHandlers
+import dev.claudefleet.mobile.ui.SessionTasksViewModel
+import dev.claudefleet.mobile.ui.TaskHandlers
+import dev.claudefleet.mobile.ui.TaskScreen
+import dev.claudefleet.mobile.ui.TaskViewModel
+import dev.claudefleet.mobile.model.GroupRef
 import dev.claudefleet.mobile.ui.HostsScreen
 import dev.claudefleet.mobile.ui.HostsViewModel
 import dev.claudefleet.mobile.ui.MultiStartHandlers
@@ -358,7 +371,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     // app handles back, and on a tab it does not, which lets Android close the
     // app and iOS do whatever it does with an unclaimed swipe. That is why the
     // return value still does not need reading here.
-    BackHandler(enabled = screen is Screen.Session || screen is Screen.NewSession) { nav.back() }
+    BackHandler(enabled = screen is Screen.Session || screen is Screen.NewSession || screen is Screen.Task) { nav.back() }
 
     val sessions = remember(repository, scope) { SessionsViewModel(repository, scope, prefs = container.prefs) }
     // The fleet's scope, like the New session form's `callScope`: a resume
@@ -391,6 +404,31 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
             onOpenSession = { nav.open(it) },
         )
     }
+    // The Work view (claude-fleet M14): the My work tab and its Review sheet.
+    // Built once per repository like the sheets above; the tab follows the
+    // fleet only while it is showing (`attach` / `detach` below).
+    val myWork = remember(repository, scope) {
+        MyWorkViewModel(
+            fleet = repository,
+            actions = container.workActions,
+            scope = scope,
+            canWrite = credentials.canWrite,
+            prefs = container.prefs,
+        )
+    }
+    val review = remember(repository, scope) {
+        ReviewViewModel(
+            fleet = repository,
+            actions = container.workActions,
+            scope = scope,
+            canWrite = credentials.canWrite,
+            onChanged = { myWork.reload() },
+        )
+    }
+    val workState by myWork.state.collectAsState()
+    // The hub stopped serving the Work view (or a reconnect found an older
+    // hub): the tab leaves the bar, and the app leaves the tab.
+    LaunchedEffect(workState.available) { if (!workState.available) nav.workUnavailable() }
     val hosts = remember(repository, scope) { HostsViewModel(repository, scope) }
     val settings = remember(container, scope) {
         SettingsViewModel(container.session, scope, container.appVersion)
@@ -400,18 +438,24 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
         bottomBar = {
             NavigationBar {
                 val attention by sessions.state.collectAsState()
-                for (entry in Tab.entries) {
+                // Work only when the hub serves `work { tree }`.
+                for (entry in Tab.entries.filter { it != Tab.Work || workState.available }) {
                     NavigationBarItem(
                         selected = tab == entry,
                         onClick = { nav.select(entry) },
                         icon = {
                             val icon = when (entry) {
                                 Tab.Sessions -> FleetIcons.Sessions
+                                Tab.Work -> FleetIcons.Work
                                 Tab.Hosts -> FleetIcons.Hosts
                                 Tab.Settings -> FleetIcons.Settings
                             }
                             if (entry == Tab.Sessions && attention.attentionCount > 0) {
                                 BadgedBox(badge = { Badge { Text("${attention.attentionCount}") } }) {
+                                    Icon(icon, contentDescription = entry.name)
+                                }
+                            } else if (entry == Tab.Work && workState.reviewCount > 0) {
+                                BadgedBox(badge = { Badge { Text("${workState.reviewCount}") } }) {
                                     Icon(icon, contentDescription = entry.name)
                                 }
                             } else {
@@ -558,6 +602,82 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         repository = repository,
                         credentials = credentials,
                         onBack = { nav.back() },
+                        onOpenTask = nav::openTask,
+                        // The fleet's scope: a change to the session's tasks
+                        // is not cancelled by leaving the session.
+                        callScope = scope,
+                    )
+                }
+                Screen.Work -> {
+                    DisposableEffect(myWork) {
+                        myWork.attach()
+                        onDispose { myWork.detach() }
+                    }
+                    val reviewState by review.state.collectAsState()
+                    MyWorkScreen(
+                        state = workState,
+                        handlers = MyWorkHandlers(
+                            onOpenTask = nav::openTask,
+                            onRefresh = { myWork.refresh() },
+                            onReload = { myWork.reload() },
+                            onToggleSection = myWork::toggleSection,
+                            onLoadMore = { myWork.loadMore(it) },
+                            onToggleSearch = myWork::toggleSearch,
+                            onSetQuery = myWork::setQuery,
+                            onOpenFilters = { myWork.setFiltersOpen(true) },
+                            onCloseFilters = { myWork.setFiltersOpen(false) },
+                            onSetOrg = myWork::setOrg,
+                            onSetTracker = myWork::setTracker,
+                            onSetStatus = myWork::setStatus,
+                            onSetHas = myWork::setHas,
+                            onToggleMine = myWork::toggleMine,
+                            onToggleReview = myWork::toggleReview,
+                            onClearFilters = myWork::clearFilters,
+                            onApplyView = myWork::applyView,
+                            onSaveView = { myWork.saveView(it) },
+                            onUpdateView = { myWork.updateView(it) },
+                            onDeleteView = { myWork.deleteView(it) },
+                            onOpenReview = if (reviewState.available) ({ review.open() }) else null,
+                            onOpenRules = if (workState.rulesAvailable) ({ myWork.openRules() }) else null,
+                            onCloseRules = myWork::closeRules,
+                            onDismissError = myWork::dismissError,
+                        ),
+                    )
+                    if (reviewState.open) {
+                        ReviewSheet(
+                            state = reviewState,
+                            handlers = ReviewHandlers(
+                                onClose = review::close,
+                                onReload = { review.reload() },
+                                onLoadMore = { review.loadMore() },
+                                onConfirm = { review.confirm(it) },
+                                onReject = { review.reject(it) },
+                                onKeep = { review.keep(it) },
+                                onRemove = { review.remove(it) },
+                                onMakePrimary = { review.makePrimary(it) },
+                                onToggleChange = review::toggleChange,
+                                onChange = { item, alt -> review.change(item, alt) },
+                                onConfirmAll = { review.confirmAllShown() },
+                                onUndo = { review.undo() },
+                                onDismissUndo = review::dismissUndo,
+                                onDismissError = review::dismissError,
+                            ),
+                        )
+                    }
+                }
+                is Screen.Task -> key(current.taskId) {
+                    TaskRoute(
+                        taskId = current.taskId,
+                        container = container,
+                        repository = repository,
+                        credentials = credentials,
+                        knownGroups = myWork::knownGroups,
+                        // The fleet's scope: a placement or a resume is not
+                        // cancelled by backing out of the task.
+                        callScope = scope,
+                        onOpenSession = nav::open,
+                        onStartHere = { nav.newSession(ticketKey = it) },
+                        onBack = { nav.back() },
                     )
                 }
                 Screen.Hosts -> {
@@ -631,12 +751,62 @@ private fun NewSessionRoute(
 }
 
 @Composable
+private fun TaskRoute(
+    taskId: String,
+    container: AppContainer,
+    repository: FleetRepository,
+    credentials: Credentials,
+    knownGroups: () -> List<GroupRef>,
+    callScope: CoroutineScope,
+    onOpenSession: (Long) -> Unit,
+    onStartHere: (String) -> Unit,
+    onBack: () -> Unit,
+) {
+    val scope = rememberWorkScope()
+    val vm = remember(taskId, repository, scope) {
+        TaskViewModel(
+            taskId = taskId,
+            fleet = repository,
+            actions = container.workActions,
+            scope = scope,
+            // `work_link` is not readonly; the view model checks the hub's
+            // list of actions as well.
+            canWrite = credentials.canWrite,
+            knownGroups = knownGroups,
+            onOpenSession = onOpenSession,
+            onStartHere = onStartHere,
+            callScope = callScope,
+        )
+    }
+    val state by vm.state.collectAsState()
+    val status by repository.status.collectAsState()
+    TaskScreen(
+        state = state,
+        status = status,
+        handlers = TaskHandlers(
+            onBack = onBack,
+            onRefresh = { vm.refresh() },
+            onOpenSession = vm::openSession,
+            onContinue = { vm.continueWork() },
+            onStartHere = vm::startHere,
+            onOpenPlace = vm::openPlace,
+            onClosePlace = vm::closePlace,
+            onPlace = { group, note -> vm.place(group, note) },
+            onClearPlacement = { vm.clearPlacement() },
+            onDismissError = vm::dismissError,
+        ),
+    )
+}
+
+@Composable
 private fun SessionRoute(
     sessionId: Long,
     container: AppContainer,
     repository: FleetRepository,
     credentials: Credentials,
     onBack: () -> Unit,
+    onOpenTask: (String) -> Unit,
+    callScope: CoroutineScope,
 ) {
     val scope = rememberWorkScope()
     val vm = remember(sessionId, repository, scope) {
@@ -665,10 +835,22 @@ private fun SessionRoute(
             canWrite = credentials.canWrite,
         )
     }
+    val tasksVm = remember(sessionId, repository, scope) {
+        SessionTasksViewModel(
+            sessionId = sessionId,
+            fleet = repository,
+            actions = container.workActions,
+            scope = scope,
+            canWrite = credentials.canWrite,
+            onOpenTask = onOpenTask,
+            callScope = callScope,
+        )
+    }
     LaunchedEffect(sessionId) { vm.load() }
 
     val state by vm.state.collectAsState()
     val work by workVm.state.collectAsState()
+    val tasks by tasksVm.state.collectAsState()
     val status by repository.status.collectAsState()
     // Collected here, not folded into `SessionUiState`: `QuickReplies.chips`
     // is its own `StateFlow`, one per app rather than one per session, and
@@ -721,6 +903,23 @@ private fun SessionRoute(
             onHandover = { workVm.handover() },
             onNameWork = { title, key -> workVm.nameWork(title, key) },
             onRenameWork = { workVm.renameWork(it) },
+        ),
+        tasks = tasks,
+        tasksHandlers = SessionTasksHandlers(
+            onOpen = tasksVm::openSheet,
+            onClose = tasksVm::closeSheet,
+            onReload = { tasksVm.reload() },
+            onOpenTask = tasksVm::openTask,
+            onMakePrimary = { tasksVm.makePrimary(it) },
+            onRemove = { tasksVm.remove(it) },
+            onConfirm = { tasksVm.confirm(it) },
+            onReject = { tasksVm.reject(it) },
+            onOpenAdd = { tasksVm.openAdd() },
+            onCloseAdd = tasksVm::closeAdd,
+            onAddQuery = tasksVm::setAddQuery,
+            onAdd = { tasksVm.add(it) },
+            onAddTyped = { tasksVm.addTyped() },
+            onDismissError = tasksVm::dismissError,
         ),
     )
 }

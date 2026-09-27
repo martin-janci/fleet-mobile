@@ -60,6 +60,16 @@ data class HubCapabilities(
             actions[tool]?.contains(action) != false &&
             action !in missing[tool].orEmpty()
 
+    /**
+     * [has], and the hub's schema *names* [action] in [tool]'s enum — not
+     * merely a free-string `action` that might take it. For a feature whose
+     * whole screen hangs on an action only a newer hub has (the Work tab on
+     * `work { tree }`): every hub that serves it enumerates its actions, so a
+     * hub that does not is one that cannot, and no tab is drawn to be refused.
+     */
+    fun lists(tool: String, action: String): Boolean =
+        has(tool, action) && actions[tool]?.contains(action) == true
+
     fun accepts(tool: String, param: String): Boolean = tool in tools && params[tool]?.contains(param) == true
 
     /** This connection learned [action] is not one [tool] has. */

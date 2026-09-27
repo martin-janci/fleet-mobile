@@ -15,6 +15,20 @@ import dev.claudefleet.mobile.model.TicketCard
 import dev.claudefleet.mobile.model.Today
 import dev.claudefleet.mobile.model.TrackerRow
 import dev.claudefleet.mobile.model.WaitResult
+import dev.claudefleet.mobile.model.BatchResult
+import dev.claudefleet.mobile.model.OrgImpact
+import dev.claudefleet.mobile.model.ReviewPage
+import dev.claudefleet.mobile.model.RulePreview
+import dev.claudefleet.mobile.model.SessionTasks
+import dev.claudefleet.mobile.model.TaskDetail
+import dev.claudefleet.mobile.model.WorkDecision
+import dev.claudefleet.mobile.model.WorkRule
+import dev.claudefleet.mobile.model.WorkRuleDraft
+import dev.claudefleet.mobile.model.WorkTask
+import dev.claudefleet.mobile.model.WorkTreeFilters
+import dev.claudefleet.mobile.model.WorkTreePage
+import dev.claudefleet.mobile.model.WorkView
+import dev.claudefleet.mobile.model.WorkViewDraft
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.timeout
@@ -521,17 +535,235 @@ class HubClient(
             json.decodeFromJsonElement(ListSerializer(OrgDetail.serializer()), it)
         }
 
-    /** Accept a suggestion: it becomes the session's work. Answers the updated row. */
-    suspend fun confirmWork(sessionId: Long, linkId: Long): SessionRow =
-        workLink("confirm", sessionId) { put("link_id", linkId) }
+    // ---- the Work view (claude-fleet M14) ----
+
+    /**
+     * One page of the Work tree. [filters] travel as a JSON object and only
+     * when one is set; [cursor] is the previous page's opaque `next_cursor`,
+     * valid only with the same filters. [perTask] caps the sessions listed
+     * under each task (0–50).
+     */
+    suspend fun workTree(
+        filters: WorkTreeFilters = WorkTreeFilters(),
+        cursor: String? = null,
+        limit: Int? = null,
+        perTask: Int? = null,
+    ): WorkTreePage =
+        call(
+            "work",
+            buildJsonObject {
+                put("action", "tree")
+                val f = filters.normalized()
+                if (f != WorkTreeFilters()) put("filters", json.encodeToJsonElement(WorkTreeFilters.serializer(), f))
+                cursor?.let { put("cursor", it) }
+                limit?.let { put("limit", it) }
+                perTask?.let { put("per_task", it) }
+            },
+        ) { json.decodeFromJsonElement(WorkTreePage.serializer(), it) }
+
+    /** One task with every session it has (and their evidence), where its org and group come from. */
+    suspend fun workTask(taskId: String): TaskDetail =
+        call("work", buildJsonObject { put("action", "task"); put("task_id", taskId) }) {
+            json.decodeFromJsonElement(TaskDetail.serializer(), it)
+        }
+
+    /** Every link of one session — live, suggested, rejected and ended — with its task. */
+    suspend fun workSessionTasks(sessionId: Long): SessionTasks =
+        call("work", buildJsonObject { put("action", "session_tasks"); put("session_id", sessionId) }) {
+            json.decodeFromJsonElement(SessionTasks.serializer(), it)
+        }
+
+    /** The review inbox: suggestions and conflicts, page by page. */
+    suspend fun workReview(cursor: String? = null, limit: Int? = null): ReviewPage =
+        call(
+            "work",
+            buildJsonObject {
+                put("action", "review")
+                cursor?.let { put("cursor", it) }
+                limit?.let { put("limit", it) }
+            },
+        ) { json.decodeFromJsonElement(ReviewPage.serializer(), it) }
+
+    /** The placement rules. */
+    suspend fun workRules(): List<WorkRule> =
+        call("work", buildJsonObject { put("action", "rules") }) {
+            json.decodeFromJsonElement(ListSerializer(WorkRule.serializer()), it)
+        }
+
+    /** What saving [rule] would move, before it is saved. */
+    suspend fun workRulePreview(rule: WorkRuleDraft): RulePreview =
+        call(
+            "work",
+            buildJsonObject {
+                put("action", "rule_preview")
+                put("rule", json.encodeToJsonElement(WorkRuleDraft.serializer(), rule))
+            },
+        ) { json.decodeFromJsonElement(RulePreview.serializer(), it) }
+
+    /** The saved views this token sees. */
+    suspend fun workViews(): List<WorkView> =
+        call("work", buildJsonObject { put("action", "views") }) {
+            json.decodeFromJsonElement(ListSerializer(WorkView.serializer()), it)
+        }
+
+    /** What moving local task [taskId] to org [orgId] (`0` = none) would change, and the token to do it. */
+    suspend fun workOrgImpact(taskId: String, orgId: Long): OrgImpact =
+        call(
+            "work",
+            buildJsonObject {
+                put("action", "org_impact")
+                put("task_id", taskId)
+                put("org_id", orgId)
+            },
+        ) { json.decodeFromJsonElement(OrgImpact.serializer(), it) }
+
+    /**
+     * Accept a suggestion: it becomes the session's work. Answers the updated
+     * row. [primary] false (claude-fleet M14) confirms it as a *secondary*
+     * link; null leaves the hub's default, which takes the primary.
+     * [expectedVersion] is the link's `link_version`: a mismatch is refused
+     * with `E_CONFLICT` and changes nothing.
+     */
+    suspend fun confirmWork(
+        sessionId: Long,
+        linkId: Long,
+        primary: Boolean? = null,
+        expectedVersion: Long? = null,
+    ): SessionRow =
+        workLink("confirm", sessionId) {
+            put("link_id", linkId)
+            primary?.let { put("primary", it) }
+            expectedVersion?.let { put("expected_version", it) }
+        }
 
     /** "Not this": a sticky rejection of one suggestion. Answers the updated row. */
-    suspend fun rejectWork(sessionId: Long, linkId: Long): SessionRow =
-        workLink("reject", sessionId) { put("link_id", linkId) }
+    suspend fun rejectWork(sessionId: Long, linkId: Long, expectedVersion: Long? = null): SessionRow =
+        workLink("reject", sessionId) {
+            put("link_id", linkId)
+            expectedVersion?.let { put("expected_version", it) }
+        }
 
     /** Clear a live link. Answers the updated row. */
-    suspend fun unlinkWork(sessionId: Long, linkId: Long): SessionRow =
-        workLink("unlink", sessionId) { put("link_id", linkId) }
+    suspend fun unlinkWork(sessionId: Long, linkId: Long, expectedVersion: Long? = null): SessionRow =
+        workLink("unlink", sessionId) {
+            put("link_id", linkId)
+            expectedVersion?.let { put("expected_version", it) }
+        }
+
+    /**
+     * Make [linkId] the session's primary link (claude-fleet M14): a
+     * compare-and-set on the current primary, [expectedPrimary] its link id
+     * (`0` = none). Another device having moved it first answers `E_CONFLICT`
+     * naming the current one. Never ends or deletes another link.
+     */
+    suspend fun setPrimaryWork(sessionId: Long, linkId: Long, expectedPrimary: Long? = null): SessionRow =
+        workLink("set_primary", sessionId) {
+            put("link_id", linkId)
+            expectedPrimary?.let { put("expected_primary", it) }
+        }
+
+    /** Undo a person's confirm / reject: the link goes back to a suggestion. */
+    suspend fun reconsiderWork(sessionId: Long, linkId: Long, expectedVersion: Long? = null): SessionRow =
+        workLink("reconsider", sessionId) {
+            put("link_id", linkId)
+            expectedVersion?.let { put("expected_version", it) }
+        }
+
+    /** Keep a conflict (cross-org, unavailable ticket) on purpose: it leaves the review inbox. */
+    suspend fun ackWork(sessionId: Long, linkId: Long, expectedVersion: Long? = null): SessionRow =
+        workLink("ack", sessionId) {
+            put("link_id", linkId)
+            expectedVersion?.let { put("expected_version", it) }
+        }
+
+    /**
+     * Several review decisions in one call (at most 100). Each is checked on
+     * its own against scope and version, so the answer is per item: some may
+     * succeed while others are refused.
+     */
+    suspend fun decideWorkBatch(decisions: List<WorkDecision>): BatchResult =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "decide_batch")
+                put("decisions", json.encodeToJsonElement(ListSerializer(WorkDecision.serializer()), decisions))
+            },
+        ) { json.decodeFromJsonElement(BatchResult.serializer(), it) }
+
+    /**
+     * Put [taskId] in the group labelled [group] — a local placement only;
+     * fleet never edits a tracker. An empty [group] clears the placement.
+     * [expectedVersion] is the task's `placement_version` (`0` = "I expect
+     * none"), so two devices placing at once cannot overwrite each other.
+     */
+    suspend fun placeWork(taskId: String, group: String, expectedVersion: Long, note: String? = null): WorkTask =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "place")
+                put("task_id", taskId)
+                put("group", group)
+                note?.takeIf { it.isNotBlank() }?.let { put("note", it) }
+                put("expected_version", expectedVersion)
+            },
+        ) { json.decodeFromJsonElement(WorkTask.serializer(), it) }
+
+    /**
+     * Move a local task to org [orgId] (`0` = none). Only with the
+     * `impact_token` of a fresh [workOrgImpact]: the hub recomputes the impact
+     * and refuses with `E_CONFLICT` when it changed.
+     */
+    suspend fun assignWorkOrg(taskId: String, orgId: Long, impactToken: String): WorkTask =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "assign_org")
+                put("task_id", taskId)
+                put("org_id", orgId)
+                put("impact_token", impactToken)
+            },
+        ) { json.decodeFromJsonElement(WorkTask.serializer(), it) }
+
+    /** Create or change a placement rule. */
+    suspend fun saveWorkRule(rule: WorkRuleDraft): WorkRule =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "rule_save")
+                put("rule", json.encodeToJsonElement(WorkRuleDraft.serializer(), rule))
+            },
+        ) { json.decodeFromJsonElement(WorkRule.serializer(), it) }
+
+    suspend fun deleteWorkRule(ruleId: Long, expectedVersion: Long? = null) {
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "rule_delete")
+                put("rule_id", ruleId)
+                expectedVersion?.let { put("expected_version", it) }
+            },
+        ) { }
+    }
+
+    /** Save a view: new without an id, else changed under its version. */
+    suspend fun saveWorkView(view: WorkViewDraft): WorkView =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "view_save")
+                put("view", json.encodeToJsonElement(WorkViewDraft.serializer(), view.copy(filters = view.filters.normalized().copy(group = null))))
+            },
+        ) { json.decodeFromJsonElement(WorkView.serializer(), it) }
+
+    suspend fun deleteWorkView(viewId: Long) {
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "view_delete")
+                put("view_id", viewId)
+            },
+        ) { }
+    }
 
     /**
      * Ask the session's Claude to write a handover for its work (claude-fleet
@@ -568,10 +800,22 @@ class HubClient(
         ) { }
     }
 
-    /** Set the session's work by item id (a looked-up ticket) or by bare key. */
-    suspend fun linkWork(sessionId: Long, itemId: Long? = null, key: String? = null): SessionRow =
+    /**
+     * Set the session's work by item id (a looked-up ticket) or by bare key.
+     * [primary] false (claude-fleet M14) adds a *secondary* link and leaves
+     * the primary alone; null is the hub's default, which takes the primary.
+     */
+    suspend fun linkWork(
+        sessionId: Long,
+        itemId: Long? = null,
+        key: String? = null,
+        primary: Boolean? = null,
+        expectedVersion: Long? = null,
+    ): SessionRow =
         workLink("link", sessionId) {
             if (itemId != null) put("item_id", itemId) else put("key", key.orEmpty())
+            primary?.let { put("primary", it) }
+            expectedVersion?.let { put("expected_version", it) }
         }
 
     /**
