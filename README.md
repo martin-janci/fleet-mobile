@@ -281,7 +281,20 @@ costs one reconnect.
     decision D20). A key that is already a ticket's says to use *Set work…*;
   - with two or more organisations, org chips that narrow the list and Today,
     the org on each work heading and ticket, and the org's colour as a thin
-    bar at each session row's edge.
+    bar at each session row's edge;
+  - a **Work** tab (claude-fleet M14's Work view, when the hub lists
+    `work { tree }`): org → group → task sections with the hub's counts,
+    *Load more* per section, saved views as chips, the desktop's filters, and
+    "Offline · as of 10:42" over the last page when the hub is unreachable. A
+    task shows every session it has had (active, suggested, past) and why,
+    with **Open**, **Continue**, **Start here** and **Place in group…**; a
+    session's **Tasks** chip lists every link with **Make primary**,
+    **Remove** and **Add task…**; the **Review** sheet decides suggestions and
+    conflicts one by one or all at once, with **Undo**. Every write carries
+    the version it was read at, so a change another device made first comes
+    back as *Changed on another device* with **Reload** — never overwritten,
+    and never queued offline. Placement rules are read-only here; they are
+    made on the desktop.
 
   A ticket card is read-only (claude-fleet decision D15): **Copy** puts the
   key, title, status, link and criteria on the clipboard as plain text; the

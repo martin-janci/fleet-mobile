@@ -33,15 +33,17 @@ class EveryErrorBannerCanBeDismissedTest {
     }
 
     @Test
-    fun all_six_screens_draw_one() {
+    fun every_screen_draws_one() {
         assertEquals(
             listOf(
                 "HostsScreen.kt",
+                "MyWorkScreen.kt",
                 "NewSessionScreen.kt",
                 "PairScreen.kt",
                 "SessionScreen.kt",
                 "SessionsScreen.kt",
                 "SettingsScreen.kt",
+                "TaskScreen.kt",
             ),
             callSites.keys.sorted(),
         )

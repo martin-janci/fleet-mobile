@@ -16,6 +16,21 @@ import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.TicketCard
 import dev.claudefleet.mobile.model.Today
 import dev.claudefleet.mobile.model.WorkSummary
+import dev.claudefleet.mobile.model.BatchResult
+import dev.claudefleet.mobile.model.DecisionResult
+import dev.claudefleet.mobile.model.OrgImpact
+import dev.claudefleet.mobile.model.ReviewPage
+import dev.claudefleet.mobile.model.RulePreview
+import dev.claudefleet.mobile.model.SessionTasks
+import dev.claudefleet.mobile.model.TaskDetail
+import dev.claudefleet.mobile.model.WorkDecision
+import dev.claudefleet.mobile.model.WorkRule
+import dev.claudefleet.mobile.model.WorkRuleDraft
+import dev.claudefleet.mobile.model.WorkTask
+import dev.claudefleet.mobile.model.WorkTreeFilters
+import dev.claudefleet.mobile.model.WorkTreePage
+import dev.claudefleet.mobile.model.WorkView
+import dev.claudefleet.mobile.model.WorkViewDraft
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.json
@@ -51,6 +66,7 @@ internal class WorkFleet(
     override val myWork = MutableStateFlow<Set<Long>?>(null)
     override val orgs = MutableStateFlow(OrgDirectory.EMPTY)
     override val timeline = MutableSharedFlow<TimelineFrame>(extraBufferCapacity = 16)
+    override val workChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16)
     val remembered = mutableListOf<Ticket>()
 
     override suspend fun refresh() = Unit
@@ -65,6 +81,22 @@ internal class WorkFleet(
 
     companion object {
         val FULL = HubCapabilities.of(ToolCatalog(setOf("work", "work_link")))
+
+        /**
+         * A hub with the Work view: `work`'s schema enumerates its actions
+         * (every hub with `tree` does), `work_link` takes a free string.
+         */
+        val WORK_VIEW = HubCapabilities.of(
+            ToolCatalog(
+                setOf("work", "work_link"),
+                mapOf(
+                    "work" to setOf(
+                        "tickets", "lookup", "resume_plan", "today", "card", "orgs",
+                        "tree", "task", "session_tasks", "review", "rules", "rule_preview", "views", "org_impact",
+                    ),
+                ),
+            ),
+        )
     }
 }
 
@@ -101,10 +133,26 @@ internal class FakeWorkActions : WorkActions {
         return planAnswer ?: throw HubError.Tool("E_NOTFOUND", "no past work")
     }
 
-    override suspend fun confirm(sessionId: Long, linkId: Long) = record("confirm $sessionId $linkId")
-    override suspend fun reject(sessionId: Long, linkId: Long) = record("reject $sessionId $linkId")
-    override suspend fun unlink(sessionId: Long, linkId: Long) = record("unlink $sessionId $linkId")
-    override suspend fun link(sessionId: Long, itemId: Long?, key: String?) = record("link $sessionId ${itemId ?: key}")
+    // The M14 arguments (`primary`, `expected_version`) are recorded in
+    // [workArgs] rather than [calls], which the older tests pin exactly.
+    val workArgs = mutableListOf<String>()
+
+    override suspend fun confirm(sessionId: Long, linkId: Long, primary: Boolean?, expectedVersion: Long?): SessionRow {
+        workArgs += "confirm $sessionId $linkId primary=$primary v=$expectedVersion"
+        return record("confirm $sessionId $linkId")
+    }
+    override suspend fun reject(sessionId: Long, linkId: Long, expectedVersion: Long?): SessionRow {
+        workArgs += "reject $sessionId $linkId v=$expectedVersion"
+        return record("reject $sessionId $linkId")
+    }
+    override suspend fun unlink(sessionId: Long, linkId: Long, expectedVersion: Long?): SessionRow {
+        workArgs += "unlink $sessionId $linkId v=$expectedVersion"
+        return record("unlink $sessionId $linkId")
+    }
+    override suspend fun link(sessionId: Long, itemId: Long?, key: String?, primary: Boolean?, expectedVersion: Long?): SessionRow {
+        workArgs += "link $sessionId ${itemId ?: key} primary=$primary"
+        return record("link $sessionId ${itemId ?: key}")
+    }
     override suspend fun start(key: String, hostAlias: String, projectId: Long?) = record("start $key $hostAlias ${projectId ?: "-"}")
     override suspend fun resume(key: String, hostAlias: String?) = record("resume $key ${hostAlias ?: "-"}")
 
@@ -142,6 +190,120 @@ internal class FakeWorkActions : WorkActions {
 
     override suspend fun renameItem(itemId: Long, title: String) {
         record("rename $itemId $title")
+    }
+
+    // ---- the Work view (M14) ----
+    var treeAnswer: (WorkTreeFilters, String?) -> WorkTreePage = { _, _ -> WorkTreePage() }
+    val treeCalls = mutableListOf<TreeCall>()
+    var failTree: Throwable? = null
+    var taskAnswer: TaskDetail? = null
+    var failTask: Throwable? = null
+    var taskCalls = 0
+    var sessionTasksAnswer = SessionTasks()
+    var sessionTasksCalls = 0
+    var failSessionTasks: Throwable? = null
+    var reviewAnswer = ReviewPage()
+    var reviewCalls = 0
+    var rulesAnswer: List<WorkRule> = emptyList()
+    var viewsAnswer: List<WorkView> = emptyList()
+    /** Null answers every decision `ok`, at its expected version + 1 — what the hub's answer would be. */
+    var batchAnswer: BatchResult? = null
+    val batches = mutableListOf<List<WorkDecision>>()
+    var placeAnswer: WorkTask? = null
+    /** Fails the next write only (a conflict, say), then clears itself. */
+    var failWrite: Throwable? = null
+    val savedViews = mutableListOf<WorkViewDraft>()
+    /** Runs inside every tree read before it answers: a test holds a read open with it. */
+    var treeGate: suspend (TreeCall) -> Unit = {}
+    /** Runs inside every write before it answers: a test holds a write open with it. */
+    var writeGate: suspend () -> Unit = {}
+
+    data class TreeCall(val filters: WorkTreeFilters, val cursor: String?, val limit: Int?, val perTask: Int?)
+
+    private fun write(call: String): SessionRow {
+        calls += call
+        failWrite?.let { failWrite = null; throw it }
+        fail?.let { throw it }
+        return started
+    }
+
+    override suspend fun tree(filters: WorkTreeFilters, cursor: String?, limit: Int?, perTask: Int?): WorkTreePage {
+        val call = TreeCall(filters, cursor, limit, perTask)
+        treeCalls += call
+        treeGate(call)
+        failTree?.let { throw it }
+        return treeAnswer(filters, cursor)
+    }
+
+    override suspend fun task(taskId: String): TaskDetail {
+        taskCalls += 1
+        failTask?.let { throw it }
+        return taskAnswer ?: throw HubError.Tool("E_NOTFOUND", "no such task")
+    }
+
+    override suspend fun sessionTasks(sessionId: Long): SessionTasks {
+        sessionTasksCalls += 1
+        failSessionTasks?.let { throw it }
+        return sessionTasksAnswer
+    }
+
+    override suspend fun review(cursor: String?, limit: Int?): ReviewPage {
+        reviewCalls += 1
+        return reviewAnswer
+    }
+
+    override suspend fun rules(): List<WorkRule> = rulesAnswer
+
+    override suspend fun rulePreview(rule: WorkRuleDraft): RulePreview = RulePreview()
+
+    override suspend fun views(): List<WorkView> = viewsAnswer
+
+    override suspend fun orgImpact(taskId: String, orgId: Long): OrgImpact = OrgImpact(taskId = taskId)
+
+    override suspend fun setPrimary(sessionId: Long, linkId: Long, expectedPrimary: Long?) =
+        write("set_primary $sessionId $linkId expected=$expectedPrimary")
+
+    override suspend fun reconsider(sessionId: Long, linkId: Long, expectedVersion: Long?): SessionRow {
+        workArgs += "reconsider $sessionId $linkId v=$expectedVersion"
+        return write("reconsider $sessionId $linkId")
+    }
+
+    override suspend fun ack(sessionId: Long, linkId: Long, expectedVersion: Long?) = write("ack $sessionId $linkId v=$expectedVersion")
+
+    override suspend fun decideBatch(decisions: List<WorkDecision>): BatchResult {
+        calls += "decide_batch " + decisions.joinToString(",") { "${it.decision}:${it.linkId}@${it.expectedVersion}" }
+        batches += decisions
+        failWrite?.let { failWrite = null; throw it }
+        return batchAnswer ?: BatchResult(decisions.map { DecisionResult(linkId = it.linkId, ok = true, version = (it.expectedVersion ?: 0) + 1) })
+    }
+
+    override suspend fun place(taskId: String, group: String, expectedVersion: Long, note: String?): WorkTask {
+        calls += "place $taskId \"$group\" v=$expectedVersion" + (note?.let { " note=\"$it\"" } ?: "")
+        writeGate()
+        failWrite?.let { failWrite = null; throw it }
+        return placeAnswer ?: WorkTask(taskId = taskId)
+    }
+
+    override suspend fun assignOrg(taskId: String, orgId: Long, impactToken: String): WorkTask {
+        calls += "assign_org $taskId $orgId"
+        return WorkTask(taskId = taskId)
+    }
+
+    override suspend fun saveRule(rule: WorkRuleDraft): WorkRule = WorkRule(name = rule.name)
+
+    override suspend fun deleteRule(ruleId: Long, expectedVersion: Long?) {
+        calls += "rule_delete $ruleId"
+    }
+
+    override suspend fun saveView(view: WorkViewDraft): WorkView {
+        calls += "view_save ${view.id ?: "new"} ${view.name} v=${view.expectedVersion}"
+        failWrite?.let { failWrite = null; throw it }
+        savedViews += view
+        return WorkView(id = view.id ?: 99, name = view.name, filters = view.filters)
+    }
+
+    override suspend fun deleteView(viewId: Long) {
+        calls += "view_delete $viewId"
     }
 }
 

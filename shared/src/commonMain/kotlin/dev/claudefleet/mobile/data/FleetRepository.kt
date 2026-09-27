@@ -167,6 +167,11 @@ class FleetRepository(
     private val _timeline = MutableSharedFlow<TimelineFrame>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val timeline: Flow<TimelineFrame> = _timeline.asSharedFlow()
 
+    // Lossy and buffered like `_sessionChanges`: a hint to re-read, never the fact.
+    private val _workChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val workChanges: Flow<Long> = _workChanges.asSharedFlow()
+    private var workTicks = 0L
+
     override fun actionMissing(tool: String, action: String) {
         _capabilities.update { it.forgetting(tool, action) }
     }
@@ -386,6 +391,11 @@ class FleetRepository(
                             }
                             event.sessionId()?.let { _sessionChanges.tryEmit(it) }
                             event.timelineFrame()?.let { _timeline.tryEmit(it) }
+                            // Any `work:*` frame — `work:changed` above all,
+                            // which changes nothing in the snapshot and
+                            // exists only to say "re-read". An unknown kind
+                            // stays a no-op for the snapshot either way.
+                            if (event.isWorkFrame()) _workChanges.tryEmit(++workTicks)
                         }
                     }
                 }

@@ -93,7 +93,9 @@ fun FleetSnapshot.applying(event: HubEvent.Row): FleetSnapshot = when (event.nam
     "project:updated" -> upsertProject(event.payload)
     "work:item" -> upsertTicket(event.payload)
     "work:tracker_removed" -> trackerRemoved(event.payload)
-    // `work:tracker` (a tracker's own state) changes nothing drawn here.
+    // `work:tracker` (a tracker's own state) and `work:changed` (the Work
+    // view's structure, ids only — see `FleetState.workChanges`) change
+    // nothing drawn from the snapshot.
     else -> this
 }
 
@@ -124,6 +126,13 @@ fun HubEvent.Row.sessionId(): Long? = when {
         if (payload.text("kind") == "mcp_call") null else payload.number("session_id")
     else -> payload.number("id")
 }
+
+/**
+ * A `work:*` frame: what makes the Work view re-read. `work:changed`
+ * (claude-fleet M14: a placement, rule, view or org changed; ids only) is
+ * the one the snapshot itself ignores — [applying] leaves it a no-op.
+ */
+fun HubEvent.Row.isWorkFrame(): Boolean = name.startsWith("work:")
 
 /** The timeline entry a `session:event` frame carries, or null for any other frame. */
 fun HubEvent.Row.timelineFrame(): TimelineFrame? {

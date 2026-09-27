@@ -1288,4 +1288,37 @@ class FleetRepositoryTest {
         assertEquals(TimelineFrame(5, "handover_written", "n"), got.await())
         repository.stop()
     }
+
+    /**
+     * `work:changed` (claude-fleet M14) — and every other `work:*` frame —
+     * ticks `workChanges`, which is what makes the Work view re-read. The
+     * snapshot is unchanged by `work:changed`; an unknown `work:` kind is as
+     * harmless as ever.
+     */
+    @Test
+    fun work_frames_tick_workChanges_and_leave_the_snapshot_alone() = runTest {
+        val repository = repo(
+            FakeHub(sessionsJson = sessionRows(1)),
+            FakeStream {
+                emit(READY)
+                emit(rowEvent("work:changed", """{"what":"placement","task_id":"item:12"}"""))
+                emit(rowEvent("session:updated", """{"id":1,"tmux_name":"a","host_alias":"box"}"""))
+                emit(rowEvent("work:something_later", """{"x":1}"""))
+                awaitCancellation()
+            },
+            backgroundScope,
+        )
+        val ticks = mutableListOf<Long>()
+        val collector = backgroundScope.launch { repository.workChanges.collect { ticks += it } }
+        runCurrent()
+
+        repository.start()
+        repository.sessions.first { it.singleOrNull()?.tmuxName == "a" }
+        runCurrent()
+
+        assertEquals(listOf(1L, 2L), ticks, "one tick per work frame, none for a session row")
+        assertEquals(listOf(1L), repository.sessions.value.map { it.id })
+        collector.cancel()
+        repository.stop()
+    }
 }

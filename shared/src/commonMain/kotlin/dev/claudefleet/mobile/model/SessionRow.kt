@@ -79,6 +79,14 @@ data class SessionRow(
      * older hub leaves it out, and the row's work's own `org_id` stands in.
      */
     @SerialName("org_id") val orgId: Long? = null,
+    /**
+     * A digest of the versions and ids of the session's live work links
+     * (claude-fleet M14), omitted when 0. It moves whenever any of them
+     * does — a *secondary* link added, ended or made primary included —
+     * which [work] (the primary only) cannot show. What tells a Work screen
+     * that this row's work changed, apart from its status churn.
+     */
+    @SerialName("work_rev") val workRev: Long = 0,
 ) {
     val isBackground: Boolean get() = tmuxName.startsWith("bg:")
 

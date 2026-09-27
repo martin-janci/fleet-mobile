@@ -157,6 +157,9 @@ fun SessionScreen(
     /** The ticket chip and its sheet; the default draws nothing (a hub without the work graph). */
     work: SessionWorkUiState = SessionWorkUiState(),
     workHandlers: SessionWorkHandlers = SessionWorkHandlers(),
+    /** Every task of the session (the Work view's *Tasks*); the default draws nothing. */
+    tasks: SessionTasksUiState = SessionTasksUiState(),
+    tasksHandlers: SessionTasksHandlers = SessionTasksHandlers(),
 ) {
     val turns = state.conversation.turns
     val listState = rememberLazyListState()
@@ -257,12 +260,15 @@ fun SessionScreen(
             onSendCommand = onSendCommand,
             work = work,
             workHandlers = workHandlers,
+            tasks = tasks,
+            onOpenTasks = tasksHandlers.onOpen,
         )
         ConnectionBanner(status, state.hubReachable)
         ErrorBanner(state.error, onDismiss = onDismissError)
         // Behind an open sheet a banner cannot be read: the sheet shows it instead.
         if (!work.sheetOpen) ErrorBanner(work.error, onDismiss = workHandlers.onDismissError)
         if (work.sheetOpen) WorkTicketSheet(work, workHandlers)
+        if (tasks.sheetOpen) SessionTasksSheet(tasks, tasksHandlers)
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             if (state.loaded && turns.isEmpty()) {
@@ -400,6 +406,8 @@ private fun SessionBar(
     onSendCommand: (String) -> Unit,
     work: SessionWorkUiState,
     workHandlers: SessionWorkHandlers,
+    tasks: SessionTasksUiState,
+    onOpenTasks: () -> Unit,
 ) {
     val busy = state.loading || state.refreshing
     val angle = refreshAngle(busy)
@@ -496,7 +504,7 @@ private fun SessionBar(
             val tight = contextIsTight(state.session, state.conversation.context)
             val retiring = state.safeKillState
             val ticket = work.chip
-            if (tight || retiring != null || ticket != null) {
+            if (tight || retiring != null || ticket != null || tasks.available) {
                 FlowRow(
                     modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -509,6 +517,15 @@ private fun SessionBar(
                             suggested = work.work == null,
                             showTitle = true,
                             onClick = workHandlers.onOpen,
+                            modifier = Modifier.align(Alignment.CenterVertically),
+                        )
+                    }
+                    // Every task of the session, not only the primary the
+                    // ticket chip shows: the Work view's *Tasks* section.
+                    if (tasks.available) {
+                        SuggestionChip(
+                            onClick = onOpenTasks,
+                            label = { Text(if (tasks.count > 0) "Tasks · ${tasks.count}" else "Tasks", maxLines = 1) },
                             modifier = Modifier.align(Alignment.CenterVertically),
                         )
                     }

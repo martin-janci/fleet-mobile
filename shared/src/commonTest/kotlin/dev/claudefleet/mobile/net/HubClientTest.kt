@@ -22,6 +22,14 @@ import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import dev.claudefleet.mobile.ui.HubWorkJson
+import dev.claudefleet.mobile.ui.WorkTreeJson
+import dev.claudefleet.mobile.model.IdOrWord
+import dev.claudefleet.mobile.model.RuleConditions
+import dev.claudefleet.mobile.model.WorkDecision
+import dev.claudefleet.mobile.model.WorkRuleDraft
+import dev.claudefleet.mobile.model.WorkTreeFilters
+import dev.claudefleet.mobile.model.WorkViewDraft
+import kotlinx.serialization.json.jsonArray
 import dev.claudefleet.mobile.ui.explain
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -933,6 +941,179 @@ class HubClientTest {
         assertFalse("host_alias" in resumeDefault)
     }
 
+    // ---- the Work view (claude-fleet M14) ----
+
+    /** Every read names its action, sends only what was chosen, and decodes the contract's JSON. */
+    @Test
+    fun the_work_view_reads_send_the_contracts_arguments() = runTest {
+        val sent = mutableListOf<JsonObject>()
+        val client = clientAnswering { body ->
+            assertEquals("work", body.tool())
+            val args = body.args()
+            sent += args
+            when (args["action"]!!.jsonPrimitive.content) {
+                "tree" -> WorkTreeJson.TREE
+                "task" -> WorkTreeJson.TASK
+                "session_tasks" -> WorkTreeJson.SESSION_TASKS
+                "review" -> WorkTreeJson.REVIEW
+                "rules" -> WorkTreeJson.RULES
+                "rule_preview" -> """{"affected":[],"total":0,"kept_manual":1}"""
+                "views" -> WorkTreeJson.VIEWS
+                else -> WorkTreeJson.ORG_IMPACT
+            }
+        }
+
+        val page = client.workTree(
+            WorkTreeFilters(org = IdOrWord.of(1), tracker = IdOrWord.LOCAL, status = "open", mine = true, has = "active", review = true, query = "login", group = "tracker:1:ABC"),
+            cursor = "c1.abc",
+            limit = 50,
+            perTask = 0,
+        )
+        client.workTree()
+        client.workTask("item:12")
+        client.workSessionTasks(7)
+        client.workReview(cursor = "r1", limit = 20)
+        client.workRules()
+        val preview = client.workRulePreview(WorkRuleDraft(name = "Payments", conditions = RuleConditions(keyPrefix = "PAY"), group = "Payments"))
+        client.workViews()
+        client.workOrgImpact("item:77", 0)
+
+        assertEquals(
+            listOf("tree", "tree", "task", "session_tasks", "review", "rules", "rule_preview", "views", "org_impact"),
+            sent.map { it["action"]!!.jsonPrimitive.content },
+        )
+        val tree = sent[0]
+        val filters = tree["filters"]!!.jsonObject
+        assertEquals(1, filters["org"]!!.jsonPrimitive.int, "an org id is a number")
+        assertEquals("local", filters["tracker"]!!.jsonPrimitive.content)
+        assertEquals("open", filters["status"]!!.jsonPrimitive.content)
+        assertEquals(true, filters["mine"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals("active", filters["has"]!!.jsonPrimitive.content)
+        assertEquals(true, filters["review"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals("login", filters["query"]!!.jsonPrimitive.content)
+        assertEquals("tracker:1:ABC", filters["group"]!!.jsonPrimitive.content)
+        assertEquals("c1.abc", tree["cursor"]!!.jsonPrimitive.content)
+        assertEquals(50, tree["limit"]!!.jsonPrimitive.int)
+        assertEquals(0, tree["per_task"]!!.jsonPrimitive.int)
+        assertEquals(setOf("action"), sent[1].keys, "no filters, cursor or limit chosen: none sent")
+        assertEquals("item:12", sent[2]["task_id"]!!.jsonPrimitive.content)
+        assertEquals(7, sent[3]["session_id"]!!.jsonPrimitive.int)
+        assertEquals("r1", sent[4]["cursor"]!!.jsonPrimitive.content)
+        assertEquals(20, sent[4]["limit"]!!.jsonPrimitive.int)
+        assertEquals(setOf("action"), sent[5].keys)
+        val rule = sent[6]["rule"]!!.jsonObject
+        assertEquals("Payments", rule["group"]!!.jsonPrimitive.content)
+        assertEquals("PAY", rule["conditions"]!!.jsonObject["key_prefix"]!!.jsonPrimitive.content)
+        assertFalse("id" in rule, "a new rule has no id")
+        assertEquals("item:77", sent[8]["task_id"]!!.jsonPrimitive.content)
+        assertEquals(0, sent[8]["org_id"]!!.jsonPrimitive.int, "0 is \"no org\"")
+
+        assertEquals("c1.abc", page.nextCursor)
+        assertEquals(1, preview.keptManual)
+    }
+
+    /** Every new decision is a `work_link` action with the session, the link and the version it was read at. */
+    @Test
+    fun the_work_view_decisions_send_versions_and_the_primary() = runTest {
+        val sent = mutableListOf<JsonObject>()
+        val client = clientAnswering { body ->
+            assertEquals("work_link", body.tool())
+            val args = body.args()
+            sent += args
+            when (args["action"]!!.jsonPrimitive.content) {
+                "decide_batch" -> WorkTreeJson.BATCH
+                "place", "assign_org" -> """{"task_id":"item:77","group":{"id":"manual:Ops","label":"Ops","source":"manual"},"placement_version":5}"""
+                "rule_save" -> WorkTreeJson.RULES.trim().removePrefix("[").removeSuffix("]")
+                "rule_delete", "view_delete" -> """{"deleted":true}"""
+                "view_save" -> """{"id":4,"name":"Mine","filters":{"mine":true},"version":1}"""
+                else -> """{"id":7,"tmux_name":"t","host_alias":"h"}"""
+            }
+        }
+
+        client.linkWork(7, key = "OPS-1", primary = false)
+        client.linkWork(7, itemId = 12)
+        client.confirmWork(7, 45, primary = false, expectedVersion = 2)
+        client.rejectWork(7, 45, expectedVersion = 2)
+        client.unlinkWork(7, 44, expectedVersion = 1)
+        client.setPrimaryWork(7, 44, expectedPrimary = 42)
+        client.reconsiderWork(7, 45)
+        client.ackWork(9, 50, expectedVersion = 1)
+        val batch = client.decideWorkBatch(
+            listOf(
+                WorkDecision(7, 42, "confirm", expectedVersion = 2),
+                WorkDecision(7, 46, "reject", expectedVersion = 1, primary = false),
+            ),
+        )
+        val placed = client.placeWork("item:77", "Ops", expectedVersion = 4, note = "audit")
+        client.placeWork("item:77", "", expectedVersion = 5)
+        client.assignWorkOrg("item:77", 2, "tok-impact")
+        client.saveWorkRule(WorkRuleDraft(id = 3, name = "Payments", group = "Payments", expectedVersion = 2))
+        client.deleteWorkRule(3, expectedVersion = 2)
+        val view = client.saveWorkView(WorkViewDraft(name = "Mine", filters = WorkTreeFilters(mine = true, group = "none"), expectedVersion = 0))
+        client.deleteWorkView(4)
+
+        val (link, linkDefault, confirm, reject, unlink, setPrimary, reconsider, ack) = sent.take(8).let { Octuple(it) }
+        assertEquals(false, link["primary"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals("OPS-1", link["key"]!!.jsonPrimitive.content)
+        assertFalse("primary" in linkDefault, "left out: the hub's default takes the primary, as before M14")
+        assertFalse("expected_version" in linkDefault)
+        assertEquals(45, confirm["link_id"]!!.jsonPrimitive.int)
+        assertEquals(false, confirm["primary"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(2, confirm["expected_version"]!!.jsonPrimitive.int)
+        assertEquals(2, reject["expected_version"]!!.jsonPrimitive.int)
+        assertEquals(1, unlink["expected_version"]!!.jsonPrimitive.int)
+        assertEquals("set_primary", setPrimary["action"]!!.jsonPrimitive.content)
+        assertEquals(44, setPrimary["link_id"]!!.jsonPrimitive.int)
+        assertEquals(42, setPrimary["expected_primary"]!!.jsonPrimitive.int)
+        assertEquals("reconsider", reconsider["action"]!!.jsonPrimitive.content)
+        assertFalse("expected_version" in reconsider)
+        assertEquals("ack", ack["action"]!!.jsonPrimitive.content)
+        assertEquals(9, ack["session_id"]!!.jsonPrimitive.int)
+
+        val decisions = sent[8]["decisions"]!!.jsonArray.map { it.jsonObject }
+        assertEquals(listOf("confirm", "reject"), decisions.map { it["decision"]!!.jsonPrimitive.content })
+        assertEquals(listOf(7, 7), decisions.map { it["session_id"]!!.jsonPrimitive.int })
+        assertEquals(2, decisions[0]["expected_version"]!!.jsonPrimitive.int)
+        assertFalse("primary" in decisions[0], "not chosen: not sent")
+        assertEquals(false, decisions[1]["primary"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(listOf(true, false), batch.results.map { it.ok })
+
+        val place = sent[9]
+        assertEquals(listOf("task_id", "group", "note", "expected_version"), place.keys.filter { it != "action" })
+        assertEquals("Ops", place["group"]!!.jsonPrimitive.content)
+        assertEquals(4, place["expected_version"]!!.jsonPrimitive.int)
+        assertEquals(5L, placed.placementVersion)
+        assertEquals("", sent[10]["group"]!!.jsonPrimitive.content, "an empty group clears the placement")
+        assertFalse("note" in sent[10])
+        assertEquals("tok-impact", sent[11]["impact_token"]!!.jsonPrimitive.content)
+        assertEquals(2, sent[11]["org_id"]!!.jsonPrimitive.int)
+        assertEquals(3, sent[12]["rule"]!!.jsonObject["id"]!!.jsonPrimitive.int)
+        assertEquals(2, sent[12]["rule"]!!.jsonObject["expected_version"]!!.jsonPrimitive.int)
+        assertEquals(3, sent[13]["rule_id"]!!.jsonPrimitive.int)
+        val viewArg = sent[14]["view"]!!.jsonObject
+        assertEquals(0, viewArg["expected_version"]!!.jsonPrimitive.int, "a new view expects none")
+        assertFalse("group" in viewArg["filters"]!!.jsonObject, "a section is never saved in a view")
+        assertFalse("id" in viewArg)
+        assertEquals(4L, view.id)
+        assertEquals(4, sent[15]["view_id"]!!.jsonPrimitive.int)
+        assertTrue(sent.take(8).all { "session_id" in it })
+    }
+
+    /** A version conflict keeps its details, so the screen can say what the hub has now. */
+    @Test
+    fun a_conflict_is_a_tool_error_with_the_current_value_in_its_details() = runTest {
+        val rpc = """{"jsonrpc":"2.0","id":1,"result":{"isError":true,""" +
+            """"content":[{"type":"text","text":"E_CONFLICT: primary changed"}],""" +
+            """"structuredContent":{"code":"E_CONFLICT","message":"the primary is now ABC-12 (link 42)",""" +
+            """"details":{"link_id":42,"version":4,"state":"active","primary":true}}}}"""
+        val (hub, _) = client { sse(rpc) to HttpStatusCode.OK }
+
+        val e = assertFailsWith<HubError.Tool> { hub.setPrimaryWork(7, 44, expectedPrimary = 0) }
+
+        assertEquals("E_CONFLICT", e.code)
+        assertEquals(42, e.details!!.jsonObject["link_id"]!!.jsonPrimitive.int)
+    }
+
     /**
      * Multi-start (claude-fleet M9.6, phone M13.4d): one `work_link start`
      * with every project in `project_ids`, and never `force_cross_org` — the
@@ -1051,4 +1232,16 @@ class HubClientTest {
         assertTrue(enumerated.has("work_link", "unlink"))
         assertFalse(enumerated.has("work_link", "confirm"), "a hub before M4 enumerates no confirm")
     }
+}
+
+/** Eight request bodies by name, for a test that makes eight calls in a row. */
+private class Octuple(private val all: List<JsonObject>) {
+    operator fun component1() = all[0]
+    operator fun component2() = all[1]
+    operator fun component3() = all[2]
+    operator fun component4() = all[3]
+    operator fun component5() = all[4]
+    operator fun component6() = all[5]
+    operator fun component7() = all[6]
+    operator fun component8() = all[7]
 }
