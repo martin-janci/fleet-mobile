@@ -18,6 +18,7 @@ import dev.claudefleet.mobile.model.Today
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
+import dev.claudefleet.mobile.net.json
 import dev.claudefleet.mobile.net.ToolCatalog
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -465,6 +466,96 @@ class SessionWorkViewModelTest {
         runCurrent()
         vm.handover().join()
         assertEquals(emptyList(), actions.calls)
+    }
+
+    // ---- the ticket card on the session (M10.5) ----
+
+    private fun cardFor(key: String) = TicketCard(key = key, title = "Refund", cached = true, acceptance = listOf("Retries back off"))
+
+    /** Opening the sheet reads the chip's card; a read, so a readonly token gets it too. */
+    @Test
+    fun the_sheet_shows_the_chips_card_to_any_token() = runTest {
+        for (canWrite in listOf(true, false)) {
+            val actions = FakeWorkActions().apply { cardAnswer = cardFor("PAY-7") }
+            val vm = SessionWorkViewModel(5, WorkFleet(listOf(row(work = PAY7))), actions, backgroundScope, canWrite = canWrite)
+            assertNull(vm.state.value.card, "nothing is read before the sheet opens")
+
+            vm.openSheet()?.join()
+            runCurrent()
+
+            assertEquals(listOf("PAY-7"), actions.cardCalls)
+            assertEquals(listOf("Retries back off"), vm.state.value.card?.acceptance, "canWrite=$canWrite")
+            assertEquals(emptyList(), actions.calls, "reading a card decides nothing")
+        }
+    }
+
+    /**
+     * The hub's own answer (recorded wire shape): the sheet's card and its Copy
+     * text carry the tracker's words literally — markup as text, a URL in a
+     * criterion as text — and never the desktop's `composer_text`.
+     */
+    @Test
+    fun the_hubs_card_is_copied_as_the_trackers_plain_words() = runTest {
+        val recorded = json.decodeFromString(TicketCard.serializer(), HubWorkJson.CARD_WITH_AC)
+        val actions = FakeWorkActions().apply { cardAnswer = recorded }
+        val vm = SessionWorkViewModel(5, WorkFleet(listOf(row(work = PAY7))), actions, backgroundScope, canWrite = false)
+        vm.openSheet()?.join()
+        runCurrent()
+
+        val copy = assertNotNull(vm.state.value.card).copyText
+        assertEquals(
+            "PAY-7 · Refund flow\nStatus: In Progress\nhttps://acme.atlassian.net/browse/PAY-7\n\nAcceptance criteria\n" +
+                "- Refund issued within 24 h\n- Email sent to https://evil.example/phish\n- <b>not bold</b>",
+            copy,
+        )
+        assertFalse("claude-fleet:" in copy, "the composer's untrusted-input fence is the desktop's, not the phone's")
+    }
+
+    @Test
+    fun a_hub_without_card_is_never_asked_and_an_uncached_key_shows_none() = runTest {
+        val noCard = HubCapabilities.of(ToolCatalog(setOf("work", "work_link"), mapOf("work" to setOf("tickets", "lookup"))))
+        val actions = FakeWorkActions().apply { cardAnswer = cardFor("PAY-7") }
+        val vm = SessionWorkViewModel(5, WorkFleet(listOf(row(work = PAY7)), noCard), actions, backgroundScope, canWrite = true)
+        vm.openSheet()?.join()
+        runCurrent()
+        assertEquals(emptyList(), actions.cardCalls)
+        assertNull(vm.state.value.card)
+
+        val uncached = FakeWorkActions().apply { cardAnswer = TicketCard(key = "PAY-7", cached = false) }
+        val vm2 = SessionWorkViewModel(5, WorkFleet(listOf(row(work = PAY7))), uncached, backgroundScope, canWrite = true)
+        vm2.openSheet()?.join()
+        runCurrent()
+        assertNull(vm2.state.value.card, "a key nobody cached has nothing to show")
+    }
+
+    /** A failed read says nothing on the sheet; an unknown action is forgotten for the connection. */
+    @Test
+    fun a_refused_card_leaves_the_sheet_alone() = runTest {
+        val fleet = WorkFleet(listOf(row(work = PAY7)))
+        val actions = object : WorkActions by FakeWorkActions() {
+            override suspend fun card(key: String): TicketCard = throw HubError.Tool("E_INVALID", "unknown action 'card'")
+        }
+        val vm = SessionWorkViewModel(5, fleet, actions, backgroundScope, canWrite = true)
+        vm.openSheet()?.join()
+        runCurrent()
+        assertNull(vm.state.value.card)
+        assertNull(vm.state.value.error, "the card is extra: no banner")
+        assertFalse(fleet.capabilities.value.has("work", "card"), "the older hub's refusal is remembered")
+    }
+
+    /** The card shown is always the chip's: a chip that moved to another ticket drops the old card. */
+    @Test
+    fun the_card_follows_the_chip() = runTest {
+        val fleet = WorkFleet(listOf(row(work = PAY7)))
+        val actions = FakeWorkActions().apply { cardAnswer = cardFor("PAY-7") }
+        val vm = SessionWorkViewModel(5, fleet, actions, backgroundScope, canWrite = true)
+        vm.openSheet()?.join()
+        runCurrent()
+        assertNotNull(vm.state.value.card)
+
+        fleet.sessions.value = listOf(row(work = PAY7.copy(linkId = 13, itemId = 80, key = "PAY-8")))
+        runCurrent()
+        assertNull(vm.state.value.card, "PAY-7's card is not PAY-8's")
     }
 
     // ── naming local work on the phone (claude-fleet M13.4a, D20) ──────────

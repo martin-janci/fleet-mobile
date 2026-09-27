@@ -72,4 +72,36 @@ class OrgAndCardTest {
         assertEquals(3, past.conversations)
         assertEquals("https://gh/pr/1", past.prUrl)
     }
+
+    /** M10.5: what Copy puts on the clipboard — the tracker's words, plain, and only an http(s) link. */
+    @Test
+    fun a_cards_copy_text_is_plain_and_complete() {
+        val card = TicketCard(
+            key = "PAY-7",
+            title = "Refund flow ",
+            url = "https://acme.atlassian.net/browse/PAY-7",
+            statusName = "In Progress",
+            cached = true,
+            acceptance = listOf("Refund issued within 24 h", " ", "<b>not bold</b>"),
+            excerpt = "not used when there are criteria",
+        )
+        assertEquals(
+            "PAY-7 · Refund flow\nStatus: In Progress\nhttps://acme.atlassian.net/browse/PAY-7\n\n" +
+                "Acceptance criteria\n- Refund issued within 24 h\n- <b>not bold</b>",
+            card.copyText,
+        )
+        val excerpt = TicketCard(key = "PAY-9", url = "javascript:alert(1)", cached = true, excerpt = " Some text ")
+        assertEquals("PAY-9\n\nSome text", excerpt.copyText, "no title, no status, and never a non-http link")
+    }
+
+    /** M10.5: an org's colour for the row's bar; anything else draws none. */
+    @Test
+    fun an_org_colour_parses_only_as_the_desktop_writes_it() {
+        assertEquals(0xFF2266FFL, orgColorArgb("#2266ff"))
+        assertEquals(0xFFFF0000L, orgColorArgb("#f00"))
+        assertEquals(0xFFE11D48L, orgColorArgb(" #E11D48 "))
+        for (bad in listOf(null, "", "#", "#12", "#12345", "#1234567", "red", "#gg0000", "rgb(1,2,3)")) {
+            assertNull(orgColorArgb(bad), "$bad")
+        }
+    }
 }

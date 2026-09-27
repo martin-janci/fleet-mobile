@@ -257,12 +257,14 @@ costs one reconnect.
     *By work* toggle that puts each host's work groups ahead of its projects;
   - a *My work* chip when a tracker is connected;
   - on a session, the ticket chip opens a sheet with the ticket, *why* the
-    session is linked to it, and **Confirm** / **Not this** / **Clear**, plus
-    *Set work…* in the menu;
+    session is linked to it, its **ticket card** (the acceptance criteria from
+    the hub's cache, with **Copy**), and **Confirm** / **Not this** /
+    **Clear**, plus *Set work…* in the menu;
   - a **Tickets** sheet (My work, Current sprint, Recent, and a search by key or
     pasted URL) with **Open** for a ticket a session is already on, **Start
     here** for one nobody is, and **Resume** for past work. A tapped ticket
-    shows its acceptance criteria and the sessions that worked on it before;
+    shows its acceptance criteria (with **Copy**) and the sessions that worked
+    on it before;
   - a **Today** sheet: what is waiting on you, in progress, shipped and stale
     since local midnight, and **Copy standup** / **Share** — the desktop's
     text, to the clipboard or the system share sheet;
@@ -278,7 +280,14 @@ costs one reconnect.
     sheet of such local work (claude-fleet M11.1; on the phone since M13.4a,
     decision D20). A key that is already a ticket's says to use *Set work…*;
   - with two or more organisations, org chips that narrow the list and Today,
-    and the org on each work heading and ticket.
+    the org on each work heading and ticket, and the org's colour as a thin
+    bar at each session row's edge.
+
+  A ticket card is read-only (claude-fleet decision D15): **Copy** puts the
+  key, title, status, link and criteria on the clipboard as plain text; the
+  phone never sends a card into a session, and the tracker's text is drawn as
+  plain text, with no link that opens by itself. A readonly token sees the
+  cards and Today too — they are reads.
 
   The phone never works a key out for itself and never becomes a second brain:
   it shows what the hub stamped on the row and calls the same `work` /

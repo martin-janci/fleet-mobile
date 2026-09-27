@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.ResumeCandidate
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.ui.components.ErrorBanner
+import dev.claudefleet.mobile.ui.components.TicketCardBody
 import dev.claudefleet.mobile.ui.components.WorkStatusDot
 
 /** Everything the Tickets sheet reports. */
@@ -159,16 +160,10 @@ private fun TicketActions(detail: TicketDetail, busy: Boolean, handlers: Tickets
                 }
             }
             val card = detail.card
-            when {
-                card != null && card.acceptance.isNotEmpty() -> {
-                    Text("Acceptance criteria", style = MaterialTheme.typography.labelMedium)
-                    for (line in card.acceptance) {
-                        Text("• $line", style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-                card != null && !card.excerpt.isNullOrBlank() ->
-                    Text(card.excerpt, style = MaterialTheme.typography.bodySmall, maxLines = 6, overflow = TextOverflow.Ellipsis)
-                else -> detail.ticket.description?.takeIf { it.isNotBlank() }?.let {
+            if (card != null && card.hasBody) {
+                TicketCardBody(card)
+            } else {
+                detail.ticket.description?.takeIf { it.isNotBlank() }?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 4, overflow = TextOverflow.Ellipsis)
                 }
             }
