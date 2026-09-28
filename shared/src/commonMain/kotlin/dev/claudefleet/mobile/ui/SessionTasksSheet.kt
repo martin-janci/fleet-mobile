@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextDecoration
@@ -184,12 +185,31 @@ private fun AddTask(state: SessionTasksUiState, handlers: SessionTasksHandlers) 
         }
         LazyColumn(modifier = Modifier.fillMaxWidth()) {
             items(state.addCandidates, key = { it.id }) { ticket ->
+                // Another org's ticket stays listed — so it is not "missing" —
+                // but says why the phone will not link it (decision D15).
+                val otherOrg = state.otherOrg[ticket.id]
                 ListItem(
                     modifier = Modifier.clickable(enabled = !state.busy && state.connected) { handlers.onAdd(ticket) },
                     leadingContent = { ticket.statusCategory?.let { WorkStatusDot(it) } },
-                    headlineContent = { Text(ticket.label, style = MaterialTheme.typography.titleSmall) },
+                    headlineContent = {
+                        Text(
+                            ticket.label,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = if (otherOrg != null) MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified,
+                        )
+                    },
                     supportingContent = {
-                        if (ticket.title.isNotBlank()) Text(ticket.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Column {
+                            if (ticket.title.isNotBlank()) Text(ticket.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            if (otherOrg != null) {
+                                Text(
+                                    "$otherOrg — another organisation than this session" +
+                                        (state.sessionOrgName?.let { " ($it)" } ?: ""),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        }
                     },
                 )
             }

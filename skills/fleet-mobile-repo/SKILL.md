@@ -144,7 +144,9 @@ missing feature should only hide a button. Instead, on every `ready`,
   (multi-start's `project_ids`). Absent means absent: an older hub ignores an
   unknown argument instead of refusing it, so there is nothing to learn from.
   `force_cross_org` is never sent (D15); `ToolsTheAppMayCallTest` fails on the
-  quoted string.
+  quoted string. The same holds for a session's *Add task…*: another org's
+  ticket is listed last and marked, tapping it sends nothing, and the hub's
+  `cross_org` refusal is said in words (`crossOrgLinkWords`).
 - **Actions.** `action` is a free string on hubs before M8.0. When the schema
   has an `enum`, `HubCapabilities.has(tool, action)` reads it; when it does
   not, an action counts as present until the hub answers `E_INVALID`

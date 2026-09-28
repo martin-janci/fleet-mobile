@@ -4,9 +4,12 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.model.LinkState
+import dev.claudefleet.mobile.model.OrgDirectory
+import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.SessionTasks
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.WorkTaskLink
+import dev.claudefleet.mobile.model.orgOf
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK_LINK
@@ -17,6 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -27,6 +31,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 data class SessionTasksUiState(
     /** The hub serves `work { session_tasks }`: the *Tasks* chip is drawn. */
@@ -49,8 +56,20 @@ data class SessionTasksUiState(
     val canAdd: Boolean = false,
     val addOpen: Boolean = false,
     val addQuery: String = "",
-    /** Tickets the add sheet offers, narrowed by [addQuery]; ones already linked are left out. */
+    /**
+     * Tickets the add sheet offers, narrowed by [addQuery]; ones already
+     * linked are left out, and ones of another organisation come last.
+     */
     val addCandidates: List<Ticket> = emptyList(),
+    /**
+     * Ticket id → the name of its organisation, for a candidate known to
+     * belong to a different organisation than this session. The hub refuses
+     * that link and the phone never overrides it (decision D15), so such a
+     * row is drawn as not linkable here.
+     */
+    val otherOrg: Map<Long, String> = emptyMap(),
+    /** This session's organisation, when the phone knows it. */
+    val sessionOrgName: String? = null,
     val busy: Boolean = false,
     val error: Friendly? = null,
     /** The error is a write another device beat: *Reload* is offered. */
@@ -106,9 +125,22 @@ class SessionTasksViewModel(
 
     private val local = MutableStateFlow(Local())
 
+    /** The org directory and this session's org in it — what the add list reads to mark another org's tickets. */
+    private data class Orgs(val directory: OrgDirectory, val sessionOrg: Long?)
+
+    private fun orgsOf(directory: OrgDirectory, rows: List<SessionRow>) =
+        Orgs(directory, rows.firstOrNull { it.id == sessionId }?.orgOf)
+
+    private val orgs: Flow<Orgs> =
+        combine(fleet.orgs, fleet.sessions, ::orgsOf).distinctUntilChanged()
+
     val state: StateFlow<SessionTasksUiState> =
-        combine(fleet.capabilities, fleet.status, fleet.tickets, local) { caps, status, cache, l -> assemble(caps, status, cache, l) }
-            .stateIn(scope, SharingStarted.Eagerly, assemble(fleet.capabilities.value, fleet.status.value, fleet.tickets.value, local.value))
+        combine(fleet.capabilities, fleet.status, fleet.tickets, orgs, local) { caps, status, cache, o, l -> assemble(caps, status, cache, o, l) }
+            .stateIn(
+                scope,
+                SharingStarted.Eagerly,
+                assemble(fleet.capabilities.value, fleet.status.value, fleet.tickets.value, orgsOf(fleet.orgs.value, fleet.sessions.value), local.value),
+            )
 
     init {
         scope.launch {
@@ -222,10 +254,21 @@ class SessionTasksViewModel(
         local.update { it.copy(addQuery = text) }
     }
 
-    /** Link a ticket from the list. */
-    fun add(ticket: Ticket): Job? = write(LINK) {
-        actions.link(sessionId, itemId = ticket.id, primary = takesPrimary())
-        local.update { it.copy(addOpen = false, addQuery = "") }
+    /**
+     * Link a ticket from the list. One the phone already knows belongs to
+     * another organisation is not sent: the hub would refuse it, and the
+     * phone never overrides that (decision D15) — it says so instead.
+     */
+    fun add(ticket: Ticket): Job? {
+        val s = state.value
+        s.otherOrg[ticket.id]?.let { org ->
+            local.update { it.copy(error = crossOrgLinkWords(ticket.label, org, s.sessionOrgName, null), conflict = false) }
+            return null
+        }
+        return write(LINK, ticket.label) {
+            actions.link(sessionId, itemId = ticket.id, primary = takesPrimary())
+            local.update { it.copy(addOpen = false, addQuery = "") }
+        }
     }
 
     /**
@@ -236,7 +279,7 @@ class SessionTasksViewModel(
     fun addTyped(): Job? {
         val reference = local.value.addQuery.trim()
         if (reference.isEmpty()) return null
-        return write(LINK) {
+        return write(LINK, reference) {
             if (reference.contains("://")) {
                 val cannot = Friendly("This hub can't look up a ticket link", "Type the ticket's key instead, like PAY-7.", isError = true)
                 if (!fleet.capabilities.value.has(WORK, LOOKUP)) {
@@ -275,7 +318,8 @@ class SessionTasksViewModel(
      */
     private fun takesPrimary(): Boolean = sessionHasNoPrimary(local.value.tasks)
 
-    private fun write(action: String, call: suspend () -> Unit): Job? {
+    /** [what] names the task in a cross-org refusal: a key, or what was typed. */
+    private fun write(action: String, what: String? = null, call: suspend () -> Unit): Job? {
         if (local.value.busy) return null
         if (!allowed(fleet.capabilities.value, fleet.status.value, action)) {
             if (canWrite && fleet.capabilities.value.has(WORK_LINK, action) && !fleet.status.value.isConnected()) {
@@ -293,17 +337,25 @@ class SessionTasksViewModel(
                 throw e
             } catch (t: Throwable) {
                 if (t is HubError.Tool && t.isUnknownAction()) fleet.actionMissing(WORK_LINK, action)
-                local.update { it.copy(error = friendlyWorkWrite(t), conflict = t.isConflict()) }
+                val error = if (t is HubError.Tool && t.isCrossOrg()) crossOrgLinkRefusal(what, t) else friendlyWorkWrite(t)
+                local.update { it.copy(error = error, conflict = t.isConflict()) }
             } finally {
                 local.update { it.copy(busy = false) }
             }
         }
     }
 
+    /** The hub's cross-org refusal, in the phone's words, naming both orgs when the phone knows them. */
+    private fun crossOrgLinkRefusal(what: String?, t: HubError.Tool): Friendly {
+        val details = t.details as? JsonObject
+        fun org(field: String) = (details?.get(field) as? JsonPrimitive)?.longOrNull?.let { fleet.orgs.value.name(it) }
+        return crossOrgLinkWords(what ?: "This task", org("work_org_id"), org("session_org_id"), explain(t))
+    }
+
     private fun allowed(caps: HubCapabilities, status: ConnectionStatus, action: String): Boolean =
         canWrite && status.isConnected() && caps.has(WORK_LINK, action)
 
-    private fun assemble(caps: HubCapabilities, status: ConnectionStatus, cache: List<Ticket>, l: Local): SessionTasksUiState {
+    private fun assemble(caps: HubCapabilities, status: ConnectionStatus, cache: List<Ticket>, o: Orgs, l: Local): SessionTasksUiState {
         if (!caps.has(WORK, SESSION_TASKS)) return SessionTasksUiState()
         val links = l.tasks?.links.orEmpty()
         val primary = l.tasks?.primaryLinkId
@@ -314,10 +366,15 @@ class SessionTasksViewModel(
         val linkedItems = links.filter { it.state == LinkState.Active || it.state == LinkState.Suggested }
             .mapNotNull { it.task?.taskId?.removePrefix(ITEM_PREFIX)?.toLongOrNull() }.toSet()
         val query = l.addQuery.trim()
+        // Another org only when both sides are known and differ — the hub's
+        // own rule (`check_cross_org`): unassigned on either side links.
+        fun otherOrgOf(t: Ticket): Long? = o.directory.orgOf(t)?.takeIf { o.sessionOrg != null && it != o.sessionOrg }
         val candidates = (l.offered + cache).distinctBy { it.id }
             .filter { it.id !in linkedItems }
             .filter { t -> query.isEmpty() || t.label.contains(query, ignoreCase = true) || t.title.contains(query, ignoreCase = true) }
+            .sortedBy { otherOrgOf(it) != null }
             .take(MAX_CANDIDATES)
+        val otherOrg = candidates.mapNotNull { t -> otherOrgOf(t)?.let { t.id to o.directory.name(it) } }.toMap()
         return SessionTasksUiState(
             available = true,
             loaded = l.tasks != null,
@@ -336,6 +393,8 @@ class SessionTasksViewModel(
             addOpen = l.addOpen,
             addQuery = l.addQuery,
             addCandidates = candidates,
+            otherOrg = otherOrg,
+            sessionOrgName = o.sessionOrg?.let(o.directory::name),
             busy = l.busy,
             error = l.error,
             conflict = l.conflict,
@@ -356,6 +415,26 @@ class SessionTasksViewModel(
         const val ITEM_PREFIX = "item:"
         const val MAX_CANDIDATES = 50
     }
+}
+
+/**
+ * A link across organisations, in words: what happened and where it can be
+ * done instead — deliberately not the hub's hint to pass `force_cross_org`,
+ * which the phone never does (decision D15). The usual cause is a session
+ * filed under the wrong organisation, so that fix is named first.
+ */
+internal fun crossOrgLinkWords(what: String, taskOrg: String?, sessionOrg: String?, details: String?): Friendly {
+    val task = taskOrg?.let { "$what belongs to $it" } ?: "$what belongs to another organisation"
+    val session = sessionOrg?.let { "this session to $it" } ?: "this session to a different one"
+    return Friendly(
+        "Another organisation",
+        "Not linked: $task and $session. The phone does not link work across organisations. " +
+            "If the session is in the wrong organisation, add an org rule for its repository or host " +
+            "(fleet-hub org rule add, or the desktop's Settings → Work → Organisations); " +
+            "if the link is meant, make it from the desktop's Tasks.",
+        isError = true,
+        details = details,
+    )
 }
 
 /**

@@ -3,6 +3,9 @@
 package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.model.OrgDetail
+import dev.claudefleet.mobile.model.OrgDirectory
+import dev.claudefleet.mobile.model.OrgTracker
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.SessionTasks
 import dev.claudefleet.mobile.model.Ticket
@@ -15,10 +18,19 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 private val LINKS: SessionTasks = json.decodeFromString(SessionTasks.serializer(), WorkTreeJson.SESSION_TASKS)
+
+/** Two orgs: Acme owns tracker 1, Beta tracker 2. */
+private val TWO_ORGS = OrgDirectory.of(
+    listOf(
+        OrgDetail(id = 1, name = "Acme", trackers = listOf(OrgTracker(1))),
+        OrgDetail(id = 2, name = "Beta", trackers = listOf(OrgTracker(2))),
+    ),
+)
 
 private fun TestScope.tasksVm(
     fleet: WorkFleet = WorkFleet(),
@@ -265,5 +277,73 @@ class SessionTasksViewModelTest {
 
         assertEquals(listOf("item:15"), opened)
         assertFalse(vm.state.value.sheetOpen)
+    }
+
+    /**
+     * The add list keeps another org's tickets (so they are not "missing"),
+     * after this org's and marked; tapping one says why in words and sends
+     * nothing — the hub would refuse it, and the phone never forces it (D15).
+     */
+    @Test
+    fun another_orgs_tickets_come_last_marked_and_are_not_sent() = runTest {
+        val fleet = WorkFleet(rows = listOf(SessionRow(id = 7, tmuxName = "api", hostAlias = "mefistos", orgId = 2)))
+        fleet.orgs.value = TWO_ORGS
+        val actions = FakeWorkActions().apply {
+            sessionTasksAnswer = LINKS
+            ticketsAnswer = mapOf(
+                "mine" to listOf(
+                    Ticket(id = 80, key = "PD-2592", title = "Support", trackerId = 1),
+                    Ticket(id = 81, key = "OM-110", title = "API", trackerId = 2),
+                    Ticket(id = 82, key = "LOC-1", title = "No tracker org"),
+                ),
+            )
+        }
+        val vm = tasksVm(fleet = fleet, actions = actions)
+        runCurrent()
+        vm.openAdd()
+        runCurrent()
+
+        val s = vm.state.value
+        assertEquals(listOf("OM-110", "LOC-1", "PD-2592"), s.addCandidates.map { it.label }, "another org's last")
+        assertEquals(mapOf(80L to "Acme"), s.otherOrg, "unassigned is never another org")
+        assertEquals("Beta", s.sessionOrgName)
+
+        assertNull(vm.add(s.addCandidates.last()))
+        runCurrent()
+        assertTrue(actions.workArgs.isEmpty(), "nothing sent")
+        val error = assertNotNull(vm.state.value.error)
+        assertEquals("Another organisation", error.title)
+        assertTrue("PD-2592 belongs to Acme and this session to Beta" in error.body, error.body)
+        assertFalse("force_cross_org" in error.body, "never the hub's hint to force it")
+
+        vm.add(s.addCandidates.first())
+        runCurrent()
+        assertEquals(listOf("link 7 81 primary=false"), actions.workArgs)
+    }
+
+    /** A typed key the hub refuses across orgs: the phone's words, both orgs named, the hub's behind Details. */
+    @Test
+    fun a_cross_org_refusal_is_said_in_words() = runTest {
+        val fleet = WorkFleet(rows = listOf(SessionRow(id = 7, tmuxName = "api", hostAlias = "mefistos", orgId = 2)))
+        fleet.orgs.value = TWO_ORGS
+        val actions = FakeWorkActions().apply { sessionTasksAnswer = LINKS }
+        val vm = tasksVm(fleet = fleet, actions = actions)
+        runCurrent()
+
+        actions.fail = HubError.Tool(
+            "E_FORBIDDEN",
+            "work item 183 belongs to organisation 1 and the session to organisation 2; fleet does not link work " +
+                "across organisations by mistake — pass force_cross_org: true if this is meant",
+            json.parseToJsonElement("""{"work_org_id":1,"session_org_id":2,"cross_org":true}"""),
+        )
+        vm.setAddQuery("PD-2592")
+        vm.addTyped()
+        runCurrent()
+
+        val error = assertNotNull(vm.state.value.error)
+        assertEquals("Another organisation", error.title)
+        assertTrue("PD-2592 belongs to Acme and this session to Beta" in error.body, error.body)
+        assertFalse("force_cross_org" in error.body)
+        assertFalse(vm.state.value.conflict)
     }
 }
