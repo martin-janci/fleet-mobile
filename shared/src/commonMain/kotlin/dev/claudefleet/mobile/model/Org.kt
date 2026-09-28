@@ -27,9 +27,13 @@ data class OrgInfo(val id: Long, val name: String, val color: String? = null)
  * The orgs this token can see, read once per connection: what an org id on a
  * row, a work link, a Today entry or a ticket's tracker is called.
  *
- * A paired phone's token is never org-scoped on the hub (`OrgScope::All`), so
- * everything here is a way of *reading* the fleet — a label, a filter — and
- * never a fence.
+ * The fence is the hub's, never this directory's. A phone paired plainly is
+ * unscoped (`OrgScope::All`) and sees every org; one paired with
+ * `fleet-hub pair --org <id>` (claude-fleet M14.1b, `OrgScope::Org`) is
+ * listed its own org alone, sees that org's rows (and unassigned ones while
+ * the org's `bound_sees_unassigned` is on), and is answered "not found" for
+ * anything else. Either way everything here is a way of *reading* what came
+ * back — a label, a filter — and nothing offers an org the hub did not list.
  */
 data class OrgDirectory(
     val orgs: Map<Long, OrgInfo> = emptyMap(),

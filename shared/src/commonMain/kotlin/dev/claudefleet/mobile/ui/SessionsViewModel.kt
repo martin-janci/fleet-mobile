@@ -658,8 +658,9 @@ class SessionsViewModel(
 
     /**
      * Only [org]'s sessions, or all of them again — tapping the chosen org
-     * again clears it. Never talks to the hub: a phone's token already sees
-     * every org, so this is a way of reading the list, not a scope.
+     * again clears it. Never talks to the hub: it narrows the rows the token
+     * already sees (every org's, or one org's for a phone paired with
+     * `--org`), so this is a way of reading the list, not a scope.
      */
     fun toggleOrg(org: Long) {
         filter { it.copy(orgFilter = if (it.orgFilter == org) null else org) }
