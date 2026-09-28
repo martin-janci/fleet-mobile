@@ -1,8 +1,8 @@
 package dev.claudefleet.mobile.net
 
 /**
- * The hub wire-contract revisions this build understands (claude-fleet
- * revision 4, hub 0.2.36 and later). A hub
+ * The hub wire-contract revisions this build understands (up to claude-fleet
+ * revision 5). A hub
  * outside the range is refused the way the desktop refuses it: the banner
  * says which side is behind, and no row event from that hub is applied.
  *
@@ -15,7 +15,10 @@ package dev.claudefleet.mobile.net
  * [dev.claudefleet.mobile.model.ConvItem.Unsupported] rather than failing the
  * conversation — and the `session_activity` tool, which this app never calls.
  * Left at 3, it refused the 0.2.36 hub outright with "this app is too old"
- * (2026-09-24).
+ * (2026-09-24). Revision 5 made `add_project` and `list_github_repos` hub
+ * tools (and `GithubRepo` a report type): this app neither calls nor reads
+ * them, so a revision-5 hub is safe here. Left at 4, it refused every
+ * current hub as "too old" (2026-09-28).
  *
  * [MIN_HUB_CONTRACT] does NOT mirror the desktop's minimum. The desktop
  * raised its own to 3 because a pre-3 hub would silently misperform
@@ -26,7 +29,7 @@ package dev.claudefleet.mobile.net
  * upgraded: this is the phone's own floor, not a copy of the desktop's.
  */
 const val MIN_HUB_CONTRACT: Int = 0
-const val MAX_HUB_CONTRACT: Int = 4
+const val MAX_HUB_CONTRACT: Int = 5
 
 /**
  * What a `contract` field that cannot be read as a revision counts as.
