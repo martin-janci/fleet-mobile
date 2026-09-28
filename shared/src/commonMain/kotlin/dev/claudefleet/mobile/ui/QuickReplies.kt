@@ -70,7 +70,7 @@ class QuickReplies(
 
     /** Add a chip, ignoring a blank one or a prompt already on the list. */
     suspend fun add(chip: QuickReply) {
-        val trimmed = QuickReply(label = chip.label.trim(), text = chip.text.trim())
+        val trimmed = chip.copy(label = chip.label.trim(), text = chip.text.trim())
         if (trimmed.text.isEmpty() || _chips.value.any { it.text == trimmed.text }) return
         push(_chips.value + trimmed)
     }
@@ -88,11 +88,26 @@ class QuickReplies(
      * button as far as muscle memory is concerned.
      */
     suspend fun replace(original: QuickReply, edited: QuickReply) {
-        val chip = QuickReply(label = edited.label.trim(), text = edited.text.trim())
+        val chip = edited.copy(label = edited.label.trim(), text = edited.text.trim())
         if (chip.text.isEmpty() || chip == original) return
         val at = _chips.value.indexOfFirst { it.text == original.text }
         if (at < 0) return
         push(_chips.value.toMutableList().also { it[at] = chip })
+    }
+
+    /**
+     * Move [chip] one place towards the start ([by] = -1) or the end (1).
+     * The row draws the list in the hub's order on every device, so the
+     * order is part of the list and saved like any other edit. A no-op at
+     * either end, or for a chip that is not there.
+     */
+    suspend fun move(chip: QuickReply, by: Int) {
+        val at = _chips.value.indexOfFirst { it.text == chip.text }
+        val to = at + by
+        if (at < 0 || to !in _chips.value.indices || to == at) return
+        val list = _chips.value.toMutableList()
+        list.add(to, list.removeAt(at))
+        push(list)
     }
 
     /**
