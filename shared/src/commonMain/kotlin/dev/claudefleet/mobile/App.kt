@@ -902,6 +902,7 @@ private fun SessionRoute(
         onAddQuickReply = { vm.addQuickReply(it) },
         onEditQuickReply = { original, edited -> vm.editQuickReply(original, edited) },
         onRemoveQuickReply = { vm.removeQuickReply(it) },
+        onMoveQuickReply = { chip, by -> vm.moveQuickReply(chip, by) },
         onOpenHistory = { vm.quickReplies.history() },
         work = work,
         workHandlers = SessionWorkHandlers(

@@ -574,6 +574,9 @@ class SessionViewModel(
     fun editQuickReply(original: QuickReply, edited: QuickReply): Job =
         editChips { quickReplies.replace(original, edited) }
 
+    /** Move a chip one place left (-1) or right (1) in the fleet's row. */
+    fun moveQuickReply(chip: QuickReply, by: Int): Job = editChips { quickReplies.move(chip, by) }
+
     /**
      * The one path a chip edit takes to the hub.
      *

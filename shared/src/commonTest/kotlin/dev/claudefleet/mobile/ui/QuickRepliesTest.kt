@@ -161,4 +161,42 @@ class QuickRepliesTest {
 
         assertEquals(0, hub.writes)
     }
+
+    @Test
+    fun move_sends_the_list_in_its_new_order() = runTest {
+        val hub = FakeQuickReplyActions(held = listOf(chip("a"), chip("b"), chip("c")))
+        val qr = QuickReplies(FakePrefs(), hub)
+        qr.refresh()
+
+        qr.move(chip("c"), -1)
+
+        assertEquals(listOf(chip("a"), chip("c"), chip("b")), hub.held)
+        assertEquals(hub.held, qr.chips.value)
+    }
+
+    @Test
+    fun move_past_either_end_makes_no_call() = runTest {
+        val hub = FakeQuickReplyActions(held = listOf(chip("a"), chip("b")))
+        val qr = QuickReplies(FakePrefs(), hub)
+        qr.refresh()
+
+        qr.move(chip("a"), -1)
+        qr.move(chip("b"), 1)
+        qr.move(chip("missing"), 1)
+
+        assertEquals(0, hub.writes)
+    }
+
+    @Test
+    fun add_and_replace_keep_the_auto_send_flag() = runTest {
+        val hub = FakeQuickReplyActions(held = listOf(chip("a")))
+        val qr = QuickReplies(FakePrefs(), hub)
+        qr.refresh()
+
+        qr.add(QuickReply(label = "B", text = " b ", autoSend = true))
+        assertEquals(QuickReply(label = "B", text = "b", autoSend = true), hub.held.last())
+
+        qr.replace(chip("a"), QuickReply(label = "a", text = "a", autoSend = false))
+        assertEquals(QuickReply(label = "a", text = "a", autoSend = false), hub.held.first())
+    }
 }

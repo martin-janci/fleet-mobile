@@ -35,6 +35,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -147,6 +148,8 @@ fun SessionScreen(
     onAddQuickReply: (QuickReply) -> Unit,
     onEditQuickReply: (QuickReply, QuickReply) -> Unit,
     onRemoveQuickReply: (QuickReply) -> Unit,
+    /** Move a chip one place left (-1) or right (1); the default does nothing. */
+    onMoveQuickReply: (QuickReply, Int) -> Unit = { _, _ -> },
     /**
      * Pulled fresh each time the field's leading icon opens the history
      * sheet — [dev.claudefleet.mobile.ui.QuickReplies.history] is a plain
@@ -351,9 +354,11 @@ fun SessionScreen(
                         enabled = state.canSendQuick,
                         editable = quickRepliesEditable,
                         onSendQuick = onSendQuick,
+                        onFill = onDraftChange,
                         onAdd = onAddQuickReply,
                         onEdit = onEditQuickReply,
                         onRemove = onRemoveQuickReply,
+                        onMove = onMoveQuickReply,
                     )
                 }
                 PromptBox(
@@ -1299,8 +1304,8 @@ private fun HistoryDialog(entries: List<String>, onPick: (String) -> Unit, onDis
 }
 
 /**
- * The chip row above the composer: a [LazyRow] of quick replies, one tap away
- * from [onSendQuick], then two trailing chips — `+`, which saves whatever is
+ * The chip row above the composer: a [LazyRow] of quick replies, then two
+ * trailing chips — `+`, which saves whatever is
  * in the draft, and **Edit chips**, which opens [ManageQuickRepliesDialog].
  *
  * The visible **Edit chips** entry is the point. The only way to change this
@@ -1308,6 +1313,12 @@ private fun HistoryDialog(entries: List<String>, onPick: (String) -> Unit, onDis
  * screen said the buttons could be edited at all, so as far as anyone using
  * the app was concerned, they could not be. The long-press still works as a
  * shortcut to the same editor.
+ *
+ * A tap does what the chip says ([QuickReply.sendsOnTap]): an auto-send chip
+ * goes to [onSendQuick]; any other puts its prompt in the composer through
+ * [onFill], to be edited and sent from there. Only the sending chips follow
+ * `enabled` — filling the box writes nothing to the session, so a busy
+ * session is no reason to refuse it.
  *
  * Visibility of the row (hidden while blocked or readonly) is the caller's
  * decision, same as every other card-vs-composer choice on this screen — see
@@ -1320,9 +1331,11 @@ private fun QuickRepliesRow(
     enabled: Boolean,
     editable: Boolean,
     onSendQuick: (String) -> Unit,
+    onFill: (String) -> Unit,
     onAdd: (QuickReply) -> Unit,
     onEdit: (QuickReply, QuickReply) -> Unit,
     onRemove: (QuickReply) -> Unit,
+    onMove: (QuickReply, Int) -> Unit,
 ) {
     var editing by remember { mutableStateOf<QuickReply?>(null) }
     var adding by remember { mutableStateOf(false) }
@@ -1333,10 +1346,12 @@ private fun QuickRepliesRow(
         modifier = Modifier.testTag(QUICK_REPLY_ROW),
     ) {
         items(chips) { chip ->
+            val sends = chip.sendsOnTap
             QuickReplyChip(
                 caption = chip.caption,
-                enabled = enabled,
-                onClick = { onSendQuick(chip.text) },
+                sends = sends,
+                enabled = enabled || !sends,
+                onClick = { if (sends) onSendQuick(chip.text) else onFill(chip.text) },
                 onLongClick = if (editable) ({ editing = chip }) else null,
             )
         }
@@ -1377,6 +1392,7 @@ private fun QuickRepliesRow(
             chips = chips,
             onEdit = { editing = it; managing = false },
             onRemove = onRemove,
+            onMove = onMove,
             onAdd = { adding = true; managing = false },
             onDismiss = { managing = false },
         )
@@ -1401,6 +1417,8 @@ private fun QuickRepliesRow(
 @Composable
 private fun QuickReplyChip(
     caption: String,
+    /** An auto-send chip: marked with a trailing ↵ so a tap is not a surprise. */
+    sends: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
     /** Null on a hub with no chip list to edit — see `quickRepliesEditable`. */
@@ -1411,7 +1429,19 @@ private fun QuickReplyChip(
         SuggestionChip(
             onClick = {},
             enabled = enabled,
-            label = { Text(caption, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            label = {
+                // The mark is its own Text so the caption stays the chip's
+                // exact text — for a screen reader and for a test finding it.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        caption,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (sends) Text(" ↵", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
             interactionSource = interaction,
         )
         Box(
@@ -1427,8 +1457,9 @@ private fun QuickReplyChip(
 }
 
 /**
- * The chip row's editor: every chip with a way to change or delete it, and a
- * way to write a new one.
+ * The chip row's editor: every chip with a way to change, move or delete it,
+ * and a way to write a new one. Tapping a chip's text opens its editor; the
+ * arrows move it one place, which is the order the row draws on every device.
  *
  * A dialog rather than a settings screen because this is where the chips are
  * — the row is on the session screen and nowhere else, and a list of buttons
@@ -1440,6 +1471,7 @@ private fun ManageQuickRepliesDialog(
     chips: List<QuickReply>,
     onEdit: (QuickReply) -> Unit,
     onRemove: (QuickReply) -> Unit,
+    onMove: (QuickReply, Int) -> Unit,
     onAdd: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -1457,7 +1489,7 @@ private fun ManageQuickRepliesDialog(
                 if (chips.isEmpty()) {
                     Text("No chips yet.", style = MaterialTheme.typography.bodyMedium)
                 }
-                chips.forEach { chip ->
+                chips.forEachIndexed { i, chip ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f).clickable { onEdit(chip) }.padding(vertical = 8.dp)) {
                             Text(chip.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1473,8 +1505,18 @@ private fun ManageQuickRepliesDialog(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             }
+                            Text(
+                                if (chip.sendsOnTap) "Sends on tap" else "Fills the box",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
-                        TextButton(onClick = { onEdit(chip) }) { Text("Edit") }
+                        IconButton(onClick = { onMove(chip, -1) }, enabled = i > 0) {
+                            Text("↑")
+                        }
+                        IconButton(onClick = { onMove(chip, 1) }, enabled = i < chips.lastIndex) {
+                            Text("↓")
+                        }
                         TextButton(onClick = { onRemove(chip) }) {
                             Text("Remove", color = MaterialTheme.colorScheme.error)
                         }
@@ -1505,6 +1547,8 @@ private fun EditQuickReplyDialog(
 ) {
     var label by remember { mutableStateOf(original?.label.orEmpty()) }
     var text by remember { mutableStateOf(original?.text.orEmpty()) }
+    // A new chip fills the box by default, as on the desktop.
+    var autoSend by remember { mutableStateOf(original?.sendsOnTap ?: false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (original == null) "New quick reply" else "Quick reply") },
@@ -1524,11 +1568,20 @@ private fun EditQuickReplyDialog(
                     minLines = 2,
                     maxLines = 6,
                 )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clickable { autoSend = !autoSend },
+                ) {
+                    Checkbox(checked = autoSend, onCheckedChange = { autoSend = it })
+                    Text("Send on tap (otherwise only fills the box)")
+                }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(QuickReply(label = label.trim(), text = text.trim())) },
+                onClick = {
+                    onSave(QuickReply(label = label.trim(), text = text.trim(), autoSend = autoSend))
+                },
                 enabled = text.isNotBlank(),
             ) { Text("Save") }
         },
