@@ -70,7 +70,7 @@ class MyWorkViewModelTest {
 
         val s = vm.state.value
         assertTrue(s.available && s.loaded)
-        assertEquals(listOf("Acme", "Globex", "No organisation"), s.orgs.map { it.name })
+        assertEquals(listOf("Acme", "Globex", "Unassigned"), s.orgs.map { it.name }, "the desktop's word for no org")
         assertEquals(listOf(4, 1, 3), s.orgs.map { it.count }, "an org counts every task of its groups, loaded or not")
         val abc = s.orgs[0].groups[0]
         assertEquals("ABC", abc.group.title)
@@ -162,6 +162,105 @@ class MyWorkViewModelTest {
         assertEquals(WorkTreeFilters(status = "open", mine = true), again.state.value.filters)
         assertTrue(again.state.value.orgs[0].collapsed)
         assertFalse(again.state.value.orgs[1].collapsed)
+    }
+
+    /**
+     * Archived tasks are hidden by default: the hub counts them
+     * (`archived_hidden`) and the list's last row offers them. *Show
+     * archived* re-reads with `archived: true`; it widens, so it is neither
+     * counted nor a chip, and *Clear all* hides them again.
+     */
+    @Test
+    fun archived_tasks_are_hidden_by_default_and_shown_on_demand() = runTest {
+        val actions = FakeWorkActions()
+        actions.treeAnswer = { filters, _ ->
+            val p = page(WorkTreeJson.TREE)
+            if (filters.archived == true) p.copy(archivedHidden = 0) else p.copy(archivedHidden = 4)
+        }
+        val vm = myWork(actions = actions)
+        vm.attach()
+        runCurrent()
+
+        assertEquals(null, actions.treeCalls.single().filters.archived, "absent: the hub's default hides them")
+        assertEquals(4, vm.state.value.archivedHidden)
+        assertTrue(vm.state.value.archivedRow)
+        assertFalse(vm.state.value.showArchived)
+
+        vm.setArchived(true)
+        runCurrent()
+        assertEquals(true, actions.treeCalls.last().filters.archived)
+        assertEquals(0, vm.state.value.archivedHidden)
+        assertTrue(vm.state.value.archivedRow, "shown, the row stays to hide them again")
+        assertEquals(0, vm.state.value.filters.sheetCount)
+        assertEquals(emptyList(), vm.state.value.facets)
+
+        vm.clearFilters()
+        runCurrent()
+        assertEquals(WorkTreeFilters(), vm.state.value.filters)
+        assertEquals(4, vm.state.value.archivedHidden)
+    }
+
+    /**
+     * *Clear filters* clears the search too — it kept it, so on a tree
+     * emptied by a search alone the empty state's button did nothing.
+     */
+    @Test
+    fun clear_filters_clears_the_search_as_well() = runTest {
+        val actions = FakeWorkActions().answeringTree()
+        val vm = myWork(actions = actions)
+        vm.attach()
+        runCurrent()
+
+        vm.setQuery("nothing-matches")
+        vm.setStatus("done")
+        runCurrent()
+        assertEquals(listOf("Status: Done", "Search: “nothing-matches”"), vm.state.value.facets.map { it.label })
+        assertEquals(listOf("Status: Done"), vm.state.value.stripFacets.map { it.label }, "the search field shows its own")
+
+        vm.clearFilters()
+        advanceTimeBy(MyWorkViewModel.QUERY_DEBOUNCE_MS + 1)
+        runCurrent()
+        assertEquals(WorkTreeFilters(), vm.state.value.filters)
+        assertEquals(WorkTreeFilters(), actions.treeCalls.last().filters)
+    }
+
+    /** A chip names its org and tracker the way the page does, and its ✕ clears only that filter. */
+    @Test
+    fun a_chip_names_the_pages_org_and_clears_only_itself() = runTest {
+        val actions = FakeWorkActions().answeringTree()
+        val vm = myWork(actions = actions)
+        vm.attach()
+        runCurrent()
+
+        vm.setOrg(IdOrWord.of(1))
+        vm.setTracker(IdOrWord.of(1))
+        vm.toggleMine()
+        runCurrent()
+        assertEquals(listOf("Org: Acme", "Tracker: Jira (acme)", "Assigned to me"), vm.state.value.facets.map { it.label })
+        assertEquals(2, vm.state.value.filters.sheetCount, "the toggle on screen is not counted on Filters")
+
+        vm.clearFacet(dev.claudefleet.mobile.model.WorkFacetId.ORG)
+        runCurrent()
+        assertEquals(WorkTreeFilters(tracker = IdOrWord.of(1), mine = true), vm.state.value.filters)
+        assertEquals(WorkTreeFilters(tracker = IdOrWord.of(1), mine = true), actions.treeCalls.last().filters)
+    }
+
+    /**
+     * A remembered status this build does not offer is dropped on the way
+     * in, rather than sent to the hub with no chip to show or clear it.
+     */
+    @Test
+    fun a_stale_remembered_value_is_dropped() = runTest {
+        val prefs = FakePrefs()
+        prefs.putStringList(MyWorkViewModel.FILTERS_KEY, listOf("""{"status":"blocked","has":"later","org":"none"}"""))
+        val actions = FakeWorkActions().answeringTree()
+        val vm = myWork(actions = actions, prefs = prefs)
+        vm.attach()
+        runCurrent()
+
+        assertEquals(WorkTreeFilters(org = IdOrWord.NONE), vm.state.value.filters)
+        assertEquals(WorkTreeFilters(org = IdOrWord.NONE), actions.treeCalls.single().filters)
+        assertEquals(listOf("Org: Unassigned"), vm.state.value.stripFacets.map { it.label })
     }
 
     /** Offline: the last page stays, says how old it is, and nothing can be written. */

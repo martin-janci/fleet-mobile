@@ -2,6 +2,9 @@ package dev.claudefleet.mobile.model
 
 import dev.claudefleet.mobile.net.json
 import dev.claudefleet.mobile.ui.WorkTreeWireSamples
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -77,6 +80,38 @@ class WorkTreeWireTest {
         assertTrue(i.links.single().becomesCrossOrg)
         assertEquals(listOf("h1"), i.hostsLosing)
         assertTrue(!i.impactToken.isNullOrBlank())
+    }
+
+    /**
+     * Archived tasks are hidden by default: the page says how many
+     * (`archived_hidden`) and a task says whether it is one (`archived`).
+     * An older hub sends neither and hides nothing — 0 and false.
+     */
+    @Test
+    fun the_archived_count_and_flag_are_read_and_default_to_none() {
+        val page = json.decodeFromString(WorkTreePage.serializer(), WorkTreeWireSamples.TREE)
+        assertEquals(1, page.archivedHidden)
+        assertTrue(page.tasks.none { it.archived })
+
+        val old = json.decodeFromString(WorkTreePage.serializer(), """{"tasks":[{"task_id":"item:1"}],"total":1}""")
+        assertEquals(0, old.archivedHidden)
+        assertFalse(old.tasks.single().archived)
+
+        val shown = json.decodeFromString(WorkTreePage.serializer(), """{"tasks":[{"task_id":"item:1","archived":true}],"total":1}""")
+        assertTrue(shown.tasks.single().archived)
+    }
+
+    /**
+     * `filters.archived` travels only when it is on: absent is the hub's
+     * default (hidden), and a hub that does not know it ignores it.
+     */
+    @Test
+    fun the_archived_filter_is_sent_only_when_on() {
+        val on = json.encodeToJsonElement(WorkTreeFilters.serializer(), WorkTreeFilters(archived = true).normalized()).jsonObject
+        assertEquals(true, on["archived"]!!.jsonPrimitive.boolean)
+        val off = json.encodeToJsonElement(WorkTreeFilters.serializer(), WorkTreeFilters(archived = false).normalized()).jsonObject
+        assertFalse("archived" in off, "$off")
+        assertEquals(WorkTreeFilters(), WorkTreeFilters(archived = false).normalized())
     }
 
     /** A session row's `work_rev` (M14): read when sent, 0 when the hub leaves it out. */

@@ -3,12 +3,14 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.epochSeconds
+import dev.claudefleet.mobile.model.Facet
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.orgColorArgb
 import dev.claudefleet.mobile.model.OrgInfo
 import dev.claudefleet.mobile.model.orgOf
 import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.SessionFacetId
 import dev.claudefleet.mobile.model.SessionFilters
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.StatusFilter
@@ -20,8 +22,10 @@ import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.WorkStatusFilter
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.withTicketsFrom
-import dev.claudefleet.mobile.model.workStatusNames
+import dev.claudefleet.mobile.model.sessionFacets
 import dev.claudefleet.mobile.model.unnamedProject
+import dev.claudefleet.mobile.model.without
+import dev.claudefleet.mobile.model.workStatusNames
 import dev.claudefleet.mobile.net.json
 import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
@@ -196,6 +200,15 @@ data class SessionsUiState(
     val searchOpen: Boolean = false,
     /** The tracker status names the sheet offers beside the three buckets ([workStatusNames]). */
     val workStatusNameChoices: List<String> = emptyList(),
+    /**
+     * Sessions that pass every other filter but are hidden because they are
+     * archived ([SessionFilters.showArchived] is off by default): what the
+     * *N archived sessions hidden · Show archived* row at the end of the list
+     * counts. 0 while they are shown.
+     */
+    val archivedHidden: Int = 0,
+    /** How many of [archivedHidden] want a person — said on that row, since the banner does not count them. */
+    val archivedAttention: Int = 0,
 ) {
     val isEmpty: Boolean get() = groups.isEmpty() && urgent.isEmpty()
 
@@ -210,14 +223,28 @@ data class SessionsUiState(
     val myWorkOnly: Boolean get() = filters.myWorkOnly
     val orgFilter: Long? get() = filters.orgFilter
 
-    /** The filters that are on, in words — the summary line and the empty state say the same thing. */
-    fun filterNames(): List<String> = filters.summary(
-        orgName = { id -> orgChoices.firstOrNull { it.id == id }?.name ?: "org #$id" },
-        projectName = { id -> projectChoices.firstOrNull { it.id == id }?.label ?: unnamedProject(id) },
-    )
+    /**
+     * Every filter that narrows the list, in the desktop's words
+     * ([sessionFacets]) — what the strip draws and the empty state names.
+     */
+    val facets: List<Facet<SessionFacetId>>
+        get() = sessionFacets(
+            filters,
+            orgName = { id -> orgChoices.firstOrNull { it.id == id }?.name },
+            projectName = { id -> projectChoices.firstOrNull { it.id == id }?.label },
+        )
+
+    /** The strip's chips: [facets] less the ones with a control of their own on screen (Needs you, the search). */
+    val stripFacets: List<Facet<SessionFacetId>> get() = facets.filterNot { it.id.onScreen }
+
+    /** The filters that are on, in words — the strip and the empty state say the same thing. */
+    fun filterNames(): List<String> = facets.map { it.label }
 
     /** Rows are being hidden: what makes the "N of M" line worth drawing. */
     val narrowed: Boolean get() = filters.any && shown != total
+
+    /** The archived row at the end of the list is drawn: some are hidden, or they are shown and can be hidden again. */
+    val archivedRow: Boolean get() = workAvailable && (archivedHidden > 0 || filters.showArchived)
 }
 
 /**
@@ -312,12 +339,21 @@ class SessionsViewModel(
      * still doing the work.
      */
     private fun readFilters(): SessionFilters {
-        val stored = prefs?.getStringList(FILTERS_KEY)?.firstOrNull() ?: return SessionFilters()
-        return try {
-            json.decodeFromString(SessionFilters.serializer(), stored)
-        } catch (_: Exception) {
-            SessionFilters()
+        prefs?.getStringList(FILTERS_KEY)?.firstOrNull()?.let { stored ->
+            return decodeFilters(stored) ?: SessionFilters()
         }
+        // Before archived sessions were hidden by default. Every install
+        // wrote `showArchived: true` there — the old default, since the store
+        // encodes defaults — so it says nothing about a choice: carry the
+        // rest over and start hidden, as the desktop's `readWorkFilters` does.
+        val old = prefs?.getStringList(FILTERS_KEY_V1)?.firstOrNull() ?: return SessionFilters()
+        return decodeFilters(old)?.copy(showArchived = false) ?: SessionFilters()
+    }
+
+    private fun decodeFilters(stored: String): SessionFilters? = try {
+        json.decodeFromString(SessionFilters.serializer(), stored)
+    } catch (_: Exception) {
+        null
     }
 
     /**
@@ -440,7 +476,7 @@ class SessionsViewModel(
     /**
      * Show the search field, or hide it — and hiding it clears the query,
      * because a filter whose control is not on screen is one nobody can see to
-     * undo. The summary line would still name it, but the field is where it is
+     * undo. The empty state would still name it, but the field is where it is
      * turned off.
      */
     fun toggleSearch() {
@@ -495,9 +531,26 @@ class SessionsViewModel(
         }
     }
 
-    /** List sessions archived from the desktop's Tidy-up, or leave them out. The desktop's `hide archived`. */
+    /** List sessions archived from the desktop's Tidy-up, or leave them out (the default). */
     fun toggleArchived() {
         filter { it.copy(showArchived = !it.showArchived) }
+    }
+
+    /** The archived row's *Show archived* / *Hide archived*. */
+    fun setShowArchived(show: Boolean) {
+        filter { it.copy(showArchived = show) }
+    }
+
+    /**
+     * One chip's ✕, or a sheet group's *Any*: that filter back to its
+     * default, the rest kept. [SessionFacetId.HOST] is cleared here too, but
+     * the navigator owns it, so the screen clears `Screen.Sessions.hostAlias`
+     * alongside (`Navigator.clearHostFilter`), exactly as *Clear all* does.
+     * Clearing the search also puts the field away, as [toggleSearch] would.
+     */
+    fun clearFacet(id: SessionFacetId) {
+        filter { it.without(id) }
+        if (id == SessionFacetId.SEARCH) local.update { it.copy(searchOpen = false) }
     }
 
     /** List background agents, or leave them out. The desktop's `bg on/off`. */
@@ -695,8 +748,12 @@ class SessionsViewModel(
             workStatusNames = l.filters.workStatusNames.filterTo(mutableSetOf()) { n ->
                 statusNames.any { it.equals(n, ignoreCase = true) }
             },
-            showArchived = l.filters.showArchived || !work.available,
         )
+        // Without the work graph nothing is archived and there is no switch
+        // for it, so nothing is hidden as archived. The person's choice is
+        // kept as it is ([filters] is what the screen shows); only what is
+        // matched against widens.
+        val applied = if (work.available) filters else filters.copy(showArchived = true)
         val myWork = work.myWork?.takeIf { filters.myWorkOnly }
         val urgency = groupMode == GroupMode.URGENCY
         // The queue is flat, so it is filtered here rather than grouped: the
@@ -707,7 +764,7 @@ class SessionsViewModel(
             emptyList()
         } else {
             rows.filter { row ->
-                row.matches(filters, l.filterAt, projectLabel(row.projectId, byId)) &&
+                row.matches(applied, l.filterAt, projectLabel(row.projectId, byId)) &&
                     (myWork == null || row.work?.itemId in myWork)
             }.byTriage(now = nowSeconds)
         }
@@ -716,11 +773,20 @@ class SessionsViewModel(
         // host filter is included because it narrows like any other — and
         // `onClearAll`, which is what the warning offers, already clears the
         // navigator's copy along with the rest.
+        fun kept(row: SessionRow, f: SessionFilters) =
+            row.matches(f, l.filterAt, projectLabel(row.projectId, byId)) && (myWork == null || row.work?.itemId in myWork)
+        // Hidden only by the archived default: not something *Clear all*
+        // brings back, so not what the banner counts — the archived row at
+        // the end of the list says these, and how many want a person.
+        val archivedOut = if (applied.showArchived) {
+            emptyList()
+        } else {
+            val widened = applied.copy(showArchived = true)
+            rows.filter { it.work?.archivedAt != null && kept(it, widened) }
+        }
+        val archivedIds = archivedOut.mapTo(HashSet()) { it.id }
         val hiddenAttention = rows.count { row ->
-            row.needsAttention && !(
-                row.matches(filters, l.filterAt, projectLabel(row.projectId, byId)) &&
-                    (myWork == null || row.work?.itemId in myWork)
-                )
+            row.needsAttention && !kept(row, applied) && row.id !in archivedIds
         }
         val groups = if (urgency) {
             emptyList()
@@ -729,7 +795,7 @@ class SessionsViewModel(
                 rows,
                 hosts,
                 projects,
-                filters,
+                applied,
                 l.filterAt,
                 byWork,
                 myWork,
@@ -759,6 +825,8 @@ class SessionsViewModel(
             filtersOpen = l.filtersOpen,
             searchOpen = l.searchOpen,
             workStatusNameChoices = statusNames,
+            archivedHidden = archivedOut.size,
+            archivedAttention = archivedOut.count { it.needsAttention },
         )
     }
 
@@ -766,7 +834,9 @@ class SessionsViewModel(
         const val BY_WORK_KEY = "sessions.by_work"
         const val GROUP_MODE_KEY = "sessions.group_mode"
         const val COLLAPSED_KEY = "sessions.collapsed_hosts"
-        const val FILTERS_KEY = "sessions.filters"
+        /** v2: archived sessions hidden by default. */
+        const val FILTERS_KEY = "sessions.filters.v2"
+        const val FILTERS_KEY_V1 = "sessions.filters"
         const val ON = "on"
     }
 }

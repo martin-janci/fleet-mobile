@@ -133,4 +133,54 @@ class WorkTreeTest {
         assertEquals(2, WorkTreeFilters(mine = true, status = "open").count)
         assertTrue(WorkTreeFilters(status = "any", mine = false).isEmpty)
     }
+
+    /**
+     * The *Filters (n)* badge counts what the sheet holds; the two toggles on
+     * screen, the search and *Show archived* (it widens) are not counted.
+     */
+    @Test
+    fun the_sheet_count_is_org_tracker_status_and_sessions_only() {
+        val all = WorkTreeFilters(
+            org = IdOrWord.NONE,
+            tracker = IdOrWord.LOCAL,
+            status = "done",
+            has = "none",
+            mine = true,
+            review = true,
+            query = "x",
+            archived = true,
+        )
+        assertEquals(4, all.sheetCount)
+        assertEquals(6, all.count)
+        assertEquals(0, WorkTreeFilters(archived = true).count)
+        assertTrue(WorkTreeFilters(archived = true).isEmpty, "showing archived tasks narrows nothing")
+        assertFalse(WorkTreeFilters(query = "x").isEmpty)
+    }
+
+    /**
+     * A status or sessions value this build does not offer — remembered by an
+     * older build, or saved in a view by a newer desktop — is dropped, as the
+     * desktop's `normalizeFilters` drops it: sent on, it narrowed the tree
+     * with no chip selected in the sheet to show it or clear it.
+     */
+    @Test
+    fun a_status_or_sessions_value_this_build_does_not_offer_is_dropped() {
+        val n = WorkTreeFilters(status = "blocked", has = "someday", org = IdOrWord.of(3)).normalized()
+        assertEquals(WorkTreeFilters(org = IdOrWord.of(3)), n)
+        for (s in WorkTreeFilters.STATUSES) assertEquals(s, WorkTreeFilters(status = s).normalized().status)
+        for (h in WorkTreeFilters.HAS) assertEquals(h, WorkTreeFilters(has = h).normalized().has)
+    }
+
+    /** The desktop's labels (`STATUS_FILTER_LABELS`, `HAS_FILTER_LABELS`), sentence case, *Any* first. */
+    @Test
+    fun the_labels_are_the_desktops() {
+        assertEquals(
+            listOf("Any", "Open", "To do", "In progress", "Done"),
+            (listOf(WorkTreeFilters.ANY) + WorkTreeFilters.STATUSES).map(WorkTreeFilters::statusLabel),
+        )
+        assertEquals(
+            listOf("Any", "Active session", "Past only", "No session", "Suggested"),
+            (listOf(WorkTreeFilters.ANY) + WorkTreeFilters.HAS).map(WorkTreeFilters::hasLabel),
+        )
+    }
 }

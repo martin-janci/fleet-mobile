@@ -4,6 +4,7 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.epochSeconds
+import dev.claudefleet.mobile.model.Facet
 import dev.claudefleet.mobile.model.GroupRef
 import dev.claudefleet.mobile.model.IdOrWord
 import dev.claudefleet.mobile.model.TreeGroup
@@ -15,6 +16,9 @@ import dev.claudefleet.mobile.model.WorkTreeFilters
 import dev.claudefleet.mobile.model.WorkTreePage
 import dev.claudefleet.mobile.model.WorkView
 import dev.claudefleet.mobile.model.WorkViewDraft
+import dev.claudefleet.mobile.model.WorkFacetId
+import dev.claudefleet.mobile.model.without
+import dev.claudefleet.mobile.model.workFacets
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK_LINK
@@ -100,8 +104,28 @@ data class MyWorkUiState(
     val rulesAvailable: Boolean = false,
     val rulesOpen: Boolean = false,
     val rules: List<WorkRule> = emptyList(),
+    /**
+     * Tasks the hub hid as archived under these filters (`archived_hidden`):
+     * what the *N archived tasks hidden · Show archived* row at the end of
+     * the list counts. 0 from an older hub, which hides none.
+     */
+    val archivedHidden: Int = 0,
+    /** Every filter that narrows the tree, in the desktop's words ([workFacets]). */
+    val facets: List<Facet<WorkFacetId>> = emptyList(),
 ) {
     val isEmpty: Boolean get() = loaded && orgs.isEmpty()
+
+    /** Archived tasks are being shown ([WorkTreeFilters.archived]). */
+    val showArchived: Boolean get() = filters.archived == true
+
+    /**
+     * The strip under the header: one removable chip per filter the sheet
+     * holds. Search and the two toggles show their own state on screen.
+     */
+    val stripFacets: List<Facet<WorkFacetId>> get() = facets.filterNot { it.id.onScreen }
+
+    /** The archived row is drawn: some are hidden, or they are being shown (and can be hidden again). */
+    val archivedRow: Boolean get() = loaded && (archivedHidden > 0 || showArchived)
 }
 
 /**
@@ -383,7 +407,27 @@ class MyWorkViewModel(
     fun setHas(has: String?) = setFilters(local.value.filters.copy(has = has))
     fun toggleMine() = setFilters(local.value.filters.copy(mine = local.value.filters.mine != true))
     fun toggleReview() = setFilters(local.value.filters.copy(review = local.value.filters.review != true))
-    fun clearFilters() = setFilters(WorkTreeFilters(query = local.value.filters.query))
+
+    /** Show archived tasks too, or hide them again (the default). Not a narrowing: it is not counted. */
+    fun setArchived(on: Boolean) = setFilters(local.value.filters.copy(archived = on))
+    fun toggleArchived() = setArchived(local.value.filters.archived != true)
+
+    /** One chip's ✕: that filter back to *Any*, the rest kept. */
+    fun clearFacet(id: WorkFacetId) {
+        if (id == WorkFacetId.QUERY) queryJob?.cancel()
+        setFilters(local.value.filters.without(id))
+    }
+
+    /**
+     * Every filter off — the search included, and archived tasks hidden
+     * again: the desktop's *Clear all* / *Clear filters*. It used to keep the
+     * search, so on a tree emptied by a search alone the empty state's
+     * *Clear filters* changed nothing at all.
+     */
+    fun clearFilters() {
+        queryJob?.cancel()
+        setFilters(WorkTreeFilters())
+    }
 
     /** The search box: typed text narrows the tree after a short pause. */
     fun setQuery(text: String) {
@@ -563,6 +607,12 @@ class MyWorkViewModel(
             rulesAvailable = caps.has(WORK, RULES),
             rulesOpen = l.rulesOpen,
             rules = l.rules,
+            archivedHidden = page?.archivedHidden ?: 0,
+            facets = workFacets(
+                l.filters,
+                orgName = { id -> page?.orgs?.firstOrNull { it.id == id }?.name?.takeIf { it.isNotBlank() } },
+                trackerName = { id -> page?.trackers?.firstOrNull { it.id == id }?.name?.takeIf { it.isNotBlank() } },
+            ),
         )
     }
 
@@ -581,7 +631,7 @@ class MyWorkViewModel(
                 key = orgKey,
                 orgId = orgId,
                 name = orgId?.let { id -> groups.firstNotNullOfOrNull { it.orgName } ?: orgNames[id]?.name?.takeIf { it.isNotBlank() } ?: "Org $id" }
-                    ?: "No organisation",
+                    ?: "Unassigned",
                 color = orgId?.let { orgNames[it]?.color },
                 count = groups.sumOf { it.count },
                 collapsed = orgKey in l.collapsed,
