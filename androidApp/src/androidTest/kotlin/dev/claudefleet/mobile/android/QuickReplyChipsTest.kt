@@ -43,6 +43,7 @@ class QuickReplyChipsTest {
     )
 
     private var sent = mutableListOf<String>()
+    private var filled = mutableListOf<String>()
     private var removed = mutableListOf<QuickReply>()
 
     /**
@@ -57,14 +58,14 @@ class QuickReplyChipsTest {
         claudeStatus = "idle",
     )
 
-    private fun screen(draft: String = "") {
+    private fun screen(draft: String = "", chips: List<QuickReply> = this.chips) {
         compose.setContent {
             FleetTheme {
                 SessionScreen(
                     sessionId = 3L,
                     state = SessionUiState(session = row, loaded = true, draft = draft),
                     status = ConnectionStatus.Connected(hubVersion = "test"),
-                    onDraftChange = {},
+                    onDraftChange = { filled += it },
                     onSend = {},
                     onRefresh = {},
                     onBack = {},
@@ -142,5 +143,16 @@ class QuickReplyChipsTest {
         compose.waitForIdle()
 
         assertEquals(listOf(chips.first()), removed)
+    }
+
+    @Test
+    fun a_chip_without_auto_send_fills_the_box_instead_of_sending() {
+        screen(chips = listOf(QuickReply(label = "Tests", text = "run the tests", autoSend = false)))
+
+        compose.onNodeWithText("Tests").performClick()
+        compose.waitForIdle()
+
+        assertEquals(listOf("run the tests"), filled)
+        assertEquals(emptyList<String>(), sent)
     }
 }

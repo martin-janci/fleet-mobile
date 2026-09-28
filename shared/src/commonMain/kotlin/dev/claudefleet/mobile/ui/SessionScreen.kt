@@ -1430,11 +1430,17 @@ private fun QuickReplyChip(
             onClick = {},
             enabled = enabled,
             label = {
-                Text(
-                    if (sends) "$caption ↵" else caption,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // The mark is its own Text so the caption stays the chip's
+                // exact text — for a screen reader and for a test finding it.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        caption,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (sends) Text(" ↵", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             },
             interactionSource = interaction,
         )
