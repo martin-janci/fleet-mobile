@@ -89,7 +89,7 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
 
         if (state.gone) {
             Text(
-                "This task is not on the hub, or this device may not see it.",
+                TASK_NOT_VISIBLE,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(24.dp),
             )
