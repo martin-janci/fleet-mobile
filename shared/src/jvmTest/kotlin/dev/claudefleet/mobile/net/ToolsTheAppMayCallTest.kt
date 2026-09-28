@@ -96,15 +96,25 @@ class ToolsTheAppMayCallTest {
     }
 
     /**
-     * Decision D15 (work graph M13.4d): a cross-org refusal is said on the
-     * phone and never overridden from it. `force_cross_org` is the one
-     * argument that would override it, so no source set may write the string
-     * a request would need — whatever the call site, whatever the button.
+     * Decision D15 (work graph M13.4d), as the owner narrowed it on
+     * 2026-09-28: a start, a multi-start or a resume refused across orgs is
+     * said on the phone and never overridden from it; only a session's
+     * *Tasks* link may be shared across orgs, after the person chose to.
+     * So `force_cross_org` is written exactly once — the constant in
+     * `HubClient.kt` — and sent only by `linkWork`.
      */
     @Test
-    fun no_source_set_can_send_force_cross_org() {
+    fun force_cross_org_is_named_once_and_sent_only_by_a_link() {
         val offences = sharedSources().filter { "\"force_cross_org\"" in it.readText() }.map { it.name }
-        assertEquals(emptyList(), offences, "the phone never retries a start with force_cross_org")
+        assertEquals(listOf("HubClient.kt"), offences, "only the constant in HubClient.kt names it")
+        val client = sharedSources().single { it.name == "HubClient.kt" }.readText()
+        assertEquals(1, Regex("\"force_cross_org\"").findAll(client).count())
+        // Each use, by the function it sits in: the nearest `fun` above it.
+        val users = Regex("""\bFORCE_CROSS_ORG\b""").findAll(client)
+            .filterNot { client.substring(0, it.range.first).endsWith("const val ") }
+            .map { use -> Regex("""fun (\w+)\(""").findAll(client.substring(0, use.range.first)).last().groupValues[1] }
+            .toList()
+        assertEquals(listOf("linkWork"), users, "no start, multi-start or resume ever forces")
     }
 
     /**

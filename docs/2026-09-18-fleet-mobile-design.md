@@ -311,9 +311,18 @@ confirm sheet (the count, the ticket's org or "not known on this phone", each
 project) and only its **Start** sends one `work_link start { project_ids }`.
 A clean answer opens the first session; anything partial stays on the form as
 a line per project, in the order asked, with **Open** where a session is. A
-`cross_org` refusal is said in the phone's own words and never retried:
-`force_cross_org` is a string no main source may contain
-(`ToolsTheAppMayCallTest`).
+`cross_org` refusal is said in the phone's own words and never retried.
+
+**Cross-org links (D15, narrowed 2026-09-28).** A session's *Tasks* → *Add
+task…* lists another organisation's tickets last, marked with the org's name.
+Tapping one — or the hub refusing a typed key with `cross_org` — opens a
+choice instead of an error: **Link anyway** shares the task across the two
+orgs (`work_link link` with `force_cross_org`, a full token on a hub whose
+schema takes it), or **Move this session** shows the `fleet-hub org rule add`
+that puts the session's repository (else its host) in the task's org, with
+*Copy command* — an org rule is the master's, never a paired client's.
+`force_cross_org` is the constant in `HubClient.kt`, used by `linkWork` alone
+(`ToolsTheAppMayCallTest`); a start, multi-start or resume never forces.
 
 **Share standup.** Beside *Copy standup*, the Today sheet's **Share** hands
 the same text to the platform share sheet (`rememberShareText`, an

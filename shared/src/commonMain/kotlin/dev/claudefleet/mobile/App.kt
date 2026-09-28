@@ -933,6 +933,8 @@ private fun SessionRoute(
             onAdd = { tasksVm.add(it) },
             onAddTyped = { tasksVm.addTyped() },
             onDismissError = tasksVm::dismissError,
+            onShareAcrossOrgs = { tasksVm.shareAcrossOrgs() },
+            onDismissCrossOrg = tasksVm::dismissCrossOrg,
         ),
     )
 }

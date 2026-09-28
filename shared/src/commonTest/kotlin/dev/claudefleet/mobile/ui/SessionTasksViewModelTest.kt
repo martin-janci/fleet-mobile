@@ -6,10 +6,13 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.OrgTracker
+import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.SessionTasks
 import dev.claudefleet.mobile.model.Ticket
+import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
+import dev.claudefleet.mobile.net.ToolCatalog
 import dev.claudefleet.mobile.net.json
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -281,13 +284,12 @@ class SessionTasksViewModelTest {
 
     /**
      * The add list keeps another org's tickets (so they are not "missing"),
-     * after this org's and marked; tapping one says why in words and sends
-     * nothing — the hub would refuse it, and the phone never forces it (D15).
+     * after this org's and marked. Tapping one sends nothing: it opens the
+     * choice — share it, or move the session with the command shown.
      */
     @Test
-    fun another_orgs_tickets_come_last_marked_and_are_not_sent() = runTest {
-        val fleet = WorkFleet(rows = listOf(SessionRow(id = 7, tmuxName = "api", hostAlias = "mefistos", orgId = 2)))
-        fleet.orgs.value = TWO_ORGS
+    fun another_orgs_ticket_opens_the_choice_and_sends_nothing() = runTest {
+        val fleet = crossOrgFleet()
         val actions = FakeWorkActions().apply {
             sessionTasksAnswer = LINKS
             ticketsAnswer = mapOf(
@@ -311,23 +313,48 @@ class SessionTasksViewModelTest {
         assertNull(vm.add(s.addCandidates.last()))
         runCurrent()
         assertTrue(actions.workArgs.isEmpty(), "nothing sent")
-        val error = assertNotNull(vm.state.value.error)
-        assertEquals("Another organisation", error.title)
-        assertTrue("PD-2592 belongs to Acme and this session to Beta" in error.body, error.body)
-        assertFalse("force_cross_org" in error.body, "never the hub's hint to force it")
+        val choice = assertNotNull(vm.state.value.crossOrg)
+        assertEquals("PD-2592", choice.what)
+        assertEquals("Acme", choice.taskOrgName)
+        assertEquals("Beta", choice.sessionOrgName)
+        assertTrue(choice.canShare)
+        assertEquals("fleet-hub org rule add 1 --owner beta-co --repo api", choice.moveCommand)
+        assertEquals("every session in beta-co/api", choice.moveCovers)
 
+        vm.dismissCrossOrg()
+        runCurrent()
+        assertNull(vm.state.value.crossOrg)
         vm.add(s.addCandidates.first())
         runCurrent()
         assertEquals(listOf("link 7 81 primary=false"), actions.workArgs)
     }
 
-    /** A typed key the hub refuses across orgs: the phone's words, both orgs named, the hub's behind Details. */
+    /** **Link anyway** sends the same link again, forced — and only from the choice. */
     @Test
-    fun a_cross_org_refusal_is_said_in_words() = runTest {
-        val fleet = WorkFleet(rows = listOf(SessionRow(id = 7, tmuxName = "api", hostAlias = "mefistos", orgId = 2)))
-        fleet.orgs.value = TWO_ORGS
+    fun link_anyway_shares_the_task_across_orgs() = runTest {
         val actions = FakeWorkActions().apply { sessionTasksAnswer = LINKS }
-        val vm = tasksVm(fleet = fleet, actions = actions)
+        val vm = tasksVm(fleet = crossOrgFleet(), actions = actions)
+        runCurrent()
+        assertNull(vm.shareAcrossOrgs(), "nothing to share before a refusal")
+
+        vm.add(Ticket(id = 80, key = "PD-2592", trackerId = 1))
+        runCurrent()
+        vm.shareAcrossOrgs()
+        runCurrent()
+
+        assertEquals(listOf("link 7 80 primary=false share"), actions.workArgs)
+        assertNull(vm.state.value.crossOrg)
+        assertNull(vm.state.value.error)
+    }
+
+    /**
+     * A typed key the hub refuses across orgs (the phone could not know):
+     * the choice opens from the refusal's details, and Link anyway sends the key.
+     */
+    @Test
+    fun a_hub_cross_org_refusal_opens_the_choice() = runTest {
+        val actions = FakeWorkActions().apply { sessionTasksAnswer = LINKS }
+        val vm = tasksVm(fleet = crossOrgFleet(), actions = actions)
         runCurrent()
 
         actions.fail = HubError.Tool(
@@ -340,10 +367,56 @@ class SessionTasksViewModelTest {
         vm.addTyped()
         runCurrent()
 
-        val error = assertNotNull(vm.state.value.error)
-        assertEquals("Another organisation", error.title)
-        assertTrue("PD-2592 belongs to Acme and this session to Beta" in error.body, error.body)
-        assertFalse("force_cross_org" in error.body)
-        assertFalse(vm.state.value.conflict)
+        val choice = assertNotNull(vm.state.value.crossOrg)
+        assertNull(vm.state.value.error, "a choice, not an error banner")
+        assertEquals("PD-2592", choice.what)
+        assertEquals("Acme", choice.taskOrgName)
+        assertEquals("Beta", choice.sessionOrgName)
+
+        actions.fail = null
+        vm.shareAcrossOrgs()
+        runCurrent()
+        assertEquals(listOf("link 7 PD-2592 primary=false", "link 7 PD-2592 primary=false share"), actions.workArgs)
+    }
+
+    /** A hub whose `work_link` does not take the override: the choice says so and offers no button. */
+    @Test
+    fun without_the_override_the_choice_only_offers_the_move() = runTest {
+        val fleet = crossOrgFleet(caps = WorkFleet.FULL)
+        val actions = FakeWorkActions().apply { sessionTasksAnswer = LINKS }
+        val vm = tasksVm(fleet = fleet, actions = actions)
+        runCurrent()
+
+        vm.add(Ticket(id = 80, key = "PD-2592", trackerId = 1))
+        runCurrent()
+
+        assertFalse(assertNotNull(vm.state.value.crossOrg).canShare)
+        assertNull(vm.shareAcrossOrgs())
+        runCurrent()
+        assertTrue(actions.workArgs.isEmpty())
+    }
+
+    @Test
+    fun the_move_command_falls_back_to_the_host_and_quotes_what_needs_it() {
+        assertEquals(
+            "fleet-hub org rule add 3 --host mefistos" to "every session on mefistos",
+            moveSessionCommand(3, ProjectRow(id = 1, owner = "local", repo = "scratch"), "mefistos"),
+        )
+        assertEquals(
+            "fleet-hub org rule add 3 --owner 'a b' --repo x" to "every session in a b/x",
+            moveSessionCommand(3, ProjectRow(id = 1, owner = "a b", repo = "x"), null),
+        )
+        assertNull(moveSessionCommand(3, null, null))
     }
 }
+
+/** Session 7 on project beta-co/api in Beta; PD's tracker in Acme; a hub that takes the override. */
+private fun crossOrgFleet(caps: HubCapabilities = SHARE_CAPS) = WorkFleet(
+    rows = listOf(SessionRow(id = 7, tmuxName = "api", hostAlias = "mefistos", projectId = 5, orgId = 2)),
+    caps = caps,
+    projectRows = listOf(ProjectRow(id = 5, owner = "beta-co", repo = "api")),
+).apply { orgs.value = TWO_ORGS }
+
+private val SHARE_CAPS = HubCapabilities.of(
+    ToolCatalog(setOf("work", "work_link"), params = mapOf("work_link" to setOf("force_cross_org"))),
+)

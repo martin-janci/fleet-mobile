@@ -804,6 +804,11 @@ class HubClient(
      * Set the session's work by item id (a looked-up ticket) or by bare key.
      * [primary] false (claude-fleet M14) adds a *secondary* link and leaves
      * the primary alone; null is the hub's default, which takes the primary.
+     *
+     * [shareAcrossOrgs] is the one place the phone passes `force_cross_org`:
+     * a link the person chose to share across organisations after the hub
+     * refused it and the phone said why (D15, as the owner narrowed it on
+     * 2026-09-28 — a start, multi-start or resume never forces).
      */
     suspend fun linkWork(
         sessionId: Long,
@@ -811,11 +816,13 @@ class HubClient(
         key: String? = null,
         primary: Boolean? = null,
         expectedVersion: Long? = null,
+        shareAcrossOrgs: Boolean = false,
     ): SessionRow =
         workLink("link", sessionId) {
             if (itemId != null) put("item_id", itemId) else put("key", key.orEmpty())
             primary?.let { put("primary", it) }
             expectedVersion?.let { put("expected_version", it) }
+            if (shareAcrossOrgs) put(FORCE_CROSS_ORG, true)
         }
 
     /**
@@ -1125,6 +1132,13 @@ internal fun HttpClient.withHubTimeouts(): HttpClient = config {
         socketTimeoutMillis = HUB_CALL_TIMEOUT_MS
     }
 }
+
+/**
+ * The org rule's override (claude-fleet M5). Named once, here, and sent only
+ * by [HubClient.linkWork]: `ToolsTheAppMayCallTest` holds every other source
+ * to never writing it.
+ */
+internal const val FORCE_CROSS_ORG = "force_cross_org"
 
 internal const val HUB_CALL_TIMEOUT_MS = 45_000L
 internal const val HUB_CONNECT_TIMEOUT_MS = 15_000L

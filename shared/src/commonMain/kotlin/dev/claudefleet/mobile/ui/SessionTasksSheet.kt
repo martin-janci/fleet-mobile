@@ -9,8 +9,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
@@ -24,6 +26,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextDecoration
@@ -51,6 +56,8 @@ data class SessionTasksHandlers(
     val onAdd: (Ticket) -> Unit = {},
     val onAddTyped: () -> Unit = {},
     val onDismissError: () -> Unit = {},
+    val onShareAcrossOrgs: () -> Unit = {},
+    val onDismissCrossOrg: () -> Unit = {},
 )
 
 /**
@@ -76,7 +83,10 @@ fun SessionTasksSheet(state: SessionTasksUiState, handlers: SessionTasksHandlers
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
             if (state.error != null && state.conflict) ReloadRow(handlers.onReload)
             if (state.loading || state.busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            if (state.addOpen) {
+            val crossOrg = state.crossOrg
+            if (crossOrg != null) {
+                CrossOrgPanel(crossOrg, state, handlers)
+            } else if (state.addOpen) {
                 AddTask(state, handlers)
             } else {
                 if (state.canAdd) {
@@ -204,7 +214,7 @@ private fun AddTask(state: SessionTasksUiState, handlers: SessionTasksHandlers) 
                             if (otherOrg != null) {
                                 Text(
                                     "$otherOrg — another organisation than this session" +
-                                        (state.sessionOrgName?.let { " ($it)" } ?: ""),
+                                        (state.sessionOrgName?.let { " ($it)" } ?: "") + ". Tap to choose.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.error,
                                 )
@@ -214,5 +224,58 @@ private fun AddTask(state: SessionTasksUiState, handlers: SessionTasksHandlers) 
                 )
             }
         }
+    }
+}
+
+/**
+ * A task and this session are in different organisations: say which, and
+ * offer the two ways on. **Link anyway** shares the task across them (sent
+ * with `force_cross_org`, only from here). **Move this session** is an org
+ * rule, the hub master's to add, so the command is shown to copy.
+ */
+@Composable
+private fun CrossOrgPanel(choice: CrossOrgChoice, state: SessionTasksUiState, handlers: SessionTasksHandlers) {
+    val clipboard = LocalClipboardManager.current
+    val task = choice.taskOrgName ?: "another organisation"
+    val session = choice.sessionOrgName ?: "a different one"
+    Column(
+        modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("Another organisation", style = MaterialTheme.typography.titleMedium)
+        Text("${choice.what} is in $task; this session is in $session. What should happen?", style = MaterialTheme.typography.bodyMedium)
+
+        Text("Share it across organisations", style = MaterialTheme.typography.titleSmall)
+        Text(
+            "Link it anyway. The session stays in $session and the link is marked as crossing organisations.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (choice.canShare) {
+            Button(onClick = handlers.onShareAcrossOrgs, enabled = !state.busy && state.connected) { Text("Link anyway") }
+        } else {
+            Text(
+                "Not from this phone: it needs a full token, connected, on a hub that allows it. Link it from the desktop's Tasks.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        val command = choice.moveCommand
+        Text("Move this session to $task", style = MaterialTheme.typography.titleSmall)
+        if (command != null) {
+            Text(
+                "An org rule does it; only the hub's owner can add one. Run on the hub" +
+                    (choice.moveCovers?.let { " — it moves $it" } ?: "") + ":",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(command, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+            OutlinedButton(onClick = { clipboard.setText(AnnotatedString(command)) }) { Text("Copy command") }
+        }
+        Text(
+            "Or on the desktop: Settings → Work → Organisations. Once the session is in $task, add the task again.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        TextButton(onClick = handlers.onDismissCrossOrg) { Text("Cancel") }
     }
 }
