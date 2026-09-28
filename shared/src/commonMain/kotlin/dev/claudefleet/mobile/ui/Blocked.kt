@@ -47,7 +47,16 @@ fun blockedCard(row: SessionRow, hubVersion: String?): BlockedCard? {
     val keyAnswers = if (keys) listOf(Answer.Enter, Answer.Escape) else emptyList()
     return when (stuck) {
         "press_enter" -> BlockedCard("Press Enter to continue", if (keys) listOf(Answer.Enter) else emptyList())
-        "trust_prompt" -> BlockedCard("Trust this folder?", listOf(Answer.Text("y"), Answer.Text("n")))
+        // Claude Code's trust dialog is a menu with "Yes" highlighted, not a
+        // `(y/n)` line: Enter picks Yes, Esc exits. It has to be keys, too —
+        // the hub refuses any typed text into a stuck session unless forced
+        // (Enter would answer the dialog), and a client's text would carry
+        // the untrusted-input marker line into the menu first.
+        "trust_prompt" -> BlockedCard(
+            "Trust this folder?",
+            keyAnswers,
+            explain = if (keys) "Enter trusts it, Esc exits Claude" else null,
+        )
         "auth_menu" -> BlockedCard("Login needed", emptyList(), explain = "Needs a login on this host", offerRestart = true)
         "reconnect" -> BlockedCard("Reconnecting to Anthropic", emptyList(), explain = "The REPL lost its connection", offerRestart = true)
         "oom" -> BlockedCard("Out of memory", emptyList(), explain = "The host ran out of memory", offerRestart = true)

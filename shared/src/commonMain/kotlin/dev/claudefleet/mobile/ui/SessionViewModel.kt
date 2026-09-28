@@ -658,8 +658,7 @@ class SessionViewModel(
         try {
             val receipt = when (a) {
                 // A numbered option is typed as its number, which is what the
-                // REPL's own prompt asks for; the trust prompt's y/n is text
-                // for the same reason. Only the bare keystrokes go through
+                // REPL's own prompt asks for. Only the bare keystrokes go through
                 // `send_prompt { keys }` — an empty prompt is not a key.
                 is Answer.Option -> actions.sendPrompt(sessionId, a.n.toString())
                 is Answer.Text -> actions.sendPrompt(sessionId, a.text)

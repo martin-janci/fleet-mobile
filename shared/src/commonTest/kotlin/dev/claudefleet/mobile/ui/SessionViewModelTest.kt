@@ -651,8 +651,8 @@ class SessionViewModelTest {
     }
 
     /**
-     * A card's own answer -- a numbered option, Enter/Escape/Interrupt, or the
-     * trust prompt's typed y/n -- never goes through `deliver`, so none of it
+     * A card's own answer -- a numbered option or Enter/Escape/Interrupt --
+     * never goes through `deliver`, so none of it
      * is a "composed" prompt and none of it belongs in the draft history.
      */
     @Test
@@ -1843,19 +1843,25 @@ class SessionViewModelTest {
         assertTrue(actions.sentPrompts.isEmpty(), "a key is never an empty send_prompt")
     }
 
-    /** The trust prompt is a typed `y`/`n`, not a key: it goes through `send_prompt`. */
+    /**
+     * The trust prompt's chips are keys: a typed `y` is refused by the hub
+     * (E_INVALID_STATE — Enter would answer the dialog), a key is not.
+     */
     @Test
-    fun the_trust_prompts_y_goes_through_send_prompt() = runTest {
+    fun the_trust_prompts_chips_press_keys_not_send_prompt() = runTest {
         val actions = FakeActions()
         val fleet = FakeFleetState(listOf(row(status = "blocked", stuck = "trust_prompt")))
         fleet.hubVersion.value = HUB_VERSION_KEYS
         val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
-
-        vm.answer(Answer.Text("y")).join()
+        vm.load().join()
         runCurrent()
 
-        assertEquals(listOf("y"), actions.sentPrompts)
-        assertTrue(actions.sentKeys.isEmpty())
+        val card = assertNotNull(vm.state.value.card)
+        vm.answer(card.answers.first()).join()
+        runCurrent()
+
+        assertEquals(listOf("Enter"), actions.sentKeys)
+        assertTrue(actions.sentPrompts.isEmpty(), "typed text into a stuck session is refused by the hub")
     }
 
     @Test
