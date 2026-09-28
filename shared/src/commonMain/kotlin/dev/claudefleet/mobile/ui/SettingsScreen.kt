@@ -38,6 +38,13 @@ fun SettingsScreen(
     onForget: () -> Unit,
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * The fleet's settings (claude-fleet declarative pages P6), drawn by
+     * [FleetSettingsSection] when the hub serves them; nothing otherwise.
+     */
+    fleetSettings: @Composable () -> Unit = {},
+    /** A fleet settings page is open: it takes the screen. */
+    fleetPageOpen: Boolean = false,
 ) {
     // The header and the error stay put; only the fields scroll. The header
     // used to live inside the scrolling column and left with the content.
@@ -50,6 +57,10 @@ fun SettingsScreen(
         ErrorBanner(errorAsFriendly, onDismiss = onDismissError)
         Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Spacer(Modifier.height(8.dp))
+            if (fleetPageOpen) {
+                fleetSettings()
+                return@Column
+            }
             Field("Hub", state.hub)
             Field("Client name", state.clientName)
             Field(
@@ -63,6 +74,7 @@ fun SettingsScreen(
             Field("App version", state.appVersion)
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            fleetSettings()
 
             Text(
                 text = "Forget this hub",

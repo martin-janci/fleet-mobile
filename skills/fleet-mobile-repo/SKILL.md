@@ -185,6 +185,23 @@ Grouping by work mirrors the desktop's
 `buildSessionsByWork` (`src/lib/sidebar_index.ts`); `SessionsViewModelTest`
 carries its cases by name, so extend both together.
 
+## The fleet's settings pages (claude-fleet declarative pages P6)
+
+`FleetSettingsViewModel` draws the hub's own page specs (`list_pages`) with
+its settings (`get_settings { describe: true }`); `model/FleetSettings.kt`
+ports the desktop's `src/lib/pages/pages.ts` helpers — conditions, units,
+the words for a value — rather than inventing a second design. The hub
+answers these tools to a person's own device only (a client bound to no
+org), so `HubCapabilities.fleetSettings` hides the section everywhere else.
+
+Writes are gated twice, like `work_link`: `Credentials.canWrite` **and** the
+hub's `setting_proposals { can_write }` (the operator trusts this device). The
+value on screen is always the hub's answer to the write, never an optimistic
+one. `src/commonTest/fixtures/pages-registry.json` is the hub's answer on a
+fresh store (claude-fleet's `src/lib/pages/registry.generated.json`, pages and
+descriptors); copy it again when the hub's pages change — `FleetSettingsTest`
+fails on a field that names no setting.
+
 ## How Compose surfaces to XCUITest on iOS
 
 Measured on an iOS 18.5 simulator (there is no other way to know it from here):
