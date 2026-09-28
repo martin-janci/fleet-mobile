@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
+import dev.claudefleet.mobile.model.TrackerRow
 import dev.claudefleet.mobile.net.HubCapabilities
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -105,6 +106,14 @@ interface FleetState {
     val orgs: StateFlow<OrgDirectory> get() = NoWork.orgs
 
     /**
+     * The connected trackers and the state each is in (`ok`, `auth_failed`,
+     * `unreachable` …), read with *My work*; empty without the work graph or
+     * after a failed read. What a ticket's screen says when its tracker is
+     * in trouble.
+     */
+    val trackers: StateFlow<List<TrackerRow>> get() = NoWork.trackers
+
+    /**
      * Timeline entries as they arrive — `session:event` frames, one at a
      * time — for a screen waiting on something the hub does later, such as a
      * handover note written at the end of a turn. A hot flow like
@@ -139,6 +148,7 @@ private object NoWork {
     val tickets: StateFlow<List<Ticket>> = MutableStateFlow<List<Ticket>>(emptyList()).asStateFlow()
     val myWork: StateFlow<Set<Long>?> = MutableStateFlow<Set<Long>?>(null).asStateFlow()
     val orgs: StateFlow<OrgDirectory> = MutableStateFlow(OrgDirectory.EMPTY).asStateFlow()
+    val trackers: StateFlow<List<TrackerRow>> = MutableStateFlow<List<TrackerRow>>(emptyList()).asStateFlow()
 }
 
 /** One `session:event` frame: which session's timeline, and what kind of entry. */

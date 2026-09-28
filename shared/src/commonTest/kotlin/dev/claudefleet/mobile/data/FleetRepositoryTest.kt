@@ -1063,6 +1063,24 @@ class FleetRepositoryTest {
         repository.stop()
     }
 
+    /** The tracker list read with *My work* is kept, with each tracker's state, for the ticket screens to say. */
+    @Test
+    fun the_trackers_and_their_states_are_kept() = runTest {
+        val hub = FakeHub().apply {
+            toolsJson = """[{"name":"list_sessions"},{"name":"work"}]"""
+            trackersJson = """[{"id":1,"provider":"jira","name":"acme","state":"auth_failed"}]"""
+            mineJson = """[]"""
+        }
+        val stream = FakeStream { emit(READY); awaitCancellation() }
+        val repository = repo(hub, stream, backgroundScope)
+
+        repository.start()
+        val trackers = repository.trackers.first { it.isNotEmpty() }
+
+        assertEquals(listOf("auth_failed"), trackers.map { it.state })
+        repository.stop()
+    }
+
     /** No tracker connected: work groups still work, but there is no *My work* to filter by. */
     @Test
     fun a_hub_with_work_and_no_tracker_has_no_my_work() = runTest {

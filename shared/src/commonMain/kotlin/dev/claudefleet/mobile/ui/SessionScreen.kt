@@ -520,6 +520,16 @@ private fun SessionBar(
                             modifier = Modifier.align(Alignment.CenterVertically),
                         )
                     }
+                    // A guess beside confirmed work gets its own dashed chip,
+                    // so the suggestion the sheet asks about is on screen too.
+                    work.suggestion?.takeIf { it.besideConfirmed }?.let { guess ->
+                        WorkChip(
+                            work = guess.work,
+                            suggested = true,
+                            onClick = workHandlers.onOpen,
+                            modifier = Modifier.align(Alignment.CenterVertically),
+                        )
+                    }
                     // Every task of the session, not only the primary the
                     // ticket chip shows: the Work view's *Tasks* section.
                     if (tasks.available) {
@@ -576,6 +586,7 @@ private fun SessionOverflowMenu(
     val manage = state.canManage
     var showTags by remember { mutableStateOf(false) }
     var showRestartConfirm by remember { mutableStateOf(false) }
+    var showSafeKillConfirm by remember { mutableStateOf(false) }
     var showKillConfirm by remember { mutableStateOf(false) }
     val actionable = !state.busy && state.connected
 
@@ -601,11 +612,11 @@ private fun SessionOverflowMenu(
             SessionManageItems(
                 state = state,
                 actionable = actionable,
-                onSafeKill = onSafeKill,
                 close = { expanded = false },
                 showRename = { showRename = true },
                 showTags = { showTags = true },
                 showRestartConfirm = { showRestartConfirm = true },
+                showSafeKillConfirm = { showSafeKillConfirm = true },
                 showKillConfirm = { showKillConfirm = true },
             )
         }
@@ -635,11 +646,14 @@ private fun SessionOverflowMenu(
         hideTags = { showTags = false },
         showRestartConfirm = showRestartConfirm,
         hideRestartConfirm = { showRestartConfirm = false },
+        showSafeKillConfirm = showSafeKillConfirm,
+        hideSafeKillConfirm = { showSafeKillConfirm = false },
         showKillConfirm = showKillConfirm,
         hideKillConfirm = { showKillConfirm = false },
         onRename = onRename,
         onSetTags = onSetTags,
         onRestart = onRestart,
+        onSafeKill = onSafeKill,
         onKill = onKill,
     )
 }
@@ -649,11 +663,11 @@ private fun SessionOverflowMenu(
 private fun SessionManageItems(
     state: SessionUiState,
     actionable: Boolean,
-    onSafeKill: () -> Unit,
     close: () -> Unit,
     showRename: () -> Unit,
     showTags: () -> Unit,
     showRestartConfirm: () -> Unit,
+    showSafeKillConfirm: () -> Unit,
     showKillConfirm: () -> Unit,
 ) {
     DropdownMenuItem(
@@ -676,7 +690,7 @@ private fun SessionManageItems(
     DropdownMenuItem(
         text = { Text("Retire safely") },
         enabled = actionable,
-        onClick = { close(); onSafeKill() },
+        onClick = { close(); showSafeKillConfirm() },
     )
     if (state.canKill) {
         DropdownMenuItem(
@@ -696,11 +710,14 @@ private fun ManageDialogs(
     hideTags: () -> Unit,
     showRestartConfirm: Boolean,
     hideRestartConfirm: () -> Unit,
+    showSafeKillConfirm: Boolean,
+    hideSafeKillConfirm: () -> Unit,
     showKillConfirm: Boolean,
     hideKillConfirm: () -> Unit,
     onRename: (String) -> Unit,
     onSetTags: (List<String>) -> Unit,
     onRestart: () -> Unit,
+    onSafeKill: () -> Unit,
     onKill: () -> Unit,
 ) {
     if (showRename) {
@@ -726,6 +743,24 @@ private fun ManageDialogs(
                 TextButton(onClick = { hideRestartConfirm(); onRestart() }) { Text("Restart") }
             },
             dismissButton = { TextButton(onClick = hideRestartConfirm) { Text("Cancel") } },
+        )
+    }
+    // Retiring ends the session once its work is saved: asked first, like
+    // Restart. No delayed enable — that is Kill now's, which cannot wait.
+    if (showSafeKillConfirm) {
+        AlertDialog(
+            onDismissRequest = hideSafeKillConfirm,
+            title = { Text("Retire this session?") },
+            text = {
+                Text(
+                    "Claude is asked to commit and push its work. Once the tree is clean, " +
+                        "the session and its worktree are removed.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { hideSafeKillConfirm(); onSafeKill() }) { Text("Retire") }
+            },
+            dismissButton = { TextButton(onClick = hideSafeKillConfirm) { Text("Cancel") } },
         )
     }
     if (showKillConfirm) {

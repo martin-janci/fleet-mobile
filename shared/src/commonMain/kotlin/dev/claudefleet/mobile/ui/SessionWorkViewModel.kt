@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.TicketCard
 import dev.claudefleet.mobile.model.Ticket
+import dev.claudefleet.mobile.model.TrackerRow
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.withTicketsFrom
 import dev.claudefleet.mobile.net.HubCapabilities
@@ -12,6 +13,7 @@ import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK_LINK
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.isUnknownAction
+import dev.claudefleet.mobile.net.orphanSessionId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -33,9 +35,14 @@ data class SessionWorkUiState(
     /** The hub's undecided guess, or null. */
     val suggested: WorkSummary? = null,
     val sheetOpen: Boolean = false,
-    /** Accept the guess (`work_link confirm`). */
+    /**
+     * The guess as the sheet draws it, with the Confirm / Not this that
+     * decide it — see [SuggestionRow]. Null when there is no guess.
+     */
+    val suggestion: SuggestionRow? = null,
+    /** Accept the guess (`work_link confirm`); the same as [SuggestionRow.canConfirm]. */
     val canConfirm: Boolean = false,
-    /** "Not this" (`work_link reject`). */
+    /** "Not this" (`work_link reject`); the same as [SuggestionRow.canReject]. */
     val canReject: Boolean = false,
     /** Clear the confirmed link (`work_link unlink`). */
     val canClear: Boolean = false,
@@ -67,9 +74,46 @@ data class SessionWorkUiState(
     val canNameWork: Boolean = false,
     /** **Rename** the session's work: it is a local item (no ticket), same gate. */
     val canRenameWork: Boolean = false,
+    /**
+     * What to say about [work]'s ticket and tracker, as plain text: why the
+     * tracker no longer answers for it, and a tracker in trouble — see
+     * [workTrouble]. Empty when all is well.
+     */
+    val workTrouble: List<String> = emptyList(),
 ) {
     /** What the chip draws: the confirmed work, else the guess. */
     val chip: WorkSummary? get() = work ?: suggested
+}
+
+/**
+ * A suggestion as the sheet draws it, and the only thing its Confirm and
+ * Not this are bound to.
+ *
+ * The hub can stamp a row with confirmed `work` *and* a `work_suggested`
+ * guess at once. The sheet used to show the confirmed ticket and its "Why:"
+ * while its Confirm / Not this acted on the guess, which was not drawn
+ * anywhere — a person read one ticket and decided another. Those decisions
+ * become the labels suggestions are judged by, so a button here must never
+ * act on a link that is not on screen beside it: the row carries the guess,
+ * its reasons, and the gates together, and the sheet hands [linkId] back
+ * with the tap.
+ */
+data class SuggestionRow(
+    val work: WorkSummary,
+    /** [workWhy] of [work]: its source, rule and strength. */
+    val why: String,
+    /**
+     * The session also has confirmed work, which the sheet draws as the
+     * current one; this row is then drawn apart from it, as a suggestion.
+     */
+    val besideConfirmed: Boolean,
+    val canConfirm: Boolean,
+    val canReject: Boolean,
+    /** [workTrouble] for the suggested ticket. */
+    val trouble: List<String> = emptyList(),
+) {
+    /** The link Confirm and Not this address — this row's, never the confirmed one's. */
+    val linkId: Long get() = work.linkId
 }
 
 /**
@@ -122,13 +166,24 @@ class SessionWorkViewModel(
     }
 
     val state: StateFlow<SessionWorkUiState> =
-        combine(fleet.sessions, fleet.capabilities, fleet.tickets, local) { rows, caps, cache, l ->
-            assemble(rows.freshRow(cache), caps, l)
+        combine(fleet.sessions, fleet.capabilities, fleet.tickets, fleet.trackers, local) { rows, caps, cache, trackers, l ->
+            assemble(rows.freshRow(cache), caps, Trouble(cache, trackers), l)
         }.stateIn(
             scope,
             SharingStarted.Eagerly,
-            assemble(fleet.sessions.value.freshRow(fleet.tickets.value), fleet.capabilities.value, local.value),
+            assemble(
+                fleet.sessions.value.freshRow(fleet.tickets.value),
+                fleet.capabilities.value,
+                Trouble(fleet.tickets.value, fleet.trackers.value),
+                local.value,
+            ),
         )
+
+    /** What [assemble] needs to say what is wrong with a ticket: the ticket cache and the trackers' states. */
+    private class Trouble(cache: List<Ticket>, private val trackers: List<TrackerRow>) {
+        private val byId = cache.associateBy { it.id }
+        fun of(work: WorkSummary): List<String> = workTrouble(work, work.itemId?.let(byId::get), trackers)
+    }
 
     /** This session's row, its work refreshed from the ticket cache — the list does the same. */
     private fun List<SessionRow>.freshRow(cache: List<Ticket>): SessionRow? =
@@ -173,11 +228,17 @@ class SessionWorkViewModel(
         local.update { it.copy(error = null) }
     }
 
-    /** Accept the suggestion the chip is showing. */
-    fun confirm(): Job = decide(CONFIRM) { actions.confirm(sessionId, it.linkId) }
+    /**
+     * Accept the suggestion drawn with link [linkId] — by default the one
+     * [SessionWorkUiState.suggestion] shows now. The sheet passes the id it
+     * drew, so a tap decides what the person was reading.
+     */
+    fun confirm(linkId: Long? = state.value.suggestion?.linkId): Job =
+        decide(CONFIRM, linkId) { actions.confirm(sessionId, it.linkId) }
 
     /** "Not this" — a sticky rejection: the hub never suggests it for this session again. */
-    fun reject(): Job = decide(REJECT) { actions.reject(sessionId, it.linkId) }
+    fun reject(linkId: Long? = state.value.suggestion?.linkId): Job =
+        decide(REJECT, linkId) { actions.reject(sessionId, it.linkId) }
 
     /** Clear the confirmed link. */
     fun clear(): Job = runGated(UNLINK) {
@@ -319,8 +380,19 @@ class SessionWorkViewModel(
         }
     }
 
-    private fun decide(action: String, call: suspend (WorkSummary) -> Unit): Job = runGated(action) {
+    /**
+     * Decide the row's guess — only if it is still the one drawn as [linkId].
+     * A `session:updated` can replace the guess between the frame the person
+     * read and their tap; deciding the new one unseen is exactly the mistake
+     * [SuggestionRow] exists to prevent, so the tap is declined and said.
+     */
+    private fun decide(action: String, linkId: Long?, call: suspend (WorkSummary) -> Unit): Job = runGated(action) {
         val guess = row()?.workSuggested ?: return@runGated
+        if (linkId == null) return@runGated
+        if (guess.linkId != linkId) {
+            local.update { it.copy(error = SUGGESTION_CHANGED) }
+            return@runGated
+        }
         call(guess)
         local.update { it.copy(sheetOpen = false) }
     }
@@ -352,17 +424,28 @@ class SessionWorkViewModel(
 
     private fun row(): SessionRow? = fleet.sessions.value.firstOrNull { it.id == sessionId }
 
-    private fun assemble(row: SessionRow?, caps: HubCapabilities, l: Local): SessionWorkUiState {
+    private fun assemble(row: SessionRow?, caps: HubCapabilities, trouble: Trouble, l: Local): SessionWorkUiState {
         // No work graph: nothing to draw, even if a row somehow carries one.
         if (row == null || !caps.work) return SessionWorkUiState(error = l.error)
         val work = row.work
         val guess = row.workSuggested
+        val suggestion = guess?.let {
+            SuggestionRow(
+                work = it,
+                why = workWhy(it),
+                besideConfirmed = work != null,
+                canConfirm = allowed(caps, CONFIRM),
+                canReject = allowed(caps, REJECT),
+                trouble = trouble.of(it),
+            )
+        }
         return SessionWorkUiState(
             work = work,
             suggested = guess,
             sheetOpen = l.sheetOpen && (work != null || guess != null),
-            canConfirm = guess != null && allowed(caps, CONFIRM),
-            canReject = guess != null && allowed(caps, REJECT),
+            suggestion = suggestion,
+            canConfirm = suggestion?.canConfirm == true,
+            canReject = suggestion?.canReject == true,
             canClear = work != null && allowed(caps, UNLINK),
             canSetWork = allowed(caps, LINK),
             busy = l.busy,
@@ -373,10 +456,17 @@ class SessionWorkViewModel(
             card = l.card?.takeIf { it.key == (work ?: guess)?.key },
             canNameWork = work == null && allowed(caps, NAME),
             canRenameWork = work?.isLocal == true && allowed(caps, NAME),
+            workTrouble = work?.let(trouble::of).orEmpty(),
         )
     }
 
     private companion object {
+        /** A tap on a suggestion the hub has since replaced: nothing was decided. */
+        val SUGGESTION_CHANGED = Friendly(
+            "The suggestion changed",
+            "Nothing was decided. Look at the new one before you choose.",
+            isError = false,
+        )
         const val CONFIRM = "confirm"
         const val REJECT = "reject"
         const val UNLINK = "unlink"
@@ -490,6 +580,10 @@ internal fun friendlyWork(t: Throwable): Friendly {
         t.isUnknownAction() -> Friendly("This hub can't do that yet", "Update the hub to use it from the phone.", isError = true, details = raw)
         t.code == "E_NOTFOUND" -> Friendly("Not found", t.message, isError = true, details = raw)
         t.code == "E_INVALID" -> Friendly("The hub refused that", t.message, isError = true, details = raw)
+        // A start or resume that lost a race made a session of its own first;
+        // the hub's message names it, and the person should know it is there.
+        t.code == "E_EXISTS" && t.orphanSessionId() != null ->
+            Friendly("Someone else got there first", t.message, isError = false, details = raw)
         t.code == "E_EXISTS" -> Friendly("Already running", t.message, isError = false, details = raw)
         t.code == "E_AMBIGUOUS" -> Friendly("Pick one", t.message, isError = true, details = raw)
         else -> friendly(t)

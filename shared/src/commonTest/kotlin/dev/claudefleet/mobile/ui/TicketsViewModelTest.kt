@@ -16,6 +16,8 @@ import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.ToolCatalog
+import dev.claudefleet.mobile.ui.components.BannerTone
+import dev.claudefleet.mobile.ui.components.bannerTone
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.buildJsonObject
@@ -137,10 +139,70 @@ class TicketsViewModelTest {
         assertEquals("pine", detail.resumeHost, "the hub's own suggestion is the default")
         tickets.selectResumeHost("hetzner")
         tickets.resume()
+        tickets.confirmResume()
         runCurrent()
 
         assertEquals(listOf("resume_plan PAY-9", "resume PAY-9 hetzner"), actions.calls)
         assertEquals(listOf(99L), nav.opened)
+    }
+
+    /** Resume starts a session: the tap only asks, and says what and where. */
+    @Test
+    fun resume_asks_before_it_calls_the_hub() = runTest {
+        val nav = Nav()
+        val actions = FakeWorkActions().apply { planAnswer = plan() }
+        val tickets = vm(WorkFleet(), actions, backgroundScope, nav)
+        tickets.select(PAY9)
+        runCurrent()
+
+        tickets.resume()
+        runCurrent()
+
+        assertEquals(listOf("resume_plan PAY-9"), actions.calls, "nothing is resumed on the tap alone")
+        assertEquals(emptyList(), nav.opened)
+        val ask = assertNotNull(tickets.state.value.confirmResume)
+        assertEquals(ResumeConfirm("PAY-9", "Ledger", "pine"), ask)
+        assertEquals("This starts a session on pine that picks up the last conversation on PAY-9 · Ledger.", resumeQuestion(ask))
+
+        tickets.confirmResume()
+        runCurrent()
+        assertEquals(listOf("resume_plan PAY-9", "resume PAY-9 pine"), actions.calls)
+        assertNull(tickets.state.value.confirmResume)
+    }
+
+    @Test
+    fun a_cancelled_resume_calls_nothing() = runTest {
+        val nav = Nav()
+        val actions = FakeWorkActions().apply { planAnswer = plan() }
+        val tickets = vm(WorkFleet(), actions, backgroundScope, nav)
+        tickets.select(PAY9)
+        runCurrent()
+
+        tickets.resume()
+        tickets.cancelResume()
+        assertNull(tickets.state.value.confirmResume)
+        tickets.confirmResume()
+        runCurrent()
+
+        assertEquals(listOf("resume_plan PAY-9"), actions.calls)
+        assertEquals(emptyList(), nav.opened)
+    }
+
+    /** A question asked about one ticket is not an answer for another. */
+    @Test
+    fun selecting_another_ticket_drops_the_question() = runTest {
+        val actions = FakeWorkActions().apply { planAnswer = plan() }
+        val tickets = vm(WorkFleet(), actions, backgroundScope, Nav())
+        tickets.select(PAY9)
+        runCurrent()
+        tickets.resume()
+
+        tickets.select(PAY7)
+        runCurrent()
+        assertNull(tickets.state.value.confirmResume)
+        tickets.confirmResume()
+        runCurrent()
+        assertFalse(actions.calls.any { it.startsWith("resume ") }, actions.calls.toString())
     }
 
     @Test
@@ -178,6 +240,7 @@ class TicketsViewModelTest {
         tickets.select(PAY9)
         runCurrent()
         tickets.resume()
+        tickets.confirmResume()
         runCurrent()
 
         assertEquals(listOf(41L), nav.opened)
@@ -200,11 +263,60 @@ class TicketsViewModelTest {
         tickets.select(PAY9)
         runCurrent()
         tickets.resume()
+        tickets.confirmResume()
         runCurrent()
 
         assertEquals(emptyList(), nav.opened)
         val error = assertNotNull(tickets.state.value.error)
         assertTrue("dev-pay-9-r" in error.body, error.body)
+        assertEquals("Someone else got there first", error.title)
+        // Stored is not shown: the sheet's banner must actually draw it — as
+        // a note, since nothing failed that the person could retry.
+        assertEquals(BannerTone.Info, bannerTone(error), "a note naming the orphan reaches the screen")
+    }
+
+    /** The plan's own reason for refusing `last` is shown where Resume would have been. */
+    @Test
+    fun a_plan_that_cannot_resume_last_says_why() = runTest {
+        val actions = FakeWorkActions().apply {
+            planAnswer = plan().copy(modes = listOf(ResumeMode("last", ok = false, reason = "its transcripts were purged"), ResumeMode("fresh", ok = true)))
+        }
+        val tickets = vm(WorkFleet(), actions, backgroundScope, Nav())
+        tickets.select(PAY9)
+        runCurrent()
+
+        val detail = tickets.state.value.selected!!
+        assertFalse(detail.canResume)
+        assertEquals("Can't resume the last conversation: its transcripts were purged", detail.resumeWhyNot)
+    }
+
+    @Test
+    fun a_plan_that_can_resume_has_no_reason_to_give() = runTest {
+        val actions = FakeWorkActions().apply { planAnswer = plan() }
+        val tickets = vm(WorkFleet(), actions, backgroundScope, Nav())
+        tickets.select(PAY9)
+        runCurrent()
+
+        assertNull(tickets.state.value.selected!!.resumeWhyNot)
+    }
+
+    /** A ticket whose tracker was removed says so, rather than only being struck through. */
+    @Test
+    fun an_unavailable_ticket_says_why() = runTest {
+        val fleet = WorkFleet()
+        fleet.trackers.value = listOf(dev.claudefleet.mobile.model.TrackerRow(id = 4, name = "Linear", state = "unreachable"))
+        val tickets = vm(fleet, FakeWorkActions(), backgroundScope, Nav())
+
+        tickets.select(PAY9.copy(trackerId = 4, unavailableReason = "tracker_removed"))
+        runCurrent()
+        assertEquals(listOf("Its tracker was removed from fleet."), tickets.state.value.selected!!.trouble)
+
+        tickets.select(PAY9.copy(trackerId = 4))
+        runCurrent()
+        assertEquals(
+            listOf("Tracker Linear: fleet cannot reach it, so statuses here may be out of date."),
+            tickets.state.value.selected!!.trouble,
+        )
     }
 
     @Test
@@ -216,8 +328,9 @@ class TicketsViewModelTest {
         runCurrent()
 
         assertFalse(tickets.state.value.selected!!.canStart || tickets.state.value.selected!!.canResume)
-        tickets.startHere(); tickets.resume()
+        tickets.startHere(); tickets.resume(); tickets.confirmResume()
         runCurrent()
+        assertNull(tickets.state.value.confirmResume, "nothing to ask a readonly token")
         assertEquals(emptyList(), nav.started)
         assertEquals(listOf("resume_plan PAY-9"), actions.calls, "reading the plan is fine; nothing was written")
     }

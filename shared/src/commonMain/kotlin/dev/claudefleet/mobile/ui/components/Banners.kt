@@ -82,30 +82,57 @@ internal fun connectionNotice(status: ConnectionStatus, hubReachable: Boolean? =
     is ConnectionStatus.Refused -> status.reason
 }
 
+/** How a banner draws a [Friendly]: a failure, or a plain note. */
+enum class BannerTone { Error, Info }
+
 /**
- * A failure a person can act on: plain language up front, the hub's own words
- * behind "Details".
+ * How [ErrorBanner] draws [message], or null when it draws nothing.
  *
- * Draws nothing for a null [error] or one that is not actually an error — see
- * [Friendly.isError] — so a session that has simply gone silent
- * (`E_NO_TRANSCRIPT`) never raises this banner at all.
+ * A [Friendly] that is not an error is still something the hub said for a
+ * person to read — "a handover is already on its way", or a resume that lost
+ * a race and names the session it made anyway — so it is drawn, as a quiet
+ * note rather than in error colours. It used to be dropped here, and those
+ * sentences were stored and never shown.
+ *
+ * A session that has simply gone silent (`E_NO_TRANSCRIPT`) is not one of
+ * these: `SessionViewModel` keeps it out of its `error` and draws the empty
+ * conversation instead, so it never reaches a banner at all.
+ *
+ * Out here rather than inside the composable because nothing in this
+ * repository can render one; the claim worth a test is about this value.
+ */
+internal fun bannerTone(message: Friendly?): BannerTone? = when {
+    message == null -> null
+    message.isError -> BannerTone.Error
+    else -> BannerTone.Info
+}
+
+/**
+ * A failure a person can act on — or a note they should read: plain language
+ * up front, the hub's own words behind "Details". [bannerTone] decides which,
+ * and whether anything is drawn.
  */
 @Composable
 fun ErrorBanner(error: Friendly?, onDismiss: (() -> Unit)? = null, modifier: Modifier = Modifier) {
-    if (error == null || !error.isError) return
+    if (error == null) return
+    val tone = bannerTone(error) ?: return
     var showDetails by remember(error) { mutableStateOf(false) }
+    val colors = MaterialTheme.colorScheme
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.errorContainer,
-        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        color = if (tone == BannerTone.Error) colors.errorContainer else colors.secondaryContainer,
+        contentColor = if (tone == BannerTone.Error) colors.onErrorContainer else colors.onSecondaryContainer,
     ) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth()) {
             Row(verticalAlignment = Alignment.Top) {
-                Icon(
-                    FleetIcons.Warning,
-                    contentDescription = null,
-                    modifier = Modifier.padding(end = 8.dp),
-                )
+                // A note carries no warning sign: it is not a failure.
+                if (tone == BannerTone.Error) {
+                    Icon(
+                        FleetIcons.Warning,
+                        contentDescription = null,
+                        modifier = Modifier.padding(end = 8.dp),
+                    )
+                }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(error.title, style = MaterialTheme.typography.titleSmall)
                     // `explain(HubError.Http)` is "the hub answered HTTP

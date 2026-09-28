@@ -15,6 +15,7 @@ import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.TicketCard
 import dev.claudefleet.mobile.model.Today
+import dev.claudefleet.mobile.model.TrackerRow
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.BatchResult
 import dev.claudefleet.mobile.model.DecisionResult
@@ -35,6 +36,8 @@ import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.json
 import dev.claudefleet.mobile.net.ToolCatalog
+import dev.claudefleet.mobile.ui.components.BannerTone
+import dev.claudefleet.mobile.ui.components.bannerTone
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
@@ -65,6 +68,7 @@ internal class WorkFleet(
     override val tickets = MutableStateFlow<List<Ticket>>(emptyList())
     override val myWork = MutableStateFlow<Set<Long>?>(null)
     override val orgs = MutableStateFlow(OrgDirectory.EMPTY)
+    override val trackers = MutableStateFlow<List<TrackerRow>>(emptyList())
     override val timeline = MutableSharedFlow<TimelineFrame>(extraBufferCapacity = 16)
     override val workChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16)
     val remembered = mutableListOf<Ticket>()
@@ -328,6 +332,114 @@ class SessionWorkViewModelTest {
         runCurrent()
 
         assertEquals(listOf("confirm 5 12", "reject 5 12"), actions.calls, "the suggestion's link, never the confirmed one")
+    }
+
+    /**
+     * The hub can stamp a row with confirmed work *and* a guess. The sheet
+     * draws the confirmed ticket as current and the guess in a block of its
+     * own, and Confirm / Not this are bound to the guess that block draws —
+     * never to a link the person cannot see.
+     */
+    @Test
+    fun with_confirmed_work_and_a_guess_the_decisions_sit_with_the_drawn_guess() = runTest {
+        val actions = FakeWorkActions()
+        val vm = SessionWorkViewModel(5, WorkFleet(listOf(row(work = PAY7, guess = PAY9_GUESS))), actions, backgroundScope, canWrite = true)
+
+        val s = vm.state.value
+        assertEquals("PAY-7", s.work?.key, "the confirmed work is drawn as the current one")
+        assertEquals("PAY-7", s.chip?.key)
+        val drawn = assertNotNull(s.suggestion, "the guess the buttons decide is drawn too")
+        assertEquals(PAY9_GUESS, drawn.work)
+        assertEquals("PAY-9", drawn.work.label)
+        assertEquals("Ledger", drawn.work.title)
+        assertEquals("linked from a prompt · rule R5", drawn.why, "its own reasons, not the confirmed link's")
+        assertTrue(drawn.besideConfirmed, "drawn apart from the confirmed work")
+        assertTrue(drawn.canConfirm && drawn.canReject)
+        assertEquals(12L, drawn.linkId)
+
+        vm.confirm(drawn.linkId)
+        runCurrent()
+        vm.reject(drawn.linkId)
+        runCurrent()
+
+        assertEquals(listOf("confirm 5 12", "reject 5 12"), actions.calls)
+    }
+
+    @Test
+    fun a_guess_on_its_own_is_the_sheets_main_ticket() = runTest {
+        val vm = SessionWorkViewModel(5, WorkFleet(listOf(row(guess = PAY9_GUESS))), FakeWorkActions(), backgroundScope, canWrite = true)
+
+        val drawn = assertNotNull(vm.state.value.suggestion)
+        assertFalse(drawn.besideConfirmed)
+        assertEquals(drawn.work, vm.state.value.chip, "the chip and the buttons are about the same ticket")
+    }
+
+    /**
+     * A `session:updated` can replace the guess between the frame the person
+     * read and their tap. The tap names the link it was drawn with, and a
+     * link that is no longer the guess is not decided — the new guess would
+     * be decided unseen.
+     */
+    @Test
+    fun a_guess_replaced_before_the_tap_is_not_decided_unseen() = runTest {
+        val fleet = WorkFleet(listOf(row(work = PAY7, guess = PAY9_GUESS)))
+        val actions = FakeWorkActions()
+        val vm = SessionWorkViewModel(5, fleet, actions, backgroundScope, canWrite = true)
+        val drawnId = vm.state.value.suggestion!!.linkId
+
+        fleet.sessions.value = listOf(row(work = PAY7, guess = PAY9_GUESS.copy(linkId = 13, key = "PAY-10", title = "Payouts")))
+        runCurrent()
+        vm.confirm(drawnId)
+        runCurrent()
+        vm.reject(drawnId)
+        runCurrent()
+
+        assertEquals(emptyList(), actions.calls)
+        assertEquals("The suggestion changed", vm.state.value.error?.title)
+        assertEquals(BannerTone.Info, bannerTone(vm.state.value.error), "said, as a note")
+        assertEquals(13L, vm.state.value.suggestion?.linkId, "the new guess is what is drawn now")
+    }
+
+    @Test
+    fun without_a_guess_there_is_nothing_to_decide() = runTest {
+        val actions = FakeWorkActions()
+        val vm = SessionWorkViewModel(5, WorkFleet(listOf(row(work = PAY7))), actions, backgroundScope, canWrite = true)
+
+        assertNull(vm.state.value.suggestion)
+        vm.confirm(); vm.reject(); vm.confirm(PAY7.linkId)
+        runCurrent()
+        assertEquals(emptyList(), actions.calls, "the confirmed link is never decided as a guess")
+    }
+
+    /**
+     * A struck-through ticket says why, in the hub's words: the cache's
+     * `unavailable_reason`, and a tracker that is not `ok`. The sheet used to
+     * say only "the tracker no longer answers".
+     */
+    @Test
+    fun the_sheet_says_why_a_ticket_is_unavailable_and_what_ails_its_tracker() = runTest {
+        val gone = PAY7.copy(unavailable = true)
+        val fleet = WorkFleet(listOf(row(work = gone, guess = PAY9_GUESS)))
+        val vm = SessionWorkViewModel(5, fleet, FakeWorkActions(), backgroundScope, canWrite = true)
+        assertEquals(listOf("The tracker no longer answers for this ticket."), vm.state.value.workTrouble, "the flag alone")
+
+        fleet.tickets.value = listOf(
+            Ticket(id = 70, key = "PAY-7", trackerId = 3, unavailableAt = 1_700_000_000, unavailableReason = "not_found_or_no_permission"),
+            Ticket(id = 90, key = "PAY-9", trackerId = 3),
+        )
+        fleet.trackers.value = listOf(TrackerRow(id = 3, provider = "jira", name = "Acme Jira", state = "auth_failed"))
+        runCurrent()
+
+        val tracker = "Tracker Acme Jira: fleet's sign-in to it was refused, so statuses here may be out of date."
+        assertEquals(
+            listOf("The tracker no longer finds this ticket, or fleet is no longer allowed to see it.", tracker),
+            vm.state.value.workTrouble,
+        )
+        assertEquals(listOf(tracker), vm.state.value.suggestion?.trouble, "the suggested ticket's tracker is said too")
+
+        fleet.trackers.value = listOf(TrackerRow(id = 3, name = "Acme Jira", state = "ok"))
+        runCurrent()
+        assertEquals(emptyList(), vm.state.value.suggestion?.trouble, "a tracker that is ok says nothing")
     }
 
     @Test
@@ -604,6 +716,7 @@ class SessionWorkViewModelTest {
         runCurrent()
         assertEquals("A handover is already on its way", vm.state.value.error?.title)
         assertFalse(vm.state.value.error!!.isError)
+        assertEquals(BannerTone.Info, bannerTone(vm.state.value.error), "not an error, but still drawn")
     }
 
     /** A free-string hub that does not know `handover` hides the button for the connection, and nothing else. */
