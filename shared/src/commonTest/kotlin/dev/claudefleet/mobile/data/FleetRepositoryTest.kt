@@ -7,6 +7,7 @@ import dev.claudefleet.mobile.net.EventStream
 import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.HubEvent
+import dev.claudefleet.mobile.net.MAX_HUB_CONTRACT
 import dev.claudefleet.mobile.net.contractVerdict
 import dev.claudefleet.mobile.net.sentence
 import io.ktor.client.HttpClient
@@ -251,12 +252,12 @@ class FleetRepositoryTest {
     fun a_ready_frame_naming_a_too_new_contract_is_refused_and_applies_no_rows() = runTest {
         val hub = FakeHub(sessionsJson = sessionRows(1, 2))
         val stream = FakeStream {
-            emit(HubEvent.Ready("0.9.9", listOf("session", "host"), contract = 5))
+            emit(HubEvent.Ready("0.9.9", listOf("session", "host"), contract = MAX_HUB_CONTRACT + 1))
             emit(rowEvent("session:updated", """{"id":1,"tmux_name":"renamed","host_alias":"box"}"""))
             awaitCancellation()
         }
         val repository = repo(hub, stream, backgroundScope)
-        val expected = ConnectionStatus.Refused(contractVerdict(5).sentence()!!)
+        val expected = ConnectionStatus.Refused(contractVerdict(MAX_HUB_CONTRACT + 1).sentence()!!)
 
         repository.start()
         // Matching the exact refusal, not merely `it is Refused`: the
@@ -281,7 +282,7 @@ class FleetRepositoryTest {
     @Test
     fun every_ready_frame_records_the_hubs_version_including_a_refused_one() = runTest {
         val hub = FakeHub(sessionsJson = sessionRows(1))
-        val stream = FakeStream { emit(HubEvent.Ready("0.9.9", listOf("session"), contract = 5)); awaitCancellation() }
+        val stream = FakeStream { emit(HubEvent.Ready("0.9.9", listOf("session"), contract = MAX_HUB_CONTRACT + 1)); awaitCancellation() }
         val repository = repo(hub, stream, backgroundScope)
 
         assertNull(repository.hubVersion.value, "nothing seen before the first ready")
@@ -1221,7 +1222,7 @@ class FleetRepositoryTest {
                 emit(READY)
                 drop.await()
             } else {
-                emit(HubEvent.Ready("0.9.9", listOf("session", "host"), contract = 5))
+                emit(HubEvent.Ready("0.9.9", listOf("session", "host"), contract = MAX_HUB_CONTRACT + 1))
                 awaitCancellation()
             }
         }
@@ -1274,7 +1275,7 @@ class FleetRepositoryTest {
                 emit(READY)
                 drop.await()
             } else {
-                emit(HubEvent.Ready("0.9.9", listOf("session", "host"), contract = 5))
+                emit(HubEvent.Ready("0.9.9", listOf("session", "host"), contract = MAX_HUB_CONTRACT + 1))
                 awaitCancellation()
             }
         }
