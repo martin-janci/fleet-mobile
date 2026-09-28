@@ -45,9 +45,22 @@ class BlockedTest {
     @Test
     fun stuck_kinds_map_to_fixed_cards() {
         assertEquals(listOf(Answer.Enter), blockedCard(row(stuck = "press_enter"), HUB_VERSION_KEYS)!!.answers)
-        assertEquals(listOf(Answer.Text("y"), Answer.Text("n")), blockedCard(row(stuck = "trust_prompt"), HUB_VERSION_KEYS)!!.answers)
+        assertEquals(listOf(Answer.Enter, Answer.Escape), blockedCard(row(stuck = "trust_prompt"), HUB_VERSION_KEYS)!!.answers)
         val auth = blockedCard(row(stuck = "auth_menu"), HUB_VERSION_KEYS)!!
         assertTrue(auth.answers.isEmpty()); assertTrue(auth.offerRestart); assertEquals("Needs a login on this host", auth.explain)
         assertTrue(blockedCard(row(stuck = "oom"), HUB_VERSION_KEYS)!!.offerRestart)
+    }
+
+    /**
+     * The trust dialog is a menu, and the hub refuses typed text into a stuck
+     * session (E_INVALID_STATE) — so it is answered with keys, and an old hub
+     * that cannot take keys offers none rather than a chip it would refuse.
+     */
+    @Test
+    fun the_trust_prompt_is_answered_with_keys_never_typed_text() {
+        val card = blockedCard(row(stuck = "trust_prompt"), HUB_VERSION_KEYS)!!
+        assertTrue(card.answers.none { it is Answer.Text }, "${card.answers}")
+        val old = blockedCard(row(stuck = "trust_prompt"), hubVersion = "0.2.34")!!
+        assertTrue(old.answers.isEmpty()); assertTrue(old.terminalAvailable)
     }
 }

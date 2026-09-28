@@ -219,9 +219,8 @@ private val TERMINAL_MAX_HEIGHT: Dp = 220.dp
  * A numbered option is drawn as the REPL draws it — the number first, because
  * the number is what is actually sent. `Escape` is abbreviated because the key
  * on a phone keyboard is not called Escape at all and "Esc" is what the prompt
- * itself says. A free-text answer (the trust prompt's `y`/`n`) is its own text:
- * inventing a friendlier word for it here would be a second place deciding
- * what a trust prompt offers.
+ * itself says. A free-text answer is its own text: inventing a friendlier
+ * word for it here would be a second place deciding what a prompt offers.
  */
 internal fun answerLabel(answer: Answer): String = when (answer) {
     is Answer.Option -> "${answer.n} · ${answer.label}"
