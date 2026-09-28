@@ -506,7 +506,7 @@ private const val PROJECT_IDS = "project_ids"
 private fun unnamedLabel(id: Long) = ProjectRow(id).label
 
 /** The org rule's refusal: `details.cross_org`, as the hub's `check_cross_org` sets it. */
-private fun HubError.Tool.isCrossOrg(): Boolean =
+internal fun HubError.Tool.isCrossOrg(): Boolean =
     ((details as? JsonObject)?.get("cross_org") as? JsonPrimitive)?.content == "true"
 
 /**

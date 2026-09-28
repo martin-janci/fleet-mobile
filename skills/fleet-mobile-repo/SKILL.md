@@ -143,8 +143,14 @@ missing feature should only hide a button. Instead, on every `ready`,
   `properties`, for a feature that is a new argument of an old action
   (multi-start's `project_ids`). Absent means absent: an older hub ignores an
   unknown argument instead of refusing it, so there is nothing to learn from.
-  `force_cross_org` is never sent (D15); `ToolsTheAppMayCallTest` fails on the
-  quoted string.
+  `force_cross_org` is sent by one call only: `HubClient.linkWork`, from a
+  session's *Tasks* after the person picked **Link anyway** in the cross-org
+  choice (D15 as narrowed by the owner on 2026-09-28). A start, multi-start or
+  resume never forces. The string is the constant `FORCE_CROSS_ORG` in
+  `HubClient.kt`, and `ToolsTheAppMayCallTest` fails on any other source that
+  quotes it or any other function that uses it. The choice also shows the
+  `fleet-hub org rule add …` that moves the session into the task's org (an
+  org rule is master-only, so the phone hands it over to copy).
 - **Actions.** `action` is a free string on hubs before M8.0. When the schema
   has an `enum`, `HubCapabilities.has(tool, action)` reads it; when it does
   not, an action counts as present until the hub answers `E_INVALID`

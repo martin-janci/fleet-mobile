@@ -60,6 +60,8 @@ interface WorkActions {
     /**
      * Set a session's work: a looked-up ticket by [itemId], or a bare [key].
      * [primary] false adds a secondary link and leaves the primary alone.
+     * [shareAcrossOrgs] links it even though the ticket and the session are
+     * in different organisations — only after the person chose to.
      */
     suspend fun link(
         sessionId: Long,
@@ -67,6 +69,7 @@ interface WorkActions {
         key: String? = null,
         primary: Boolean? = null,
         expectedVersion: Long? = null,
+        shareAcrossOrgs: Boolean = false,
     ): SessionRow
 
     /** Start work on [key] on [hostAlias]; [projectId] null lets the hub pick. */
@@ -170,8 +173,8 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
     override suspend fun unlink(sessionId: Long, linkId: Long, expectedVersion: Long?): SessionRow =
         session.withClient { it.unlinkWork(sessionId, linkId, expectedVersion) }
 
-    override suspend fun link(sessionId: Long, itemId: Long?, key: String?, primary: Boolean?, expectedVersion: Long?): SessionRow =
-        session.withClient { it.linkWork(sessionId, itemId, key, primary, expectedVersion) }
+    override suspend fun link(sessionId: Long, itemId: Long?, key: String?, primary: Boolean?, expectedVersion: Long?, shareAcrossOrgs: Boolean): SessionRow =
+        session.withClient { it.linkWork(sessionId, itemId, key, primary, expectedVersion, shareAcrossOrgs) }
 
     override suspend fun start(key: String, hostAlias: String, projectId: Long?): SessionRow =
         session.withClient { it.startWork(key, hostAlias, projectId) }

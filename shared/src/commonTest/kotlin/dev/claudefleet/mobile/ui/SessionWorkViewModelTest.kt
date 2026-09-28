@@ -153,8 +153,8 @@ internal class FakeWorkActions : WorkActions {
         workArgs += "unlink $sessionId $linkId v=$expectedVersion"
         return record("unlink $sessionId $linkId")
     }
-    override suspend fun link(sessionId: Long, itemId: Long?, key: String?, primary: Boolean?, expectedVersion: Long?): SessionRow {
-        workArgs += "link $sessionId ${itemId ?: key} primary=$primary"
+    override suspend fun link(sessionId: Long, itemId: Long?, key: String?, primary: Boolean?, expectedVersion: Long?, shareAcrossOrgs: Boolean): SessionRow {
+        workArgs += "link $sessionId ${itemId ?: key} primary=$primary" + if (shareAcrossOrgs) " share" else ""
         return record("link $sessionId ${itemId ?: key}")
     }
     override suspend fun start(key: String, hostAlias: String, projectId: Long?) = record("start $key $hostAlias ${projectId ?: "-"}")
