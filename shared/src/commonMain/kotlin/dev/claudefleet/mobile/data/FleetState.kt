@@ -100,8 +100,9 @@ interface FleetState {
     /**
      * The organisations this token can see and what their trackers are
      * (claude-fleet M5), read once per connection when the hub lists
-     * `work orgs`; empty otherwise. A label and a filter, never a fence: a
-     * phone's token is not org-scoped on the hub.
+     * `work orgs`; empty otherwise. A label and a filter, never a fence: the
+     * hub does the fencing, and a phone paired with `--org` is listed only
+     * its own org ([OrgDirectory]).
      */
     val orgs: StateFlow<OrgDirectory> get() = NoWork.orgs
 

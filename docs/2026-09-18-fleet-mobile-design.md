@@ -292,7 +292,8 @@ and re-reads — debounced — on `session:*` and `work:item` while open; its
 by name. The one departure: a session the phone has no row for yet keeps the
 digest's own `org_id` instead of dropping out of every org. Orgs are read
 once per connection (`work orgs`) into an `OrgDirectory` — a label and a
-filter, never a fence, since a paired phone's token sees every org. A row's
+filter, never a fence: the hub fences, and a phone paired with `--org`
+(claude-fleet M14.1b) is listed and shown only its own org. A row's
 org is its `org_id` (in the phone view from the hub's M8.6), else its work's.
 Past work is the resume plan's `candidates`; the ticket card is `work card`
 from the hub's cache. **Ask for a handover** is asynchronous on the hub, so

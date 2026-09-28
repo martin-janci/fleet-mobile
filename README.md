@@ -45,7 +45,10 @@ voids it), and in the URL **fragment**, which a browser never puts on the wire.
 ```bash
 fleet-hub pair --name kiosk --mode readonly   # observe only; the default is full
 fleet-hub pair --name phone --ttl 120         # seconds the code stays valid (30–3600)
+fleet-hub pair --name phone --org 2           # bound to one organisation
 ```
+
+A phone paired with `--org` sees only its org's work, sessions and trackers (plus unassigned ones while that org lets bound devices see them); the app shows what the hub returns and offers no other org.
 
 A `readonly` client can watch everything and send nothing; the app knows this
 and disables the prompt box, and leaves out the New session button, rather than

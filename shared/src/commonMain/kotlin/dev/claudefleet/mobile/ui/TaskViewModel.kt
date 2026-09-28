@@ -82,6 +82,13 @@ data class TaskUiState(
 }
 
 /**
+ * What the screen says for [TaskUiState.gone]. The hub answers a task outside
+ * this token's scope (a phone paired with `--org`, say) exactly as one that
+ * does not exist, so the sentence names both.
+ */
+internal const val TASK_NOT_VISIBLE = "This task is not on the hub, or this device may not see it."
+
+/**
  * One task and every session it has had — the Work view's detail
  * (`work { task }`). Pushed over My work, or over a session's *Tasks*.
  *
