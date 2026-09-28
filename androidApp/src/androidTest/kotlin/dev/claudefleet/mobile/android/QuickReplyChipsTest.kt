@@ -1,12 +1,14 @@
 package dev.claudefleet.mobile.android
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.model.QuickReply
@@ -100,6 +102,16 @@ class QuickReplyChipsTest {
         compose.waitForIdle()
 
         assertEquals(listOf("go on"), sent)
+    }
+
+    @Test
+    fun a_chip_caption_is_drawn_with_a_width() {
+        // A weighted caption inside the LazyRow's unbounded width measured at
+        // zero: the node existed and took taps, but every chip was an empty box.
+        screen()
+
+        compose.onNodeWithText("Go on").assertWidthIsAtLeast(16.dp)
+        compose.onNodeWithText("Review").assertWidthIsAtLeast(16.dp)
     }
 
     @Test
