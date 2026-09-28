@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
@@ -100,6 +101,9 @@ const val CONVERSATION_LIST: String = "conversation-list"
 
 /** The quick-reply chip row, for the device test that taps and long-presses it. */
 const val QUICK_REPLY_ROW: String = "quick-reply-row"
+
+/** The widest a quick-reply caption draws before it ellipsizes. */
+private val QUICK_REPLY_CAPTION_MAX = 200.dp
 
 /**
  * One session: what has been said, newest at the bottom, and a box to answer.
@@ -1432,12 +1436,16 @@ private fun QuickReplyChip(
             label = {
                 // The mark is its own Text so the caption stays the chip's
                 // exact text — for a screen reader and for a test finding it.
+                // A long caption is capped with widthIn, never weight: the
+                // chip sits in a LazyRow, whose width is unbounded, and a
+                // weighted child of an unbounded Row is measured at zero —
+                // every chip drew as an empty box.
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         caption,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
+                        modifier = Modifier.widthIn(max = QUICK_REPLY_CAPTION_MAX),
                     )
                     if (sends) Text(" ↵", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
