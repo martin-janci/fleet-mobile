@@ -34,7 +34,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -53,6 +52,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.IdOrWord
+import dev.claudefleet.mobile.model.WorkFacetId
+import dev.claudefleet.mobile.model.facetSentence
 import dev.claudefleet.mobile.model.WorkRule
 import dev.claudefleet.mobile.model.WorkTask
 import dev.claudefleet.mobile.model.WorkTreeFilters
@@ -80,6 +81,10 @@ data class MyWorkHandlers(
     val onToggleMine: () -> Unit = {},
     val onToggleReview: () -> Unit = {},
     val onClearFilters: () -> Unit = {},
+    /** One chip's ✕ in the strip, or a sheet group's *Any*. */
+    val onClearFacet: (WorkFacetId) -> Unit = {},
+    /** *Show archived* (the sheet's switch, the list's last row), or hide them again. */
+    val onSetArchived: (Boolean) -> Unit = {},
     val onApplyView: (WorkView) -> Unit = {},
     val onSaveView: (String) -> Unit = {},
     val onUpdateView: (WorkView) -> Unit = {},
@@ -93,9 +98,13 @@ data class MyWorkHandlers(
 )
 
 /**
- * The **My work** tab: saved views as chips, a filter sheet, and org → group
- * sections (headers with the hub's counts) of compact task cards, each
- * section folding away and loading more of itself on its own. When the hub
+ * The **My work** tab: saved views as chips, then *Filters (n)* beside the
+ * *Assigned to me* and *To review* toggles, a strip of removable chips for
+ * what the sheet holds, and org → group sections (headers with the hub's
+ * counts) of compact task cards, each section folding away and loading more
+ * of itself on its own. Archived tasks are hidden by default; the list's last
+ * row says how many and shows them. The layout and the words are the
+ * desktop's Work view (claude-fleet `WorkFiltersBar.svelte`). When the hub
  * cannot be reached the last page stays, under "Offline · as of 10:42".
  *
  * Stateless: it draws a [MyWorkUiState]; [MyWorkViewModel] is what is tested.
@@ -125,14 +134,6 @@ fun MyWorkScreen(
                         }
                     }
                 }
-                IconButton(onClick = handlers.onOpenFilters) {
-                    val n = state.filters.count
-                    if (n > 0) {
-                        BadgedBox(badge = { Badge { Text("$n") } }) { Icon(FleetIcons.Filters, contentDescription = "Filters, $n on") }
-                    } else {
-                        Icon(FleetIcons.Filters, contentDescription = "Filters")
-                    }
-                }
             },
             below = {
                 if (state.searchOpen) {
@@ -159,6 +160,30 @@ fun MyWorkScreen(
                         }
                     }
                 }
+                // The sheet's entry, then the two quick toggles, which show
+                // their own state and so get no chip in the strip.
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FiltersButton(count = state.filters.sheetCount, onClick = handlers.onOpenFilters)
+                    FilterChip(
+                        selected = state.filters.mine == true,
+                        onClick = handlers.onToggleMine,
+                        label = { Text("Assigned to me") },
+                    )
+                    FilterChip(
+                        selected = state.filters.review == true,
+                        onClick = handlers.onToggleReview,
+                        label = { Text("To review") },
+                    )
+                }
+                FilterStrip(
+                    facets = state.stripFacets,
+                    onClear = handlers.onClearFacet,
+                    onClearAll = handlers.onClearFilters,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
             },
         )
         state.stale?.let { StaleNotice(it) }
@@ -174,7 +199,7 @@ fun MyWorkScreen(
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 if (state.isEmpty) {
                     item(key = "empty") {
-                        EmptyWork(state.filters, handlers.onClearFilters, Modifier.fillParentMaxSize())
+                        EmptyWork(state, handlers, Modifier.fillParentMaxSize())
                     }
                 } else if (!state.loaded && !state.loading) {
                     item(key = "not-yet") {
@@ -204,6 +229,13 @@ fun MyWorkScreen(
                                 LoadMoreRow(group, state.connected, onClick = { handlers.onLoadMore(group.key) })
                             }
                         }
+                    }
+                }
+                // Archived tasks are hidden by default; the last row says how
+                // many (the hub's `archived_hidden`) and shows them all.
+                if (state.archivedRow && !state.isEmpty) {
+                    item(key = "archived") {
+                        ArchivedRow(state.archivedHidden, state.showArchived, "tasks", handlers.onSetArchived)
                     }
                 }
             }
@@ -350,63 +382,101 @@ private fun LoadMoreRow(group: WorkGroupSection, connected: Boolean, onClick: ()
 }
 
 @Composable
-private fun EmptyWork(filters: WorkTreeFilters, onClearFilters: () -> Unit, modifier: Modifier) {
+private fun EmptyWork(state: MyWorkUiState, handlers: MyWorkHandlers, modifier: Modifier) {
     Column(modifier = modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("No tasks here", style = MaterialTheme.typography.titleMedium)
-        if (!filters.isEmpty) {
-            Text("The filters hide everything. Clear them to see all your work.", style = MaterialTheme.typography.bodyMedium)
-            TextButton(onClick = onClearFilters) { Text("Clear filters") }
-        } else {
-            Text(
-                "Tasks appear when a tracker is connected on the hub, or a session is linked to work.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+        when {
+            // The desktop's words: what is on, and the way out under it.
+            state.facets.isNotEmpty() -> {
+                Text(emptyWorkSentence(facetSentence(state.facets)), style = MaterialTheme.typography.bodyMedium)
+                TextButton(onClick = handlers.onClearFilters) { Text("Clear filters") }
+            }
+            state.archivedHidden > 0 -> Text("No tasks to show.", style = MaterialTheme.typography.bodyMedium)
+            else -> {
+                Text("No tasks here", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Tasks appear when a tracker is connected on the hub, or a session is linked to work.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
         }
+        if (state.archivedRow) ArchivedRow(state.archivedHidden, state.showArchived, "tasks", handlers.onSetArchived)
     }
 }
 
-/** The same filters the desktop has: org, tracker, status, mine, has, review — and saving them as a view. */
+/** "No tasks match Org: Acme, Status: Done." — the desktop's empty state. */
+internal fun emptyWorkSentence(facets: String): String = "No tasks match $facets."
+
+/**
+ * One sheet of labelled chip groups — Organisation, Tracker, Status,
+ * Sessions, each led by *Any* — then *Show archived*, and saving the
+ * filters as a view. *Assigned to me* and *To review* are on the screen.
+ *
+ * A remembered org or tracker the last page no longer lists still gets its
+ * chip, selected, so a filter that is on always has a control that shows it
+ * and turns it off (the Organisation group used to vanish when the page
+ * listed no orgs, leaving `org: none` narrowing the tree unseen).
+ */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun WorkFiltersSheet(state: MyWorkUiState, handlers: MyWorkHandlers) {
     var naming by remember { mutableStateOf(false) }
     val f = state.filters
     ModalBottomSheet(onDismissRequest = handlers.onCloseFilters) {
-        Column(
-            modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text("Filters", style = MaterialTheme.typography.titleLarge)
-            if (state.filterOrgs.isNotEmpty()) {
-                FilterLabel("Organisation")
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Choice("Any", f.org == null) { handlers.onSetOrg(null) }
-                    for (org in state.filterOrgs) Choice(org.name.ifBlank { "Org ${org.id}" }, f.org == IdOrWord.of(org.id)) { handlers.onSetOrg(IdOrWord.of(org.id)) }
-                    Choice("No organisation", f.org == IdOrWord.NONE) { handlers.onSetOrg(IdOrWord.NONE) }
+        Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Filters", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                TextButton(onClick = handlers.onClearFilters, enabled = !f.isEmpty || state.showArchived) { Text("Clear all") }
+            }
+            if (state.filterOrgs.isNotEmpty() || f.org != null) {
+                FilterGroup("Organisation") {
+                    ChipFlow {
+                        ChoiceChip("Any", f.org == null, { handlers.onClearFacet(WorkFacetId.ORG) })
+                        for (org in state.filterOrgs) {
+                            ChoiceChip(org.name.ifBlank { "Org ${org.id}" }, f.org == IdOrWord.of(org.id), { handlers.onSetOrg(IdOrWord.of(org.id)) })
+                        }
+                        val stale = f.org?.id?.takeIf { id -> state.filterOrgs.none { it.id == id } }
+                        if (stale != null) ChoiceChip("Org #$stale", true, { handlers.onClearFacet(WorkFacetId.ORG) })
+                        ChoiceChip("Unassigned", f.org == IdOrWord.NONE, { handlers.onSetOrg(IdOrWord.NONE) })
+                    }
                 }
             }
-            FilterLabel("Tracker")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Choice("Any", f.tracker == null) { handlers.onSetTracker(null) }
-                for (t in state.filterTrackers) Choice(t.name.ifBlank { t.provider }, f.tracker == IdOrWord.of(t.id)) { handlers.onSetTracker(IdOrWord.of(t.id)) }
-                Choice("Local work", f.tracker == IdOrWord.LOCAL) { handlers.onSetTracker(IdOrWord.LOCAL) }
-                Choice("Bare keys", f.tracker == IdOrWord.REF) { handlers.onSetTracker(IdOrWord.REF) }
+            FilterGroup("Tracker") {
+                ChipFlow {
+                    ChoiceChip("Any", f.tracker == null, { handlers.onClearFacet(WorkFacetId.TRACKER) })
+                    for (t in state.filterTrackers) {
+                        ChoiceChip(t.name.ifBlank { t.provider }, f.tracker == IdOrWord.of(t.id), { handlers.onSetTracker(IdOrWord.of(t.id)) })
+                    }
+                    val stale = f.tracker?.id?.takeIf { id -> state.filterTrackers.none { it.id == id } }
+                    if (stale != null) ChoiceChip("Tracker #$stale", true, { handlers.onClearFacet(WorkFacetId.TRACKER) })
+                    ChoiceChip("Local work", f.tracker == IdOrWord.LOCAL, { handlers.onSetTracker(IdOrWord.LOCAL) })
+                    ChoiceChip("Bare keys", f.tracker == IdOrWord.REF, { handlers.onSetTracker(IdOrWord.REF) })
+                }
             }
-            FilterLabel("Status")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Choice("Any", f.status == null) { handlers.onSetStatus(null) }
-                for (s in WorkTreeFilters.STATUSES) Choice(statusWords(s), f.status == s) { handlers.onSetStatus(s) }
+            FilterGroup("Status") {
+                ChipFlow {
+                    ChoiceChip(WorkTreeFilters.statusLabel(WorkTreeFilters.ANY), f.status == null, { handlers.onClearFacet(WorkFacetId.STATUS) })
+                    for (s in WorkTreeFilters.STATUSES) ChoiceChip(WorkTreeFilters.statusLabel(s), f.status == s, { handlers.onSetStatus(s) })
+                }
             }
-            FilterLabel("Sessions")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Choice("Any", f.has == null) { handlers.onSetHas(null) }
-                for (h in WorkTreeFilters.HAS) Choice(hasWords(h), f.has == h) { handlers.onSetHas(h) }
+            FilterGroup("Sessions") {
+                ChipFlow {
+                    ChoiceChip(WorkTreeFilters.hasLabel(WorkTreeFilters.ANY), f.has == null, { handlers.onClearFacet(WorkFacetId.HAS) })
+                    for (h in WorkTreeFilters.HAS) ChoiceChip(WorkTreeFilters.hasLabel(h), f.has == h, { handlers.onSetHas(h) })
+                }
             }
-            ToggleRow("Assigned to me", f.mine == true, handlers.onToggleMine)
-            ToggleRow("Something to review", f.review == true, handlers.onToggleReview)
+            FilterGroup("Include") {
+                SwitchRow(
+                    label = "Show archived",
+                    help = "Done tasks, and tasks whose sessions are all archived, with nothing running",
+                    checked = state.showArchived,
+                    onToggle = { handlers.onSetArchived(!state.showArchived) },
+                )
+            }
             HorizontalDivider()
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = handlers.onClearFilters, enabled = !f.isEmpty) { Text("Clear all") }
+            FlowRow(modifier = Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (state.canSaveView) TextButton(onClick = { naming = true }) { Text("Save as view…") }
                 val active = state.views.firstOrNull { it.id == state.activeViewId }
                 if (active != null && state.canDeleteView) TextButton(onClick = { handlers.onDeleteView(active) }) { Text("Delete “${active.name}”") }
@@ -414,9 +484,11 @@ private fun WorkFiltersSheet(state: MyWorkUiState, handlers: MyWorkHandlers) {
             }
             if (state.viewsAvailable && state.views.isNotEmpty() && state.canSaveView) {
                 val saved = state.views
-                Text("Update a saved view with these filters:", style = MaterialTheme.typography.labelMedium)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for (view in saved) OutlinedButton(onClick = { handlers.onUpdateView(view) }) { Text(view.name) }
+                Column(modifier = Modifier.padding(horizontal = 24.dp)) {
+                    Text("Update a saved view with these filters:", style = MaterialTheme.typography.labelMedium)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (view in saved) OutlinedButton(onClick = { handlers.onUpdateView(view) }) { Text(view.name) }
+                    }
                 }
             }
         }
@@ -435,40 +507,6 @@ private fun WorkFiltersSheet(state: MyWorkUiState, handlers: MyWorkHandlers) {
             dismissButton = { TextButton(onClick = { naming = false }) { Text("Cancel") } },
         )
     }
-}
-
-@Composable
-private fun FilterLabel(text: String) {
-    Text(text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
-}
-
-@Composable
-private fun Choice(label: String, selected: Boolean, onClick: () -> Unit) {
-    FilterChip(selected = selected, onClick = onClick, label = { Text(label, maxLines = 1) })
-}
-
-@Composable
-private fun ToggleRow(label: String, on: Boolean, onToggle: () -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, modifier = Modifier.weight(1f))
-        Switch(checked = on, onCheckedChange = { onToggle() })
-    }
-}
-
-internal fun statusWords(status: String): String = when (status) {
-    "open" -> "Open"
-    "todo" -> "To do"
-    "in_progress" -> "In progress"
-    "done" -> "Done"
-    else -> status
-}
-
-internal fun hasWords(has: String): String = when (has) {
-    "active" -> "Active"
-    "past_only" -> "Past only"
-    "none" -> "No session"
-    "suggested" -> "Suggested"
-    else -> has
 }
 
 /** Placement rules, read-only: they are made and changed on the desktop. */

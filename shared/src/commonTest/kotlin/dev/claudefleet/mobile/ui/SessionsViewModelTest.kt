@@ -8,6 +8,7 @@ import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.SessionFacetId
 import dev.claudefleet.mobile.model.SessionFilters
 import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.model.StatusFilter
@@ -1024,7 +1025,7 @@ class SessionFilterStateTest {
         vm.setProjectFilter(2)
         runCurrent()
         assertEquals(1, vm.state.value.shown)
-        assertEquals(listOf("martin-janci/fleet-mobile"), vm.state.value.filterNames())
+        assertEquals(listOf("Project: martin-janci/fleet-mobile"), vm.state.value.filterNames())
 
         vm.setProjectFilter(null)
         runCurrent()
@@ -1059,16 +1060,78 @@ class SessionFilterStateTest {
         fleet.capabilities.value = HubCapabilities.of(ToolCatalog(setOf("work")))
         val vm = SessionsViewModel(fleet, backgroundScope)
 
-        vm.toggleWorkStatus(WorkStatusFilter.DONE)
         runCurrent()
-        assertEquals(1, vm.state.value.shown)
-        vm.toggleArchived()
-        runCurrent()
-        assertEquals(0, vm.state.value.shown, "the one done session is archived")
+        assertEquals(2, vm.state.value.shown, "archived sessions are hidden by default")
+        assertEquals(1, vm.state.value.archivedHidden)
+        assertTrue(vm.state.value.archivedRow)
 
         vm.toggleWorkStatus(WorkStatusFilter.DONE)
         runCurrent()
-        assertEquals(2, vm.state.value.shown, "only the archived session is left out")
+        assertEquals(0, vm.state.value.shown, "the one done session is archived")
+        assertEquals(1, vm.state.value.archivedHidden, "it passes every other filter")
+
+        vm.toggleArchived()
+        runCurrent()
+        assertEquals(1, vm.state.value.shown)
+        assertEquals(0, vm.state.value.archivedHidden)
+        assertTrue(vm.state.value.archivedRow, "shown, the row stays to hide them again")
+
+        vm.toggleWorkStatus(WorkStatusFilter.DONE)
+        runCurrent()
+        assertEquals(3, vm.state.value.shown)
+    }
+
+    /**
+     * Hidden by default must not mean a blocked agent nobody can see — but
+     * *Clear all* does not bring an archived session back, so the banner
+     * (which offers exactly that) does not count it; the archived row does.
+     */
+    @Test
+    fun an_archived_session_that_wants_a_person_is_said_on_the_archived_row_not_the_banner() = runTest {
+        val blocked = session(1, claudeStatus = "blocked").copy(work = WorkSummary(key = "ABC-1", archivedAt = 5))
+        val fleet = FakeFleet(listOf(blocked, session(2)))
+        fleet.capabilities.value = HubCapabilities.of(ToolCatalog(setOf("work")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+        runCurrent()
+
+        assertEquals(0, vm.state.value.hiddenAttention)
+        assertEquals(1, vm.state.value.archivedHidden)
+        assertEquals(1, vm.state.value.archivedAttention)
+
+        vm.setShowArchived(true)
+        runCurrent()
+        assertEquals(2, vm.state.value.shown)
+        assertEquals(0, vm.state.value.archivedAttention)
+    }
+
+    /** One chip's ✕ clears that filter and keeps the rest; the strip leaves out what has its own control. */
+    @Test
+    fun a_chip_clears_its_own_filter_and_the_strip_names_what_the_sheet_holds() = runTest {
+        val fleet = FakeFleet(listOf(session(1, host = "box", claudeStatus = "blocked"), session(2, host = "pine")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.toggleNeedsAttentionOnly()
+        vm.toggleStatus(StatusFilter.BLOCKED)
+        vm.setHostFilter("box")
+        vm.setQuery("x")
+        runCurrent()
+        assertEquals(
+            listOf(SessionFacetId.HOST, SessionFacetId.STATE),
+            vm.state.value.stripFacets.map { it.id },
+            "Needs you and the search show their state in their own controls",
+        )
+        assertEquals(4, vm.state.value.facets.size)
+
+        vm.clearFacet(SessionFacetId.STATE)
+        runCurrent()
+        assertTrue(vm.state.value.filters.statuses.isEmpty())
+        assertEquals("box", vm.state.value.filters.hostFilter)
+        assertTrue(vm.state.value.filters.needsAttentionOnly)
+
+        vm.clearFacet(SessionFacetId.SEARCH)
+        runCurrent()
+        assertEquals("", vm.state.value.filters.query)
+        assertFalse(vm.state.value.searchOpen)
     }
 
     @Test
@@ -1109,8 +1172,9 @@ class SessionFilterStateTest {
         val fleet = FakeFleet(listOf(archived, session(2)))
         fleet.capabilities.value = HubCapabilities.of(ToolCatalog(setOf("work")))
         val vm = SessionsViewModel(fleet, backgroundScope)
+        runCurrent()
+        assertEquals(1, vm.state.value.shown, "the archived session is hidden by default")
 
-        vm.toggleArchived()
         vm.toggleWorkStatus(WorkStatusFilter.TODO)
         runCurrent()
         assertEquals(0, vm.state.value.shown)
@@ -1398,6 +1462,32 @@ class WhatTheListRemembersTest {
      * put there itself — it opens on the whole fleet instead, which is the
      * safe direction to be wrong in.
      */
+    /**
+     * Before archived sessions were hidden by default every install stored
+     * `showArchived: true` (the old default, and the store encodes defaults),
+     * so that value says nothing about a choice: the rest carries over and
+     * the new default applies — the desktop's `sidebar.work-filters.v2`.
+     */
+    @Test
+    fun filters_stored_before_archived_was_hidden_carry_over_with_archived_hidden() = runTest {
+        val prefs = FakePrefs()
+        prefs.putStringList("sessions.filters", listOf("{\"window\":\"H8\",\"showBackground\":false,\"showArchived\":true}"))
+
+        val filters = SessionsViewModel(FakeFleet(), backgroundScope, prefs = prefs).state.value.filters
+        assertEquals(TimeWindow.H8, filters.window)
+        assertFalse(filters.showBackground)
+        assertFalse(filters.showArchived)
+    }
+
+    /** Once written under the new key, a person's *Show archived* is kept. */
+    @Test
+    fun show_archived_is_remembered_once_chosen() = runTest {
+        val prefs = FakePrefs()
+        SessionsViewModel(FakeFleet(), backgroundScope, prefs = prefs).setShowArchived(true)
+
+        assertTrue(SessionsViewModel(FakeFleet(), backgroundScope, prefs = prefs).state.value.filters.showArchived)
+    }
+
     @Test
     fun a_stored_value_this_build_cannot_read_opens_on_the_whole_fleet() = runTest {
         val prefs = FakePrefs()

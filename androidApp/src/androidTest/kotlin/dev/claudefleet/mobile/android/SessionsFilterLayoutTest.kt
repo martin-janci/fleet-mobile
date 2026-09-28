@@ -6,18 +6,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.model.SessionFacetId
 import dev.claudefleet.mobile.model.SessionFilters
+import dev.claudefleet.mobile.model.StatusFilter
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.ui.GroupMode
 import dev.claudefleet.mobile.ui.HostGroup
 import dev.claudefleet.mobile.ui.ProjectGroup
+import dev.claudefleet.mobile.ui.SessionsHandlers
 import dev.claudefleet.mobile.ui.SessionsScreen
 import dev.claudefleet.mobile.ui.SessionsUiState
 import dev.claudefleet.mobile.ui.theme.FleetTheme
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -28,12 +34,13 @@ import org.junit.runner.RunWith
  *
  * They used to sit in the `TopAppBar`'s `actions`, a `Row` that is measured
  * before the title and neither wraps nor scrolls: on a phone, a host filter
- * next to the "Needs attention" chip overflowed the bar, and whichever of the
+ * next to the "Needs you" chip overflowed the bar, and whichever of the
  * three lost the race was clipped away. Wrapping fixed that and then the row
  * spent the room it bought — a host token, *My work*, and one chip per
  * organisation — so the second failure this file guards is the header growing
  * back. The chip row is capped at three by construction now; the rest is in
- * the sheet *Filters* opens, and the summary line names it.
+ * the sheet *Filters (n)* opens, and the strip under it names each one with
+ * its own ✕ — claude-fleet's filter model (2026-09-28 sidebar cleanup).
  *
  * The width is pinned at 320dp so the assertion does not depend on which
  * device runs it.
@@ -75,7 +82,7 @@ class SessionsFilterLayoutTest {
         )
 
         compose.onNodeWithText("Sessions").assertIsDisplayed()
-        assertWhole("Needs attention", "Filters")
+        assertWhole("Needs you", "Filters")
     }
 
     /**
@@ -102,17 +109,17 @@ class SessionsFilterLayoutTest {
             ),
         )
 
-        assertWhole("Needs attention", "Filters · 2", "Group: work")
+        assertWhole("Needs you", "Filters (2)", "Group: work")
     }
 
     /**
-     * What is filtering the list is named under the chips, with the counts —
-     * the line that answers "where did my session go" now that the controls
-     * are behind a sheet. A long alias is ellipsized rather than allowed to
-     * push the *Clear* button off the edge.
+     * What is filtering the list is a strip of chips under the controls, with
+     * the counts first — what answers "where did my session go" now that the
+     * controls are behind a sheet. The chips scroll sideways, so a long alias
+     * cannot push *Clear all* off the edge.
      */
     @Test
-    fun the_summary_line_names_the_active_filters_and_fits() {
+    fun the_strip_names_the_active_filters_and_fits() {
         // With rows on screen, because "3 of 87" over an empty list is a state
         // the view model cannot produce. The first version of this test left
         // `groups` empty, so the empty state drew its own *Clear all filters*
@@ -141,7 +148,72 @@ class SessionsFilterLayoutTest {
         )
 
         compose.onNodeWithText("3 of 87", substring = true).assertIsDisplayed()
-        assertWhole("Clear")
+        assertWhole("Clear all")
+        // Needs you has its own chip on screen, so the strip names only the host.
+        compose.onNodeWithContentDescription("Host: mefistos-builder. Remove filter").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Needs you. Remove filter").assertDoesNotExist()
+    }
+
+    /** A chip's ✕ clears that one filter — the host through the handler the navigator is behind. */
+    @Test
+    fun a_chip_removes_only_its_own_filter() {
+        val cleared = mutableListOf<SessionFacetId>()
+        compose.setContent {
+            FleetTheme {
+                Box(Modifier.width(NARROW)) {
+                    SessionsScreen(
+                        state = SessionsUiState(
+                            status = ConnectionStatus.Connected(hubVersion = null),
+                            filters = SessionFilters(hostFilter = "box", statuses = setOf(StatusFilter.BLOCKED)),
+                            shown = 1,
+                            total = 4,
+                        ),
+                        handlers = SessionsHandlers(onClearFacet = { cleared += it }),
+                    )
+                }
+            }
+        }
+
+        compose.onNodeWithContentDescription("State: Blocked. Remove filter").performClick()
+        assertEquals(listOf(SessionFacetId.STATE), cleared)
+    }
+
+    /**
+     * Archived sessions are hidden by default; the list's last row says how
+     * many and brings them back, and it is a real 48 dp target.
+     */
+    @Test
+    fun the_archived_row_says_how_many_are_hidden_and_shows_them() {
+        val shown = mutableListOf<Boolean>()
+        compose.setContent {
+            FleetTheme {
+                Box(Modifier.width(NARROW)) {
+                    SessionsScreen(
+                        state = SessionsUiState(
+                            status = ConnectionStatus.Connected(hubVersion = null),
+                            groups = listOf(
+                                HostGroup(
+                                    alias = "box",
+                                    reachable = true,
+                                    projects = listOf(ProjectGroup(1, "acme/api", listOf(SessionRow(id = 1, tmuxName = "sess-1")))),
+                                ),
+                            ),
+                            shown = 1,
+                            total = 4,
+                            workAvailable = true,
+                            archivedHidden = 3,
+                        ),
+                        handlers = SessionsHandlers(onSetShowArchived = { shown += it }),
+                    )
+                }
+            }
+        }
+
+        compose.onNodeWithText("3 archived sessions hidden").assertIsDisplayed()
+        val button = compose.onNodeWithText("Show archived")
+        assertTrue(button.getBoundsInRoot().let { it.bottom - it.top } >= 40.dp)
+        button.performClick()
+        assertEquals(listOf(true), shown)
     }
 
     /** Pinned so the assertion does not depend on which device runs it. */

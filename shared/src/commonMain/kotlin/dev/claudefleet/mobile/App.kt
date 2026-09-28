@@ -79,6 +79,7 @@ import dev.claudefleet.mobile.ui.SessionWorkHandlers
 import dev.claudefleet.mobile.ui.SessionWorkViewModel
 import dev.claudefleet.mobile.ui.SessionFiltersHandlers
 import dev.claudefleet.mobile.ui.SessionFiltersSheet
+import dev.claudefleet.mobile.model.SessionFacetId
 import dev.claudefleet.mobile.ui.SessionsHandlers
 import dev.claudefleet.mobile.ui.SessionsScreen
 import dev.claudefleet.mobile.ui.SessionsViewModel
@@ -508,6 +509,11 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                                 sessions.clearFilters()
                                 nav.clearHostFilter()
                             },
+                            onClearFacet = { id ->
+                                sessions.clearFacet(id)
+                                if (id == SessionFacetId.HOST) nav.clearHostFilter()
+                            },
+                            onSetShowArchived = sessions::setShowArchived,
                             // `new_session` is not a readonly tool: a readonly
                             // pairing is not offered a form the hub would refuse.
                             onNewSession = if (credentials.canWrite) ({ nav.newSession() }) else null,
@@ -547,6 +553,10 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                                 onClearAll = {
                                     sessions.clearFilters()
                                     nav.clearHostFilter()
+                                },
+                                onClearFacet = { id ->
+                                    sessions.clearFacet(id)
+                                    if (id == SessionFacetId.HOST) nav.clearHostFilter()
                                 },
                             ),
                         )
@@ -633,6 +643,8 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                             onToggleMine = myWork::toggleMine,
                             onToggleReview = myWork::toggleReview,
                             onClearFilters = myWork::clearFilters,
+                            onClearFacet = myWork::clearFacet,
+                            onSetArchived = { myWork.setArchived(it) },
                             onApplyView = myWork::applyView,
                             onSaveView = { myWork.saveView(it) },
                             onUpdateView = { myWork.updateView(it) },

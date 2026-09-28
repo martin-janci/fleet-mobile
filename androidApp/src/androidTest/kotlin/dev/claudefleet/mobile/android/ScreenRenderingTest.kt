@@ -103,7 +103,7 @@ class SessionsScreenTest {
     fun the_attention_filter_shows_its_count() {
         show(state)
 
-        compose.onNodeWithText("Needs attention", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Needs you", substring = true).assertIsDisplayed()
         compose.onNodeWithText("7", substring = false).assertIsDisplayed()
     }
 

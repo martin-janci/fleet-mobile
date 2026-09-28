@@ -88,30 +88,77 @@ data class WorkTreeFilters(
     val query: String? = null,
     /** One group only — a section being expanded. Never saved in a view. */
     val group: String? = null,
+    /**
+     * Include archived tasks — done, or every session link archived, with no
+     * active session. Absent (or false) hides them and the page says how many
+     * ([WorkTreePage.archivedHidden]); an explicit `status: done` shows done
+     * tasks anyway. An older hub ignores it and hides nothing.
+     */
+    val archived: Boolean? = null,
 ) {
-    /** "Any" spelled as absent, a blank query dropped, a `false` toggle dropped. */
+    /**
+     * "Any" spelled as absent, a blank query dropped, a `false` toggle
+     * dropped — and a status or sessions value this build does not offer
+     * dropped too (the desktop's `normalizeFilters`): a stale remembered
+     * value, or one a newer desktop saved in a view, would otherwise narrow
+     * the tree with no chip selected in the sheet to show it or clear it.
+     */
     fun normalized(): WorkTreeFilters = WorkTreeFilters(
         org = org?.takeIf { it.raw.isNotBlank() },
         tracker = tracker?.takeIf { it.raw.isNotBlank() },
-        status = status?.takeIf { it.isNotBlank() && it != ANY },
+        status = status?.takeIf { it in STATUSES },
         mine = mine?.takeIf { it },
-        has = has?.takeIf { it.isNotBlank() && it != ANY },
+        has = has?.takeIf { it in HAS },
         review = review?.takeIf { it },
         query = query?.trim()?.takeIf { it.isNotEmpty() },
         group = group?.takeIf { it.isNotBlank() },
+        archived = archived?.takeIf { it },
     )
 
-    /** How many filters a person set — what the Filters button counts. The group and the search are not counted. */
+    /**
+     * How many filters a person set. The group (navigation), the search and
+     * *Show archived* (it widens the tree) are not counted.
+     */
     val count: Int get() = with(normalized()) {
         listOfNotNull(org, tracker, status, mine, has, review).size
     }
 
-    val isEmpty: Boolean get() = normalized().copy(group = null) == WorkTreeFilters()
+    /**
+     * What the *Filters (n)* button counts: the filters held in the sheet —
+     * organisation, tracker, status, sessions. *Assigned to me* and *To
+     * review* are toggles on screen and show their own state.
+     */
+    val sheetCount: Int get() = with(normalized()) {
+        listOfNotNull(org, tracker, status, has).size
+    }
+
+    /** Nothing narrows the tree (search included). Showing archived tasks is not a narrowing. */
+    val isEmpty: Boolean get() = normalized().copy(group = null, archived = null) == WorkTreeFilters()
 
     companion object {
         const val ANY = "any"
         val STATUSES = listOf("open", "todo", "in_progress", "done")
         val HAS = listOf("active", "past_only", "none", "suggested")
+
+        /** The desktop's `STATUS_FILTER_LABELS` (`work_view.ts`). */
+        fun statusLabel(status: String): String = when (status) {
+            ANY -> "Any"
+            "open" -> "Open"
+            "todo" -> "To do"
+            "in_progress" -> "In progress"
+            "done" -> "Done"
+            else -> status
+        }
+
+        /** The desktop's `HAS_FILTER_LABELS` (`work_view.ts`). */
+        fun hasLabel(has: String): String = when (has) {
+            ANY -> "Any"
+            "active" -> "Active session"
+            "past_only" -> "Past only"
+            "none" -> "No session"
+            "suggested" -> "Suggested"
+            else -> has
+        }
     }
 }
 
@@ -320,6 +367,12 @@ data class WorkTask(
     /** Active (primary first), suggested, ended newest first. */
     val sessions: List<WorkTaskLink> = emptyList(),
     @SerialName("sessions_more") val sessionsMore: Int = 0,
+    /**
+     * No active session, and done or every session link archived: the tree
+     * hides it unless the filters ask for archived tasks (or for done ones).
+     * An older hub does not send it.
+     */
+    val archived: Boolean = false,
 ) {
     /** The key, else the title, else the id. */
     val label: String get() = key?.takeIf { it.isNotBlank() } ?: title.ifBlank { taskId }
@@ -357,6 +410,11 @@ data class WorkTreePage(
     val orgs: List<TreeOrg> = emptyList(),
     val trackers: List<TreeTracker> = emptyList(),
     val total: Int = 0,
+    /**
+     * Tasks that passed every other filter but were hidden as archived, over
+     * the whole result (not the page). 0 from an older hub, which hides none.
+     */
+    @SerialName("archived_hidden") val archivedHidden: Int = 0,
     @SerialName("next_cursor") val nextCursor: String? = null,
     /** Hub seconds: when the page was read. What "as of" says when the phone is offline. */
     @SerialName("generated_at") val generatedAt: Long? = null,

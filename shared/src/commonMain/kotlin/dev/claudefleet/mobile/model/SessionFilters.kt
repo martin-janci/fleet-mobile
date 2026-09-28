@@ -141,10 +141,14 @@ data class SessionFilters(
     val workStatusNames: Set<String> = emptySet(),
     /**
      * Sessions archived from the desktop's Tidy-up (work graph M7) are listed.
-     * The desktop's `hide archived` chip, the other way up to match
-     * [showBackground]: on means the rows are there.
+     *
+     * **Off by default**, as on the desktop: the list stays about what is
+     * running, and its last row says how many are hidden and shows them all
+     * in one tap. So being off is not a filter anyone set — it is not counted
+     * ([activeCount]) and has no chip — and being on widens the list, so it
+     * is not counted either. *Clear all* turns it back off.
      */
-    val showArchived: Boolean = true,
+    val showArchived: Boolean = false,
 ) {
     /**
      * How many filters are on — what the *Filters* chip counts.
@@ -164,7 +168,6 @@ data class SessionFilters(
             orgFilter != null,
             projectFilter != null,
             workStatuses.isNotEmpty() || workStatusNames.isNotEmpty(),
-            !showArchived,
         ).count { it }
 
     /**
@@ -177,7 +180,7 @@ data class SessionFilters(
      * filter it was counting was already visible and already switched on. The
      * same goes for [query], which the search field shows whenever it is set.
      *
-     * The summary line still names all of them ([summary]): that line is about
+     * The empty state still names all of them ([sessionFacets]): that is about
      * what is hiding rows, not about where the control lives.
      */
     val sheetCount: Int
@@ -190,33 +193,6 @@ data class SessionFilters(
      * clears itself. A caller wanting all of them gone clears both.
      */
     fun cleared(): SessionFilters = SessionFilters(hostFilter = hostFilter)
-
-    /**
-     * The filters that are on, in words, for the summary line under the chips
-     * — the one place that says *what* is hiding rows. Ordered loosely by how
-     * surprising each is to have left on.
-     */
-    fun summary(
-        projectName: (Long) -> String = ::unnamedProject,
-        // Last, so the trailing-lambda form existing callers use keeps naming the org.
-        orgName: (Long) -> String = { "org #$it" },
-    ): List<String> = buildList {
-        hostFilter?.let { add("Host $it") }
-        projectFilter?.let { add(projectName(it)) }
-        if (needsAttentionOnly) add("Needs you")
-        if (window != TimeWindow.ANY) add("${direction.label} ${window.label}")
-        if (statuses.isNotEmpty()) add(statuses.sortedBy { it.ordinal }.joinToString("/") { it.label })
-        if (myWorkOnly) add("My work")
-        orgFilter?.let { add(orgName(it)) }
-        if (workStatuses.isNotEmpty() || workStatusNames.isNotEmpty()) {
-            val parts = workStatuses.sortedBy { it.ordinal }.map { it.label.lowercase() } +
-                workStatusNames.sortedBy { it.lowercase() }
-            add("Ticket " + parts.joinToString("/"))
-        }
-        if (!showArchived) add("No archived")
-        if (!showBackground) add("No background")
-        if (query.isNotBlank()) add("\"${query.trim()}\"")
-    }
 }
 
 /**

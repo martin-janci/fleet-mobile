@@ -272,10 +272,26 @@ class SessionFiltersTest {
             orgFilter = 3,
             projectFilter = 4,
             workStatuses = setOf(WorkStatusFilter.TODO, WorkStatusFilter.DONE),
-            showArchived = false,
         )
-        assertEquals(11, all.activeCount)
+        assertEquals(10, all.activeCount)
         assertTrue(all.any)
+    }
+
+    /**
+     * Archived sessions are hidden by default, as on the desktop — so hiding
+     * them is not a filter anyone set, and showing them widens the list:
+     * neither counts, and neither is a chip.
+     */
+    @Test
+    fun the_archived_switch_is_never_counted_nor_named() {
+        assertFalse(SessionFilters().showArchived)
+        for (show in listOf(false, true)) {
+            val f = SessionFilters(showArchived = show)
+            assertEquals(0, f.activeCount)
+            assertEquals(0, f.sheetCount)
+            assertEquals(emptyList(), sessionFacets(f))
+        }
+        assertFalse(SessionFilters(showArchived = true).cleared().showArchived, "Clear all hides them again")
     }
 
     /**
@@ -300,7 +316,7 @@ class SessionFiltersTest {
     fun the_summary_still_names_the_filters_the_chip_does_not_count() {
         val f = SessionFilters(needsAttentionOnly = true, query = "hub")
         assertEquals(0, f.sheetCount)
-        assertEquals(listOf("Needs you", "\"hub\""), f.summary())
+        assertEquals(listOf("Needs you", "Search: “hub”"), sessionFacets(f).map { it.label })
     }
 
     /**
@@ -331,7 +347,7 @@ class SessionFiltersTest {
 
     @Test
     fun the_summary_names_what_is_on_and_says_nothing_when_nothing_is() {
-        assertEquals(emptyList(), SessionFilters().summary())
+        assertEquals(emptyList(), sessionFacets(SessionFilters()))
         val named = SessionFilters(
             hostFilter = "box",
             needsAttentionOnly = true,
@@ -341,10 +357,19 @@ class SessionFiltersTest {
             orgFilter = 3,
             showBackground = false,
             query = " hub ",
-        ).summary { "Acme" }
+        ).let { f -> sessionFacets(f, orgName = { "Acme" }).map { it.label } }
 
+        // The desktop's words and order (claude-fleet `filter_facets.ts`).
         assertEquals(
-            listOf("Host box", "Needs you", "Idle beyond 24 hours", "Blocked/Failed", "Acme", "No background", "\"hub\""),
+            listOf(
+                "Needs you",
+                "Org: Acme",
+                "Host: box",
+                "Idle beyond 24 hours",
+                "Search: “hub”",
+                "State: Blocked/Failed",
+                "Background agents hidden",
+            ),
             named,
         )
     }
@@ -353,7 +378,7 @@ class SessionFiltersTest {
     @Test
     fun the_summary_names_statuses_in_the_sheets_order() {
         val f = SessionFilters(statuses = setOf(StatusFilter.STOPPED, StatusFilter.WORKING, StatusFilter.STUCK))
-        assertEquals(listOf("Working/Stuck/Stopped"), f.summary())
+        assertEquals(listOf("State: Working/Stuck/Stopped"), sessionFacets(f).map { it.label })
     }
 
     // ---- the desktop's work filters and the project --------------------------
@@ -415,7 +440,8 @@ class SessionFiltersTest {
         assertTrue(todo.kept(either))
         assertFalse(dev.kept(either))
         assertEquals(1, either.activeCount)
-        assertEquals(listOf("Ticket to do/QA Review"), either.summary())
+        assertEquals(listOf("Status: To do/QA Review"), sessionFacets(either).map { it.label })
+        assertEquals(listOf("Column: qa review"), sessionFacets(f).map { it.label }, "a column alone reads as a column")
     }
 
     @Test
@@ -446,14 +472,14 @@ class SessionFiltersTest {
     }
 
     @Test
-    fun archived_sessions_are_listed_until_they_are_switched_off() {
+    fun archived_sessions_are_hidden_until_they_are_switched_on() {
         val archived = row(work = WorkSummary(key = "ABC-5", archivedAt = NOW - 60))
         val live = row(work = WorkSummary(key = "ABC-6"))
-        assertTrue(archived.kept(SessionFilters()))
-        val f = SessionFilters(showArchived = false)
-        assertFalse(archived.kept(f))
+        val f = SessionFilters()
+        assertFalse(archived.kept(f), "hidden by default")
         assertTrue(live.kept(f))
         assertTrue(row(work = null).kept(f), "a session with no work was never archived")
+        assertTrue(archived.kept(SessionFilters(showArchived = true)))
     }
 
     @Test
@@ -461,13 +487,12 @@ class SessionFiltersTest {
         val f = SessionFilters(
             projectFilter = 4,
             workStatuses = setOf(WorkStatusFilter.DONE, WorkStatusFilter.TODO),
-            showArchived = false,
         )
         assertEquals(
-            listOf("acme/api", "Ticket to do/done", "No archived"),
-            f.summary(projectName = { "acme/api" }),
+            listOf("Project: acme/api", "Status: To do/Done"),
+            sessionFacets(f, projectName = { "acme/api" }).map { it.label },
         )
-        // Without a name to hand, the project reads the way its group heading would.
-        assertEquals("project #4", f.summary().first())
+        // Without a name to hand, the project reads as its id.
+        assertEquals("Project: #4", sessionFacets(f).first().label)
     }
 }

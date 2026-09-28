@@ -5,10 +5,15 @@ package dev.claudefleet.mobile.ui
  * dumped by `WORK_VIEW_FIXTURE_DIR=<dir> cargo test -p fleet-core --lib dump_wire_samples`
  * in claude-fleet. Hand-written fixtures prove the screens; these prove the models
  * read what the hub really sends. Regenerate them when the hub's shapes change.
+ *
+ * `TREE`'s `archived_hidden` and each task's `archived` (claude-fleet's
+ * archived-by-default tree, `service/work/view.rs`, 2026-09-28) were added by
+ * hand in the hub's key order, ahead of the next regeneration.
  */
 internal object WorkTreeWireSamples {
     val TREE = """
 {
+  "archived_hidden": 1,
   "generated_at": 1790518155,
   "groups": [
     {
@@ -48,6 +53,7 @@ internal object WorkTreeWireSamples {
   ],
   "tasks": [
     {
+      "archived": false,
       "counts": {
         "active": 1,
         "ended": 0,
@@ -108,6 +114,7 @@ internal object WorkTreeWireSamples {
       "unavailable": false
     },
     {
+      "archived": false,
       "counts": {
         "active": 1,
         "ended": 0,
@@ -168,6 +175,7 @@ internal object WorkTreeWireSamples {
       "unavailable": false
     },
     {
+      "archived": false,
       "counts": {
         "active": 0,
         "ended": 0,

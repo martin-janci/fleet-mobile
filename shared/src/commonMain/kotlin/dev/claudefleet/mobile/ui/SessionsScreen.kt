@@ -60,6 +60,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.model.SessionFacetId
+import dev.claudefleet.mobile.model.facetSentence
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.orgOf
@@ -104,6 +106,13 @@ data class SessionsHandlers(
      */
     val onClearAll: () -> Unit = {},
     /**
+     * One chip's ✕ in the strip. The host chip goes through the navigator as
+     * well, for the reason [onClearAll] does.
+     */
+    val onClearFacet: (SessionFacetId) -> Unit = {},
+    /** The archived row at the end of the list: *Show archived* / *Hide archived*. */
+    val onSetShowArchived: (Boolean) -> Unit = {},
+    /**
      * Open the New session form. Null hides the button — a `readonly` pairing,
      * which the hub would refuse `new_session` anyway.
      */
@@ -125,16 +134,19 @@ data class SessionsHandlers(
  * project, with the triage toggles a thumb reaches for and a sheet holding the
  * rest.
  *
- * Three things ride in the header and nothing else does: **Needs attention**,
- * because it is the question this screen exists to answer; **Filters**, which
- * carries its own count and opens [SessionFiltersSheet]; and **By work**,
+ * Three things ride in the header and nothing else does: **Needs you**,
+ * because it is the question this screen exists to answer; **Filters (n)**,
+ * which carries its own count and opens [SessionFiltersSheet]; and **Group**,
  * which is last and apart because it is not a filter at all — it regroups the
  * list without removing a row from it, and drawing it as a fourth identical
  * chip is what made it read as a filter that does nothing.
  *
- * Under them, whenever anything is on, one line saying how many rows are
- * hidden and by what. That line is the screen's answer to "where did my
- * session go", and it is why the other filters can safely live out of sight.
+ * Under them, whenever the sheet holds anything that is on, a strip: how many
+ * rows are shown of how many, then one removable chip per filter in the
+ * desktop's words ([SessionsUiState.stripFacets]), then *Clear all*. That
+ * strip is the screen's answer to "where did my session go", and it is why
+ * the other filters can safely live out of sight. Archived sessions are
+ * hidden by default, and the list's last row says how many and shows them.
  *
  * Stateless by design — it draws a [SessionsUiState] and reports taps. The view
  * model is what is tested; this is what only a device can show.
@@ -163,13 +175,21 @@ fun SessionsScreen(
             FilterRow(
                 needsAttentionOnly = state.needsAttentionOnly,
                 attentionCount = state.attentionCount,
-                activeFilters = state.filters.sheetCount,
+                activeFilters = state.stripFacets.size,
                 onToggleNeedsAttention = handlers.onToggleNeedsAttention,
                 onOpenFilters = handlers.onOpenFilters,
                 groupMode = state.groupMode,
                 onCycleGroupMode = handlers.onCycleGroupMode,
             )
-            FilterSummary(state = state, onOpenFilters = handlers.onOpenFilters, onClearAll = handlers.onClearAll)
+            // One removable chip per filter the sheet holds, and *Clear all*;
+            // "3 of 87" first, so how much they hide is said where they are.
+            FilterStrip(
+                facets = state.stripFacets,
+                onClear = handlers.onClearFacet,
+                onClearAll = handlers.onClearAll,
+                lead = if (state.shown != state.total) "${state.shown} of ${state.total}" else null,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
         }
         HiddenAttentionBanner(count = state.hiddenAttention, onClearAll = handlers.onClearAll)
         ConnectionBanner(state.status)
@@ -199,6 +219,7 @@ fun SessionsScreen(
                         EmptyFleet(
                             state = state,
                             onClearAll = handlers.onClearAll,
+                            onSetShowArchived = handlers.onSetShowArchived,
                             modifier = Modifier.fillParentMaxSize(),
                         )
                     }
@@ -246,6 +267,19 @@ fun SessionsScreen(
                                 onClick = { handlers.onOpenSession(row.id) },
                             )
                         }
+                    }
+                }
+                // Archived sessions are hidden by default; the list's last
+                // row says how many, and brings them all back in one tap.
+                if (state.archivedRow && !state.isEmpty) {
+                    item(key = "archived") {
+                        ArchivedRow(
+                            hidden = state.archivedHidden,
+                            showing = state.filters.showArchived,
+                            noun = "sessions",
+                            attention = state.archivedAttention,
+                            onSetShown = handlers.onSetShowArchived,
+                        )
                     }
                 }
             }
@@ -365,7 +399,7 @@ private fun SearchField(query: String, onSetQuery: (String) -> Unit) {
  *
  * They used to ride in the `TopAppBar`'s `actions`, which is a plain `Row`
  * that neither wraps nor scrolls and is measured before the title: on a phone,
- * the moment a host filter joined the "Needs attention" chip the two
+ * the moment a host filter joined the "Needs you" chip the two
  * overflowed the bar and pushed the title clean off the screen. Here they own
  * the full width and *wrap* — a `FlowRow`, not a `Row`, because on a 320dp
  * screen two chips genuinely do not fit side by side and the second belongs on
@@ -375,8 +409,8 @@ private fun SearchField(query: String, onSetQuery: (String) -> Unit) {
  * and one chip per organisation all landed here, and at six chips the header
  * was four lines deep over the list it was filtering. So this row is now
  * capped at three by construction rather than by luck — everything that
- * narrows the list beyond *Needs attention* is behind [onOpenFilters], which
- * carries the count, and everything that is on is named on the line below.
+ * narrows the list beyond *Needs you* is behind [onOpenFilters], which
+ * carries the count, and everything that is on is a chip in the strip below.
  *
  * [byWork] sits last and is not a filter: it regroups the list without
  * removing a row, which is why it is outside the count. It keeps a chip of its
@@ -404,7 +438,7 @@ private fun FilterRow(
         FilterChip(
             selected = needsAttentionOnly,
             onClick = onToggleNeedsAttention,
-            label = { Text("Needs attention") },
+            label = { Text("Needs you") },
             leadingIcon = {
                 Icon(
                     FleetIcons.Warning,
@@ -414,18 +448,7 @@ private fun FilterRow(
             },
             trailingIcon = if (attentionCount > 0) ({ Badge { Text("$attentionCount") } }) else null,
         )
-        FilterChip(
-            selected = activeFilters > 0,
-            onClick = onOpenFilters,
-            label = { Text(if (activeFilters > 0) "Filters · $activeFilters" else "Filters") },
-            leadingIcon = {
-                Icon(
-                    FleetIcons.Filters,
-                    contentDescription = null,
-                    modifier = Modifier.size(FilterChipDefaults.IconSize),
-                )
-            },
-        )
+        FiltersButton(count = activeFilters, onClick = onOpenFilters)
         // The label names the view you are *in*, not the one a tap would give
         // — the desktop's `group-by-toggle`. A cycling control whose label
         // promises the next state leaves you unable to read the current one.
@@ -434,45 +457,6 @@ private fun FilterRow(
             onClick = onCycleGroupMode,
             label = { Text("Group: ${groupMode.label}") },
         )
-    }
-}
-
-/**
- * One line saying how many sessions are hidden and by what, drawn only while
- * something is on.
- *
- * The cheapest thing on this screen and the one that makes the rest safe. With
- * the filters behind a sheet a person can leave one on, close the app, come
- * back tomorrow and read a three-session list as a quiet fleet — so the list
- * says "3 of 87" in its own chrome, names what is doing it, and offers the way
- * out. Tapping the line reopens the sheet; the ✕ clears everything.
- *
- * The counts come from the view model rather than from `groups.sumOf` here,
- * because a session hidden by a filter and a session on a host that is simply
- * absent look identical once the tree is built.
- */
-@Composable
-private fun FilterSummary(state: SessionsUiState, onOpenFilters: () -> Unit, onClearAll: () -> Unit) {
-    if (!state.filters.any) return
-    val names = state.filterNames()
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onOpenFilters)
-            .padding(start = 16.dp, end = 4.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "${state.shown} of ${state.total} · ${names.joinToString(", ")}",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        TextButton(onClick = onClearAll, contentPadding = PaddingValues(horizontal = 8.dp)) {
-            Text("Clear", style = MaterialTheme.typography.labelMedium)
-        }
     }
 }
 
@@ -713,40 +697,58 @@ private fun SessionRowItem(
  * start a session rather than what to clear.
  */
 @Composable
-private fun EmptyFleet(state: SessionsUiState, onClearAll: () -> Unit, modifier: Modifier = Modifier.fillMaxSize()) {
-    val names = state.filterNames()
+private fun EmptyFleet(
+    state: SessionsUiState,
+    onClearAll: () -> Unit,
+    onSetShowArchived: (Boolean) -> Unit,
+    modifier: Modifier = Modifier.fillMaxSize(),
+) {
+    val facets = state.facets
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(32.dp),
         ) {
-            if (names.isEmpty()) {
-                Text(
+            when {
+                facets.isNotEmpty() -> {
+                    Text(
+                        text = emptySessionsSentence(facets.let(::facetSentence)),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(onClick = onClearAll) { Text("Clear filters") }
+                }
+                // Nothing narrows, and every session there is is archived:
+                // the row under this says how many and shows them.
+                state.archivedHidden > 0 -> Text(
+                    text = "No sessions to show.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                else -> Text(
                     text = "No sessions. Start one from the desktop app or the terminal.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } else {
-                Text(
-                    text = if (state.total == 1) {
-                        "The one session in the fleet does not match your filters"
-                    } else {
-                        "None of the ${state.total} sessions match your filters"
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            }
+            // Under an empty list the archived row belongs here, in view,
+            // rather than below a message that fills the screen.
+            if (state.archivedRow) {
+                ArchivedRow(
+                    hidden = state.archivedHidden,
+                    showing = state.filters.showArchived,
+                    noun = "sessions",
+                    attention = state.archivedAttention,
+                    onSetShown = onSetShowArchived,
                 )
-                Text(
-                    text = names.joinToString(", "),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                TextButton(onClick = onClearAll) { Text("Clear all filters") }
             }
         }
     }
 }
+
+/** The empty state's sentence, the desktop's words: "No sessions match Host: x, Last 1d." */
+internal fun emptySessionsSentence(facets: String): String = "No sessions match $facets."
 
 /** A work heading, in words: the key, its title and status, and who is waiting. */
 internal fun workHeaderDescription(work: WorkSummary, attention: Int, orgLabel: String? = null): String = buildList {
