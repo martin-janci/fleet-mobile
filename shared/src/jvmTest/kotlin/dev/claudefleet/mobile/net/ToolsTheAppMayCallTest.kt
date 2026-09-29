@@ -88,6 +88,17 @@ class ToolsTheAppMayCallTest {
         // and a `readonly` one is never shown it — which is also the token
         // that draws no chip row at all.
         "quick_replies",
+        // The fleet's settings (claude-fleet declarative pages P6):
+        // `Access::Person` / `PersonDevice` in `guard.rs` — a person's own
+        // paired device, bound to no org. The reads are readonly tools;
+        // `set_setting` and the decision are writes the hub takes only from a
+        // `full` device its operator trusts, which `setting_proposals`
+        // answers as `can_write` and `FleetSettingsViewModel` checks.
+        "list_pages",
+        "get_settings",
+        "set_setting",
+        "setting_proposals",
+        "decide_setting_proposals",
     )
 
     @Test

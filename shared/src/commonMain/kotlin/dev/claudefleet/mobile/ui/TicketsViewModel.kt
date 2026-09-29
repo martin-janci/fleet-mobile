@@ -2,19 +2,33 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.WorkActions
+import dev.claudefleet.mobile.model.Facet
 import dev.claudefleet.mobile.model.OrgDirectory
+import dev.claudefleet.mobile.model.OrgInfo
 import dev.claudefleet.mobile.model.ResumeCandidate
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.TicketCard
+import dev.claudefleet.mobile.model.TicketFacetId
+import dev.claudefleet.mobile.model.TicketFilters
+import dev.claudefleet.mobile.model.TicketList
+import dev.claudefleet.mobile.model.TicketSessionFilter
+import dev.claudefleet.mobile.model.TicketSort
 import dev.claudefleet.mobile.model.TrackerRow
+import dev.claudefleet.mobile.model.WorkStatusFilter
+import dev.claudefleet.mobile.model.sortTickets
+import dev.claudefleet.mobile.model.ticketFacets
+import dev.claudefleet.mobile.model.ticketMatchesQuery
+import dev.claudefleet.mobile.model.ticketStatusNames
+import dev.claudefleet.mobile.model.without
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK_LINK
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.existingSessionId
 import dev.claudefleet.mobile.net.isUnknownAction
+import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -27,9 +41,15 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 
-/** One section of the Tickets sheet: a hub view and what it answered. */
-data class TicketSection(val view: String, val title: String, val tickets: List<Ticket>)
+/**
+ * One section of the Tickets sheet: a hub view and what it answered. In
+ * [TicketsUiState.sections], [tickets] is what the filters let through, in
+ * the chosen sort, and [total] is how many the hub listed — so a section can
+ * say "Nothing here" apart from "3 hidden by filters".
+ */
+data class TicketSection(val view: String, val title: String, val tickets: List<Ticket>, val total: Int = tickets.size)
 
 /** What a person can do with the ticket they tapped. */
 data class TicketDetail(
@@ -92,7 +112,28 @@ data class TicketsUiState(
      * or more orgs; empty otherwise, which draws no org labels at all.
      */
     val ticketOrgs: Map<Long, String> = emptyMap(),
-)
+    /** What narrows the lists; remembered on the device, like the Sessions list's. */
+    val filters: TicketFilters = TicketFilters(),
+    /** How each section is ordered — a view, outside the filters and their count. */
+    val sort: TicketSort = TicketSort.TRACKER,
+    /** The sheet shows its filter page instead of the lists. */
+    val filtersOpen: Boolean = false,
+    /** Every filter that is on, the search text included: what the empty state names. */
+    val facets: List<Facet<TicketFacetId>> = emptyList(),
+    /** Distinct tickets the lists show, and how many they hold unfiltered: "5 of 23". */
+    val shown: Int = 0,
+    val total: Int = 0,
+    /** The filter page's chips: the tracker columns, orgs and trackers the lists hold. */
+    val statusNameChoices: List<String> = emptyList(),
+    val orgChoices: List<OrgInfo> = emptyList(),
+    val trackerChoices: List<TrackerRow> = emptyList(),
+) {
+    /** The strip's chips: every facet but the one the search field already shows. */
+    val stripFacets: List<Facet<TicketFacetId>> get() = facets.filterNot { it.id.onScreen }
+
+    /** The lists hold tickets and the filters hide every one — the sheet says so, and why. */
+    val allFiltered: Boolean get() = total > 0 && shown == 0 && facets.isNotEmpty()
+}
 
 /**
  * The Tickets sheet over the Sessions tab: *My work*, *Current sprint* and
@@ -117,8 +158,13 @@ class TicketsViewModel(
     private val onOpenSession: (Long) -> Unit,
     /** Open the New session form in ticket mode for this key. */
     private val onStartHere: (String) -> Unit,
+    /** Where the filters and the sort are remembered; null remembers nothing. */
+    private val prefs: Prefs? = null,
 ) {
     private data class Local(
+        val filters: TicketFilters = TicketFilters(),
+        val sort: TicketSort = TicketSort.TRACKER,
+        val filtersOpen: Boolean = false,
         val open: Boolean = false,
         val sections: List<TicketSection> = emptyList(),
         val loading: Boolean = false,
@@ -134,7 +180,7 @@ class TicketsViewModel(
         val error: Friendly? = null,
     )
 
-    private val local = MutableStateFlow(Local())
+    private val local = MutableStateFlow(Local(filters = storedFilters(), sort = storedSort()))
 
     val state: StateFlow<TicketsUiState> =
         combine(
@@ -179,7 +225,97 @@ class TicketsViewModel(
     }
 
     fun close() {
-        local.update { Local(sections = it.sections) }
+        local.update { Local(filters = it.filters, sort = it.sort, sections = it.sections) }
+    }
+
+    // ── Filters ──
+
+    fun openFilters() {
+        local.update { it.copy(filtersOpen = true) }
+    }
+
+    fun closeFilters() {
+        local.update { it.copy(filtersOpen = false) }
+    }
+
+    /**
+     * A list's chip. From *All*, the tap picks that list alone — the chip
+     * reads unselected under *All*, so a tap must select it, not hide it.
+     * After that it adds or removes the list; none left, or all three, is *All*.
+     */
+    fun toggleList(list: TicketList) = setFilters { f ->
+        val next = when {
+            f.lists.isEmpty() -> setOf(list)
+            list in f.lists -> f.lists - list
+            else -> f.lists + list
+        }
+        f.copy(lists = if (next.size == TicketList.entries.size) emptySet() else next)
+    }
+
+    fun toggleStatus(status: WorkStatusFilter) = setFilters { f ->
+        f.copy(statuses = if (status in f.statuses) f.statuses - status else f.statuses + status)
+    }
+
+    /** A tracker column, matched case-insensitively, so "code review" and "Code Review" are one chip. */
+    fun toggleStatusName(name: String) = setFilters { f ->
+        val present = f.statusNames.firstOrNull { it.equals(name, ignoreCase = true) }
+        f.copy(statusNames = if (present != null) f.statusNames - present else f.statusNames + name)
+    }
+
+    fun setOrg(id: Long?) = setFilters { it.copy(org = id) }
+
+    fun setTracker(id: Long?) = setFilters { it.copy(tracker = id) }
+
+    fun setSession(filter: TicketSessionFilter?) = setFilters { it.copy(session = filter) }
+
+    /** One chip's ×: that filter back at its default. The search chip clears the field. */
+    fun clearFacet(id: TicketFacetId) {
+        if (id == TicketFacetId.SEARCH) local.update { it.copy(query = "", found = null) } else setFilters { it.without(id) }
+    }
+
+    /** Every filter off and the search field empty: every listed ticket back. */
+    fun clearAll() {
+        local.update { it.copy(query = "", found = null) }
+        setFilters { TicketFilters() }
+    }
+
+    /** Tracker → Status → Updated → Tracker. Remembered, like the filters. */
+    fun cycleSort() {
+        var next = TicketSort.TRACKER
+        local.update {
+            next = it.sort.next
+            it.copy(sort = next)
+        }
+        prefs?.putStringList(SORT_KEY, listOf(next.name))
+    }
+
+    /**
+     * Change the filters and remember them. One `update {}`, with what it
+     * committed read after, so two quick taps cannot both start from the
+     * same value and lose one.
+     */
+    private fun setFilters(change: (TicketFilters) -> TicketFilters) {
+        var stored = TicketFilters()
+        local.update {
+            stored = change(it.filters)
+            it.copy(filters = stored)
+        }
+        prefs?.putStringList(FILTERS_KEY, listOf(json.encodeToString(TicketFilters.serializer(), stored)))
+    }
+
+    /** What was remembered; anything unreadable — an older or newer shape — is no filter at all. */
+    private fun storedFilters(): TicketFilters {
+        val stored = prefs?.getStringList(FILTERS_KEY)?.firstOrNull() ?: return TicketFilters()
+        return try {
+            json.decodeFromString(TicketFilters.serializer(), stored)
+        } catch (_: Exception) {
+            TicketFilters()
+        }
+    }
+
+    private fun storedSort(): TicketSort {
+        val stored = prefs?.getStringList(SORT_KEY)?.firstOrNull() ?: return TicketSort.TRACKER
+        return TicketSort.entries.firstOrNull { it.name == stored } ?: TicketSort.TRACKER
     }
 
     fun onQuery(text: String) {
@@ -371,10 +507,37 @@ class TicketsViewModel(
         } else {
             shown.mapNotNull { t -> orgs.orgOf(t)?.let { t.id to orgs.name(it) } }.toMap()
         }
+
+        // The filters, over the listings as the cache now has them. The same
+        // liveness rule as the detail's: a session the fleet still has.
+        val alive = sessions.mapTo(HashSet()) { it.id }
+        val liveItems = sessions.mapNotNullTo(HashSet()) { it.work?.itemId }
+        val live = { t: Ticket -> t.id in liveItems || t.liveSessionIds.any { it in alive } }
+        val f = l.filters
+        val listed = l.sections.map { s -> s.copy(tickets = s.tickets.map { it.current() }) }
+        val all = listed.flatMap { it.tickets }
+        val sections = listed
+            .filter { s -> f.lists.isEmpty() || TicketList.of(s.view)?.let { it in f.lists } != false }
+            .map { s ->
+                val kept = s.tickets.filter { t -> f.matches(t, orgs::orgOf, live) && ticketMatchesQuery(t, l.query) }
+                s.copy(tickets = sortTickets(kept, l.sort), total = s.tickets.size)
+            }
+
+        val orgIds = all.mapNotNullTo(LinkedHashSet()) { orgs.orgOf(it) }
+        val orgChoices = if (orgs.orgs.size < 2 && f.org == null) {
+            emptyList()
+        } else {
+            (orgIds + listOfNotNull(f.org)).map { id -> orgs.orgs[id] ?: OrgInfo(id, orgs.name(id)) }
+                .sortedBy { it.name.lowercase() }
+        }
+        val trackerIds = all.mapNotNullTo(LinkedHashSet()) { it.trackerId } + listOfNotNull(f.tracker)
+        val trackerChoices = trackerIds
+            .map { id -> trackers.firstOrNull { it.id == id } ?: TrackerRow(id = id, name = "Tracker #$id") }
+            .sortedBy { trackerName(it).lowercase() }
         return TicketsUiState(
             available = caps.has(WORK, TICKETS),
             open = l.open,
-            sections = l.sections.map { s -> s.copy(tickets = s.tickets.map { it.current() }) },
+            sections = sections,
             loading = l.loading,
             query = l.query,
             found = l.found?.current(),
@@ -383,6 +546,20 @@ class TicketsViewModel(
             error = l.error,
             confirmResume = l.confirmResume?.takeIf { selected?.canResume == true && selected.ticket.key == it.key },
             ticketOrgs = ticketOrgs,
+            filters = f,
+            sort = l.sort,
+            filtersOpen = l.filtersOpen,
+            facets = ticketFacets(
+                f,
+                l.query,
+                orgName = { id -> orgs.name(id) },
+                trackerName = { id -> trackerChoices.firstOrNull { it.id == id }?.let(::trackerName) },
+            ),
+            shown = sections.flatMap { it.tickets }.distinctBy { it.id }.size,
+            total = all.distinctBy { it.id }.size,
+            statusNameChoices = ticketStatusNames(all),
+            orgChoices = orgChoices,
+            trackerChoices = if (trackerChoices.size > 1 || f.tracker != null) trackerChoices else emptyList(),
         )
     }
 
@@ -393,6 +570,12 @@ class TicketsViewModel(
         const val RESUME_PLAN = "resume_plan"
         const val START = "start"
         const val RESUME = "resume"
-        val VIEWS = listOf("mine" to "My work", "sprint" to "Current sprint", "recent" to "Recent")
+        val VIEWS = TicketList.entries.map { it.wire to it.label }
+        const val FILTERS_KEY = "tickets.filters.v1"
+        const val SORT_KEY = "tickets.sort"
+        val json = Json { ignoreUnknownKeys = true }
     }
 }
+
+/** What a tracker chip reads: its name, else its provider. */
+internal fun trackerName(t: TrackerRow): String = t.name.ifBlank { t.provider.ifBlank { "Tracker #${t.id}" } }

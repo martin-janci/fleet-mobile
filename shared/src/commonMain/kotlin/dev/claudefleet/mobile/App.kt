@@ -36,6 +36,8 @@ import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.data.FleetRepository
 import dev.claudefleet.mobile.data.HubAgentActions
 import dev.claudefleet.mobile.data.HubNewSessionActions
+import dev.claudefleet.mobile.data.FleetSettingsActions
+import dev.claudefleet.mobile.data.HubFleetSettingsActions
 import dev.claudefleet.mobile.data.HubQuickReplyActions
 import dev.claudefleet.mobile.data.HubSessionActions
 import dev.claudefleet.mobile.data.HubWorkActions
@@ -85,6 +87,8 @@ import dev.claudefleet.mobile.model.SessionFacetId
 import dev.claudefleet.mobile.ui.SessionsHandlers
 import dev.claudefleet.mobile.ui.SessionsScreen
 import dev.claudefleet.mobile.ui.SessionsViewModel
+import dev.claudefleet.mobile.ui.FleetSettingsSection
+import dev.claudefleet.mobile.ui.FleetSettingsViewModel
 import dev.claudefleet.mobile.ui.SettingsScreen
 import dev.claudefleet.mobile.ui.SettingsViewModel
 import dev.claudefleet.mobile.ui.Tab
@@ -183,6 +187,9 @@ class AppContainer(
      * of it and the draft history, which is this phone's alone.
      */
     val quickReplies: QuickReplies = QuickReplies(prefs, HubQuickReplyActions(session))
+
+    /** The fleet's settings pages' calls (claude-fleet declarative pages P6). */
+    val fleetSettingsActions: FleetSettingsActions = HubFleetSettingsActions(session)
 
     /**
      * The live fleet picture for one credential.
@@ -387,6 +394,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
             canWrite = credentials.canWrite,
             onOpenSession = { nav.open(it) },
             onStartHere = { nav.newSession(ticketKey = it) },
+            prefs = container.prefs,
         )
     }
     val today = remember(repository, scope) {
@@ -436,6 +444,14 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     val settings = remember(container, scope) {
         SettingsViewModel(container.session, scope, container.appVersion)
     }
+    // The fleet's settings (claude-fleet declarative pages P6): offered when
+    // the hub serves this token the page specs and the settings, read again
+    // on every connection that does.
+    val fleetSettings = remember(repository, scope) {
+        FleetSettingsViewModel(container.fleetSettingsActions, scope, credentials.canWrite)
+    }
+    val settingsCaps by repository.capabilities.collectAsState()
+    LaunchedEffect(settingsCaps.fleetSettings) { if (settingsCaps.fleetSettings) fleetSettings.load() }
 
     Scaffold(
         bottomBar = {
@@ -571,6 +587,10 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                                 onRefresh = { today.refresh() },
                                 onOpenSession = today::openSession,
                                 onDismissError = today::dismissError,
+                                onToggleSection = today::toggleSection,
+                                onSetHost = today::setHost,
+                                onToggleTicketsOnly = today::toggleTicketsOnly,
+                                onClearFilters = today::clearFilters,
                             ),
                         )
                     }
@@ -589,6 +609,17 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                                 onConfirmResume = { tickets.confirmResume() },
                                 onCancelResume = tickets::cancelResume,
                                 onDismissError = tickets::dismissError,
+                                onOpenFilters = tickets::openFilters,
+                                onCloseFilters = tickets::closeFilters,
+                                onToggleList = tickets::toggleList,
+                                onToggleStatus = tickets::toggleStatus,
+                                onToggleStatusName = tickets::toggleStatusName,
+                                onSetOrg = tickets::setOrg,
+                                onSetTracker = tickets::setTracker,
+                                onSetSession = tickets::setSession,
+                                onClearFacet = tickets::clearFacet,
+                                onClearAll = tickets::clearAll,
+                                onCycleSort = tickets::cycleSort,
                             ),
                         )
                     }
@@ -705,10 +736,27 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                 }
                 Screen.Settings -> {
                     val state by settings.state.collectAsState()
+                    val fleet by fleetSettings.state.collectAsState()
                     SettingsScreen(
                         state = state,
                         onForget = { settings.forget() },
                         onDismissError = settings::dismissError,
+                        fleetPageOpen = settingsCaps.fleetSettings && fleet.openPage != null,
+                        fleetSettings = {
+                            if (settingsCaps.fleetSettings) {
+                                FleetSettingsSection(
+                                    state = fleet,
+                                    clientName = state.clientName,
+                                    onOpen = fleetSettings::open,
+                                    onBack = { fleetSettings.back() },
+                                    onSet = fleetSettings::set,
+                                    onRefuse = fleetSettings::refuse,
+                                    onDecide = { id, apply -> fleetSettings.decide(id, apply) },
+                                    onConfirm = fleetSettings::confirm,
+                                    onCancelConfirm = fleetSettings::cancelConfirm,
+                                )
+                            }
+                        },
                     )
                 }
             }

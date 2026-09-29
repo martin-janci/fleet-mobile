@@ -163,4 +163,78 @@ class TodayTest {
         assertEquals(null, t.groups[1].key)
         assertEquals("pr", t.shipped[0].how)
     }
+
+    // --- The sheet's own filters (phone only; the desktop has no copy). ---
+
+    private fun hs(id: Long, name: String, host: String, attention: String? = null, stale: String? = null) =
+        TodaySession(id = id, name = name, hostAlias = host, attention = attention, stale = stale)
+
+    private val hosted = TodayView(
+        waiting = listOf(TodayGroup(key = "PD-1", title = "Pay", sessions = listOf(hs(1, "a", "mac", attention = "ci_failing"), hs(2, "b", "trn")))),
+        inProgress = listOf(
+            TodayGroup(key = "PD-2", title = "Ship", sessions = listOf(hs(3, "c", "trn"))),
+            TodayGroup(key = null, sessions = listOf(hs(4, "d", "mac"))),
+        ),
+        shipped = listOf(TodayShipped(how = "done", key = "PD-0", title = "Done")),
+        stale = listOf(TodayGroup(key = "PD-3", sessions = listOf(hs(5, "e", "trn", stale = "idle")))),
+    )
+
+    @Test
+    fun no_filter_is_the_view_itself() {
+        assertEquals(hosted, filterToday(hosted, TodayFilters()))
+        assertTrue(!TodayFilters().any)
+    }
+
+    /** The host drops `a`, the one needing a person, so PD-1 is in progress on `trn` — the hub's rule again. */
+    @Test
+    fun a_host_filter_re_buckets_what_is_left_and_keeps_shipped() {
+        val v = filterToday(hosted, TodayFilters(host = "trn"))
+        assertEquals(emptyList(), v.waiting)
+        assertEquals(listOf("PD-1", "PD-2"), v.inProgress.map { it.key })
+        assertEquals(listOf(listOf(2L)), v.inProgress.take(1).map { g -> g.sessions.map { it.id } })
+        assertEquals(listOf("PD-3"), v.stale.map { it.key })
+        assertEquals(1, v.shipped.size, "shipped names no host; the filter cannot judge it")
+    }
+
+    @Test
+    fun section_chips_or_together_and_tickets_only_drops_the_no_work_group() {
+        val v = filterToday(hosted, TodayFilters(sections = setOf(TodaySection.Waiting, TodaySection.Shipped)))
+        assertEquals(listOf("PD-1"), v.waiting.map { it.key })
+        assertEquals(emptyList(), v.inProgress)
+        assertEquals(emptyList(), v.stale)
+        assertEquals(1, v.shipped.size)
+
+        val t = filterToday(hosted, TodayFilters(ticketsOnly = true))
+        assertEquals(listOf("PD-2"), t.inProgress.map { it.key })
+        assertTrue(hosted.hasUnlinked)
+        assertTrue(!t.hasUnlinked)
+    }
+
+    @Test
+    fun counts_hosts_and_sessions_of_a_view() {
+        assertEquals(listOf(1, 2, 1, 1), TodaySection.entries.map { hosted.count(it) })
+        assertEquals(listOf("mac", "trn"), todayHosts(hosted))
+        assertEquals(listOf(1L, 2L, 3L, 4L, 5L), hosted.sessions.map { it.id })
+    }
+
+    /** The screenshot that started this: `(ci_failing)` on screen. A wire token never reaches the sheet. */
+    @Test
+    fun every_attention_reason_the_hub_sends_has_words() {
+        val hub = listOf("waiting", "stuck", "stop_failed", "failed", "context_full", "stale_working", "ci_failing", "lifecycle")
+        for (r in hub) {
+            val label = attentionLabel(r)
+            assertTrue('_' !in label && label.first().isUpperCase(), "$r reads as $label")
+        }
+        assertEquals("CI failing", attentionLabel("ci_failing"))
+        assertEquals("Context full", attentionLabel("context_full"))
+        assertEquals("Some new reason", attentionLabel("some_new_reason"))
+        assertEquals("Ticket done", staleLabel("done"))
+        assertEquals("Idle", staleLabel("idle"))
+    }
+
+    /** The standup keeps the desktop's words: the sheet's labels are the sheet's alone. */
+    @Test
+    fun the_standup_still_says_what_the_desktop_says() {
+        assertEquals("a (ci_failing)", sessionPhrase(hs(1, "a", "mac", attention = "ci_failing"), TodayBucket.Waiting))
+    }
 }

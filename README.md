@@ -252,7 +252,16 @@ costs one reconnect.
   hosts are listed and marked rather than dropped, because the app cannot
   unhide one and a hidden host can still own live sessions.
 - **Settings** — which hub, which client name, the app version, and *Forget
-  this hub*.
+  this hub*. Under it, **Fleet settings** (claude-fleet declarative pages P6,
+  when the hub serves `list_pages` and `get_settings`): the hub's own settings
+  pages — automation, limits, projects, the work graph, decisions — drawn from
+  the hub's page specs with the hub's values, and **Proposed changes**, what an
+  agent proposed with its reason. A device the hub's operator trusts
+  (`fleet-hub client trust <name>`) switches, picks and saves values (a change
+  that needs confirming asks first) and applies or rejects proposals; any
+  other device reads them and is told the command. Maps, id lists and price
+  tables, resources (Trackers, Organisations) and data pages stay on a
+  desktop.
 - **Work** (a hub with the work graph) — what each session is working on, as
   the hub decided it:
   - a key chip on every row (a dotted outline for a guess nobody has decided,
@@ -267,10 +276,16 @@ costs one reconnect.
     pasted URL) with **Open** for a ticket a session is already on, **Start
     here** for one nobody is, and **Resume** for past work. A tapped ticket
     shows its acceptance criteria (with **Copy**) and the sessions that worked
-    on it before;
+    on it before. It filters like the Sessions list: typing narrows the lists
+    by key or title, **Filters (n)** picks lists, status (bucket or tracker
+    column), sessions, organisation and tracker, **Sort** orders by tracker,
+    status or last update, and a strip of removable chips ("5 of 23") says
+    what is on. Filters and sort are remembered on the device;
   - a **Today** sheet: what is waiting on you, in progress, shipped and stale
-    since local midnight, and **Copy standup** / **Share** — the desktop's
-    text, to the clipboard or the system share sheet;
+    since local midnight, one card per section, each session's reason as a
+    coloured chip in words; chips narrow it by section, host or *Tickets
+    only*, and **Copy standup** / **Share** hand on the desktop's text for
+    what is shown, to the clipboard or the system share sheet;
   - **Ask for a handover** on a linked session: Claude writes a handover note
     for whoever picks the work up next, and the sheet says when it is written;
   - **Also start in** on *Start here*, for a full token on a hub that takes

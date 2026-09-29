@@ -82,13 +82,17 @@ enum class WorkStatusFilter(val label: String, val category: StatusCategory) {
  * (`src/lib/work_filters.ts`): the three buckets lump a Jira workflow's
  * columns together, and the one a team cares about is often in the middle.
  */
-fun workStatusNames(rows: List<SessionRow>): List<String> {
+fun workStatusNames(rows: List<SessionRow>): List<String> =
+    rankedStatusNames(rows.asSequence().map { it.work?.statusName to it.work?.statusCategory })
+
+/** [workStatusNames]'s ordering over (name, bucket) pairs; blank names are skipped. */
+internal fun rankedStatusNames(pairs: Sequence<Pair<String?, StatusCategory?>>): List<String> {
     val seen = LinkedHashMap<String, Pair<String, Int>>()
-    for (row in rows) {
-        val name = row.work?.statusName?.trim()?.takeIf { it.isNotEmpty() } ?: continue
+    for ((raw, category) in pairs) {
+        val name = raw?.trim()?.takeIf { it.isNotEmpty() } ?: continue
         val key = name.lowercase()
         if (key in seen) continue
-        val rank = when (row.work.statusCategory) {
+        val rank = when (category) {
             StatusCategory.Todo -> 0
             StatusCategory.InProgress -> 1
             StatusCategory.Done -> 2
