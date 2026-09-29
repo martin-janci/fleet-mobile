@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.android
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.onNodeWithTag
 import dev.claudefleet.mobile.data.ConnectionStatus
@@ -125,7 +126,10 @@ class ConversationItemsTest {
             "no findings",
             "Interrupted during a tool call",
         )) {
-            compose.onNodeWithText(text, substring = true).assertIsDisplayed()
+            // Scrolled to one by one: the turn is taller than a phone's
+            // screen since tool rows became 48dp touch targets, so the last
+            // items sit below the fold of a list scrolled to its top.
+            compose.onNodeWithText(text, substring = true).performScrollTo().assertIsDisplayed()
         }
 
         // The fallback, asserted here rather than in a test of its own.
@@ -140,7 +144,7 @@ class ConversationItemsTest {
         // The string matters: it is what a bug report quotes, and the
         // difference between "the app showed a blank" and "the app needs
         // support for X".
-        compose.onNodeWithText("whatever-comes-next", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("whatever-comes-next", substring = true).performScrollTo().assertIsDisplayed()
     }
 
 }
