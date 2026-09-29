@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.SendPromptResult
+import dev.claudefleet.mobile.model.ToolDetail
 import dev.claudefleet.mobile.model.WaitResult
 import kotlinx.coroutines.CancellationException
 
@@ -16,7 +17,7 @@ import kotlinx.coroutines.CancellationException
  * discouraged, and makes the view-model tests transport-free.
  *
  * Every one of these is a tool a paired client token may call:
- * `session_conversation` and `fleet_health` are in the hub's readonly
+ * `session_conversation`, `session_tool_detail` and `fleet_health` are in the hub's readonly
  * allow-list, and `send_prompt` is fleet-wide session control, which a `full`
  * client has and a `readonly` one does not (see `SessionViewModel`'s
  * `canSendPrompts`).
@@ -36,6 +37,13 @@ interface SessionActions {
         turns: Int? = null,
         sinceTurn: Long? = null,
     ): Conversation
+
+    /**
+     * One tool call's input and result (`session_tool_detail`, readonly), for
+     * an expanded tool row. Only called when the hub lists the tool — see
+     * [dev.claudefleet.mobile.net.HubCapabilities.toolDetail].
+     */
+    suspend fun toolDetail(sessionId: Long, toolUseId: String): ToolDetail
 
     /** Deliver [text] to the session's REPL and submit it. */
     suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult
@@ -88,6 +96,9 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
         turns: Int?,
         sinceTurn: Long?,
     ): Conversation = session.withClient { it.conversation(sessionId, turns, sinceTurn) }
+
+    override suspend fun toolDetail(sessionId: Long, toolUseId: String): ToolDetail =
+        session.withClient { it.toolDetail(sessionId, toolUseId) }
 
     override suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult =
         session.withClient { it.sendPrompt(sessionId, text) }

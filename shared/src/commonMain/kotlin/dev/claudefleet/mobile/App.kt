@@ -77,6 +77,8 @@ import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.SessionViewModel
 import dev.claudefleet.mobile.ui.SessionWorkHandlers
 import dev.claudefleet.mobile.ui.SessionWorkViewModel
+import dev.claudefleet.mobile.ui.ToolDetailsHost
+import dev.claudefleet.mobile.ui.ToolDetailsModel
 import dev.claudefleet.mobile.ui.SessionFiltersHandlers
 import dev.claudefleet.mobile.ui.SessionFiltersSheet
 import dev.claudefleet.mobile.model.SessionFacetId
@@ -858,6 +860,14 @@ private fun SessionRoute(
             callScope = callScope,
         )
     }
+    val toolDetailsModel = remember(sessionId, repository, scope) {
+        ToolDetailsModel(
+            sessionId = sessionId,
+            fleet = repository,
+            actions = container.sessionActions,
+            scope = scope,
+        )
+    }
     LaunchedEffect(sessionId) { vm.load() }
 
     val state by vm.state.collectAsState()
@@ -874,6 +884,7 @@ private fun SessionRoute(
     // than folded into `SessionUiState` for the same reason `chips` is: it is
     // the fleet's own value, not one this screen's view model owns.
     val caps by repository.capabilities.collectAsState()
+    val toolDetailStates by toolDetailsModel.states.collectAsState()
     SessionScreen(
         sessionId = sessionId,
         state = state,
@@ -935,6 +946,11 @@ private fun SessionRoute(
             onDismissError = tasksVm::dismissError,
             onShareAcrossOrgs = { tasksVm.shareAcrossOrgs() },
             onDismissCrossOrg = tasksVm::dismissCrossOrg,
+        ),
+        toolDetails = ToolDetailsHost(
+            available = caps.toolDetail,
+            states = toolDetailStates,
+            request = toolDetailsModel::request,
         ),
     )
 }

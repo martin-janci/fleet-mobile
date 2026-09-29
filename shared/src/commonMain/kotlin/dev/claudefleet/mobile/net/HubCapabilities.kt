@@ -55,6 +55,13 @@ data class HubCapabilities(
      */
     val quickReplies: Boolean get() = QUICK_REPLIES in tools
 
+    /**
+     * A tool call's row can be expanded to its input and result
+     * (`session_tool_detail`, readonly on the hub). Absent on an older hub,
+     * whose rows still show their verb and target and simply do not open.
+     */
+    val toolDetail: Boolean get() = SESSION_TOOL_DETAIL in tools
+
     fun has(tool: String, action: String): Boolean =
         tool in tools &&
             actions[tool]?.contains(action) != false &&
@@ -81,6 +88,7 @@ data class HubCapabilities(
         const val WORK_LINK = "work_link"
         const val ENSURE_OPERATOR = "ensure_operator"
         const val QUICK_REPLIES = "quick_replies"
+        const val SESSION_TOOL_DETAIL = "session_tool_detail"
 
         fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions, params = catalog.params)
     }

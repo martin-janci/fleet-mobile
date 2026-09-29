@@ -241,11 +241,32 @@ sealed class ConvItem {
         override val label: String get() = text
     }
 
-    /** A tool one-liner. [error] is set when the tool call came back failed. */
+    /**
+     * A tool call. [error] is set when the tool call came back failed.
+     *
+     * Everything past [error] is newer than the item itself: a hub from before
+     * the conversation's tool rows sent only `summary` and `error`, so every
+     * other field defaults to what such a hub implies — no id (so the row
+     * cannot be expanded), a name to be read out of [summary], and a finished
+     * call.
+     */
     @Serializable
     @SerialName("tool")
     @JsonIgnoreUnknownKeys
-    data class Tool(val summary: String, val error: Boolean = false) : ConvItem() {
+    data class Tool(
+        val summary: String,
+        val error: Boolean = false,
+        /** The `tool_use` id — what `session_tool_detail` is asked about. */
+        val id: String? = null,
+        /** `"Read"`, `"Bash"`, `"mcp__srv__tool"` …; empty from an older hub. */
+        val name: String = "",
+        /** The file, command or pattern the call was about, when there is one. */
+        val target: String? = null,
+        val at: String? = null,
+        @SerialName("ended_at") val endedAt: String? = null,
+        /** False while the call is still waiting for its result. */
+        val done: Boolean = true,
+    ) : ConvItem() {
         override val label: String get() = summary
     }
 

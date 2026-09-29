@@ -42,8 +42,16 @@ class ConversationItemsTest {
                 endedAt = "t2",
                 items = listOf(
                     ConvItem.Text("plain answer"),
+                    // An older hub's tool row (summary only) and a current
+                    // one's: both draw as verb + target, not the raw one-liner.
                     ConvItem.Tool(summary = "Read(build.gradle.kts)"),
-                    ConvItem.Tool(summary = "Bash(false)", error = true),
+                    ConvItem.Tool(
+                        summary = "Bash(command=./gradlew check)",
+                        error = true,
+                        id = "tu_1",
+                        name = "Bash",
+                        target = "./gradlew check",
+                    ),
                     ConvItem.Subagent(
                         name = "Task",
                         agentType = "general-purpose",
@@ -104,8 +112,10 @@ class ConversationItemsTest {
 
         for (text in listOf(
             "plain answer",
-            "Read(build.gradle.kts)",
-            "Bash(false)",
+            "build.gradle.kts",
+            "./gradlew check",
+            // A failed call says so in words, not only in colour.
+            "failed",
             "general-purpose",
             "search the tree",
             "four call sites",

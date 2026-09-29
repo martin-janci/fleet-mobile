@@ -16,6 +16,7 @@ import dev.claudefleet.mobile.model.PendingOption
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.ToolDetail
 import dev.claudefleet.mobile.model.WaitResult
 import dev.claudefleet.mobile.net.HUB_VERSION_KEYS
 import dev.claudefleet.mobile.net.HubError
@@ -176,6 +177,9 @@ private class FakeActions : SessionActions {
             inFlightReads -= 1
         }
     }
+
+    override suspend fun toolDetail(sessionId: Long, toolUseId: String): ToolDetail =
+        ToolDetail(id = toolUseId)
 
     override suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult {
         sentPrompts += text

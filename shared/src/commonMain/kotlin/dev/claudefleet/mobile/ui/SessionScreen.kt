@@ -55,6 +55,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -167,6 +168,11 @@ fun SessionScreen(
     /** Every task of the session (the Work view's *Tasks*); the default draws nothing. */
     tasks: SessionTasksUiState = SessionTasksUiState(),
     tasksHandlers: SessionTasksHandlers = SessionTasksHandlers(),
+    /**
+     * What the tool rows can open (`session_tool_detail`); the default opens
+     * nothing — an older hub, a preview, or a test that does not care.
+     */
+    toolDetails: ToolDetailsHost = ToolDetailsHost.None,
 ) {
     val turns = state.conversation.turns
     val listState = rememberLazyListState()
@@ -286,14 +292,18 @@ fun SessionScreen(
                 // `atBottom` above is derived from measurement, so it only
                 // means anything where there is measurement, and the test that
                 // checks it has to run on a device — see `ConversationScrollTest`.
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize().testTag(CONVERSATION_LIST),
-                ) {
-                    if (state.conversation.truncated) {
-                        item(key = "truncated") { TruncationNote() }
+                CompositionLocalProvider(LocalToolDetails provides toolDetails) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize().testTag(CONVERSATION_LIST),
+                        // Room under the last turn, so it does not sit flush on the composer.
+                        contentPadding = PaddingValues(bottom = 12.dp),
+                    ) {
+                        if (state.conversation.truncated) {
+                            item(key = "truncated") { TruncationNote() }
+                        }
+                        turnItems(turns, working = state.session?.claudeStatus == "working")
                     }
-                    turnItems(turns)
                 }
             }
             // The fast way back down, for whoever scrolled up to read
@@ -381,9 +391,9 @@ fun SessionScreen(
  * here and only here: the list only ever grows at the bottom (see
  * `Conversation.appending`), so an index is stable for every turn but the last.
  */
-private fun LazyListScope.turnItems(turns: List<ConvTurn>) {
+private fun LazyListScope.turnItems(turns: List<ConvTurn>, working: Boolean) {
     for ((index, turn) in turns.withIndex()) {
-        item(key = "turn-$index") { Turn(turn) }
+        item(key = "turn-$index") { Turn(turn, live = working && index == turns.lastIndex) }
     }
 }
 
@@ -926,30 +936,40 @@ private fun refreshAngle(busy: Boolean): Float = if (busy) {
     0f
 }
 
+/**
+ * One turn: the prompt bubble, then everything the agent said and did.
+ *
+ * Turns are set apart by space above each prompt rather than a full-bleed rule:
+ * a rule between every turn made a long conversation read as a ledger, and
+ * the bubble already marks where a new exchange starts. [live] is the last
+ * turn of a session that is working — its newest folded tool run opens by
+ * itself, since that is where the work is happening.
+ */
 @Composable
-private fun Turn(turn: ConvTurn) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        val prompt = turn.prompt
-        if (!prompt.isNullOrBlank()) {
+internal fun Turn(turn: ConvTurn, live: Boolean = false) {
+    val prompt = turn.prompt
+    val hasPrompt = !prompt.isNullOrBlank()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = if (hasPrompt) 24.dp else 4.dp, bottom = 4.dp),
+    ) {
+        if (hasPrompt) {
             Surface(
                 color = MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                 shape = MaterialTheme.shapes.medium,
             ) {
                 Text(
-                    text = prompt,
+                    text = prompt.orEmpty(),
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(12.dp),
                 )
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
         }
-        for ((index, item) in turn.items.withIndex()) {
-            Item(item)
-            if (index != turn.items.lastIndex) Spacer(Modifier.height(4.dp))
-        }
+        TurnItems(turn.items, live) { Item(it) }
     }
-    HorizontalDivider()
 }
 
 @Composable
@@ -967,36 +987,9 @@ private fun Item(item: ConvItem) {
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(vertical = 4.dp),
         )
-        // A tool call is a one-liner, and a failed one has to look failed: it is
-        // the single most useful thing to spot while scrolling.
-        is ConvItem.Tool -> Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            Text(
-                text = if (item.error) "✗" else "·",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (item.error) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                fontWeight = if (item.error) FontWeight.Bold else FontWeight.Normal,
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = item.summary,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = if (item.error) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        // Normally drawn by `TurnItems`, which folds runs of them; here for
+        // exhaustiveness, and drawn the same way.
+        is ConvItem.Tool -> ToolCallRow(item)
         // A subagent gets a block rather than a line: it is a whole piece of
         // work, and its result is the part somebody scrolls back for.
         is ConvItem.Subagent -> Surface(

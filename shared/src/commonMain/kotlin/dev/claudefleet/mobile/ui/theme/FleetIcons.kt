@@ -369,4 +369,104 @@ object FleetIcons {
             }
         }.build()
     }
+
+    // ─── Tool rows in a conversation ─────────────────────────────────────────
+    // Stroke-only at the same 2-unit weight as the rest, so each tints with
+    // `onSurfaceVariant` or `error` like the text beside it.
+
+    /** A pencil: Edit, MultiEdit, Write. */
+    val Edit: ImageVector by lazy {
+        strokeIcon("Edit") {
+            moveTo(4f, 20f); lineTo(5f, 15.5f); lineTo(15.5f, 5f)
+            quadTo(17f, 3.5f, 18.5f, 5f); lineTo(19f, 5.5f)
+            quadTo(20.5f, 7f, 19f, 8.5f); lineTo(8.5f, 19f); close()
+            moveTo(13.5f, 7f); lineTo(17f, 10.5f)
+        }
+    }
+
+    /** A terminal window with a prompt: Bash. */
+    val Terminal: ImageVector by lazy {
+        strokeIcon("Terminal") {
+            moveTo(5f, 4f); lineTo(19f, 4f); quadTo(21f, 4f, 21f, 6f); lineTo(21f, 18f)
+            quadTo(21f, 20f, 19f, 20f); lineTo(5f, 20f); quadTo(3f, 20f, 3f, 18f)
+            lineTo(3f, 6f); quadTo(3f, 4f, 5f, 4f); close()
+            moveTo(7f, 9f); lineTo(10f, 12f); lineTo(7f, 15f)
+            moveTo(12.5f, 15f); lineTo(17f, 15f)
+        }
+    }
+
+    /** A page with a folded corner: Read. */
+    val Document: ImageVector by lazy {
+        strokeIcon("Document") {
+            moveTo(6f, 3f); lineTo(14f, 3f); lineTo(19f, 8f); lineTo(19f, 21f); lineTo(6f, 21f); close()
+            moveTo(14f, 3f); lineTo(14f, 8f); lineTo(19f, 8f)
+            moveTo(9f, 13f); lineTo(16f, 13f)
+            moveTo(9f, 17f); lineTo(16f, 17f)
+        }
+    }
+
+    /** Three ticked lines: TodoWrite. */
+    val Checklist: ImageVector by lazy {
+        strokeIcon("Checklist") {
+            moveTo(3f, 6f); lineTo(4.5f, 7.5f); lineTo(7f, 5f)
+            moveTo(10f, 6.5f); lineTo(21f, 6.5f)
+            moveTo(3f, 12f); lineTo(4.5f, 13.5f); lineTo(7f, 11f)
+            moveTo(10f, 12.5f); lineTo(21f, 12.5f)
+            moveTo(3f, 18f); lineTo(4.5f, 19.5f); lineTo(7f, 17f)
+            moveTo(10f, 18.5f); lineTo(21f, 18.5f)
+        }
+    }
+
+    /** An open-jawed wrench: any other tool. */
+    val Wrench: ImageVector by lazy {
+        strokeIcon("Wrench") {
+            // The head: a C around (15.5, 8.5), open to the upper right, with
+            // the jaw's notch cut into it; then the handle down to the corner.
+            moveTo(19.4f, 7.8f)
+            arcTo(4f, 4f, 0f, isMoreThanHalf = true, isPositiveArc = true, x1 = 16.2f, y1 = 4.6f)
+            lineTo(16.2f, 7.8f); close()
+            moveTo(12.7f, 11.3f); lineTo(4.5f, 19.5f)
+        }
+    }
+
+    /** Stacked layers: a folded run of tool calls. */
+    val Layers: ImageVector by lazy {
+        strokeIcon("Layers") {
+            moveTo(12f, 4f); lineTo(20f, 8.5f); lineTo(12f, 13f); lineTo(4f, 8.5f); close()
+            moveTo(4f, 12.5f); lineTo(12f, 17f); lineTo(20f, 12.5f)
+            moveTo(4f, 16.5f); lineTo(12f, 21f); lineTo(20f, 16.5f)
+        }
+    }
+
+    /** A crossed circle: a call that failed. */
+    val Failed: ImageVector by lazy {
+        strokeIcon("Failed") {
+            moveTo(21f, 12f)
+            arcTo(9f, 9f, 0f, isMoreThanHalf = false, isPositiveArc = true, x1 = 3f, y1 = 12f)
+            arcTo(9f, 9f, 0f, isMoreThanHalf = false, isPositiveArc = true, x1 = 21f, y1 = 12f)
+            moveTo(9f, 9f); lineTo(15f, 15f)
+            moveTo(15f, 9f); lineTo(9f, 15f)
+        }
+    }
+
+    /** A downward chevron; rotated half a turn when its row is open. */
+    val ChevronDown: ImageVector by lazy {
+        strokeIcon("ChevronDown") {
+            moveTo(6f, 9f); lineTo(12f, 15f); lineTo(18f, 9f)
+        }
+    }
+
+    private fun strokeIcon(
+        name: String,
+        block: androidx.compose.ui.graphics.vector.PathBuilder.() -> Unit,
+    ): ImageVector = ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {
+        path(
+            fill = null,
+            stroke = SolidColor(Color.Black),
+            strokeLineWidth = 2f,
+            strokeLineCap = StrokeCap.Round,
+            strokeLineJoin = StrokeJoin.Round,
+            pathBuilder = block,
+        )
+    }.build()
 }
