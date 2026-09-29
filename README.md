@@ -276,7 +276,11 @@ costs one reconnect.
     pasted URL) with **Open** for a ticket a session is already on, **Start
     here** for one nobody is, and **Resume** for past work. A tapped ticket
     shows its acceptance criteria (with **Copy**) and the sessions that worked
-    on it before;
+    on it before. It filters like the Sessions list: typing narrows the lists
+    by key or title, **Filters (n)** picks lists, status (bucket or tracker
+    column), sessions, organisation and tracker, **Sort** orders by tracker,
+    status or last update, and a strip of removable chips ("5 of 23") says
+    what is on. Filters and sort are remembered on the device;
   - a **Today** sheet: what is waiting on you, in progress, shipped and stale
     since local midnight, and **Copy standup** / **Share** — the desktop's
     text, to the clipboard or the system share sheet;

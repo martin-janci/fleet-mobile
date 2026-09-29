@@ -392,6 +392,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
             canWrite = credentials.canWrite,
             onOpenSession = { nav.open(it) },
             onStartHere = { nav.newSession(ticketKey = it) },
+            prefs = container.prefs,
         )
     }
     val today = remember(repository, scope) {
@@ -602,6 +603,17 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                                 onConfirmResume = { tickets.confirmResume() },
                                 onCancelResume = tickets::cancelResume,
                                 onDismissError = tickets::dismissError,
+                                onOpenFilters = tickets::openFilters,
+                                onCloseFilters = tickets::closeFilters,
+                                onToggleList = tickets::toggleList,
+                                onToggleStatus = tickets::toggleStatus,
+                                onToggleStatusName = tickets::toggleStatusName,
+                                onSetOrg = tickets::setOrg,
+                                onSetTracker = tickets::setTracker,
+                                onSetSession = tickets::setSession,
+                                onClearFacet = tickets::clearFacet,
+                                onClearAll = tickets::clearAll,
+                                onCycleSort = tickets::cycleSort,
                             ),
                         )
                     }

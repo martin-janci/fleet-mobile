@@ -2,14 +2,15 @@ package dev.claudefleet.mobile.model
 
 /*
  * The active-filter summary: one removable chip per filter that narrows the
- * list, for the Sessions list and My work alike. A port of claude-fleet's
- * `src/lib/filter_facets.ts` (`sessionFacets` / `workFacets` /
+ * list, for the Sessions list, My work and the Tickets sheet alike. A port of
+ * claude-fleet's `src/lib/filter_facets.ts` (`sessionFacets` / `workFacets` /
  * `withoutWorkFacet` / `facetSentence`), so the phone and the desktop phrase
  * an active filter in the same words and the empty states can name what
- * hides the rows.
+ * hides the rows. The Tickets sheet has no desktop twin; its facets borrow
+ * the Sessions list's words wherever the question is the same.
  *
  * Pure — strings and ids only. A facet's [Facet.id] is what its owner clears
- * ([SessionFilters.without] / [WorkTreeFilters.without]).
+ * ([SessionFilters.without] / [WorkTreeFilters.without] / [TicketFilters.without]).
  */
 
 /** One active filter: what clears it, and the chip's text ("Host: gpu-box"). */
@@ -153,4 +154,56 @@ fun WorkTreeFilters.without(id: WorkFacetId): WorkTreeFilters {
         WorkFacetId.REVIEW -> n.copy(review = null)
         WorkFacetId.QUERY -> n.copy(query = null)
     }
+}
+
+// ── Tickets ──
+
+/**
+ * The Tickets sheet's filters. [SEARCH] is the search field's text, which
+ * shows itself, so the strip leaves it out ([onScreen]); the empty state
+ * still names it.
+ */
+enum class TicketFacetId {
+    LIST,
+    STATUS,
+    ORG,
+    TRACKER,
+    SESSION,
+    SEARCH,
+    ;
+
+    val onScreen: Boolean get() = this == SEARCH
+}
+
+/** Every filter in [f] (and the search [query]) that narrows the sheet, in reading order. */
+fun ticketFacets(
+    f: TicketFilters,
+    query: String = "",
+    orgName: (Long) -> String? = { null },
+    trackerName: (Long) -> String? = { null },
+): List<Facet<TicketFacetId>> = buildList {
+    if (f.lists.isNotEmpty() && f.lists.size < TicketList.entries.size) {
+        add(Facet(TicketFacetId.LIST, "List: " + f.lists.sortedBy { it.ordinal }.joinToString("/") { it.label }))
+    }
+    if (f.statuses.isNotEmpty() || f.statusNames.isNotEmpty()) {
+        val buckets = f.statuses.sortedBy { it.ordinal }.map { it.label }
+        val names = f.statusNames.sortedBy { it.lowercase() }
+        val prefix = if (buckets.isEmpty()) "Column" else "Status"
+        add(Facet(TicketFacetId.STATUS, "$prefix: " + (buckets + names).joinToString("/")))
+    }
+    f.org?.let { add(Facet(TicketFacetId.ORG, "Org: ${orgName(it) ?: "#$it"}")) }
+    f.tracker?.let { add(Facet(TicketFacetId.TRACKER, "Tracker: ${trackerName(it) ?: "#$it"}")) }
+    f.session?.let { add(Facet(TicketFacetId.SESSION, it.label)) }
+    val q = query.trim()
+    if (q.isNotEmpty() && !isTicketUrl(q)) add(Facet(TicketFacetId.SEARCH, "Search: “$q”"))
+}
+
+/** [this] without one facet, that field back at its default. [TicketFacetId.SEARCH] is the query's, not this value's. */
+fun TicketFilters.without(id: TicketFacetId): TicketFilters = when (id) {
+    TicketFacetId.LIST -> copy(lists = emptySet())
+    TicketFacetId.STATUS -> copy(statuses = emptySet(), statusNames = emptySet())
+    TicketFacetId.ORG -> copy(org = null)
+    TicketFacetId.TRACKER -> copy(tracker = null)
+    TicketFacetId.SESSION -> copy(session = null)
+    TicketFacetId.SEARCH -> this
 }
