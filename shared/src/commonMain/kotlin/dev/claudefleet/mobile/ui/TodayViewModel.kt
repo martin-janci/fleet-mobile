@@ -5,11 +5,16 @@ import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Today
+import dev.claudefleet.mobile.model.TodayFilters
+import dev.claudefleet.mobile.model.TodaySection
 import dev.claudefleet.mobile.model.TodayView
+import dev.claudefleet.mobile.model.count
+import dev.claudefleet.mobile.model.filterToday
 import dev.claudefleet.mobile.model.localMidnight
 import dev.claudefleet.mobile.model.orgOf
 import dev.claudefleet.mobile.model.scopeToday
 import dev.claudefleet.mobile.model.standupText
+import dev.claudefleet.mobile.model.todayHosts
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK
 import dev.claudefleet.mobile.net.HubError
@@ -41,9 +46,21 @@ data class TodayUiState(
     /** Whether a digest has answered at all — "nothing today" is only said after one has. */
     val loaded: Boolean = false,
     val error: Friendly? = null,
+    /** The sheet's own chips: sections, host, tickets only. */
+    val filters: TodayFilters = TodayFilters(),
+    /** [view] through [filters]: what the sheet draws. */
+    val shown: TodayView = TodayView(),
+    /**
+     * Each section's count with every filter but the section chips applied,
+     * so a chip says what tapping it would show. A section at 0 is offered
+     * only while it is selected — the one chip that can clear it.
+     */
+    val sectionCounts: Map<TodaySection, Int> = emptyMap(),
+    /** The hosts [view]'s sessions run on, plus the filtered one if it has gone. */
+    val hostChoices: List<String> = emptyList(),
 ) {
     /** What *Copy standup* and *Share* hand on: the desktop's text, for what is on screen. */
-    val standup: String get() = standupText(view)
+    val standup: String get() = standupText(shown)
 }
 
 /**
@@ -55,6 +72,10 @@ data class TodayUiState(
  * phone narrows it to the Sessions list's org filter ([orgFilter]) and
  * re-buckets with the hub's own rule, as the desktop does for its scope. A
  * read, open to a readonly token.
+ *
+ * On top of that the sheet has chips of its own ([TodayFilters]: sections,
+ * a host, tickets only), held here so they survive the sheet closing and
+ * reopening; *Copy standup* copies what they leave on screen.
  *
  * While the sheet is open it re-reads when the fleet moves — a session row
  * changing, or a ticket (`work:item`) — at most once per [refreshDebounceMs],
@@ -80,6 +101,7 @@ class TodayViewModel(
         val loading: Boolean = false,
         val today: Today? = null,
         val error: Friendly? = null,
+        val filters: TodayFilters = TodayFilters(),
     )
 
     private val local = MutableStateFlow(Local())
@@ -120,6 +142,27 @@ class TodayViewModel(
         local.update { it.copy(error = null) }
     }
 
+    /** A section chip: several at once, none meaning every section. */
+    fun toggleSection(section: TodaySection) {
+        local.update { l ->
+            val on = l.filters.sections
+            l.copy(filters = l.filters.copy(sections = if (section in on) on - section else on + section))
+        }
+    }
+
+    /** A host chip; the selected one again, or null, clears it. */
+    fun setHost(host: String?) {
+        local.update { l -> l.copy(filters = l.filters.copy(host = if (host == l.filters.host) null else host)) }
+    }
+
+    fun toggleTicketsOnly() {
+        local.update { l -> l.copy(filters = l.filters.copy(ticketsOnly = !l.filters.ticketsOnly)) }
+    }
+
+    fun clearFilters() {
+        local.update { it.copy(filters = TodayFilters()) }
+    }
+
     /** Show [sessionId]: the sheet closes first, as the Tickets sheet's Open does. */
     fun openSession(sessionId: Long) {
         close()
@@ -146,6 +189,9 @@ class TodayViewModel(
         if (!available) return TodayUiState()
         val byId = rows.associateBy { it.id }
         val view = l.today?.let { t -> scopeToday(t, org) { s -> byId[s.id]?.orgOf ?: s.orgId } } ?: TodayView()
+        val f = l.filters
+        val unsectioned = filterToday(view, f.copy(sections = emptySet()))
+        val hosts = todayHosts(view)
         return TodayUiState(
             available = true,
             open = l.open,
@@ -153,6 +199,10 @@ class TodayViewModel(
             view = view,
             loaded = l.today != null,
             error = l.error,
+            filters = f,
+            shown = filterToday(view, f),
+            sectionCounts = TodaySection.entries.associateWith { unsectioned.count(it) },
+            hostChoices = if (f.host != null && f.host !in hosts) (hosts + f.host).sorted() else hosts,
         )
     }
 

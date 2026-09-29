@@ -225,4 +225,54 @@ class TodayViewModelTest {
         assertEquals(1, actions.todayCalls.size)
         assertEquals(4, t.state.value.view.let { it.waiting.size + it.inProgress.size + it.stale.size })
     }
+
+    /** The sheet's chips: counts ignore the section chips, the standup follows what is shown, Clear puts it all back. */
+    @Test
+    fun its_filters_narrow_the_sheet_and_the_standup() = runTest {
+        val actions = FakeWorkActions().apply { todayAnswer = digest }
+        val t = vm(WorkFleet(rows), actions, backgroundScope)
+        t.open()!!.join()
+        runCurrent()
+
+        assertEquals(1, t.state.value.sectionCounts[dev.claudefleet.mobile.model.TodaySection.Waiting])
+        assertEquals(1, t.state.value.sectionCounts[dev.claudefleet.mobile.model.TodaySection.Shipped])
+
+        t.toggleSection(dev.claudefleet.mobile.model.TodaySection.Waiting)
+        runCurrent()
+        var s = t.state.value
+        assertTrue(s.filters.any)
+        assertEquals(emptyList(), s.shown.shipped)
+        assertEquals(listOf("PAY-7"), s.view.waiting.map { it.key }, "the view is unfiltered")
+        assertTrue(s.standup.startsWith("Waiting on me\n"), s.standup)
+        assertEquals(1, s.sectionCounts[dev.claudefleet.mobile.model.TodaySection.Shipped], "a count says what its chip would show")
+
+        t.clearFilters()
+        runCurrent()
+        s = t.state.value
+        assertFalse(s.filters.any)
+        assertEquals(s.view, s.shown)
+    }
+
+    /** A host chip toggles; one that has left the digest stays offered, so it can be cleared. */
+    @Test
+    fun a_host_chip_toggles_and_stays_while_selected() = runTest {
+        val actions = FakeWorkActions().apply { todayAnswer = digest }
+        val t = vm(WorkFleet(rows), actions, backgroundScope)
+        t.open()!!.join()
+        runCurrent()
+
+        t.setHost("gone")
+        runCurrent()
+        assertEquals("gone", t.state.value.filters.host)
+        assertTrue("gone" in t.state.value.hostChoices)
+        assertTrue(t.state.value.shown.waiting.isEmpty())
+
+        t.setHost("gone")
+        runCurrent()
+        assertNull(t.state.value.filters.host)
+
+        t.toggleTicketsOnly()
+        runCurrent()
+        assertTrue(t.state.value.filters.ticketsOnly)
+    }
 }

@@ -180,3 +180,99 @@ fun standupText(v: TodayView): String {
     section("Stale", v.stale.flatMap { groupLines(it, TodayBucket.Stale) })
     return if (parts.isNotEmpty()) parts.joinToString("\n\n") + "\n" else "Nothing to report.\n"
 }
+
+/** A section of the Today sheet, as its filter chips name them. */
+enum class TodaySection(val label: String) {
+    Waiting("Waiting on me"),
+    InProgress("In progress"),
+    Shipped("Shipped"),
+    Stale("Stale"),
+}
+
+/**
+ * What the Today sheet's chips narrow the digest to — the phone's, on top of
+ * the Sessions list's org filter ([scopeToday]); the desktop has no copy.
+ * Empty [sections] shows every section, as *Any* does in the Sessions filters.
+ */
+data class TodayFilters(
+    val sections: Set<TodaySection> = emptySet(),
+    /** One host's sessions; null keeps every host. */
+    val host: String? = null,
+    /** Hide the sessions no ticket is linked to (the no-work groups). */
+    val ticketsOnly: Boolean = false,
+) {
+    val any: Boolean get() = sections.isNotEmpty() || host != null || ticketsOnly
+}
+
+/**
+ * [v] narrowed by [f]. The host filter drops sessions, so groups are
+ * re-bucketed with the hub's rule ([bucketOf]), as [scopeToday] does after
+ * the org filter: a group waiting only because of a session on another host
+ * is in progress here. Shipped entries carry no host, so the host filter
+ * leaves them alone — the sheet says so on the section.
+ */
+fun filterToday(v: TodayView, f: TodayFilters): TodayView {
+    val waiting = mutableListOf<TodayGroup>()
+    val inProgress = mutableListOf<TodayGroup>()
+    val stale = mutableListOf<TodayGroup>()
+    for (g in v.waiting + v.inProgress + v.stale) {
+        if (f.ticketsOnly && g.key.isNullOrEmpty()) continue
+        val sessions = if (f.host == null) g.sessions else g.sessions.filter { it.hostAlias == f.host }
+        if (sessions.isEmpty()) continue
+        val group = if (sessions.size == g.sessions.size) g else g.copy(sessions = sessions)
+        when (bucketOf(sessions)) {
+            TodayBucket.Waiting -> waiting += group
+            TodayBucket.InProgress -> inProgress += group
+            TodayBucket.Stale -> stale += group
+        }
+    }
+    fun keep(s: TodaySection) = f.sections.isEmpty() || s in f.sections
+    return TodayView(
+        waiting = if (keep(TodaySection.Waiting)) waiting else emptyList(),
+        inProgress = if (keep(TodaySection.InProgress)) inProgress else emptyList(),
+        shipped = if (keep(TodaySection.Shipped)) v.shipped else emptyList(),
+        stale = if (keep(TodaySection.Stale)) stale else emptyList(),
+    )
+}
+
+/** How many entries a section lists: its tasks (a no-work group counts once), or its shipped lines. */
+fun TodayView.count(s: TodaySection): Int = when (s) {
+    TodaySection.Waiting -> waiting.size
+    TodaySection.InProgress -> inProgress.size
+    TodaySection.Shipped -> shipped.size
+    TodaySection.Stale -> stale.size
+}
+
+/** Every session the view lists, once each. */
+val TodayView.sessions: List<TodaySession>
+    get() = (waiting + inProgress + stale).flatMap { it.sessions }.distinctBy { it.id }
+
+/** The hosts the view's sessions run on, sorted — the sheet's host chips. */
+fun todayHosts(v: TodayView): List<String> = v.sessions.map { it.hostAlias }.filter { it.isNotEmpty() }.distinct().sorted()
+
+private val ATTENTION_LABELS = mapOf(
+    "waiting" to "Waiting for you",
+    "stuck" to "Stuck",
+    "stop_failed" to "Stop failed",
+    "failed" to "Turn failed",
+    "context_full" to "Context full",
+    "stale_working" to "Stalled",
+    "ci_failing" to "CI failing",
+    "lifecycle" to "Needs a look",
+)
+
+/**
+ * The words on a session's attention chip. The hub's reasons
+ * (`attention.rs`'s `Reason`) are wire tokens — `ci_failing` must never
+ * reach a screen as it is, and an unknown one reads as words rather than
+ * snake case. The standup keeps [sessionPhrase]'s words, the desktop's,
+ * byte for byte; this is the sheet's alone.
+ */
+fun attentionLabel(reason: String): String =
+    ATTENTION_LABELS[reason] ?: reason.replace('_', ' ').trim().replaceFirstChar { it.uppercaseChar() }
+
+/** The words on a stale session's chip: why it is listed under Stale. */
+fun staleLabel(stale: String): String = if (stale == "done") "Ticket done" else "Idle"
+
+/** Whether any group is the no-work one — what *Tickets only* would hide. */
+val TodayView.hasUnlinked: Boolean get() = (waiting + inProgress + stale).any { it.key.isNullOrEmpty() }
