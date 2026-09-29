@@ -569,6 +569,10 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                                 onRefresh = { today.refresh() },
                                 onOpenSession = today::openSession,
                                 onDismissError = today::dismissError,
+                                onToggleSection = today::toggleSection,
+                                onSetHost = today::setHost,
+                                onToggleTicketsOnly = today::toggleTicketsOnly,
+                                onClearFilters = today::clearFilters,
                             ),
                         )
                     }

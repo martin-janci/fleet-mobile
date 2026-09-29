@@ -269,8 +269,10 @@ costs one reconnect.
     shows its acceptance criteria (with **Copy**) and the sessions that worked
     on it before;
   - a **Today** sheet: what is waiting on you, in progress, shipped and stale
-    since local midnight, and **Copy standup** / **Share** — the desktop's
-    text, to the clipboard or the system share sheet;
+    since local midnight, one card per section, each session's reason as a
+    coloured chip in words; chips narrow it by section, host or *Tickets
+    only*, and **Copy standup** / **Share** hand on the desktop's text for
+    what is shown, to the clipboard or the system share sheet;
   - **Ask for a handover** on a linked session: Claude writes a handover note
     for whoever picks the work up next, and the sheet says when it is written;
   - **Also start in** on *Start here*, for a full token on a hub that takes
