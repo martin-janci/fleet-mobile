@@ -157,7 +157,7 @@ private fun PageBody(
                 is PageItem.Field -> {
                     val d = state.descriptors[item.key]
                     if (d != null && item.condition.holds(state.values)) {
-                        FieldRow(state, d, item.hint, onSet, onRefuse, onDecide)
+                        FieldRow(state, d, item.hint, item.readOnly, onSet, onRefuse, onDecide)
                     }
                 }
                 is PageItem.Notice -> Text(
@@ -183,12 +183,13 @@ private fun FieldRow(
     state: FleetSettingsUiState,
     d: SettingDescriptor,
     hint: String?,
+    shownOnly: Boolean,
     onSet: (String, String) -> Unit,
     onRefuse: (String, String) -> Unit,
     onDecide: (Long, Boolean) -> Unit,
 ) {
     val value = state.values[d.key] ?: d.value
-    val editable = state.editable(d.key)
+    val editable = state.editable(d.key) && !shownOnly
     val busy = d.key in state.busy
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {

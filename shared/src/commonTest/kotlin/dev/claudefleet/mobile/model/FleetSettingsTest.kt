@@ -42,6 +42,15 @@ class FleetSettingsTest {
         assertFalse("settings.orgs" in offered)
         assertFalse("usage" in offered, "a data page is a desktop's")
         assertFalse("settings" in offered, "the overview is the list itself")
+        assertTrue("settings.updates" in offered, "$offered")
+    }
+
+    @Test
+    fun a_field_the_page_marks_read_only_is_shown_not_edited() {
+        // D32: Jev's work link is an offline benchmark until J1 passes.
+        val field = registry.pages.flatMap { it.allSections }.flatMap { it.items }.map { PageItem.of(it) }
+            .filterIsInstance<PageItem.Field>().single { it.key == "decide.jev.work_link" }
+        assertTrue(field.readOnly)
     }
 
     @Test

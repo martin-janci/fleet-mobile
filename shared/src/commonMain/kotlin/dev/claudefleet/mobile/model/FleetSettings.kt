@@ -65,7 +65,14 @@ data class Section(
 
 /** One item of a section, as the phone draws it. */
 sealed interface PageItem {
-    data class Field(val key: String, val hint: String?, val condition: Condition?) : PageItem
+    /** [readOnly]: the page shows this setting and does not edit it (its
+     *  `widget` is `readonly`), whatever the device may write. */
+    data class Field(
+        val key: String,
+        val hint: String?,
+        val condition: Condition?,
+        val readOnly: Boolean = false,
+    ) : PageItem
     data class Notice(val tone: String, val text: String) : PageItem
     data class Link(val page: String, val label: String?) : PageItem
 
@@ -80,6 +87,7 @@ sealed interface PageItem {
                     key = str("key").orEmpty(),
                     hint = str("hint"),
                     condition = (o["when"] as? JsonObject)?.let { json.decodeFromJsonElement(Condition.serializer(), it) },
+                    readOnly = str("widget") == "readonly",
                 )
                 "notice" -> Notice(tone = str("tone") ?: "info", text = str("text").orEmpty())
                 "link" -> Link(page = str("page").orEmpty(), label = str("label"))
