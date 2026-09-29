@@ -252,7 +252,16 @@ costs one reconnect.
   hosts are listed and marked rather than dropped, because the app cannot
   unhide one and a hidden host can still own live sessions.
 - **Settings** — which hub, which client name, the app version, and *Forget
-  this hub*.
+  this hub*. Under it, **Fleet settings** (claude-fleet declarative pages P6,
+  when the hub serves `list_pages` and `get_settings`): the hub's own settings
+  pages — automation, limits, projects, the work graph, decisions — drawn from
+  the hub's page specs with the hub's values, and **Proposed changes**, what an
+  agent proposed with its reason. A device the hub's operator trusts
+  (`fleet-hub client trust <name>`) switches, picks and saves values (a change
+  that needs confirming asks first) and applies or rejects proposals; any
+  other device reads them and is told the command. Maps, id lists and price
+  tables, resources (Trackers, Organisations) and data pages stay on a
+  desktop.
 - **Work** (a hub with the work graph) — what each session is working on, as
   the hub decided it:
   - a key chip on every row (a dotted outline for a guess nobody has decided,

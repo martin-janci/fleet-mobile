@@ -55,6 +55,14 @@ data class HubCapabilities(
      */
     val quickReplies: Boolean get() = QUICK_REPLIES in tools
 
+    /**
+     * The fleet's settings pages (claude-fleet declarative pages P6): the hub
+     * serves this token the page specs and the settings. It does to a
+     * person's own device — a client bound to no org, of either mode — and
+     * to nothing else, and an older hub has neither tool.
+     */
+    val fleetSettings: Boolean get() = LIST_PAGES in tools && GET_SETTINGS in tools
+
     fun has(tool: String, action: String): Boolean =
         tool in tools &&
             actions[tool]?.contains(action) != false &&
@@ -81,6 +89,8 @@ data class HubCapabilities(
         const val WORK_LINK = "work_link"
         const val ENSURE_OPERATOR = "ensure_operator"
         const val QUICK_REPLIES = "quick_replies"
+        const val LIST_PAGES = "list_pages"
+        const val GET_SETTINGS = "get_settings"
 
         fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions, params = catalog.params)
     }

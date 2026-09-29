@@ -4,12 +4,16 @@ import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.MultiStart
 import dev.claudefleet.mobile.model.OrgDetail
+import dev.claudefleet.mobile.model.PagesBundle
 import dev.claudefleet.mobile.model.PairResult
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.SettingDescriptor
+import dev.claudefleet.mobile.model.SettingsDecided
+import dev.claudefleet.mobile.model.SettingsPending
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.TicketCard
 import dev.claudefleet.mobile.model.Today
@@ -46,6 +50,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.io.readByteArray
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -423,6 +429,51 @@ class HubClient(
                 }
             },
         ) { json.decodeFromJsonElement(ListSerializer(QuickReply.serializer()), it) }
+
+    // ---- the fleet's settings (claude-fleet declarative pages P6) ----
+    //
+    // The hub answers these to a person's own paired device (a client bound
+    // to no org). Reads for either mode; `set_setting` and the decision are
+    // writes, which the hub takes only from a device its operator trusts —
+    // `setting_proposals` says whether this one is (`can_write`).
+
+    /** The page specs: which settings go on which page. */
+    suspend fun listPages(): PagesBundle =
+        call("list_pages") { json.decodeFromJsonElement(PagesBundle.serializer(), it) }
+
+    /** Every registered setting with its metadata and effective value. */
+    suspend fun describeSettings(): List<SettingDescriptor> =
+        call("get_settings", buildJsonObject { put("describe", true) }) {
+            json.decodeFromJsonElement(ListSerializer(SettingDescriptor.serializer()), it)
+        }
+
+    /**
+     * Change one setting, as the person holding this device; answers every
+     * effective value. The hub validates it, and refuses an untrusted device
+     * with `E_FORBIDDEN` naming the command that trusts it.
+     */
+    suspend fun setSetting(key: String, value: String): Map<String, String> =
+        call(
+            "set_setting",
+            buildJsonObject {
+                put("key", key)
+                put("value", value)
+            },
+        ) { json.decodeFromJsonElement(MapSerializer(String.serializer(), String.serializer()), it) }
+
+    /** Proposals waiting for review, and whether this device may decide them. */
+    suspend fun settingProposals(): SettingsPending =
+        call("setting_proposals") { json.decodeFromJsonElement(SettingsPending.serializer(), it) }
+
+    /** Apply [accept], reject [reject]; each is decided on its own. */
+    suspend fun decideSettingProposals(accept: List<Long>, reject: List<Long>): SettingsDecided =
+        call(
+            "decide_setting_proposals",
+            buildJsonObject {
+                put("accept", json.encodeToJsonElement(ListSerializer(Long.serializer()), accept))
+                put("reject", json.encodeToJsonElement(ListSerializer(Long.serializer()), reject))
+            },
+        ) { json.decodeFromJsonElement(SettingsDecided.serializer(), it) }
 
     /** Set the session's friendly display name. */
     suspend fun rename(sessionId: Long, friendlyName: String): Unit =
