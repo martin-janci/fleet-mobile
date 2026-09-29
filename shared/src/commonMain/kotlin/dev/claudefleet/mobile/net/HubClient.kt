@@ -16,6 +16,7 @@ import dev.claudefleet.mobile.model.SettingsDecided
 import dev.claudefleet.mobile.model.SettingsPending
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.TicketCard
+import dev.claudefleet.mobile.model.ToolDetail
 import dev.claudefleet.mobile.model.Today
 import dev.claudefleet.mobile.model.TrackerRow
 import dev.claudefleet.mobile.model.WaitResult
@@ -331,6 +332,29 @@ class HubClient(
                 put("events_limit", 0)
             },
         ) { json.decodeFromJsonElement(Conversation.serializer(), it) }
+
+    /**
+     * One tool call's input and result, for its expanded row — read only when
+     * a person asks, since a conversation read carries one-liners only.
+     *
+     * Additive: a hub that does not list `session_tool_detail` in `tools/list`
+     * is never asked (see [HubCapabilities.toolDetail]). [claudeSessionId]
+     * looks in an earlier conversation of the session; null means the
+     * current one.
+     */
+    suspend fun toolDetail(
+        sessionId: Long,
+        toolUseId: String,
+        claudeSessionId: String? = null,
+    ): ToolDetail =
+        call(
+            "session_tool_detail",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("tool_use_id", toolUseId)
+                if (claudeSessionId != null) put("claude_session_id", claudeSessionId)
+            },
+        ) { json.decodeFromJsonElement(ToolDetail.serializer(), it) }
 
     /** Deliver [text] to a session's REPL and submit it. */
     suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult =

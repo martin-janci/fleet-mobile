@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.android
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.onNodeWithTag
 import dev.claudefleet.mobile.data.ConnectionStatus
@@ -42,8 +43,16 @@ class ConversationItemsTest {
                 endedAt = "t2",
                 items = listOf(
                     ConvItem.Text("plain answer"),
+                    // An older hub's tool row (summary only) and a current
+                    // one's: both draw as verb + target, not the raw one-liner.
                     ConvItem.Tool(summary = "Read(build.gradle.kts)"),
-                    ConvItem.Tool(summary = "Bash(false)", error = true),
+                    ConvItem.Tool(
+                        summary = "Bash(command=./gradlew check)",
+                        error = true,
+                        id = "tu_1",
+                        name = "Bash",
+                        target = "./gradlew check",
+                    ),
                     ConvItem.Subagent(
                         name = "Task",
                         agentType = "general-purpose",
@@ -104,8 +113,10 @@ class ConversationItemsTest {
 
         for (text in listOf(
             "plain answer",
-            "Read(build.gradle.kts)",
-            "Bash(false)",
+            "build.gradle.kts",
+            "./gradlew check",
+            // A failed call says so in words, not only in colour.
+            "failed",
             "general-purpose",
             "search the tree",
             "four call sites",
@@ -115,7 +126,10 @@ class ConversationItemsTest {
             "no findings",
             "Interrupted during a tool call",
         )) {
-            compose.onNodeWithText(text, substring = true).assertIsDisplayed()
+            // Scrolled to one by one: the turn is taller than a phone's
+            // screen since tool rows became 48dp touch targets, so the last
+            // items sit below the fold of a list scrolled to its top.
+            compose.onNodeWithText(text, substring = true).performScrollTo().assertIsDisplayed()
         }
 
         // The fallback, asserted here rather than in a test of its own.
@@ -130,7 +144,7 @@ class ConversationItemsTest {
         // The string matters: it is what a bug report quotes, and the
         // difference between "the app showed a blank" and "the app needs
         // support for X".
-        compose.onNodeWithText("whatever-comes-next", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("whatever-comes-next", substring = true).performScrollTo().assertIsDisplayed()
     }
 
 }

@@ -237,6 +237,35 @@ class ConvItemTest {
         assertEquals(emptyList(), parsed.turns.single().reminders)
     }
 
+    /** A current hub's tool row, every field — and an older hub's, which has two. */
+    @Test
+    fun a_tool_item_carries_its_id_name_target_and_state() {
+        val current = itemOf(
+            """{"kind":"tool","summary":"Bash(command=pnpm check)","error":true,"id":"toolu_01",
+                "name":"Bash","target":"pnpm check","at":"2026-09-28T10:00:01Z",
+                "ended_at":"2026-09-28T10:00:03Z","done":false}""",
+        )
+        assertEquals(
+            ConvItem.Tool(
+                summary = "Bash(command=pnpm check)",
+                error = true,
+                id = "toolu_01",
+                name = "Bash",
+                target = "pnpm check",
+                at = "2026-09-28T10:00:01Z",
+                endedAt = "2026-09-28T10:00:03Z",
+                done = false,
+            ),
+            current,
+        )
+        // Nulls where the hub has none to give.
+        val bare = itemOf("""{"kind":"tool","summary":"TodoWrite","error":false,"id":null,"name":"TodoWrite","target":null,"at":null,"ended_at":null,"done":true}""")
+        assertEquals(ConvItem.Tool(summary = "TodoWrite", name = "TodoWrite"), bare)
+        // An older hub: no id (so nothing to expand), no name, a finished call.
+        val old = itemOf("""{"kind":"tool","summary":"Read(a.kt)","error":false}""")
+        assertEquals(ConvItem.Tool("Read(a.kt)", error = false, id = null, name = "", target = null, done = true), old)
+    }
+
     /**
      * Every kind the hub emits today, parsed as itself.
      *
@@ -250,7 +279,7 @@ class ConvItemTest {
     fun every_kind_the_hub_emits_today_is_modelled() {
         val known = mapOf(
             "text" to """{"kind":"text","text":"x"}""",
-            "tool" to """{"kind":"tool","summary":"Read(a)"}""",
+            "tool" to """{"kind":"tool","summary":"Read(a)","error":false,"id":"tu_1","name":"Read","target":"a","at":"t1","ended_at":"t2","done":true}""",
             "subagent" to """{"kind":"subagent","name":"Task"}""",
             "compact" to """{"kind":"compact"}""",
             "command" to """{"kind":"command","name":"c"}""",

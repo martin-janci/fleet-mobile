@@ -56,6 +56,10 @@ class ToolsTheAppMayCallTest {
         "list_hosts",
         "list_projects",
         "session_conversation",
+        // One tool call's input and result, for an expanded tool row. In the
+        // hub's `READONLY_TOOLS`, so every client token may; additive, so it
+        // is only called when `tools/list` names it (`HubCapabilities.toolDetail`).
+        "session_tool_detail",
         "send_prompt",
         "fleet_health",
         "capture_session",

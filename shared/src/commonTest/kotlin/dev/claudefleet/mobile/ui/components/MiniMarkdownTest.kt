@@ -1,10 +1,14 @@
 package dev.claudefleet.mobile.ui.components
 
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -68,23 +72,21 @@ class MiniMarkdownTest {
     }
 
     @Test
-    fun dash_and_star_prefixed_lines_become_bullets() {
-        val blocks = parseMarkdown("- one\n* two")
+    fun dash_star_and_plus_prefixed_lines_become_one_bullet_list() {
+        val blocks = parseMarkdown("- one\n* two\n+ three")
 
-        assertEquals(2, blocks.size)
-        val one = assertIs<MdBlock.Bullet>(blocks[0])
-        assertEquals("one", one.text.text)
-        val two = assertIs<MdBlock.Bullet>(blocks[1])
-        assertEquals("two", two.text.text)
+        val list = assertIs<MdBlock.ListBlock>(blocks.single())
+        assertFalse(list.ordered)
+        assertEquals(listOf("one", "two", "three"), list.items.map { it.paragraphText() })
     }
 
     /**
      * The parser hands one logical bullet to the renderer regardless of its
-     * length; wrapping under the marker (see `MarkdownText`'s `Row` in
+     * length; wrapping under the marker (see `ListView`'s `Row` in
      * `MiniMarkdown.kt`, which needs `Modifier.weight(1f)` on the body
      * `Text` for this) is a layout concern, not a parsing one. This just
      * pins the parser side of that: a single, very long line prefixed with
-     * `- ` stays exactly one `Bullet` block, not split by its own length.
+     * `- ` stays exactly one list item, not split by its own length.
      */
     @Test
     fun a_long_bullet_stays_a_single_block() {
@@ -93,9 +95,8 @@ class MiniMarkdownTest {
 
         val blocks = parseMarkdown("- $long")
 
-        assertEquals(1, blocks.size)
-        val bullet = assertIs<MdBlock.Bullet>(blocks.single())
-        assertEquals(long, bullet.text.text)
+        val list = assertIs<MdBlock.ListBlock>(blocks.single())
+        assertEquals(long, list.items.single().paragraphText())
     }
 
     @Test
@@ -116,23 +117,36 @@ class MiniMarkdownTest {
     }
 
     @Test
-    fun a_heading_is_demoted_to_a_bold_paragraph() {
-        val blocks = parseMarkdown("# Title")
+    fun atx_headings_keep_their_level_one_to_six() {
+        val blocks = parseMarkdown((1..6).joinToString("\n") { "#".repeat(it) + " H$it" })
 
-        val paragraph = assertIs<MdBlock.Paragraph>(blocks.single()).text
-        assertEquals("Title", paragraph.text)
-        val bold = paragraph.spanStyles.first { it.item.fontWeight == FontWeight.Bold }
-        assertEquals(0, bold.start)
-        assertEquals(paragraph.text.length, bold.end)
+        assertEquals(6, blocks.size)
+        blocks.forEachIndexed { idx, block ->
+            val heading = assertIs<MdBlock.Heading>(block)
+            assertEquals(idx + 1, heading.level)
+            assertEquals("H${idx + 1}", heading.text.text)
+        }
     }
 
     @Test
-    fun a_deeper_heading_level_is_also_demoted_to_bold() {
-        val blocks = parseMarkdown("### Subheading")
+    fun a_heading_drops_its_closing_hashes_but_not_a_hash_in_a_word() {
+        assertEquals("Title", assertIs<MdBlock.Heading>(parseMarkdown("## Title ##").single()).text.text)
+        assertEquals("C#", assertIs<MdBlock.Heading>(parseMarkdown("## C#").single()).text.text)
+        // No space after the hashes: a hashtag, not a heading.
+        assertIs<MdBlock.Paragraph>(parseMarkdown("#hashtag").single())
+        // Seven hashes is not a heading either.
+        assertIs<MdBlock.Paragraph>(parseMarkdown("####### seven").single())
+    }
 
-        val paragraph = assertIs<MdBlock.Paragraph>(blocks.single()).text
-        assertEquals("Subheading", paragraph.text)
-        assertTrue(paragraph.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+    @Test
+    fun setext_underlines_make_level_one_and_two_headings() {
+        val blocks = parseMarkdown("Big\n===\n\nSmall\n---")
+
+        val big = assertIs<MdBlock.Heading>(blocks[0])
+        assertEquals(1, big.level)
+        assertEquals("Big", big.text.text)
+        val small = assertIs<MdBlock.Heading>(blocks[1])
+        assertEquals(2, small.level)
     }
 
     @Test
@@ -189,7 +203,9 @@ class MiniMarkdownTest {
      */
     @Test
     fun five_thousand_adjacent_stars_complete_quickly_and_deterministically() {
-        val input = "*".repeat(5000)
+        // A leading `x` keeps this on the inline path: a line of nothing but
+        // `*` is a GFM thematic break (pinned at the end of this test).
+        val input = "x" + "*".repeat(5000)
 
         val blocks = parseMarkdown(input)
 
@@ -197,7 +213,9 @@ class MiniMarkdownTest {
         // Every `*` pairs with its immediate neighbour as an (empty) bold
         // span -- 5000 is a multiple of 4, so the whole run is consumed and
         // nothing is left over to fall back to a literal, unmatched `*`.
-        assertEquals("", paragraph.text.text)
+        assertEquals("x", paragraph.text.text)
+
+        assertEquals(MdBlock.Rule, parseMarkdown("*".repeat(5000)).single())
     }
 
     @Test
@@ -222,19 +240,380 @@ class MiniMarkdownTest {
         val blocks = parseMarkdown("# Title\r\nline")
 
         assertEquals(2, blocks.size)
-        val heading = assertIs<MdBlock.Paragraph>(blocks[0])
+        val heading = assertIs<MdBlock.Heading>(blocks[0])
         assertEquals("Title", heading.text.text)
-        assertTrue(heading.text.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+        assertEquals(1, heading.level)
         val paragraph = assertIs<MdBlock.Paragraph>(blocks[1])
         assertEquals("line", paragraph.text.text)
 
         assertTrue(blocks.none { block ->
             val plain = when (block) {
                 is MdBlock.Paragraph -> block.text.text
-                is MdBlock.Bullet -> block.text.text
+                is MdBlock.Heading -> block.text.text
                 is MdBlock.Code -> block.text
+                else -> ""
             }
             '\r' in plain
         })
     }
+
+    // ------------------------------------------------------------ lists
+
+    @Test
+    fun an_ordered_list_honours_its_start_number_and_both_delimiters() {
+        val list = assertIs<MdBlock.ListBlock>(parseMarkdown("3. three\n4) four").single())
+
+        assertTrue(list.ordered)
+        assertEquals(3, list.start)
+        assertEquals(listOf("three", "four"), list.items.map { it.paragraphText() })
+    }
+
+    @Test
+    fun lists_nest_by_indentation() {
+        val md = "1. Reset\n2. Cap\n   - so a long outage\n     - does not stall\n   - matches the hub\n3. Test"
+
+        val outer = assertIs<MdBlock.ListBlock>(parseMarkdown(md).single())
+        assertEquals(3, outer.items.size)
+        val second = outer.items[1]
+        assertEquals("Cap", assertIs<MdBlock.Paragraph>(second.blocks[0]).text.text)
+        val inner = assertIs<MdBlock.ListBlock>(second.blocks[1])
+        assertFalse(inner.ordered)
+        assertEquals(2, inner.items.size)
+        val innermost = assertIs<MdBlock.ListBlock>(inner.items[0].blocks[1])
+        assertEquals("does not stall", innermost.items.single().paragraphText())
+        assertEquals("Test", outer.items[2].paragraphText())
+    }
+
+    /** Transcripts often nest with two spaces under `1. `, short of the content column. */
+    @Test
+    fun a_marker_indented_past_its_parent_marker_nests_leniently() {
+        val outer = assertIs<MdBlock.ListBlock>(parseMarkdown("1. parent\n  - child").single())
+
+        val child = assertIs<MdBlock.ListBlock>(outer.items.single().blocks[1])
+        assertEquals("child", child.items.single().paragraphText())
+    }
+
+    @Test
+    fun a_loose_list_with_blank_lines_between_items_stays_one_list() {
+        val list = assertIs<MdBlock.ListBlock>(parseMarkdown("- a\n\n- b\n\n- c").single())
+
+        assertEquals(3, list.items.size)
+    }
+
+    @Test
+    fun task_items_carry_their_checked_state() {
+        val list = assertIs<MdBlock.ListBlock>(parseMarkdown("- [x] done\n- [ ] todo\n- [X] also\n- plain").single())
+
+        assertEquals(listOf(true, false, true, null), list.items.map { it.checked })
+        assertEquals(listOf("done", "todo", "also", "plain"), list.items.map { it.paragraphText() })
+    }
+
+    @Test
+    fun an_ordered_marker_other_than_one_does_not_interrupt_a_paragraph() {
+        val blocks = parseMarkdown("we waited until\n2021. It was worth it")
+
+        val paragraph = assertIs<MdBlock.Paragraph>(blocks.single())
+        assertEquals("we waited until\n2021. It was worth it", paragraph.text.text)
+    }
+
+    // ------------------------------------------------------------ quotes, rules
+
+    @Test
+    fun a_blockquote_holds_other_blocks_and_nests() {
+        val quote = assertIs<MdBlock.Quote>(parseMarkdown("> **Note:** shared\n> - one\n>> deeper").single())
+
+        assertEquals("Note: shared", assertIs<MdBlock.Paragraph>(quote.blocks[0]).text.text)
+        assertIs<MdBlock.ListBlock>(quote.blocks[1])
+        val inner = assertIs<MdBlock.Quote>(quote.blocks[2])
+        assertEquals("deeper", assertIs<MdBlock.Paragraph>(inner.blocks.single()).text.text)
+    }
+
+    @Test
+    fun a_lazy_line_continues_the_quoted_paragraph() {
+        val quote = assertIs<MdBlock.Quote>(parseMarkdown("> first\nsecond").single())
+
+        assertEquals("first\nsecond", assertIs<MdBlock.Paragraph>(quote.blocks.single()).text.text)
+    }
+
+    @Test
+    fun three_dashes_stars_or_underscores_are_a_rule() {
+        for (rule in listOf("---", "***", "___", "- - -", "* * *")) {
+            val blocks = parseMarkdown("above\n\n$rule\n\nbelow")
+            assertEquals(MdBlock.Rule, blocks[1], "for $rule")
+        }
+    }
+
+    /**
+     * Kotlin/Native blows the stack as SIGBUS, not a catchable error, so
+     * nesting is bounded before recursing: 5000 `>` (or list markers) nest
+     * only MAX_DEPTH deep and the rest is paragraph text.
+     */
+    @Test
+    fun block_nesting_is_bounded() {
+        fun quoteDepth(blocks: List<MdBlock>): Int {
+            val q = blocks.singleOrNull() as? MdBlock.Quote ?: return 0
+            return 1 + quoteDepth(q.blocks)
+        }
+        val quotes = parseMarkdown(">".repeat(5000) + " deep")
+        assertEquals(MAX_DEPTH, quoteDepth(quotes))
+
+        fun listDepth(blocks: List<MdBlock>): Int {
+            val l = blocks.firstOrNull() as? MdBlock.ListBlock ?: return 0
+            return 1 + listDepth(l.items.first().blocks)
+        }
+        val lists = parseMarkdown("- ".repeat(5000) + "x")
+        assertEquals(MAX_DEPTH, listDepth(lists))
+    }
+
+    /**
+     * Inline spans nest (see `emphasis_nests`) but never past MAX_DEPTH:
+     * thousands of alternating markers complete, with the text intact.
+     */
+    @Test
+    fun deeply_alternating_inline_markers_complete() {
+        val open = listOf("**", "_", "~~", "*")
+        val input = (0 until 4000).joinToString("") { open[it % 4] + "a " } + "x" +
+            (3999 downTo 0).joinToString("") { " b" + open[it % 4] }
+
+        val paragraph = assertIs<MdBlock.Paragraph>(parseMarkdown(input).single()).text
+        assertTrue('x' in paragraph.text)
+    }
+
+    // ------------------------------------------------------------ fences
+
+    @Test
+    fun a_tilde_fence_and_a_longer_backtick_fence_work() {
+        val tilde = assertIs<MdBlock.Code>(parseMarkdown("~~~python\nprint(1)\n~~~").single())
+        assertEquals("print(1)", tilde.text)
+        assertEquals("python", tilde.lang)
+
+        // A four-backtick fence is not closed by three.
+        val outer = assertIs<MdBlock.Code>(parseMarkdown("````md\n```\ninner\n```\n````").single())
+        assertEquals("```\ninner\n```", outer.text)
+    }
+
+    @Test
+    fun an_indented_fence_inside_a_list_item_strips_its_indent() {
+        val list = assertIs<MdBlock.ListBlock>(parseMarkdown("1. run:\n   ```sh\n   make\n   ```").single())
+
+        val code = assertIs<MdBlock.Code>(list.items.single().blocks[1])
+        assertEquals("make", code.text)
+        assertEquals("sh", code.lang)
+    }
+
+    // ------------------------------------------------------------ tables
+
+    @Test
+    fun a_table_keeps_its_header_rows_and_alignment() {
+        val md = "| File | Change | Lines |\n|:-----|:------:|------:|\n| `a.ts` | **reset** | +4 |\n| b.ts | test | +22 |"
+
+        val table = assertIs<MdBlock.Table>(parseMarkdown(md).single())
+        assertEquals(listOf("File", "Change", "Lines"), table.header.map { it.text })
+        assertEquals(listOf(MdAlign.Start, MdAlign.Center, MdAlign.End), table.align)
+        assertEquals(2, table.rows.size)
+        assertEquals(listOf("a.ts", "reset", "+4"), table.rows[0].map { it.text })
+        assertTrue(table.rows[0][0].spanStyles.any { it.item.fontFamily == FontFamily.Monospace })
+        assertTrue(table.rows[0][1].spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+    }
+
+    @Test
+    fun a_table_without_outer_pipes_and_with_default_alignment_parses() {
+        val table = assertIs<MdBlock.Table>(parseMarkdown("a | b\n--- | ---\n1 | 2").single())
+
+        assertEquals(listOf(MdAlign.None, MdAlign.None), table.align)
+        assertEquals(listOf("1", "2"), table.rows.single().map { it.text })
+    }
+
+    @Test
+    fun ragged_rows_are_padded_or_truncated_to_the_header() {
+        val md = "| a | b | c |\n|---|---|---|\n| 1 |\n| 1 | 2 | 3 | 4 | 5 |"
+
+        val table = assertIs<MdBlock.Table>(parseMarkdown(md).single())
+        assertEquals(listOf("1", "", ""), table.rows[0].map { it.text })
+        assertEquals(listOf("1", "2", "3"), table.rows[1].map { it.text })
+    }
+
+    @Test
+    fun an_escaped_pipe_stays_inside_its_cell() {
+        val table = assertIs<MdBlock.Table>(parseMarkdown("| expr | means |\n|---|---|\n| `a \\| b` | or |").single())
+
+        assertEquals(listOf("a | b", "or"), table.rows.single().map { it.text })
+    }
+
+    @Test
+    fun a_header_and_delimiter_with_different_cell_counts_is_not_a_table() {
+        val blocks = parseMarkdown("| a | b |\n|---|\n| 1 | 2 |")
+
+        assertTrue(blocks.none { it is MdBlock.Table })
+    }
+
+    @Test
+    fun a_table_ends_at_a_blank_line_or_a_line_without_a_pipe() {
+        val blocks = parseMarkdown("| a |\n|---|\n| 1 |\nafter")
+
+        assertEquals(1, assertIs<MdBlock.Table>(blocks[0]).rows.size)
+        assertEquals("after", assertIs<MdBlock.Paragraph>(blocks[1]).text.text)
+    }
+
+    // ------------------------------------------------------------ inline
+
+    @Test
+    fun underscores_emphasise_but_never_inside_a_word() {
+        val p = paragraph("__bold__ and _italic_ but snake_case_name stays")
+
+        assertEquals("bold and italic but snake_case_name stays", p.text)
+        assertEquals("bold", p.styled { it.fontWeight == FontWeight.Bold })
+        assertEquals("italic", p.styled { it.fontStyle == FontStyle.Italic })
+    }
+
+    @Test
+    fun triple_stars_are_bold_and_italic() {
+        val p = paragraph("***both***")
+
+        assertEquals("both", p.text)
+        assertTrue(p.spanStyles.any { it.item.fontWeight == FontWeight.Bold && it.item.fontStyle == FontStyle.Italic })
+    }
+
+    @Test
+    fun emphasis_nests() {
+        val p = paragraph("**bold with `code` and *italic***")
+
+        assertEquals("bold with code and italic", p.text)
+        assertEquals("code", p.styled { it.fontFamily == FontFamily.Monospace })
+        assertEquals("italic", p.styled { it.fontStyle == FontStyle.Italic })
+    }
+
+    @Test
+    fun a_spaced_star_is_arithmetic_not_emphasis() {
+        val p = paragraph("2 * 3 * 4")
+
+        assertEquals("2 * 3 * 4", p.text)
+        assertTrue(p.spanStyles.isEmpty())
+    }
+
+    @Test
+    fun strikethrough_uses_line_through() {
+        val p = paragraph("~~old~~ new")
+
+        assertEquals("old new", p.text)
+        assertEquals("old", p.styled { it.textDecoration == TextDecoration.LineThrough })
+    }
+
+    @Test
+    fun double_backtick_code_can_hold_a_backtick() {
+        val p = paragraph("``a ` b`` done")
+
+        assertEquals("a ` b done", p.text)
+        assertEquals("a ` b", p.styled { it.fontFamily == FontFamily.Monospace })
+    }
+
+    @Test
+    fun inline_code_keeps_backslashes_and_stars_literal() {
+        val p = paragraph("`C:\\*path*\\`")
+
+        assertEquals("C:\\*path*\\", p.text)
+        assertTrue(p.spanStyles.none { it.item.fontStyle == FontStyle.Italic })
+    }
+
+    @Test
+    fun backslash_escapes_make_markers_literal() {
+        val p = paragraph("\\*not italic\\* and \\[not a link\\](x) and \\\\")
+
+        assertEquals("*not italic* and [not a link](x) and \\", p.text)
+        assertTrue(p.spanStyles.isEmpty())
+        assertTrue(p.links().isEmpty())
+    }
+
+    @Test
+    fun a_markdown_link_becomes_a_url_annotation_over_its_text() {
+        val p = paragraph("see the [**spec**](https://example.com/spec \"title\") now")
+
+        assertEquals("see the spec now", p.text)
+        val link = p.links().single()
+        assertEquals("https://example.com/spec", (link.item as LinkAnnotation.Url).url)
+        assertEquals("spec", p.text.substring(link.start, link.end))
+        assertEquals("spec", p.styled { it.fontWeight == FontWeight.Bold })
+    }
+
+    @Test
+    fun a_link_url_may_hold_balanced_parentheses() {
+        val p = paragraph("[Foo](https://en.wikipedia.org/wiki/Foo_(bar)) x")
+
+        assertEquals("Foo x", p.text)
+        assertEquals("https://en.wikipedia.org/wiki/Foo_(bar)", (p.links().single().item as LinkAnnotation.Url).url)
+    }
+
+    @Test
+    fun unsafe_link_schemes_render_as_plain_text() {
+        for (url in listOf("javascript:alert(1)", "file:///etc/passwd", "intent://x", "relative/path", "data:text/html,x")) {
+            val p = paragraph("[click]($url)")
+            assertEquals("click", p.text, "for $url")
+            assertTrue(p.links().isEmpty(), "for $url")
+        }
+        assertTrue(paragraph("<javascript:alert(1)>").links().isEmpty())
+    }
+
+    @Test
+    fun mailto_links_are_allowed() {
+        val p = paragraph("[mail](mailto:a@b.dev) and <c@d.dev>")
+
+        assertEquals(
+            listOf("mailto:a@b.dev", "mailto:c@d.dev"),
+            p.links().map { (it.item as LinkAnnotation.Url).url },
+        )
+        assertEquals("mail and c@d.dev", p.text)
+    }
+
+    @Test
+    fun autolinks_and_bare_urls_become_links() {
+        val p = paragraph("<https://a.dev/x> and https://b.dev/y_z. And (https://c.dev/q) end")
+
+        assertEquals(
+            listOf("https://a.dev/x", "https://b.dev/y_z", "https://c.dev/q"),
+            p.links().map { (it.item as LinkAnnotation.Url).url },
+        )
+        assertEquals("https://a.dev/x and https://b.dev/y_z. And (https://c.dev/q) end", p.text)
+    }
+
+    @Test
+    fun an_image_is_never_fetched_and_shows_its_alt_text() {
+        val p = paragraph("![a diagram](https://example.com/d.png)")
+
+        assertEquals("a diagram", p.text)
+        // A tap-to-open link, not an inline image.
+        assertEquals("https://example.com/d.png", (p.links().single().item as LinkAnnotation.Url).url)
+    }
+
+    @Test
+    fun a_link_inside_link_text_is_not_nested() {
+        val p = paragraph("[see https://x.dev](https://y.dev)")
+
+        assertEquals(1, p.links().size)
+    }
+
+    /**
+     * The O(n) guarantee for the other markers: thousands of stray openers
+     * of every kind complete promptly (no wall-clock assertion, see the
+     * 5000-star test above for why).
+     */
+    @Test
+    fun many_stray_markers_of_every_kind_complete() {
+        val input = "[`_~<!(".repeat(3000) + "https://".repeat(2000)
+
+        val p = paragraph(input)
+        assertTrue(p.text.isNotEmpty())
+    }
+
+    // ------------------------------------------------------------ helpers
+
+    private fun paragraph(md: String): AnnotatedString = assertIs<MdBlock.Paragraph>(parseMarkdown(md).single()).text
+
+    private fun AnnotatedString.links() = getLinkAnnotations(0, length)
+
+    private fun AnnotatedString.styled(pred: (androidx.compose.ui.text.SpanStyle) -> Boolean): String {
+        val span = spanStyles.first { pred(it.item) && it.end > it.start }
+        return text.substring(span.start, span.end)
+    }
+
+    private fun MdListItem.paragraphText(): String = assertIs<MdBlock.Paragraph>(blocks.single()).text.text
 }
