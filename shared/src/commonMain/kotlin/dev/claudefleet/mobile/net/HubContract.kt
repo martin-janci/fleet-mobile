@@ -13,7 +13,8 @@ package dev.claudefleet.mobile.net
  * catch. Revision 4 added the `bash` and `harness` conversation item kinds —
  * modelled here since fleet-mobile #22, and any unknown kind degrades to
  * [dev.claudefleet.mobile.model.ConvItem.Unsupported] rather than failing the
- * conversation — and the `session_activity` tool, which this app never calls.
+ * conversation — and the `session_activity` tool, which this app calls only
+ * behind [HUB_VERSION_DIGIT_KEYS], to re-read a dialog before answering it.
  * Left at 3, it refused the 0.2.36 hub outright with "this app is too old"
  * (2026-09-24). Revision 5 made `add_project` and `list_github_repos` hub
  * tools (and `GithubRepo` a report type): this app neither calls nor reads
@@ -96,6 +97,20 @@ fun ContractVerdict.sentence(): String? = when (this) {
  * instead, via [semverAtLeast].
  */
 const val HUB_VERSION_KEYS: String = "0.2.35"
+
+/**
+ * The first hub release whose `send_prompt { keys }` takes a digit `1`–`9`
+ * and that offers `session_activity` — the two things answering a dialog's
+ * numbered option needs.
+ *
+ * An option cannot go as typed text. The hub refuses text into a blocked
+ * session (`E_INVALID_STATE`: "Enter would answer it"), and forcing it would
+ * not help: the text path pastes, the REPL has bracketed paste on, so the
+ * first byte the dialog would see is ESC — cancelling it instead of
+ * answering. A hub between [HUB_VERSION_KEYS] and this one gets no option
+ * chips, only Enter / Esc and the terminal.
+ */
+const val HUB_VERSION_DIGIT_KEYS: String = "0.2.36"
 
 /**
  * Whether [version] is at or above [floor], read as `major.minor.patch`.

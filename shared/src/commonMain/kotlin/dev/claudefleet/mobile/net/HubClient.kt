@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.net
 
+import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.MultiStart
@@ -368,8 +369,9 @@ class HubClient(
 
     /**
      * Press one key instead of typing text — `send_prompt` with `keys` and an
-     * empty `prompt`. [key] is one of `"Enter"`, `"Escape"`, `"C-c"`, the set
-     * the hub's guard accepts.
+     * empty `prompt`. [key] is one of `"Enter"`, `"Escape"`, `"C-c"` or, from
+     * [HUB_VERSION_DIGIT_KEYS], a digit `"1"`–`"9"` that picks that option of
+     * a dialog — the set the hub's guard accepts.
      */
     suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult =
         call(
@@ -380,6 +382,17 @@ class HubClient(
                 put("keys", key)
             },
         ) { json.decodeFromJsonElement(SendPromptResult.serializer(), it) }
+
+    /**
+     * What the session's pane shows right now (`session_activity`, readonly):
+     * one capture, seconds old, where the row's `pending_input` is up to a
+     * reconcile tick old. Read immediately before a dialog answer goes out.
+     */
+    suspend fun activity(sessionId: Long): ActivityProbe =
+        call(
+            "session_activity",
+            buildJsonObject { put("session_id", sessionId) },
+        ) { json.decodeFromJsonElement(ActivityProbe.serializer(), it) }
 
     /**
      * The visible tmux pane, capped to [maxLines] lines.

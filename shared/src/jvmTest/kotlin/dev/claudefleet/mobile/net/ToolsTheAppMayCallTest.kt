@@ -63,6 +63,10 @@ class ToolsTheAppMayCallTest {
         "send_prompt",
         "fleet_health",
         "capture_session",
+        // The pane read made immediately before a dialog's numbered option is
+        // pressed (`SessionViewModel.answer`). Readonly and `Access::Client`
+        // in the hub's `guard.rs`.
+        "session_activity",
         "wait_for_session",
         "restart_session",
         "safe_kill_session",

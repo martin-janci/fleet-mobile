@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.model.Activity
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.net.HUB_VERSION_DIGIT_KEYS
 import dev.claudefleet.mobile.net.HUB_VERSION_KEYS
 import dev.claudefleet.mobile.net.semverAtLeast
 
@@ -10,6 +11,10 @@ import dev.claudefleet.mobile.net.semverAtLeast
  * ad hoc. Task 3 turns one of these into a `send_prompt` call.
  */
 sealed interface Answer {
+    /**
+     * A dialog's numbered option, pressed as the digit key [n] — never typed
+     * as text (see [HUB_VERSION_DIGIT_KEYS] for why text cannot answer it).
+     */
     data class Option(val n: Int, val label: String) : Answer
     data object Enter : Answer
     data object Escape : Answer
@@ -37,7 +42,10 @@ data class BlockedCard(
  * `hubVersion` gates the structured `send_prompt { keys }` chips: below
  * [HUB_VERSION_KEYS] (or when the hub named no version at all) the hub cannot
  * take a structured Enter/Escape, so those chips are withheld and the
- * terminal stays the only way to answer.
+ * terminal stays the only way to answer. The numbered options of a dialog
+ * need [HUB_VERSION_DIGIT_KEYS] in the same way, and only `1`–`9` have a key:
+ * the REPL has no keystroke for "10" that a dialog would not read as "1", so
+ * a higher option is left to the terminal.
  */
 fun blockedCard(row: SessionRow, hubVersion: String?): BlockedCard? {
     val stuck = row.stuckKind
@@ -63,9 +71,16 @@ fun blockedCard(row: SessionRow, hubVersion: String?): BlockedCard? {
         null -> {
             val p = row.pendingInput
             val headline = p?.question ?: Activity.pending(row.currentActivity) ?: "Waiting for input"
-            val options = p?.options.orEmpty().map { Answer.Option(it.n, it.label) }
+            val options = if (semverAtLeast(hubVersion, HUB_VERSION_DIGIT_KEYS)) {
+                p?.options.orEmpty().filter { it.n in 1..ANSWER_MAX_DIGIT }.map { Answer.Option(it.n, it.label) }
+            } else {
+                emptyList()
+            }
             BlockedCard(headline, options + keyAnswers)
         }
         else -> BlockedCard(stuck.replace('_', ' '), keyAnswers, offerRestart = true)
     }
 }
+
+/** Highest option a single keystroke can pick — the hub's `DigitKey` range, `1`..`9`. */
+internal const val ANSWER_MAX_DIGIT: Int = 9

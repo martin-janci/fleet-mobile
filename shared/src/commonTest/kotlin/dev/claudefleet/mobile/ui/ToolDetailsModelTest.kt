@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.SessionActions
+import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
@@ -56,6 +57,7 @@ class ToolDetailsModelTest {
         override suspend fun conversation(sessionId: Long, turns: Int?, sinceTurn: Long?): Conversation = error("unused")
         override suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult = error("unused")
         override suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult = error("unused")
+        override suspend fun activity(sessionId: Long): ActivityProbe = error("unused")
         override suspend fun capture(sessionId: Long, maxLines: Int): String = error("unused")
         override suspend fun waitForTurn(sessionId: Long, turn: Long, timeoutS: Int): WaitResult = error("unused")
         override suspend fun restart(sessionId: Long) = error("unused")

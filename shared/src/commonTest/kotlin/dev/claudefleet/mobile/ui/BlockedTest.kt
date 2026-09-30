@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.model.PendingInput
 import dev.claudefleet.mobile.model.PendingOption
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.net.HUB_VERSION_DIGIT_KEYS
 import dev.claudefleet.mobile.net.HUB_VERSION_KEYS
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -18,9 +19,32 @@ class BlockedTest {
     @Test
     fun options_become_answers_and_the_question_is_the_headline() {
         val p = PendingInput("permission", "Recreate turanga?", listOf(PendingOption(1, "Yes", true), PendingOption(3, "No")))
-        val card = blockedCard(row(pending = p, activity = "waiting for input: ☐ Recreate turanga?"), HUB_VERSION_KEYS)!!
+        val card = blockedCard(row(pending = p, activity = "waiting for input: ☐ Recreate turanga?"), HUB_VERSION_DIGIT_KEYS)!!
         assertEquals("Recreate turanga?", card.headline)
         assertEquals(listOf(Answer.Option(1, "Yes"), Answer.Option(3, "No"), Answer.Enter, Answer.Escape), card.answers)
+    }
+
+    /**
+     * A 0.2.35 hub takes Enter / Esc / C-c as keys but not a digit, and it
+     * refuses a typed "1" into a blocked session — so it gets no option chip
+     * it would refuse, only the keys and the terminal.
+     */
+    @Test
+    fun a_hub_without_digit_keys_offers_no_option_chips() {
+        val p = PendingInput("permission", "Allow?", listOf(PendingOption(1, "Yes"), PendingOption(2, "No")))
+        val card = blockedCard(row(pending = p), HUB_VERSION_KEYS)!!
+        assertEquals("Allow?", card.headline)
+        assertEquals(listOf(Answer.Enter, Answer.Escape), card.answers)
+        assertTrue(card.terminalAvailable)
+    }
+
+    /** No keystroke picks option 10: pressing "1" then "0" would answer option 1. */
+    @Test
+    fun an_option_above_nine_has_no_chip() {
+        val options = (1..10).map { PendingOption(it, "choice $it") }
+        val card = blockedCard(row(pending = PendingInput("input", "Pick one", options)), HUB_VERSION_DIGIT_KEYS)!!
+        val offered = card.answers.filterIsInstance<Answer.Option>().map { it.n }
+        assertEquals((1..9).toList(), offered)
     }
 
     @Test

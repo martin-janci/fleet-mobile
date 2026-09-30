@@ -158,7 +158,11 @@ missing feature should only hide a button. Instead, on every `ready`,
   connection** (the next `ready` asks again — it may be an upgraded hub).
 - A hub that cannot answer `tools/list` reads as the old hub: nothing
   work-shaped is offered, and nothing errors. `HUB_VERSION_KEYS` stays only
-  for the `send_prompt { keys }` chips.
+  for the `send_prompt { keys }` chips, and `HUB_VERSION_DIGIT_KEYS` (0.2.36)
+  for a dialog's numbered options: an option is pressed as its digit KEY after
+  a `session_activity` re-read shows the same dialog — never sent as text,
+  which the hub refuses into a blocked session (`E_INVALID_STATE`) and which,
+  pasted, would reach the dialog as ESC and cancel it.
 
 `work` and `work_link` are in `ToolsTheAppMayCallTest`'s `permitted` set;
 `work_admin` (tracker administration, master-only) is in `forbidden`. One row
