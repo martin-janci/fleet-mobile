@@ -9,10 +9,13 @@ import dev.claudefleet.mobile.data.QuickReplyActions
 import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.epochSeconds
+import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
+import dev.claudefleet.mobile.model.PendingInput
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.appending
+import dev.claudefleet.mobile.model.fingerprint
 import dev.claudefleet.mobile.model.tailMarker
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.store.Prefs
@@ -657,10 +660,21 @@ class SessionViewModel(
         local.update { it.copy(answering = true, stillWaiting = false, error = null) }
         try {
             val receipt = when (a) {
-                // A numbered option is typed as its number, which is what the
-                // REPL's own prompt asks for. Only the bare keystrokes go through
-                // `send_prompt { keys }` — an empty prompt is not a key.
-                is Answer.Option -> actions.sendPrompt(sessionId, a.n.toString())
+                // A numbered option is its digit KEY, never typed text: the
+                // hub refuses text into a blocked session (E_INVALID_STATE),
+                // and pasted text would reach the dialog as ESC first and
+                // cancel it. A key has no such gate on the hub, so the pane
+                // is re-read first and nothing goes out unless the dialog on
+                // screen is still the one this card was drawn from — the
+                // same check the desktop's answer card makes.
+                is Answer.Option -> {
+                    val moved = dialogMoved(row()?.pendingInput, actions.activity(sessionId), a)
+                    if (moved != null) {
+                        local.update { it.copy(answering = false, error = moved) }
+                        return@launch
+                    }
+                    actions.sendKeys(sessionId, a.n.toString())
+                }
                 is Answer.Text -> actions.sendPrompt(sessionId, a.text)
                 Answer.Enter -> actions.sendKeys(sessionId, "Enter")
                 Answer.Escape -> actions.sendKeys(sessionId, "Escape")
@@ -1169,6 +1183,33 @@ internal val SESSION_EVENT_DEBOUNCE = 500.milliseconds
  * when the REPL never moves at all.
  */
 internal const val ANSWER_WAIT_SECONDS: Int = 30
+
+/**
+ * Why [option] must not be pressed, or null when it may: the fresh [probe]
+ * has to show the same dialog the card was drawn from ([asked], the row's
+ * `pending_input`), still blocked, still offering that option. The row is up
+ * to a reconcile tick old, so without this a tap on a stale card could
+ * approve a permission the person never saw — or press a digit into a REPL
+ * that has already moved on. PURE, for the tests.
+ */
+internal fun dialogMoved(asked: PendingInput?, probe: ActivityProbe, option: Answer.Option): Friendly? {
+    val onScreen = probe.pendingInput?.takeIf { probe.stuckKind == null && probe.claudeStatus == "blocked" }
+    return when {
+        onScreen == null -> Friendly(
+            "That question is gone",
+            "Nothing was sent — it was answered or dismissed already.",
+            isError = false,
+        )
+        asked == null ||
+            onScreen.fingerprint() != asked.fingerprint() ||
+            onScreen.options.none { it.n == option.n && it.label == option.label } -> Friendly(
+            "The question changed",
+            "Nothing was sent — read it again and choose.",
+            isError = false,
+        )
+        else -> null
+    }
+}
 
 /** What `wait_for_session` answers when the turn actually moved. */
 internal const val WAIT_SATISFIED: String = "satisfied"

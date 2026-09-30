@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.data
 
+import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.ToolDetail
@@ -17,7 +18,7 @@ import kotlinx.coroutines.CancellationException
  * discouraged, and makes the view-model tests transport-free.
  *
  * Every one of these is a tool a paired client token may call:
- * `session_conversation`, `session_tool_detail` and `fleet_health` are in the hub's readonly
+ * `session_conversation`, `session_tool_detail`, `session_activity` and `fleet_health` are in the hub's readonly
  * allow-list, and `send_prompt` is fleet-wide session control, which a `full`
  * client has and a `readonly` one does not (see `SessionViewModel`'s
  * `canSendPrompts`).
@@ -48,8 +49,14 @@ interface SessionActions {
     /** Deliver [text] to the session's REPL and submit it. */
     suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult
 
-    /** Press one key (`"Enter"` | `"Escape"` | `"C-c"`) instead of typing text. */
+    /**
+     * Press one key (`"Enter"` | `"Escape"` | `"C-c"`, or a digit `"1"`–`"9"`
+     * that picks a dialog's option) instead of typing text.
+     */
     suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult
+
+    /** The pane as it is right now (`session_activity`), to re-check a dialog before answering it. */
+    suspend fun activity(sessionId: Long): ActivityProbe
 
     /** The visible tmux pane, capped to [maxLines] lines. */
     suspend fun capture(sessionId: Long, maxLines: Int = 40): String
@@ -105,6 +112,9 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
 
     override suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult =
         session.withClient { it.sendKeys(sessionId, key) }
+
+    override suspend fun activity(sessionId: Long): ActivityProbe =
+        session.withClient { it.activity(sessionId) }
 
     override suspend fun capture(sessionId: Long, maxLines: Int): String =
         session.withClient { it.capture(sessionId, maxLines) }

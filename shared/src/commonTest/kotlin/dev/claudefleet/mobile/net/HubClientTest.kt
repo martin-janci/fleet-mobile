@@ -673,6 +673,36 @@ class HubClientTest {
         assertEquals(3L, client.sendKeys(7, "Escape").turnSeqBefore)
     }
 
+    /** A dialog's option is a digit key — never the text "2", which the hub refuses into a blocked session. */
+    @Test
+    fun a_digit_is_sent_as_a_key() = runTest {
+        val client = clientAnswering { body ->
+            assertEquals("send_prompt", body.tool())
+            assertEquals("2", body.args()["keys"]?.jsonPrimitive?.content)
+            assertEquals("", body.args()["prompt"]?.jsonPrimitive?.content)
+            """{"delivered":true,"session_id":7,"turn_seq_before":3}"""
+        }
+        assertEquals(3L, client.sendKeys(7, "2").turnSeqBefore)
+    }
+
+    /** `session_activity`'s answer as the hub writes it (`ActivityProbe`, fields it adds are ignored). */
+    @Test
+    fun activity_reads_the_dialog_on_screen() = runTest {
+        val client = clientAnswering { body ->
+            assertEquals("session_activity", body.tool())
+            assertEquals(7, body.args()["session_id"]?.jsonPrimitive?.int)
+            """{"claude_status":"blocked","current_activity":"waiting for input","stuck_kind":null,
+               "waiting_for":"permission","spinner":null,
+               "pending_input":{"kind":"permission","question":"Allow access to /srv?",
+                 "options":[{"n":1,"label":"Yes","selected":true},{"n":2,"label":"No","selected":false}]}}"""
+        }
+        val probe = client.activity(7)
+        assertEquals("blocked", probe.claudeStatus)
+        assertNull(probe.stuckKind)
+        assertEquals("Allow access to /srv?", probe.pendingInput?.question)
+        assertEquals(listOf(1, 2), probe.pendingInput?.options?.map { it.n })
+    }
+
     /**
      * `capture_session` answers plain text, not JSON — the pane's own text
      * riding in the tool's text content block, not a JSON string inside it.

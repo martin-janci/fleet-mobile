@@ -7,6 +7,7 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.data.STOPPED
+import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.Conversation
@@ -18,6 +19,7 @@ import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.ToolDetail
 import dev.claudefleet.mobile.model.WaitResult
+import dev.claudefleet.mobile.net.HUB_VERSION_DIGIT_KEYS
 import dev.claudefleet.mobile.net.HUB_VERSION_KEYS
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.data.FakeQuickReplyActions
@@ -202,6 +204,24 @@ private class FakeActions : SessionActions {
     var captures = 0
         private set
     var captureFails: Throwable? = null
+
+    /**
+     * What [activity] answers — by default the dialog [blockedRow] carries,
+     * still on screen, so an option answer goes through unless a test moves it.
+     */
+    var probeAnswer: ActivityProbe = ActivityProbe(
+        claudeStatus = "blocked",
+        pendingInput = PendingInput("permission", "Do it?", listOf(PendingOption(1, "Yes"))),
+    )
+    var probeFails: Throwable? = null
+    var probes = 0
+        private set
+
+    override suspend fun activity(sessionId: Long): ActivityProbe {
+        probes += 1
+        probeFails?.let { throw it }
+        return probeAnswer
+    }
 
     override suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult {
         sentKeys += key
@@ -1804,21 +1824,26 @@ class SessionViewModelTest {
      * go away.
      */
     @Test
-    fun answering_an_option_sends_its_number_waits_for_the_turn_and_clears_the_card() = runTest {
+    fun answering_an_option_presses_its_digit_waits_for_the_turn_and_clears_the_card() = runTest {
         val actions = FakeActions()
         val gate = CompletableDeferred<Unit>()
         actions.sendGate = gate
         val fleet = FakeFleetState(listOf(blockedRow()))
-        fleet.hubVersion.value = HUB_VERSION_KEYS
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
         val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
         vm.load().join()
         runCurrent()
-        assertNotNull(vm.state.value.card)
+        assertEquals(Answer.Option(1, "Yes"), assertNotNull(vm.state.value.card).answers.first())
 
         val job = vm.answer(Answer.Option(1, "Yes"))
         runCurrent()
         assertTrue(vm.state.value.answering)
-        assertEquals(listOf("1"), actions.sentPrompts)
+        assertEquals(1, actions.probes, "the pane is re-read before the key goes out")
+        assertEquals(listOf("1"), actions.sentKeys)
+        assertTrue(
+            actions.sentPrompts.isEmpty(),
+            "typed text into a blocked session is refused by the hub (E_INVALID_STATE), and pasted it would cancel the dialog",
+        )
 
         gate.complete(Unit)
         // The hub moved on: the same row, no longer blocked.
@@ -1829,6 +1854,63 @@ class SessionViewModelTest {
         assertNull(vm.state.value.card)
         assertFalse(vm.state.value.answering)
         assertEquals(listOf(ID to 3L), actions.waited, "waited on the send's turn_seq_before")
+    }
+
+    /**
+     * The row is up to a reconcile tick old: a tap on a card drawn from it
+     * must not answer a dialog the person never saw.
+     */
+    @Test
+    fun an_option_is_not_pressed_when_the_dialog_on_screen_changed() = runTest {
+        val actions = FakeActions()
+        actions.probeAnswer = ActivityProbe(
+            claudeStatus = "blocked",
+            pendingInput = PendingInput("permission", "Delete the repo?", listOf(PendingOption(1, "Yes"))),
+        )
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Option(1, "Yes")).join()
+        runCurrent()
+
+        assertTrue(actions.sentKeys.isEmpty(), "${actions.sentKeys}")
+        assertTrue(actions.sentPrompts.isEmpty())
+        assertEquals("The question changed", vm.state.value.error?.title)
+        assertFalse(vm.state.value.answering)
+    }
+
+    @Test
+    fun an_option_is_not_pressed_when_the_dialog_is_gone() = runTest {
+        val actions = FakeActions()
+        actions.probeAnswer = ActivityProbe(claudeStatus = "working")
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Option(1, "Yes")).join()
+        runCurrent()
+
+        assertTrue(actions.sentKeys.isEmpty())
+        assertEquals("That question is gone", vm.state.value.error?.title)
+        assertFalse(vm.state.value.answering)
+    }
+
+    /** Not knowing what is on the pane is not the same as knowing it is unchanged. */
+    @Test
+    fun an_option_is_not_pressed_when_the_pane_cannot_be_read() = runTest {
+        val actions = FakeActions()
+        actions.probeFails = HubError.Tool("E_SSH", "host unreachable")
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Option(1, "Yes")).join()
+        runCurrent()
+
+        assertTrue(actions.sentKeys.isEmpty())
+        assertEquals("E_SSH: host unreachable", vm.state.value.error?.details)
+        assertFalse(vm.state.value.answering)
     }
 
     @Test
@@ -1937,6 +2019,7 @@ class SessionViewModelTest {
 
         assertTrue(actions.sentKeys.isEmpty())
         assertTrue(actions.sentPrompts.isEmpty())
+        assertEquals(0, actions.probes, "a readonly device does not even read the pane for an answer")
         assertTrue(actions.waited.isEmpty())
         assertFalse(vm.state.value.answering)
     }
@@ -2141,6 +2224,7 @@ class SessionViewModelTest {
 
         assertTrue(actions.sentKeys.isEmpty())
         assertTrue(actions.sentPrompts.isEmpty())
+        assertEquals(0, actions.probes, "a readonly device does not even read the pane for an answer")
         assertTrue(actions.waited.isEmpty())
     }
 
