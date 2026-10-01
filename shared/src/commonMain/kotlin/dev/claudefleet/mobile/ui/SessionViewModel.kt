@@ -659,22 +659,43 @@ class SessionViewModel(
         if (!canAnswerNow(local.value)) return@launch
         local.update { it.copy(answering = true, stillWaiting = false, error = null) }
         try {
-            val receipt = when (a) {
-                // A numbered option is its digit KEY, never typed text: the
-                // hub refuses text into a blocked session (E_INVALID_STATE),
-                // and pasted text would reach the dialog as ESC first and
-                // cancel it. A key has no such gate on the hub, so the pane
-                // is re-read first and nothing goes out unless the dialog on
-                // screen is still the one this card was drawn from — the
-                // same check the desktop's answer card makes.
-                is Answer.Option -> {
-                    val moved = dialogMoved(row()?.pendingInput, actions.activity(sessionId), a)
-                    if (moved != null) {
-                        local.update { it.copy(answering = false, error = moved) }
-                        return@launch
-                    }
-                    actions.sendKeys(sessionId, a.n.toString())
+            // Every KEY is pressed only after re-reading the pane. The hub
+            // refuses typed text into a blocked session (E_INVALID_STATE) and
+            // pasted text would reach a dialog as ESC first and cancel it, so
+            // an answer has to be a key — and `send_prompt { keys }` has no
+            // state gate on the hub at all. The row the card was drawn from is
+            // up to a reconcile tick old, so nothing goes out unless the pane
+            // still shows the same card. The same check the desktop's answer
+            // card makes.
+            //
+            // Enter and Escape need this as much as the digits do, and on a
+            // trust prompt more: Enter trusts the folder, and on a permission
+            // dialog it picks the highlighted option, i.e. approves.
+            val keyToPress = when (a) {
+                is Answer.Option -> a.n.toString()
+                Answer.Enter -> "Enter"
+                Answer.Escape -> "Escape"
+                // Drawn by no card (`blockedCard` never offers it), so it
+                // cannot be pressed from a stale one; C-c interrupts rather
+                // than approving anything.
+                Answer.Interrupt -> null
+                is Answer.Text -> null
+            }
+            if (keyToPress != null) {
+                val asked = row()
+                val moved = dialogMoved(
+                    asked?.pendingInput,
+                    asked?.stuckKind,
+                    actions.activity(sessionId),
+                    a as? Answer.Option,
+                )
+                if (moved != null) {
+                    local.update { it.copy(answering = false, error = moved) }
+                    return@launch
                 }
+            }
+            val receipt = when (a) {
+                is Answer.Option -> actions.sendKeys(sessionId, a.n.toString())
                 is Answer.Text -> actions.sendPrompt(sessionId, a.text)
                 Answer.Enter -> actions.sendKeys(sessionId, "Enter")
                 Answer.Escape -> actions.sendKeys(sessionId, "Escape")
@@ -1185,28 +1206,55 @@ internal val SESSION_EVENT_DEBOUNCE = 500.milliseconds
 internal const val ANSWER_WAIT_SECONDS: Int = 30
 
 /**
- * Why [option] must not be pressed, or null when it may: the fresh [probe]
- * has to show the same dialog the card was drawn from ([asked], the row's
- * `pending_input`), still blocked, still offering that option. The row is up
- * to a reconcile tick old, so without this a tap on a stale card could
- * approve a permission the person never saw — or press a digit into a REPL
- * that has already moved on. PURE, for the tests.
+ * Why this answer must not be pressed, or null when it may: the fresh [probe]
+ * has to show the same card the person tapped. The row is up to a reconcile
+ * tick old, so without this a tap on a stale card could approve a permission
+ * the person never saw — or press a digit into a REPL that has already moved
+ * on. PURE, for the tests.
+ *
+ * Two card shapes, because [blockedCard] draws two and both offer keys:
+ *
+ *  - a STUCK card ([askedStuck] set — `trust_prompt`, `press_enter`, an
+ *    unknown kind): the pane must still be stuck the same way. The hub
+ *    reports such a pane as `stuck_kind` with `pending_input: null`, so the
+ *    dialog identity below says nothing about it. This is the dangerous one:
+ *    Enter on "Trust this folder?" trusts the folder, and on a permission
+ *    dialog it picks the highlighted option, i.e. it approves — so a trust
+ *    card left on screen after the pane moved to a permission dialog was one
+ *    tap from an unauthorised, irreversible grant.
+ *  - a DIALOG card ([asked] set): the pane must still be blocked on a dialog
+ *    of the same identity, and — when [option] names one — still offer it.
+ *    [option] is null for the bare Enter/Escape chips that sit beside the
+ *    digits on that same card.
  */
-internal fun dialogMoved(asked: PendingInput?, probe: ActivityProbe, option: Answer.Option): Friendly? {
+internal fun dialogMoved(
+    asked: PendingInput?,
+    askedStuck: String?,
+    probe: ActivityProbe,
+    option: Answer.Option?,
+): Friendly? {
+    val gone = Friendly(
+        "That question is gone",
+        "Nothing was sent — it was answered or dismissed already.",
+        isError = false,
+    )
+    val changed = Friendly(
+        "The question changed",
+        "Nothing was sent — read it again and choose.",
+        isError = false,
+    )
+    if (askedStuck != null) {
+        return when (probe.stuckKind) {
+            null -> gone
+            askedStuck -> null
+            else -> changed
+        }
+    }
     val onScreen = probe.pendingInput?.takeIf { probe.stuckKind == null && probe.claudeStatus == "blocked" }
     return when {
-        onScreen == null -> Friendly(
-            "That question is gone",
-            "Nothing was sent — it was answered or dismissed already.",
-            isError = false,
-        )
-        asked == null ||
-            onScreen.fingerprint() != asked.fingerprint() ||
-            onScreen.options.none { it.n == option.n && it.label == option.label } -> Friendly(
-            "The question changed",
-            "Nothing was sent — read it again and choose.",
-            isError = false,
-        )
+        onScreen == null -> gone
+        asked == null || onScreen.fingerprint() != asked.fingerprint() -> changed
+        option != null && onScreen.options.none { it.n == option.n && it.label == option.label } -> changed
         else -> null
     }
 }
