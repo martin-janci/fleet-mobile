@@ -38,7 +38,14 @@ private class FakeHub(
     val values = registry.descriptors.associate { it.key to it.value }.toMutableMap()
     val calls = mutableListOf<String>()
 
-    override suspend fun pages() = PagesBundle(registry.pages).also { calls += "list_pages" }
+    /** What `list_pages` throws, for the containment test. */
+    var failPages: Throwable? = null
+
+    override suspend fun pages(): PagesBundle {
+        calls += "list_pages"
+        failPages?.let { throw it }
+        return PagesBundle(registry.pages)
+    }
     override suspend fun describe() = registry.descriptors.map { it.copy(value = values.getValue(it.key)) }.also { calls += "get_settings" }
     override suspend fun set(key: String, value: String): Map<String, String> {
         calls += "set_setting $key=$value"
@@ -65,6 +72,36 @@ private fun proposal(id: Long = 4, key: String = "work.recent_days", value: Stri
     SettingProposal(id = id, key = key, value = value, before = "14", current = "14", why = "shorter", source = "agent", sourceDetail = "control API")
 
 class FleetSettingsViewModelTest {
+
+    /**
+     * A refused settings read stays on this screen. The fan-out's `async`
+     * children used to run directly under `load()`'s own `launch`, so a
+     * failed `list_pages` cancelled that job rather than being caught — and
+     * the scope behind it is `rememberCoroutineScope`'s plain Job, not a
+     * SupervisorJob, with no `CoroutineExceptionHandler` in any production
+     * source. One refused read therefore tore down the whole shared work
+     * scope and reached the uncaught handler.
+     *
+     * The scope here is the TestScope, so an escaped failure fails this test:
+     * it is the containment that is being asserted, not just the message.
+     */
+    @Test
+    fun a_refused_pages_read_is_contained_and_leaves_the_scope_usable() = runTest {
+        val hub = FakeHub()
+        hub.failPages = HubError.Tool("E_FORBIDDEN", "nope")
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+
+        assertFalse(vm.state.value.loading)
+        assertFalse(vm.state.value.loaded)
+        assertNotNull(vm.state.value.error)
+
+        // the scope survived: the very same view-model loads again
+        hub.failPages = null
+        vm.load(); runCurrent()
+        assertTrue(vm.state.value.loaded)
+        assertNull(vm.state.value.error)
+    }
 
     @Test
     fun it_reads_the_hubs_pages_values_and_review_and_who_may_write() = runTest {

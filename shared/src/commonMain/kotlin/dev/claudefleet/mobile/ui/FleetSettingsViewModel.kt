@@ -10,6 +10,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -84,19 +85,29 @@ class FleetSettingsViewModel(
     fun load(): Job = scope.launch {
         _state.update { it.copy(loading = true, error = null) }
         try {
-            val pages = async { actions.pages() }
-            val described = async { actions.describe() }
-            // A readonly token may read proposals; a hub without the tool, or
-            // one that refuses it, leaves the review empty and this device
-            // read-only rather than failing the whole screen.
-            val pending = async { runCatching { actions.pending() }.getOrNull() }
-            val descs = described.await()
-            val p = pending.await()
+            // `coroutineScope { }` is what makes the catch below able to
+            // contain a failure. Without it the `launch` job is the `async`
+            // children's parent, so a failed `pages()` or `describe()`
+            // cancels it — and the scope is `rememberCoroutineScope`'s plain
+            // Job, not a SupervisorJob, with no CoroutineExceptionHandler
+            // anywhere in production — so one refused settings read tore down
+            // the whole shared work scope and reached the uncaught handler.
+            // Same shape as TicketsViewModel's own fan-out.
+            val (pages, descs, p) = coroutineScope {
+                val pages = async { actions.pages() }
+                val described = async { actions.describe() }
+                // A readonly token may read proposals; a hub without the tool,
+                // or one that refuses it, leaves the review empty and this
+                // device read-only rather than failing the whole screen.
+                val pending = async { runCatching { actions.pending() }.getOrNull() }
+                // every await inside the boundary, so none of them can escape
+                Triple(pages.await(), described.await(), pending.await())
+            }
             _state.update {
                 it.copy(
                     loading = false,
                     loaded = true,
-                    pages = offeredPages(pages.await()),
+                    pages = offeredPages(pages),
                     descriptors = descs.associateBy { d -> d.key },
                     values = descs.associate { d -> d.key to d.value },
                     proposals = p?.proposals.orEmpty(),

@@ -1936,6 +1936,9 @@ class SessionViewModelTest {
     @Test
     fun the_trust_prompts_chips_press_keys_not_send_prompt() = runTest {
         val actions = FakeActions()
+        // The pane is still the trust prompt the card was drawn from. The hub
+        // reports such a pane as `stuck_kind` with no `pending_input`.
+        actions.probeAnswer = ActivityProbe(claudeStatus = "blocked", stuckKind = "trust_prompt")
         val fleet = FakeFleetState(listOf(row(status = "blocked", stuck = "trust_prompt")))
         fleet.hubVersion.value = HUB_VERSION_KEYS
         val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
@@ -1947,7 +1950,84 @@ class SessionViewModelTest {
         runCurrent()
 
         assertEquals(listOf("Enter"), actions.sentKeys)
+        assertEquals(1, actions.probes, "the pane is re-read before a key goes out")
         assertTrue(actions.sentPrompts.isEmpty(), "typed text into a stuck session is refused by the hub")
+    }
+
+    /**
+     * The harm the probe exists to prevent, one chip to the right of where it
+     * was first put: a stale "Trust this folder?" card whose pane has already
+     * moved to a permission dialog. Enter there picks the highlighted option,
+     * i.e. it approves — possibly with "don't ask again" — so nothing may go
+     * out until the pane is confirmed to be the same card.
+     */
+    @Test
+    fun enter_is_not_pressed_when_the_stuck_card_is_stale() = runTest {
+        val actions = FakeActions()
+        // the row still says trust_prompt; the pane has moved on to a dialog
+        actions.probeAnswer = ActivityProbe(
+            claudeStatus = "blocked",
+            pendingInput = PendingInput("permission", "Delete the repo?", listOf(PendingOption(1, "Yes"))),
+        )
+        val fleet = FakeFleetState(listOf(row(status = "blocked", stuck = "trust_prompt")))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+        runCurrent()
+
+        vm.answer(Answer.Enter).join()
+        runCurrent()
+
+        assertTrue(actions.sentKeys.isEmpty(), "nothing is pressed into a dialog the person never read")
+        assertEquals("That question is gone", vm.state.value.error?.title)
+        assertFalse(vm.state.value.answering)
+    }
+
+    /** The same gate for Escape, and for a stuck kind that simply changed. */
+    @Test
+    fun escape_is_not_pressed_when_the_pane_is_stuck_a_different_way() = runTest {
+        val actions = FakeActions()
+        actions.probeAnswer = ActivityProbe(claudeStatus = "blocked", stuckKind = "press_enter")
+        val fleet = FakeFleetState(listOf(row(status = "blocked", stuck = "trust_prompt")))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+        runCurrent()
+
+        vm.answer(Answer.Escape).join()
+        runCurrent()
+
+        assertTrue(actions.sentKeys.isEmpty())
+        assertEquals("The question changed", vm.state.value.error?.title)
+    }
+
+    /**
+     * Enter beside the digits on a DIALOG card is gated on the dialog's
+     * identity, but not on any one option — it presses whatever is
+     * highlighted, so there is no option to name.
+     */
+    @Test
+    fun enter_on_a_dialog_card_is_gated_on_the_dialog_not_an_option() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+        runCurrent()
+        // the default probe is the same dialog the row carries
+        vm.answer(Answer.Enter).join()
+        runCurrent()
+        assertEquals(listOf("Enter"), actions.sentKeys)
+
+        // now the dialog itself changes: Enter is refused
+        actions.probeAnswer = ActivityProbe(
+            claudeStatus = "blocked",
+            pendingInput = PendingInput("permission", "Something else?", listOf(PendingOption(1, "Yes"))),
+        )
+        vm.answer(Answer.Enter).join()
+        runCurrent()
+        assertEquals(listOf("Enter"), actions.sentKeys, "no second key went out")
+        assertEquals("The question changed", vm.state.value.error?.title)
     }
 
     @Test
