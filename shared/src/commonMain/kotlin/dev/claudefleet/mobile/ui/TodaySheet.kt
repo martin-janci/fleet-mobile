@@ -32,6 +32,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -47,6 +48,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -58,6 +60,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.model.TodayGroup
@@ -117,6 +120,11 @@ data class TodayHandlers(
 fun TodaySheet(state: TodayUiState, handlers: TodayHandlers) {
     ModalBottomSheet(
         onDismissRequest = handlers.onClose,
+        // Opened at full height. The M3 default opens half-expanded, which on
+        // this sheet puts the footer — the two buttons the whole screen is for —
+        // below the fold, and the list it sits under is scrollable, so a drag
+        // scrolls the list instead of growing the sheet.
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         // The sheet one step darker than its cards: the separation is the
         // surface change, not a line.
         containerColor = MaterialTheme.colorScheme.surface,
@@ -149,7 +157,11 @@ fun TodayBody(state: TodayUiState, handlers: TodayHandlers) {
         Box(Modifier.fillMaxWidth().height(4.dp)) {
             if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
-        if (state.loaded && !state.view.isEmpty) TodayFilterRow(state, handlers)
+        // Drawn whenever there is a digest to filter OR a filter is on: gating
+        // it on `!view.isEmpty` alone hid the chips — and Clear with them — in
+        // the one case a person needs them, a filter that matches nothing. The
+        // footer's `filtered` is the same question, asked the same way.
+        if (state.loaded && (!state.view.isEmpty || state.filters.any)) TodayFilterRow(state, handlers)
         ErrorBanner(state.error, onDismiss = handlers.onDismissError)
         val v = state.shown
         LazyColumn(
@@ -185,7 +197,9 @@ fun TodayBody(state: TodayUiState, handlers: TodayHandlers) {
         }
         TodayFooter(
             enabled = state.loaded,
-            filtered = state.filters.any,
+            // Filtered means "the text is narrower than the day", which takes a
+            // filter AND something for it to narrow.
+            filtered = state.filters.any && !state.view.isEmpty,
             copied = copied,
             onCopy = {
                 clipboard.setText(AnnotatedString(state.standup))
@@ -225,18 +239,22 @@ private fun TodayHeader(state: TodayUiState, handlers: TodayHandlers) {
 }
 
 /**
- * "Since midnight · 11 sessions · 5 need you": the day in one line, over
- * the whole digest rather than the filtered slice — a filter narrows the
- * list, it does not make the day quieter.
+ * "11 live sessions · 5 need you · 3 shipped today": the day in one line, over
+ * the whole digest rather than the filtered slice — a filter narrows the list,
+ * it does not make the day quieter.
+ *
+ * It used to open with "Since midnight", which claimed the day for a number
+ * that is not about the day: `v.sessions` is what is running NOW (the hub's
+ * waiting / in-progress / stale groups), not what ran since midnight. Only
+ * `shipped` is a since-midnight count, so only it says "today".
  */
 internal fun todaySummary(v: TodayView): String {
     val sessions = v.sessions
     val needYou = sessions.count { it.attention != null }
     return buildList {
-        add("Since midnight")
-        add(if (sessions.size == 1) "1 session" else "${sessions.size} sessions")
+        add(if (sessions.size == 1) "1 live session" else "${sessions.size} live sessions")
         if (needYou > 0) add(if (needYou == 1) "1 needs you" else "$needYou need you")
-        if (v.shipped.isNotEmpty()) add("${v.shipped.size} shipped")
+        if (v.shipped.isNotEmpty()) add("${v.shipped.size} shipped today")
     }.joinToString(" · ")
 }
 
@@ -388,6 +406,11 @@ private fun SectionBody(last: Boolean, content: @Composable () -> Unit) {
 /** One piece of work and its sessions — each a tap to open. */
 @Composable
 private fun TodayGroupBlock(g: TodayGroup, section: TodaySection, handlers: TodayHandlers) {
+    // What a screen reader needs on each session line: which piece of work it
+    // belongs to. The lines say name, host and reason, which outside the
+    // visual grouping is three sessions of the same shape with no way to tell
+    // whose ticket is whose.
+    val work = if (g.key.isNullOrEmpty()) "not linked to a ticket" else groupLabel(g.key, g.title)
     Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp)) {
         if (g.key.isNullOrEmpty()) {
             // Not a heading: it names what is missing, set quieter than a
@@ -409,32 +432,46 @@ private fun TodayGroupBlock(g: TodayGroup, section: TodaySection, handlers: Toda
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                // The hub sends the ticket's own URL on every group and nothing
+                // read it, so the one thing a person wants from a ticket line on
+                // a phone — opening it — was in the payload and off the screen.
+                OpenLink(g.url, "Open ${g.key ?: "the ticket"}")
                 // The hub leaves `status_name` NULL for every LOCAL work item,
                 // so reading it alone drew no status at all for exactly the
                 // items this sheet is mostly about. One vocabulary for the
                 // pill, the standup and the work chip: `groupStatusLabel`.
                 groupStatusLabel(g).takeIf { it.isNotEmpty() }?.let {
                     Spacer(Modifier.width(8.dp))
-                    TonePill(it, categoryTone(g.statusCategory))
+                    // Bounded: a Row measures its non-weighted children first,
+                    // so a long status name (a tracker's own words — "Waiting
+                    // for customer response") took the width the ticket title
+                    // needed and left the title one ellipsised word.
+                    TonePill(it, categoryTone(g.statusCategory), Modifier.widthIn(max = STATUS_PILL_MAX))
                 }
             }
         }
-        for (s in g.sessions) SessionLine(s, section, onOpen = { handlers.onOpenSession(s.id) })
+        for (s in g.sessions) SessionLine(s, section, work, onOpen = { handlers.onOpenSession(s.id) })
     }
 }
 
 /**
  * A session: status dot, name over host, the reason it is listed, chevron.
- * One node for a screen reader, said as what a tap does.
+ * One node for a screen reader, said as what a tap does — opening with the
+ * [work] it sits under, which the visual grouping says and the node did not.
  */
 @Composable
-private fun SessionLine(s: TodaySession, section: TodaySection, onOpen: () -> Unit) {
+private fun SessionLine(s: TodaySession, section: TodaySection, work: String, onOpen: () -> Unit) {
     val reason: Pair<String, StatusTone>? = when {
         section == TodaySection.Waiting && s.attention != null -> attentionLabel(s.attention) to attentionTone(s.attention)
         section == TodaySection.Stale && s.stale != null -> staleLabel(s.stale) to StatusTone.IDLE
         else -> null
     }
-    val spoken = listOfNotNull(s.name, "on ${s.hostAlias}".takeIf { s.hostAlias.isNotEmpty() }, reason?.first).joinToString(", ")
+    val spoken = listOfNotNull(
+        work.takeIf { it.isNotEmpty() },
+        s.name,
+        "on ${s.hostAlias}".takeIf { s.hostAlias.isNotEmpty() },
+        reason?.first,
+    ).joinToString(", ")
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -483,6 +520,31 @@ private fun SessionLine(s: TodaySession, section: TodaySection, onOpen: () -> Un
     }
 }
 
+/**
+ * "Open in browser", when the hub sent somewhere to go.
+ *
+ * Guarded: `openUri` throws on a platform with no handler, or on a URL the
+ * system will not take, and a crash is a worse answer than a chip that does
+ * nothing. Only `http(s)` is offered — the hub's own trackers — so a payload
+ * naming `file:` or an app scheme cannot make this a launcher.
+ */
+@Composable
+private fun OpenLink(url: String?, label: String) {
+    // `WorkSheet.OpenTicketButton`'s rule, to the letter: only `http(s)`, so a
+    // payload naming `file:` or an app scheme cannot make this a launcher, and
+    // `runCatching` because `openUri` throws where there is no handler — a crash
+    // is a worse answer than a button that does nothing.
+    val ok = url?.takeIf { it.startsWith("https://") || it.startsWith("http://") } ?: return
+    val uri = LocalUriHandler.current
+    TextButton(
+        onClick = { runCatching { uri.openUri(ok) } },
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+        modifier = Modifier.semantics { contentDescription = label },
+    ) {
+        Text("Open", style = MaterialTheme.typography.labelMedium, maxLines = 1)
+    }
+}
+
 @Composable
 private fun ShippedRow(x: TodayShipped) {
     val label = if (!x.key.isNullOrEmpty()) groupLabel(x.key, x.title) else x.title.ifEmpty { "Untitled work" }
@@ -505,6 +567,9 @@ private fun ShippedRow(x: TodayShipped) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        // The PR for a `pr` line, the ticket for a `done` one — both arrive on
+        // the payload and neither was read by anything.
+        OpenLink(x.prUrl ?: x.url, if (x.how == "done") "Open ${x.key ?: "the ticket"}" else "Open the pull request")
         Spacer(Modifier.width(8.dp))
         TonePill(if (x.how == "done") "Done" else "PR", StatusTone.COMPLETED)
     }
@@ -536,7 +601,10 @@ private fun TodayFooter(enabled: Boolean, filtered: Boolean, copied: Boolean, on
             )
         }
         Button(onClick = onShare, enabled = enabled, modifier = Modifier.weight(1f).heightIn(min = TOUCH_TARGET)) {
-            Text("Share", maxLines = 1)
+            // Share hands on the SAME text Copy does, so it carries the same
+            // warning: the word was on one button only, and the one that leaves
+            // the phone was the one that said nothing.
+            Text(if (filtered) "Share filtered" else "Share", maxLines = 1)
         }
     }
 }
@@ -554,14 +622,18 @@ private fun EmptyNote(text: String, action: String? = null, onAction: () -> Unit
  * list's status chip uses, so a colour means one thing across the app. The
  * idle pair sits close to the card, so it gets an outline to keep its edge.
  */
+/** How wide a status pill may get before its own text ellipsises instead of
+ *  the title's. About two words of `labelSmall`. */
+private val STATUS_PILL_MAX: Dp = 160.dp
+
 @Composable
-private fun TonePill(text: String, tone: StatusTone) {
+private fun TonePill(text: String, tone: StatusTone, modifier: Modifier = Modifier) {
     val c = LocalStatusColors.current(tone)
     val container = if (c.container.alpha == 0f) MaterialTheme.colorScheme.surfaceContainerHighest else c.container
     val edge = if (tone == StatusTone.IDLE || c.container.alpha == 0f) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant) else null
     val shape = RoundedCornerShape(50)
     Box(
-        modifier = Modifier
+        modifier = modifier
             .clip(shape)
             .background(container)
             .then(if (edge != null) Modifier.border(edge, shape) else Modifier)

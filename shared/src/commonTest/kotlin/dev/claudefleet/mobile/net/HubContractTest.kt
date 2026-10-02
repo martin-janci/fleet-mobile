@@ -172,9 +172,9 @@ class HubContractVerdictTest {
      * is present; this is the half that runs everywhere, CI included.
      */
     @Test
-    fun the_range_is_zero_to_six() {
+    fun the_range_is_zero_to_seven() {
         assertEquals(0, MIN_HUB_CONTRACT)
-        assertEquals(6, MAX_HUB_CONTRACT)
+        assertEquals(7, MAX_HUB_CONTRACT)
     }
 
     @Test
@@ -238,8 +238,8 @@ class HubContractVerdictTest {
     @Test
     fun a_readable_out_of_range_contract_still_names_itself() {
         assertEquals(
-            "This app is too old for this hub (contract 7). Update the app.",
-            contractVerdict(7).sentence(),
+            "This app is too old for this hub (contract ${MAX_HUB_CONTRACT + 1}). Update the app.",
+            contractVerdict(MAX_HUB_CONTRACT + 1).sentence(),
         )
     }
 }

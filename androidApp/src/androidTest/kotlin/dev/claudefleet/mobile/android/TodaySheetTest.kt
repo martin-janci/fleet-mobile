@@ -3,9 +3,11 @@ package dev.claudefleet.mobile.android
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.claudefleet.mobile.model.StatusCategory
+import dev.claudefleet.mobile.model.TodayFilters
 import dev.claudefleet.mobile.model.TodayGroup
 import dev.claudefleet.mobile.model.TodaySession
 import dev.claudefleet.mobile.model.TodayView
@@ -104,6 +106,57 @@ class TodaySheetTest {
                 compose.onAllNodesWithText("in progress").fetchSemanticsNodes().isEmpty() &&
                 compose.onAllNodesWithText("done").fetchSemanticsNodes().isEmpty(),
         )
+    }
+
+    /**
+     * A session's screen-reader node names the WORK it sits under.
+     *
+     * The node said name, host and reason, which outside the visual grouping is
+     * several sessions of the same shape with no way to tell whose ticket is
+     * whose — and this is the one reading of the sheet where the grouping is
+     * invisible.
+     */
+    @Test
+    fun a_session_is_announced_with_the_work_it_belongs_to() {
+        show(
+            TodayView(
+                inProgress = listOf(
+                    group("PAY-9", "Ledger", StatusCategory.InProgress, null, "in_progress"),
+                    TodayGroup(bucket = "in_progress", key = null, sessions = listOf(session(77, "loose"))),
+                ),
+            ),
+        )
+
+        compose.onNodeWithContentDescription("PAY-9 Ledger, s-PAY-9, on pine. Open session").assertIsDisplayed()
+        compose.onNodeWithContentDescription("not linked to a ticket, loose, on pine. Open session").assertIsDisplayed()
+    }
+
+    /**
+     * Share says it is handing on a FILTERED standup, as Copy does.
+     *
+     * The word was on one button only — and the one that leaves the phone was
+     * the one that said nothing.
+     */
+    @Test
+    fun both_buttons_say_when_the_text_is_filtered() {
+        val view = TodayView(inProgress = listOf(group("PAY-9", "Ledger", StatusCategory.InProgress, null, "in_progress")))
+        compose.setContent {
+            FleetTheme {
+                TodayBody(
+                    state = TodayUiState(
+                        available = true,
+                        open = true,
+                        loaded = true,
+                        view = view,
+                        shown = view,
+                        filters = TodayFilters(host = "pine"),
+                    ),
+                    handlers = TodayHandlers(),
+                )
+            }
+        }
+        compose.onNodeWithText("Copy filtered").assertIsDisplayed()
+        compose.onNodeWithText("Share filtered").assertIsDisplayed()
     }
 
     /**

@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 /**
  * The Today digest, `work { action: today, since }` (claude-fleet M9.1):
@@ -32,6 +33,15 @@ data class TodayGroup(
     val url: String? = null,
     @SerialName("org_id") val orgId: Long? = null,
     val sessions: List<TodaySession> = emptyList(),
+    /**
+     * Where the hub had this group in its one list, stamped by [scopeToday]
+     * when it splits that list into sections.
+     *
+     * `@Transient` so it is the client's own bookkeeping and not a wire field:
+     * a hub that one day sends `hub_index` must not have it read as this, and
+     * this must not appear in anything the client serialises back.
+     */
+    @Transient val hubIndex: Int = 0,
 )
 
 @Serializable
@@ -107,10 +117,14 @@ fun scopeToday(today: Today, org: Long?, orgOfSession: (TodaySession) -> Long?):
     val waiting = mutableListOf<TodayGroup>()
     val inProgress = mutableListOf<TodayGroup>()
     val stale = mutableListOf<TodayGroup>()
-    for (g in today.groups) {
+    for ((i, g) in today.groups.withIndex()) {
         val sessions = if (org == null) g.sessions else g.sessions.filter { orgOfSession(it) == org }
         if (sessions.isEmpty()) continue
-        val group = g.copy(sessions = sessions)
+        // The hub's own position, carried so a later re-bucketing can put a
+        // group back where the hub had it — see `inOrder`. This split must not
+        // reorder: the order it produces is the desktop's, pinned by
+        // `StandupFixtureTest`.
+        val group = g.copy(sessions = sessions, hubIndex = i)
         when (bucketOf(sessions)) {
             TodayBucket.Waiting -> waiting += group
             TodayBucket.Stale -> stale += group
@@ -120,6 +134,25 @@ fun scopeToday(today: Today, org: Long?, orgOfSession: (TodaySession) -> Long?):
     val shipped = if (org == null) today.shipped else today.shipped.filter { it.orgId == org }
     return TodayView(waiting, inProgress, shipped, stale)
 }
+
+/**
+ * Back into the hub's own order, by the position [scopeToday] stamped.
+ *
+ * `filterToday` re-buckets — the host filter can take away the session that
+ * made a group waiting — by walking `waiting + inProgress + stale` and
+ * appending, so a group that changed bucket landed at the END of its new
+ * section and the order a person saw depended on which section it used to be
+ * in. Sorting by the hub's index undoes exactly that, and nothing else: the
+ * unfiltered order is the hub's, and turning a filter on now narrows the list
+ * without reshuffling what is left.
+ *
+ * Deliberately NOT an order of the sheet's own devising. The first attempt
+ * sorted by newest activity, which read well and broke `StandupFixtureTest`:
+ * the unfiltered order is a cross-repo contract with the desktop's standup,
+ * and a phone that sorts it differently diverges from the text this sheet
+ * exists to copy.
+ */
+private fun List<TodayGroup>.inOrder(): List<TodayGroup> = sortedBy { it.hubIndex }
 
 private val ATTENTION_WORDS = mapOf(
     "waiting" to "waiting for an answer",
@@ -225,6 +258,9 @@ data class TodayFilters(
  * the org filter: a group waiting only because of a session on another host
  * is in progress here. Shipped entries carry no host, so the host filter
  * leaves them alone — the sheet says so on the section.
+ *
+ * Each section comes back [inOrder], the same rule [scopeToday] applies, so
+ * turning a filter on narrows the list without reshuffling what is left.
  */
 fun filterToday(v: TodayView, f: TodayFilters): TodayView {
     val waiting = mutableListOf<TodayGroup>()
@@ -243,14 +279,23 @@ fun filterToday(v: TodayView, f: TodayFilters): TodayView {
     }
     fun keep(s: TodaySection) = f.sections.isEmpty() || s in f.sections
     return TodayView(
-        waiting = if (keep(TodaySection.Waiting)) waiting else emptyList(),
-        inProgress = if (keep(TodaySection.InProgress)) inProgress else emptyList(),
+        waiting = if (keep(TodaySection.Waiting)) waiting.inOrder() else emptyList(),
+        inProgress = if (keep(TodaySection.InProgress)) inProgress.inOrder() else emptyList(),
         shipped = if (keep(TodaySection.Shipped)) v.shipped else emptyList(),
-        stale = if (keep(TodaySection.Stale)) stale else emptyList(),
+        stale = if (keep(TodaySection.Stale)) stale.inOrder() else emptyList(),
     )
 }
 
-/** How many entries a section lists: its tasks (a no-work group counts once), or its shipped lines. */
+/**
+ * How many ROWS a section's card lists: a group for Waiting / In progress /
+ * Stale (a no-work group counts once), a line for Shipped.
+ *
+ * The chips and the section headers both read this, so the two always agree —
+ * but a "Waiting 3" chip counts three pieces of work, which may be any number
+ * of sessions, while "Shipped 5" counts five lines. That is what the card
+ * draws, which is what a count beside a heading means; [TodayView.sessions] is
+ * the number of sessions, and the header line is where that is said.
+ */
 fun TodayView.count(s: TodaySection): Int = when (s) {
     TodaySection.Waiting -> waiting.size
     TodaySection.InProgress -> inProgress.size

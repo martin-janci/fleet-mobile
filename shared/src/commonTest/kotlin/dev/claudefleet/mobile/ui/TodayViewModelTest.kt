@@ -236,6 +236,78 @@ class TodayViewModelTest {
         assertEquals(4, t.state.value.view.let { it.waiting.size + it.inProgress.size + it.stale.size })
     }
 
+    /**
+     * The filter lifecycle the class KDoc promises: filters survive the sheet
+     * closing, and a close does not cost the digest either.
+     *
+     * Nothing exercised it, and `assemble` now returns early while the sheet is
+     * closed — so "the filters are kept" went from undocumented behaviour to a
+     * branch that could silently drop them.
+     */
+    @Test
+    fun the_filters_survive_the_sheet_closing() = runTest {
+        val actions = FakeWorkActions().apply { todayAnswer = digest }
+        val t = vm(WorkFleet(rows), actions, backgroundScope)
+        t.open()!!.join()
+        runCurrent()
+        t.toggleSection(dev.claudefleet.mobile.model.TodaySection.Waiting)
+        t.setHost("mefistos")
+        runCurrent()
+        val before = t.state.value.filters
+        assertTrue(before.any, "setup: something is on")
+
+        t.close()
+        runCurrent()
+        assertFalse(t.state.value.open)
+        assertEquals(before, t.state.value.filters, "a close is not a clear")
+        assertTrue(t.state.value.loaded, "and the digest it already read is still read")
+
+        t.open()!!.join()
+        runCurrent()
+        assertEquals(before, t.state.value.filters)
+        assertTrue(t.state.value.shown.waiting.isNotEmpty() || t.state.value.shown.isEmpty)
+
+        // Clear is what clears them.
+        t.clearFilters()
+        runCurrent()
+        assertFalse(t.state.value.filters.any)
+    }
+
+    /**
+     * An empty filtered list copies the DAY, not nothing.
+     *
+     * `standup` was repointed from `view` to `shown` so a filtered copy matches
+     * the list — right — but `shown` empty means the filters match nothing, and
+     * a Copy button that yields an empty standup is never what it is for.
+     */
+    @Test
+    fun a_filter_that_matches_nothing_still_copies_the_day() = runTest {
+        val actions = FakeWorkActions().apply { todayAnswer = digest }
+        val t = vm(WorkFleet(rows), actions, backgroundScope)
+        t.open()!!.join()
+        runCurrent()
+        val whole = t.state.value.standup
+
+        // A host with nothing on it AND only Waiting kept: shipped entries name
+        // no host, so a host filter alone cannot empty the sheet.
+        t.setHost("a-host-with-nothing-on-it")
+        t.toggleSection(dev.claudefleet.mobile.model.TodaySection.Waiting)
+        runCurrent()
+        val s = t.state.value
+        assertTrue(s.shown.isEmpty, "setup: the filter matches nothing")
+        assertEquals(whole, s.standup, "the day, rather than an empty clipboard")
+        // And the chips say zero rather than their unfiltered counts: the
+        // section counts apply every filter BUT the section chips, which is
+        // what makes a chip say what tapping it would show.
+        assertEquals(0, s.sectionCounts[dev.claudefleet.mobile.model.TodaySection.Waiting])
+        assertEquals(0, s.sectionCounts[dev.claudefleet.mobile.model.TodaySection.InProgress])
+        assertEquals(
+            1,
+            s.sectionCounts[dev.claudefleet.mobile.model.TodaySection.Shipped],
+            "shipped names no host, so a host filter cannot judge it",
+        )
+    }
+
     /** The sheet's chips: counts ignore the section chips, the standup follows what is shown, Clear puts it all back. */
     @Test
     fun its_filters_narrow_the_sheet_and_the_standup() = runTest {

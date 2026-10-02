@@ -166,17 +166,18 @@ class TodayTest {
 
     // --- The sheet's own filters (phone only; the desktop has no copy). ---
 
-    private fun hs(id: Long, name: String, host: String, attention: String? = null, stale: String? = null) =
-        TodaySession(id = id, name = name, hostAlias = host, attention = attention, stale = stale)
+    private fun hs(id: Long, name: String, host: String, attention: String? = null, stale: String? = null, at: Long = 0) =
+        TodaySession(id = id, name = name, hostAlias = host, lastActivityAt = at, attention = attention, stale = stale)
 
+    /** In the hub's own order, which is the order the sheet lists. */
     private val hosted = TodayView(
-        waiting = listOf(TodayGroup(key = "PD-1", title = "Pay", sessions = listOf(hs(1, "a", "mac", attention = "ci_failing"), hs(2, "b", "trn")))),
+        waiting = listOf(TodayGroup(key = "PD-1", title = "Pay", sessions = listOf(hs(1, "a", "mac", attention = "ci_failing", at = 90), hs(2, "b", "trn", at = 80)))),
         inProgress = listOf(
-            TodayGroup(key = "PD-2", title = "Ship", sessions = listOf(hs(3, "c", "trn"))),
-            TodayGroup(key = null, sessions = listOf(hs(4, "d", "mac"))),
+            TodayGroup(key = "PD-2", title = "Ship", sessions = listOf(hs(3, "c", "trn", at = 70))),
+            TodayGroup(key = null, sessions = listOf(hs(4, "d", "mac", at = 60))),
         ),
         shipped = listOf(TodayShipped(how = "done", key = "PD-0", title = "Done")),
-        stale = listOf(TodayGroup(key = "PD-3", sessions = listOf(hs(5, "e", "trn", stale = "idle")))),
+        stale = listOf(TodayGroup(key = "PD-3", sessions = listOf(hs(5, "e", "trn", stale = "idle", at = 50)))),
     )
 
     @Test
@@ -208,6 +209,65 @@ class TodayTest {
         assertEquals(listOf("PD-2"), t.inProgress.map { it.key })
         assertTrue(hosted.hasUnlinked)
         assertTrue(!t.hasUnlinked)
+    }
+
+    /**
+     * A filter narrows the list; it does not reshuffle what is left.
+     *
+     * `filterToday` re-buckets (the host filter can take away the session that
+     * made a group waiting) by walking `waiting + inProgress + stale` and
+     * appending, so a group that changed bucket landed at the END of its new
+     * section and the order depended on which section it used to be in. The
+     * hub's own position, stamped by `scopeToday`, puts it back.
+     *
+     * The order itself is NOT the sheet's to choose: the first attempt sorted
+     * by newest activity and broke `StandupFixtureTest`, because the unfiltered
+     * order is a cross-repo contract with the desktop's standup text.
+     */
+    @Test
+    fun a_filter_does_not_reshuffle_what_is_left() {
+        // The hub's order is A, B, C. The host filter takes C's waiting session
+        // away, so C becomes in-progress — and must land between A and nothing,
+        // at its own place, not appended after B.
+        val digest = Today(
+            groups = listOf(
+                TodayGroup(bucket = "in_progress", key = "A", sessions = listOf(hs(1, "a", "trn"))),
+                TodayGroup(bucket = "waiting", key = "B", sessions = listOf(hs(2, "b", "trn", attention = "waiting"))),
+                TodayGroup(bucket = "waiting", key = "C", sessions = listOf(hs(3, "c", "mac", attention = "waiting"), hs(4, "d", "trn"))),
+            ),
+        )
+        val v = scopeToday(digest, null) { null }
+        assertEquals(listOf("B", "C"), v.waiting.map { it.key }, "setup: the hub's order")
+        assertEquals(listOf("A"), v.inProgress.map { it.key })
+
+        val f = filterToday(v, TodayFilters(host = "trn"))
+        assertEquals(listOf("B"), f.waiting.map { it.key })
+        assertEquals(
+            listOf("A", "C"),
+            f.inProgress.map { it.key },
+            "C re-buckets to its own place in the hub's order, not to the end",
+        )
+    }
+
+    /**
+     * The host filter and the section chips together, which were only ever
+     * tested apart: a group the host filter moves into a section the chips keep
+     * is kept, and one it moves OUT of a kept section is gone.
+     */
+    @Test
+    fun the_host_filter_and_the_section_chips_compose() {
+        // PD-1 is waiting only because of `a` on mac; on trn it is in progress.
+        val waitingOnly = filterToday(hosted, TodayFilters(sections = setOf(TodaySection.Waiting), host = "trn"))
+        assertEquals(emptyList(), waitingOnly.waiting, "nothing is waiting on trn")
+        assertEquals(emptyList(), waitingOnly.inProgress, "and the chips keep Waiting only")
+
+        val inProgressOnly = filterToday(hosted, TodayFilters(sections = setOf(TodaySection.InProgress), host = "trn"))
+        assertEquals(listOf("PD-1", "PD-2"), inProgressOnly.inProgress.map { it.key })
+        assertEquals(emptyList(), inProgressOnly.shipped, "Shipped is not among the kept sections")
+
+        // Tickets-only on top of both.
+        val linked = filterToday(hosted, TodayFilters(sections = setOf(TodaySection.InProgress), host = "mac", ticketsOnly = true))
+        assertEquals(emptyList(), linked.inProgress, "mac's only in-progress group is the unlinked one")
     }
 
     @Test

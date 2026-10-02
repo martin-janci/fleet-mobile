@@ -58,10 +58,28 @@ data class TodayUiState(
     val sectionCounts: Map<TodaySection, Int> = emptyMap(),
     /** The hosts [view]'s sessions run on, plus the filtered one if it has gone. */
     val hostChoices: List<String> = emptyList(),
+    /** What *Copy standup* and *Share* hand on — see [standupFor]. Built once
+     *  per state in `assemble`, not on read: the sheet uses it as a `remember`
+     *  key, and a computed `get()` rebuilt the whole text (every group, every
+     *  session, every shipped line) on every recomposition and then compared it
+     *  to decide whether anything changed. */
+    val standup: String = "",
 ) {
-    /** What *Copy standup* and *Share* hand on: the desktop's text, for what is on screen. */
-    val standup: String get() = standupText(shown)
+
 }
+
+/**
+ * The standup text for one state: what is on screen, and the whole day's when
+ * the chips have hidden everything.
+ *
+ * `standup` was repointed from `view` to `shown` so a filtered copy matches the
+ * list, which is right; but `shown` empty means the filters match nothing, and
+ * copying an EMPTY standup is never what the button is for. The list says
+ * "Nothing today matches these filters" and offers Clear; the text falls back
+ * to the day.
+ */
+internal fun standupFor(view: TodayView, shown: TodayView): String =
+    standupText(if (shown.isEmpty) view else shown)
 
 /**
  * The Today sheet over the Sessions tab (claude-fleet M9.1 on the phone): the
@@ -187,11 +205,25 @@ class TodayViewModel(
     private fun assemble(caps: HubCapabilities, rows: List<SessionRow>, org: Long?, l: Local): TodayUiState {
         val available = caps.has(WORK, TODAY)
         if (!available) return TodayUiState()
+        // Nothing is drawn while the sheet is closed, and this runs on every
+        // session-row emission for the whole fleet: one `associateBy`, a
+        // `scopeToday`, two `filterToday` passes and a `todayHosts` over the
+        // digest, all to build a state nobody reads. The filters are kept —
+        // they survive the sheet closing, which is the documented lifecycle.
+        if (!l.open) {
+            return TodayUiState(
+                available = true,
+                open = false,
+                loaded = l.today != null,
+                filters = l.filters,
+            )
+        }
         val byId = rows.associateBy { it.id }
         val view = l.today?.let { t -> scopeToday(t, org) { s -> byId[s.id]?.orgOf ?: s.orgId } } ?: TodayView()
         val f = l.filters
         val unsectioned = filterToday(view, f.copy(sections = emptySet()))
         val hosts = todayHosts(view)
+        val shown = filterToday(view, f)
         return TodayUiState(
             available = true,
             open = l.open,
@@ -200,9 +232,10 @@ class TodayViewModel(
             loaded = l.today != null,
             error = l.error,
             filters = f,
-            shown = filterToday(view, f),
+            shown = shown,
             sectionCounts = TodaySection.entries.associateWith { unsectioned.count(it) },
             hostChoices = if (f.host != null && f.host !in hosts) (hosts + f.host).sorted() else hosts,
+            standup = standupFor(view, shown),
         )
     }
 
