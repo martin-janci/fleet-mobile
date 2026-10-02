@@ -7,6 +7,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.model.ConvItem
@@ -22,9 +23,9 @@ import org.junit.Test
 /**
  * Auto-scroll, on a device, because that is the only place it exists.
  *
- * `SessionScreen`'s `atBottom` is a `derivedStateOf` over
- * `LazyListState.layoutInfo.visibleItemsInfo` — which is measurement. Off a
- * device there is no measurement, so `visibleItemsInfo` is empty, so `atBottom`
+ * `SessionScreen`'s `atBottom` is a `derivedStateOf` over the list's first
+ * visible item and its offset — which is measurement. Off a device there is
+ * no measurement, so the list never leaves item 0, so `atBottom`
  * is unconditionally true and every assertion about it passes for the wrong
  * reason. That is not hypothetical: the comment above it records two bugs that
  * both shipped, and the second one was *exactly* this — `atBottom` permanently
@@ -59,8 +60,8 @@ class ConversationScrollTest {
      * so this source set cannot clear it. Distinct ids keep one test's
      * remembered anchor from being recalled by the next.
      */
-    private fun show(sessionId: Long, initial: Int): (Int) -> Unit {
-        var state by mutableStateOf(SessionUiState(conversation = conversation(initial), loaded = true))
+    private fun show(sessionId: Long, initial: Int, loaded: Boolean = true): (Int) -> Unit {
+        var state by mutableStateOf(SessionUiState(conversation = conversation(initial), loaded = loaded))
         // Wrapped, because the bar's `StatusChip` reads `LocalStatusColors`
         // and `FleetTheme` is the only thing that provides it — composing the
         // screen bare throws "FleetTheme is not applied" before anything can
@@ -99,8 +100,35 @@ class ConversationScrollTest {
         // snapshot write from the test thread usually lands, and "usually" in
         // a device test is a flake nobody can reproduce.
         return { total ->
-            compose.runOnUiThread { state = state.copy(conversation = conversation(total)) }
+            compose.runOnUiThread {
+                // What the view model would count for a reader scrolled away;
+                // the screen only draws it while that reader is away.
+                val unseen = if (state.loaded) total - initial else 0
+                state = state.copy(conversation = conversation(total), loaded = true, unseen = unseen)
+            }
         }
+    }
+
+    /**
+     * The bug this list was rebuilt for: the screen drew the OLDEST turns on
+     * the frame the conversation arrived and only then scrolled to the newest,
+     * which a person saw as the chat opening at the top and jumping.
+     *
+     * With the clock held, the one frame that lays the turns out is the frame
+     * asserted on — no later scroll gets a chance to put things right.
+     */
+    @Test
+    fun the_newest_turn_is_on_screen_in_the_first_frame_that_has_turns() {
+        val load = show(sessionId = 4L, initial = 0, loaded = false)
+        compose.waitForIdle()
+
+        compose.mainClock.autoAdvance = false
+        load(30)
+        compose.mainClock.advanceTimeByFrame()
+
+        compose.onNodeWithText("answer-30").assertIsDisplayed()
+        compose.onNodeWithText("answer-01").assertDoesNotExist()
+        compose.mainClock.autoAdvance = true
     }
 
     /**
@@ -131,7 +159,8 @@ class ConversationScrollTest {
         val grow = show(sessionId = 2L, initial = 30)
         compose.waitForIdle()
 
-        compose.onNodeWithTag(CONVERSATION_LIST).performScrollToIndex(0)
+        // Newest first: item 29 is the oldest of thirty turns.
+        compose.onNodeWithTag(CONVERSATION_LIST).performScrollToIndex(29)
         compose.waitForIdle()
         compose.onNodeWithText("answer-01").assertIsDisplayed()
 
@@ -155,14 +184,36 @@ class ConversationScrollTest {
         val grow = show(sessionId = 3L, initial = 30)
         compose.waitForIdle()
 
-        compose.onNodeWithTag(CONVERSATION_LIST).performScrollToIndex(0)
+        compose.onNodeWithTag(CONVERSATION_LIST).performScrollToIndex(29)
         compose.waitForIdle()
         grow(31)
         compose.waitForIdle()
 
-        compose.onNodeWithTag(CONVERSATION_LIST).performScrollToIndex(30)
+        // Item 0 is the newest turn.
+        compose.onNodeWithTag(CONVERSATION_LIST).performScrollToIndex(0)
         compose.waitForIdle()
         grow(32)
+        compose.waitForIdle()
+
+        compose.onNodeWithText("answer-32").assertIsDisplayed()
+    }
+
+    /**
+     * Away from the bottom, what arrived is counted on the pill, and a tap on
+     * it is the way back down.
+     */
+    @Test
+    fun the_pill_counts_new_turns_and_takes_the_reader_to_them() {
+        val grow = show(sessionId = 5L, initial = 30)
+        compose.waitForIdle()
+        compose.onNodeWithTag(CONVERSATION_LIST).performScrollToIndex(29)
+        compose.waitForIdle()
+
+        grow(32)
+        compose.waitForIdle()
+        compose.onNodeWithText("2").assertIsDisplayed()
+
+        compose.onNodeWithText("↓ Latest").performClick()
         compose.waitForIdle()
 
         compose.onNodeWithText("answer-32").assertIsDisplayed()

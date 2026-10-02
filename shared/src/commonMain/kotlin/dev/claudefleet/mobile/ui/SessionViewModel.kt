@@ -17,6 +17,7 @@ import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.appending
 import dev.claudefleet.mobile.model.fingerprint
 import dev.claudefleet.mobile.model.tailMarker
+import dev.claudefleet.mobile.model.turnsAddedAfter
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
@@ -104,6 +105,14 @@ data class SessionUiState(
      * told to be back at the bottom.
      */
     val newReply: Boolean = false,
+    /**
+     * How many turns arrived at the newest end while the reader was scrolled
+     * away from it — the count on the jump pill's badge. Only turns appended
+     * after the one that was newest when the reader left the bottom count
+     * ([dev.claudefleet.mobile.model.turnsAddedAfter]); the live turn growing
+     * is [newReply]'s business, not a new turn. Cleared with [newReply].
+     */
+    val unseen: Int = 0,
     /**
      * What to draw for a session the hub says is blocked or stuck, or null
      * when there is nothing to answer. Derived from the row and the hub's
@@ -314,6 +323,7 @@ class SessionViewModel(
          */
         val atBottom: Boolean = true,
         val newReply: Boolean = false,
+        val unseen: Int = 0,
         val answering: Boolean = false,
         val stillWaiting: Boolean = false,
         /**
@@ -615,7 +625,13 @@ class SessionViewModel(
      * got there, whether by the jump pill or by scrolling there themselves.
      */
     fun onAtBottom(atBottom: Boolean) {
-        local.update { it.copy(atBottom = atBottom, newReply = if (atBottom) false else it.newReply) }
+        local.update {
+            it.copy(
+                atBottom = atBottom,
+                newReply = if (atBottom) false else it.newReply,
+                unseen = if (atBottom) 0 else it.unseen,
+            )
+        }
     }
 
     /**
@@ -1046,6 +1062,11 @@ class SessionViewModel(
                         error = null,
                         silent = false,
                         newReply = current.newReply || (tailGrew && !current.atBottom),
+                        unseen = if (current.atBottom) {
+                            0
+                        } else {
+                            current.unseen + appended.turnsAddedAfter(current.conversation)
+                        },
                     )
                 }
             }
@@ -1129,6 +1150,7 @@ class SessionViewModel(
         error = l.error,
         silent = l.silent,
         newReply = l.newReply,
+        unseen = l.unseen,
         // Derived, never stored: `blockedCard` in `Blocked.kt` is the one
         // place that decides what a blocked or stuck row offers, and it is
         // asked here with the hub's own version because the structured-key

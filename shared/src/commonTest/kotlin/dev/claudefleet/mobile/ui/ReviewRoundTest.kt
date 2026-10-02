@@ -123,38 +123,47 @@ class ConversationIdentityDriftTest {
 }
 
 /**
- * Task 5 review, S1 — the auto-scroll lands on the wrong turn.
+ * Task 5 review, S1 — the auto-scroll landed on the wrong turn, because the
+ * truncation note sat at item 0 and pushed every turn one index along.
  *
- * `scrollToItem` takes a **LazyColumn item index**, and the truncation note
- * occupies index 0 whenever `truncated` is set — which is the normal case, since
- * the hub sets it on any conversation longer than its window. So the target was
- * one short and the screen settled on the second-to-last turn, with the newest
- * one below the fold: exactly the turn the screen exists to show.
- *
- * The index is a pure function so that it can be asserted at all; nothing in
- * this repository can render a `LazyColumn`.
+ * The list is newest-first under `reverseLayout` now, so there is no index to
+ * get wrong: the newest turn is item 0 — drawn against the bottom edge, which
+ * is where a fresh `LazyListState` already is — and the note comes after the
+ * oldest turn. What is left to assert is the order and the keys.
  */
 class ConversationScrollTest {
 
     @Test
-    fun the_newest_turn_is_the_last_item_not_the_last_turn() {
-        // Three turns, no note: items are turn0, turn1, turn2.
-        assertEquals(2, newestItemIndex(turns = 3, truncated = false))
-        // Three turns behind a note: items are note, turn0, turn1, turn2.
-        assertEquals(3, newestItemIndex(turns = 3, truncated = true))
+    fun the_newest_turn_is_item_zero() {
+        val rows = newestFirst(listOf(turn("a", "t1"), turn("b", "t2"), turn("c", "t3")))
+
+        assertEquals(listOf("c", "b", "a"), rows.map { it.turn.prompt })
     }
 
     @Test
-    fun an_empty_conversation_has_nothing_to_scroll_to() {
-        assertEquals(null, newestItemIndex(turns = 0, truncated = false))
-        // Not index 0: that is the note, and jumping to it on an empty
-        // conversation would be scrolling to a header.
-        assertEquals(null, newestItemIndex(turns = 0, truncated = true))
+    fun an_empty_conversation_has_no_rows() {
+        assertEquals(emptyList(), newestFirst(emptyList()))
     }
 
+    /**
+     * Keys belong to the turn, not its position: a turn arriving at the
+     * newest end, or the oldest one dropped at the ceiling, leaves every
+     * other turn's key alone — which is what lets the list hold a scrolled-up
+     * reader in place.
+     */
     @Test
-    fun one_turn_is_index_zero_or_one_depending_on_the_note() {
-        assertEquals(0, newestItemIndex(turns = 1, truncated = false))
-        assertEquals(1, newestItemIndex(turns = 1, truncated = true))
+    fun a_turn_keeps_its_key_as_turns_arrive_and_leave() {
+        val before = newestFirst(listOf(turn("a", "t1"), turn("b", "t2"))).associate { it.turn.prompt to it.key }
+        val after = newestFirst(listOf(turn("b", "t2"), turn("c", "t3"))).associate { it.turn.prompt to it.key }
+
+        assertEquals(before["b"], after["b"])
+    }
+
+    /** `LazyColumn` throws on a duplicate key, and two headless turns in one second share an identity. */
+    @Test
+    fun turns_sharing_an_identity_still_get_distinct_keys() {
+        val rows = newestFirst(listOf(turn(null, null), turn(null, null), turn("a", "t1"), turn("a", "t1")))
+
+        assertEquals(rows.size, rows.map { it.key }.toSet().size)
     }
 }
