@@ -159,6 +159,18 @@ data class SessionUiState(
     val canManage: Boolean
         get() = !readOnly && session != null && !session.isController
 
+    /**
+     * Whether a management item (Rename, Tags, Restart, Retire safely, Kill
+     * now) should be enabled right now.
+     *
+     * The menu used to ask `!busy && connected`, two of the three terms
+     * [SessionViewModel.runManaged] actually refuses on: during an in-flight
+     * answer or a send, every item was live and tapping one was silently
+     * dropped by the guard underneath. One rule, named once.
+     */
+    val canAct: Boolean
+        get() = idle(sending, answering, busy) && connected
+
     /** Restart carries no narrowing beyond [canManage] — see [BlockedCard.offerRestart] for when it is worth showing. */
     val canRestart: Boolean
         get() = canManage
@@ -663,53 +675,61 @@ class SessionViewModel(
      * reconnect leaves the previous connection's rows in place, so the card
      * outlives it and the gate has to be here.
      */
-    fun answer(a: Answer): Job = scope.launch {
+    fun answer(a: Answer, from: BlockedCard? = null): Job = scope.launch {
         if (!canAnswerNow(local.value)) return@launch
         val mine = ++answerSeq
         local.update { it.copy(answering = true, stillWaiting = false, error = null) }
+        // Every KEY is pressed only after re-reading the pane. The hub refuses
+        // typed text into a blocked session (E_INVALID_STATE) and pasted text
+        // would reach a dialog as ESC first and cancel it, so an answer is
+        // always a key — and `send_prompt { keys }` has no state gate on the
+        // hub at all. The row the card was drawn from is up to a reconcile tick
+        // old, so nothing goes out unless the pane still shows the same card.
+        // The same check the desktop's answer card makes.
+        //
+        // Enter and Escape need this as much as the digits do, and on a trust
+        // prompt more: Enter trusts the folder, and on a permission dialog it
+        // picks the highlighted option, i.e. approves.
+        //
+        // `from` is the card the chip was DRAWN on, which is the only honest
+        // answer to "what did the person read". Falling back to the live row
+        // compares the probe against a row that may already have moved — the
+        // very staleness the probe exists to catch. A caller that names no card
+        // (this file's own tests) gets the old behaviour and says so here.
+        val drawn = from ?: row()?.let {
+            BlockedCard("", emptyList(), asked = it.pendingInput, askedStuck = it.stuckKind)
+        }
+        val key = when (a) {
+            is Answer.Option -> a.n.toString()
+            Answer.Enter -> "Enter"
+            Answer.Escape -> "Escape"
+        }
         try {
-            // Every KEY is pressed only after re-reading the pane. The hub
-            // refuses typed text into a blocked session (E_INVALID_STATE) and
-            // pasted text would reach a dialog as ESC first and cancel it, so
-            // an answer has to be a key — and `send_prompt { keys }` has no
-            // state gate on the hub at all. The row the card was drawn from is
-            // up to a reconcile tick old, so nothing goes out unless the pane
-            // still shows the same card. The same check the desktop's answer
-            // card makes.
-            //
-            // Enter and Escape need this as much as the digits do, and on a
-            // trust prompt more: Enter trusts the folder, and on a permission
-            // dialog it picks the highlighted option, i.e. approves.
-            val keyToPress = when (a) {
-                is Answer.Option -> a.n.toString()
-                Answer.Enter -> "Enter"
-                Answer.Escape -> "Escape"
-                // Drawn by no card (`blockedCard` never offers it), so it
-                // cannot be pressed from a stale one; C-c interrupts rather
-                // than approving anything.
-                Answer.Interrupt -> null
-                is Answer.Text -> null
+            // Three calls follow, and they fail differently: a failed PROBE
+            // sent nothing, a failed PRESS may or may not have landed, and a
+            // failed WAIT is after delivery. One banner for all three told the
+            // person the one thing they needed to know — whether to try again —
+            // wrongly two times out of three.
+            val probe = try {
+                actions.activity(sessionId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                local.update { it.copy(answering = false, error = beforeSending(t)) }
+                return@launch
             }
-            if (keyToPress != null) {
-                val asked = row()
-                val moved = dialogMoved(
-                    asked?.pendingInput,
-                    asked?.stuckKind,
-                    actions.activity(sessionId),
-                    a as? Answer.Option,
-                )
-                if (moved != null) {
-                    local.update { it.copy(answering = false, error = moved) }
-                    return@launch
-                }
+            val moved = dialogMoved(drawn?.asked, drawn?.askedStuck, probe, a as? Answer.Option)
+            if (moved != null) {
+                // The banner says "read it again and choose", so put the fresh
+                // picture ON the screen: without this the stale question stayed
+                // up with its chips still tappable and nothing the person could
+                // do would refresh it. The read clears the banner — it is a new
+                // picture — so the refusal is set after it, not before.
+                requestRead(first = false)
+                local.update { it.copy(answering = false, error = moved) }
+                return@launch
             }
-            val receipt = when (a) {
-                is Answer.Option -> actions.sendKeys(sessionId, a.n.toString())
-                is Answer.Text -> actions.sendPrompt(sessionId, a.text)
-                Answer.Enter -> actions.sendKeys(sessionId, "Enter")
-                Answer.Escape -> actions.sendKeys(sessionId, "Escape")
-                Answer.Interrupt -> actions.sendKeys(sessionId, "C-c")
-            }
+            val receipt = actions.sendKeys(sessionId, key)
             // Delivered, so the card is answered and the screen is live again.
             // `sessions.turn_seq` moves only at Stop / StopFailure, so waiting
             // for it here held every control inert for the whole of
@@ -726,7 +746,12 @@ class SessionViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(answering = false, error = friendly(t)) }
+            // Everything from `sendKeys` on: the key may well have been
+            // pressed, so the banner must not invite a second press. Read
+            // first, set the banner second, for the reason above.
+            val said = afterSending(t)
+            requestRead(first = false)
+            local.update { it.copy(answering = false, error = said) }
         }
     }
 
@@ -1246,6 +1271,29 @@ internal const val ANSWER_WAIT_SECONDS: Int = 30
  *    [option] is null for the bare Enter/Escape chips that sit beside the
  *    digits on that same card.
  */
+/**
+ * A failure BEFORE the key went out: the pane re-read itself failed, so
+ * nothing was sent and pressing again is safe. Says so, because the one
+ * decision the person has to make from this banner is whether to retry.
+ */
+internal fun beforeSending(t: Throwable): Friendly {
+    val f = friendly(t)
+    return f.copy(body = "Nothing was sent — the session could not be read. ${f.body}")
+}
+
+/**
+ * A failure AFTER the key went out — the press itself, or the wait for the turn
+ * to move. The key may well have been pressed, and on a permission dialog that
+ * is a grant, so this must not invite a second press. The old single `catch`
+ * gave this the same words as the safe case above.
+ */
+internal fun afterSending(t: Throwable): Friendly {
+    val f = friendly(t)
+    return f.copy(
+        body = "The answer may already have been delivered — check the session before answering again. ${f.body}",
+    )
+}
+
 internal fun dialogMoved(
     asked: PendingInput?,
     askedStuck: String?,

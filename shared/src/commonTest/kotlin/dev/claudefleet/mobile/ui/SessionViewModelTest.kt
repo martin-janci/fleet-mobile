@@ -1950,6 +1950,103 @@ class SessionViewModelTest {
         assertFalse(vm.state.value.answering)
     }
 
+    /**
+     * The guard compares against the card the chip was DRAWN on, not the live
+     * row at tap time.
+     *
+     * Both operands used to come from the row: in the window where a row event
+     * has landed but the chips have not recomposed, the "what was asked" side
+     * moved with the pane and the refusal could not fire — the person tapped a
+     * dialog they had read and answered the one that replaced it. Passing the
+     * composed card is what makes the two operands independent.
+     */
+    @Test
+    fun the_guard_compares_against_the_card_that_was_drawn_not_the_live_row() = runTest {
+        val read = PendingInput("permission", "Delete the repo?", listOf(PendingOption(1, "Yes")))
+        val now = PendingInput("permission", "Push to main?", listOf(PendingOption(1, "Yes")))
+        val actions = FakeActions()
+        actions.probeAnswer = ActivityProbe(claudeStatus = "blocked", pendingInput = now)
+        // The row has ALREADY moved on to the new dialog, which is what the
+        // probe agrees with — so a guard reading the row would let the key
+        // through.
+        val fleet = FakeFleetState(listOf(blockedRow(pending = now)))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+
+        val drawn = blockedCard(blockedRow(pending = read), HUB_VERSION_DIGIT_KEYS)!!
+        vm.answer(Answer.Option(1, "Yes"), drawn).join()
+        runCurrent()
+
+        assertTrue(actions.sentKeys.isEmpty(), "${actions.sentKeys}")
+        assertEquals("The question changed", vm.state.value.error?.title)
+
+        // And the same card against the dialog it was drawn from goes through.
+        val agreeing = blockedCard(blockedRow(pending = now), HUB_VERSION_DIGIT_KEYS)!!
+        vm.answer(Answer.Option(1, "Yes"), agreeing).join()
+        runCurrent()
+        assertEquals(listOf("1"), actions.sentKeys)
+    }
+
+    /**
+     * A refusal refreshes the row, so the question the banner tells the person
+     * to read again is actually on screen.
+     *
+     * The freshly read dialog used to be thrown away and no path refreshed
+     * anything, so the stale question stayed up with its chips still tappable
+     * under a banner saying "read it again and choose" — an instruction the
+     * screen gave no way to follow.
+     */
+    @Test
+    fun a_refused_answer_reads_the_session_again_and_keeps_its_banner() = runTest {
+        val actions = FakeActions()
+        actions.probeAnswer = ActivityProbe(
+            claudeStatus = "blocked",
+            pendingInput = PendingInput("permission", "Push to main?", listOf(PendingOption(1, "Yes"))),
+        )
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+        val before = actions.reads
+
+        vm.answer(Answer.Option(1, "Yes")).join()
+        runCurrent()
+
+        assertTrue(actions.reads > before, "the refusal asked for a fresh read")
+        // The read clears the banner, so the refusal has to outlive it.
+        assertEquals("The question changed", vm.state.value.error?.title)
+        assertFalse(vm.state.value.answering)
+    }
+
+    /**
+     * A failure before the key and a failure after it say different things.
+     *
+     * Three calls go out — the probe, the press, the wait — and one `catch`
+     * gave all three the same banner, so the one decision the person makes from
+     * it (press again, or go and look) was wrong two times out of three.
+     */
+    @Test
+    fun a_failure_before_the_key_and_one_after_it_are_not_the_same_banner() = runTest {
+        val probeDied = FakeActions().apply { probeFails = HubError.Tool("E_SSH", "host unreachable") }
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        val one = SessionViewModel(ID, fleet, probeDied, backgroundScope)
+        one.answer(Answer.Option(1, "Yes")).join()
+        runCurrent()
+        val safe = one.state.value.error!!
+        assertTrue(safe.body.startsWith("Nothing was sent"), safe.body)
+        assertEquals("E_SSH: host unreachable", safe.details)
+
+        val pressDied = FakeActions().apply { sendFails = HubError.Tool("E_BUSY", "mid-turn") }
+        val two = SessionViewModel(ID, FakeFleetState(listOf(blockedRow())).also { it.hubVersion.value = HUB_VERSION_DIGIT_KEYS }, pressDied, backgroundScope)
+        two.answer(Answer.Option(1, "Yes")).join()
+        runCurrent()
+        val risky = two.state.value.error!!
+        assertTrue(risky.body.startsWith("The answer may already have been delivered"), risky.body)
+        assertEquals("E_BUSY: mid-turn", risky.details)
+    }
+
     @Test
     fun enter_and_escape_go_through_keys_rather_than_an_empty_prompt() = runTest {
         val actions = FakeActions()
@@ -1959,10 +2056,13 @@ class SessionViewModelTest {
 
         vm.answer(Answer.Enter).join()
         vm.answer(Answer.Escape).join()
-        vm.answer(Answer.Interrupt).join()
         runCurrent()
 
-        assertEquals(listOf("Enter", "Escape", "C-c"), actions.sentKeys)
+        // `Answer` has no `Interrupt` or `Text` arm any more: neither had a
+        // construction site outside this test, and `Text` was the last path by
+        // which this app would have typed into a blocked session. Every answer
+        // is a key, which is also what makes the pane re-read unskippable.
+        assertEquals(listOf("Enter", "Escape"), actions.sentKeys)
         assertTrue(actions.sentPrompts.isEmpty(), "a key is never an empty send_prompt")
     }
 
@@ -2341,7 +2441,7 @@ class SessionViewModelTest {
 
         assertTrue(actions.sentKeys.isEmpty())
         assertTrue(actions.sentPrompts.isEmpty())
-        assertEquals(0, actions.probes, "a readonly device does not even read the pane for an answer")
+        assertEquals(0, actions.probes, "a refused hub is not read either — this screen calls it for nothing")
         assertTrue(actions.waited.isEmpty())
     }
 
@@ -2398,6 +2498,44 @@ class SessionViewModelTest {
         val vm = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope, canSendPrompts = false)
         runCurrent()
         assertFalse(vm.state.value.canManage)
+    }
+
+    /**
+     * The management menu's enablement is the same rule `runManaged` refuses on.
+     *
+     * The menu asked `!busy && connected` — two of the three idle terms — so
+     * during an in-flight answer or send every item was live and the tap was
+     * dropped by the guard underneath with nothing said.
+     */
+    @Test
+    fun canAct_is_the_same_rule_runManaged_refuses_on() = runTest {
+        val actions = FakeActions()
+        actions.sendGate = CompletableDeferred()
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+        assertTrue(vm.state.value.canAct, "setup: idle and connected")
+
+        // An answer in flight: the press is held open inside `sendKeys`.
+        val job = vm.answer(Answer.Option(1, "Yes"))
+        runCurrent()
+        assertTrue(vm.state.value.answering)
+        assertFalse(vm.state.value.canAct, "an answer is in flight")
+        // And the call underneath agrees: a management call now is refused.
+        vm.restart().join()
+        runCurrent()
+        assertTrue(actions.restarted.isEmpty(), "runManaged refused it, so the menu must have too")
+
+        actions.sendGate!!.complete(Unit)
+        job.join()
+        runCurrent()
+        assertTrue(vm.state.value.canAct)
+
+        // Disconnected is the other half.
+        fleet.status.value = ConnectionStatus.Refused("too old")
+        runCurrent()
+        assertFalse(vm.state.value.canAct)
     }
 
     @Test

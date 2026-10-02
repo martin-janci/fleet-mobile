@@ -72,7 +72,7 @@ fun BlockedCardView(
     readOnly: Boolean,
     canAnswer: Boolean,
     connected: Boolean,
-    onAnswer: (Answer) -> Unit,
+    onAnswer: (Answer, BlockedCard) -> Unit,
     onShowTerminal: () -> Unit,
     onHideTerminal: () -> Unit,
     onRestart: (() -> Unit)? = null,
@@ -129,9 +129,12 @@ fun BlockedCardView(
                 ) {
                     for (answer in card.answers) {
                         AssistChip(
-                            onClick = { onAnswer(answer) },
+                            // The card, not just the answer: the guard before the key goes
+                            // out compares against the dialog THIS card was drawn
+                            // from, which the live row may already have left behind.
+                            onClick = { onAnswer(answer, card) },
                             enabled = canAnswer,
-                            label = { Text(answerLabel(answer)) },
+                            label = { Text(answerLabel(answer, card.highlighted)) },
                             // The chip sits ON the status container, so its
                             // label has to be that container's own `on`
                             // colour rather than the scheme's `onSurface` —
@@ -219,13 +222,13 @@ private val TERMINAL_MAX_HEIGHT: Dp = 220.dp
  * A numbered option is drawn as the REPL draws it — the number first, because
  * the number is what is actually sent. `Escape` is abbreviated because the key
  * on a phone keyboard is not called Escape at all and "Esc" is what the prompt
- * itself says. A free-text answer is its own text: inventing a friendlier
- * word for it here would be a second place deciding what a prompt offers.
+ * itself says.
  */
-internal fun answerLabel(answer: Answer): String = when (answer) {
+internal fun answerLabel(answer: Answer, highlighted: String? = null): String = when (answer) {
     is Answer.Option -> "${answer.n} · ${answer.label}"
-    Answer.Enter -> "Enter"
+    // Enter presses whatever the REPL's cursor is on, so when the pane says
+    // which that is, the chip says it too: an unlabelled Enter beside labelled
+    // digits is the one chip whose effect the person cannot read off the card.
+    Answer.Enter -> highlighted?.let { "Enter · $it" } ?: "Enter"
     Answer.Escape -> "Esc"
-    Answer.Interrupt -> "Interrupt"
-    is Answer.Text -> answer.text
 }

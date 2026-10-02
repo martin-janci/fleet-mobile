@@ -65,7 +65,7 @@ class SessionHeaderLayoutTest {
                         onBack = {},
                         onDismissError = {},
                         onAtBottom = {},
-                        onAnswer = {},
+                        onAnswer = { _, _ -> },
                         onShowTerminal = {},
                         onHideTerminal = {},
                         onRestart = {},

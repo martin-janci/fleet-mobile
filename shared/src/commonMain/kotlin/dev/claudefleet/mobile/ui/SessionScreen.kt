@@ -130,7 +130,7 @@ fun SessionScreen(
     onBack: () -> Unit,
     onDismissError: () -> Unit,
     onAtBottom: (Boolean) -> Unit,
-    onAnswer: (Answer) -> Unit,
+    onAnswer: (Answer, BlockedCard) -> Unit,
     onShowTerminal: () -> Unit,
     onHideTerminal: () -> Unit,
     onRestart: () -> Unit,
@@ -607,7 +607,10 @@ private fun SessionOverflowMenu(
     var showRestartConfirm by remember { mutableStateOf(false) }
     var showSafeKillConfirm by remember { mutableStateOf(false) }
     var showKillConfirm by remember { mutableStateOf(false) }
-    val actionable = !state.busy && state.connected
+    // The same terms `runManaged` refuses on — see [SessionUiState.canAct]. The
+    // menu asked `!busy && connected` and left every item live during an
+    // in-flight answer or send, where the guard underneath dropped the tap.
+    val actionable = state.canAct
 
     IconButton(onClick = { expanded = true }) {
         Icon(FleetIcons.MoreVert, contentDescription = "Session actions")
