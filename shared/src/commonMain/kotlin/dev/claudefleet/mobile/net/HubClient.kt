@@ -574,9 +574,22 @@ class HubClient(
     // `HubCapabilities` says the tool (and, for a decision, the action) is
     // there — see `FleetState.capabilities`.
 
-    /** Tickets from the hub's tracker cache for one view: `mine`, `sprint`, `recent`. Never a tracker call. */
-    suspend fun workTickets(view: String): List<Ticket> =
-        call("work", buildJsonObject { put("action", "tickets"); put("view", view) }) {
+    /**
+     * Tickets from the hub's tracker cache for one view: `mine`, `sprint`,
+     * `recent`. Never a tracker call.
+     *
+     * [limit] is asked for explicitly, because the hub's own default is 50 and
+     * it sends NO truncation signal: a person with 300 tickets in `recent` got
+     * the 50 most recently updated and a count that read as the whole of their
+     * work. [TICKETS_LIMIT] is the hub's maximum, so asking for it is asking
+     * for everything the hub will give, and the caller can tell a full page
+     * from a short one by comparing the size against what it asked for.
+     */
+    suspend fun workTickets(view: String, limit: Int = TICKETS_LIMIT): List<Ticket> =
+        call(
+            "work",
+            buildJsonObject { put("action", "tickets"); put("view", view); put("limit", limit) },
+        ) {
             json.decodeFromJsonElement(ListSerializer(Ticket.serializer()), it)
         }
 
@@ -1230,6 +1243,17 @@ internal fun HttpClient.withHubTimeouts(): HttpClient = config {
  * to never writing it.
  */
 internal const val FORCE_CROSS_ORG = "force_cross_org"
+
+/**
+ * The most tickets one `work { action: tickets }` will return
+ * (`TICKETS_MAX_LIMIT` in the hub's `service/trackers/tickets.rs`; its default
+ * when nothing is asked for is 50).
+ *
+ * Asked for explicitly so a list is the whole of what the hub holds rather
+ * than its first page, and so the caller can recognise a full page: a section
+ * of exactly this many tickets may have more behind it.
+ */
+const val TICKETS_LIMIT: Int = 200
 
 internal const val HUB_CALL_TIMEOUT_MS = 45_000L
 internal const val HUB_CONNECT_TIMEOUT_MS = 15_000L

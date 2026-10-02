@@ -31,11 +31,26 @@ enum class TicketSessionFilter(val label: String) {
  */
 @Serializable
 enum class TicketSort(val label: String) {
-    /** The hub's order — what the tracker's own list shows. */
-    TRACKER("Tracker"),
+    /**
+     * The order the hub listed them in — its cache is `updated_ext DESC`, so
+     * newest tracker update first AT READ TIME.
+     *
+     * It used to be labelled "Tracker" and documented as "what the tracker's
+     * own list shows", which is an order the hub has never had: it does not
+     * ask the tracker for an order, it sorts its own cache.
+     */
+    TRACKER("As listed"),
     /** In progress, then to do, then done, then no status: what is moving first. */
     STATUS("Status"),
-    /** The tracker's last update, newest first. */
+    /**
+     * The tracker's last update, newest first — recomputed over the cache as
+     * it is NOW.
+     *
+     * Which is the whole of the difference from [TRACKER]: the sheet's rows
+     * are refreshed from the ticket cache (`current()`), so a ticket the sync
+     * has touched since the listing moves under this one and stays put under
+     * [TRACKER].
+     */
     UPDATED("Updated"),
     ;
 
@@ -63,6 +78,16 @@ data class TicketFilters(
     val tracker: Long? = null,
     val session: TicketSessionFilter? = null,
 ) {
+    /**
+     * Whether anything narrows the lists.
+     *
+     * Copied from `SessionFilters` with none of its readers, so for a while
+     * nothing read it and production asked the same question of the facet list
+     * instead — two answers to one question, free to disagree. It is now the
+     * one source: the filter page's Clear all and its button read it, and the
+     * facet strip is a RENDERING of the same filters rather than their
+     * definition.
+     */
     val any: Boolean get() = this != TicketFilters()
 
     /**
@@ -103,6 +128,27 @@ fun ticketMatchesQuery(ticket: Ticket, query: String): Boolean {
 
 /** The search field holds a link, which only the hub's lookup can answer. */
 fun isTicketUrl(query: String): Boolean = "://" in query
+
+/**
+ * Whether the field's text could BE a ticket the hub can look up: a URL, or a
+ * tracker key — letters or digits, a `-`, then digits (`PAY-9`, `OM-110`), as
+ * `work lookup` parses one.
+ *
+ * It gates the keyboard's Search action. The field is a live filter as well as
+ * the sheet's lookup, and with `ImeAction.Search` unconditional the natural
+ * key for dismissing the keyboard sent ordinary filter words to the hub as a
+ * key lookup — a live tracker fetch for the word "login", answered with an
+ * error banner over lists that were matching it perfectly well.
+ */
+fun isLookupText(query: String): Boolean {
+    val q = query.trim()
+    if (q.isEmpty()) return false
+    if (isTicketUrl(q)) return true
+    val dash = q.lastIndexOf('-')
+    if (dash <= 0 || dash == q.length - 1) return false
+    return q.substring(0, dash).all { it.isLetterOrDigit() || it == '_' } &&
+        q.substring(dash + 1).all { it.isDigit() }
+}
 
 /** [tickets] in [sort]'s order; stable, so equal tickets keep the hub's order. */
 fun sortTickets(tickets: List<Ticket>, sort: TicketSort): List<Ticket> = when (sort) {

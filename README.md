@@ -278,9 +278,11 @@ costs one reconnect.
     shows its acceptance criteria (with **Copy**) and the sessions that worked
     on it before. It filters like the Sessions list: typing narrows the lists
     by key or title, **Filters (n)** picks lists, status (bucket or tracker
-    column), sessions, organisation and tracker, **Sort** orders by tracker,
-    status or last update, and a strip of removable chips ("5 of 23") says
-    what is on. Filters and sort are remembered on the device;
+    column), sessions, organisation and tracker, **Sort** orders as listed (the
+    hub's own order, newest tracker update first at read time), by status or by
+    last update, and a strip of removable chips ("5 of 23") says what is on.
+    Filters and sort are remembered on the device; a list the hub capped reads
+    "200+", since it sends no truncation signal of its own;
   - a **Today** sheet: what is waiting on you, in progress, shipped and stale
     since local midnight, one card per section, each session's reason as a
     coloured chip in words; chips narrow it by section, host or *Tickets

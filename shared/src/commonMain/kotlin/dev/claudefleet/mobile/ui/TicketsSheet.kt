@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
@@ -47,6 +49,7 @@ import dev.claudefleet.mobile.model.TicketSessionFilter
 import dev.claudefleet.mobile.model.TicketSort
 import dev.claudefleet.mobile.model.WorkStatusFilter
 import dev.claudefleet.mobile.model.facetSentence
+import dev.claudefleet.mobile.model.isLookupText
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.TicketCardBody
 import dev.claudefleet.mobile.ui.components.WorkStatusDot
@@ -102,11 +105,35 @@ fun TicketsSheet(state: TicketsUiState, handlers: TicketsHandlers) {
     // that should have closed the filters. `onCloseFilters` already existed for
     // the toolbar arrow.
     ModalBottomSheet(onDismissRequest = if (state.filtersOpen) handlers.onCloseFilters else handlers.onClose) {
-        if (state.filtersOpen) {
-            TicketFiltersPage(state, handlers)
-            return@ModalBottomSheet
-        }
-        Column(modifier = Modifier.fillMaxWidth()) {
+        TicketsBody(state, handlers)
+    }
+}
+
+/**
+ * Everything the sheet holds, without the sheet.
+ *
+ * Apart so it can be composed on its own, as [TodayBody] is and for the same
+ * reason: a `ModalBottomSheet` draws into a window of its own, which a composed
+ * test cannot reach — and this sheet's two pages, with the state that has to
+ * survive the swap between them, are exactly what no test covered.
+ *
+ * Public, not internal: the composed tests live in `androidApp`, another
+ * module.
+ */
+@Composable
+fun TicketsBody(state: TicketsUiState, handlers: TicketsHandlers) {
+    // Hoisted ABOVE the page swap. Both states used to be remembered inside
+    // the branch the swap removes — the list had none of its own, so
+    // `LazyColumn` made one internally — so opening the filters and coming
+    // back put a person at the top of a list they had scrolled halfway
+    // down, which on `recent` is the most-scrolled list on the sheet.
+    val listState = rememberLazyListState()
+    val pageScroll = rememberScrollState()
+    if (state.filtersOpen) {
+        TicketFiltersPage(state, handlers, pageScroll)
+        return
+    }
+    Column(modifier = Modifier.fillMaxWidth()) {
             Text("Tickets", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp))
             OutlinedTextField(
                 value = state.query,
@@ -123,10 +150,16 @@ fun TicketsSheet(state: TicketsUiState, handlers: TicketsHandlers) {
                 } else {
                     null
                 },
+                // Search only when the text could BE a key or a URL. The field
+                // became a live filter and kept `ImeAction.Search`, so the
+                // natural key for dismissing the keyboard sent ordinary filter
+                // words to the hub as a key lookup — a live tracker fetch for
+                // the word "login", answered with an error banner over lists
+                // that were matching perfectly well.
                 keyboardOptions = KeyboardOptions(
                     capitalization = KeyboardCapitalization.Characters,
                     autoCorrectEnabled = false,
-                    imeAction = ImeAction.Search,
+                    imeAction = if (isLookupText(state.query)) ImeAction.Search else ImeAction.Done,
                 ),
                 keyboardActions = KeyboardActions(onSearch = { handlers.onSearch() }),
                 modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp),
@@ -142,7 +175,7 @@ fun TicketsSheet(state: TicketsUiState, handlers: TicketsHandlers) {
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
             if (state.loading || state.busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             state.selected?.let { TicketActions(it, state.busy, handlers) }
-            LazyColumn(modifier = Modifier.fillMaxWidth()) {
+            LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
                 state.found?.let { found ->
                     item(key = "found") { SectionTitle("Found") }
                     item(key = "found-${found.id}") {
@@ -172,7 +205,6 @@ fun TicketsSheet(state: TicketsUiState, handlers: TicketsHandlers) {
             }
         }
     }
-}
 
 /**
  * **Filters (n)** and **Sort**: the one control that narrows, carrying its
@@ -216,7 +248,7 @@ private fun AllFiltered(state: TicketsUiState, onClearAll: () -> Unit) {
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TicketFiltersPage(state: TicketsUiState, handlers: TicketsHandlers) {
+private fun TicketFiltersPage(state: TicketsUiState, handlers: TicketsHandlers, scroll: ScrollState) {
     val f = state.filters
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -229,10 +261,28 @@ private fun TicketFiltersPage(state: TicketsUiState, handlers: TicketsHandlers) 
             Text("Filters", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
             TextButton(onClick = handlers.onClearAll, enabled = state.facets.isNotEmpty()) { Text("Clear all") }
         }
+        // The error and the progress bar live on the lists page, which the swap
+        // above removes — so a read that failed or was still running while the
+        // filters were open said nothing at all, and the numbers on this page's
+        // button were of a list that had not arrived.
+        ErrorBanner(state.error, onDismiss = handlers.onDismissError)
+        if (state.loading || state.busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        // The SEARCH facet counts towards this page's numbers and its Clear
+        // all, but the field that holds the query is on the page the sheet
+        // swapped out — so the query drove a figure and a button whose cause
+        // was nowhere on screen. Here it is, in the same removable chip the
+        // lists page draws it in.
+        FilterStrip(
+            facets = state.facets.filter { it.id == TicketFacetId.SEARCH },
+            onClear = handlers.onClearFacet,
+            onClearAll = handlers.onClearAll,
+            modifier = Modifier.padding(bottom = 4.dp),
+            showClearAll = false,
+        )
         Column(
             modifier = Modifier
                 .weight(1f, fill = false)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scroll)
                 .padding(bottom = 8.dp),
         ) {
             // Several at once; *All* is the reset.
@@ -307,7 +357,11 @@ private fun TicketFiltersPage(state: TicketsUiState, handlers: TicketsHandlers) 
             onClick = handlers.onCloseFilters,
             modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = TOUCH_TARGET),
         ) {
-            Text(showTicketsLabel(state.shown, state.total, state.facets.isNotEmpty()))
+            // `f.any`, not `state.facets.isNotEmpty()`: the facet list counts
+            // the search too, so with a query typed and no filter set the
+            // button read "Show 3 tickets" where "Show all 3" was the truth of
+            // this page. One question, one answer — `TicketFilters.any`.
+            Text(showTicketsLabel(state.shown, state.total, f.any))
         }
     }
 }
@@ -323,10 +377,16 @@ internal fun showTicketsLabel(shown: Int, total: Int, filtered: Boolean): String
 internal fun emptyTicketsSentence(facets: String): String = "No tickets match $facets."
 
 /** "My work · 12", or "My work · 3 of 12" while filters hide some. */
-internal fun sectionTitle(section: TicketSection): String = when {
-    section.total == 0 -> section.title
-    section.tickets.size == section.total -> "${section.title} · ${section.total}"
-    else -> "${section.title} · ${section.tickets.size} of ${section.total}"
+internal fun sectionTitle(section: TicketSection): String {
+    // "200+", not "200": the hub caps a listing, and a section that came back
+    // exactly full may have more behind it. Without this a person with 300
+    // tickets in `recent` read "200" as the whole of their work.
+    val total = if (section.capped) "${section.total}+" else "${section.total}"
+    return when {
+        section.total == 0 -> section.title
+        section.tickets.size == section.total -> "${section.title} · $total"
+        else -> "${section.title} · ${section.tickets.size} of $total"
+    }
 }
 
 /** A section with nothing to draw: empty at the hub, or emptied by the filters. */

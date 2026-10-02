@@ -866,6 +866,10 @@ class HubClientTest {
         assertTrue(client.workResumePlan("PAY-7").canResumeLast)
 
         assertEquals("mine", sent[0]["view"]!!.jsonPrimitive.content)
+        // The limit goes out EXPLICITLY. The hub's own default is 50 and it
+        // sends no truncation signal, so a listing asked for without one was
+        // the first page of someone's work presented as all of it.
+        assertEquals(TICKETS_LIMIT, sent[0]["limit"]!!.jsonPrimitive.int)
         assertEquals("PAY-7", sent[2]["key"]!!.jsonPrimitive.content, "a key is trimmed and sent as key")
         assertEquals("https://acme.atlassian.net/browse/PAY-7", sent[3]["url"]!!.jsonPrimitive.content)
         assertFalse("key" in sent[3], "a pasted URL goes as url, not key")

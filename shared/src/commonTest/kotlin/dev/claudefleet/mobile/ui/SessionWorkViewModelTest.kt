@@ -39,6 +39,7 @@ import dev.claudefleet.mobile.net.ToolCatalog
 import dev.claudefleet.mobile.ui.components.BannerTone
 import dev.claudefleet.mobile.ui.components.bannerTone
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.runCurrent
@@ -114,6 +115,16 @@ internal class FakeWorkActions : WorkActions {
     var planAnswer: ResumePlan? = null
     var started = SessionRow(id = 99, tmuxName = "pay-9", hostAlias = "pine")
 
+    /**
+     * Held open, these make a read SLOW, which is the only way to test what
+     * happens while one is in flight: a lookup answering after the field was
+     * cleared, a second search started over the first, a sheet closed mid-read.
+     * Every answer used to arrive instantly from a fixed slot, so none of that
+     * was reachable by a test at all.
+     */
+    var ticketsGate: CompletableDeferred<Unit>? = null
+    var lookupGate: CompletableDeferred<Unit>? = null
+
     private fun record(call: String): SessionRow {
         calls += call
         fail?.let { throw it }
@@ -122,12 +133,14 @@ internal class FakeWorkActions : WorkActions {
 
     override suspend fun tickets(view: String): List<Ticket> {
         calls += "tickets $view"
+        ticketsGate?.await()
         fail?.let { throw it }
         return ticketsAnswer[view].orEmpty()
     }
 
     override suspend fun lookup(keyOrUrl: String): Ticket {
         calls += "lookup $keyOrUrl"
+        lookupGate?.await()
         failLookup?.let { throw it }
         return lookupAnswer
     }

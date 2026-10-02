@@ -28,6 +28,7 @@ import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK_LINK
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.existingSessionId
 import dev.claudefleet.mobile.net.isUnknownAction
+import dev.claudefleet.mobile.net.TICKETS_LIMIT
 import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -49,7 +50,19 @@ import kotlinx.serialization.json.Json
  * the chosen sort, and [total] is how many the hub listed — so a section can
  * say "Nothing here" apart from "3 hidden by filters".
  */
-data class TicketSection(val view: String, val title: String, val tickets: List<Ticket>, val total: Int = tickets.size)
+data class TicketSection(
+    val view: String,
+    val title: String,
+    val tickets: List<Ticket>,
+    val total: Int = tickets.size,
+    /**
+     * The hub returned a FULL page for this view, so there may be more behind
+     * it. The hub sends no truncation signal of its own; this is the only one
+     * there is — the listing came back with exactly as many tickets as were
+     * asked for.
+     */
+    val capped: Boolean = false,
+)
 
 /** What a person can do with the ticket they tapped. */
 data class TicketDetail(
@@ -234,8 +247,15 @@ class TicketsViewModel(
         return scope.launch {
             try {
                 val sections = coroutineScope {
-                    VIEWS.map { (view, title) -> async { TicketSection(view, title, actions.tickets(view)) } }
-                        .map { it.await() }
+                    VIEWS.map { (view, title) ->
+                        async {
+                            val tickets = actions.tickets(view)
+                            // The hub sends no truncation signal, so a full page
+                            // is the only one there is: `tickets.size` equal to
+                            // what was asked for means there may be more.
+                            TicketSection(view, title, tickets, capped = tickets.size >= TICKETS_LIMIT)
+                        }
+                    }.map { it.await() }
                 }
                 fleet.rememberTickets(sections.flatMap { it.tickets })
                 local.update { it.copy(sections = sections, loading = false) }
@@ -248,6 +268,8 @@ class TicketsViewModel(
     }
 
     fun close() {
+        searching?.cancel()
+        searching = null
         local.update { Local(filters = it.filters, sort = it.sort, sections = it.sections) }
     }
 
@@ -293,13 +315,40 @@ class TicketsViewModel(
 
     /** One chip's ×: that filter back at its default. The search chip clears the field. */
     fun clearFacet(id: TicketFacetId) {
-        if (id == TicketFacetId.SEARCH) local.update { it.copy(query = "", found = null) } else setFilters { it.without(id) }
+        if (id == TicketFacetId.SEARCH) clearSearch() else setFilters { it.without(id) }
     }
 
     /** Every filter off and the search field empty: every listed ticket back. */
     fun clearAll() {
-        local.update { it.copy(query = "", found = null) }
+        clearSearch()
         setFilters { TicketFilters() }
+    }
+
+    /**
+     * The search field empty and everything it put on screen gone with it.
+     *
+     * Resetting `query` and `found` alone left three things behind: the lookup
+     * still in flight, which re-selected the dismissed ticket when it landed;
+     * the error the failed lookup had raised, under lists that now match
+     * perfectly well; and the ticket's own actions row, still open on a ticket
+     * no longer anywhere on the sheet. The selection goes only when it IS the
+     * found ticket — a ticket chosen from a list is not the search's to drop.
+     */
+    private fun clearSearch() {
+        searching?.cancel()
+        searching = null
+        local.update {
+            val wasFound = it.selectedId != null && it.selectedId == it.found?.id
+            it.copy(
+                query = "",
+                found = null,
+                error = null,
+                selectedId = if (wasFound) null else it.selectedId,
+                selected = if (wasFound) null else it.selected,
+                plan = if (wasFound) null else it.plan,
+                card = if (wasFound) null else it.card,
+            )
+        }
     }
 
     /** Tracker → Status → Updated → Tracker. Remembered, like the filters. */
@@ -341,6 +390,17 @@ class TicketsViewModel(
         return TicketSort.entries.firstOrNull { it.name == stored } ?: TicketSort.TRACKER
     }
 
+    /**
+     * The one `search` in flight, so clearing the field, Clear all or closing
+     * the sheet can cancel it.
+     *
+     * Without it a lookup launched and was forgotten: its answer landed in
+     * `found` after the field was emptied, re-selecting a ticket the person
+     * had just dismissed, and its `finally` cleared `busy` under a later
+     * search that was still running.
+     */
+    private var searching: Job? = null
+
     fun onQuery(text: String) {
         local.update { it.copy(query = text) }
     }
@@ -349,12 +409,20 @@ class TicketsViewModel(
     fun search(): Job? {
         val reference = local.value.query.trim()
         if (reference.isEmpty() || !fleet.capabilities.value.has(WORK, LOOKUP)) return null
-        return scope.launch {
+        searching?.cancel()
+        val job = scope.launch {
             local.update { it.copy(busy = true, error = null, found = null) }
             try {
                 val ticket = actions.lookup(reference)
                 fleet.rememberTickets(listOf(ticket))
-                local.update { it.copy(found = ticket) }
+                // Belt and braces beside the cancel: an answer is only this
+                // search's answer while the field still holds what was asked.
+                var current = false
+                local.update {
+                    current = it.query.trim() == reference
+                    if (current) it.copy(found = ticket) else it
+                }
+                if (!current) return@launch
                 select(ticket)
             } catch (e: CancellationException) {
                 throw e
@@ -365,6 +433,8 @@ class TicketsViewModel(
                 local.update { it.copy(busy = false) }
             }
         }
+        searching = job
+        return job
     }
 
     /**

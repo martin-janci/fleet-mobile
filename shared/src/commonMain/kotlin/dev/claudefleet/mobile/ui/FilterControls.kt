@@ -101,6 +101,14 @@ internal fun <I> FilterStrip(
     modifier: Modifier = Modifier,
     /** Something said before the chips ("3 of 87"); null says nothing. */
     lead: String? = null,
+    /**
+     * Whether the strip draws its own *Clear all* at the end.
+     *
+     * False where the screen already has one — the Tickets filter page carries
+     * it in its header, and a second one directly beneath would be two buttons
+     * for one action.
+     */
+    showClearAll: Boolean = true,
 ) {
     if (facets.isEmpty()) return
     Row(
@@ -140,8 +148,10 @@ internal fun <I> FilterStrip(
                 )
             }
         }
-        TextButton(onClick = onClearAll, contentPadding = PaddingValues(horizontal = 8.dp)) {
-            Text("Clear all", style = MaterialTheme.typography.labelMedium)
+        if (showClearAll) {
+            TextButton(onClick = onClearAll, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                Text("Clear all", style = MaterialTheme.typography.labelMedium)
+            }
         }
     }
 }
