@@ -20,7 +20,10 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * Expanded tool rows read `session_tool_detail` once per call, only from a hub
@@ -94,24 +97,66 @@ class ToolDetailsModelTest {
         assertEquals(emptyMap(), model.states.value)
     }
 
+    /**
+     * A TRANSIENT failure can be retried, and only the row's Retry retries it.
+     *
+     * The old spelling of this test used `E_NOT_FOUND`, a code the hub does not
+     * emit, and then asserted that the very same request succeeded on a second
+     * try — a sequence the real `E_NOTFOUND` can never produce. The two cases
+     * are now separate, because a plain `request` must NOT re-read after a
+     * failure: the row opens with a `LaunchedEffect` that fires again on every
+     * scroll back into a keyed `LazyColumn`, and each read is a transcript grep
+     * over SSH.
+     */
     @Test
-    fun loading_shows_while_the_call_is_out_and_a_failure_can_be_retried() = runTest {
+    fun loading_shows_while_the_call_is_out_and_a_transient_failure_retries_only_when_asked() = runTest {
         val actions = Actions()
         actions.gate = CompletableDeferred()
-        actions.fail = HubError.Tool("E_NOT_FOUND", "no such tool call")
+        actions.fail = HubError.Transport(IllegalStateException("reset"))
         val model = ToolDetailsModel(7, Fleet(withTool), actions, this)
         model.request("tu_1")
         runCurrent()
         assertEquals(ToolDetailLoad.Loading, model.states.value["tu_1"])
         actions.gate!!.complete(Unit)
         runCurrent()
-        assertEquals(ToolDetailLoad.Failed, model.states.value["tu_1"])
+        val failed = assertIs<ToolDetailLoad.Failed>(model.states.value["tu_1"])
+        assertTrue(failed.retryable)
+        assertNull(failed.said, "a transport failure is not the hub speaking")
 
+        // A scroll back into view re-runs the row's effect: no second read.
         actions.fail = null
         model.request("tu_1")
         runCurrent()
+        assertIs<ToolDetailLoad.Failed>(model.states.value["tu_1"])
+        assertEquals(1, actions.asked.size)
+
+        // The Retry button does read again.
+        model.request("tu_1", force = true)
+        runCurrent()
         assertIs<ToolDetailLoad.Loaded>(model.states.value["tu_1"])
         assertEquals(2, actions.asked.size)
+    }
+
+    /**
+     * A refusal with a terminal code will read the same way however often it is
+     * asked, so it carries what the hub said and is never read again — not by
+     * the row's effect and not by a Retry, which is not offered.
+     */
+    @Test
+    fun a_terminal_refusal_is_never_read_again() = runTest {
+        val actions = Actions()
+        actions.fail = HubError.Tool("E_NOTFOUND", "no such tool call in the transcript")
+        val model = ToolDetailsModel(7, Fleet(withTool), actions, this)
+        model.request("tu_1")
+        runCurrent()
+        val failed = assertIs<ToolDetailLoad.Failed>(model.states.value["tu_1"])
+        assertFalse(failed.retryable)
+        assertEquals("no such tool call in the transcript", failed.said)
+
+        model.request("tu_1")
+        model.request("tu_1", force = true)
+        runCurrent()
+        assertEquals(1, actions.asked.size, "asked once, however often it is asked")
     }
 
     @Test

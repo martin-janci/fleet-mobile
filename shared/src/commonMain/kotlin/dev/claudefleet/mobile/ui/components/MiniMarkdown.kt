@@ -97,6 +97,10 @@ import kotlin.math.min
  * - The inline scan stays linear per nesting level: every "where does this
  *   marker close" question is an O(1) read of a precomputed table (see
  *   [nextMarker]).
+ * - A table is bounded by [TABLE_MAX_COLS] and [TABLE_MAX_CELLS]. Its cost is
+ *   `columns × rows` while its input is `columns + rows`, so a few kilobytes
+ *   of pipes buys millions of cells — the one amplification in this parser
+ *   that nesting depth says nothing about.
  * - Only `http:`, `https:` and `mailto:` links are live; any other scheme
  *   (`javascript:`, `file:`, `intent:`, a relative path) renders as its
  *   plain text. Images are never fetched: `![alt](src)` shows its alt text
@@ -146,6 +150,24 @@ enum class MdAlign { None, Start, Center, End }
  * literally.
  */
 internal const val MAX_DEPTH = 12
+
+/**
+ * Most columns a GFM table may have, and most cells it may hold, before it is
+ * left as paragraph text.
+ *
+ * A table's cost is `columns × rows` while its INPUT is `columns + rows`: a
+ * header of 1000 `|` and 1000 one-pipe body lines is ~5 KB of transcript and a
+ * million cells, each a parsed `AnnotatedString`, which [TableView] then
+ * composes and measures in a non-lazy `Layout` on the main thread. The hub
+ * serves up to 64 000 characters of assistant text per read and the item stays
+ * in the window, so the hang would come back on every reopen. The sibling
+ * untrusted grid in this app is bounded the same way (`DIFF_MAX_CELLS`).
+ *
+ * Past either bound the lines fall through to a paragraph, exactly as a table
+ * whose delimiter row does not match its header does today.
+ */
+internal const val TABLE_MAX_COLS = 32
+internal const val TABLE_MAX_CELLS = 8_192
 
 /**
  * The theme-dependent parts of inline spans. [parseMarkdown] without it uses
@@ -484,7 +506,7 @@ private class BlockParser(private val styles: MdInlineStyles) {
                 val align = delimiterRow(lines[i + 1])
                 if (align != null) {
                     val header = splitRow(line)
-                    if (header.size == align.size) {
+                    if (header.size == align.size && header.size <= TABLE_MAX_COLS) {
                         flush()
                         i = parseTable(lines, i, header, align, out)
                         continue
@@ -509,11 +531,15 @@ private class BlockParser(private val styles: MdInlineStyles) {
         val cols = header.size
         var i = start + 2
         val rows = mutableListOf<List<AnnotatedString>>()
+        // One shared empty string for the padding: a row of one pipe used to
+        // allocate `cols` fresh parses of "".
+        val blank = AnnotatedString("")
         while (i < lines.size) {
             val l = lines[i]
             if (l.isBlank() || '|' !in l || startsBlock(l)) break
+            if ((rows.size + 1) * cols > TABLE_MAX_CELLS) break
             val cells = splitRow(l)
-            rows += List(cols) { c -> inline(cells.getOrElse(c) { "" }) }
+            rows += List(cols) { c -> cells.getOrNull(c)?.let { inline(it) } ?: blank }
             i++
         }
         out += MdBlock.Table(header.map { inline(it) }, align, rows)
@@ -783,7 +809,13 @@ private class InlineParser(private val src: String, private val styles: MdInline
                 // `**bold *italic***`: the closing `***` gives its last two
                 // stars to the bold when an italic opened inside it.
                 if (star && tripleStarAt(close, to) && star1Open[i + 2] < close) close++
-                if (within(close, 2, to)) {
+                // `close > i + 2`: an EMPTY span is not a span. `****` closed
+                // at `i + 2` and was consumed as two empty bold ranges, so any
+                // inline run of four or more markers vanished from the text
+                // instead of showing as itself — the same guard the `***`
+                // branch above already has. Refused, the two markers fall to
+                // the literal branch below, which is the GFM result.
+                if (within(close, 2, to) && close > i + 2) {
                     span(b, BOLD, i + 2, close, depth, links)
                     return close + 2
                 }
@@ -795,7 +827,7 @@ private class InlineParser(private val src: String, private val styles: MdInline
             var close = (if (star) star1Close else under1Close)[i + 1]
             // `*italic **bold***`: the mirror image -- the italic takes the last star.
             if (star && tripleStarAt(close, to) && star2Open[i + 1] < close) close += 2
-            if (within(close, 1, to)) {
+            if (within(close, 1, to) && close > i + 1) {
                 span(b, ITALIC, i + 1, close, depth, links)
                 return close + 1
             }
@@ -806,7 +838,8 @@ private class InlineParser(private val src: String, private val styles: MdInline
     private fun strike(b: AnnotatedString.Builder, i: Int, to: Int, depth: Int, links: Boolean): Int? {
         if (at(i + 1) != '~' || i + 2 >= to || spaceAt(i + 2)) return null
         val close = tilde2Close[i + 2]
-        if (!within(close, 2, to)) return null
+        // An empty span is not a span: `~~~~` is its own four characters.
+        if (!within(close, 2, to) || close == i + 2) return null
         span(b, styles.strike, i + 2, close, depth, links)
         return close + 2
     }

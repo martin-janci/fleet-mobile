@@ -191,15 +191,13 @@ class MiniMarkdownTest {
      * hanging) is what the old, quadratic scan would have done here; the
      * point is that it returns at all, promptly.
      *
-     * A run of `*` this long always pairs up under the shared matching rule
-     * (any two identical, un-escaped markers find each other, nearest first)
-     * -- there is no input shape that leaves *many* identical single-character
-     * markers simultaneously stray, since any earlier one finds a later one.
-     * Genuinely stray behaviour is what the two single-occurrence tests above
-     * pin; this one pins the large-input performance the fix exists for, and
-     * the exact (paired, mostly-empty) text a run of adjacent `*` produces --
-     * unchanged from what the un-fixed scan already returned, just returned
-     * fast rather than quadratically.
+     * A run of `*` this long finds no closer that is not immediately adjacent,
+     * and an EMPTY span is not a span, so every marker falls through to the
+     * literal branch and the text is its own 5000 stars. Genuinely stray
+     * behaviour is what the two single-occurrence tests above pin; this one
+     * pins the large-input performance the fix exists for, and that a run of
+     * markers survives as itself rather than being consumed as empty spans and
+     * disappearing — which is what it used to do.
      */
     @Test
     fun five_thousand_adjacent_stars_complete_quickly_and_deterministically() {
@@ -210,12 +208,61 @@ class MiniMarkdownTest {
         val blocks = parseMarkdown(input)
 
         val paragraph = assertIs<MdBlock.Paragraph>(blocks.single())
-        // Every `*` pairs with its immediate neighbour as an (empty) bold
-        // span -- 5000 is a multiple of 4, so the whole run is consumed and
-        // nothing is left over to fall back to a literal, unmatched `*`.
-        assertEquals("x", paragraph.text.text)
+        // Every `*` is its own character. An EMPTY span is not a span, so no
+        // pair of markers is consumed and the run renders as itself, which is
+        // what GFM does — it used to disappear entirely, "x" and nothing else,
+        // and that is how any `****` in a transcript was swallowed.
+        assertEquals(input, paragraph.text.text)
 
         assertEquals(MdBlock.Rule, parseMarkdown("*".repeat(5000)).single())
+    }
+
+    /**
+     * An inline run of four or more markers is its own text. `****` closed an
+     * empty bold span at `i + 2`, so the markers were consumed and vanished
+     * from the rendered line — a transcript's `****` or `~~~~` simply gone.
+     */
+    @Test
+    fun an_empty_span_is_not_a_span() {
+        for (run in listOf("****", "______", "~~~~", "********")) {
+            val p = assertIs<MdBlock.Paragraph>(parseMarkdown("x$run y").single())
+            assertEquals("x$run y", p.text.text, run)
+        }
+        // A span with something in it still pairs.
+        assertEquals("bold", assertIs<MdBlock.Paragraph>(parseMarkdown("**bold**").single()).text.text)
+        assertEquals("gone", assertIs<MdBlock.Paragraph>(parseMarkdown("~~gone~~").single()).text.text)
+    }
+
+    /**
+     * A table costs `columns × rows` and is bought with `columns + rows`
+     * characters, so a few kilobytes of pipes used to buy millions of parsed
+     * cells — composed and measured in a non-lazy layout on the main thread.
+     * Past either bound the lines are a paragraph, exactly as a table whose
+     * delimiter row does not match its header already is.
+     */
+    @Test
+    fun a_table_is_bounded_in_both_dimensions() {
+        val wide = "|".repeat(TABLE_MAX_COLS + 3) + "\n" + "|" + "-|".repeat(TABLE_MAX_COLS + 2) + "\n|x|"
+        assertTrue(
+            parseMarkdown(wide).none { it is MdBlock.Table },
+            "a header past TABLE_MAX_COLS falls through to text",
+        )
+
+        val cols = 8
+        val tall = buildString {
+            append("|".repeat(cols + 1)).append('\n')
+            append("|").append("-|".repeat(cols)).append('\n')
+            repeat(4000) { append("|x|\n") }
+        }
+        val table = parseMarkdown(tall).filterIsInstance<MdBlock.Table>().single()
+        assertEquals(cols, table.header.size)
+        assertTrue(table.rows.size * cols <= TABLE_MAX_CELLS, "cells: ${table.rows.size * cols}")
+        assertTrue(table.rows.isNotEmpty(), "what fits is still drawn")
+
+        // An ordinary table is untouched.
+        val ok = parseMarkdown("| a | b |\n| --- | --- |\n| 1 | 2 |").filterIsInstance<MdBlock.Table>().single()
+        assertEquals(2, ok.header.size)
+        assertEquals(1, ok.rows.size)
     }
 
     @Test

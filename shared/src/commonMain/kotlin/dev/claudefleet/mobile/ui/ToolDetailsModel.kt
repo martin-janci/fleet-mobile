@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.model.ToolDetail
+import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,7 +16,39 @@ import kotlinx.coroutines.launch
 sealed interface ToolDetailLoad {
     data object Loading : ToolDetailLoad
     data class Loaded(val detail: ToolDetail) : ToolDetailLoad
-    data object Failed : ToolDetailLoad
+
+    /**
+     * The read failed, carrying WHY.
+     *
+     * Every `Throwable` used to collapse into one carrier-less value, so the
+     * screen could not tell a timeout from a refusal: it offered Retry for
+     * causes that can never succeed, and each attempt is a transcript grep over
+     * SSH on the session's own host.
+     */
+    data class Failed(val error: Throwable?) : ToolDetailLoad {
+        /** What to show instead of a bare "couldn't load", when the hub said. */
+        val said: String? get() = when (val e = error) {
+            is HubError.Tool -> e.message
+            is HubError.Forbidden -> e.message
+            else -> null
+        }
+
+        /**
+         * Whether reading again could answer differently. A refusal with a
+         * terminal code cannot: the transcript has no such call, or the
+         * request itself is wrong. Mirrors the desktop's `loadRetryable`.
+         */
+        val retryable: Boolean get() = when (val e = error) {
+            is HubError.Tool -> e.code !in TERMINAL_CODES
+            is HubError.Forbidden -> false
+            else -> true
+        }
+    }
+
+    companion object {
+        /** Refusals that will read the same way however often they are asked. */
+        internal val TERMINAL_CODES = setOf("E_NOTFOUND", "E_NO_TRANSCRIPT", "E_INVALID", "E_INVALID_STATE")
+    }
 }
 
 /**
@@ -46,16 +79,23 @@ class ToolDetailsModel(
      *
      * [done] is what the row knows now: a detail read while the call was
      * still running has no result, so once the row says the call finished,
-     * that one answer is read again rather than kept. A failure is retried
-     * only when asked again (the row's Retry).
+     * that one answer is read again rather than kept.
+     *
+     * A FAILURE is not retried on its own. Only [force] — the row's Retry —
+     * asks again. The row opens with a `LaunchedEffect`, and a keyed
+     * `LazyColumn` re-runs it every time the row scrolls back into view, so
+     * "Failed → start again" meant each scroll past a failing call fired
+     * another transcript grep over SSH, against the method's own promise and
+     * its test.
      */
-    fun request(toolUseId: String, done: Boolean = true) {
+    fun request(toolUseId: String, done: Boolean = true, force: Boolean = false) {
         if (!fleet.capabilities.value.toolDetail) return
         var start = false
         _states.update { held ->
             val current = held[toolUseId]
             val stale = current is ToolDetailLoad.Loaded && current.detail.result == null && done
-            if (current == null || current is ToolDetailLoad.Failed || stale) {
+            val retry = force && current is ToolDetailLoad.Failed && current.retryable
+            if (current == null || stale || retry) {
                 start = true
                 held + (toolUseId to ToolDetailLoad.Loading)
             } else {
@@ -71,7 +111,7 @@ class ToolDetailsModel(
                 _states.update { it - toolUseId }
                 throw e
             } catch (t: Throwable) {
-                ToolDetailLoad.Failed
+                ToolDetailLoad.Failed(t)
             }
             _states.update { it + (toolUseId to next) }
         }

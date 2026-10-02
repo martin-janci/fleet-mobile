@@ -337,4 +337,56 @@ class ToolCallsTest {
         assertEquals("11", tail.first())
         assertEquals("40", tail.last())
     }
+
+    /**
+     * `+N −M` is exact even past the cell budget, where the ROWS draw every
+     * changed line twice. Counting those rows reported `added = n, removed = m`
+     * — not the number of lines that changed — under a figure an audit screen
+     * reads as the truth.
+     */
+    @Test
+    fun the_diff_stat_is_exact_whichever_way_the_rows_were_drawn() {
+        // Two changed lines far apart, so the changed MIDDLE (what is aligned
+        // after the common prefix and suffix are trimmed) is 21 lines each way.
+        val old = (1..40).joinToString("\n") { "line $it" }
+        val new = old.replace("line 10", "LINE 10").replace("line 30", "LINE 30")
+
+        // Aligned: the rows agree with the texts.
+        assertEquals(DiffStat(added = 2, removed = 2), diffStat(lineDiff(old, new)))
+        assertEquals(DiffStat(added = 2, removed = 2), diffStat(old, new))
+
+        // Past the budget the rows draw the whole middle twice over; the texts
+        // still say 2 and 2.
+        val fallback = lineDiff(old, new, maxCells = 4)
+        assertEquals(DiffStat(added = 21, removed = 21), diffStat(fallback), "what the rows hold")
+        assertEquals(DiffStat(added = 2, removed = 2), diffStat(old, new))
+
+        // The empty edges stay what they were.
+        assertEquals(DiffStat(added = 2, removed = 0), diffStat("", "a\nb"))
+        assertEquals(DiffStat(added = 0, removed = 1), diffStat("a", ""))
+        assertEquals(DiffStat(added = 0, removed = 0), diffStat("", ""))
+    }
+
+    /**
+     * The hub cuts a tool detail's text at 8 000 CHARACTERS and appends one
+     * `…`. Spotting that is what stops the client diffing two different windows
+     * of a file as though they were whole, and calling a middle "the last 30
+     * lines".
+     */
+    @Test
+    fun a_field_the_hub_cut_is_recognised_and_trimmed() {
+        val cut = "x".repeat(HUB_TEXT_MAX) + "…"
+        assertTrue(cutByHub(cut))
+        assertFalse(cutByHub(null))
+        assertFalse(cutByHub("short"))
+        assertFalse(cutByHub("short…"), "an ellipsis of its own is not a cut")
+        assertFalse(cutByHub("x".repeat(HUB_TEXT_MAX)), "exactly at the cap is not cut")
+        // Counted in code points, as the hub counts them: a field of astral
+        // characters has twice the UTF-16 length and is still one cut field.
+        assertTrue(cutByHub("\uD83D\uDE00".repeat(HUB_TEXT_MAX) + "…"))
+
+        // Trimming drops the marker AND the partial last line.
+        assertEquals("a\nb", withoutHubCut("a\nb\nhalf a li…"))
+        assertEquals("", withoutHubCut("one partial line…"))
+    }
 }

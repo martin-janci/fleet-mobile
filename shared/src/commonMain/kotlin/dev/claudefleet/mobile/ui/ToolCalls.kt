@@ -200,12 +200,45 @@ internal enum class DiffKind { Context, Add, Del }
 internal data class DiffLine(val kind: DiffKind, val text: String, val oldNo: Int?, val newNo: Int?)
 
 /**
- * The most LCS cells one diff may fill. An Edit's texts are capped at 8 000
- * characters by the hub, so this is only reached by a long run of very short
- * lines; past it the changed middle is shown as all deletions then all
- * additions, which is still correct, only less tidy.
+ * The most LCS cells one diff may fill. An Edit's texts are capped at
+ * [HUB_TEXT_MAX] characters by the hub, so this is only reached by a long run
+ * of very short lines; past it the changed middle is shown as all deletions
+ * then all additions — the ROWS are less tidy, every changed line drawn twice.
+ *
+ * The `+N −M` beside them is not taken from those rows: it would read
+ * `added = n, removed = m`, which is not the number of lines that changed.
+ * [diffStat] computes it from the texts, in one two-row pass, so the figure an
+ * audit screen reads as exact is exact either way.
  */
 internal const val DIFF_MAX_CELLS: Long = 250_000
+
+/**
+ * The hub's cap on every text field of a tool detail
+ * (`TOOL_DETAIL_MAX_CHARS`). A field it CUT is this many characters plus the
+ * `…` it appends — see [cutByHub].
+ */
+internal const val HUB_TEXT_MAX = 8_000
+
+/**
+ * Whether [text] is a field the hub CUT at [HUB_TEXT_MAX].
+ *
+ * The hub appends one `…` when it cuts, and only then, so the marker is the
+ * length plus that character. Counted in CODE POINTS, as the hub counts
+ * `chars()`: a field full of emoji has more UTF-16 units than characters.
+ *
+ * It matters because the client diffs and paginates these fields: a cut that
+ * nothing notices turns into changes that did not happen at the cut, and into
+ * "the last 30 lines" that are from the middle.
+ */
+internal fun cutByHub(text: String?): Boolean {
+    if (text == null || !text.endsWith("…")) return false
+    // Code points: a surrogate pair carries exactly one low surrogate.
+    return text.count { !it.isLowSurrogate() } == HUB_TEXT_MAX + 1
+}
+
+/** [text] without the `…` the hub appended, and without the partial last line. */
+internal fun withoutHubCut(text: String): String =
+    text.removeSuffix("…").substringBeforeLast('\n', missingDelimiterValue = "")
 
 private fun linesOf(text: String): List<String> = if (text.isEmpty()) emptyList() else text.split('\n')
 
@@ -309,8 +342,49 @@ internal fun collapseContext(lines: List<DiffLine>, context: Int = DIFF_CONTEXT)
 /** `+N −M` counts of a diff. */
 internal data class DiffStat(val added: Int, val removed: Int)
 
+/**
+ * The counts as the DRAWN rows hold them. Exact for a diff that was aligned;
+ * past [DIFF_MAX_CELLS] every changed line is drawn as both a deletion and an
+ * addition, so prefer [diffStat] over the texts there.
+ */
 internal fun diffStat(lines: List<DiffLine>): DiffStat =
     DiffStat(lines.count { it.kind == DiffKind.Add }, lines.count { it.kind == DiffKind.Del })
+
+/**
+ * The exact `+N −M` for [old] against [new], whichever way [lineDiff] drew it.
+ *
+ * `added = n − L` and `removed = m − L` for the LCS length `L` of the changed
+ * middle, computed in two rows — so no cell budget applies and the figure is
+ * the same one the aligned rows would have shown.
+ */
+internal fun diffStat(old: String, new: String): DiffStat {
+    val a = linesOf(old)
+    val b = linesOf(new)
+    var pre = 0
+    while (pre < a.size && pre < b.size && a[pre] == b[pre]) pre++
+    var suf = 0
+    while (suf < a.size - pre && suf < b.size - pre && a[a.size - 1 - suf] == b[b.size - 1 - suf]) suf++
+    val m = a.size - suf - pre
+    val n = b.size - suf - pre
+    if (m == 0 || n == 0) return DiffStat(added = n, removed = m)
+    var prev = IntArray(n + 1)
+    var cur = IntArray(n + 1)
+    for (i in 1..m) {
+        for (j in 1..n) {
+            cur[j] = if (a[pre + i - 1] == b[pre + j - 1]) {
+                prev[j - 1] + 1
+            } else {
+                maxOf(prev[j], cur[j - 1])
+            }
+        }
+        val swap = prev
+        prev = cur
+        cur = swap
+        cur.fill(0)
+    }
+    val lcs = prev[n]
+    return DiffStat(added = n - lcs, removed = m - lcs)
+}
 
 /** `"/repo/src/lib/poll.ts"` → `"poll.ts"` to `"/repo/src/lib/"`. */
 internal fun splitPath(path: String): Pair<String, String> {

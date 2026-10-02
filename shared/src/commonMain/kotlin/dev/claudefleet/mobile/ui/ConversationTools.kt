@@ -76,11 +76,16 @@ import dev.claudefleet.mobile.ui.theme.FleetIcons
 class ToolDetailsHost(
     val available: Boolean,
     val states: Map<String, ToolDetailLoad>,
-    val request: (toolUseId: String, done: Boolean) -> Unit,
+    /**
+     * Ask for a detail. `force` is the row's Retry and nothing else: a plain
+     * ask after a failure must not read again, since the row's effect re-runs
+     * on every scroll back into view and each read is an SSH transcript grep.
+     */
+    val request: (toolUseId: String, done: Boolean, force: Boolean) -> Unit,
     val expandAll: Boolean = false,
 ) {
     companion object {
-        val None = ToolDetailsHost(available = false, states = emptyMap(), request = { _, _ -> })
+        val None = ToolDetailsHost(available = false, states = emptyMap(), request = { _, _, _ -> })
     }
 }
 
@@ -98,7 +103,11 @@ private val ICON = 18.dp
 /** A turn's items, with tool runs drawn as tool rows. [item] draws everything else. */
 @Composable
 internal fun TurnItems(items: List<ConvItem>, live: Boolean, item: @Composable (ConvItem) -> Unit) {
-    val runs = remember(items, live) { groupToolRuns(items, live || anyPending(items)) }
+    // `live` alone decides "running". A call that never received a
+    // `tool_result` leaves `done = false` for ever, so OR-ing in `anyPending`
+    // made every later visit to that dead turn re-open its group — a turn the
+    // session has long finished, presented as still working.
+    val runs = remember(items, live) { groupToolRuns(items, live) }
     var previousWasTool = false
     for ((index, run) in runs.withIndex()) {
         val isTool = run is ItemRun.Tools || (run is ItemRun.One && run.item is ConvItem.Tool)
@@ -106,19 +115,28 @@ internal fun TurnItems(items: List<ConvItem>, live: Boolean, item: @Composable (
         // only make a run look like separate paragraphs.
         if (index > 0 && !(isTool && previousWasTool)) Spacer(Modifier.padding(top = 4.dp))
         when (run) {
-            is ItemRun.Tools -> ToolGroupRow(run)
+            is ItemRun.Tools -> ToolGroupRow(run, live = live)
             is ItemRun.One -> {
                 val one = run.item
-                if (one is ConvItem.Tool) ToolCallRow(one) else item(one)
+                if (one is ConvItem.Tool) ToolCallRow(one, live = live) else item(one)
             }
         }
         previousWasTool = isTool
     }
 }
 
-/** One call: icon, verb, target; tap to open its detail when the hub can give it. */
+/**
+ * One call: icon, verb, target; tap to open its detail when the hub can give
+ * it.
+ *
+ * [live] is whether the turn this call belongs to is still running. A call with
+ * no result is only still working while that is true: a turn that ended without
+ * one — the session was killed, the REPL restarted, the hook never fired — has
+ * a call that will never finish, and a spinner on it spun for ever. That case
+ * says "no result" instead.
+ */
 @Composable
-internal fun ToolCallRow(tool: ConvItem.Tool, modifier: Modifier = Modifier) {
+internal fun ToolCallRow(tool: ConvItem.Tool, live: Boolean = false, modifier: Modifier = Modifier) {
     val host = LocalToolDetails.current
     val id = tool.id
     val expandable = host.available && id != null
@@ -142,12 +160,19 @@ internal fun ToolCallRow(tool: ConvItem.Tool, modifier: Modifier = Modifier) {
                 ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val stalled = !tool.done && !live
             Box(Modifier.size(ICON), contentAlignment = Alignment.Center) {
                 when {
-                    !tool.done -> CircularProgressIndicator(
+                    !tool.done && live -> CircularProgressIndicator(
                         modifier = Modifier.size(16.dp),
                         strokeWidth = 2.dp,
                         color = colors.primary,
+                    )
+                    stalled -> Icon(
+                        FleetIcons.Failed,
+                        contentDescription = "no result",
+                        tint = colors.onSurfaceVariant,
+                        modifier = Modifier.size(ICON),
                     )
                     tool.error -> Icon(FleetIcons.Failed, contentDescription = "failed", tint = colors.error, modifier = Modifier.size(ICON))
                     else -> Icon(iconFor(line.kind), contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(ICON))
@@ -178,6 +203,9 @@ internal fun ToolCallRow(tool: ConvItem.Tool, modifier: Modifier = Modifier) {
             if (tool.error) {
                 Spacer(Modifier.width(8.dp))
                 Text("failed", style = MaterialTheme.typography.labelMedium, color = colors.error)
+            } else if (stalled) {
+                Spacer(Modifier.width(8.dp))
+                Text("no result", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
             }
             if (expandable) {
                 Spacer(Modifier.width(8.dp))
@@ -185,20 +213,25 @@ internal fun ToolCallRow(tool: ConvItem.Tool, modifier: Modifier = Modifier) {
             }
         }
         if (expanded && expandable && id != null) {
-            LaunchedEffect(id, tool.done) { host.request(id, tool.done) }
-            ToolDetailCard(tool, line.kind, host.states[id], onRetry = { host.request(id, tool.done) })
+            LaunchedEffect(id, tool.done) { host.request(id, tool.done, false) }
+            ToolDetailCard(tool, line.kind, host.states[id], onRetry = { host.request(id, tool.done, true) })
         }
     }
 }
 
 /** "7 tool calls" over "Read, Grep, Edit +3", opening to the calls themselves. */
 @Composable
-internal fun ToolGroupRow(run: ItemRun.Tools, modifier: Modifier = Modifier) {
+internal fun ToolGroupRow(run: ItemRun.Tools, live: Boolean = false, modifier: Modifier = Modifier) {
     val host = LocalToolDetails.current
     val key = run.tools.first().let { it.id ?: it.summary }
-    // Keyed on `startExpanded` too: a group that picks up a failure, or
-    // becomes the live end of the turn, opens even if it was drawn closed.
-    var expanded by rememberSaveable(key, run.startExpanded) { mutableStateOf(run.startExpanded || host.expandAll) }
+    // A ONE-WAY latch, not an input. `rememberSaveable(key, run.startExpanded)`
+    // re-ran its initialiser in BOTH directions, and `startExpanded` goes true
+    // → false the moment the turn stops working or a newer run becomes the
+    // turn's last — so a group that opened itself then shut itself, taking any
+    // detail card opened inside it out of composition with it. Opening is what
+    // was asked for; closing never was.
+    var expanded by rememberSaveable(key) { mutableStateOf(run.startExpanded || host.expandAll) }
+    LaunchedEffect(run.startExpanded) { if (run.startExpanded) expanded = true }
     val colors = MaterialTheme.colorScheme
     val running = run.tools.any { !it.done }
     val failed = run.failed
@@ -248,7 +281,7 @@ internal fun ToolGroupRow(run: ItemRun.Tools, modifier: Modifier = Modifier) {
                     }
                     .padding(start = ICON / 2 + 12.dp),
             ) {
-                for (tool in run.tools) ToolCallRow(tool)
+                for (tool in run.tools) ToolCallRow(tool, live = live)
             }
         }
     }
@@ -302,14 +335,17 @@ private fun ToolDetailCard(tool: ConvItem.Tool, kind: ToolKind, load: ToolDetail
         ) {
             when (load) {
                 null, ToolDetailLoad.Loading -> LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 8.dp))
-                ToolDetailLoad.Failed -> Row(verticalAlignment = Alignment.CenterVertically) {
+                is ToolDetailLoad.Failed -> Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "Couldn't load details",
+                        // What the hub said, when it said anything: a refusal
+                        // names its reason, and "couldn't load details" beside
+                        // a Retry that can never work says neither.
+                        load.said ?: "Couldn't load details",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = onRetry) { Text("Retry") }
+                    if (load.retryable) TextButton(onClick = onRetry) { Text("Retry") }
                 }
                 is ToolDetailLoad.Loaded -> ToolDetailBody(tool, kind, load.detail)
             }
@@ -321,7 +357,17 @@ private fun ToolDetailCard(tool: ConvItem.Tool, kind: ToolKind, load: ToolDetail
 private fun ToolDetailBody(tool: ConvItem.Tool, kind: ToolKind, detail: ToolDetail) {
     val edit = detail.edit
     when {
-        edit != null -> EditDetailView(edit, isNewFile = detail.name == "Write" || tool.toolName() == "Write")
+        // A FAILED Edit / MultiEdit / Write is not an applied change: the kind
+        // view still says what was ASKED for, and the hub's error text — the
+        // one thing that says the file was not touched — follows it. "new file"
+        // is suppressed, since nothing was created.
+        edit != null -> {
+            EditDetailView(
+                edit,
+                isNewFile = !detail.isError && (detail.name == "Write" || tool.toolName() == "Write"),
+            )
+            ErrorTail(detail)
+        }
         kind == ToolKind.Bash -> BashDetail(detail.command ?: tool.toolTarget().orEmpty(), detail.result, detail.isError)
         kind == ToolKind.Read -> ReadDetail(
             path = inputString(detail.input, "file_path") ?: tool.toolTarget().orEmpty(),
@@ -335,10 +381,28 @@ private fun ToolDetailBody(tool: ConvItem.Tool, kind: ToolKind, detail: ToolDeta
         )
         kind == ToolKind.Todo -> {
             val todos = remember(detail.input) { parseTodos(detail.input) }
-            if (todos != null) TodoDetail(todos) else FallbackDetail(detail)
+            if (todos != null) {
+                TodoDetail(todos)
+                ErrorTail(detail)
+            } else {
+                FallbackDetail(detail)
+            }
         }
         else -> FallbackDetail(detail)
     }
+}
+
+/**
+ * The hub's error text after a kind view that cannot show it — nothing at all
+ * when the call succeeded. The desktop's rule: the view says what was asked
+ * for, this says it did not happen.
+ */
+@Composable
+private fun ErrorTail(detail: ToolDetail) {
+    if (!detail.isError) return
+    Spacer(Modifier.padding(top = 8.dp))
+    Label("Error")
+    MonoBlock(detail.result.orEmpty(), true)
 }
 
 // ─── Edit / MultiEdit / Write ───────────────────────────────────────────────
@@ -363,9 +427,18 @@ private fun diffPalette(): DiffPalette {
 
 @Composable
 private fun EditDetailView(edit: EditDetail, isNewFile: Boolean) {
-    val lines = remember(edit) { lineDiff(edit.old, edit.new) }
+    // The hub caps `old` and `new` INDEPENDENTLY, so a cut pair is two
+    // different windows of the file: diffing them whole invented changes at the
+    // cut and hid every change past it, under an exact-looking `+N −M`. The
+    // partial last line goes too, since it is a line in neither file.
+    val cut = remember(edit) { cutByHub(edit.old) || cutByHub(edit.new) }
+    val old = remember(edit) { if (cutByHub(edit.old)) withoutHubCut(edit.old) else edit.old }
+    val new = remember(edit) { if (cutByHub(edit.new)) withoutHubCut(edit.new) else edit.new }
+    val lines = remember(old, new) { lineDiff(old, new) }
     val rows = remember(lines) { collapseContext(lines) }
-    val stat = remember(lines) { diffStat(lines) }
+    // Over the TEXTS, not the rows: past `DIFF_MAX_CELLS` the rows draw every
+    // changed line twice, and this figure is read as exact.
+    val stat = remember(old, new) { diffStat(old, new) }
     val palette = diffPalette()
     val (name, dir) = remember(edit.filePath) { splitPath(edit.filePath) }
     var showAll by remember(edit) { mutableStateOf(false) }
@@ -387,11 +460,18 @@ private fun EditDetailView(edit: EditDetail, isNewFile: Boolean) {
             Text("new file", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.width(8.dp))
-        Text("+${stat.added}", style = MaterialTheme.typography.labelMedium, color = palette.addFg, fontWeight = FontWeight.SemiBold)
+        // `+N+` / `−M+` when the text was cut: the counts are exact for what
+        // arrived, and there is more past it.
+        val more = if (cut) "+" else ""
+        Text("+${stat.added}$more", style = MaterialTheme.typography.labelMedium, color = palette.addFg, fontWeight = FontWeight.SemiBold)
         if (stat.removed > 0 || !isNewFile) {
             Spacer(Modifier.width(6.dp))
-            Text("−${stat.removed}", style = MaterialTheme.typography.labelMedium, color = palette.delFg, fontWeight = FontWeight.SemiBold)
+            Text("−${stat.removed}$more", style = MaterialTheme.typography.labelMedium, color = palette.delFg, fontWeight = FontWeight.SemiBold)
         }
+    }
+    if (cut) {
+        Spacer(Modifier.padding(top = 4.dp))
+        Muted("diff over the first $HUB_TEXT_MAX characters of each side — the hub cut the rest")
     }
     Spacer(Modifier.padding(top = 8.dp))
     if (rows.isEmpty()) {
@@ -413,7 +493,9 @@ private fun EditDetailView(edit: EditDetail, isNewFile: Boolean) {
         }
     }
     if (!showAll && rows.size > DIFF_ROW_CAP) {
-        TextButton(onClick = { showAll = true }) { Text("Show all ${rows.size} lines") }
+        // Rows, not lines: a `Gap` is one row standing for many, and `showAll`
+        // lifts the take without expanding the gaps.
+        TextButton(onClick = { showAll = true }) { Text("Show the remaining ${rows.size - DIFF_ROW_CAP} rows") }
     }
 }
 
@@ -484,10 +566,23 @@ private fun BashDetail(command: String, result: String?, isError: Boolean) {
                 result == null -> Text("running…", fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 16.sp)
                 result.isBlank() -> Text("(no output)", fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 16.sp)
                 else -> {
+                    // The hub keeps the HEAD of a long result, so what is on
+                    // screen is the end of what it SENT, not the end of the
+                    // output — and `hidden` counts only lines inside that head.
+                    // Saying "the last 30 lines" of it was simply wrong.
+                    val cut = remember(result) { cutByHub(result) }
                     val (hidden, tail) = remember(result) { tailLines(result, BASH_TAIL) }
+                    if (cut) {
+                        Spacer(Modifier.padding(top = 4.dp))
+                        Text(
+                            "cut by the hub at $HUB_TEXT_MAX characters — the end of the output is not shown",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.inverseOnSurface.copy(alpha = 0.7f),
+                        )
+                    }
                     if (hidden > 0 && !showEarlier) {
                         Text(
-                            "Show $hidden earlier lines",
+                            if (cut) "Show the earlier $hidden lines of what was sent" else "Show $hidden earlier lines",
                             style = MaterialTheme.typography.labelMedium,
                             color = colors.inversePrimary,
                             modifier = Modifier
