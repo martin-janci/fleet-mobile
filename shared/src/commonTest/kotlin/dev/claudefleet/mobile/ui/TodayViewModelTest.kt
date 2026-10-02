@@ -165,7 +165,17 @@ class TodayViewModelTest {
         SessionRow(id = 5, tmuxName = "scratch", hostAlias = "pine"),
     )
 
-    /** Every section, from the hub's own JSON — and, whole, the standup the desktop would copy for it. */
+    /**
+     * Every section, from the hub's own JSON — and, whole, the standup the
+     * desktop would copy for it.
+     *
+     * The two lines that carry a status and no `status_name` — `PAY-9` and
+     * `OLD-1`, local work the hub leaves unnamed — used to be asserted
+     * verbatim WITHOUT one, under this very doc comment, so the suite
+     * certified a standup the desktop does not copy. They read "in progress"
+     * and "to do" now, from the one `groupStatusLabel` the sheet's pill uses
+     * too.
+     */
     @Test
     fun every_section_from_a_recorded_digest_and_the_desktops_standup() = runTest {
         val actions = FakeWorkActions().apply { todayAnswer = recorded(HubWorkJson.TODAY_EVERY_SECTION) }
@@ -185,14 +195,14 @@ class TodayViewModelTest {
             - ENG-2 Other — PR https://github.com/acme/eng/pull/4
 
             In progress
-            - PAY-9 Ledger — PR https://github.com/acme/pay/pull/9 (CI passing) · ledger
+            - PAY-9 Ledger — in progress · PR https://github.com/acme/pay/pull/9 (CI passing) · ledger
             - scratch
 
             Waiting on me
             - PAY-7 Refund flow — In Progress · pay (waiting for an answer), pay-tests
 
             Stale
-            - OLD-1 — old (idle)
+            - OLD-1 — to do · old (idle)
 
             """.trimIndent(),
             t.state.value.standup,

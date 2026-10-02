@@ -84,6 +84,21 @@ enum class StatusCategory(val wire: String) {
     }
 }
 
+/**
+ * A status bucket in words — the fallback wherever the hub gives no
+ * `status_name`, which is every LOCAL work item. Null for [StatusCategory.Unknown],
+ * which names nothing a person would recognise.
+ *
+ * One vocabulary: the work chip, the Today pill and the standup all read it
+ * from here, and the desktop's `groupStatusLabel` uses the same three words.
+ */
+fun StatusCategory.spoken(): String? = when (this) {
+    StatusCategory.Todo -> "to do"
+    StatusCategory.InProgress -> "in progress"
+    StatusCategory.Done -> "done"
+    StatusCategory.Unknown -> null
+}
+
 internal object StatusCategorySerializer : KSerializer<StatusCategory> {
     override val descriptor = PrimitiveSerialDescriptor("StatusCategory", PrimitiveKind.STRING)
     override fun serialize(encoder: Encoder, value: StatusCategory) = encoder.encodeString(value.wire)

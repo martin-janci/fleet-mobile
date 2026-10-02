@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.model.WorkSummary
+import dev.claudefleet.mobile.model.spoken
 import dev.claudefleet.mobile.ui.theme.LocalStatusColors
 import dev.claudefleet.mobile.ui.theme.StatusTone
 
@@ -129,18 +130,6 @@ fun workChipDescription(work: WorkSummary, suggested: Boolean, showTitle: Boolea
     (work.statusName ?: work.statusCategory?.spoken())?.let { add(it) }
     if (work.unavailable) add("ticket unavailable")
 }.joinToString(", ")
-
-/**
- * A status bucket in words — the fallback for a work item the hub leaves with
- * no `status_name`, which is every LOCAL one. One vocabulary, so a second
- * screen does not invent its own.
- */
-fun StatusCategory.spoken(): String? = when (this) {
-    StatusCategory.Todo -> "to do"
-    StatusCategory.InProgress -> "in progress"
-    StatusCategory.Done -> "done"
-    StatusCategory.Unknown -> null
-}
 
 /** A ticket's status bucket as a dot, in the session palette: to do idle, in progress working, done completed. */
 @Composable

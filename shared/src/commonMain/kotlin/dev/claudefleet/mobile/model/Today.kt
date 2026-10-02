@@ -136,6 +136,16 @@ fun sessionPhrase(s: TodaySession, bucket: TodayBucket): String = when {
     else -> s.name
 }
 
+/**
+ * What a group's status reads as: the tracker's own name when it has one, else
+ * the category in words — which is the ONLY status a local work item ever has,
+ * since the hub leaves `status_name` null for one. Empty when neither is known.
+ *
+ * The desktop's `groupStatusLabel`, so the standup copies the same line from
+ * either and the sheet's pill says the same word.
+ */
+fun groupStatusLabel(g: TodayGroup): String = g.statusName ?: g.statusCategory?.spoken() ?: ""
+
 /** `KEY title` for a group; the no-work group names nothing itself. */
 fun groupLabel(key: String?, title: String): String {
     if (key.isNullOrEmpty()) return "No work"
@@ -146,7 +156,12 @@ fun groupLabel(key: String?, title: String): String {
 private fun groupLines(g: TodayGroup, bucket: TodayBucket): List<String> {
     if (g.key.isNullOrEmpty()) return g.sessions.map { "- ${sessionPhrase(it, bucket)}" }
     val extras = buildList {
-        g.statusName?.let { add(it) }
+        // Through `groupStatusLabel`, which falls back to the category: the hub
+        // leaves `status_name` null for every LOCAL work item, so reading it
+        // alone dropped the status from the standup for exactly the work this
+        // sheet is mostly about — and the desktop's line, which this is
+        // promised to match, has always carried it.
+        groupStatusLabel(g).takeIf { it.isNotEmpty() }?.let { add(it) }
         g.sessions.firstOrNull { it.prUrl != null }?.let { s ->
             add(if (s.ciStatus != null) "PR ${s.prUrl} (CI ${s.ciStatus})" else "PR ${s.prUrl}")
         }

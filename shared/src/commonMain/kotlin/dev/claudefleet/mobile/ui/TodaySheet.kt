@@ -67,12 +67,12 @@ import dev.claudefleet.mobile.model.TodayShipped
 import dev.claudefleet.mobile.model.TodayView
 import dev.claudefleet.mobile.model.attentionLabel
 import dev.claudefleet.mobile.model.groupLabel
+import dev.claudefleet.mobile.model.groupStatusLabel
 import dev.claudefleet.mobile.model.hasUnlinked
 import dev.claudefleet.mobile.model.sessions
 import dev.claudefleet.mobile.model.staleLabel
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.StatusDot
-import dev.claudefleet.mobile.ui.components.spoken
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.LocalStatusColors
 import dev.claudefleet.mobile.ui.theme.StatusTone
@@ -115,69 +115,84 @@ data class TodayHandlers(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TodaySheet(state: TodayUiState, handlers: TodayHandlers) {
-    val clipboard = LocalClipboardManager.current
-    val share = rememberShareText()
-    // Keyed on the text: "Copied" is about this standup, and a re-read that
-    // changes it puts the button back.
-    var copied by remember(state.standup) { mutableStateOf(false) }
     ModalBottomSheet(
         onDismissRequest = handlers.onClose,
         // The sheet one step darker than its cards: the separation is the
         // surface change, not a line.
         containerColor = MaterialTheme.colorScheme.surface,
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            TodayHeader(state, handlers)
-            // Reserved whether or not it is loading, so a re-read does not
-            // shift the list under a thumb about to tap it.
-            Box(Modifier.fillMaxWidth().height(4.dp)) {
-                if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
-            if (state.loaded && !state.view.isEmpty) TodayFilterRow(state, handlers)
-            ErrorBanner(state.error, onDismiss = handlers.onDismissError)
-            val v = state.shown
-            LazyColumn(
-                modifier = Modifier.weight(1f, fill = false).fillMaxWidth(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                when {
-                    state.loaded && state.view.isEmpty -> item(key = "empty") { EmptyNote("Nothing yet today.") }
-                    state.loaded && v.isEmpty -> item(key = "filtered-empty") {
-                        EmptyNote("Nothing today matches these filters.", action = "Clear filters", onAction = handlers.onClearFilters)
-                    }
+        TodayBody(state, handlers)
+    }
+}
+
+/**
+ * Everything the sheet holds, without the sheet.
+ *
+ * Apart so it can be composed on its own: a `ModalBottomSheet` draws into a
+ * window of its own, which a composed test cannot reach, and this screen's
+ * drawing is exactly what no test covered — the group status pill went missing
+ * for every local work item with the suite green (`TodaySheetTest`).
+ *
+ * Public, not internal: the composed tests live in `androidApp`, another module.
+ */
+@Composable
+fun TodayBody(state: TodayUiState, handlers: TodayHandlers) {
+    val clipboard = LocalClipboardManager.current
+    val share = rememberShareText()
+    // Keyed on the text: "Copied" is about this standup, and a re-read that
+    // changes it puts the button back.
+    var copied by remember(state.standup) { mutableStateOf(false) }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        TodayHeader(state, handlers)
+        // Reserved whether or not it is loading, so a re-read does not
+        // shift the list under a thumb about to tap it.
+        Box(Modifier.fillMaxWidth().height(4.dp)) {
+            if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+        if (state.loaded && !state.view.isEmpty) TodayFilterRow(state, handlers)
+        ErrorBanner(state.error, onDismiss = handlers.onDismissError)
+        val v = state.shown
+        LazyColumn(
+            modifier = Modifier.weight(1f, fill = false).fillMaxWidth(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            when {
+                state.loaded && state.view.isEmpty -> item(key = "empty") { EmptyNote("Nothing yet today.") }
+                state.loaded && v.isEmpty -> item(key = "filtered-empty") {
+                    EmptyNote("Nothing today matches these filters.", action = "Clear filters", onAction = handlers.onClearFilters)
                 }
-                groupSection(TodaySection.Waiting, v.waiting, handlers)
-                groupSection(TodaySection.InProgress, v.inProgress, handlers)
-                if (v.shipped.isNotEmpty()) {
-                    item(key = "section-shipped") {
-                        SectionCard(
-                            TodaySection.Shipped,
-                            v.shipped.size,
-                            // Shipped entries name no host; say so rather
-                            // than let them pass for the filtered host's.
-                            note = if (state.filters.host != null) "all hosts" else null,
-                        ) {
-                            v.shipped.forEachIndexed { i, x ->
-                                if (i > 0) ItemDivider()
-                                ShippedRow(x)
-                            }
+            }
+            groupSection(TodaySection.Waiting, v.waiting, handlers)
+            groupSection(TodaySection.InProgress, v.inProgress, handlers)
+            if (v.shipped.isNotEmpty()) {
+                item(key = "section-shipped") {
+                    SectionCard(
+                        TodaySection.Shipped,
+                        v.shipped.size,
+                        // Shipped entries name no host; say so rather
+                        // than let them pass for the filtered host's.
+                        note = if (state.filters.host != null) "all hosts" else null,
+                    ) {
+                        v.shipped.forEachIndexed { i, x ->
+                            if (i > 0) ItemDivider()
+                            ShippedRow(x)
                         }
                     }
                 }
-                groupSection(TodaySection.Stale, v.stale, handlers)
             }
-            TodayFooter(
-                enabled = state.loaded,
-                filtered = state.filters.any,
-                copied = copied,
-                onCopy = {
-                    clipboard.setText(AnnotatedString(state.standup))
-                    copied = true
-                },
-                onShare = { share(state.standup) },
-            )
+            groupSection(TodaySection.Stale, v.stale, handlers)
         }
+        TodayFooter(
+            enabled = state.loaded,
+            filtered = state.filters.any,
+            copied = copied,
+            onCopy = {
+                clipboard.setText(AnnotatedString(state.standup))
+                copied = true
+            },
+            onShare = { share(state.standup) },
+        )
     }
 }
 
@@ -396,10 +411,9 @@ private fun TodayGroupBlock(g: TodayGroup, section: TodaySection, handlers: Toda
                 )
                 // The hub leaves `status_name` NULL for every LOCAL work item,
                 // so reading it alone drew no status at all for exactly the
-                // items this sheet is mostly about. The category's own words
-                // are the fallback the work chip already uses — `spoken()`,
-                // reused rather than written again here.
-                (g.statusName ?: g.statusCategory?.spoken())?.let {
+                // items this sheet is mostly about. One vocabulary for the
+                // pill, the standup and the work chip: `groupStatusLabel`.
+                groupStatusLabel(g).takeIf { it.isNotEmpty() }?.let {
                     Spacer(Modifier.width(8.dp))
                     TonePill(it, categoryTone(g.statusCategory))
                 }
