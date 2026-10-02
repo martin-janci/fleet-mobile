@@ -47,6 +47,35 @@ class BlockedTest {
         assertEquals((1..9).toList(), offered)
     }
 
+    /**
+     * A chip is pressed as its digit, so a repeated ordinal means the chip's
+     * label is not the choice the REPL would pick. The hub can read a
+     * numbered list the agent printed above the dialog as part of the same
+     * block (`n = 1, 2, 1, 2, 3`); nothing here can tell which `1` is meant,
+     * so no chip is drawn at all and the terminal stays the way to answer.
+     */
+    @Test
+    fun a_repeated_ordinal_withholds_every_option_chip() {
+        val leaked = listOf(
+            PendingOption(1, "Add the guard"),
+            PendingOption(2, "Run the tests"),
+            PendingOption(1, "Yes"),
+            PendingOption(2, "Yes, and don't ask again"),
+            PendingOption(3, "No"),
+        )
+        val card = blockedCard(row(pending = PendingInput("permission", "Allow?", leaked)), HUB_VERSION_DIGIT_KEYS)!!
+        assertEquals(listOf(Answer.Enter, Answer.Escape), card.answers)
+        assertTrue(card.terminalAvailable)
+    }
+
+    /** A GAP is not a repeat: each digit still names one choice. */
+    @Test
+    fun a_gap_in_the_ordinals_still_gets_its_chips() {
+        val p = PendingInput("permission", "Allow?", listOf(PendingOption(1, "Yes"), PendingOption(3, "No")))
+        val card = blockedCard(row(pending = p), HUB_VERSION_DIGIT_KEYS)!!
+        assertEquals(listOf(Answer.Option(1, "Yes"), Answer.Option(3, "No"), Answer.Enter, Answer.Escape), card.answers)
+    }
+
     @Test
     fun without_pending_input_the_headline_comes_from_the_activity_line_and_only_keys_are_offered() {
         val card = blockedCard(row(activity = "waiting for input: ☐ Recreate turanga?"), HUB_VERSION_KEYS)!!

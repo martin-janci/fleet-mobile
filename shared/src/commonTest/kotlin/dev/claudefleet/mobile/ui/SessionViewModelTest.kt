@@ -236,8 +236,12 @@ private class FakeActions : SessionActions {
         return captureAnswer
     }
 
+    /** Held open, the turn wait stays in flight after the key was delivered. */
+    var waitGate: CompletableDeferred<Unit>? = null
+
     override suspend fun waitForTurn(sessionId: Long, turn: Long, timeoutS: Int): WaitResult {
         waited += sessionId to turn
+        waitGate?.await()
         return waitAnswer
     }
 
@@ -1854,6 +1858,39 @@ class SessionViewModelTest {
         assertNull(vm.state.value.card)
         assertFalse(vm.state.value.answering)
         assertEquals(listOf(ID to 3L), actions.waited, "waited on the send's turn_seq_before")
+    }
+
+    /**
+     * `sessions.turn_seq` moves only at Stop / StopFailure, so an approval in
+     * the MIDDLE of a turn is never satisfied by the wait: the agent carries
+     * on working and the counter sits still for the full 30 s. The controls
+     * must not sit dark for it — the key is delivered, which is the whole of
+     * what the card was for. The desktop's card clears on the same line.
+     */
+    @Test
+    fun the_controls_come_back_as_soon_as_the_key_is_delivered() = runTest {
+        val actions = FakeActions()
+        val wait = CompletableDeferred<Unit>()
+        actions.waitGate = wait
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.load().join()
+        runCurrent()
+
+        val job = vm.answer(Answer.Option(1, "Yes"))
+        runCurrent()
+        assertEquals(listOf("1"), actions.sentKeys)
+        assertEquals(listOf(ID to 3L), actions.waited, "the wait is in flight")
+        assertFalse(
+            vm.state.value.answering,
+            "delivered, so the screen is live again — it does not wait out the turn",
+        )
+
+        wait.complete(Unit)
+        job.join()
+        runCurrent()
+        assertFalse(vm.state.value.answering)
     }
 
     /**

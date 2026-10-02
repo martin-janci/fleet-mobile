@@ -72,7 +72,9 @@ fun blockedCard(row: SessionRow, hubVersion: String?): BlockedCard? {
             val p = row.pendingInput
             val headline = p?.question ?: Activity.pending(row.currentActivity) ?: "Waiting for input"
             val options = if (semverAtLeast(hubVersion, HUB_VERSION_DIGIT_KEYS)) {
-                p?.options.orEmpty().filter { it.n in 1..ANSWER_MAX_DIGIT }.map { Answer.Option(it.n, it.label) }
+                p?.options.orEmpty().takeIf { cleanOrdinals(it) }.orEmpty()
+                    .filter { it.n in 1..ANSWER_MAX_DIGIT }
+                    .map { Answer.Option(it.n, it.label) }
             } else {
                 emptyList()
             }
@@ -84,3 +86,21 @@ fun blockedCard(row: SessionRow, hubVersion: String?): BlockedCard? {
 
 /** Highest option a single keystroke can pick — the hub's `DigitKey` range, `1`..`9`. */
 internal const val ANSWER_MAX_DIGIT: Int = 9
+
+/**
+ * Whether these options are one menu: each ordinal once, in ascending order.
+ *
+ * A chip is pressed as the DIGIT, so the digit has to identify the option. An
+ * older hub's pane parser can read a numbered list the AGENT printed as part
+ * of the same block (a prose "1. … 2. …" above the dialog), which comes
+ * through as `n = 1, 2, 1, 2, 3`: a chip labelled from the agent's prose,
+ * pressing a digit the dialog reads as a different choice entirely. Nothing
+ * here can tell which of two `1`s the REPL means, so the whole set is
+ * withheld and the terminal stays the way to answer — the same conservative
+ * call [blockedCard] makes for an option above [ANSWER_MAX_DIGIT].
+ *
+ * A GAP is not a repeat: `1, 3` is still one option per digit (the capture
+ * can lose a choice line off its top), so those chips are drawn.
+ */
+internal fun cleanOrdinals(options: List<dev.claudefleet.mobile.model.PendingOption>): Boolean =
+    options.zipWithNext().all { (a, b) -> b.n > a.n }

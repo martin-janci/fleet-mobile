@@ -400,6 +400,14 @@ class SessionViewModel(
      */
     private var drawnTurnSeq: Long? = null
 
+    /**
+     * Which answer the turn wait belongs to. An answer stops holding the
+     * controls as soon as its key is delivered (see [answer]), so a second
+     * answer can start while the first is still waiting on `turn_seq`; only
+     * the newest one may report [SessionUiState.stillWaiting].
+     */
+    private var answerSeq: Long = 0
+
     /** The generation currently inside [fetchLock], fetching and applying. */
     private var running: Generation? = null
 
@@ -657,6 +665,7 @@ class SessionViewModel(
      */
     fun answer(a: Answer): Job = scope.launch {
         if (!canAnswerNow(local.value)) return@launch
+        val mine = ++answerSeq
         local.update { it.copy(answering = true, stillWaiting = false, error = null) }
         try {
             // Every KEY is pressed only after re-reading the pane. The hub
@@ -701,8 +710,18 @@ class SessionViewModel(
                 Answer.Escape -> actions.sendKeys(sessionId, "Escape")
                 Answer.Interrupt -> actions.sendKeys(sessionId, "C-c")
             }
+            // Delivered, so the card is answered and the screen is live again.
+            // `sessions.turn_seq` moves only at Stop / StopFailure, so waiting
+            // for it here held every control inert for the whole of
+            // ANSWER_WAIT_SECONDS after a MID-TURN approval — a permission
+            // granted in the middle of a turn that then carries on working.
+            // The desktop's card clears on the same line (`AnswerPrompt`).
+            local.update { it.copy(answering = false) }
             val wait = actions.waitForTurn(sessionId, receipt.turnSeqBefore, timeoutS = ANSWER_WAIT_SECONDS)
-            local.update { it.copy(answering = false, stillWaiting = wait.status != WAIT_SATISFIED) }
+            // A newer answer owns the card by now: its own wait reports.
+            if (mine == answerSeq) {
+                local.update { it.copy(stillWaiting = wait.status != WAIT_SATISFIED) }
+            }
             requestRead(first = false)
         } catch (e: CancellationException) {
             throw e
