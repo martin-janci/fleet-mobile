@@ -1089,7 +1089,9 @@ private fun Item(item: ConvItem) {
         // exhaustiveness, and drawn the same way.
         is ConvItem.Tool -> ToolCallRow(item)
         // A subagent gets a block rather than a line: it is a whole piece of
-        // work, and its result is the part somebody scrolls back for.
+        // work, and its result is the part somebody scrolls back for. A
+        // `Workflow` call arrives as this same item and draws this same block
+        // -- see `typeLabel`.
         is ConvItem.Subagent -> Surface(
             color = MaterialTheme.colorScheme.surfaceVariant,
             contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1099,7 +1101,7 @@ private fun Item(item: ConvItem) {
             Column(modifier = Modifier.padding(10.dp)) {
                 Text(
                     text = buildString {
-                        append(item.agentType?.takeIf { it.isNotBlank() } ?: item.name.ifBlank { "subagent" })
+                        append(item.typeLabel())
                         if (!item.done) append(" — running")
                         if (item.error) append(" — failed")
                     },

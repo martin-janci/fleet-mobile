@@ -86,6 +86,34 @@ class ConvItemTest {
         assertEquals("Find every caller", item.label, "the label says what it was asked to do")
     }
 
+    /**
+     * A `Workflow` call, which the hub sends as a `subagent` item with its own
+     * name and no `agent_type`.
+     *
+     * It is listed here with the other kinds because it is the same handoff:
+     * the hub chose this wire kind over a new `workflow` one so that this
+     * screen draws the block with no change at all, and what has to hold is
+     * that nothing in the block then calls it a subagent.
+     */
+    @Test
+    fun a_workflow_arrives_as_a_block_headed_by_its_own_name() {
+        val item = itemOf(
+            """{"kind":"subagent","id":"tu_7","name":"Workflow",
+                "description":"Relaunch T8d then T9 under the new account",
+                "result":"{\"t8d\":{\"green\":true}}","error":false,
+                "at":"t1","ended_at":"t2","done":true}""",
+        )
+
+        assertIs<ConvItem.Subagent>(item)
+        assertEquals(null, item.agentType, "a workflow has no subagent type")
+        assertEquals("Workflow", item.name)
+        assertEquals(
+            "Relaunch T8d then T9 under the new account",
+            item.label,
+            "the label says what the workflow was for",
+        )
+    }
+
     /** A subagent still in flight, and one that failed: both have to look it. */
     @Test
     fun a_subagent_reports_running_and_failed_states() {

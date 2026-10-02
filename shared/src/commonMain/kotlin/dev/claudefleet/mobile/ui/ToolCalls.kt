@@ -123,6 +123,26 @@ internal fun ConvItem.Tool.line(): ToolLine {
     )
 }
 
+/**
+ * The word a block leads with: the subagent type the call named, else the
+ * tool's own name when the block is not a subagent at all, else `subagent`.
+ *
+ * The hub sends a `Workflow` call as a `subagent` item on purpose (`BLOCK_TOOLS`
+ * in `service/transcript.rs`): a workflow is a whole piece of work that reports
+ * once at the end, which is what this block draws, and sharing the wire kind is
+ * what put it on phones that shipped before the change instead of
+ * "(unsupported item: workflow)". It carries no `agent_type`, though, and
+ * "subagent" is the one word that would be wrong above it.
+ *
+ * Ports the desktop's `blockTypeLabel` (`src/lib/conversation.ts`), lower-cased
+ * the same way, so the phone and the desktop head the same block alike.
+ */
+internal fun ConvItem.Subagent.typeLabel(): String {
+    agentType?.takeIf { it.isNotBlank() }?.let { return it }
+    val own = name.trim()
+    return if (own.isEmpty() || own == "Task" || own == "Agent") "subagent" else own.lowercase()
+}
+
 // ─── Grouping ───────────────────────────────────────────────────────────────
 
 /** The fewest consecutive tool calls that fold into one "N tool calls" row. */
