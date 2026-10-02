@@ -521,6 +521,64 @@ class MiniMarkdownTest {
         assertTrue(p.spanStyles.any { it.item.fontWeight == FontWeight.Bold && it.item.fontStyle == FontStyle.Italic })
     }
 
+    /**
+     * `___foo___` is bold-italic too, as `***foo***` already was.
+     *
+     * The triple handling had a table for `*` only, so the `__` branch paired
+     * two of the three underscores and left the third as literal text: bold
+     * `_foo` followed by a stray `_`.
+     */
+    @Test
+    fun triple_underscores_are_bold_and_italic() {
+        val p = paragraph("___both___")
+
+        assertEquals("both", p.text)
+        assertTrue(
+            p.spanStyles.any { it.item.fontWeight == FontWeight.Bold && it.item.fontStyle == FontStyle.Italic },
+            "${p.text} / ${p.spanStyles}",
+        )
+
+        // `_` still never OPENS against a word, which is what keeps
+        // `snake_case_name` literal (asserted above). A run of three mid-word is
+        // a pre-existing case this fix does not touch and does not pin:
+        // `wordAt` counts letters and digits, not `_`, so the second underscore
+        // of `snake___x` is not "inside a word" by that rule. Changing that is a
+        // change to the `_` flanking rules, not to the triple.
+
+        // `__bold__` and `_italic_` are unchanged.
+        val two = paragraph("__b__ and _i_")
+        assertEquals("b and i", two.text)
+        assertEquals("b", two.styled { it.fontWeight == FontWeight.Bold })
+        assertEquals("i", two.styled { it.fontStyle == FontStyle.Italic })
+    }
+
+    /**
+     * A code span opened with three or more backticks is a code span.
+     *
+     * Only runs of 1 and 2 had closer tables, so ```` ```x``` ```` rendered as
+     * literal backticks — while `fenceOpen`'s own comment calls exactly that
+     * "an inline code span, not a fence".
+     */
+    @Test
+    fun a_long_backtick_run_is_still_a_code_span() {
+        val p = paragraph("see ```x``` done")
+        assertEquals("see x done", p.text)
+        assertEquals("x", p.styled { it.fontFamily == FontFamily.Monospace })
+
+        // It can hold shorter runs, which is the whole point of a long run.
+        val held = paragraph("see ````a ``b`` c```` done")
+        assertEquals("see a ``b`` c done", held.text)
+        assertEquals("a ``b`` c", held.styled { it.fontFamily == FontFamily.Monospace })
+
+        // An unclosed run is literal text, as a short one is — tested mid-line,
+        // because a line that STARTS with three backticks and a word is a fence
+        // with that word as its language, which `fenceOpen` decides before any
+        // of this runs.
+        val open = paragraph("see ```x and more")
+        assertEquals("see ```x and more", open.text)
+        assertTrue(open.spanStyles.isEmpty(), "${open.spanStyles}")
+    }
+
     @Test
     fun emphasis_nests() {
         val p = paragraph("**bold with `code` and *italic***")
@@ -611,6 +669,36 @@ class MiniMarkdownTest {
         assertEquals("mail and c@d.dev", p.text)
     }
 
+    /**
+     * Six heading levels parse as six levels — the renderer draws each at its
+     * own size, which the file comment promises and 4, 5 and 6 did not get
+     * (they shared one style).
+     */
+    @Test
+    fun every_heading_level_parses_as_its_own_level() {
+        val md = (1..6).joinToString("\n\n") { "${"#".repeat(it)} h$it" }
+        val levels = parseMarkdown(md).map { assertIs<MdBlock.Heading>(it).level }
+        assertEquals(listOf(1, 2, 3, 4, 5, 6), levels)
+        // Seven is not a heading.
+        assertIs<MdBlock.Paragraph>(parseMarkdown("####### h7").single())
+
+        // And each level draws at its OWN step. 4, 5 and 6 shared one style, so
+        // they were indistinguishable on screen while the file comment promised
+        // "distinct sizes".
+        val type = androidx.compose.material3.Typography()
+        val styles = (1..6).map { headingStyle(type, it) }
+        // The three that collided: 4, 5 and 6 shared ONE style, and now differ.
+        assertEquals(3, styles.drop(3).distinct().size, "$styles")
+        assertEquals(3, styles.drop(3).map { it.fontSize }.distinct().size, "by size, not just weight")
+        // 1, 2 and 3 were already distinct from each other.
+        assertEquals(3, styles.take(3).distinct().size)
+        // Level 3 and level 4 are the same step of the default type scale
+        // (`titleSmall` and `labelLarge` are one style there); `HeadingView`
+        // tells them apart with the variant colour it gives level 4 and up, so
+        // this is not the collision the fix was about.
+        assertEquals(styles[2], styles[3])
+    }
+
     @Test
     fun autolinks_and_bare_urls_become_links() {
         val p = paragraph("<https://a.dev/x> and https://b.dev/y_z. And (https://c.dev/q) end")
@@ -620,6 +708,41 @@ class MiniMarkdownTest {
             p.links().map { (it.item as LinkAnnotation.Url).url },
         )
         assertEquals("https://a.dev/x and https://b.dev/y_z. And (https://c.dev/q) end", p.text)
+    }
+
+    /**
+     * A bare URL ends at a closing bracket it does not own.
+     *
+     * The trim set had `)` (balanced against a `(` inside the URL) but not `]`,
+     * `}`, `` ` `` or `>`, so a URL written inside brackets or braces swallowed
+     * the closer into the LIVE link, not merely the drawn text — the thing a tap
+     * then opened was not the URL.
+     */
+    @Test
+    fun a_bare_url_does_not_swallow_a_bracket_it_does_not_own() {
+        val url = "https://x.dev/a"
+        for ((open, close) in listOf("[" to "]", "{" to "}")) {
+            val p = paragraph("$open$url$close rest")
+            assertEquals(
+                listOf(url),
+                p.links().map { (it.item as LinkAnnotation.Url).url },
+                "$open$url$close",
+            )
+        }
+
+        // A balanced `(` inside the URL is still part of it — the case the `)`
+        // rule exists for.
+        val wiki = "https://en.wikipedia.org/wiki/Foo_(bar)"
+        assertEquals(
+            listOf(wiki),
+            paragraph("see $wiki end").links().map { (it.item as LinkAnnotation.Url).url },
+        )
+
+        // And an unbalanced one still ends the URL.
+        assertEquals(
+            listOf(url),
+            paragraph("($url) end").links().map { (it.item as LinkAnnotation.Url).url },
+        )
     }
 
     @Test

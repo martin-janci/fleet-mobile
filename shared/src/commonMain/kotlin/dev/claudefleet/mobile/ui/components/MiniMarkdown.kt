@@ -22,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -699,6 +700,22 @@ private class InlineParser(private val src: String, private val styles: MdInline
     private val star2Open = nextMarker(n) { j ->
         src[j] == '*' && at(j + 1) == '*' && !escaped[j] && at(j - 1) != '*' && at(j + 2) != '*' && !spaceAt(j + 2)
     }
+    // `___foo___` had no table of its own, so the `__` branch paired two of the
+    // three and left the third as literal text: bold `_foo` followed by a `_`.
+    // Word-boundary rules as everywhere else for `_`, which never opens or
+    // closes inside a word.
+    private val under3Close = nextMarker(n) { j ->
+        src[j] == '_' && at(j + 1) == '_' && at(j + 2) == '_' && !escaped[j] && j > 0 &&
+            !spaceAt(j - 1) && !wordAt(j + 3)
+    }
+    private val under1Open = nextMarker(n) { j ->
+        src[j] == '_' && !escaped[j] && at(j - 1) != '_' && at(j + 1) != '_' && !spaceAt(j + 1) &&
+            !wordAt(j - 1)
+    }
+    private val under2Open = nextMarker(n) { j ->
+        src[j] == '_' && at(j + 1) == '_' && !escaped[j] && at(j - 1) != '_' && at(j + 2) != '_' &&
+            !spaceAt(j + 2) && !wordAt(j - 1)
+    }
     private val under2Close = nextMarker(n) { j ->
         src[j] == '_' && at(j + 1) == '_' && !escaped[j] && j > 0 && !spaceAt(j - 1) && !wordAt(j + 2)
     }
@@ -766,12 +783,15 @@ private class InlineParser(private val src: String, private val styles: MdInline
     private fun codeSpan(b: AnnotatedString.Builder, i: Int, to: Int): Int {
         var len = 0
         while (i + len < to && src[i + len] == '`') len++
-        val table = when (len) {
-            1 -> tick1
-            2 -> tick2
-            else -> null
+        // Any run length closes. Only 1 and 2 had tables, so ```x``` — which
+        // `fenceOpen`'s own comment calls "an inline code span, not a fence" —
+        // rendered as literal backticks. A run of three or more is rare enough
+        // to scan for rather than precompute a table nobody else reads.
+        val close = when (len) {
+            1 -> tick1[i + 1]
+            2 -> tick2[i + 2]
+            else -> runOf(i + len, len, to)
         }
-        val close = table?.get(i + len) ?: n
         if (!within(close, len, to)) {
             b.append(src, i, i + len)
             return i + len
@@ -786,16 +806,26 @@ private class InlineParser(private val src: String, private val styles: MdInline
         return close + len
     }
 
-    /** Exactly `***` starts at [j] and ends inside the range ending at [to]. */
-    private fun tripleStarAt(j: Int, to: Int) =
-        j + 3 <= to && at(j - 1) != '*' && at(j) == '*' && at(j + 1) == '*' && at(j + 2) == '*' && at(j + 3) != '*'
+    /** The next run of exactly [len] backticks at or after [from], else [n]. */
+    private fun runOf(from: Int, len: Int, to: Int): Int {
+        var j = from
+        while (j < to) {
+            if (src[j] == '`' && tickRun(j, len)) return j
+            j++
+        }
+        return n
+    }
+
+    /** Exactly `***` (or `___`) starts at [j] and ends inside the range ending at [to]. */
+    private fun tripleAt(j: Int, to: Int, ch: Char) =
+        j + 3 <= to && at(j - 1) != ch && at(j) == ch && at(j + 1) == ch && at(j + 2) == ch && at(j + 3) != ch
 
     private fun emphasis(b: AnnotatedString.Builder, i: Int, to: Int, depth: Int, links: Boolean, ch: Char): Int? {
         val star = ch == '*'
         // `_` never opens inside a word: `snake_case_name` stays literal.
         if (!star && wordAt(i - 1)) return null
-        if (star && at(i + 1) == '*' && at(i + 2) == '*' && i + 3 < to && !spaceAt(i + 3)) {
-            val close = star3Close[i + 3]
+        if (at(i + 1) == ch && at(i + 2) == ch && i + 3 < to && !spaceAt(i + 3)) {
+            val close = (if (star) star3Close else under3Close)[i + 3]
             // An empty `******` falls through to the `**` pairing below, so
             // a long run of `*` still pairs up two by two.
             if (within(close, 3, to) && close > i + 3) {
@@ -808,7 +838,7 @@ private class InlineParser(private val src: String, private val styles: MdInline
                 var close = (if (star) star2Close else under2Close)[i + 2]
                 // `**bold *italic***`: the closing `***` gives its last two
                 // stars to the bold when an italic opened inside it.
-                if (star && tripleStarAt(close, to) && star1Open[i + 2] < close) close++
+                if (tripleAt(close, to, ch) && (if (star) star1Open else under1Open)[i + 2] < close) close++
                 // `close > i + 2`: an EMPTY span is not a span. `****` closed
                 // at `i + 2` and was consumed as two empty bold ranges, so any
                 // inline run of four or more markers vanished from the text
@@ -826,7 +856,7 @@ private class InlineParser(private val src: String, private val styles: MdInline
         if (i + 1 < to && !spaceAt(i + 1)) {
             var close = (if (star) star1Close else under1Close)[i + 1]
             // `*italic **bold***`: the mirror image -- the italic takes the last star.
-            if (star && tripleStarAt(close, to) && star2Open[i + 1] < close) close += 2
+            if (tripleAt(close, to, ch) && (if (star) star2Open else under2Open)[i + 1] < close) close += 2
             if (within(close, 1, to) && close > i + 1) {
                 span(b, ITALIC, i + 1, close, depth, links)
                 return close + 1
@@ -904,11 +934,18 @@ private class InlineParser(private val src: String, private val styles: MdInline
         for (k in i until end) {
             if (src[k] == '(') balance++ else if (src[k] == ')') balance--
         }
-        // Trailing punctuation belongs to the sentence, not the URL; a `)`
-        // stays only while it balances a `(` inside the URL.
+        // Trailing punctuation belongs to the sentence, not the URL; a closing
+        // bracket stays only while it balances an opener inside the URL.
+        //
+        // `]`, `}`, `` ` `` and `>` were missing from the trim set, so a URL
+        // written inside brackets or braces — `[https://x/y]`, `{…}`, a URL at
+        // the end of a code span — swallowed the closer into the LIVE link, not
+        // just the drawn text. `(` is counted (a Wikipedia URL legitimately
+        // holds a balanced pair); the others never appear balanced in a URL this
+        // app shows, so one unmatched closer simply ends it.
         while (end > i + scheme) {
             val last = src[end - 1]
-            if (last in ".,:;!?\"'*_~") {
+            if (last in ".,:;!?\"'*_~`]}>") {
                 end--
             } else if (last == ')' && balance < 0) {
                 end--
@@ -998,15 +1035,26 @@ private fun Blocks(blocks: List<MdBlock>, style: TextStyle, gap: Dp, listLevel: 
     }
 }
 
+/**
+ * One type step per heading level.
+ *
+ * 4, 5 and 6 shared `labelLarge`, so a document that nests that deep drew them
+ * identically while this file's own comment promises "distinct sizes". Out of
+ * the composable so the mapping is testable without a composition — a
+ * `Typography` is an ordinary object.
+ */
+internal fun headingStyle(type: Typography, level: Int): TextStyle = when (level) {
+    1 -> type.titleLarge
+    2 -> type.titleMedium
+    3 -> type.titleSmall
+    4 -> type.labelLarge
+    5 -> type.labelMedium
+    else -> type.labelSmall
+}
+
 @Composable
 private fun HeadingView(block: MdBlock.Heading, first: Boolean) {
-    val type = MaterialTheme.typography
-    val base = when (block.level) {
-        1 -> type.titleLarge
-        2 -> type.titleMedium
-        3 -> type.titleSmall
-        else -> type.labelLarge
-    }
+    val base = headingStyle(MaterialTheme.typography, block.level)
     val color = if (block.level >= 4) MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified
     // BLOCK_GAP below; above, more, so a heading reads as the start of a
     // section rather than the end of the previous one.
