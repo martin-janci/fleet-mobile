@@ -240,7 +240,23 @@ internal fun cutByHub(text: String?): Boolean {
 internal fun withoutHubCut(text: String): String =
     text.removeSuffix("…").substringBeforeLast('\n', missingDelimiterValue = "")
 
-private fun linesOf(text: String): List<String> = if (text.isEmpty()) emptyList() else text.split('\n')
+/**
+ * [text] as lines, WITHOUT the empty segment a trailing newline produces.
+ *
+ * `"a\n".split('\n')` is `["a", ""]`, and that phantom line was a real
+ * defect twice over: every `Write` of a newline-terminated file — which is
+ * every well-formed source file — reported one addition too many and drew a
+ * blank green row under the diff, and the same file read back through
+ * `parseNumberedLines` had one line fewer, so the two views of one file
+ * disagreed about its length.
+ *
+ * The cost is that `"a"` and `"a\n"` now diff as equal. That is git's own
+ * reading (it reports the difference as a note, not a changed line), and it is
+ * the lesser of the two wrongs: a missing final newline is a fact about the
+ * file's last byte, not a changed line of code.
+ */
+private fun linesOf(text: String): List<String> =
+    if (text.isEmpty()) emptyList() else text.removeSuffix("\n").split('\n')
 
 /**
  * A line diff of [old] against [new]: the common prefix and suffix are
@@ -305,7 +321,25 @@ internal fun lineDiff(old: String, new: String, maxCells: Long = DIFF_MAX_CELLS)
 internal sealed interface DiffRow {
     data class Line(val line: DiffLine) : DiffRow
     data class Gap(val count: Int) : DiffRow
+
+    /**
+     * The boundary between two of a MultiEdit's edits — "edit 2 of 3".
+     *
+     * A MultiEdit arrives as one pair of strings with its edits joined by
+     * [MULTI_EDIT_SEP], and diffing that pair whole made the separator itself
+     * a diff line and let one edit's lines align against another's. Each edit
+     * is its own diff; this is what sits between them.
+     */
+    data class Edit(val ordinal: Int, val total: Int) : DiffRow
 }
+
+/**
+ * What the hub joins a MultiEdit's edits with, in both halves
+ * (`service/transcript.rs`'s `edit_detail`). The two halves have the same
+ * number of segments — one per edit — unless the hub's 8 000-character cap
+ * fell inside one of them.
+ */
+internal const val MULTI_EDIT_SEP = "\n…\n"
 
 /** Context lines kept on each side of a change. */
 internal const val DIFF_CONTEXT: Int = 2
@@ -337,6 +371,63 @@ internal fun collapseContext(lines: List<DiffLine>, context: Int = DIFF_CONTEXT)
         i = end
     }
     return out
+}
+
+/**
+ * A MultiEdit's rows: each edit diffed against its OWN counterpart, with a
+ * [DiffRow.Edit] between them.
+ *
+ * The hub sends one pair of strings with the edits joined by
+ * [MULTI_EDIT_SEP], and diffing that pair as one file was wrong twice: the
+ * `…` separator line is in both halves, so it became a context line of the
+ * diff and appeared on screen as part of the file; and the LCS is free to
+ * align the first edit's old lines against the third edit's new ones, so the
+ * hunks drifted out of the edits they belong to.
+ *
+ * When the two halves do NOT split into the same number of segments the join
+ * cannot be undone — the hub's character cap fell inside a segment, or an
+ * edit's own text contains the separator — so this falls back to the single
+ * diff, which is wrong in the old way rather than wrong in a new one.
+ */
+internal fun multiEditRows(old: String, new: String, context: Int = DIFF_CONTEXT): List<DiffRow> {
+    val pairs = multiEditPairs(old, new) ?: return collapseContext(lineDiff(old, new), context)
+    val out = mutableListOf<DiffRow>()
+    for ((index, pair) in pairs.withIndex()) {
+        out += DiffRow.Edit(index + 1, pairs.size)
+        out += collapseContext(lineDiff(pair.first, pair.second), context)
+    }
+    return out
+}
+
+/**
+ * The same `+N −M` as [diffStat], summed per edit.
+ *
+ * Over the joined halves the separator lines cancel, so the total is nearly
+ * right — but only nearly: the LCS may pair one edit's line with another's
+ * and count neither. Per edit it is the figure each edit actually made.
+ */
+internal fun multiEditStat(old: String, new: String): DiffStat {
+    val pairs = multiEditPairs(old, new) ?: return diffStat(old, new)
+    var added = 0
+    var removed = 0
+    for ((a, b) in pairs) {
+        val stat = diffStat(a, b)
+        added += stat.added
+        removed += stat.removed
+    }
+    return DiffStat(added, removed)
+}
+
+/**
+ * [old] and [new] split on [MULTI_EDIT_SEP], or null when the join cannot be
+ * undone: a single segment (a plain Edit or Write, nothing to split) or an
+ * unequal count on the two sides.
+ */
+private fun multiEditPairs(old: String, new: String): List<Pair<String, String>>? {
+    val a = old.split(MULTI_EDIT_SEP)
+    val b = new.split(MULTI_EDIT_SEP)
+    if (a.size < 2 || a.size != b.size) return null
+    return a.zip(b)
 }
 
 /** `+N −M` counts of a diff. */
@@ -397,8 +488,17 @@ internal fun splitPath(path: String): Pair<String, String> {
 /** One line of a Read result, with the number `cat -n` put in front of it. */
 internal data class NumberedLine(val number: Int, val text: String)
 
-/** `"     1\tcode"`, or `"     1→code"` from a newer Claude Code. */
-private val NUMBERED = Regex("""^\s*(\d+)(?:\t|→)(.*)$""")
+/**
+ * `"     1\tcode"`, or `"     1→code"` from a newer Claude Code.
+ *
+ * [RegexOption.DOT_MATCHES_ALL] and no trailing `$`: `.` excludes the line
+ * terminators `\r`, U+0085, U+2028 and U+2029, and the input is already one
+ * `\n`-free line, so without it a single Read line holding any of them failed
+ * to match — and the `break` written for the note that FOLLOWS a numbered
+ * block then discarded the whole rest of the file. `matchEntire` anchors both
+ * ends on its own, which is why the `$` is gone with it.
+ */
+private val NUMBERED = Regex("""^\s*(\d+)(?:\t|→)(.*)""", RegexOption.DOT_MATCHES_ALL)
 
 /**
  * A Read result's lines split into number and code, as far as they keep the

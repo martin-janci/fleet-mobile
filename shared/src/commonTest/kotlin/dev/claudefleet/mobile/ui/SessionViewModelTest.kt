@@ -180,8 +180,13 @@ private class FakeActions : SessionActions {
         }
     }
 
+    // Not a fake: a refusal. `ToolDetailsModel` is kept apart from
+    // `SessionViewModel` so that a detail read never waits behind (or holds
+    // up) a conversation refetch, and this is the only thing that holds that
+    // claim — a permissive stub let the separation be broken without a test
+    // noticing.
     override suspend fun toolDetail(sessionId: Long, toolUseId: String): ToolDetail =
-        ToolDetail(id = toolUseId)
+        error("SessionViewModel must not read tool details; that is ToolDetailsModel's own scope")
 
     override suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult {
         sentPrompts += text

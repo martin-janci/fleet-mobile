@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.android
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
@@ -14,6 +15,7 @@ import dev.claudefleet.mobile.ui.CONVERSATION_LIST
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.SessionUiState
 import dev.claudefleet.mobile.ui.theme.FleetTheme
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -110,6 +112,18 @@ class ConversationItemsTest {
         // this honest on a short screen.
         compose.onNodeWithTag(CONVERSATION_LIST).performScrollToIndex(0)
         compose.waitForIdle()
+
+        // The VERBS, exactly. Asserting only `"build.gradle.kts"` as a
+        // substring was satisfied by the old raw one-liner rendering too — the
+        // string `Read(build.gradle.kts)` contains it — so the test could not
+        // fail if the verb-and-target row regressed to drawing `tool.summary`.
+        compose.onNodeWithText("Read").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Run").performScrollTo().assertIsDisplayed()
+        assertTrue(
+            "the raw one-liner must not be drawn: a tool row is a verb and a target",
+            compose.onAllNodesWithText("Read(build.gradle.kts)", substring = true)
+                .fetchSemanticsNodes().isEmpty(),
+        )
 
         for (text in listOf(
             "plain answer",

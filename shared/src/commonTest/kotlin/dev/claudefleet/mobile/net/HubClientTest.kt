@@ -1262,6 +1262,81 @@ class HubClientTest {
         assertTrue(enumerated.has("work_link", "unlink"))
         assertFalse(enumerated.has("work_link", "confirm"), "a hub before M4 enumerates no confirm")
     }
+
+    /**
+     * `session_tool_detail`'s whole wire surface, in one place.
+     *
+     * The tool name, its three request keys, seven `ToolDetail` fields, three
+     * `EditDetail` fields — every one of them was pinned by no test on this
+     * side, and `@Serializable` with a default per field means drift is
+     * SILENT: a renamed hub field decodes as its default and the card simply
+     * goes blank. This asserts the request fleet sends and decodes a verbatim
+     * null-stripped reply of the hub's own shape.
+     */
+    @Test
+    fun the_tool_detail_request_and_reply_are_pinned_field_by_field() = runTest {
+        val (hub, calls) = client { _ ->
+            sse(
+                okResult(
+                    """{"id":"tu_7","name":"Bash","input":"{\n  \"command\": \"ls\"\n}",""" +
+                        """"command":"ls","result":"a\nb","is_error":true}""",
+                ),
+            ) to HttpStatusCode.OK
+        }
+
+        val detail = hub.toolDetail(sessionId = 42, toolUseId = "tu_7")
+
+        val params = Json.parseToJsonElement(calls.bodyText(0)).jsonObject["params"]!!.jsonObject
+        assertEquals(HubCapabilities.SESSION_TOOL_DETAIL, params["name"]!!.jsonPrimitive.content)
+        assertEquals("session_tool_detail", params["name"]!!.jsonPrimitive.content)
+        val args = params["arguments"]!!.jsonObject
+        assertEquals(setOf("session_id", "tool_use_id"), args.keys)
+        assertEquals(42, args["session_id"]!!.jsonPrimitive.int)
+        assertEquals("tu_7", args["tool_use_id"]!!.jsonPrimitive.content)
+
+        assertEquals("tu_7", detail.id)
+        assertEquals("Bash", detail.name)
+        assertEquals("ls", detail.command)
+        assertEquals("a\nb", detail.result)
+        assertTrue(detail.isError, "`is_error`, not `isError`: a @SerialName nobody checked")
+        assertTrue("\"command\"" in detail.input, "the pretty-printed input: ${detail.input}")
+        assertNull(detail.edit, "a Bash call has no edit half")
+    }
+
+    /** The third request key is sent only when it is asked for. */
+    @Test
+    fun an_earlier_conversation_is_named_only_when_given() = runTest {
+        val (hub, calls) = client { _ ->
+            sse(okResult("""{"id":"tu_7","name":"Read"}""")) to HttpStatusCode.OK
+        }
+
+        hub.toolDetail(sessionId = 42, toolUseId = "tu_7", claudeSessionId = "conv-9")
+
+        val args = Json.parseToJsonElement(calls.bodyText(0))
+            .jsonObject["params"]!!.jsonObject["arguments"]!!.jsonObject
+        assertEquals(setOf("session_id", "tool_use_id", "claude_session_id"), args.keys)
+        assertEquals("conv-9", args["claude_session_id"]!!.jsonPrimitive.content)
+    }
+
+    /** And the Edit half, whose three fields are the diff the card draws. */
+    @Test
+    fun an_edit_details_three_fields_are_pinned_too() = runTest {
+        val (hub, _) = client { _ ->
+            sse(
+                okResult(
+                    """{"id":"tu_8","name":"Edit","input":"{}","edit":""" +
+                        """{"file_path":"/repo/src/poll.ts","old":"let a = 1","new":"let a = 2"}}""",
+                ),
+            ) to HttpStatusCode.OK
+        }
+
+        val edit = hub.toolDetail(sessionId = 42, toolUseId = "tu_8").edit
+
+        assertEquals("/repo/src/poll.ts", edit?.filePath, "`file_path`, not `filePath`")
+        assertEquals("let a = 1", edit?.old)
+        assertEquals("let a = 2", edit?.new)
+    }
+
 }
 
 /** Eight request bodies by name, for a test that makes eight calls in a row. */

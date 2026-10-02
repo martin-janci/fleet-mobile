@@ -349,7 +349,10 @@ class HubClient(
         claudeSessionId: String? = null,
     ): ToolDetail =
         call(
-            "session_tool_detail",
+            // The capability's own constant, not a second literal of the same
+            // name: the call site and the `tools/list` check have to agree, and
+            // two independent strings for one tool name agree only by luck.
+            HubCapabilities.SESSION_TOOL_DETAIL,
             buildJsonObject {
                 put("session_id", sessionId)
                 put("tool_use_id", toolUseId)

@@ -13,7 +13,11 @@ import dev.claudefleet.mobile.model.ToolDetail
 import dev.claudefleet.mobile.model.WaitResult
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runCurrent
@@ -50,11 +54,23 @@ class ToolDetailsModelTest {
         var gate: CompletableDeferred<Unit>? = null
         var result: String? = "ok"
 
+        /**
+         * One answer per call, oldest first; [result] answers once it runs
+         * out. It exists because a result enqueued up front is the only way to
+         * make the SECOND read of one call differ from the first when both
+         * resume inside the same `runCurrent()`.
+         */
+        val answers = ArrayDeque<String?>()
+
         override suspend fun toolDetail(sessionId: Long, toolUseId: String): ToolDetail {
             asked += sessionId to toolUseId
             gate?.await()
             fail?.let { throw it }
-            return ToolDetail(id = toolUseId, name = "Bash", result = result)
+            return ToolDetail(
+                id = toolUseId,
+                name = "Bash",
+                result = if (answers.isNotEmpty()) answers.removeFirst() else result,
+            )
         }
 
         override suspend fun conversation(sessionId: Long, turns: Int?, sinceTurn: Long?): Conversation = error("unused")
@@ -157,6 +173,90 @@ class ToolDetailsModelTest {
         model.request("tu_1", force = true)
         runCurrent()
         assertEquals(1, actions.asked.size, "asked once, however often it is asked")
+    }
+
+    /**
+     * The row says the call FINISHED while the first read is still out.
+     *
+     * The row asks the moment it opens, which is usually mid-call, and asks
+     * again when the result lands. That second ask used to be dropped — a
+     * `Loading` entry is already "on its way" — so the in-flight answer, which
+     * carries no `result`, was stored as the final one and the card said
+     * "running…" under a row that had stopped spinning. Nothing cleared it:
+     * the row's `LaunchedEffect` will not fire again for the same `tool.done`.
+     */
+    @Test
+    fun a_done_that_arrives_while_the_read_is_out_is_not_forgotten() = runTest {
+        val actions = Actions()
+        actions.gate = CompletableDeferred()
+        actions.answers += null          // the in-flight read: no result yet
+        actions.answers += "finished"    // the read the dropped `done` owes
+        val model = ToolDetailsModel(7, Fleet(withTool), actions, this)
+
+        model.request("tu_1", done = false)
+        runCurrent()
+        assertEquals(ToolDetailLoad.Loading, model.states.value["tu_1"])
+
+        model.request("tu_1", done = true)
+        runCurrent()
+        assertEquals(1, actions.asked.size, "the read already out is not duplicated")
+
+        actions.gate!!.complete(Unit)
+        runCurrent()
+        assertEquals(2, actions.asked.size, "and the finished call is taken again, once")
+        val loaded = assertIs<ToolDetailLoad.Loaded>(model.states.value["tu_1"])
+        assertEquals("finished", loaded.detail.result)
+    }
+
+    /**
+     * And exactly once: a second answer that STILL has no result is the call's
+     * final state (killed session, a hook that never fired), not a reason to
+     * ask for ever.
+     */
+    @Test
+    fun a_call_that_really_produced_no_result_is_asked_twice_and_no_more() = runTest {
+        val actions = Actions()
+        actions.result = null
+        actions.gate = CompletableDeferred()
+        val model = ToolDetailsModel(7, Fleet(withTool), actions, this)
+
+        model.request("tu_1", done = false)
+        runCurrent()
+        model.request("tu_1", done = true)
+        runCurrent()
+        actions.gate!!.complete(Unit)
+        runCurrent()
+
+        // Two: the in-flight read, and the one the remembered `done` owed. The
+        // second answer has no result either, and that is the end of it — the
+        // remembered flag is consumed by being taken, so a call that never
+        // produces a result cannot drive the pair round again.
+        assertEquals(2, actions.asked.size)
+        val loaded = assertIs<ToolDetailLoad.Loaded>(model.states.value["tu_1"])
+        assertNull(loaded.detail.result)
+    }
+
+    /**
+     * A screen that went away leaves no half-read detail behind.
+     *
+     * The cancellation arm drops the entry rather than storing a `Failed`,
+     * since a cancelled read is not a failure of the hub's and Retry beside it
+     * would be nonsense — and until now nothing exercised that arm at all.
+     */
+    @Test
+    fun a_cancelled_read_leaves_nothing_behind() = runTest {
+        val actions = Actions()
+        actions.gate = CompletableDeferred()
+        val child = CoroutineScope(coroutineContext + Job())
+        val model = ToolDetailsModel(7, Fleet(withTool), actions, child)
+
+        model.request("tu_1")
+        runCurrent()
+        assertEquals(ToolDetailLoad.Loading, model.states.value["tu_1"])
+
+        child.cancel(CancellationException("the screen closed"))
+        runCurrent()
+        assertEquals(emptyMap(), model.states.value)
     }
 
     @Test

@@ -389,4 +389,119 @@ class ToolCallsTest {
         assertEquals("a\nb", withoutHubCut("a\nb\nhalf a li…"))
         assertEquals("", withoutHubCut("one partial line…"))
     }
+
+    /**
+     * A newline-terminated file has no phantom final line.
+     *
+     * `"a\n".split('\n')` is `["a", ""]`, and that empty segment reached two
+     * screens at once: every `Write` of a well-formed source file counted one
+     * addition too many and drew a blank green row at the end of its diff,
+     * while the same file read back through `parseNumberedLines` had one line
+     * fewer — two views of one file disagreeing about its length.
+     */
+    @Test
+    fun a_trailing_newline_is_not_a_line() {
+        assertEquals(DiffStat(added = 1, removed = 0), diffStat("", "one line\n"))
+        assertEquals(DiffStat(added = 2, removed = 0), diffStat("", "a\nb\n"))
+        assertEquals(1, lineDiff("", "one line\n").size)
+        assertEquals("one line", lineDiff("", "one line\n").single().text)
+
+        // The price, stated: a file's missing final newline is not a CHANGED
+        // line — the line itself is still there, as context. It is a fact about
+        // the file's last byte, which git reports as a note, not a diff line.
+        assertEquals(DiffStat(0, 0), diffStat("a", "a\n"))
+        assertTrue(
+            lineDiff("a", "a\n").all { it.kind == DiffKind.Context },
+            "a missing final newline must change no line: ${lineDiff("a", "a\n")}",
+        )
+
+        // And the empty case is untouched.
+        assertEquals(emptyList(), lineDiff("", ""))
+        assertEquals(DiffStat(0, 0), diffStat("", ""))
+    }
+
+    /**
+     * A Read line carrying a bare `\r`, U+0085, U+2028 or U+2029 does not end
+     * the file.
+     *
+     * `java.util.regex`'s `.` excludes every line terminator, so one such line
+     * failed `matchEntire` — and the `break` written for the note that FOLLOWS
+     * a numbered block then threw away the whole rest of the file. A 2 000-line
+     * Read showed 40 lines because line 41 held a stray carriage return.
+     */
+    @Test
+    fun a_line_terminator_inside_a_line_does_not_truncate_the_read() {
+        for (terminator in listOf("\r", "\u0085", "\u2028", "\u2029")) {
+            val read = "     1\tfirst\n     2\tmid${terminator}dle\n     3\tthird"
+            val lines = parseNumberedLines(read)
+            assertEquals(3, lines?.size, "a ${terminator.single().code} in line 2 truncated the file")
+            assertEquals("mid${terminator}dle", lines?.get(1)?.text)
+            assertEquals(3, lines?.get(2)?.number)
+        }
+
+        // A trailing CR is still stripped as the CRLF it is, not kept as text.
+        assertEquals("code", parseNumberedLines("     1\tcode\r")?.single()?.text)
+
+        // And the note that follows a numbered block still ends it.
+        val withNote = "     1\tcode\n\n(the file has more lines)"
+        assertEquals(1, parseNumberedLines(withNote)?.size)
+    }
+
+    /**
+     * A MultiEdit is diffed EDIT BY EDIT, not as one file.
+     *
+     * The hub joins the edits' `old_string`s and `new_string`s with `"\n…\n"`
+     * and sends one pair, so diffing the pair whole was wrong twice over: the
+     * separator is identical on both sides, so it became a CONTEXT line of the
+     * file and appeared on screen as if the file contained it; and the LCS was
+     * free to pair the first edit's old lines with the third edit's new ones,
+     * so the hunks drifted out of the edits they belong to.
+     */
+    @Test
+    fun a_multi_edits_edits_are_diffed_one_by_one() {
+        val old = "alpha" + MULTI_EDIT_SEP + "gamma"
+        val new = "beta" + MULTI_EDIT_SEP + "delta"
+        val rows = multiEditRows(old, new)
+
+        val headers = rows.filterIsInstance<DiffRow.Edit>()
+        assertEquals(listOf(DiffRow.Edit(1, 2), DiffRow.Edit(2, 2)), headers)
+
+        val texts = rows.filterIsInstance<DiffRow.Line>().map { it.line.text }
+        assertEquals(listOf("alpha", "beta", "gamma", "delta"), texts)
+        assertFalse(texts.any { it == "…" }, "the separator is not a line of the file")
+
+        // Each edit's numbers are its own snippet's, as a single Edit's are.
+        val adds = rows.filterIsInstance<DiffRow.Line>().filter { it.line.kind == DiffKind.Add }
+        assertEquals(listOf(1, 1), adds.map { it.line.newNo })
+
+        assertEquals(DiffStat(added = 2, removed = 2), multiEditStat(old, new))
+    }
+
+    /**
+     * When the join cannot be undone the single diff is used instead — wrong
+     * in the old way rather than wrong in a new one.
+     *
+     * The hub caps each half at 8 000 characters independently, so a cut can
+     * fall inside a segment and leave the two sides with different segment
+     * counts; and a plain Edit or Write has nothing to split at all.
+     */
+    @Test
+    fun a_join_that_cannot_be_undone_falls_back_to_one_diff() {
+        // One segment either side: a plain Edit.
+        assertEquals(
+            collapseContext(lineDiff("a", "b")),
+            multiEditRows("a", "b"),
+        )
+        assertEquals(diffStat("a", "b"), multiEditStat("a", "b"))
+
+        // Unequal counts: the hub's cap fell inside the second edit's `old`.
+        val old = "a" + MULTI_EDIT_SEP + "b"
+        val new = "x" + MULTI_EDIT_SEP + "y" + MULTI_EDIT_SEP + "z"
+        assertEquals(collapseContext(lineDiff(old, new)), multiEditRows(old, new))
+        assertEquals(diffStat(old, new), multiEditStat(old, new))
+        assertTrue(
+            multiEditRows(old, new).none { it is DiffRow.Edit },
+            "a fallback must not claim edit boundaries it could not find",
+        )
+    }
 }

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -69,8 +70,11 @@ import dev.claudefleet.mobile.ui.theme.FleetIcons
  * `Turn`, so a turn drawn anywhere — a screenshot, a preview — gets the
  * unexpandable [None] without knowing about any of this.
  *
- * [expandAll] opens every row and group on first draw; only a preview or a
- * screenshot wants that.
+ * [expandAll] opens every row and group on first draw. Its one caller is
+ * `ConversationToolDetailTest` under `androidApp/src/androidTest`, which has
+ * to compose the expanded card itself — a test cannot tap a row and then wait
+ * on a hub read. Nothing in the app sets it; it is here so that path is drawn
+ * by something, which for a while it was not.
  */
 @Immutable
 class ToolDetailsHost(
@@ -141,7 +145,14 @@ internal fun ToolCallRow(tool: ConvItem.Tool, live: Boolean = false, modifier: M
     val id = tool.id
     val expandable = host.available && id != null
     val line = remember(tool) { tool.line() }
-    var expanded by rememberSaveable(id ?: tool.summary) { mutableStateOf(host.expandAll) }
+    // `key =`, not an input. The first positional argument of
+    // `rememberSaveable` is an INPUT, and the saved slot itself is derived
+    // from the CALL SITE — so a run of two tool rows that folds into a group
+    // on the third call moves each row from `TurnItems`'s own `ToolCallRow`
+    // to the group's, a different call site, and every row's expansion (with
+    // the detail card open inside it) was dropped. An explicit key is stored
+    // under the tool's id instead, which is the same wherever it is drawn.
+    var expanded by rememberSaveable(key = "tool:${id ?: tool.summary}") { mutableStateOf(host.expandAll) }
     val colors = MaterialTheme.colorScheme
 
     Column(modifier.fillMaxWidth()) {
@@ -180,10 +191,18 @@ internal fun ToolCallRow(tool: ConvItem.Tool, live: Boolean = false, modifier: M
             }
             Spacer(Modifier.width(8.dp))
             Text(
+                // `weight(1f, fill = false)` with an overflow, not a bare
+                // `maxLines`: Compose measures a Row's non-weighted children
+                // FIRST, so a long MCP verb — `mcp__linear__list_issues` is a
+                // real one — took the width the target, the `failed` label and
+                // the chevron needed, and they were squeezed out of the row.
+                // `fill = false` keeps a short verb at its own width.
                 text = line.verb,
                 style = MaterialTheme.typography.labelLarge,
                 color = if (tool.error) colors.error else colors.onSurface,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
             )
             Spacer(Modifier.width(8.dp))
             if (line.target != null) {
@@ -230,7 +249,7 @@ internal fun ToolGroupRow(run: ItemRun.Tools, live: Boolean = false, modifier: M
     // turn's last — so a group that opened itself then shut itself, taking any
     // detail card opened inside it out of composition with it. Opening is what
     // was asked for; closing never was.
-    var expanded by rememberSaveable(key) { mutableStateOf(run.startExpanded || host.expandAll) }
+    var expanded by rememberSaveable(key = "toolgroup:$key") { mutableStateOf(run.startExpanded || host.expandAll) }
     LaunchedEffect(run.startExpanded) { if (run.startExpanded) expanded = true }
     val colors = MaterialTheme.colorScheme
     val running = run.tools.any { !it.done }
@@ -364,7 +383,15 @@ private fun ToolDetailBody(tool: ConvItem.Tool, kind: ToolKind, detail: ToolDeta
         edit != null -> {
             EditDetailView(
                 edit,
-                isNewFile = !detail.isError && (detail.name == "Write" || tool.toolName() == "Write"),
+                // `wholeFile`, not `isNewFile`. The hub hard-codes a Write's
+                // `old` to `""` whether or not the path existed, so the tool
+                // NAME cannot tell a creation from an overwrite — and calling
+                // every Write a "new file" presented an overwrite as a
+                // creation and suppressed its `−M`, which is exactly the
+                // number a person checking an overwrite wants. This says only
+                // what is known: the diff is of the whole file.
+                wholeFile = !detail.isError && (detail.name == "Write" || tool.toolName() == "Write"),
+                multiEdit = detail.name == "MultiEdit" || tool.toolName() == "MultiEdit",
             )
             ErrorTail(detail)
         }
@@ -426,7 +453,7 @@ private fun diffPalette(): DiffPalette {
 }
 
 @Composable
-private fun EditDetailView(edit: EditDetail, isNewFile: Boolean) {
+private fun EditDetailView(edit: EditDetail, wholeFile: Boolean, multiEdit: Boolean = false) {
     // The hub caps `old` and `new` INDEPENDENTLY, so a cut pair is two
     // different windows of the file: diffing them whole invented changes at the
     // cut and hid every change past it, under an exact-looking `+N −M`. The
@@ -434,11 +461,19 @@ private fun EditDetailView(edit: EditDetail, isNewFile: Boolean) {
     val cut = remember(edit) { cutByHub(edit.old) || cutByHub(edit.new) }
     val old = remember(edit) { if (cutByHub(edit.old)) withoutHubCut(edit.old) else edit.old }
     val new = remember(edit) { if (cutByHub(edit.new)) withoutHubCut(edit.new) else edit.new }
-    val lines = remember(old, new) { lineDiff(old, new) }
-    val rows = remember(lines) { collapseContext(lines) }
+    // Per EDIT for a MultiEdit: the hub joins its edits with `"\n…\n"` in
+    // both halves, so one diff over the pair made the separator a context line
+    // of the file and let one edit's old lines align against another's new
+    // ones. `multiEditRows` falls back to the single diff when the join cannot
+    // be undone, so a plain Edit or Write is unchanged.
+    val rows = remember(old, new, multiEdit) {
+        if (multiEdit) multiEditRows(old, new) else collapseContext(lineDiff(old, new))
+    }
     // Over the TEXTS, not the rows: past `DIFF_MAX_CELLS` the rows draw every
     // changed line twice, and this figure is read as exact.
-    val stat = remember(old, new) { diffStat(old, new) }
+    val stat = remember(old, new, multiEdit) {
+        if (multiEdit) multiEditStat(old, new) else diffStat(old, new)
+    }
     val palette = diffPalette()
     val (name, dir) = remember(edit.filePath) { splitPath(edit.filePath) }
     var showAll by remember(edit) { mutableStateOf(false) }
@@ -455,19 +490,20 @@ private fun EditDetailView(edit: EditDetail, isNewFile: Boolean) {
             overflow = TextOverflow.MiddleEllipsis,
             modifier = Modifier.weight(1f),
         )
-        if (isNewFile) {
+        if (wholeFile) {
             Spacer(Modifier.width(6.dp))
-            Text("new file", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("whole file", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.width(8.dp))
         // `+N+` / `−M+` when the text was cut: the counts are exact for what
         // arrived, and there is more past it.
         val more = if (cut) "+" else ""
         Text("+${stat.added}$more", style = MaterialTheme.typography.labelMedium, color = palette.addFg, fontWeight = FontWeight.SemiBold)
-        if (stat.removed > 0 || !isNewFile) {
-            Spacer(Modifier.width(6.dp))
-            Text("−${stat.removed}$more", style = MaterialTheme.typography.labelMedium, color = palette.delFg, fontWeight = FontWeight.SemiBold)
-        }
+        Spacer(Modifier.width(6.dp))
+        // Always, Write included. Suppressing `−0` for a "new file" hid the one
+        // figure that tells an overwrite from a creation, on the only tool whose
+        // `old` the hub fills in blind.
+        Text("−${stat.removed}$more", style = MaterialTheme.typography.labelMedium, color = palette.delFg, fontWeight = FontWeight.SemiBold)
     }
     if (cut) {
         Spacer(Modifier.padding(top = 4.dp))
@@ -488,6 +524,13 @@ private fun EditDetailView(edit: EditDetail, isNewFile: Boolean) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth().padding(start = 48.dp, top = 4.dp, bottom = 4.dp),
+                )
+                is DiffRow.Edit -> Text(
+                    "edit ${row.ordinal} of ${row.total}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth().padding(start = 8.dp, top = 6.dp, bottom = 2.dp),
                 )
             }
         }
@@ -514,8 +557,13 @@ private fun DiffLineRow(line: DiffLine, palette: DiffPalette) {
             style = MaterialTheme.typography.labelSmall,
             fontFamily = FontFamily.Monospace,
             color = colors.onSurfaceVariant.copy(alpha = 0.8f),
+            // `widthIn(min =)` with `softWrap = false`: at a fixed 32.dp there
+            // are 26dp of text room for an 11sp monospace number, so a
+            // four-digit line — any file over 999 lines — was CLIPPED to three
+            // digits and the gutter named a different line of the file.
             maxLines = 1,
-            modifier = Modifier.width(32.dp).padding(end = 6.dp, top = 2.dp),
+            softWrap = false,
+            modifier = Modifier.widthIn(min = 32.dp).padding(end = 6.dp, top = 2.dp),
             textAlign = androidx.compose.ui.text.style.TextAlign.End,
         )
         Text(
@@ -626,8 +674,14 @@ private fun ReadDetail(path: String, result: String?, isError: Boolean) {
                             style = MaterialTheme.typography.labelSmall,
                             fontFamily = FontFamily.Monospace,
                             color = colors.onSurfaceVariant.copy(alpha = 0.8f),
+                            // As the diff gutter: fixed at 32.dp a four-digit
+                            // number did not fit, and with no `maxLines` this one
+                            // WRAPPED, so the row grew to two lines and the code
+                            // beside it stopped lining up with its number.
+                            maxLines = 1,
+                            softWrap = false,
                             textAlign = androidx.compose.ui.text.style.TextAlign.End,
-                            modifier = Modifier.width(32.dp).padding(end = 8.dp, top = 2.dp),
+                            modifier = Modifier.widthIn(min = 32.dp).padding(end = 8.dp, top = 2.dp),
                         )
                         Text(
                             line.text.ifEmpty { " " },
@@ -679,8 +733,13 @@ private fun SearchDetail(pattern: String, result: String?, isError: Boolean) {
                             line,
                             style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
+                            // A path is ellipsised in the MIDDLE, as the tool
+                            // row's own target already is: cutting the END of
+                            // `/a/very/long/dir/poll.ts` drops the file name,
+                            // which is the whole of what a Glob result says.
+                            maxLines = if (looksLikePath(line)) 1 else 2,
+                            softWrap = !looksLikePath(line),
+                            overflow = if (looksLikePath(line)) TextOverflow.MiddleEllipsis else TextOverflow.Ellipsis,
                         )
                     }
                 }

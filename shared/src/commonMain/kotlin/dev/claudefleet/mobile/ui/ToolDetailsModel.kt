@@ -75,6 +75,27 @@ class ToolDetailsModel(
     val states: StateFlow<Map<String, ToolDetailLoad>> = _states.asStateFlow()
 
     /**
+     * Tool ids whose row said the call had FINISHED while a read of it was
+     * still in flight.
+     *
+     * A row asks as soon as it opens, which is usually while the call is
+     * still running, and asks again with `done = true` when the result
+     * arrives — but the second ask used to be dropped, because a `Loading`
+     * entry is already "on its way". So the in-flight answer, which has no
+     * `result`, was stored as the final one and the card said "running…"
+     * under a row that had stopped spinning: the one state nothing clears,
+     * since the row's `LaunchedEffect` will not re-fire for the same
+     * `tool.done`. Remembering the wanted `done` here lets the read that is
+     * already going finish and then be taken again, once.
+     *
+     * A [MutableStateFlow] rather than a `mutableSetOf`: this model's scope is
+     * `Dispatchers.Default`, so the row's `request` and the read's own
+     * continuation are on different threads, and `update` is the only
+     * compare-and-set a common source set has.
+     */
+    private val wantDone = MutableStateFlow<Set<String>>(emptySet())
+
+    /**
      * Read [toolUseId]'s detail unless it is already held or on its way.
      *
      * [done] is what the row knows now: a detail read while the call was
@@ -91,10 +112,12 @@ class ToolDetailsModel(
     fun request(toolUseId: String, done: Boolean = true, force: Boolean = false) {
         if (!fleet.capabilities.value.toolDetail) return
         var start = false
+        var missedDone = false
         _states.update { held ->
             val current = held[toolUseId]
             val stale = current is ToolDetailLoad.Loaded && current.detail.result == null && done
             val retry = force && current is ToolDetailLoad.Failed && current.retryable
+            missedDone = done && current is ToolDetailLoad.Loading
             if (current == null || stale || retry) {
                 start = true
                 held + (toolUseId to ToolDetailLoad.Loading)
@@ -103,6 +126,7 @@ class ToolDetailsModel(
                 held
             }
         }
+        if (missedDone) wantDone.update { it + toolUseId }
         if (!start) return
         scope.launch {
             val next = try {
@@ -114,6 +138,19 @@ class ToolDetailsModel(
                 ToolDetailLoad.Failed(t)
             }
             _states.update { it + (toolUseId to next) }
+            // The `done` that arrived while this read was in flight. Asking
+            // again here rather than at the flip is what makes it one extra
+            // read and not a loop: `wantDone` is emptied by taking it, and the
+            // second answer either carries a result (so `stale` is false) or
+            // the call really produced none.
+            var missed = false
+            wantDone.update { held ->
+                missed = toolUseId in held
+                held - toolUseId
+            }
+            if (missed && next is ToolDetailLoad.Loaded && next.detail.result == null) {
+                request(toolUseId, done = true)
+            }
         }
     }
 }
