@@ -278,6 +278,21 @@ class Navigator {
 internal fun isPushed(screen: Screen): Boolean =
     screen is Screen.Session || screen is Screen.NewSession || screen is Screen.Task
 
+/**
+ * Whether the app claims the system back gesture: a pushed screen, or an open
+ * fleet-settings page.
+ *
+ * On a tab the handler must be DISABLED rather than enabled-and-ignoring, so
+ * the gesture reaches the system and Android can close the app from a tab root.
+ *
+ * The fleet page is the exception, and it is not a [Screen]: it is view-model
+ * state inside the Settings tab, and `SettingsScreen` hands the whole screen
+ * over to it. Unclaimed, back left the app from a page whose only way out was
+ * its own "‹ Fleet settings" button.
+ */
+internal fun claimsBackGesture(screen: Screen, fleetPageOpen: Boolean): Boolean =
+    isPushed(screen) || (screen is Screen.Settings && fleetPageOpen)
+
 private fun rootOf(tab: Tab): Screen = when (tab) {
     Tab.Sessions -> Screen.Sessions()
     Tab.Work -> Screen.Work

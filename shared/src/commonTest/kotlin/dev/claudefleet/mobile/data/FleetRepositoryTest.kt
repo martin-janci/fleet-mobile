@@ -1340,4 +1340,42 @@ class FleetRepositoryTest {
         collector.cancel()
         repository.stop()
     }
+
+    /**
+     * `settings:changed` (claude-fleet declarative pages P6) ticks
+     * `settingsChanges`, which is what makes the fleet-settings screen read
+     * again — the frame carries ids only and changes nothing in the snapshot.
+     * Without it the screen was filled once per process: after `fleet-hub
+     * client trust <name>` the phone stayed read-only until it was killed.
+     *
+     * `connections` counts each `ready`, which is what a "read it again on
+     * every connection" effect keys on: the capability flags cannot be, since
+     * an equal value is conflated away and the flag is `true` both times.
+     */
+    @Test
+    fun settings_frames_tick_settingsChanges_and_every_ready_counts_a_connection() = runTest {
+        val repository = repo(
+            FakeHub(sessionsJson = sessionRows(1)),
+            FakeStream {
+                emit(READY)
+                emit(rowEvent("settings:changed", """{"key":"update.track"}"""))
+                emit(rowEvent("session:updated", """{"id":1,"tmux_name":"a","host_alias":"box"}"""))
+                emit(rowEvent("settings:changed", """{"key":"gc.enabled"}"""))
+                awaitCancellation()
+            },
+            backgroundScope,
+        )
+        val ticks = mutableListOf<Long>()
+        val collector = backgroundScope.launch { repository.settingsChanges.collect { ticks += it } }
+        runCurrent()
+
+        repository.start()
+        repository.sessions.first { it.singleOrNull()?.tmuxName == "a" }
+        runCurrent()
+
+        assertEquals(listOf(1L, 2L), ticks, "one tick per settings frame, none for a session row")
+        assertEquals(1L, repository.connections.value)
+        collector.cancel()
+        repository.stop()
+    }
 }

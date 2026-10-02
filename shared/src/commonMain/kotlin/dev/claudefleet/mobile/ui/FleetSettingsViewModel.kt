@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.model.SettingDescriptor
 import dev.claudefleet.mobile.model.SettingProposal
 import dev.claudefleet.mobile.model.editableOnPhone
 import dev.claudefleet.mobile.model.offeredPages
+import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -97,9 +98,24 @@ class FleetSettingsViewModel(
                 val pages = async { actions.pages() }
                 val described = async { actions.describe() }
                 // A readonly token may read proposals; a hub without the tool,
-                // or one that refuses it, leaves the review empty and this
+                // or one that REFUSES it, leaves the review empty and this
                 // device read-only rather than failing the whole screen.
-                val pending = async { runCatching { actions.pending() }.getOrNull() }
+                //
+                // Only a refusal: `HubError.Tool` (an unknown tool, or one
+                // that answered `E_FORBIDDEN`) is the hub saying "not for
+                // you". A timeout, a reset, a 401 or a 403 is not that, and
+                // catching those here read as "the hub refuses review" — so a
+                // trusted `full` device went read-only, showed the operator
+                // the trust command they had already run, and (nothing
+                // re-reads, G4) stayed that way for the life of the process.
+                // Anything else reaches the outer catch and is reported.
+                val pending = async {
+                    try {
+                        actions.pending()
+                    } catch (e: HubError.Tool) {
+                        null
+                    }
+                }
                 // every await inside the boundary, so none of them can escape
                 Triple(pages.await(), described.await(), pending.await())
             }

@@ -136,6 +136,23 @@ interface FleetState {
      */
     val workChanges: Flow<Long> get() = emptyFlow()
 
+    /**
+     * A tick for every `settings:changed` frame the hub sends — a fleet
+     * setting was written, by anyone, anywhere. The frame carries ids only, so
+     * the value means nothing on its own: the fleet-settings screen re-reads
+     * whole, the way the Work view re-reads on [workChanges].
+     */
+    val settingsChanges: Flow<Long> get() = emptyFlow()
+
+    /**
+     * How many times this repository has been connected, counting from 1. A
+     * `StateFlow`, so it is the thing to key a "read it again on every
+     * connection" effect on: the capability flags cannot be, since an equal
+     * [HubCapabilities] is conflated away and the flag that matters is `true`
+     * both times.
+     */
+    val connections: StateFlow<Long> get() = NoWork.connections
+
     /** The hub refused [action] of [tool] as unknown: hide it for the rest of this connection. */
     fun actionMissing(tool: String, action: String) {}
 
@@ -146,6 +163,7 @@ interface FleetState {
 /** The defaults [FleetState] hands a fake: a hub without the work graph. */
 private object NoWork {
     val capabilities: StateFlow<HubCapabilities> = MutableStateFlow(HubCapabilities()).asStateFlow()
+    val connections: StateFlow<Long> = MutableStateFlow(0L).asStateFlow()
     val tickets: StateFlow<List<Ticket>> = MutableStateFlow<List<Ticket>>(emptyList()).asStateFlow()
     val myWork: StateFlow<Set<Long>?> = MutableStateFlow<Set<Long>?>(null).asStateFlow()
     val orgs: StateFlow<OrgDirectory> = MutableStateFlow(OrgDirectory.EMPTY).asStateFlow()

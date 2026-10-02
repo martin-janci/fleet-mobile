@@ -213,8 +213,13 @@ fun SettingDescriptor.rangeText(): String {
     var base = when {
         kind.type == "int" && kind.min != null && kind.max != null ->
             "${kind.min}–${kind.max}${if (u.isNotEmpty()) " $u" else ""}"
+        // Through `toDisplay`, not `min / unitFactor()`: both are `Long`, so
+        // that division TRUNCATED — a 900 s minimum shown in hours read "at
+        // least 0 hours", advertising a floor the hub refuses, on the same row
+        // where the value itself printed in correct fractional hours. The
+        // desktop divides in floating point (`pages.ts`) and shows 0.25.
         kind.type == "secs" && (kind.min ?: 0) > 0 ->
-            "at least ${(kind.min ?: 0) / unitFactor()}${if (u.isNotEmpty()) " $u" else ""}"
+            "at least ${toDisplay((kind.min ?: 0).toString())}${if (u.isNotEmpty()) " $u" else ""}"
         kind.type == "secs" -> u
         else -> ""
     }

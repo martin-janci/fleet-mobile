@@ -395,4 +395,29 @@ class NavigatorTest {
         assertTrue(nav.back())
         assertEquals(Screen.Work, nav.screen.value)
     }
+
+    /**
+     * What the app claims the system back gesture for: a pushed screen, and an
+     * open fleet-settings page — which is not a [Screen] but view-model state
+     * inside the Settings tab, and so used to leave the app instead of closing
+     * the page. On every tab root the handler stays disabled, which is how
+     * Android closes the app from a tab.
+     */
+    @Test
+    fun back_is_claimed_for_a_pushed_screen_and_for_an_open_fleet_page() {
+        val pushed = listOf(Screen.Session(1), Screen.NewSession(), Screen.Task("item:12"))
+        val roots = listOf(Screen.Sessions(), Screen.Sessions("box"), Screen.Hosts, Screen.Work, Screen.Settings)
+        for (s in pushed) {
+            assertTrue(claimsBackGesture(s, fleetPageOpen = false), "$s")
+            assertTrue(claimsBackGesture(s, fleetPageOpen = true), "$s")
+        }
+        for (s in roots) {
+            assertFalse(claimsBackGesture(s, fleetPageOpen = false), "$s")
+        }
+        assertTrue(claimsBackGesture(Screen.Settings, fleetPageOpen = true))
+        // Only the Settings tab draws one, so no other root is claimed by it.
+        for (s in roots.filterNot { it is Screen.Settings }) {
+            assertFalse(claimsBackGesture(s, fleetPageOpen = true), "$s")
+        }
+    }
 }

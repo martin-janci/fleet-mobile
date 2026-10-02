@@ -75,6 +75,7 @@ import dev.claudefleet.mobile.ui.PairedHub
 import dev.claudefleet.mobile.ui.PairedScreen
 import dev.claudefleet.mobile.ui.QuickReplies
 import dev.claudefleet.mobile.ui.Screen
+import dev.claudefleet.mobile.ui.claimsBackGesture
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.SessionViewModel
 import dev.claudefleet.mobile.ui.SessionWorkHandlers
@@ -381,8 +382,6 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     // app handles back, and on a tab it does not, which lets Android close the
     // app and iOS do whatever it does with an unclaimed swipe. That is why the
     // return value still does not need reading here.
-    BackHandler(enabled = screen is Screen.Session || screen is Screen.NewSession || screen is Screen.Task) { nav.back() }
-
     val sessions = remember(repository, scope) { SessionsViewModel(repository, scope, prefs = container.prefs) }
     // The fleet's scope, like the New session form's `callScope`: a resume
     // started from the sheet must not be cancelled by closing it.
@@ -451,7 +450,44 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
         FleetSettingsViewModel(container.fleetSettingsActions, scope, credentials.canWrite)
     }
     val settingsCaps by repository.capabilities.collectAsState()
+    val fleetSettingsState by fleetSettings.state.collectAsState()
+    // Read on the first connection that offers them, again on every later one
+    // (`connections` counts them, so an equal `HubCapabilities` no longer
+    // conflates the key away), and again whenever the hub says a setting
+    // changed. Without those two the store was filled once per process: after
+    // `fleet-hub client trust <name>` — the command this screen itself prints
+    // — the phone stayed read-only until it was killed, and a value changed
+    // elsewhere was never redrawn, which `set()`'s "same value, nothing to do"
+    // then turned into a tap that silently did nothing.
+    val connections by repository.connections.collectAsState()
+    LaunchedEffect(connections) { if (settingsCaps.fleetSettings) fleetSettings.load() }
     LaunchedEffect(settingsCaps.fleetSettings) { if (settingsCaps.fleetSettings) fleetSettings.load() }
+    LaunchedEffect(settingsCaps.fleetSettings) {
+        if (settingsCaps.fleetSettings) {
+            repository.settingsChanges.collect { fleetSettings.load() }
+        }
+    }
+
+    // `Navigator.back()` returns false on a tab specifically so the
+    // platform can have the gesture instead, `NavigatorTest` pins that, and a
+    // mutation guards it — and until now the only caller was the Back *button*
+    // on the session bar, which discards the Boolean. There was no `BackHandler`
+    // anywhere in the repository, so the system back gesture out of an open
+    // session did not return to the list: it finished the activity and left the
+    // app. A designed, documented, tested contract wired to nothing.
+    //
+    // `enabled` is the whole of the contract in one expression: on a session the
+    // app handles back, and on a tab it does not, which lets Android close the
+    // app and iOS do whatever it does with an unclaimed swipe.
+    //
+    // An open fleet-settings page is the one exception, and it is not a
+    // `Screen`: it is view-model state inside the Settings TAB, and
+    // `SettingsScreen` hands the whole screen to it. Unclaimed, back left the
+    // app from a page whose only way out was the in-page "‹ Fleet settings"
+    // button. `FleetSettingsViewModel.back()` was written to answer exactly
+    // this ("false when already there") and had no caller.
+    val fleetPageOpen = settingsCaps.fleetSettings && fleetSettingsState.openPage != null
+    BackHandler(enabled = claimsBackGesture(screen, fleetPageOpen)) { if (!fleetSettings.back()) nav.back() }
 
     Scaffold(
         bottomBar = {
@@ -736,12 +772,12 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                 }
                 Screen.Settings -> {
                     val state by settings.state.collectAsState()
-                    val fleet by fleetSettings.state.collectAsState()
+                    val fleet = fleetSettingsState
                     SettingsScreen(
                         state = state,
                         onForget = { settings.forget() },
                         onDismissError = settings::dismissError,
-                        fleetPageOpen = settingsCaps.fleetSettings && fleet.openPage != null,
+                        fleetPageOpen = fleetPageOpen,
                         fleetSettings = {
                             if (settingsCaps.fleetSettings) {
                                 FleetSettingsSection(
@@ -754,6 +790,8 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                                     onDecide = { id, apply -> fleetSettings.decide(id, apply) },
                                     onConfirm = fleetSettings::confirm,
                                     onCancelConfirm = fleetSettings::cancelConfirm,
+                                    onDismissError = fleetSettings::dismissError,
+                                    onRetry = { fleetSettings.load() },
                                 )
                             }
                         },

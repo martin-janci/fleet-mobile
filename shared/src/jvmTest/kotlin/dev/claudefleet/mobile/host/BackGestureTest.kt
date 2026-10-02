@@ -55,10 +55,10 @@ class TheBackGestureReachesTheNavigatorTest {
     }
 
     /**
-     * Enabled on the three screens pushed over a tab — a session, the New
-     * session form, and a task (the Work view's detail) — and nowhere else,
-     * which is the navigator's contract (`isPushed`) expressed where the
-     * platform can see it.
+     * `enabled` is one named rule, not an expression written out here:
+     * `claimsBackGesture` (`Navigator.kt`), which `NavigatorTest` holds screen
+     * by screen — a pushed screen, or an open fleet-settings page, and nothing
+     * else. This file's job is only that the handler is wired to that rule.
      *
      * On a tab the handler must be *disabled* rather than enabled-and-ignoring:
      * a disabled handler lets the gesture reach the system, which is how Android
@@ -67,13 +67,19 @@ class TheBackGestureReachesTheNavigatorTest {
      */
     @Test
     fun it_is_enabled_only_on_a_pushed_screen() {
-        val call = Regex("""BackHandler\(enabled = ([^)]+)\)""").find(app)
+        // Lazy up to the `)` that the handler's own body follows, so a rule
+        // that is itself a call keeps its parentheses.
+        val call = Regex("""BackHandler\(enabled = (.+?)\)\s*\{""").find(app)
             ?: fail("BackHandler is not called with an explicit `enabled`")
 
-        assertEquals("screen is Screen.Session || screen is Screen.NewSession || screen is Screen.Task", call.groupValues[1].trim())
+        assertEquals("claimsBackGesture(screen, fleetPageOpen)", call.groupValues[1].trim())
+        // The body gives the in-screen level first refusal (the fleet page's
+        // own back), then the navigator. `fleetSettings.back()` answers false
+        // when no page is open, so a pushed screen still reaches `nav.back()`.
         assertTrue(
-            Regex("""BackHandler\([^)]*\)\s*\{\s*nav\.back\(\)\s*\}""").containsMatchIn(app),
-            "the handler must call nav.back() and nothing else",
+            Regex("""BackHandler\(enabled = .+?\)\s*\{\s*if \(!fleetSettings\.back\(\)\) nav\.back\(\)\s*\}""")
+                .containsMatchIn(app),
+            "the handler must offer the open fleet page its back, then the navigator",
         )
     }
 

@@ -209,4 +209,29 @@ class FleetSettingsViewModelTest {
         assertNull(vm.state.value.error)
         assertFalse(vm.state.value.canWrite)
     }
+
+    /**
+     * A REFUSAL leaves the review empty (the case above); a transport failure
+     * is not a refusal. Caught alike, one timeout read as "this hub refuses
+     * review": a trusted `full` device went read-only, was shown the trust
+     * command its operator had already run, and — nothing re-read it — stayed
+     * that way for the life of the process. It is reported instead, so the
+     * screen can say so and offer Retry.
+     */
+    @Test
+    fun a_failed_review_read_that_is_not_a_refusal_is_reported() = runTest {
+        for (thrown in listOf(HubError.Unauthorized("stale token"), HubError.Http(503, "down"))) {
+            val hub = object : FleetSettingsActions by FakeHub() {
+                override suspend fun pending(): SettingsPending = throw thrown
+            }
+            val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+            vm.load(); runCurrent()
+            assertNotNull(vm.state.value.error, "$thrown")
+            assertFalse(vm.state.value.loaded, "$thrown")
+            assertFalse(vm.state.value.canWrite, "$thrown")
+            // and it is dismissable, which is what the banner's close does
+            vm.dismissError()
+            assertNull(vm.state.value.error)
+        }
+    }
 }

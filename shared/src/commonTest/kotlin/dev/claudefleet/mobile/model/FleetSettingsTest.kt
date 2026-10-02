@@ -81,6 +81,24 @@ class FleetSettingsTest {
         assertTrue(days.rangeText().startsWith("1–365 days"), days.rangeText())
     }
 
+    /**
+     * A `secs` floor shown in a larger unit is a FRACTION of it. Dividing two
+     * `Long`s truncated it, so a 900 s minimum read "at least 0 hours" — a
+     * floor the hub refuses, advertised on the same row where the value itself
+     * printed in correct fractional hours. The desktop shows 0.25
+     * (`pages.ts`).
+     */
+    @Test
+    fun a_secs_floor_shows_as_a_fraction_of_its_unit() {
+        val every = d("update.check_interval_secs")
+        assertEquals("hours", every.unit)
+        assertEquals(900L, every.kind.min)
+        assertEquals("at least 0.25 hours", every.rangeText().substringBefore(';'))
+        // A whole multiple still reads as a whole number.
+        val whole = d("update.check_interval_secs").let { it.copy(kind = it.kind.copy(min = 7200)) }
+        assertEquals("at least 2 hours", whole.rangeText().substringBefore(';'))
+    }
+
     @Test
     fun values_read_in_words() {
         assertEquals("On", d("playbooks.press_enter").inWords("true"))

@@ -174,6 +174,18 @@ class FleetRepository(
     // Lossy and buffered like `_sessionChanges`: a hint to re-read, never the fact.
     private val _workChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val workChanges: Flow<Long> = _workChanges.asSharedFlow()
+
+    // Lossy and buffered like `_workChanges`, and read the same way: a hint to
+    // re-read the fleet's settings, never the fact itself.
+    private val _settingsChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val settingsChanges: Flow<Long> = _settingsChanges.asSharedFlow()
+    private var settingsTicks = 0L
+
+    // Counted, not derived from the capabilities: an equal `HubCapabilities` is
+    // conflated away by `StateFlow`, so a screen keying "read it again" on the
+    // flags was only ever read once per process.
+    private val _connections = MutableStateFlow(0L)
+    override val connections: StateFlow<Long> = _connections.asStateFlow()
     private var workTicks = 0L
 
     override fun actionMissing(tool: String, action: String) {
@@ -382,6 +394,7 @@ class FleetRepository(
                             event.now?.let { _clockSkewSeconds.value = it - clock() }
                             _status.value = ConnectionStatus.Connected(event.version)
                             _sessionChanges.tryEmit(ALL_SESSIONS_CHANGED)
+                            _connections.value += 1
                             discover()
                         }
                         is HubEvent.Lagged -> {
@@ -401,6 +414,11 @@ class FleetRepository(
                             // exists only to say "re-read". An unknown kind
                             // stays a no-op for the snapshot either way.
                             if (event.isWorkFrame()) _workChanges.tryEmit(++workTicks)
+                            // `settings:changed` changes nothing in the
+                            // snapshot and exists only to say "re-read". The
+                            // hub hides it from SCOPED callers only, so a
+                            // person's own device does receive it.
+                            if (event.isSettingsFrame()) _settingsChanges.tryEmit(++settingsTicks)
                         }
                     }
                 }

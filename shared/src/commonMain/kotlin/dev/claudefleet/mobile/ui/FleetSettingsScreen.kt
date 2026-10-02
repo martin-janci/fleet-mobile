@@ -39,6 +39,7 @@ import dev.claudefleet.mobile.model.inWords
 import dev.claudefleet.mobile.model.rangeText
 import dev.claudefleet.mobile.model.toDisplay
 import dev.claudefleet.mobile.model.unitWord
+import dev.claudefleet.mobile.ui.components.ErrorBanner
 
 /**
  * The fleet's settings, drawn from the hub's own page specs (claude-fleet
@@ -61,9 +62,29 @@ fun FleetSettingsSection(
     onDecide: (Long, Boolean) -> Unit,
     onConfirm: () -> Unit,
     onCancelConfirm: () -> Unit,
+    onDismissError: () -> Unit,
+    onRetry: () -> Unit,
 ) {
     if (state.loading && !state.loaded) {
         LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+    }
+    // Everything that can fail here reported into `state.error` and nothing
+    // drew it: a failed read left an empty section and a failed Apply just
+    // un-busied its button, both indistinguishable from "the hub has nothing
+    // to say". The banner is the one the rest of the app uses; the Retry is
+    // beside it because `load()`'s only other caller fires once per process
+    // (and now on a reconnect — see `FleetSettingsViewModel.load`).
+    // Wrapped into a [Friendly] here, at the point `ErrorBanner` needs one —
+    // `FleetSettingsUiState.error` stays a plain `String?`, as the other
+    // migrated screens' do.
+    val errorAsFriendly = state.error?.asGenericFriendly()
+    if (errorAsFriendly != null) {
+        ErrorBanner(errorAsFriendly, onDismiss = onDismissError)
+        if (!state.loaded) {
+            TextButton(onClick = onRetry, modifier = Modifier.padding(horizontal = 8.dp)) {
+                Text("Try again")
+            }
+        }
     }
     val page = state.page
     if (page == null) {
@@ -231,7 +252,17 @@ private fun FieldRow(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         state.fieldErrors[d.key]?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-        state.proposalFor(d.key)?.let { p -> Suggestion(state, d, p, onDecide) }
+        // Apply WRITES the value, so the row is an editing control and is
+        // gated like the three above it: a page that marks the field
+        // `widget: "readonly"` (`shownOnly`), or the hub that owns it
+        // (`readOnlyHere`), locks it here too. The hub cannot catch this —
+        // `settings::set_by` refuses `owned_by` keys and knows nothing about a
+        // page's widget — so a tap used to turn on exactly what the page locks.
+        // The desktop gates the same control (`FieldRow.svelte`, `{#if
+        // proposal && !readonly}`); the Proposed-changes page still lists it.
+        if (!shownOnly && !d.readOnlyHere) {
+            state.proposalFor(d.key)?.let { p -> Suggestion(state, d, p, onDecide) }
+        }
     }
 }
 

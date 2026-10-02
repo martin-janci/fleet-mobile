@@ -134,6 +134,9 @@ fun HubEvent.Row.sessionId(): Long? = when {
  */
 fun HubEvent.Row.isWorkFrame(): Boolean = name.startsWith("work:")
 
+/** A `settings:*` frame — `settings:changed`, which carries ids only. */
+fun HubEvent.Row.isSettingsFrame(): Boolean = name.startsWith("settings:")
+
 /** The timeline entry a `session:event` frame carries, or null for any other frame. */
 fun HubEvent.Row.timelineFrame(): TimelineFrame? {
     if (name != "session:event") return null
