@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -44,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -70,6 +72,7 @@ import dev.claudefleet.mobile.model.sessions
 import dev.claudefleet.mobile.model.staleLabel
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.StatusDot
+import dev.claudefleet.mobile.ui.components.spoken
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.LocalStatusColors
 import dev.claudefleet.mobile.ui.theme.StatusTone
@@ -278,14 +281,24 @@ private fun TodayFilterRow(state: TodayUiState, handlers: TodayHandlers) {
     }
 }
 
+/**
+ * One `LazyColumn` item per GROUP, not one per section.
+ *
+ * A section used to be a single item holding a `forEachIndexed` over its
+ * groups, so opening Today composed every group and every session row in it
+ * at once — against a dimension nothing caps: the hub caps `groups` at 200 but
+ * never truncates a group's `sessions`. `itemsIndexed` lets the list compose
+ * what is on screen, which is what a `LazyColumn` is for. The card's look is
+ * kept by splitting it: the heading is its own item, and each group carries
+ * the divider above it.
+ */
 private fun LazyListScope.groupSection(section: TodaySection, groups: List<TodayGroup>, handlers: TodayHandlers) {
     if (groups.isEmpty()) return
-    item(key = "section-${section.name}") {
-        SectionCard(section, groups.size) {
-            groups.forEachIndexed { i, g ->
-                if (i > 0) ItemDivider()
-                TodayGroupBlock(g, section, handlers)
-            }
+    item(key = "section-${section.name}") { SectionHeading(section, groups.size) }
+    itemsIndexed(groups, key = { _, g -> "group-${section.name}-${g.key}" }) { i, g ->
+        SectionBody(last = i == groups.lastIndex) {
+            if (i > 0) ItemDivider()
+            TodayGroupBlock(g, section, handlers)
         }
     }
 }
@@ -299,31 +312,61 @@ private fun SectionCard(section: TodaySection, count: Int, note: String? = null,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(modifier = Modifier.padding(bottom = 4.dp)) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 6.dp)
-                    .clearAndSetSemantics {
-                        heading()
-                        contentDescription = listOfNotNull(section.label, "$count", note).joinToString(", ")
-                    },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    section.label,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(Modifier.width(8.dp))
-                TonePill("$count", sectionTone(section))
-                Spacer(Modifier.weight(1f))
-                if (note != null) {
-                    Text(note, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+            SectionHeadingRow(section, count, note)
             content()
         }
+    }
+}
+
+/** The heading every section card carries, whether it is one item or many. */
+@Composable
+private fun SectionHeadingRow(section: TodaySection, count: Int, note: String? = null) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 6.dp)
+            .clearAndSetSemantics {
+                heading()
+                contentDescription = listOfNotNull(section.label, "$count", note).joinToString(", ")
+            },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            section.label,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.width(8.dp))
+        TonePill("$count", sectionTone(section))
+        Spacer(Modifier.weight(1f))
+        if (note != null) {
+            Text(note, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** A card drawn as several list items: its top, with the heading. */
+@Composable
+private fun SectionHeading(section: TodaySection, count: Int) {
+    Surface(
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        SectionHeadingRow(section, count)
+    }
+}
+
+/** One group's slice of such a card: square, except the last, which closes it. */
+@Composable
+private fun SectionBody(last: Boolean, content: @Composable () -> Unit) {
+    Surface(
+        shape = if (last) RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp) else RectangleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(bottom = if (last) 4.dp else 0.dp)) { content() }
     }
 }
 
@@ -351,7 +394,12 @@ private fun TodayGroupBlock(g: TodayGroup, section: TodaySection, handlers: Toda
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                g.statusName?.let {
+                // The hub leaves `status_name` NULL for every LOCAL work item,
+                // so reading it alone drew no status at all for exactly the
+                // items this sheet is mostly about. The category's own words
+                // are the fallback the work chip already uses — `spoken()`,
+                // reused rather than written again here.
+                (g.statusName ?: g.statusCategory?.spoken())?.let {
                     Spacer(Modifier.width(8.dp))
                     TonePill(it, categoryTone(g.statusCategory))
                 }

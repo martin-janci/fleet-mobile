@@ -166,21 +166,48 @@ class TicketFiltersTest {
 
     private fun live5() = SessionRow(id = 5, tmuxName = "s5", hostAlias = "pine")
 
+    /**
+     * The strip counts ROWS, summed per section — what the sheet draws and what
+     * a person can count under the three headers right beneath it.
+     *
+     * The hub's `views_of` makes *Current sprint* and *Recent* subsets of *My
+     * work*, so a ticket is routinely in two lists and is drawn in both. These
+     * two numbers used to be the only deduped ones in the sheet, so the
+     * headline read "2 of 4" directly above headers adding to "3 / 2 / 1" and
+     * three drawn rows — and the filter page's "Show N tickets" promised a
+     * count pressing it did not deliver.
+     */
     @Test
-    fun filters_narrow_every_section_and_count_distinct_tickets() = runTest {
+    fun filters_narrow_every_section_and_count_the_rows_the_sheet_draws() = runTest {
         val tickets = vm(WorkFleet(listOf(live5())), actions(), backgroundScope)
         tickets.open()
         runCurrent()
-        assertEquals(4, tickets.state.value.total)
-        assertEquals(4, tickets.state.value.shown)
+        // Six rows over three sections, from four distinct tickets.
+        assertEquals(6, tickets.state.value.total)
+        assertEquals(6, tickets.state.value.shown)
 
         tickets.toggleStatus(WorkStatusFilter.IN_PROGRESS)
         runCurrent()
         val s = tickets.state.value
         assertEquals(listOf(listOf("PD-2592", "PD-2223"), listOf("PD-2592"), emptyList()), s.sections.map { sec -> sec.tickets.map { it.key } })
         assertEquals(listOf(3, 2, 1), s.sections.map { it.total })
-        assertEquals(2, s.shown, "PD-2592 is in two lists and counts once")
+        assertEquals(3, s.shown, "the headline is the sum of the headers beneath it")
+        assertEquals(6, s.total, "and its denominator is theirs")
         assertEquals(listOf("Status: In progress"), s.stripFacets.map { it.label })
+    }
+
+    /** The denominator counts only the lists the sheet is SHOWING. */
+    @Test
+    fun switching_a_list_off_takes_it_out_of_both_numbers() = runTest {
+        val tickets = vm(WorkFleet(), actions(), backgroundScope)
+        tickets.open()
+        runCurrent()
+        tickets.toggleList(TicketList.RECENT)
+        runCurrent()
+        val s = tickets.state.value
+        assertEquals(listOf(1), s.sections.map { it.total }, "only Recent is drawn")
+        assertEquals(1, s.shown)
+        assertEquals(1, s.total, "not 4: My work and Current sprint are switched off")
     }
 
     @Test
@@ -239,7 +266,7 @@ class TicketFiltersTest {
         tickets.clearFacet(TicketFacetId.SEARCH)
         runCurrent()
         assertEquals("", tickets.state.value.query)
-        assertEquals(4, tickets.state.value.shown)
+        assertEquals(6, tickets.state.value.shown)
     }
 
     @Test
@@ -258,7 +285,7 @@ class TicketFiltersTest {
         runCurrent()
         assertEquals(TicketFilters(), tickets.state.value.filters)
         assertEquals("", tickets.state.value.query)
-        assertEquals(4, tickets.state.value.shown)
+        assertEquals(6, tickets.state.value.shown)
     }
 
     @Test

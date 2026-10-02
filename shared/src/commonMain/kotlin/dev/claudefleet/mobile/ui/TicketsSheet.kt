@@ -96,7 +96,12 @@ data class TicketsHandlers(
 @Composable
 fun TicketsSheet(state: TicketsUiState, handlers: TicketsHandlers) {
     state.confirmResume?.let { ResumeConfirmDialog(it, handlers) }
-    ModalBottomSheet(onDismissRequest = handlers.onClose) {
+    // The filter page is a PAGE inside this one sheet, so back and a scrim tap
+    // have to step back one page rather than dismiss the sheet under it — which
+    // is what an unconditional `onClose` did, losing the lists for a gesture
+    // that should have closed the filters. `onCloseFilters` already existed for
+    // the toolbar arrow.
+    ModalBottomSheet(onDismissRequest = if (state.filtersOpen) handlers.onCloseFilters else handlers.onClose) {
         if (state.filtersOpen) {
             TicketFiltersPage(state, handlers)
             return@ModalBottomSheet

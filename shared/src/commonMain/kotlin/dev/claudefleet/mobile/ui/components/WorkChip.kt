@@ -130,7 +130,12 @@ fun workChipDescription(work: WorkSummary, suggested: Boolean, showTitle: Boolea
     if (work.unavailable) add("ticket unavailable")
 }.joinToString(", ")
 
-private fun StatusCategory.spoken(): String? = when (this) {
+/**
+ * A status bucket in words — the fallback for a work item the hub leaves with
+ * no `status_name`, which is every LOCAL one. One vocabulary, so a second
+ * screen does not invent its own.
+ */
+fun StatusCategory.spoken(): String? = when (this) {
     StatusCategory.Todo -> "to do"
     StatusCategory.InProgress -> "in progress"
     StatusCategory.Done -> "done"

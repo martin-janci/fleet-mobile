@@ -120,7 +120,21 @@ data class TicketsUiState(
     val filtersOpen: Boolean = false,
     /** Every filter that is on, the search text included: what the empty state names. */
     val facets: List<Facet<TicketFacetId>> = emptyList(),
-    /** Distinct tickets the lists show, and how many they hold unfiltered: "5 of 23". */
+    /**
+     * Rows the sheet DRAWS, and how many the sections it is drawing hold
+     * unfiltered: "5 of 23".
+     *
+     * Per section, summed — not distinct tickets. The hub's `views_of` makes
+     * *Current sprint* and *Recent* subsets of *My work*, so a ticket is
+     * routinely in two or three of them and is drawn once in each; every
+     * section header counts that way, and so does the filter page's "Show N
+     * tickets" button, which is a promise about what pressing it draws.
+     * Deduping only these two made the headline disagree with the three
+     * headers directly beneath it ("2 of 4" over "3 / 2 / 1") and with the
+     * rows a person can count. The denominator is the KEPT sections' own
+     * totals, so a list switched off is not counted either. The sibling
+     * screen sums the same way (`SessionsViewModel`).
+     */
     val shown: Int = 0,
     val total: Int = 0,
     /** The filter page's chips: the tracker columns, orgs and trackers the lists hold. */
@@ -131,8 +145,17 @@ data class TicketsUiState(
     /** The strip's chips: every facet but the one the search field already shows. */
     val stripFacets: List<Facet<TicketFacetId>> get() = facets.filterNot { it.id.onScreen }
 
-    /** The lists hold tickets and the filters hide every one — the sheet says so, and why. */
-    val allFiltered: Boolean get() = total > 0 && shown == 0 && facets.isNotEmpty()
+    /**
+     * The lists hold tickets and the filters hide every one — the sheet says
+     * so, and why.
+     *
+     * Never while a looked-up ticket is on screen. A key that is in none of
+     * the three lists is what the search field is FOR, and it satisfies
+     * `shown == 0`: the sheet drew the ticket, then "No tickets match
+     * Search: …" directly beneath it, and that box's only button clears the
+     * search — discarding the ticket the person had just found.
+     */
+    val allFiltered: Boolean get() = total > 0 && shown == 0 && facets.isNotEmpty() && found == null
 }
 
 /**
@@ -513,7 +536,19 @@ class TicketsViewModel(
         val alive = sessions.mapTo(HashSet()) { it.id }
         val liveItems = sessions.mapNotNullTo(HashSet()) { it.work?.itemId }
         val live = { t: Ticket -> t.id in liveItems || t.liveSessionIds.any { it in alive } }
-        val f = l.filters
+        // APPLIED filters, which is not the same as the DISPLAYED ones. The
+        // Organisation filter is the only predicate answered from the org
+        // DIRECTORY rather than from the row, and `readOrgs` replaces a good
+        // directory with EMPTY on any failure — after which `orgOf` is null
+        // for every ticket and the org filter hid the whole sheet, blaming a
+        // filter the person set long ago. One flaky read did it, and with the
+        // filters now persisted it never healed for the connection. The
+        // repository states the rule one function below (`readMyWork`: a
+        // failed read "hides the chip rather than filtering the list to
+        // nothing") and the sibling screen already splits the two
+        // (`SessionsViewModel`). `l.filters` still goes to the state, so the
+        // chip stays visible and clearable.
+        val f = if (orgs.trackerOrg.isEmpty()) l.filters.copy(org = null) else l.filters
         val listed = l.sections.map { s -> s.copy(tickets = s.tickets.map { it.current() }) }
         val all = listed.flatMap { it.tickets }
         val sections = listed
@@ -524,10 +559,13 @@ class TicketsViewModel(
             }
 
         val orgIds = all.mapNotNullTo(LinkedHashSet()) { orgs.orgOf(it) }
-        val orgChoices = if (orgs.orgs.size < 2 && f.org == null) {
+        // The org the PERSON set, not the applied one: the chip has to stay on
+        // screen, and clearable, while the directory is empty.
+        val chosenOrg = l.filters.org
+        val orgChoices = if (orgs.orgs.size < 2 && chosenOrg == null) {
             emptyList()
         } else {
-            (orgIds + listOfNotNull(f.org)).map { id -> orgs.orgs[id] ?: OrgInfo(id, orgs.name(id)) }
+            (orgIds + listOfNotNull(chosenOrg)).map { id -> orgs.orgs[id] ?: OrgInfo(id, orgs.name(id)) }
                 .sortedBy { it.name.lowercase() }
         }
         val trackerIds = all.mapNotNullTo(LinkedHashSet()) { it.trackerId } + listOfNotNull(f.tracker)
@@ -546,17 +584,17 @@ class TicketsViewModel(
             error = l.error,
             confirmResume = l.confirmResume?.takeIf { selected?.canResume == true && selected.ticket.key == it.key },
             ticketOrgs = ticketOrgs,
-            filters = f,
+            filters = l.filters,
             sort = l.sort,
             filtersOpen = l.filtersOpen,
             facets = ticketFacets(
-                f,
+                l.filters,
                 l.query,
                 orgName = { id -> orgs.name(id) },
                 trackerName = { id -> trackerChoices.firstOrNull { it.id == id }?.let(::trackerName) },
             ),
-            shown = sections.flatMap { it.tickets }.distinctBy { it.id }.size,
-            total = all.distinctBy { it.id }.size,
+            shown = sections.sumOf { it.tickets.size },
+            total = sections.sumOf { it.total },
             statusNameChoices = ticketStatusNames(all),
             orgChoices = orgChoices,
             trackerChoices = if (trackerChoices.size > 1 || f.tracker != null) trackerChoices else emptyList(),
