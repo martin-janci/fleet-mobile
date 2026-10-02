@@ -10,16 +10,11 @@ package dev.claudefleet.mobile.ui
  * no Compose runtime in the picture. It is app-lifetime and in-memory only —
  * a process restart forgets it, the same as which tab was open.
  *
- * Anchors are **index-based** ([ScrollAnchor.firstVisibleIndex] is a
- * `LazyColumn` item position, not a turn id — turns have none on the wire).
- * `SessionScreen` only ever shows the truncation-note item at index 0 when
- * [dev.claudefleet.mobile.model.Conversation.truncated] is set, so a session
- * that toggles that flag between the visit that stored an anchor and the one
- * that recalls it — the window sliding a turn off the hub's own tail while
- * the screen was away — can land the recall one turn off from where the
- * reader actually left it. That is the cost of an index rather than a turn
- * identity, and cheaper than the identity `Conversation.appending` already
- * has to guess at for the same reason.
+ * Anchors carry the first visible item's **key** ([ScrollAnchor.firstVisibleKey],
+ * see [newestFirst]) as well as its index. The list is newest-first, so every
+ * turn that arrives while the screen is away pushes the reader's turn one
+ * index further from 0; `SessionScreen` looks the key up again on recall and
+ * falls back to the index only when the turn has gone from the conversation.
  *
  * Main-thread-only: every caller is a composable's effect or a test on the
  * default (single) test dispatcher, and [anchors] is a bare `MutableMap`
@@ -63,4 +58,6 @@ internal data class ScrollAnchor(
     val firstVisibleIndex: Int,
     val firstVisibleOffset: Int,
     val atBottom: Boolean,
+    /** The `LazyColumn` key of the item at [firstVisibleIndex], when there was one. */
+    val firstVisibleKey: Any? = null,
 )

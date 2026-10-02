@@ -193,6 +193,26 @@ private fun ConvTurn.identity(): Pair<String?, String?> = at to prompt
  */
 fun Conversation.tailMarker(): Pair<Int, String?> = turns.size to turns.lastOrNull()?.endedAt
 
+/**
+ * How many turns this conversation has at its **newest end** that [earlier]
+ * did not — the turns after the one [earlier] ended on.
+ *
+ * Counted from the newest end only: an older turn that appears at the head
+ * (a wider read reaching further back) is history arriving, not something
+ * new to read, so it never counts. Found by the same identity [appending]
+ * splices on; when [earlier]'s newest turn is no longer here at all (its
+ * identity drifted, or the windows are disjoint), every turn [earlier] did
+ * not hold counts instead.
+ */
+fun Conversation.turnsAddedAfter(earlier: Conversation): Int {
+    val newest = earlier.turns.lastOrNull() ?: return 0
+    val id = newest.identity()
+    val at = turns.indexOfLast { it.identity() == id }
+    if (at >= 0) return turns.size - 1 - at
+    val held = earlier.turns.mapTo(HashSet()) { it.identity() }
+    return turns.count { it.identity() !in held }
+}
+
 /** One turn: the human prompt that opened it and what the agent said or did. */
 @Serializable
 data class ConvTurn(

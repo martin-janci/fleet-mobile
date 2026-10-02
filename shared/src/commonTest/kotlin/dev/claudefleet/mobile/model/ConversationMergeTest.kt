@@ -438,3 +438,48 @@ class ConversationTailMarkerTest {
         assertEquals(a.tailMarker(), b.tailMarker())
     }
 }
+
+/**
+ * What the jump pill counts: turns at the **newest end** only. History arriving
+ * at the head is not something new to read.
+ */
+class TurnsAddedAfterTest {
+
+    @Test
+    fun counts_the_turns_after_the_one_that_was_newest() {
+        val earlier = conversation(turn("t1", "a"), turn("t2", "b"))
+        val now = conversation(turn("t1", "a"), turn("t2", "b"), turn("t3", "c"), turn("t4", "d"))
+
+        assertEquals(2, now.turnsAddedAfter(earlier))
+    }
+
+    @Test
+    fun older_turns_arriving_at_the_head_are_not_counted() {
+        val earlier = conversation(turn("t2", "b"), turn("t3", "c"))
+        val now = conversation(turn("t0", "x"), turn("t1", "a"), turn("t2", "b"), turn("t3", "c"))
+
+        assertEquals(0, now.turnsAddedAfter(earlier))
+    }
+
+    @Test
+    fun the_live_turn_growing_adds_no_turn() {
+        val earlier = conversation(turn("t1", "a", "working"))
+        val now = conversation(turn("t1", "a", "working", "more"))
+
+        assertEquals(0, now.turnsAddedAfter(earlier))
+    }
+
+    @Test
+    fun the_first_read_adds_nothing_to_count() {
+        assertEquals(0, conversation(turn("t1", "a")).turnsAddedAfter(Conversation()))
+    }
+
+    @Test
+    fun when_the_old_newest_turn_is_gone_every_turn_not_held_counts() {
+        val earlier = conversation(turn("t1", "a"), turn("t2", "b"))
+        // Disjoint: the window slid past everything that was held.
+        val now = conversation(turn("t1", "a"), turn("t5", "e"), turn("t6", "f"))
+
+        assertEquals(2, now.turnsAddedAfter(earlier))
+    }
+}
