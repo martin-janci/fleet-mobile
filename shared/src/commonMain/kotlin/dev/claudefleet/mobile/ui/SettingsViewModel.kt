@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.AuthActions
 import dev.claudefleet.mobile.data.AuthState
+import dev.claudefleet.mobile.data.VersionActions
 import dev.claudefleet.mobile.store.Credentials
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -22,7 +23,18 @@ data class SettingsUiState(
     val clientName: String = "",
     /** `full` or `readonly`. */
     val mode: String = "",
+    /** This app's version — the phone's, from its own build. */
     val appVersion: String = "",
+    /**
+     * The HUB's version, blank until it is read (and if it will not answer).
+     *
+     * Kept apart from [appVersion] rather than folded into one "version"
+     * field, because they are two programs: a phone updated from the store
+     * and a hub the operator upgrades, on separate release trains. One number
+     * on this screen could only have been one of them, and whichever it was,
+     * it was being read as the other half the time.
+     */
+    val hubVersion: String = "",
     val forgetting: Boolean = false,
     val error: String? = null,
 ) {
@@ -44,8 +56,9 @@ data class SettingsUiState(
 }
 
 /**
- * Settings: which hub, under what name, with what rights, on what version of
- * the app — and one button that drops the credential.
+ * Settings: which hub, under what name, with what rights, on what version —
+ * the app's and the hub's, named apart — and one button that drops the
+ * credential.
  *
  * **There is no revoke.** Cancelling a token for good is fleet administration,
  * which the hub reserves for the master credential and refuses a client's
@@ -65,8 +78,19 @@ class SettingsViewModel(
     private val auth: AuthActions,
     scope: CoroutineScope,
     private val appVersion: String,
+    /**
+     * How the hub's own version is read. Left out, nothing asks and the field
+     * stays blank — which is what the tests below rely on to keep "the
+     * Settings screen makes no request at all" literally true of a screen
+     * whose other fields all come from the stored credential.
+     */
+    private val versions: VersionActions? = null,
 ) {
-    private data class Local(val forgetting: Boolean = false, val error: String? = null)
+    private data class Local(
+        val forgetting: Boolean = false,
+        val error: String? = null,
+        val hubVersion: String = "",
+    )
 
     private val local = MutableStateFlow(Local())
     private val work = scope
@@ -88,19 +112,39 @@ class SettingsViewModel(
         // `combine` and trails by a dispatch, and a second tap must not depend
         // on how promptly a collector was resumed.
         if (local.value.forgetting) return@launch
-        local.value = Local(forgetting = true)
+        // `copy`, not a fresh `Local`: the hub version read when the screen
+        // opened is still true of the hub, and a forget that FAILS leaves the
+        // screen paired — with a blanked-out version field, if this threw it
+        // away on the way.
+        local.update { it.copy(forgetting = true, error = null) }
         try {
             auth.forget()
-            local.value = Local()
+            local.update { it.copy(forgetting = false, error = null) }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.value = Local(error = explain(t))
+            local.update { it.copy(forgetting = false, error = explain(t)) }
         }
     }
 
     fun dismissError() {
         local.update { it.copy(error = null) }
+    }
+
+    /**
+     * Read the hub's version, once per visit to the screen.
+     *
+     * On opening rather than at construction: this view model is built when
+     * the paired UI mounts and lives as long as it does, so a hub upgraded in
+     * the meantime would otherwise be reported at whatever it was running
+     * when the app started. A failure leaves the previous answer standing —
+     * a version that was true a minute ago beats a dash — and says nothing,
+     * since [VersionActions.hubVersion] is a label, not an action somebody
+     * asked for.
+     */
+    fun load(): Job = work.launch {
+        val v = versions?.hubVersion() ?: return@launch
+        local.update { it.copy(hubVersion = v) }
     }
 
     private fun assemble(auth: AuthState, l: Local): SettingsUiState {
@@ -110,6 +154,8 @@ class SettingsViewModel(
             clientName = credentials?.name.orEmpty(),
             mode = credentials?.mode.orEmpty(),
             appVersion = appVersion,
+            // Not shown while unpaired: there is no hub to have a version.
+            hubVersion = if (credentials == null) "" else l.hubVersion,
             forgetting = l.forgetting,
             error = l.error,
         )

@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.net
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.HubHealth
 import dev.claudefleet.mobile.model.MultiStart
 import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.PagesBundle
@@ -62,10 +63,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
@@ -978,15 +976,18 @@ class HubClient(
         ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
 
     /**
-     * Is this hub reachable and its store open, right now.
+     * Is this hub reachable and its store open, right now — and which version
+     * is it running.
      *
      * `fleet_health` is in the hub's readonly allow-list — a paired client
      * may always ask, even one that cannot `send_prompt` — which is what
      * makes it the probe [dev.claudefleet.mobile.data.SessionActions.ping]
      * uses to tell an unreachable hub from a merely-dropped `/events` stream.
+     * The same answer carries [HubHealth.version], which is why Settings has
+     * a hub version to show beside the app's without a second tool.
      */
-    suspend fun fleetHealth(): Boolean =
-        call("fleet_health") { it.jsonObject["db_ready"]?.jsonPrimitive?.booleanOrNull == true }
+    suspend fun fleetHealth(): HubHealth =
+        call("fleet_health") { json.decodeFromJsonElement(HubHealth.serializer(), it) }
 
     // ---- the wire ----
 

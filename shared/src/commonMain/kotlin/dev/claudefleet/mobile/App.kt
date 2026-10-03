@@ -44,6 +44,8 @@ import dev.claudefleet.mobile.data.HubWorkActions
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.SessionActions
+import dev.claudefleet.mobile.data.HubVersionActions
+import dev.claudefleet.mobile.data.VersionActions
 import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.net.HubEventStream
 import dev.claudefleet.mobile.net.withHubTimeouts
@@ -165,6 +167,9 @@ class AppContainer(
 
     /** The two calls a session screen may make, through the 401 rule. */
     val sessionActions: SessionActions = HubSessionActions(session)
+
+    /** The hub's own version, for the Settings screen to show beside this app's. */
+    val versionActions: VersionActions = HubVersionActions(session)
 
     /** The New session form's one call, through the same 401 rule. */
     val newSessionActions: NewSessionActions = HubNewSessionActions(session)
@@ -442,7 +447,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     LaunchedEffect(workState.available) { if (!workState.available) nav.workUnavailable() }
     val hosts = remember(repository, scope) { HostsViewModel(repository, scope) }
     val settings = remember(container, scope) {
-        SettingsViewModel(container.session, scope, container.appVersion)
+        SettingsViewModel(container.session, scope, container.appVersion, container.versionActions)
     }
     // The fleet's settings (claude-fleet declarative pages P6): offered when
     // the hub serves this token the page specs and the settings, read again
@@ -737,6 +742,11 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                 Screen.Settings -> {
                     val state by settings.state.collectAsState()
                     val fleet by fleetSettings.state.collectAsState()
+                    // On opening, not at construction: this view model lives
+                    // as long as the paired UI does, and a hub upgraded in
+                    // the meantime would otherwise be reported at whatever
+                    // version it ran when the app started.
+                    LaunchedEffect(settings) { settings.load() }
                     SettingsScreen(
                         state = state,
                         onForget = { settings.forget() },

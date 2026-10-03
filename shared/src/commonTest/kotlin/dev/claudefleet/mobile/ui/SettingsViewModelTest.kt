@@ -4,6 +4,7 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.AppSession
 import dev.claudefleet.mobile.data.AuthState
+import dev.claudefleet.mobile.data.VersionActions
 import dev.claudefleet.mobile.store.Credentials
 import dev.claudefleet.mobile.store.Secrets
 import dev.claudefleet.mobile.store.SecretsUnavailable
@@ -87,7 +88,104 @@ private fun paired(
     return AppSession(secrets, http) to secrets
 }
 
+/**
+ * The hub's version, as the screen reads it.
+ *
+ * A fake of the one-method interface rather than of the transport: what is
+ * being asserted is that the SCREEN keeps the hub's version apart from the
+ * app's own, and a `MockEngine` answering `fleet_health` would test the
+ * decoding of a payload `HubHealth` already has its own defaults for.
+ */
+private class FakeVersions(private val answer: String?) : VersionActions {
+    var asked = 0
+        private set
+
+    override suspend fun hubVersion(): String? {
+        asked += 1
+        return answer
+    }
+}
+
 class SettingsViewModelTest {
+
+    /**
+     * The field this whole pair of fields exists for: one number on the screen
+     * could only ever have been the app's or the hub's, and a phone updated
+     * from the store against a hub the operator upgrades is exactly where the
+     * two drift apart.
+     */
+    @Test
+    fun the_hub_version_is_read_on_opening_and_kept_apart_from_the_apps() = runTest {
+        val (session, _) = paired()
+        session.restore()
+        val versions = FakeVersions("0.4.6")
+        val vm = SettingsViewModel(session, backgroundScope, appVersion = VERSION, versions = versions)
+        runCurrent()
+
+        // Nothing is asked until the screen opens.
+        assertEquals(0, versions.asked)
+        assertEquals("", vm.state.value.hubVersion)
+
+        vm.load()
+        runCurrent()
+
+        assertEquals(1, versions.asked)
+        assertEquals("0.4.6", vm.state.value.hubVersion)
+        assertEquals(VERSION, vm.state.value.appVersion, "the app's own version is untouched by it")
+    }
+
+    @Test
+    fun a_hub_that_will_not_say_leaves_the_field_blank_and_raises_nothing() = runTest {
+        val (session, _) = paired()
+        session.restore()
+        val vm = SettingsViewModel(session, backgroundScope, appVersion = VERSION, versions = FakeVersions(null))
+        runCurrent()
+
+        vm.load()
+        runCurrent()
+
+        assertEquals("", vm.state.value.hubVersion, "the screen draws a dash, not a guess")
+        assertNull(vm.state.value.error, "a label is not an action whose failure needs explaining")
+    }
+
+    /** Nothing asks when no provider was handed over, and nothing breaks. */
+    @Test
+    fun without_a_provider_the_hub_version_is_simply_absent() = runTest {
+        val (session, _) = paired()
+        session.restore()
+        val vm = SettingsViewModel(session, backgroundScope, appVersion = VERSION)
+        runCurrent()
+
+        vm.load()
+        runCurrent()
+
+        assertEquals("", vm.state.value.hubVersion)
+    }
+
+    /**
+     * A forget that fails leaves the screen paired, so it must leave the
+     * screen's other fields alone too — the hub's version is still the hub's
+     * version.
+     */
+    @Test
+    fun a_refused_forget_keeps_the_hub_version_on_screen() = runTest {
+        val (session, _) = paired(secrets = FakeSecrets(
+            Credentials(HUB_URL, TOKEN, "phone", Credentials.FULL),
+            refuseToClear = SecretsUnavailable("keystore locked"),
+        ))
+        session.restore()
+        val vm = SettingsViewModel(session, backgroundScope, appVersion = VERSION, versions = FakeVersions("0.4.6"))
+        runCurrent()
+        vm.load()
+        runCurrent()
+
+        vm.forget()
+        runCurrent()
+
+        assertNotNull(vm.state.value.error)
+        assertEquals("0.4.6", vm.state.value.hubVersion)
+    }
+
 
     @Test
     fun settings_names_the_hub_the_client_and_the_mode() = runTest {
