@@ -774,6 +774,145 @@ class MiniMarkdownTest {
         assertTrue(p.text.isNotEmpty())
     }
 
+    /**
+     * A link's text ends at the `]` that MATCHES its `[`, not the first one.
+     *
+     * A README badge is an image inside a link —
+     * `[![build](badge.svg)](ci-url)` — and taking the first `]` took the
+     * image's, so the link resolved to the badge image's own URL and
+     * `](ci-url)` stayed on screen as literal text. A tap went to the picture
+     * rather than to the build.
+     */
+    @Test
+    fun a_link_whose_text_holds_an_image_keeps_its_own_url() {
+        val p = paragraph("[![build](https://img.dev/badge.svg)](https://ci.dev/job) after")
+
+        assertEquals(
+            listOf("https://ci.dev/job"),
+            p.links().map { (it.item as LinkAnnotation.Url).url },
+            "the LINK's url, not the image's",
+        )
+        assertFalse("](" in p.text, "no leftover markup on screen: ${p.text}")
+        assertEquals("build after", p.text)
+    }
+
+    /** Plain nesting too, with no image involved. */
+    @Test
+    fun a_bracket_inside_a_links_text_does_not_end_it() {
+        val p = paragraph("[see [1] below](https://a.dev/x)")
+
+        assertEquals(
+            listOf("https://a.dev/x"),
+            p.links().map { (it.item as LinkAnnotation.Url).url },
+        )
+        assertEquals("see [1] below", p.text)
+    }
+
+    /**
+     * And an UNBALANCED `]` inside a code span in the link text is text, not a
+     * closer.
+     *
+     * Balanced brackets (`a[0]`) are handled by the depth count alone; only a
+     * lone one inside a span needs the span to be skipped whole, and that is
+     * the case a code snippet about Markdown itself produces.
+     */
+    @Test
+    fun an_unbalanced_bracket_in_a_code_span_does_not_end_a_links_text() {
+        val p = paragraph("[the `]` case](https://a.dev/x)")
+
+        assertEquals(
+            listOf("https://a.dev/x"),
+            p.links().map { (it.item as LinkAnnotation.Url).url },
+        )
+        assertEquals("the ] case", p.text)
+
+        // And the balanced form, which the depth count alone would also get.
+        val balanced = paragraph("[the `a[0]` case](https://a.dev/x)")
+        assertEquals(
+            listOf("https://a.dev/x"),
+            balanced.links().map { (it.item as LinkAnnotation.Url).url },
+        )
+        assertEquals("the a[0] case", balanced.text)
+    }
+
+    /**
+     * A link's URL ends at the `)` that MATCHES its `(`, wherever the balanced
+     * pair sits inside it.
+     *
+     * The old rule took the first `)` and then extended only while the very
+     * NEXT character was another `)` — so a URL whose parentheses are not at
+     * its very end was cut at the first one, and the truncated string became
+     * the live `LinkAnnotation.Url`. The tap opened a page that does not exist.
+     */
+    @Test
+    fun a_links_url_keeps_balanced_parentheses_wherever_they_sit() {
+        val mid = "https://en.wikipedia.org/wiki/Foo_(bar)/edit"
+        assertEquals(
+            listOf(mid),
+            paragraph("[x]($mid) end").links().map { (it.item as LinkAnnotation.Url).url },
+            "parentheses in the MIDDLE of the path",
+        )
+
+        val end = "https://en.wikipedia.org/wiki/Foo_(bar)"
+        assertEquals(
+            listOf(end),
+            paragraph("[x]($end) end").links().map { (it.item as LinkAnnotation.Url).url },
+            "and at its end, which the old rule did handle",
+        )
+
+        val nested = "https://a.dev/f(g(h))/i"
+        assertEquals(
+            listOf(nested),
+            paragraph("[x]($nested)").links().map { (it.item as LinkAnnotation.Url).url },
+            "two levels deep",
+        )
+
+        // A title after a space still ends the destination.
+        assertEquals(
+            listOf("https://a.dev/x"),
+            paragraph("""[x](https://a.dev/x "a title")""").links().map { (it.item as LinkAnnotation.Url).url },
+        )
+    }
+
+    /**
+     * A list item ends at the prose that follows its closed code fence.
+     *
+     * The lazy-continuation test was "the previous line is not blank", and a
+     * fence's closing ``` satisfies it — so the shape of every "do this:" /
+     * code / "then that" transcript silently folded the closing prose into the
+     * bullet.
+     */
+    @Test
+    fun prose_after_an_items_closed_fence_ends_the_list() {
+        // No blank line before the prose: with one, the OLD rule already
+        // ended the item (its last collected line was blank), so the fence
+        // was never what the test turned on.
+        val blocks = parseMarkdown("- run it:\n  ```sh\n  ./gradlew check\n  ```\nThen read the report.")
+
+        assertEquals(2, blocks.size, "a list and a paragraph: ${blocks.map { it::class.simpleName }}")
+        assertIs<MdBlock.ListBlock>(blocks[0])
+        assertEquals("Then read the report.", assertIs<MdBlock.Paragraph>(blocks[1]).text.text)
+    }
+
+    /** The same for a quote. */
+    @Test
+    fun prose_after_a_quotes_closed_fence_ends_the_quote() {
+        val blocks = parseMarkdown("> run it:\n> ```sh\n> ./gradlew check\n> ```\nThen read the report.")
+
+        assertEquals(2, blocks.size, "a quote and a paragraph: ${blocks.map { it::class.simpleName }}")
+        assertIs<MdBlock.Quote>(blocks[0])
+        assertEquals("Then read the report.", assertIs<MdBlock.Paragraph>(blocks[1]).text.text)
+    }
+
+    /** An ordinary lazy continuation of a paragraph still works. */
+    @Test
+    fun a_lazy_paragraph_continuation_still_joins_its_item() {
+        val blocks = parseMarkdown("- a sentence that\nwraps onto the next line")
+
+        val list = assertIs<MdBlock.ListBlock>(blocks.single())
+        assertEquals("a sentence that\nwraps onto the next line", list.items.single().paragraphText())
+    }
+
     // ------------------------------------------------------------ helpers
 
     private fun paragraph(md: String): AnnotatedString = assertIs<MdBlock.Paragraph>(parseMarkdown(md).single()).text

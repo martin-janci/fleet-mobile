@@ -393,6 +393,43 @@ private class BlockParser(private val styles: MdInlineStyles) {
     private fun inline(s: String) = InlineParser(s, styles).parse()
 
     /** A line that would open some other block, so it cannot be a lazy paragraph continuation. */
+    /**
+     * Whether the lines collected for a container so far end in an open
+     * PARAGRAPH — the one thing a lazy continuation is allowed to continue.
+     *
+     * The test used to be "the previous line is not blank", which a CLOSED
+     * code fence satisfies: its closing ``` is a line and it is not blank. So
+     * after a list item (or a quote) whose last block was a fenced code block,
+     * the next unindented prose line was absorbed into the item instead of
+     * ending the list — the shape of every "do this:" / code / "then this"
+     * transcript, where the closing prose silently became part of the bullet.
+     *
+     * Cheap rather than exact: this tracks what KIND of block is open rather
+     * than parsing what has been collected (which would recurse through the
+     * whole container on every line). A blank line, a fence — open or just
+     * closed — and any other block opener each leave no paragraph to continue.
+     */
+    private fun endsInParagraph(lines: List<String>): Boolean {
+        var fence: Fence? = null
+        var paragraph = false
+        for (l in lines) {
+            val t = l.trimStart()
+            if (fence != null) {
+                if (isFenceClose(t, fence)) fence = null
+                paragraph = false
+                continue
+            }
+            val open = fenceOpen(t)
+            paragraph = when {
+                open != null -> { fence = open; false }
+                l.isBlank() -> false
+                startsBlock(l) -> false
+                else -> true
+            }
+        }
+        return fence == null && paragraph
+    }
+
     private fun startsBlock(line: String): Boolean {
         val t = line.trimStart()
         return fenceOpen(t) != null || t.startsWith(">") || atxHeading(t) != null ||
@@ -455,7 +492,7 @@ private class BlockParser(private val styles: MdInlineStyles) {
                         if (s.startsWith(" ") || s.startsWith("\t")) s = s.substring(1)
                         inner += s
                         i++
-                    } else if (l.isNotBlank() && inner.isNotEmpty() && inner.last().isNotBlank() && !startsBlock(l)) {
+                    } else if (l.isNotBlank() && inner.isNotEmpty() && endsInParagraph(inner) && !startsBlock(l)) {
                         inner += l // a lazy continuation of the quoted paragraph
                         i++
                     } else {
@@ -583,7 +620,7 @@ private class BlockParser(private val styles: MdInlineStyles) {
                     i++
                     continue
                 }
-                if (lm == null && itemLines.last().isNotBlank() && !startsBlock(l)) {
+                if (lm == null && endsInParagraph(itemLines) && !startsBlock(l)) {
                     itemLines += l.trimStart() // a lazy paragraph continuation
                     i++
                     continue
@@ -726,7 +763,6 @@ private class InlineParser(private val src: String, private val styles: MdInline
     private val tilde2Close = nextMarker(n) { j ->
         src[j] == '~' && at(j + 1) == '~' && !escaped[j] && j > 0 && !spaceAt(j - 1)
     }
-    private val closeBracket = nextMarker(n) { j -> src[j] == ']' && !escaped[j] }
     private val closeParen = nextMarker(n) { j -> src[j] == ')' && !escaped[j] }
     private val nextGt = nextMarker(n) { j -> src[j] == '>' }
     private val nextLt = nextMarker(n) { j -> src[j] == '<' }
@@ -758,8 +794,18 @@ private class InlineParser(private val src: String, private val styles: MdInline
                     '`' -> codeSpan(b, i, to)
                     '*', '_' -> emphasis(b, i, to, depth, links, c)
                     '~' -> strike(b, i, to, depth, links)
-                    '[' -> if (links) link(b, i, to, depth, image = false) else null
-                    '!' -> if (links && i + 1 < to && src[i + 1] == '[') link(b, i + 1, to, depth, image = true) else null
+                    '[' -> if (links) link(b, i, to, depth, image = false, clickable = true) else null
+                    // An image is parsed even inside a link's text, where
+                    // `links` is false: a README badge is an image inside a
+                    // link, and leaving it out printed `![build](badge.svg)`
+                    // on screen as markup. `clickable = links` keeps it from
+                    // pushing a second annotation inside the outer link's —
+                    // tapping the badge follows the link, as it should.
+                    '!' -> if (i + 1 < to && src[i + 1] == '[') {
+                        link(b, i + 1, to, depth, image = true, clickable = links)
+                    } else {
+                        null
+                    }
                     '<' -> if (links) autolink(b, i, to) else null
                     'h', 'H' -> if (links) bareUrl(b, i, to, from) else null
                     else -> null
@@ -874,34 +920,98 @@ private class InlineParser(private val src: String, private val styles: MdInline
         return close + 2
     }
 
-    /** `[text](url)`, or with [image] the `[alt](src)` of `![alt](src)`, opening at [i]. */
-    private fun link(b: AnnotatedString.Builder, i: Int, to: Int, depth: Int, image: Boolean): Int? {
-        val close = closeBracket[i + 1]
+    /**
+     * `[text](url)`, or with [image] the `[alt](src)` of `![alt](src)`,
+     * opening at [i].
+     *
+     * [clickable] is false for an image inside a link's own text, where the
+     * outer link's annotation already covers the span.
+     */
+    private fun link(b: AnnotatedString.Builder, i: Int, to: Int, depth: Int, image: Boolean, clickable: Boolean): Int? {
+        val close = matchingBracket(i + 1, to)
         if (!within(close, 1, to) || close + 1 >= to || src[close + 1] != '(') return null
-        var paren = closeParen[close + 2]
+        val paren = matchingParen(close + 2, to)
         if (!within(paren, 1, to)) return null
-        // One level of balanced parentheses inside the URL (Wikipedia-style).
-        var open = 0
-        for (k in close + 2 until paren) {
-            if (src[k] == '(') open++ else if (src[k] == ')') open--
-        }
-        while (open > 0 && paren + 1 < to && src[paren + 1] == ')') {
-            paren++
-            open--
-        }
         var dest = src.substring(close + 2, paren).trim()
         dest = if (dest.startsWith("<") && '>' in dest) {
             dest.substring(1, dest.indexOf('>'))
         } else {
             dest.takeWhile { !it.isWhitespace() } // drops an optional "title"
         }
-        val live = safeUrl(dest)
+        val live = clickable && safeUrl(dest)
         if (live) b.pushLink(LinkAnnotation.Url(dest, styles.link))
         if (image) b.pushStyle(ITALIC)
         scan(b, i + 1, close, depth + 1, links = false)
         if (image) b.pop()
         if (live) b.pop()
         return paren + 1
+    }
+
+    /**
+     * The `]` that closes the `[` before [from], counting nesting.
+     *
+     * Taking the FIRST unescaped `]`, which this used to do, takes the
+     * image's for an image inside a link — a README badge,
+     * `[![build](badge.svg)](ci-url)`. The link then resolved to the badge's
+     * own URL and `](ci-url)` was left on screen as literal text: a link that
+     * went somewhere other than it said.
+     *
+     * A backtick run is skipped whole, so a `]` inside a code span is not a
+     * closer and not counted as one either.
+     */
+    private fun matchingBracket(from: Int, to: Int): Int {
+        var depth = 0
+        var j = from
+        while (j < to) {
+            val c = src[j]
+            when {
+                escaped[j] -> Unit
+                c == '`' -> {
+                    var len = 0
+                    while (j + len < to && src[j + len] == '`') len++
+                    val end = runOf(j + len, len, to)
+                    // An unclosed run is not a span: fall through and go on
+                    // reading the brackets after it.
+                    if (within(end, len, to)) {
+                        j = end + len
+                        continue
+                    }
+                    j += len
+                    continue
+                }
+                c == '[' -> depth++
+                c == ']' -> if (depth == 0) return j else depth--
+            }
+            j++
+        }
+        return n
+    }
+
+    /**
+     * The `)` that closes the `(` before [from], counting nesting.
+     *
+     * The old rule took the first `)` and then extended only while the very
+     * NEXT character was another `)`, so a URL whose balanced parentheses are
+     * not at its very end — `…/Foo_(bar)/edit` — was cut at the first one, and
+     * the truncated string became the live `LinkAnnotation.Url`. A person
+     * tapped a link to a page that does not exist.
+     */
+    private fun matchingParen(from: Int, to: Int): Int {
+        var depth = 0
+        var j = from
+        while (j < to) {
+            when {
+                escaped[j] -> Unit
+                // The `<…>` form ends the destination at its own `>`, and a
+                // space ends it too (a title follows), so neither can carry a
+                // paren into the count.
+                src[j].isWhitespace() -> return closeParen[j]
+                src[j] == '(' -> depth++
+                src[j] == ')' -> if (depth == 0) return j else depth--
+            }
+            j++
+        }
+        return n
     }
 
     /** `<https://…>`, `<mailto:…>` or `<a@b.c>` opening at [i]. */

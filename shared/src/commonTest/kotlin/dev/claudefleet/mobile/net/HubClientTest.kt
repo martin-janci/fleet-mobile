@@ -701,6 +701,30 @@ class HubClientTest {
         assertNull(probe.stuckKind)
         assertEquals("Allow access to /srv?", probe.pendingInput?.question)
         assertEquals(listOf(1, 2), probe.pendingInput?.options?.map { it.n })
+        assertEquals(listOf(true, false), probe.pendingInput?.options?.map { it.selected })
+    }
+
+    /**
+     * `stuck_kind` is really mapped, which the test above cannot say.
+     *
+     * Its fixture sends `"stuck_kind":null` and asserts null — and under
+     * `ignoreUnknownKeys = true` a dropped or misspelt `@SerialName` gives
+     * exactly the same null. So the suite's only wire-level check of the field
+     * certified nothing, while the `stuckKind` conjunct of `dialogMoved` is
+     * what stops a trust prompt being answered by a card built for a different
+     * one.
+     */
+    @Test
+    fun a_probes_stuck_kind_arrives_under_its_wire_name() = runTest {
+        val client = clientAnswering { body ->
+            assertEquals("session_activity", body.tool())
+            """{"claude_status":"blocked","stuck_kind":"trust_prompt","waiting_for":"trust"}"""
+        }
+
+        val probe = client.activity(7)
+
+        assertEquals("trust_prompt", probe.stuckKind, "`stuck_kind`, not `stuckKind`")
+        assertNull(probe.pendingInput, "a trust prompt is a menu, not a numbered dialog")
     }
 
     /**
