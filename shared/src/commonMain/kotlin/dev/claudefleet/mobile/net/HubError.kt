@@ -113,6 +113,16 @@ sealed class HubError(message: String, cause: Throwable? = null) : Exception(mes
         )
 
     /**
+     * A file downloaded from `GET /downloads/<id>` did not arrive whole: fewer
+     * or more bytes than the hub announced, or a digest that is not the one in
+     * `X-Fleet-Sha256`. The copy is thrown away; asking again is the remedy.
+     *
+     * [what] is the app's own words, never wire text.
+     */
+    data class Damaged(val what: String) :
+        HubError("the file arrived damaged: $what. Try again.")
+
+    /**
      * The hub could not be reached, or answered something unintelligible.
      *
      * Deliberately **not** a `data class`, and deliberately silent about the

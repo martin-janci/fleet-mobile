@@ -2,6 +2,9 @@ package dev.claudefleet.mobile.net
 
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
+import dev.claudefleet.mobile.model.Download
+import dev.claudefleet.mobile.model.DownloadList
+import dev.claudefleet.mobile.model.DownloadRemoved
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.HubHealth
 import dev.claudefleet.mobile.model.MultiStart
@@ -38,19 +41,23 @@ import dev.claudefleet.mobile.model.WorkView
 import dev.claudefleet.mobile.model.WorkViewDraft
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.prepareGet
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
+import io.ktor.utils.io.readAvailable
 import io.ktor.utils.io.readBuffer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.io.Sink
 import kotlinx.io.readByteArray
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
@@ -989,6 +996,115 @@ class HubClient(
     suspend fun fleetHealth(): HubHealth =
         call("fleet_health") { json.decodeFromJsonElement(HubHealth.serializer(), it) }
 
+    // ---- file downloads (claude-fleet contract revision 7) ----
+    //
+    // `list_downloads` is a read; `send_file` and `remove_download` are
+    // writes the hub refuses a readonly token (and does not list for one).
+    // None is called unless `tools/list` names it — see
+    // `HubCapabilities.downloads`.
+
+    /** The hub's copies, newest first. [sessionId] narrows to one session; [limit] caps the rows. */
+    suspend fun listDownloads(sessionId: Long? = null, limit: Int? = null): DownloadList =
+        call(
+            "list_downloads",
+            buildJsonObject {
+                sessionId?.let { put("session_id", it) }
+                limit?.let { put("limit", it) }
+            },
+        ) { json.decodeFromJsonElement(DownloadList.serializer(), it) }
+
+    /**
+     * Ask the hub to copy [path] off [sessionId]'s host. Answers the new row
+     * at once, in state `fetching`; `download:changed` says when it is ready.
+     * [path] is absolute or relative to the session's working directory. A
+     * blank [note] is left out.
+     */
+    suspend fun sendFile(sessionId: Long, path: String, note: String? = null): Download =
+        call(
+            "send_file",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("path", path)
+                note?.takeIf { it.isNotBlank() }?.let { put("note", it) }
+            },
+        ) { json.decodeFromJsonElement(Download.serializer(), it) }
+
+    /** Forget one copy on the hub. False when it was already gone. */
+    suspend fun removeDownload(id: Long): Boolean =
+        call("remove_download", buildJsonObject { put("id", id) }) {
+            json.decodeFromJsonElement(DownloadRemoved.serializer(), it).removed
+        }
+
+    /**
+     * Stream `GET /downloads/<id>` into [sink], hashing as it goes.
+     *
+     * Not a tool call, and deliberately outside both of a call's ceilings: a
+     * file is up to the hub's `downloads.max_file_mb` (100 MB by default), so
+     * the bytes are never held whole — not [MAX_RESPONSE_BYTES], which bounds
+     * what is read into a `String`, and not the client-wide request deadline,
+     * which would give up on a large file over a slow link that is going fine.
+     * The socket timeout stays bounded, so a connection gone half-open still
+     * fails.
+     *
+     * What it checks, with what the hub said: the byte count against
+     * `Content-Length` (or, without one, against [expectedSize], the row's
+     * `size`), and the digest against `X-Fleet-Sha256` when it is sent. A
+     * mismatch is [HubError.Damaged]; the caller deletes what it wrote.
+     *
+     * `404` — the row is not visible to this token, not `ready`, or gone — is
+     * [HubError.Tool] with [DOWNLOAD_GONE], in words a person can act on.
+     */
+    suspend fun downloadFile(
+        id: Long,
+        sink: Sink,
+        expectedSize: Long? = null,
+        onProgress: (received: Long, total: Long?) -> Unit = { _, _ -> },
+    ): FetchedFile = try {
+        http.prepareGet("$base/downloads/$id") {
+            if (token != null) header(HttpHeaders.Authorization, "Bearer $token")
+            timeout {
+                requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+                socketTimeoutMillis = HUB_CALL_TIMEOUT_MS
+            }
+        }.execute { response ->
+            val status = response.status.value
+            if (status == 404) {
+                throw HubError.Tool(DOWNLOAD_GONE, "That file is no longer on the hub: it expired, was removed, or is not ready yet.")
+            }
+            if (status !in 200..299) throwForStatus(status, response.textWithin(MAX_RESPONSE_BYTES), base, token)
+            val declared = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+            val limit = declared ?: expectedSize
+            val expectedSha = response.headers[SHA256_HEADER]?.trim()?.lowercase()?.takeIf { it.length == 64 }
+            val channel = response.bodyAsChannel()
+            val hash = Sha256()
+            val buffer = ByteArray(DOWNLOAD_CHUNK)
+            var received = 0L
+            while (true) {
+                val n = channel.readAvailable(buffer, 0, buffer.size)
+                if (n < 0) break
+                if (n == 0) continue
+                received += n
+                if (limit != null && received > limit) throw HubError.Damaged("more bytes than the hub announced ($limit)")
+                hash.update(buffer, 0, n)
+                sink.write(buffer, 0, n)
+                onProgress(received, limit)
+            }
+            sink.flush()
+            if (limit != null && received != limit) {
+                throw HubError.Damaged("$received of $limit bytes arrived")
+            }
+            val digest = hash.hex()
+            if (expectedSha != null && digest != expectedSha) throw HubError.Damaged("its checksum does not match the hub's")
+            FetchedFile(bytes = received, sha256 = digest)
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: HubError) {
+        throw e
+    } catch (t: Throwable) {
+        throw HubError.Transport(t)
+    }
+
     // ---- the wire ----
 
     /**
@@ -1228,6 +1344,22 @@ internal fun HttpClient.withHubTimeouts(): HttpClient = config {
  * to never writing it.
  */
 internal const val FORCE_CROSS_ORG = "force_cross_org"
+
+/** What [HubClient.downloadFile] wrote: how many bytes, and their SHA-256 (hex). */
+data class FetchedFile(val bytes: Long, val sha256: String)
+
+/**
+ * The code a `404` on `GET /downloads/<id>` becomes: the row is gone,
+ * expired, not ready, or not this token's to see — the hub does not say
+ * which, and to a person they are one thing.
+ */
+const val DOWNLOAD_GONE = "E_NOTFOUND"
+
+/** The hub's digest of the file it serves, hex. */
+internal const val SHA256_HEADER = "X-Fleet-Sha256"
+
+/** How much of a download is read per step: enough to keep a fast link busy, small enough for any heap. */
+private const val DOWNLOAD_CHUNK = 64 * 1024
 
 internal const val HUB_CALL_TIMEOUT_MS = 45_000L
 internal const val HUB_CONNECT_TIMEOUT_MS = 15_000L

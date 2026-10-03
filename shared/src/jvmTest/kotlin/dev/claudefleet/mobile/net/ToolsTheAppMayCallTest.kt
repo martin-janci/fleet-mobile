@@ -103,6 +103,14 @@ class ToolsTheAppMayCallTest {
         "set_setting",
         "setting_proposals",
         "decide_setting_proposals",
+        // File downloads (claude-fleet contract revision 7): `Access::Client`.
+        // `list_downloads` is readonly; `send_file` and `remove_download` are
+        // writes the hub does not list for a readonly token, and the Files tab
+        // checks `canWrite` too (`HubCapabilities.sendFile` / `removeDownload`).
+        // The bytes come over `GET /downloads/<id>`, not a tool.
+        "list_downloads",
+        "send_file",
+        "remove_download",
     )
 
     @Test
