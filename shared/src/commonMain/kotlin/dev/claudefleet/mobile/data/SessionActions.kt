@@ -145,7 +145,9 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
     // an unhandled failure inside the screen's own probe loop, which is the
     // one caller with no catch of its own.
     override suspend fun ping(): Boolean = try {
-        session.withClient { it.fleetHealth() }
+        // `fleetHealth()` answers the hub's version too (Settings draws it
+        // through `VersionActions`); the probe is the store-open half of it.
+        session.withClient { it.fleetHealth() }.dbReady
     } catch (e: CancellationException) {
         throw e
     } catch (t: Throwable) {
