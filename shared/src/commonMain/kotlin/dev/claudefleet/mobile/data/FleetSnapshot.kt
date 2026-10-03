@@ -42,6 +42,21 @@ data class FleetSnapshot(
 val SNAPSHOT_EVENT_KINDS: List<String> = listOf("session", "host", "project", "work")
 
 /**
+ * Kinds that change nothing in the snapshot and are subscribed to only as a
+ * signal to re-read: `download` (`download:changed { id }`, claude-fleet
+ * file downloads) tells the Files tab to ask `list_downloads` again. A hub
+ * that does not know the kind ignores it in `?kinds=`.
+ *
+ * Kept apart from [SNAPSHOT_EVENT_KINDS] so that list still means "what the
+ * snapshot applies" — `FleetSnapshotTest` holds every entry of it to changing
+ * the snapshot, which a signal never does.
+ */
+val SIGNAL_EVENT_KINDS: List<String> = listOf("download")
+
+/** Everything the stream asks the hub for with `?kinds=`. */
+val STREAM_EVENT_KINDS: List<String> = SNAPSHOT_EVENT_KINDS + SIGNAL_EVENT_KINDS
+
+/**
  * The payload keys the snapshot decodes, and therefore what the stream asks
  * the hub for with `?fields=`.
  *
@@ -133,6 +148,10 @@ fun HubEvent.Row.sessionId(): Long? = when {
  * the one the snapshot itself ignores — [applying] leaves it a no-op.
  */
 fun HubEvent.Row.isWorkFrame(): Boolean = name.startsWith("work:")
+
+/** The download a `download:changed` frame names, or null for any other frame. */
+fun HubEvent.Row.downloadId(): Long? =
+    if (name == "download:changed") payload.number("id") else null
 
 /** The timeline entry a `session:event` frame carries, or null for any other frame. */
 fun HubEvent.Row.timelineFrame(): TimelineFrame? {

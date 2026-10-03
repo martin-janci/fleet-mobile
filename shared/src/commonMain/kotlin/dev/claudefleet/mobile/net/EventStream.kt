@@ -1,6 +1,6 @@
 package dev.claudefleet.mobile.net
 
-import dev.claudefleet.mobile.data.SNAPSHOT_EVENT_KINDS
+import dev.claudefleet.mobile.data.STREAM_EVENT_KINDS
 import dev.claudefleet.mobile.data.SNAPSHOT_PAYLOAD_FIELDS
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeoutConfig
@@ -373,14 +373,15 @@ class HubEventStream(
     base: String,
     private val token: String? = null,
     /**
-     * The `?kinds=` filter. Defaults to `SNAPSHOT_EVENT_KINDS` itself rather
+     * The `?kinds=` filter. Defaults to `STREAM_EVENT_KINDS` — what the
+     * snapshot applies plus the re-read signals — itself rather
      * than to a second copy of its contents, which is what this was: two
      * literals kept in step by a test on each side is a convention, not a
      * mechanism. Subscribing to more kinds than the snapshot applies
      * spends a phone's radio on frames that get dropped, and to fewer leaves
      * rows quietly stale — and neither shows up until someone edits a list.
      */
-    private val kinds: List<String> = SNAPSHOT_EVENT_KINDS,
+    private val kinds: List<String> = STREAM_EVENT_KINDS,
     /**
      * The `?fields=` projection, for the same reason and with the same
      * mechanism as [kinds]: [SNAPSHOT_PAYLOAD_FIELDS] is derived from what the

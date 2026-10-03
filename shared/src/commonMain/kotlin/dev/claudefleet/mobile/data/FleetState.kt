@@ -136,6 +136,16 @@ interface FleetState {
      */
     val workChanges: Flow<Long> get() = emptyFlow()
 
+    /**
+     * The id of a hub download that changed — a `download:changed` frame
+     * (claude-fleet file downloads; ids only) — and [ALL_DOWNLOADS_CHANGED]
+     * once per `ready` / `lagged` resync, since a scoped stream never carries
+     * the frame and anything may have moved while the stream was down. The
+     * Files tab re-reads `list_downloads` on one. Hot and lossy like
+     * [sessionChanges].
+     */
+    val downloadChanges: Flow<Long> get() = emptyFlow()
+
     /** The hub refused [action] of [tool] as unknown: hide it for the rest of this connection. */
     fun actionMissing(tool: String, action: String) {}
 
@@ -151,6 +161,9 @@ private object NoWork {
     val orgs: StateFlow<OrgDirectory> = MutableStateFlow(OrgDirectory.EMPTY).asStateFlow()
     val trackers: StateFlow<List<TrackerRow>> = MutableStateFlow<List<TrackerRow>>(emptyList()).asStateFlow()
 }
+
+/** What [FleetState.downloadChanges] carries for "re-read everything". Download ids start at 1. */
+const val ALL_DOWNLOADS_CHANGED: Long = 0L
 
 /** One `session:event` frame: which session's timeline, and what kind of entry. */
 data class TimelineFrame(val sessionId: Long, val kind: String, val detail: String? = null)
