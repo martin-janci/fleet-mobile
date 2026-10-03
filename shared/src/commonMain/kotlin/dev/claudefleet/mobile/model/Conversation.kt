@@ -294,6 +294,14 @@ sealed class ConvItem {
      * A `Task` / `Agent` call, which the hub keeps apart from other tools so
      * its final text can be shown without cramming a subagent transcript into
      * a one-liner. This fleet runs subagents constantly, so these are common.
+     *
+     * A `Workflow` call arrives here too, with [name] `"Workflow"` and no
+     * [agentType] (`BLOCK_TOOLS` in the hub's `service/transcript.rs`). It is
+     * not a subagent — it is a script that orchestrates them — but it is the
+     * same shape to a reader: one piece of work, running for as long as it
+     * runs, with a report at the end. The hub reuses this kind rather than
+     * inventing `workflow` precisely so that a phone already in somebody's
+     * pocket draws the block instead of "(unsupported item: workflow)".
      */
     @Serializable
     @SerialName("subagent")
