@@ -1,6 +1,8 @@
 package dev.claudefleet.mobile.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -18,6 +20,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -28,11 +32,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.Page
 import dev.claudefleet.mobile.model.PageItem
 import dev.claudefleet.mobile.model.SettingDescriptor
 import dev.claudefleet.mobile.model.SettingProposal
+import dev.claudefleet.mobile.model.editableOnPhone
 import dev.claudefleet.mobile.model.fromDisplay
 import dev.claudefleet.mobile.model.holds
 import dev.claudefleet.mobile.model.inWords
@@ -110,17 +119,31 @@ private fun PageList(state: FleetSettingsUiState, clientName: String, onOpen: (S
         style = MaterialTheme.typography.titleSmall,
         modifier = Modifier.padding(horizontal = 16.dp),
     )
+    // Only once the hub HAS answered. `canWrite` defaults to false and is set
+    // at the end of a successful load, so while the three reads were in flight
+    // — and for ever after a failure — this read "the hub's operator trusts
+    // this device: fleet-hub client trust <name>", which is a wrong
+    // instruction for a device already trusted and also exactly what an empty
+    // catalogue looked like.
     Text(
-        text = if (state.canWrite) {
-            "The hub’s settings: a change here is the hub’s, for the whole fleet."
-        } else {
-            "The hub’s settings, read only. To change them here, the hub’s operator " +
-                "trusts this device: fleet-hub client trust ${clientName.ifBlank { "<name>" }}"
+        text = when {
+            !state.loaded -> "Reading the hub’s settings…"
+            state.canWrite -> "The hub’s settings: a change here is the hub’s, for the whole fleet."
+            else ->
+                "The hub’s settings, read only. To change them here, the hub’s operator " +
+                    "trusts this device: fleet-hub client trust ${clientName.ifBlank { "<name>" }}"
         },
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
     )
+    if (state.loaded && state.pages.isEmpty()) {
+        Text(
+            "The hub offers this device no settings pages.",
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(16.dp),
+        )
+    }
     for (p in state.pages) {
         val waiting = if (p.layout == "review_apply") state.proposals.size else 0
         Column(
@@ -164,27 +187,92 @@ private fun PageBody(
         Review(state, onDecide)
         return
     }
-    val sections = page.allSections.filter { it.condition.holds(state.values) }
+    // ONE tab at a time, with its title, as the desktop's `PageView` draws it.
+    // `allSections` flattened the lot: `settings.work` is tabs-only (Detection
+    // / Tidy-up / Retention), so its six sections ran together with the three
+    // tab names gone, and a tab's own `when` was never evaluated.
+    val tabs = page.shownTabs(state.values)
+    var tab by remember(page.id) { mutableStateOf(0) }
+    if (tabs.size > 1) {
+        val selected = tab.coerceIn(0, tabs.size - 1)
+        ScrollableTabRow(selectedTabIndex = selected, edgePadding = 8.dp) {
+            tabs.forEachIndexed { i, t ->
+                Tab(selected = i == selected, onClick = { tab = i }, text = { Text(t.title) })
+            }
+        }
+    }
+    val sections = page.shownSections(state.values, tab.coerceIn(0, maxOf(tabs.size - 1, 0)))
+        .filter { it.condition.holds(state.values) }
     for (section in sections) {
         HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
-        Text(
-            section.title.uppercase(),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
-        for (raw in section.items) {
-            when (val item = PageItem.of(raw)) {
+        // `collapsible` / `advanced` were declared and never read, so four
+        // advanced sections of the fixture drew open and unmarked. The desktop
+        // closes an advanced one and badges it.
+        var open by remember(page.id, section.title) { mutableStateOf(!section.advanced) }
+        val foldable = section.collapsible || section.advanced
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (foldable) Modifier.clickable { open = !open } else Modifier)
+                .padding(horizontal = 16.dp),
+        ) {
+            Text(
+                section.title.uppercase(),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (section.advanced) {
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "ADVANCED",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (foldable) {
+                Spacer(Modifier.weight(1f))
+                Text(if (open) "▾" else "▸", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        if (!open) continue
+        // `Section.intro` was declared and never drawn, though the desktop
+        // draws it: the one sentence that says what the section is for.
+        section.intro?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+            )
+        }
+        // Parsed ONCE per section, not on every recomposition: every item of
+        // every drawn section went back through `PageItem.of` — a `when`
+        // decode among them — on each frame a switch or a keystroke caused.
+        val items = remember(section.items) { section.items.map(PageItem::of) }
+        for (item in items) {
+            when (item) {
                 is PageItem.Field -> {
                     val d = state.descriptors[item.key]
                     if (d != null && item.condition.holds(state.values)) {
                         FieldRow(state, d, item.hint, item.readOnly, onSet, onRefuse, onDecide)
                     }
                 }
+                // `tone` was parsed and never read, so the fixture's five
+                // `warn` notices drew as plain body text beside its three
+                // `info` ones — the distinction the hub went to the trouble of
+                // sending.
                 is PageItem.Notice -> Text(
-                    item.text,
+                    if (item.tone == "info") item.text else "⚠ ${item.text}",
                     style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    color = when (item.tone) {
+                        "danger" -> MaterialTheme.colorScheme.error
+                        "warn" -> MaterialTheme.colorScheme.tertiary
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .semantics { if (item.tone != "info") contentDescription = "Warning. ${item.text}" },
                 )
                 is PageItem.Link -> state.pages.firstOrNull { it.id == item.page }?.let { target ->
                     TextButton(onClick = { onOpen(target.id) }, modifier = Modifier.padding(horizontal = 8.dp)) {
@@ -236,7 +324,7 @@ private fun FieldRow(
             }
         }
         if (editable && d.kind.type in setOf("secs", "int", "text")) {
-            ValueField(d, value, busy, onSet, onRefuse)
+            ValueField(d, value, busy, state.settled, onSet, onRefuse)
         }
         val range = d.rangeText()
         Text(
@@ -245,8 +333,19 @@ private fun FieldRow(
                 if (range.isNotEmpty()) append(" ($range)")
                 hint?.let { append(" "); append(it) }
                 if (d.restart == "app") append(" Applies after the hub restarts.")
+                // The wire's other non-`none` value, which the desktop draws
+                // and this dropped: the hub's enum is None | App | Hooks, and
+                // `work.session_start_context` carries `hooks`.
+                if (d.restart == "hooks") append(" Applies when the hosts’ hooks are next installed.")
                 d.ownedBy?.let { append(" Change it with $it.") }
-                if (!d.readOnlyHere && state.canWrite && !editable) append(" Change it on a desktop.")
+                // `!d.editableOnPhone`, not the composite `!editable`: that
+                // folded "this kind needs a desktop" together with "this PAGE
+                // shows this field read-only", and a desktop renders a
+                // `readonly` widget as a plain span too — so it could not be
+                // changed there either. Live on `decide.jev.work_link`.
+                if (!d.readOnlyHere && !shownOnly && state.canWrite && !d.editableOnPhone) {
+                    append(" Change it on a desktop.")
+                }
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -273,11 +372,26 @@ private fun ValueField(
     d: SettingDescriptor,
     value: String,
     busy: Boolean,
+    settled: Int,
     onSet: (String, String) -> Unit,
     onRefuse: (String, String) -> Unit,
 ) {
     val shown = if (d.kind.type == "text") value else d.toDisplay(value)
-    var draft by remember(d.key, shown) { mutableStateOf(shown) }
+    // `settled` is a key too: a write the view model drops as a no-op —
+    // `"60.0"` or `"060"` for a stored `60` — changed no value, so the draft
+    // kept the person's spelling and Save stayed live over a tap that did
+    // nothing. Bumping it re-seeds the field with the hub's own text.
+    var draft by remember(d.key, shown, settled) { mutableStateOf(shown) }
+    val save = {
+        if (d.kind.type == "text") {
+            onSet(d.key, draft.trim())
+        } else {
+            d.fromDisplay(draft).fold(
+                onSuccess = { onSet(d.key, it) },
+                onFailure = { onRefuse(d.key, "${d.label}: ${it.message}") },
+            )
+        }
+    }
     Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
             value = draft,
@@ -285,30 +399,35 @@ private fun ValueField(
             singleLine = true,
             enabled = !busy,
             suffix = if (d.unitWord.isNotEmpty() && d.kind.type != "text") ({ Text(d.unitWord) }) else null,
+            // Every other text input in the app declares its keyboard; this one
+            // did not, so a field `fromDisplay` will only read as a
+            // non-negative decimal opened a full QWERTY — which is also how
+            // `"2d"` got typed into an hours field.
+            keyboardOptions = KeyboardOptions(
+                keyboardType = if (d.kind.type == "text") KeyboardType.Text else KeyboardType.Decimal,
+                autoCorrectEnabled = false,
+                imeAction = ImeAction.Done,
+            ),
+            keyboardActions = KeyboardActions(onDone = { if (!busy && draft != shown) save() }),
             modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(8.dp))
-        OutlinedButton(
-            enabled = !busy && draft != shown,
-            onClick = {
-                if (d.kind.type == "text") {
-                    onSet(d.key, draft.trim())
-                } else {
-                    d.fromDisplay(draft).fold(
-                        onSuccess = { onSet(d.key, it) },
-                        onFailure = { onRefuse(d.key, "${d.label}: ${it.message}") },
-                    )
-                }
-            },
-        ) { Text(if (busy) "Saving…" else "Save") }
+        OutlinedButton(enabled = !busy && draft != shown, onClick = save) {
+            Text(if (busy) "Saving…" else "Save")
+        }
     }
 }
 
 @Composable
 private fun Suggestion(state: FleetSettingsUiState, d: SettingDescriptor, p: SettingProposal, onDecide: (Long, Boolean) -> Unit) {
     Column(modifier = Modifier.padding(top = 4.dp)) {
+        // WHO suggested it, as the Review page and the desktop's own field row
+        // both say: the hub's vocabulary is person | agent | system, so without
+        // it a colleague's device's suggestion was indistinguishable from an
+        // agent's on the one screen where a person acts on it.
+        val who = p.sourceDetail?.let { "${p.source} ($it)" } ?: p.source
         Text(
-            "✦ Suggested: ${d.inWords(p.value)}" + (p.why?.let { " — “$it”" } ?: ""),
+            "✦ Suggested by $who: ${d.inWords(p.value)}" + (p.why?.let { " — “$it”" } ?: ""),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.primary,
         )
@@ -336,10 +455,18 @@ private fun Review(state: FleetSettingsUiState, onDecide: (Long, Boolean) -> Uni
         HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
             Text(d?.label ?: p.key, style = MaterialTheme.typography.bodyLarge)
-            val now = d?.inWords(p.current) ?: p.current
+            // The value the SCREEN holds, not the proposal's frozen snapshot.
+            // Two stores hold the same fact — `values`, which a write updates,
+            // and `proposals[].current`, which it does not — and the hub does
+            // not refresh a pending proposal when the key is set. So after the
+            // person changed a key themselves the row printed the pre-change
+            // value as "now" and suppressed the drift warning, for exactly the
+            // case they had caused.
+            val nowRaw = state.values[p.key] ?: p.current
+            val now = d?.inWords(nowRaw) ?: nowRaw
             val next = d?.inWords(p.value) ?: p.value
             Text("$now → $next", style = MaterialTheme.typography.bodyMedium)
-            if (p.current != p.before) {
+            if (nowRaw != p.before) {
                 Text(
                     "Changed since it was proposed (it was ${d?.inWords(p.before) ?: p.before}).",
                     style = MaterialTheme.typography.bodySmall,

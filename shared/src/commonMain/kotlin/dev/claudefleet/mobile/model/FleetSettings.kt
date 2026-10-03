@@ -41,8 +41,33 @@ data class Page(
     val sections: List<Section> = emptyList(),
     val tabs: List<PageTab> = emptyList(),
 ) {
-    /** Every section, tab by tab, in order. */
+    /**
+     * Every section, tab by tab, in order — for asking "does this page place a
+     * field at all", NOT for drawing.
+     *
+     * Drawing from this flattened everything: `settings.work` is tabs-only
+     * (Detection / Tidy-up / Retention), so its six sections ran together with
+     * the three tab names gone, and a tab's own `when` was never evaluated.
+     * [shownTabs] and [shownSections] are what the screen reads.
+     */
     val allSections: List<Section> get() = sections + tabs.flatMap { it.sections }
+
+    /** The tabs whose condition holds, in order; empty for a page with none. */
+    fun shownTabs(values: Map<String, String>): List<PageTab> =
+        tabs.filter { it.condition.holds(values) }
+
+    /**
+     * The sections to draw: the page's own, plus the selected tab's.
+     *
+     * One tab at a time, as the desktop's `PageView` does — it takes
+     * `tabs[tab].sections` INSTEAD of `page.sections` when a page has tabs.
+     * [tab] indexes [shownTabs]; out of range reads as the first.
+     */
+    fun shownSections(values: Map<String, String>, tab: Int = 0): List<Section> {
+        val shown = shownTabs(values)
+        if (shown.isEmpty()) return sections
+        return sections + shown.getOrElse(tab) { shown.first() }.sections
+    }
 }
 
 @Serializable
@@ -80,13 +105,34 @@ sealed interface PageItem {
     data class Elsewhere(val type: String) : PageItem
 
     companion object {
+        /**
+         * A field's `when`, or null when it cannot be read.
+         *
+         * `decodeFromJsonElement` throws `SerializationException` on a
+         * wrong-typed member, and this runs inside composition — so a malformed
+         * condition was a UI CRASH rather than an empty row. The hub's own page
+         * validator owns the item shape, so this is unreachable through a
+         * healthy hub; a client is still not the place to crash over it. A
+         * condition that cannot be read is no condition, which is how a missing
+         * one already behaves ([holds] returns true), so the field is shown
+         * rather than silently hidden.
+         */
+        private fun cond(e: kotlinx.serialization.json.JsonElement?): Condition? {
+            val o = e as? JsonObject ?: return null
+            return try {
+                json.decodeFromJsonElement(Condition.serializer(), o)
+            } catch (_: Exception) {
+                null
+            }
+        }
+
         fun of(o: JsonObject): PageItem {
             fun str(k: String) = (o[k] as? JsonPrimitive)?.takeIf { it.isString }?.content
             return when (val type = str("type")) {
                 "field" -> Field(
                     key = str("key").orEmpty(),
                     hint = str("hint"),
-                    condition = (o["when"] as? JsonObject)?.let { json.decodeFromJsonElement(Condition.serializer(), it) },
+                    condition = cond(o["when"]),
                     readOnly = str("widget") == "readonly",
                 )
                 "notice" -> Notice(tone = str("tone") ?: "info", text = str("text").orEmpty())
@@ -177,14 +223,28 @@ val SettingDescriptor.unitWord: String get() = UNIT_WORDS[unit].orEmpty()
 /** Stored units per shown unit: seconds shown in hours is 3600. */
 fun SettingDescriptor.unitFactor(): Long = if (kind.type == "secs") SECS_PER[unit] ?: 1 else 1
 
-/** The stored value as the number a person types. */
+/**
+ * The stored value as the number a person types.
+ *
+ * Two divergences from the desktop's `pages.ts`, which this is a port of, and
+ * both were visible on a row:
+ *
+ *  - wholeness was tested BEFORE rounding, so `7199` seconds in hours is
+ *    `1.99972…`, not whole, and the else branch's `2.0` printed as `"2.0"`
+ *    where the desktop prints `"2"` (JS `String(2)`).
+ *  - `kotlin.math.round` is ties-to-EVEN and JS `Math.round` is half-up, so
+ *    `450` seconds in hours — exactly `0.125`, exactly `12.5` after scaling —
+ *    printed `"0.12"` against the desktop's `"0.13"`.
+ *
+ * `floor(x + 0.5)` is half-up, and the wholeness test moves after it.
+ */
 fun SettingDescriptor.toDisplay(raw: String): String {
     val f = unitFactor()
     if (f == 1L) return raw
     val n = raw.toDoubleOrNull() ?: return raw
-    val shown = n / f
-    return if (shown == kotlin.math.floor(shown)) shown.toLong().toString()
-    else ((kotlin.math.round(shown * 100)) / 100).toString()
+    val rounded = kotlin.math.floor(n / f * 100 + 0.5) / 100
+    return if (rounded == kotlin.math.floor(rounded)) rounded.toLong().toString()
+    else rounded.toString()
 }
 
 /** A typed number back to the stored text, or why it cannot be. The hub still
@@ -193,6 +253,12 @@ fun SettingDescriptor.toDisplay(raw: String): String {
 fun SettingDescriptor.fromDisplay(typed: String): Result<String> {
     val t = typed.trim()
     if (t.isEmpty()) return Result.failure(IllegalArgumentException("enter a number"))
+    // `String.toDouble` accepts Kotlin's own float suffixes — `"2d"`, `"2f"`,
+    // `"2D"` all parse as 2.0 — so a typo was sent to the hub as a valid value
+    // where the desktop's `Number("2d")` is NaN and refuses it. On an hours
+    // field "2d" silently meant two HOURS. It also parses differently on
+    // Android and on Kotlin/Native, which is its own reason to pin it.
+    if (!NUMERIC.matches(t)) return Result.failure(IllegalArgumentException("enter a number, 0 or more"))
     val n = t.toDoubleOrNull()
     if (n == null || n < 0 || n.isNaN() || n.isInfinite()) {
         return Result.failure(IllegalArgumentException("enter a number, 0 or more"))
@@ -206,6 +272,9 @@ fun SettingDescriptor.fromDisplay(typed: String): Result<String> {
     if (stored == 0L && n != 0.0) return Result.failure(IllegalArgumentException("too small: under one second"))
     return Result.success(stored.toString())
 }
+
+/** What [fromDisplay] will read as a number: digits, one optional point. */
+private val NUMERIC = Regex("""^\d+(\.\d+)?$""")
 
 /** "1–365 days", "0 = never": the bounds in the shown unit. */
 fun SettingDescriptor.rangeText(): String {
@@ -283,7 +352,11 @@ const val SETTINGS_ROOT_PAGE: String = "settings"
 fun offeredPages(bundle: PagesBundle): List<Page> =
     bundle.pages.filter { p ->
         p.parent == SETTINGS_ROOT_PAGE && (
-            p.layout == "review_apply" ||
+            // `review == "settings"`, not the layout alone: `review_apply` is
+            // also the Guides page's layout, and if that is ever parented under
+            // Settings the phone would list SETTINGS proposals under the Guides
+            // title. It reads `null` on an older hub, which had only the one.
+            (p.layout == "review_apply" && (p.review == null || p.review == "settings")) ||
                 (p.layout == "category" && p.allSections.any { s -> s.items.any { PageItem.of(it) is PageItem.Field } })
             )
     }

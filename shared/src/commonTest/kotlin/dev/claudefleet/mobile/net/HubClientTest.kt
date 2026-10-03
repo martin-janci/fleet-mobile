@@ -1365,6 +1365,114 @@ class HubClientTest {
         assertEquals("let a = 2", edit?.new)
     }
 
+
+    /**
+     * The five settings methods' whole wire surface, which nothing touched.
+     *
+     * The view-model tests feed `FakeHub` the fixture's already-DECODED
+     * structures, so `call(...)` and every decoder below it — the bare-`List`
+     * of descriptors, `set_setting`'s `Map<String,String>`, `SettingsPending`
+     * and the accept/reject `Long` encoding — were exercised by nothing but a
+     * name allowlist.
+     */
+    @Test
+    fun the_settings_reads_send_what_the_hub_expects_and_decode_its_answer() = runTest {
+        val (hub, calls) = client { req ->
+            val tool = Json.parseToJsonElement((req.body as TextContent).text)
+                .jsonObject["params"]!!.jsonObject["name"]!!.jsonPrimitive.content
+            val payload = when (tool) {
+                "list_pages" ->
+                    """{"pages":[{"id":"settings.automation","title":"Automation","parent":"settings",""" +
+                        """"layout":"category","sections":[{"title":"Sweeps","items":[{"type":"field","key":"gc.enabled"}]}]}]}"""
+                "get_settings" ->
+                    """[{"key":"gc.enabled","label":"Tidy up","kind":{"type":"bool"},"value":"true",""" +
+                        """"default":"false","unit":"none","danger":{"level":"confirm","message":"It kills sessions."},""" +
+                        """"restart":"hooks","owned_by":null,"option_labels":[]}]"""
+                "setting_proposals" ->
+                    """{"can_write":true,"proposals":[{"id":4,"at":17,"key":"work.recent_days","value":"3",""" +
+                        """"before":"14","current":"14","why":"shorter","source":"agent","source_detail":"control API"}]}"""
+                else -> "{}"
+            }
+            sse(okResult(payload)) to HttpStatusCode.OK
+        }
+
+        val pages = hub.listPages()
+        val page = pages.pages.single()
+        assertEquals("settings.automation", page.id)
+        assertEquals("settings", page.parent, "the parent is what `offeredPages` filters on")
+        assertEquals("category", page.layout)
+        assertEquals("Sweeps", page.sections.single().title)
+
+        val descs = hub.describeSettings()
+        val d = descs.single()
+        assertEquals("gc.enabled", d.key)
+        assertEquals("Tidy up", d.label)
+        assertEquals("bool", d.kind.type)
+        assertEquals("true", d.value)
+        assertEquals("false", d.default)
+        assertEquals("confirm", d.danger.level, "`danger` gates the confirm dialog")
+        assertEquals("It kills sessions.", d.danger.message)
+        assertEquals("hooks", d.restart)
+        assertNull(d.ownedBy, "`owned_by`, not `ownedBy`")
+
+        val pending = hub.settingProposals()
+        assertTrue(pending.canWrite, "`can_write`, not `canWrite`")
+        val p = pending.proposals.single()
+        assertEquals(4L, p.id)
+        assertEquals("work.recent_days", p.key)
+        assertEquals("14", p.before)
+        assertEquals("14", p.current)
+        assertEquals("agent", p.source)
+        assertEquals("control API", p.sourceDetail, "`source_detail`, not `sourceDetail`")
+
+        // And the arguments each one sends.
+        val args = (0..2).map {
+            Json.parseToJsonElement(calls.bodyText(it)).jsonObject["params"]!!.jsonObject
+        }
+        assertEquals("list_pages", args[0]["name"]!!.jsonPrimitive.content)
+        assertEquals("get_settings", args[1]["name"]!!.jsonPrimitive.content)
+        assertEquals(
+            true,
+            args[1]["arguments"]!!.jsonObject["describe"]!!.jsonPrimitive.content.toBoolean(),
+            "without `describe` the hub answers values only, and every row would be blank",
+        )
+        assertEquals("setting_proposals", args[2]["name"]!!.jsonPrimitive.content)
+    }
+
+    /** The two WRITES: their arguments, and the shapes they decode. */
+    @Test
+    fun the_settings_writes_send_their_arguments_and_decode_their_answers() = runTest {
+        val (hub, calls) = client { req ->
+            val tool = Json.parseToJsonElement((req.body as TextContent).text)
+                .jsonObject["params"]!!.jsonObject["name"]!!.jsonPrimitive.content
+            val payload = if (tool == "set_setting") {
+                """{"work.recent_days":"3","gc.enabled":"true"}"""
+            } else {
+                """{"applied":[4],"rejected":[5],"failed":[{"id":6,"error":"no longer waiting for review"}]}"""
+            }
+            sse(okResult(payload)) to HttpStatusCode.OK
+        }
+
+        val values = hub.setSetting("work.recent_days", "3")
+        assertEquals(mapOf("work.recent_days" to "3", "gc.enabled" to "true"), values)
+        val setArgs = Json.parseToJsonElement(calls.bodyText(0))
+            .jsonObject["params"]!!.jsonObject["arguments"]!!.jsonObject
+        assertEquals(setOf("key", "value"), setArgs.keys)
+        assertEquals("work.recent_days", setArgs["key"]!!.jsonPrimitive.content)
+        assertEquals("3", setArgs["value"]!!.jsonPrimitive.content, "a value is a STRING on the wire, whatever its kind")
+
+        val decided = hub.decideSettingProposals(accept = listOf(4), reject = listOf(5, 6))
+        assertEquals(listOf(4L), decided.applied)
+        assertEquals(listOf(5L), decided.rejected)
+        assertEquals(6L, decided.failed.single().id)
+        assertEquals("no longer waiting for review", decided.failed.single().error)
+        val decideArgs = Json.parseToJsonElement(calls.bodyText(1))
+            .jsonObject["params"]!!.jsonObject["arguments"]!!.jsonObject
+        assertEquals(setOf("accept", "reject"), decideArgs.keys)
+        assertEquals(listOf(4), decideArgs["accept"]!!.jsonArray.map { it.jsonPrimitive.int })
+        assertEquals(listOf(5, 6), decideArgs["reject"]!!.jsonArray.map { it.jsonPrimitive.int })
+    }
+
 }
 
 /** Eight request bodies by name, for a test that makes eight calls in a row. */

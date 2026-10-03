@@ -104,9 +104,184 @@ class FleetSettingsTest {
         assertEquals("On", d("playbooks.press_enter").inWords("true"))
         assertEquals("Off", d("playbooks.press_enter").inWords("false"))
         assertEquals("(empty)", d("playbooks.press_enter").inWords(""))
+        // The LABEL, not `optionLabel(value)` again: `inWords`'s choice branch
+        // IS `optionLabel(value)`, and `optionLabel` falls back to the raw
+        // value — so if `@SerialName("option_labels")` stopped deserialising
+        // both sides returned "github" and the test stayed green. The fixture
+        // carries the real label.
         val layout = d("projects.layout")
-        val first = layout.kind.options.first()
-        assertEquals(layout.optionLabel(first), layout.inWords(first))
+        assertEquals("github: root/owner/repo", layout.inWords("github"))
+        assertEquals("flat: root/repo", layout.inWords("flat"))
+        assertEquals("nonesuch", layout.inWords("nonesuch"), "an unknown option is its own name")
+        // And a choice_set reads every member by its label.
+        val reasons = d("work.auto_tidy_reasons")
+        assertEquals("Done and idle, PR merged, idle", reasons.inWords("done_idle,pr_merged_idle"))
+        assertEquals("Done and idle", reasons.inWords(" done_idle "), "trimmed")
+
+        // A `secs` value reads in its own unit, which no test asked for.
+        assertEquals("1 hours", d("gc.bg_idle_secs").inWords("3600"))
+        assertEquals("60 minutes", d("health.hooks_silent_secs").inWords("3600"))
+    }
+
+    /**
+     * Both directions, at every factor the fixture carries, with the
+     * non-multiples that were the whole problem.
+     *
+     * The conversion was tested at ONE factor (hours) on three inputs, plus a
+     * line on `work.recent_days` — which is `kind: int`, so its factor is 1 and
+     * that line exercises the identity path, not seconds→days. A table would
+     * have caught the two divergences from `pages.ts` this now pins: wholeness
+     * tested before rounding (so `7199` s in hours printed "2.0" where the
+     * desktop prints "2") and ties-to-even instead of half-up (`450` s in hours
+     * is exactly 0.125 → exactly 12.5 scaled, so "0.12" against "0.13").
+     */
+    @Test
+    fun seconds_convert_both_ways_at_every_factor_the_hub_uses() {
+        val hours = d("gc.bg_idle_secs")
+        val minutes = d("health.hooks_silent_secs")
+        assertEquals(3600L, hours.unitFactor())
+        assertEquals(60L, minutes.unitFactor())
+
+        // (descriptor, stored, shown) — shown is what a person reads and types.
+        val table = listOf(
+            Triple(minutes, "0", "0"),
+            Triple(minutes, "60", "1"),
+            Triple(minutes, "3600", "60"),
+            Triple(minutes, "90", "1.5"),
+            Triple(hours, "0", "0"),
+            Triple(hours, "3600", "1"),
+            Triple(hours, "5400", "1.5"),
+            Triple(hours, "21600", "6"),
+            // Half-up, not ties-to-even: exactly 12.5 hundredths.
+            Triple(hours, "450", "0.13"),
+            // Whole AFTER rounding, so no trailing ".0".
+            Triple(hours, "7199", "2"),
+            Triple(hours, "3601", "1"),
+            Triple(hours, "315360000", "87600"),
+        )
+        for ((desc, stored, shown) in table) {
+            assertEquals(shown, desc.toDisplay(stored), "${desc.key}: $stored shows as")
+        }
+
+        // A whole number of the shown unit round-trips exactly, both ways.
+        for ((desc, stored) in listOf(
+            minutes to "0", minutes to "60", minutes to "3600", minutes to "90",
+            hours to "0", hours to "3600", hours to "5400", hours to "21600",
+        )) {
+            val shown = desc.toDisplay(stored)
+            assertEquals(
+                Result.success(stored),
+                desc.fromDisplay(shown),
+                "${desc.key}: $stored → $shown → back",
+            )
+        }
+
+        // And where it does NOT: two decimals cannot hold every second, so a
+        // non-multiple comes back rounded. Pinned, not claimed as exact — the
+        // desktop's `pages.ts` loses the same seconds, and Save is gated on
+        // `draft != shown`, so an untouched field is never written back.
+        assertEquals(Result.success("7200"), hours.fromDisplay(hours.toDisplay("7199")))
+        assertEquals(Result.success("288"), hours.fromDisplay(hours.toDisplay("300")))
+    }
+
+    /**
+     * `fromDisplay` refuses what is not a number — including Kotlin's own float
+     * suffixes.
+     *
+     * `String.toDouble` reads `"2d"`, `"2f"` and `"2D"` as 2.0, so a typo went
+     * to the hub as a valid value where the desktop's `Number("2d")` is NaN and
+     * refuses it. On an hours field "2d" silently meant two HOURS. It also
+     * parses differently on Android and on Kotlin/Native.
+     */
+    @Test
+    fun a_typed_number_is_digits_and_at_most_one_point() {
+        val hours = d("gc.bg_idle_secs")
+        for (bad in listOf("2d", "2f", "2D", "2F", "1e3", "0x10", "+2", " 2 2 ", "two", "", "   ", ".5", "2.", "-1", "NaN", "Infinity")) {
+            assertTrue(hours.fromDisplay(bad).isFailure, "`$bad` is not a number a field may send")
+        }
+        for (good in listOf("0", "2", "0.5", "1.25", " 6 ")) {
+            assertTrue(hours.fromDisplay(good).isSuccess, "`$good` is one")
+        }
+    }
+
+    /**
+     * [PageItem.of] on items the hub would not send.
+     *
+     * The parser is defensive everywhere except the `when` decode, which threw
+     * `SerializationException` on a wrong-typed member — inside composition, so
+     * a UI crash rather than an empty row. A condition that cannot be read is
+     * now no condition, which is how a MISSING one already behaves.
+     */
+    @Test
+    fun a_malformed_item_is_parsed_rather_than_thrown() {
+        fun item(vararg pairs: Pair<String, kotlinx.serialization.json.JsonElement>) =
+            kotlinx.serialization.json.JsonObject(pairs.toMap())
+        fun s(v: String) = kotlinx.serialization.json.JsonPrimitive(v)
+
+        val noKey = PageItem.of(item("type" to s("field")))
+        assertEquals(PageItem.Field("", null, null), noKey)
+
+        val numberKey = PageItem.of(item("type" to s("field"), "key" to kotlinx.serialization.json.JsonPrimitive(7)))
+        assertEquals("", (numberKey as PageItem.Field).key, "a non-string key is no key")
+
+        assertEquals(PageItem.Elsewhere("source"), PageItem.of(item("type" to s("source"))))
+        assertEquals(PageItem.Elsewhere(""), PageItem.of(item()), "no type at all")
+
+        // A `when` that is not an object, and one whose member is the wrong
+        // type: neither throws, and the field is SHOWN (no condition means
+        // "always holds"), not silently hidden.
+        val notObject = PageItem.of(item("type" to s("field"), "key" to s("k"), "when" to s("nonsense")))
+        assertEquals(null, (notObject as PageItem.Field).condition)
+        val badMember = PageItem.of(
+            kotlinx.serialization.json.JsonObject(
+                mapOf(
+                    "type" to s("field"),
+                    "key" to s("k"),
+                    "when" to kotlinx.serialization.json.JsonObject(mapOf("eq" to kotlinx.serialization.json.JsonPrimitive(7))),
+                ),
+            ),
+        )
+        assertEquals(null, (badMember as PageItem.Field).condition)
+        assertTrue(badMember.condition.holds(emptyMap()), "shown, not hidden")
+    }
+
+    /**
+     * A page's tabs are a structure, not a bag of sections.
+     *
+     * `allSections` flattened them, so `settings.work` — tabs-only (Detection /
+     * Tidy-up / Retention) — drew its six sections run together with the three
+     * tab names gone, and a tab's own `when` was never evaluated.
+     */
+    @Test
+    fun a_pages_tabs_keep_their_titles_and_their_conditions() {
+        val work = registry.pages.single { it.id == "settings.work" }
+        assertTrue(work.tabs.size > 1, "the fixture's tabs-only page")
+        assertEquals(emptyList(), work.sections, "it places nothing outside a tab")
+
+        val titles = work.shownTabs(emptyMap()).map { it.title }
+        assertEquals(work.tabs.map { it.title }, titles, "no tab carries a condition today")
+
+        // One tab at a time, and the page's own sections with it.
+        val first = work.shownSections(emptyMap(), 0)
+        val second = work.shownSections(emptyMap(), 1)
+        assertEquals(work.tabs[0].sections, first)
+        assertEquals(work.tabs[1].sections, second)
+        assertTrue(first != second, "a tab is not every tab")
+        assertEquals(work.allSections.size, work.tabs.sumOf { it.sections.size })
+
+        // A tab whose condition fails is not offered, and index 0 is then the
+        // first one that IS.
+        val gated = work.copy(
+            tabs = listOf(work.tabs[0].copy(condition = Condition(key = "k", eq = "no"))) + work.tabs.drop(1),
+        )
+        assertEquals(work.tabs.drop(1).map { it.title }, gated.shownTabs(mapOf("k" to "yes")).map { it.title })
+        assertEquals(work.tabs[1].sections, gated.shownSections(mapOf("k" to "yes"), 0))
+
+        // An out-of-range tab reads as the first, never as a crash.
+        assertEquals(work.tabs[0].sections, work.shownSections(emptyMap(), 99))
+        // A page with no tabs is its own sections.
+        val flat = registry.pages.single { it.id == "settings.automation" }
+        assertEquals(flat.sections, flat.shownSections(emptyMap()))
     }
 
     @Test

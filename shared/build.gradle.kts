@@ -130,8 +130,19 @@ val pagesRegistryFixture = tasks.register("generatePagesRegistryFixture") {
     doLast {
         val text = source.asFile.readText()
         require("\"\"\"" !in text) { "the fixture cannot be embedded in a raw string: it contains three quotes" }
-        require(text.toByteArray().size < 65_000) { "a JVM string constant holds under 64 KiB" }
         val escaped = text.replace("$", "\${'$'}")
+        // The ESCAPED string is what becomes the constant, and the JVM's limit
+        // (65,535 bytes of modified UTF-8 in the constant pool) applies to that,
+        // not to the file. Measuring the file was measuring the wrong string —
+        // and the margin was thin enough to matter: an honest re-copy of the
+        // hub's registry would have failed the BUILD rather than a test. The
+        // fixture is cut to the fields this app's model declares, which is both
+        // what keeps it under the limit and what makes the drift test honest.
+        require(escaped.toByteArray().size < 65_000) {
+            "the pages fixture is ${escaped.toByteArray().size} bytes escaped; a JVM string " +
+                "constant holds under 64 KiB. Cut it to the fields the model reads, or hold it " +
+                "as a resource instead of a constant."
+        }
         val out = outDir.get().file("dev/claudefleet/mobile/model/PagesRegistryFixture.kt").asFile
         out.parentFile.mkdirs()
         out.writeText(

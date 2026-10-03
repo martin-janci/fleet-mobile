@@ -55,7 +55,20 @@ fun SettingsScreen(
         // `SettingsViewModel` into this task's scope.
         val errorAsFriendly = state.error?.asGenericFriendly()
         ErrorBanner(errorAsFriendly, onDismiss = onDismissError)
-        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+        // A scroll state PER MODE. One call site spanning both branches meant
+        // the list's offset carried into an open page, and `ScrollState` only
+        // clamps to the new `maxValue` — with nine page rows and the four
+        // fields above them, the offset needed to reach the lower entries is
+        // larger than the top of a tall page like `settings.limits`, so it was
+        // not clamped away: the page opened with its back button, its title and
+        // its first section already scrolled off.
+        val listScroll = rememberScrollState()
+        val pageScroll = rememberScrollState()
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(if (fleetPageOpen) pageScroll else listScroll),
+        ) {
             Spacer(Modifier.height(8.dp))
             if (fleetPageOpen) {
                 fleetSettings()

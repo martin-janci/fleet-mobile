@@ -18,8 +18,25 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** A change that needs the person's yes first: the setting's own sentence. */
-data class PendingConfirm(val key: String, val value: String, val label: String, val message: String)
+/**
+ * A change that needs the person's yes first: the setting's own sentence.
+ *
+ * [proposalId] is set when the change is a PROPOSAL being applied rather than a
+ * field being typed. The confirm gate lived in `set()` only, so `decide` — the
+ * screen's second write path — applied a confirm-level change with no question
+ * asked. The hub refuses to record a proposal for a confirm-level setting
+ * (`Danger::Confirm` implies `AiPolicy::Never`), so the window is narrow: a
+ * proposal left for a key to which the hub LATER adds `.danger(...)` survives
+ * the upgrade, because only decided rows are pruned. Narrow is not none, and
+ * the desktop's `ReviewApply` gates it.
+ */
+data class PendingConfirm(
+    val key: String,
+    val value: String,
+    val label: String,
+    val message: String,
+    val proposalId: Long? = null,
+)
 
 /** What the fleet's settings pages draw. */
 data class FleetSettingsUiState(
@@ -44,6 +61,18 @@ data class FleetSettingsUiState(
     val fieldErrors: Map<String, String> = emptyMap(),
     val confirm: PendingConfirm? = null,
     val error: String? = null,
+    /**
+     * Bumped whenever a write ENDED without changing `values` — a no-op the
+     * view model dropped. The field's draft is keyed on it, so the text goes
+     * back to the hub's value instead of keeping a spelling of it that is not.
+     */
+    val settled: Int = 0,
+    /**
+     * The values on screen may be behind the hub: a decision was applied and
+     * the re-read of the settings failed. The screen says so rather than
+     * showing a stale number as current.
+     */
+    val valuesStale: Boolean = false,
 ) {
     val page: Page? get() = pages.firstOrNull { it.id == openPage }
 
@@ -119,11 +148,19 @@ class FleetSettingsViewModel(
                 // every await inside the boundary, so none of them can escape
                 Triple(pages.await(), described.await(), pending.await())
             }
+            val offered = offeredPages(pages)
             _state.update {
                 it.copy(
                     loading = false,
                     loaded = true,
-                    pages = offeredPages(pages),
+                    pages = offered,
+                    // A reload that no longer offers the open page left the
+                    // screen in page mode with no page: `PageList` is drawn
+                    // inside that branch, so there was no back button and no
+                    // Hub / Access / Forget rows either — the only way out was
+                    // to open another page, or none at all if the hub came back
+                    // with an empty list.
+                    openPage = it.openPage?.takeIf { id -> offered.any { p -> p.id == id } },
                     descriptors = descs.associateBy { d -> d.key },
                     values = descs.associate { d -> d.key to d.value },
                     proposals = p?.proposals.orEmpty(),
@@ -155,7 +192,15 @@ class FleetSettingsViewModel(
     fun set(key: String, value: String) {
         val s = _state.value
         if (!s.editable(key) || key in s.busy) return
-        if (s.values[key] == value) return
+        if (s.values[key] == value) {
+            // A write the view model drops is still an ANSWER: `"60.0"` or
+            // `"060"` for a stored `60` normalises to the value the hub already
+            // has, and returning silently left Save live, the tap doing
+            // nothing, and the field showing the person's text rather than the
+            // hub's value. Bumping `settled` re-seeds the draft.
+            _state.update { it.copy(settled = it.settled + 1, fieldErrors = it.fieldErrors - key) }
+            return
+        }
         val d = s.descriptors.getValue(key)
         if (d.danger.confirms && value != d.default) {
             _state.update { it.copy(confirm = PendingConfirm(key, value, d.label, d.danger.message.orEmpty())) }
@@ -167,7 +212,15 @@ class FleetSettingsViewModel(
     fun confirm() {
         val c = _state.value.confirm ?: return
         _state.update { it.copy(confirm = null) }
-        write(c.key, c.value)
+        val id = c.proposalId
+        if (id == null) {
+            write(c.key, c.value)
+            return
+        }
+        val tag = "#$id"
+        if (tag in _state.value.busy) return
+        _state.update { it.copy(busy = it.busy + tag) }
+        applyDecision(id, apply = true, tag = tag)
     }
 
     fun cancelConfirm() {
@@ -185,7 +238,16 @@ class FleetSettingsViewModel(
         scope.launch {
             try {
                 val all = actions.set(key, value)
-                _state.update { it.copy(values = it.values + all, busy = it.busy - key) }
+                _state.update {
+                    it.copy(
+                        values = it.values + all,
+                        busy = it.busy - key,
+                        // The hub may normalise to what it already had (a
+                        // trimmed text, a clamped number), so the draft is
+                        // re-seeded here too.
+                        settled = it.settled + 1,
+                    )
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {
@@ -194,12 +256,38 @@ class FleetSettingsViewModel(
         }
     }
 
-    /** Apply or reject one proposal, then read the values and the review again. */
+    /**
+     * Apply or reject one proposal, then read the values and the review again.
+     *
+     * An APPLY of a confirm-level change asks first, like typing one does.
+     */
     fun decide(proposalId: Long, apply: Boolean): Job? {
         val s = _state.value
         val tag = "#$proposalId"
         if (!s.canWrite || tag in s.busy) return null
+        if (apply) {
+            val p = s.proposals.firstOrNull { it.id == proposalId }
+            val d = p?.let { s.descriptors[it.key] }
+            if (p != null && d != null && d.danger.confirms && p.value != d.default) {
+                _state.update {
+                    it.copy(
+                        confirm = PendingConfirm(
+                            p.key,
+                            p.value,
+                            d.label,
+                            d.danger.message.orEmpty(),
+                            proposalId = proposalId,
+                        ),
+                    )
+                }
+                return null
+            }
+        }
         _state.update { it.copy(busy = it.busy + tag) }
+        return applyDecision(proposalId, apply, tag)
+    }
+
+    private fun applyDecision(proposalId: Long, apply: Boolean, tag: String): Job {
         return scope.launch {
             try {
                 val d = actions.decide(
@@ -207,13 +295,35 @@ class FleetSettingsViewModel(
                     reject = if (apply) emptyList() else listOf(proposalId),
                 )
                 val failed = d.failed.firstOrNull()?.error
-                val descs = if (d.applied.isNotEmpty()) actions.describe() else null
+                val refused = d.failed.any { f -> f.id == proposalId }
+                // Both re-reads are non-fatal, and BOTH after the decision the
+                // hub has already made: letting `describe()` throw out of here
+                // reached the outer catch, which touches neither `values` nor
+                // `proposals` — so the field showed the old value, the proposal
+                // still offered Apply, and the hub had applied it. A failed
+                // re-read marks the values stale instead.
+                val descs = if (d.applied.isNotEmpty()) {
+                    runCatching { actions.describe() }.getOrNull()
+                } else {
+                    null
+                }
+                val staleNow = d.applied.isNotEmpty() && descs == null
                 val pending = runCatching { actions.pending() }.getOrNull()
                 _state.update {
                     it.copy(
                         busy = it.busy - tag,
-                        values = descs?.associate { x -> x.key to x.value } ?: it.values,
-                        proposals = pending?.proposals ?: it.proposals.filterNot { p -> p.id == proposalId },
+                        // Merged, not replaced: `decide` fetches a hub-wide
+                        // snapshot, and a field write that finished while this
+                        // was in flight would otherwise be rolled back on
+                        // screen by a map read before it.
+                        values = descs?.let { x -> it.values + x.associate { y -> y.key to y.value } } ?: it.values,
+                        valuesStale = it.valuesStale || staleNow,
+                        // A proposal the hub REFUSED is still the hub's: it was
+                        // dropped locally whenever the `pending()` re-read also
+                        // failed, so a proposal that is still there vanished
+                        // from the screen.
+                        proposals = pending?.proposals
+                            ?: if (refused) it.proposals else it.proposals.filterNot { p -> p.id == proposalId },
                         error = failed,
                     )
                 }
@@ -227,5 +337,10 @@ class FleetSettingsViewModel(
 
     fun dismissError() {
         _state.update { it.copy(error = null) }
+    }
+
+    /** Clear the stale-values mark: the next successful read did answer. */
+    fun clearStale() {
+        _state.update { it.copy(valuesStale = false) }
     }
 }

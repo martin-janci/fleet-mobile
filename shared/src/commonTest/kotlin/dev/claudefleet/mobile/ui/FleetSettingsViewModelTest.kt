@@ -13,6 +13,8 @@ import dev.claudefleet.mobile.model.SettingsDecided
 import dev.claudefleet.mobile.model.SettingsPending
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.json
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.Serializable
@@ -233,5 +235,256 @@ class FleetSettingsViewModelTest {
             vm.dismissError()
             assertNull(vm.state.value.error)
         }
+    }
+
+    /**
+     * A write the view model drops as a no-op still ANSWERS the field.
+     *
+     * `"60.0"` or `"060"` for a stored `60` normalises to the value the hub
+     * already has, and returning silently changed no state — so the draft kept
+     * the person's spelling, Save stayed live, and tapping it did nothing, for
+     * ever. `settled` is the one thing the field's draft is re-keyed on.
+     */
+    @Test
+    fun a_write_the_model_drops_still_re_seeds_the_field() = runTest {
+        val hub = FakeHub()
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+        val key = "work.recent_days"
+        val now = vm.state.value.values.getValue(key)
+        val before = vm.state.value.settled
+
+        vm.set(key, now)
+        runCurrent()
+
+        assertTrue(vm.state.value.settled > before, "the field is told the write settled")
+        assertFalse(hub.calls.any { it.startsWith("set_setting $key") }, "and nothing was sent")
+
+        // A real write settles it too: the hub may normalise to what it had.
+        val real = vm.state.value.settled
+        vm.set(key, "7")
+        runCurrent()
+        assertTrue(vm.state.value.settled > real)
+        assertEquals("7", vm.state.value.values.getValue(key))
+    }
+
+    /**
+     * A reload that no longer offers the open page does not strand the screen.
+     *
+     * `PageList` is drawn INSIDE the page-mode branch, so a page id that no
+     * longer matches left no back button, no Hub / Access / Forget rows, and —
+     * if the hub came back with nothing — no way out at all.
+     */
+    @Test
+    fun a_reload_that_drops_the_open_page_closes_it() = runTest {
+        val hub = object : FleetSettingsActions by FakeHub() {
+            var offer = true
+            override suspend fun pages() =
+                if (offer) PagesBundle(registry.pages) else PagesBundle(emptyList())
+        }
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+        vm.open("settings.automation")
+        assertEquals("settings.automation", vm.state.value.openPage)
+
+        hub.offer = false
+        vm.load(); runCurrent()
+
+        assertNull(vm.state.value.openPage, "a page the hub no longer offers is not open")
+        assertEquals(emptyList(), vm.state.value.pages)
+
+        // And a reload that still offers it leaves it alone.
+        hub.offer = true
+        vm.open("settings.automation")
+        vm.load(); runCurrent()
+        assertEquals("settings.automation", vm.state.value.openPage)
+    }
+
+    /**
+     * Applying a confirm-level PROPOSAL asks first, as typing one does.
+     *
+     * The confirm gate lived in `set()` only, so `decide` — the screen's second
+     * write path — applied such a change with no question. The hub refuses to
+     * record a proposal for a confirm-level setting, so the window is narrow: a
+     * proposal left for a key the hub LATER marks `.danger(...)` survives,
+     * because only decided rows are pruned.
+     */
+    @Test
+    fun applying_a_confirm_level_proposal_asks_first() = runTest {
+        val hub = FakeHub(proposals = listOf(proposal(id = 9, key = "gc.enabled", value = "true")))
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+
+        assertNull(vm.decide(9, apply = true), "nothing is sent yet")
+        runCurrent()
+        val c = assertNotNull(vm.state.value.confirm)
+        assertEquals("gc.enabled", c.key)
+        assertEquals(9L, c.proposalId)
+        assertTrue(c.message.isNotEmpty(), "the setting's own sentence")
+        assertFalse(hub.calls.any { it.startsWith("decide") })
+
+        vm.confirm(); runCurrent()
+        assertTrue(hub.calls.any { it == "decide [9] []" }, "${hub.calls}")
+        assertEquals("true", vm.state.value.values.getValue("gc.enabled"))
+        assertNull(vm.state.value.confirm)
+    }
+
+    /** Cancelling it sends nothing, and the proposal is still there. */
+    @Test
+    fun cancelling_that_question_leaves_the_proposal_waiting() = runTest {
+        val hub = FakeHub(proposals = listOf(proposal(id = 9, key = "gc.enabled", value = "true")))
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+        vm.decide(9, apply = true); runCurrent()
+
+        vm.cancelConfirm(); runCurrent()
+
+        assertNull(vm.state.value.confirm)
+        assertFalse(hub.calls.any { it.startsWith("decide") })
+        assertEquals(1, vm.state.value.proposals.size)
+    }
+
+    /** REJECTING one never asks: nothing is applied. */
+    @Test
+    fun rejecting_a_confirm_level_proposal_asks_nothing() = runTest {
+        val hub = FakeHub(proposals = listOf(proposal(id = 9, key = "gc.enabled", value = "true")))
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+
+        assertNotNull(vm.decide(9, apply = false))
+        runCurrent()
+
+        assertNull(vm.state.value.confirm)
+        assertTrue(hub.calls.any { it == "decide [] [9]" }, "${hub.calls}")
+    }
+
+    /**
+     * A proposal the hub REFUSED stays on screen.
+     *
+     * The local removal ran whether or not the id was in `failed`, so whenever
+     * the `pending()` re-read also failed — it is swallowed — a proposal the
+     * hub still holds vanished from the phone.
+     */
+    @Test
+    fun a_refused_decision_leaves_its_proposal_on_screen() = runTest {
+        // The first `pending()` has to succeed, or `load()` reports and never
+        // trusts the device; the re-read after the decision is the one that
+        // fails, which is the case being pinned.
+        val seed = FakeHub(proposals = listOf(proposal(id = 4)))
+        val hub = object : FleetSettingsActions by seed {
+            var loaded = false
+            override suspend fun pending(): SettingsPending {
+                if (!loaded) {
+                    loaded = true
+                    return seed.pending()
+                }
+                throw HubError.Http(503, "down")
+            }
+            override suspend fun decide(accept: List<Long>, reject: List<Long>) =
+                SettingsDecided(failed = listOf(DecideFailure(4, "no longer waiting for review")))
+        }
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+        assertEquals(1, vm.state.value.proposals.size)
+
+        vm.decide(4, apply = false); runCurrent()
+
+        assertEquals(1, vm.state.value.proposals.size, "the hub refused it: it is still the hub's")
+        assertNotNull(vm.state.value.error)
+    }
+
+    /**
+     * A decision whose re-read fails marks the values STALE rather than showing
+     * an old number as current.
+     *
+     * `describe()` was awaited outside any guard, so a failure after the hub had
+     * already applied the proposal reached the outer catch — which touches
+     * neither `values` nor `proposals`, so the field showed the old value and
+     * the proposal still offered Apply.
+     */
+    @Test
+    fun a_decision_whose_re_read_fails_says_the_values_are_stale() = runTest {
+        val seed = FakeHub(proposals = listOf(proposal(id = 4)))
+        var failDescribe = false
+        val hub = object : FleetSettingsActions by seed {
+            override suspend fun describe(): List<SettingDescriptor> {
+                if (failDescribe) throw HubError.Http(503, "down")
+                return seed.describe()
+            }
+        }
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+        failDescribe = true
+
+        vm.decide(4, apply = true); runCurrent()
+
+        assertTrue(vm.state.value.valuesStale, "the screen knows it is behind")
+        assertEquals(emptyList(), vm.state.value.proposals, "the hub applied it, so it is gone")
+        vm.clearStale()
+        assertFalse(vm.state.value.valuesStale)
+    }
+
+    /**
+     * A failing `list_pages` is reported and the SCOPE survives.
+     *
+     * Nothing drove `load()` with a failing read, which is why the unconfined
+     * `async` fan-out shipped: one refused settings read tore down the shared
+     * work scope and reached the uncaught handler. The assertion that matters
+     * is the last one.
+     */
+    @Test
+    fun a_failing_page_read_is_reported_and_the_scope_lives() = runTest {
+        val hub = FakeHub().apply { failPages = HubError.Http(503, "down") }
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+
+        assertNotNull(vm.state.value.error)
+        assertFalse(vm.state.value.loaded)
+        assertFalse(vm.state.value.loading)
+        assertTrue(this.isActive, "the shared work scope must survive a refused read")
+    }
+
+    /** A second write to a key already in flight is dropped, not queued. */
+    @Test
+    fun a_write_to_a_busy_key_is_dropped() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val seed = FakeHub()
+        val hub = object : FleetSettingsActions by seed {
+            override suspend fun set(key: String, value: String): Map<String, String> {
+                gate.await()
+                return seed.set(key, value)
+            }
+        }
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+        vm.set("work.recent_days", "7"); runCurrent()
+        assertTrue("work.recent_days" in vm.state.value.busy)
+
+        vm.set("work.recent_days", "9"); runCurrent()
+        gate.complete(Unit); runCurrent()
+
+        assertEquals("7", vm.state.value.values.getValue("work.recent_days"), "the second tap was dropped")
+        assertEquals(1, seed.calls.count { it.startsWith("set_setting work.recent_days") })
+    }
+
+    /** `refuse` shows a message against one field without sending anything, and
+     *  opening or leaving a page clears what was shown. */
+    @Test
+    fun a_refusal_the_phone_made_itself_is_shown_and_cleared_by_navigation() = runTest {
+        val hub = FakeHub()
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+
+        vm.refuse("work.recent_days", "Recent: enter a whole number")
+        assertEquals("Recent: enter a whole number", vm.state.value.fieldErrors["work.recent_days"])
+        assertFalse(hub.calls.any { it.startsWith("set_setting") })
+
+        vm.open("settings.automation")
+        assertEquals(emptyMap(), vm.state.value.fieldErrors, "a new page starts clean")
+
+        vm.refuse("work.recent_days", "again")
+        assertTrue(vm.back(), "the page was open")
+        assertEquals(emptyMap(), vm.state.value.fieldErrors)
+        assertFalse(vm.back(), "and back from the list is nothing to do")
     }
 }
