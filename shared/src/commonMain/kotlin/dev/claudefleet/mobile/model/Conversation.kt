@@ -193,6 +193,26 @@ private fun ConvTurn.identity(): Pair<String?, String?> = at to prompt
  */
 fun Conversation.tailMarker(): Pair<Int, String?> = turns.size to turns.lastOrNull()?.endedAt
 
+/**
+ * How many turns this conversation has at its **newest end** that [earlier]
+ * did not — the turns after the one [earlier] ended on.
+ *
+ * Counted from the newest end only: an older turn that appears at the head
+ * (a wider read reaching further back) is history arriving, not something
+ * new to read, so it never counts. Found by the same identity [appending]
+ * splices on; when [earlier]'s newest turn is no longer here at all (its
+ * identity drifted, or the windows are disjoint), every turn [earlier] did
+ * not hold counts instead.
+ */
+fun Conversation.turnsAddedAfter(earlier: Conversation): Int {
+    val newest = earlier.turns.lastOrNull() ?: return 0
+    val id = newest.identity()
+    val at = turns.indexOfLast { it.identity() == id }
+    if (at >= 0) return turns.size - 1 - at
+    val held = earlier.turns.mapTo(HashSet()) { it.identity() }
+    return turns.count { it.identity() !in held }
+}
+
 /** One turn: the human prompt that opened it and what the agent said or did. */
 @Serializable
 data class ConvTurn(
@@ -274,6 +294,14 @@ sealed class ConvItem {
      * A `Task` / `Agent` call, which the hub keeps apart from other tools so
      * its final text can be shown without cramming a subagent transcript into
      * a one-liner. This fleet runs subagents constantly, so these are common.
+     *
+     * A `Workflow` call arrives here too, with [name] `"Workflow"` and no
+     * [agentType] (`BLOCK_TOOLS` in the hub's `service/transcript.rs`). It is
+     * not a subagent — it is a script that orchestrates them — but it is the
+     * same shape to a reader: one piece of work, running for as long as it
+     * runs, with a report at the end. The hub reuses this kind rather than
+     * inventing `workflow` precisely so that a phone already in somebody's
+     * pocket draws the block instead of "(unsupported item: workflow)".
      */
     @Serializable
     @SerialName("subagent")

@@ -21,8 +21,9 @@ import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 
 /**
- * Settings: which hub, under what name, with what rights, on what version — and
- * one button that drops the credential.
+ * Settings: which hub, under what name, with what rights, on what version —
+ * this app's and the hub's, as two fields — and one button that drops the
+ * credential.
  *
  * **No revoke button, and not because one was left out.** Cancelling a token for
  * good is the operator's, from the hub; this app holds a client token, which the
@@ -84,7 +85,11 @@ fun SettingsScreen(
                     state.mode
                 },
             )
+            // Two programs, two versions, named apart. One "Version" field
+            // here could only ever have been one of them, and whichever it
+            // was it read as the other half the time.
             Field("App version", state.appVersion)
+            Field("Hub version", state.hubVersion)
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             fleetSettings()

@@ -96,7 +96,11 @@ refusal is a bug, not a flow.
    count per host.
 5. **Settings** — which hub, which client name, a way to forget the token
    (which does not revoke it; revocation is the operator's, from the terminal),
-   and the app's own version.
+   and two versions: this app's own and the hub's, as separate fields. They
+   are two programs on two release trains — a phone updated from the store, a
+   hub the operator upgrades — so one "version" field could only ever have
+   been one of them. The hub's is read from `fleet_health` each time the
+   screen opens, and shows a dash when the hub does not answer.
 
 ### Events
 

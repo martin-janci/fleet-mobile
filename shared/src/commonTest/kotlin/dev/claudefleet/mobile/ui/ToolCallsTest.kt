@@ -104,6 +104,20 @@ class ToolCallsTest {
         assertEquals(ToolKind.Other, toolKind("WebFetch"))
     }
 
+    @Test
+    fun a_block_is_headed_by_its_agent_type_or_by_its_own_name() {
+        val sub = { type: String?, name: String ->
+            ConvItem.Subagent(agentType = type, name = name).typeLabel()
+        }
+        assertEquals("Explore", sub("Explore", "Task"), "the agent type when there is one")
+        assertEquals("subagent", sub(null, "Task"))
+        assertEquals("subagent", sub(null, "Agent"))
+        assertEquals("subagent", sub(null, ""), "an older hub sent no name at all")
+        // The case this exists for: a workflow shares the `subagent` kind and
+        // has no agent type, and heading it "subagent" would be a lie.
+        assertEquals("workflow", sub(null, "Workflow"))
+    }
+
     // ─── Grouping ───────────────────────────────────────────────────────
 
     @Test

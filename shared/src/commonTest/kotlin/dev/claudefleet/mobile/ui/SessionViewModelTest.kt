@@ -1767,6 +1767,77 @@ class SessionViewModelTest {
         assertFalse(vm.state.value.newReply)
     }
 
+    // ---- unseen: the jump pill's count ----
+
+    /** Turns that arrive at the newest end while the reader is away are counted, read by read. */
+    @Test
+    fun turns_arriving_while_scrolled_away_are_counted_across_reads() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "a")))
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        vm.onAtBottom(false)
+
+        actions.answer = Conversation(listOf(turn("t1", "a"), turn("t2", "b"), turn("t3", "c")))
+        vm.refresh().join()
+        actions.answer = Conversation(listOf(turn("t3", "c"), turn("t4", "d")))
+        vm.refresh().join()
+        runCurrent()
+
+        assertEquals(3, vm.state.value.unseen)
+    }
+
+    /** A reader at the newest turn is following it; nothing is unseen. */
+    @Test
+    fun turns_arriving_at_the_bottom_are_not_counted() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "a")))
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+
+        actions.answer = Conversation(listOf(turn("t1", "a"), turn("t2", "b")))
+        vm.refresh().join()
+        runCurrent()
+
+        assertEquals(0, vm.state.value.unseen)
+    }
+
+    /** The live turn growing is a new reply, not a new turn: the pill says so, the count does not move. */
+    @Test
+    fun the_live_turn_growing_sets_newReply_without_counting_a_turn() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "a", text("working")).copy(endedAt = "e1")))
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        vm.onAtBottom(false)
+
+        actions.answer = Conversation(listOf(turn("t1", "a", text("working"), text("more")).copy(endedAt = "e2")))
+        vm.refresh().join()
+        runCurrent()
+
+        assertTrue(vm.state.value.newReply)
+        assertEquals(0, vm.state.value.unseen)
+    }
+
+    /** Getting back to the bottom — by the pill or by scrolling — clears the count with `newReply`. */
+    @Test
+    fun onAtBottom_true_clears_the_unseen_count() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(listOf(turn("t1", "a")))
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        vm.onAtBottom(false)
+        actions.answer = Conversation(listOf(turn("t1", "a"), turn("t2", "b")))
+        vm.refresh().join()
+        runCurrent()
+        assertEquals(1, vm.state.value.unseen, "setup: a turn must be counted before this test can check it clears")
+
+        vm.onAtBottom(true)
+        runCurrent()
+
+        assertEquals(0, vm.state.value.unseen)
+    }
+
     /** `onAtBottom(false)` alone, with nothing new arriving, is not itself a new reply. */
     @Test
     fun onAtBottom_false_alone_does_not_set_newReply() = runTest {

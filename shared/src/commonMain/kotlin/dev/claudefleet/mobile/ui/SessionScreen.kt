@@ -9,6 +9,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +30,7 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -36,6 +38,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -58,6 +62,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -69,6 +74,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -93,6 +99,7 @@ import dev.claudefleet.mobile.ui.components.contextIsTight
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.data.ConnectionStatus
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.milliseconds
@@ -117,7 +124,7 @@ private val QUICK_REPLY_CAPTION_MAX = 200.dp
  * its label. Only a device can show whether any of this reads well; what
  * *should* happen for a given state is in [SessionViewModel] and tested
  * there, and the pure index arithmetic behind the pill and the turn-stepping
- * buttons is in [newestItemIndex] and [adjacentTurn].
+ * buttons is in [newestFirst] and [adjacentTurn].
  */
 @Composable
 fun SessionScreen(
@@ -175,36 +182,54 @@ fun SessionScreen(
     toolDetails: ToolDetailsHost = ToolDetailsHost.None,
 ) {
     val turns = state.conversation.turns
+    val truncated = state.conversation.truncated
+    // Newest first, under a `reverseLayout` list: item 0 is the newest turn
+    // and is drawn against the bottom edge. A list that has never scrolled
+    // (index 0, offset 0) is therefore already showing it on the very first
+    // frame that has turns at all — there is no "scroll to the last item
+    // once it has loaded" step, which is what used to draw the oldest turns
+    // first and then visibly jump. See [newestFirst].
+    val rows = remember(turns) { newestFirst(turns) }
+    val newestKey = rows.firstOrNull()?.key
+    val lastItem = rows.size - 1 + if (truncated) 1 else 0
+    // One state for the life of this screen — not keyed on the turns, so a
+    // read never resets the reader's position.
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val newest = newestItemIndex(turns.size, state.conversation.truncated)
-    // Newest at the bottom, so new output should bring the view with it —
-    // but only for someone who was already at the bottom. This used to fire
-    // unconditionally and yank the view down while a person was scrolled up
-    // reading, and it keyed on `turns.size`, so the live bottom turn growing
-    // — the usual case, since the agent appends items to it while it works —
-    // did not scroll at all.
-    //
-    // The key has to include `newest`. `remember(listState)` alone
-    // allocated the lambda once and closed over the `newest` of the FIRST
-    // composition — which is null, because `SessionRoute` composes this
-    // with `SessionUiState`'s initial empty `Conversation` and only then
-    // runs `vm.load()`. `newest == null` is the second disjunct, so
-    // `atBottom` was permanently true and the effect below fired
-    // unconditionally: exactly the behaviour it was written to replace.
-    // `listState` comes from `rememberLazyListState()` and never changes, so
-    // the key could never have invalidated on its own.
-    val atBottom by remember(listState, newest) {
+    val nearPx = with(LocalDensity.current) { NEAR_NEWEST.roundToPx() }
+    // At the newest turn: item 0 at the bottom edge, give or take
+    // [NEAR_NEWEST]. Derived from the list rather than latched, so scrolling
+    // back down opts back in by itself. Before the list is measured at all it
+    // reads index 0, offset 0 — at the newest — which is also the truth.
+    val atBottom by remember(listState, nearPx) {
         derivedStateOf {
-            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()
-            last == null || newest == null || last.index >= newest - 1
+            listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset <= nearPx
         }
+    }
+    // True while this screen's own scroll to the newest turn is running. A
+    // turn that arrives is first laid out below the fold (the list holds the
+    // reader's item by key), so for the length of the animation that follows
+    // it `atBottom` reads false; this keeps the jump pill and the view
+    // model's `newReply` from flashing on for a reader who never left.
+    var following by remember { mutableStateOf(false) }
+    val followJob = remember { FollowJob() }
+    fun scrollToNewest() {
+        val previous = followJob.job
+        following = true
+        val job = scope.launch { listState.animateScrollToItem(0) }
+        // Swapped in before the old one is cancelled: a job cancelled before
+        // it ever ran completes on the spot, and its handler must not see
+        // itself as the current one and clear `following` under the new one.
+        followJob.job = job
+        previous?.cancel()
+        job.invokeOnCompletion { if (followJob.job === job) following = false }
     }
 
     // The view model's own copy of `atBottom` — used for `newReply` and the
-    // pill's label — follows the screen's, not the other way round: the
+    // unseen count — follows the screen's, not the other way round: the
     // screen is the one thing that can actually see the list.
-    LaunchedEffect(atBottom) { onAtBottom(atBottom) }
+    val shownAtBottom = atBottom || following
+    LaunchedEffect(shownAtBottom) { onAtBottom(shownAtBottom) }
 
     // Remembers where this session was scrolled to across a visit to this
     // screen — closing it (navigating away; the composable leaving
@@ -221,39 +246,65 @@ fun SessionScreen(
                 ScrollAnchor(
                     firstVisibleIndex = listState.firstVisibleItemIndex,
                     firstVisibleOffset = listState.firstVisibleItemScrollOffset,
-                    atBottom = atBottom,
+                    atBottom = atBottom || following,
+                    firstVisibleKey = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.key,
                 ),
             )
         }
     }
 
-    // Whether this screen's one shot at applying a recalled anchor has
-    // already been taken. Keyed on `sessionId` for the same reason as the
-    // `DisposableEffect` above: a straight A-to-B navigation must get its own
-    // fresh consideration for B rather than inheriting "already considered"
-    // from A's.
-    var recallConsidered by remember(sessionId) { mutableStateOf(false) }
-
-    // `state.conversation.tailMarker()` — turn count and the last turn's
-    // `endedAt` together — is the one rule for "did the tail move", shared
-    // with `SessionViewModel.runGeneration`'s own `tailGrew`, rather than
-    // spelling the same pair of keys out by hand in both places.
-    LaunchedEffect(state.conversation.tailMarker(), newest, state.loaded) {
-        // On the first `loaded` this screen ever sees, a remembered anchor
-        // — one the reader was NOT at the bottom of when it was taken, see
-        // [ScrollMemory.remember] — wins over the newest turn: that is
-        // "open where you left off". Every other pass through this effect
-        // (a later turn arriving, a recall that came back empty or at the
-        // bottom) falls through to the ordinary stick-to-the-newest rule.
-        if (!recallConsidered && state.loaded) {
-            recallConsidered = true
-            val recalled = ScrollMemory.recall(sessionId)
-            if (recalled != null && !recalled.atBottom) {
-                listState.scrollToItem(recalled.firstVisibleIndex, recalled.firstVisibleOffset)
-                return@LaunchedEffect
+    // What the tail looked like the last time this screen was composed, so a
+    // change to it can be told apart from any other recomposition.
+    val tail = remember(sessionId) { TailWatch() }
+    val marker = state.conversation.tailMarker()
+    // A `SideEffect`, not a `LaunchedEffect`: it runs once the composition
+    // that carries the new turns is applied and BEFORE the frame that lays
+    // them out, so `listState` still describes what the reader was looking
+    // at — which is the whole question. A `LaunchedEffect` coroutine could
+    // run on either side of that layout, and after it the list has already
+    // moved its index to keep the reader's item in place.
+    SideEffect {
+        val previousKey = tail.newestKey
+        val previousMarker = tail.marker
+        tail.newestKey = newestKey
+        tail.marker = marker
+        if (newestKey == null) return@SideEffect
+        if (previousKey == null) {
+            // The first turns this screen shows for this session. A
+            // remembered anchor — one the reader was NOT at the bottom of when
+            // it was taken, see [ScrollMemory.remember] — wins over the newest
+            // turn: that is "open where you left off". Requested rather than
+            // scrolled to, so it lands in the same layout as the turns
+            // themselves instead of a frame later. With none, index 0: a
+            // fresh state already is, and one carried over from another
+            // session at this call site must not keep that session's place.
+            val recalled = ScrollMemory.recall(sessionId)?.takeIf { !it.atBottom }
+            if (recalled != null) {
+                val index = rows.indexOfFirst { it.key == recalled.firstVisibleKey }.takeIf { it >= 0 }
+                    ?: if (recalled.firstVisibleKey == TRUNCATED_KEY && truncated) rows.size else null
+                listState.requestScrollToItem(
+                    index ?: recalled.firstVisibleIndex.coerceIn(0, lastItem),
+                    recalled.firstVisibleOffset,
+                )
+            } else if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
+                listState.requestScrollToItem(0)
             }
+            return@SideEffect
         }
-        if (newest != null && atBottom) listState.scrollToItem(newest)
+        if (previousKey == newestKey && previousMarker == marker) return@SideEffect
+        val index = listState.firstVisibleItemIndex
+        val offset = listState.firstVisibleItemScrollOffset
+        // The live turn grew under a reader pinned to its end: `reverseLayout`
+        // keeps that end against the bottom edge by itself, nothing to scroll.
+        if (previousKey == newestKey && index == 0 && offset == 0) return@SideEffect
+        // The tail moved: a turn arrived, or the live one grew. Follow it only
+        // for a reader who was already at the newest turn (or on the way
+        // there) and is not in the middle of scrolling away from it; anyone
+        // scrolled up to read stays exactly where they are — the list holds
+        // their item by key — and the pill counts what arrived.
+        val wasAtBottom = following ||
+            (!listState.isScrollInProgress && index == 0 && offset <= nearPx)
+        if (wasAtBottom) scrollToNewest()
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -263,7 +314,6 @@ fun SessionScreen(
             onRefresh = onRefresh,
             listState = listState,
             turnCount = turns.size,
-            truncated = state.conversation.truncated,
             scope = scope,
             onRestart = onRestart,
             onSafeKill = onSafeKill,
@@ -283,6 +333,10 @@ fun SessionScreen(
         if (work.sheetOpen) WorkTicketSheet(work, workHandlers)
         if (tasks.sheetOpen) SessionTasksSheet(tasks, tasksHandlers)
 
+        // `weight(1f)`: the list takes what the bar and the footer leave, so
+        // it shrinks when the keyboard raises the footer (`App` applies the
+        // IME inset, once, with the rest of `safeDrawing`), and with
+        // `reverseLayout` the newest turn stays against the footer as it does.
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             if (state.loaded && turns.isEmpty()) {
                 EmptyConversation(state)
@@ -296,29 +350,32 @@ fun SessionScreen(
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize().testTag(CONVERSATION_LIST),
-                        // Room under the last turn, so it does not sit flush on the composer.
+                        // Item 0 — the newest turn — at the bottom.
+                        reverseLayout = true,
+                        // Room under the newest turn, so it does not sit flush on the composer.
                         contentPadding = PaddingValues(bottom = 12.dp),
                     ) {
-                        if (state.conversation.truncated) {
-                            item(key = "truncated") { TruncationNote() }
+                        turnItems(rows, working = state.session?.claudeStatus == "working")
+                        // After the oldest turn, so drawn above it.
+                        if (truncated) {
+                            item(key = TRUNCATED_KEY, contentType = TRUNCATED_KEY) { TruncationNote() }
                         }
-                        turnItems(turns, working = state.session?.claudeStatus == "working")
                     }
                 }
             }
             // The fast way back down, for whoever scrolled up to read
-            // something and either wants the bottom again or just got a
-            // fresh reply while they were up there — see `SessionUiState.newReply`.
-            if (!atBottom) {
+            // something and either wants the bottom again or got fresh
+            // turns while they were up there — see `SessionUiState.newReply`
+            // and `SessionUiState.unseen`.
+            if (!shownAtBottom) {
                 JumpToLatest(
                     newReply = state.newReply,
+                    unseen = state.unseen,
                     onClick = {
-                        newest?.let { target -> scope.launch { listState.animateScrollToItem(target) } }
-                        // Optimistic: this fires before `animateScrollToItem`
-                        // has actually finished, on the assumption that the
-                        // animation it just started will land there. The
-                        // `atBottom` derived above will confirm it once the
-                        // list settles; nothing here waits for that.
+                        scrollToNewest()
+                        // Clears `newReply` and the count now rather than
+                        // when the animation lands; `following` keeps the
+                        // screen's own report true for the length of it.
                         onAtBottom(true)
                     },
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
@@ -367,7 +424,9 @@ fun SessionScreen(
                         draft = state.draft,
                         enabled = state.canSendQuick,
                         editable = quickRepliesEditable,
-                        onSendQuick = onSendQuick,
+                        // A chip that sends is the reader answering: show
+                        // them the newest turn, where the answer will land.
+                        onSendQuick = { scrollToNewest(); onSendQuick(it) },
                         onFill = onDraftChange,
                         onAdd = onAddQuickReply,
                         onEdit = onEditQuickReply,
@@ -378,7 +437,10 @@ fun SessionScreen(
                 PromptBox(
                     state = state,
                     onDraftChange = onDraftChange,
-                    onSend = onSend,
+                    // Whoever just sent wants to see it land, wherever they
+                    // had scrolled to — and once at the newest turn, the
+                    // turn their prompt starts is followed like any other.
+                    onSend = { scrollToNewest(); onSend() },
                     onOpenHistory = onOpenHistory,
                 )
             }
@@ -387,14 +449,51 @@ fun SessionScreen(
 }
 
 /**
- * Turns have no id on the wire, so they are keyed by position. That is correct
- * here and only here: the list only ever grows at the bottom (see
- * `Conversation.appending`), so an index is stable for every turn but the last.
+ * The turns, newest first ([newestFirst]), each keyed by its identity rather
+ * than its position, so that turns arriving at the newest end leave every
+ * other item's key alone and the list can hold a scrolled-up reader still.
  */
-private fun LazyListScope.turnItems(turns: List<ConvTurn>, working: Boolean) {
-    for ((index, turn) in turns.withIndex()) {
-        item(key = "turn-$index") { Turn(turn, live = working && index == turns.lastIndex) }
+private fun LazyListScope.turnItems(rows: List<TurnRow>, working: Boolean) {
+    itemsIndexed(rows, key = { _, row -> row.key }, contentType = { _, _ -> "turn" }) { index, row ->
+        Turn(row.turn, live = working && index == 0)
     }
+}
+
+/** The truncation note's key, and its content type. */
+internal const val TRUNCATED_KEY: String = "truncated"
+
+/**
+ * How far above the newest turn's end a reader can be and still count as at
+ * the bottom — still followed when the tail moves, and shown no jump pill.
+ */
+private val NEAR_NEWEST = 48.dp
+
+/** The scroll that follows the newest turn, so a second one can replace it. */
+private class FollowJob {
+    var job: Job? = null
+}
+
+/** What the tail looked like at the screen's last composition; see `SessionScreen`'s `SideEffect`. */
+private class TailWatch {
+    var newestKey: String? = null
+    var marker: Pair<Int, String?>? = null
+}
+
+/**
+ * Bring a turn into view from its start — the prompt — rather than its end.
+ *
+ * In a `reverseLayout` list `animateScrollToItem` lines the item's **bottom**
+ * up with the bottom of the viewport. A turn shorter than the viewport is
+ * then wholly visible; a taller one would show its last lines, so the rest of
+ * the way is scrolled to put its top at the top. The item stays the first
+ * visible one throughout, which is what keeps [adjacentTurn] stepping from it.
+ */
+private suspend fun LazyListState.showTurn(index: Int) {
+    animateScrollToItem(index)
+    val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return
+    val viewport = layoutInfo.viewportSize.height - layoutInfo.beforeContentPadding - layoutInfo.afterContentPadding
+    val overflow = item.size - viewport
+    if (overflow > 0) animateScrollBy(overflow.toFloat())
 }
 
 /**
@@ -415,7 +514,6 @@ private fun SessionBar(
     onRefresh: () -> Unit,
     listState: LazyListState,
     turnCount: Int,
-    truncated: Boolean,
     scope: CoroutineScope,
     onRestart: () -> Unit,
     onSafeKill: () -> Unit,
@@ -431,14 +529,14 @@ private fun SessionBar(
     val busy = state.loading || state.refreshing
     val angle = refreshAngle(busy)
     // Recomputed from `listState.firstVisibleItemIndex` — a snapshot-backed
-    // read — whenever it moves, same as `atBottom` above it in the file; see
-    // [adjacentTurn] for what "adjacent" means once the truncation note is
-    // in the count.
-    val prevTurn by remember(listState, turnCount, truncated) {
-        derivedStateOf { adjacentTurn(listState.firstVisibleItemIndex, turnCount, truncated, -1) }
+    // read, and in this `reverseLayout` list the item at the bottom of the
+    // viewport — whenever it moves; see [adjacentTurn] for the index
+    // arithmetic of a newest-first list.
+    val prevTurn by remember(listState, turnCount) {
+        derivedStateOf { adjacentTurn(listState.firstVisibleItemIndex, turnCount, -1) }
     }
-    val nextTurn by remember(listState, turnCount, truncated) {
-        derivedStateOf { adjacentTurn(listState.firstVisibleItemIndex, turnCount, truncated, 1) }
+    val nextTurn by remember(listState, turnCount) {
+        derivedStateOf { adjacentTurn(listState.firstVisibleItemIndex, turnCount, 1) }
     }
     ScreenHeader(
         title = state.session?.displayName ?: "Session",
@@ -497,7 +595,7 @@ private fun SessionBar(
                     modifier = Modifier.weight(1f),
                 )
                 IconButton(
-                    onClick = { prevTurn?.let { target -> scope.launch { listState.animateScrollToItem(target) } } },
+                    onClick = { prevTurn?.let { target -> scope.launch { listState.showTurn(target) } } },
                     enabled = prevTurn != null,
                 ) {
                     Icon(
@@ -507,7 +605,7 @@ private fun SessionBar(
                     )
                 }
                 IconButton(
-                    onClick = { nextTurn?.let { target -> scope.launch { listState.animateScrollToItem(target) } } },
+                    onClick = { nextTurn?.let { target -> scope.launch { listState.showTurn(target) } } },
                     enabled = nextTurn != null,
                 ) {
                     Icon(
@@ -994,7 +1092,9 @@ private fun Item(item: ConvItem) {
         // exhaustiveness, and drawn the same way.
         is ConvItem.Tool -> ToolCallRow(item)
         // A subagent gets a block rather than a line: it is a whole piece of
-        // work, and its result is the part somebody scrolls back for.
+        // work, and its result is the part somebody scrolls back for. A
+        // `Workflow` call arrives as this same item and draws this same block
+        // -- see `typeLabel`.
         is ConvItem.Subagent -> Surface(
             color = MaterialTheme.colorScheme.surfaceVariant,
             contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1004,7 +1104,7 @@ private fun Item(item: ConvItem) {
             Column(modifier = Modifier.padding(10.dp)) {
                 Text(
                     text = buildString {
-                        append(item.agentType?.takeIf { it.isNotBlank() } ?: item.name.ifBlank { "subagent" })
+                        append(item.typeLabel())
                         if (!item.done) append(" — running")
                         if (item.error) append(" — failed")
                     },
@@ -1144,27 +1244,34 @@ private fun EmptyConversation(state: SessionUiState) {
 }
 
 /**
- * The fast way back down: a filled pill that floats over the conversation.
+ * The fast way back down: a filled pill that floats over the conversation,
+ * with a badge counting the turns that arrived while the reader was away.
  *
  * Was an outlined `AssistChip`, whose container is transparent — floated over
  * a transcript, the monospace tool lines showed straight through its label
  * and "↓ New reply" was unreadable exactly when there was one.
  */
 @Composable
-private fun JumpToLatest(newReply: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Surface(
-        onClick = onClick,
-        shape = CircleShape,
-        color = if (newReply) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = if (newReply) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer,
-        shadowElevation = 4.dp,
+private fun JumpToLatest(newReply: Boolean, unseen: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    BadgedBox(
+        badge = {
+            if (unseen > 0) Badge { Text(if (unseen > 99) "99+" else unseen.toString()) }
+        },
         modifier = modifier,
     ) {
-        Text(
-            text = if (newReply) "↓ New reply" else "↓ Latest",
-            style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
+        Surface(
+            onClick = onClick,
+            shape = CircleShape,
+            color = if (newReply) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = if (newReply) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer,
+            shadowElevation = 4.dp,
+        ) {
+            Text(
+                text = if (newReply) "↓ New reply" else "↓ Latest",
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
     }
 }
 
@@ -1599,22 +1706,4 @@ private fun EditQuickReplyDialog(
             }
         },
     )
-}
-
-/**
- * Which **LazyColumn item** holds the newest turn, or null when there are none.
- *
- * Not `turns.lastIndex`: `scrollToItem` takes an item index, and the
- * truncation note occupies index 0 whenever `truncated` is set —
- * which is the normal case, since the hub sets it on any conversation longer
- * than its window. The target was one short, so the screen settled on the
- * second-to-last turn with the newest one below the fold: exactly the turn the
- * screen exists to show.
- *
- * A pure function because nothing in this repository can render a `LazyColumn`,
- * and an off-by-one that only a device can see is an off-by-one that ships.
- */
-internal fun newestItemIndex(turns: Int, truncated: Boolean): Int? {
-    if (turns <= 0) return null
-    return turns - 1 + if (truncated) 1 else 0
 }

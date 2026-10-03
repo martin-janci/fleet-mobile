@@ -88,7 +88,7 @@ class LiveHubTest {
         val sessions = client.listSessions()
         assertEquals(6, sessions.size, "the demo fleet: 2 hosts × 3 sessions")
         assertTrue(sessions.all { it.hostAlias.startsWith("demo-") })
-        assertTrue(client.fleetHealth())
+        assertTrue(client.fleetHealth().dbReady)
 
         // `POST /pair` allows one attempt per address every 6 s (the hub's
         // ATTEMPT_INTERVAL); inside it the answer is 429, not the verdict.
