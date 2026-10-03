@@ -97,6 +97,26 @@
                 <data android:scheme="claudefleet" />
             </intent-filter>
         </activity>
+
+        <!--
+          The Files tab's Share and Open (`FileHandoff.android.kt`): a file the
+          app downloaded from the hub leaves it as a `content://` URI with a
+          one-off read grant — Android refuses a `file://` path across apps.
+          Not exported; `res/xml/file_paths.xml` exposes only
+          `cache/downloads/`, where those copies live, and nothing else of the
+          app's storage. The authority is `<applicationId>.files`, so a debug
+          build (`.debug`) and a release build each name their own, and the
+          code builds the same string from `packageName`.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

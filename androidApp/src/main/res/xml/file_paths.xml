@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  What the app's FileProvider may hand out: the Files tab's downloaded copies,
+  `<cache>/downloads/<id>/<name>` (`downloadCachePath` in `DownloadActions.kt`),
+  and nothing else. The credential store, preferences and the rest of the
+  cache stay unreachable by URI.
+-->
+<paths>
+    <cache-path name="downloads" path="downloads/" />
+</paths>

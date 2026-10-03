@@ -251,6 +251,20 @@ costs one reconnect.
 - **Hosts** — reachability, Claude and tmux versions, session count. Hidden
   hosts are listed and marked rather than dropped, because the app cannot
   unhide one and a hidden host can still own live sessions.
+- **Files** (a hub with file downloads, claude-fleet contract revision 7,
+  when it lists `list_downloads`) — the files sessions sent to the hub
+  (`send_file`, by Claude or from the desktop's file viewer), newest first:
+  name, size, host · session, age, and state — a spinner while the hub is
+  still copying it off its host, the reason when that failed. Re-read on
+  opening, on a pull, and on every `download:changed`. A tap on a ready file
+  streams `GET /downloads/<id>` into the app's cache (checked against the
+  hub's `Content-Length` and `X-Fleet-Sha256`, outside the 8 MiB reply
+  ceiling below, which is for tool answers), then offers **Save** (Android
+  10+: the phone's *Downloads*, through MediaStore — no storage permission),
+  **Share** and **Open** (a `FileProvider` URI); on iOS, the share sheet,
+  which holds *Save to Files*. **Remove** (a `full` token only, asked first)
+  forgets the hub's copy for every device. The app has no file browser of its
+  own, so it does not offer *Send to downloads*; that is the desktop's.
 - **Settings** — which hub, which client name, the app version, and *Forget
   this hub*. Under it, **Fleet settings** (claude-fleet declarative pages P6,
   when the hub serves `list_pages` and `get_settings`): the hub's own settings
