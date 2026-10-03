@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+
 package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.ConnectionStatus
