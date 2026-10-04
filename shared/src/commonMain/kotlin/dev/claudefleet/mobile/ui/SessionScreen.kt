@@ -241,6 +241,8 @@ fun SessionScreen(
     onReview: (String) -> Unit = {},
     onRepair: () -> Unit = {},
     onDismissRepair: () -> Unit = {},
+    /** Press Enter in the pane (the ⏎ chip); the default does nothing. */
+    onPressEnter: () -> Unit = {},
 ) {
     state.repair?.let { RepairReportDialog(it, onDismissRepair) }
     val turns = state.conversation.turns
@@ -631,6 +633,10 @@ fun SessionScreen(
                     ) { shown ->
                         when (shown) {
                             Chrome.Full -> Column {
+                                // The desktop's slash menu: while the draft is one
+                                // `/word`, the commands it could be; a tap fills it in.
+                                val slash = if (state.readOnly) emptyList() else matchSlashCommands(state.draft)
+                                if (slash.isNotEmpty()) SlashSuggestions(slash, onPick = { onDraftChange(completeSlashCommand(it)) })
                                 // Hidden outright, not merely dimmed, in the same two cases
                                 // the card itself takes over the space for: while it is up
                                 // (the answer goes there instead) and on a readonly device (no
@@ -649,6 +655,7 @@ fun SessionScreen(
                                         onEdit = onEditQuickReply,
                                         onRemove = onRemoveQuickReply,
                                         onMove = onMoveQuickReply,
+                                        onPressEnter = { scrollToNewest(); onPressEnter() },
                                     )
                                 }
                                 PromptBox(
@@ -959,6 +966,7 @@ private fun SessionBar(
                     onDismissGhost = onDismissGhost,
                     onReview = onReview,
                     onRepair = onRepair,
+                    onSendCommand = onSendCommand,
                 )
             }
         },
@@ -1095,8 +1103,10 @@ private fun SessionOverflowMenu(
     onDismissGhost: () -> Unit = {},
     onReview: (String) -> Unit = {},
     onRepair: () -> Unit = {},
+    onSendCommand: (String) -> Unit = {},
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var picking by remember { mutableStateOf<String?>(null) }
     var showReview by remember { mutableStateOf(false) }
     var showRepairConfirm by remember { mutableStateOf(false) }
     var showRecreateConfirm by remember { mutableStateOf(false) }
@@ -1130,6 +1140,12 @@ private fun SessionOverflowMenu(
                 enabled = state.connected,
                 onClick = { expanded = false; showNameWork = true },
             )
+        }
+        // The desktop's model and effort pickers: each sends `/model <alias>`
+        // or `/effort <level>` like a typed command.
+        if (state.canSendQuick) {
+            DropdownMenuItem(text = { Text("Model…") }, onClick = { expanded = false; picking = "model" })
+            DropdownMenuItem(text = { Text("Effort…") }, onClick = { expanded = false; picking = "effort" })
         }
         if (state.canReview) {
             DropdownMenuItem(text = { Text("Review…") }, enabled = actionable, onClick = { expanded = false; showReview = true })
@@ -1166,6 +1182,27 @@ private fun SessionOverflowMenu(
         }
     }
 
+    picking?.let { command ->
+        AlertDialog(
+            onDismissRequest = { picking = null },
+            title = { Text(if (command == "model") "Switch the model" else "Set the effort") },
+            text = {
+                Column(modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
+                    for (option in if (command == "model") MODEL_OPTIONS else EFFORT_OPTIONS) {
+                        Text(
+                            option.label,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                picking = null
+                                pickerCommand(command, option.value)?.let(onSendCommand)
+                            }.padding(vertical = 12.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { picking = null }) { Text("Cancel") } },
+        )
+    }
     if (showReview) {
         var prompt by remember { mutableStateOf(DEFAULT_REVIEW_PROMPT) }
         AlertDialog(
@@ -2216,6 +2253,8 @@ private fun QuickRepliesRow(
     onEdit: (QuickReply, QuickReply) -> Unit,
     onRemove: (QuickReply) -> Unit,
     onMove: (QuickReply, Int) -> Unit,
+    /** The ⏎ chip: Enter in the pane, for a REPL waiting on a bare Enter. */
+    onPressEnter: () -> Unit = {},
 ) {
     var editing by remember { mutableStateOf<QuickReply?>(null) }
     var adding by remember { mutableStateOf(false) }
@@ -2225,6 +2264,9 @@ private fun QuickRepliesRow(
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp),
         modifier = Modifier.testTag(QUICK_REPLY_ROW),
     ) {
+        item {
+            SuggestionChip(onClick = onPressEnter, enabled = enabled, label = { Text("⏎ Enter") })
+        }
         items(chips) { chip ->
             val sends = chip.sendsOnTap
             QuickReplyChip(
@@ -2497,4 +2539,20 @@ private fun RepairReportDialog(report: RepairReport, onDismiss: () -> Unit) {
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
     )
+}
+
+/** The slash commands the draft could be, each with what it does; a tap fills it in. */
+@Composable
+private fun SlashSuggestions(commands: List<SlashCommand>, onPick: (SlashCommand) -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().heightIn(max = 168.dp).verticalScroll(rememberScrollState()).padding(top = 4.dp)) {
+        for (c in commands) {
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { onPick(c) }.padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("/${c.name}", style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace, modifier = Modifier.width(120.dp))
+                Text(c.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
 }

@@ -867,6 +867,26 @@ class SessionViewModel(
     fun sendQuick(text: String): Job = sendCommand(text)
 
     /**
+     * Press Enter in the session's pane (`send_prompt { keys }`) — the
+     * desktop's ⏎ chip, for a REPL waiting on a bare Enter. Guarded like a
+     * chip; nothing is typed, so the draft and the history are untouched.
+     */
+    fun pressEnter(): Job = scope.launch {
+        val current = local.value
+        if (!canWriteNow(current) || row() == null) return@launch
+        local.update { it.copy(sending = true, error = null) }
+        try {
+            actions.sendKeys(sessionId, "Enter")
+            local.update { it.copy(sending = false) }
+            requestRead(first = false)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(sending = false, error = friendly(t)) }
+        }
+    }
+
+    /**
      * The guarded hub write [send], [sendCommand] and [sendQuick] all make,
      * and the refetch that follows it — the one write path, per the task-6
      * ruling that added [sendQuick] rather than a second send.

@@ -3116,4 +3116,26 @@ class SessionViewModelTest {
         runCurrent()
         assertNull(vm.state.value.repair)
     }
+
+    @Test
+    fun the_enter_chip_presses_enter_and_leaves_the_draft_alone() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.onDraftChange("half written")
+
+        vm.pressEnter().join()
+        runCurrent()
+
+        assertEquals(listOf("Enter"), actions.sentKeys)
+        assertEquals("half written", vm.state.value.draft)
+    }
+
+    @Test
+    fun the_enter_chip_makes_no_call_for_a_readonly_credential() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, canSendPrompts = false)
+        vm.pressEnter().join()
+        runCurrent()
+        assertTrue(actions.sentKeys.isEmpty())
+    }
 }
