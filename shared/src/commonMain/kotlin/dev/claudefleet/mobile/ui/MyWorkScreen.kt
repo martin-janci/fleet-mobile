@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.ui.components.WorkRow
 import androidx.compose.foundation.layout.heightIn
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -322,36 +323,15 @@ private fun Chevron(collapsed: Boolean, name: String) {
 /** A compact task card: key, title, status, tracker, counts, and what wants a person. */
 @Composable
 internal fun TaskCard(task: WorkTask, onClick: () -> Unit) {
-    ListItem(
-        modifier = Modifier.clickable(onClick = onClick),
-        leadingContent = { task.statusCategory?.let { WorkStatusDot(it) } },
-        headlineContent = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    task.label,
-                    style = MaterialTheme.typography.titleSmall,
-                    textDecoration = if (task.unavailable) TextDecoration.LineThrough else null,
-                )
-                if (task.review) {
-                    Text(" ?", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.tertiary)
-                }
-                if (task.title.isNotBlank() && task.key != null) {
-                    Text(
-                        " · ${task.title}",
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-        },
-        supportingContent = {
-            val line = taskCardLine(task)
-            if (line.isNotEmpty()) Text(line, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        },
-        trailingContent = {
-            if (task.needsYou) Text("needs you", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-        },
+    WorkRow(
+        label = task.label,
+        title = if (task.key != null) task.title else "",
+        details = taskCardLine(task),
+        onClick = onClick,
+        status = task.statusCategory,
+        unavailable = task.unavailable,
+        review = task.review,
+        needsYou = task.needsYou,
     )
 }
 

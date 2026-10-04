@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.ui.components.WorkRow
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.clickable
@@ -138,12 +139,14 @@ fun TicketsSheet(state: TicketsUiState, handlers: TicketsHandlers) {
             )
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
             if (state.loading || state.busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            state.selected?.let { TicketActions(it, state.busy, handlers) }
             LazyColumn(modifier = Modifier.fillMaxWidth()) {
                 state.found?.let { found ->
                     item(key = "found") { SectionTitle("Found") }
                     item(key = "found-${found.id}") {
                         TicketRow(found, state.selected?.ticket?.id == found.id, state.ticketOrgs[found.id], handlers)
+                    }
+                    state.selected?.takeIf { it.ticket.id == found.id }?.let { detail ->
+                        item(key = "found-actions-${found.id}") { TicketActions(detail, state.busy, handlers) }
                     }
                 }
                 if (state.allFiltered) {
@@ -162,8 +165,16 @@ fun TicketsSheet(state: TicketsUiState, handlers: TicketsHandlers) {
                             )
                         }
                     }
-                    items(section.tickets, key = { "${section.view}-${it.id}" }) { ticket ->
-                        TicketRow(ticket, state.selected?.ticket?.id == ticket.id, state.ticketOrgs[ticket.id], handlers)
+                    // The chosen ticket's actions open under its own row, not
+                    // above the list: there they pushed the row it was tapped on
+                    // down or off the screen.
+                    for (ticket in section.tickets) {
+                        item(key = "${section.view}-${ticket.id}") {
+                            TicketRow(ticket, state.selected?.ticket?.id == ticket.id, state.ticketOrgs[ticket.id], handlers)
+                        }
+                        state.selected?.takeIf { it.ticket.id == ticket.id }?.let { detail ->
+                            item(key = "${section.view}-actions-${ticket.id}") { TicketActions(detail, state.busy, handlers) }
+                        }
                     }
                 }
             }
@@ -345,29 +356,27 @@ private fun SectionTitle(text: String) {
 
 @Composable
 private fun TicketRow(ticket: Ticket, selected: Boolean, org: String?, handlers: TicketsHandlers) {
-    ListItem(
-        modifier = Modifier.clickable { handlers.onSelect(if (selected) null else ticket) },
-        leadingContent = { ticket.statusCategory?.let { WorkStatusDot(it) } },
-        headlineContent = {
-            Text(
-                ticket.label,
-                style = MaterialTheme.typography.titleSmall,
-                textDecoration = if (ticket.unavailable) TextDecoration.LineThrough else null,
-            )
-        },
-        supportingContent = {
-            val line = listOfNotNull(ticket.title.takeIf { it.isNotBlank() }, org).joinToString(" · ")
-            if (line.isNotEmpty()) Text(line, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        },
-        trailingContent = {
-            // Both: whether someone is on it is the question a list of
-            // tickets is scanned for, and a tracker status used to hide it.
-            val live = if (ticket.liveSessionIds.isNotEmpty()) "live" else null
-            val status = listOfNotNull(ticket.statusName, live).joinToString(" · ").ifEmpty { null }
-            status?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
-        },
+    WorkRow(
+        label = ticket.label,
+        title = ticket.title,
+        details = ticketRowLine(ticket, org),
+        onClick = { handlers.onSelect(if (selected) null else ticket) },
+        status = ticket.statusCategory,
+        unavailable = ticket.unavailable,
+        selected = selected,
     )
 }
+
+/**
+ * The facts under a ticket's title: its tracker status and whether a session
+ * is on it — both, since that is what a list of tickets is scanned for — and
+ * its organisation.
+ */
+internal fun ticketRowLine(ticket: Ticket, org: String?): String = listOfNotNull(
+    ticket.statusName?.takeIf { it.isNotBlank() },
+    if (ticket.liveSessionIds.isNotEmpty()) "live" else null,
+    org,
+).joinToString(" · ")
 
 /** Open, Start here, or Resume with a host picker — only what the hub and the token allow. */
 @OptIn(ExperimentalLayoutApi::class)

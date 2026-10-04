@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.ui.components.withFind
+import dev.claudefleet.mobile.ui.components.LocalFindQuery
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.draw.clipToBounds
@@ -570,7 +572,10 @@ fun SessionScreen(
                     // `atBottom` above is derived from measurement, so it only
                     // means anything where there is measurement, and the test that
                     // checks it has to run on a device — see `ConversationScrollTest`.
-                    CompositionLocalProvider(LocalToolDetails provides toolDetails) {
+                    CompositionLocalProvider(
+                        LocalToolDetails provides toolDetails,
+                        LocalFindQuery provides if (findOpen) findQuery else "",
+                    ) {
                         LazyColumn(
                             state = listState,
                             modifier = Modifier.fillMaxSize().testTag(CONVERSATION_LIST),
@@ -1830,10 +1835,14 @@ private fun PromptBubble(prompt: String) {
         ) { expanded = !expanded },
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
+            // A match inside a folded prompt opens it, or Find would land on
+            // a bubble whose matching line is cut off.
+            val find = LocalFindQuery.current
+            val matched = find.isNotBlank() && prompt.contains(find.trim(), ignoreCase = true)
             Text(
-                text = prompt,
+                text = AnnotatedString(prompt).withFind(),
                 style = MaterialTheme.typography.bodyMedium,
-                maxLines = if (expanded) Int.MAX_VALUE else PROMPT_FOLD_LINES,
+                maxLines = if (expanded || matched) Int.MAX_VALUE else PROMPT_FOLD_LINES,
                 overflow = TextOverflow.Ellipsis,
                 // Only a folded layout can say whether folding cut anything;
                 // an unfolded one keeps the answer it had.
