@@ -76,6 +76,18 @@ import dev.claudefleet.mobile.ui.components.WorkStatusDot
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.LocalStatusColors
 import dev.claudefleet.mobile.ui.theme.StatusTone
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.foundation.combinedClickable
 
 /**
  * Everything the fleet list reports.
@@ -127,6 +139,12 @@ data class SessionsHandlers(
      */
     val onOpenAgent: (() -> Unit)? = null,
     val onDismissAgentError: () -> Unit = {},
+    /** Multi-select: pick or unpick a row, drop the selection, act on it, close its outcome. */
+    val onToggleSelect: (Long) -> Unit = {},
+    val onClearSelection: () -> Unit = {},
+    val onBulkSend: (String) -> Unit = {},
+    val onBulkKill: () -> Unit = {},
+    val onDismissBulkOutcome: () -> Unit = {},
 )
 
 /**
@@ -158,9 +176,16 @@ fun SessionsScreen(
     handlers: SessionsHandlers = SessionsHandlers(),
     modifier: Modifier = Modifier,
     agent: AgentUiState = AgentUiState(),
+    bulk: BulkUiState = BulkUiState(),
 ) {
+    // While something is picked a tap picks too; a long press starts it.
+    val select: ((Long) -> Unit)? = if (bulk.enabled) handlers.onToggleSelect else null
+    val tap: (Long) -> Unit = { id -> if (bulk.active && select != null) select(id) else handlers.onOpenSession(id) }
+    bulk.outcome?.let { BulkOutcomeDialog(it, handlers.onDismissBulkOutcome) }
     Column(modifier = modifier.fillMaxSize()) {
-        SessionsBar(
+        if (bulk.active) {
+            SelectionBar(bulk, handlers)
+        } else SessionsBar(
             status = state.status,
             searchOpen = state.searchOpen,
             onToggleSearch = handlers.onToggleSearch,
@@ -234,7 +259,9 @@ fun SessionsScreen(
                         showWork = true,
                         showHost = true,
                         orgColor = row.orgOf?.let(state.orgColors::get),
-                        onClick = { handlers.onOpenSession(row.id) },
+                        onClick = { tap(row.id) },
+                        selected = row.id in bulk.selected,
+                        onLongClick = select?.let { { it(row.id) } },
                     )
                 }
                 for (host in state.groups) {
@@ -264,7 +291,9 @@ fun SessionsScreen(
                                 // Under its work heading the key is already said.
                                 showWork = project.work == null,
                                 orgColor = row.orgOf?.let(state.orgColors::get),
-                                onClick = { handlers.onOpenSession(row.id) },
+                                onClick = { tap(row.id) },
+                                selected = row.id in bulk.selected,
+                                onLongClick = select?.let { { it(row.id) } },
                             )
                         }
                     }
@@ -283,7 +312,7 @@ fun SessionsScreen(
                     }
                 }
             }
-            handlers.onNewSession?.let { newSession ->
+            handlers.onNewSession?.takeIf { !bulk.active }?.let { newSession ->
                 FloatingActionButton(
                     onClick = newSession,
                     modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
@@ -625,12 +654,20 @@ private fun SessionRowItem(
     showHost: Boolean = false,
     /** The row's org colour (ARGB), drawn as a thin bar at its start edge; null draws none. */
     orgColor: Long? = null,
+    /** Picked for a bulk action: tinted, with a check for its dot. */
+    selected: Boolean = false,
+    /** Starts (or extends) the selection; null where this pairing cannot act on sessions. */
+    onLongClick: (() -> Unit)? = null,
 ) {
     ListItem(
+        colors = if (selected) ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else ListItemDefaults.colors(),
         modifier = Modifier
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick, onLongClickLabel = onLongClick?.let { "Select" })
             .then(if (orgColor != null) Modifier.orgBar(Color(orgColor)) else Modifier),
-        leadingContent = { StatusDot(row.claudeStatus, row.stuckKind) },
+        leadingContent = {
+            if (selected) Icon(FleetIcons.Check, contentDescription = "Selected", modifier = Modifier.size(16.dp))
+            else StatusDot(row.claudeStatus, row.stuckKind)
+        },
         headlineContent = {
             Column {
                 Text(row.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -767,3 +804,86 @@ private fun Modifier.orgBar(color: Color): Modifier = drawBehind {
 }
 
 private val ORG_BAR_WIDTH = 3.dp
+
+/** In place of the list's bar while sessions are picked: how many, and what can be done to them. */
+@Composable
+private fun SelectionBar(bulk: BulkUiState, handlers: SessionsHandlers) {
+    var sending by remember { mutableStateOf(false) }
+    var killing by remember { mutableStateOf(false) }
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer) {
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = handlers.onClearSelection) { Icon(FleetIcons.Close, contentDescription = "Clear selection") }
+            Text("${bulk.selected.size} selected", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            if (bulk.running) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            TextButton(onClick = { sending = true }, enabled = !bulk.running) { Text("Send") }
+            TextButton(onClick = { killing = true }, enabled = !bulk.running && bulk.killable > 0) { Text("Kill") }
+        }
+    }
+    if (sending) {
+        var text by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { sending = false },
+            title = { Text("Send to ${sessionsWord(bulk.selected.size)}") },
+            text = {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    minLines = 3,
+                    placeholder = { Text("The same prompt, to each") },
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { handlers.onBulkSend(text); sending = false }, enabled = text.isNotBlank()) { Text("Send") }
+            },
+            dismissButton = { TextButton(onClick = { sending = false }) { Text("Cancel") } },
+        )
+    }
+    if (killing) {
+        val skipped = bulk.selected.size - bulk.killable
+        AlertDialog(
+            onDismissRequest = { killing = false },
+            title = { Text("Kill ${sessionsWord(bulk.killable)}?") },
+            text = {
+                Text(
+                    "Each is killed now, without waiting for it to save anything." +
+                        if (skipped > 0) " $skipped picked cannot be killed from here and are skipped." else "",
+                )
+            },
+            confirmButton = { TextButton(onClick = { handlers.onBulkKill(); killing = false }) { Text("Kill") } },
+            dismissButton = { TextButton(onClick = { killing = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** What a bulk action did, per session: what went through, and what did not and why. */
+@Composable
+private fun BulkOutcomeDialog(outcome: List<BulkOutcome>, onDismiss: () -> Unit) {
+    val done = outcome.count { it.ok }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (done == outcome.size) "Done for all $done" else "Done for $done of ${outcome.size}") },
+        text = {
+            Column(modifier = Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                for (o in outcome.filter { !it.ok }) {
+                    Text(o.name, style = MaterialTheme.typography.labelLarge)
+                    Text(o.reason ?: "failed", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+                if (done < outcome.size) {
+                    Text(
+                        "The ones that did not go through stay picked.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
+    )
+}
+
+/** "1 session", "3 sessions". */
+internal fun sessionsWord(n: Int): String = if (n == 1) "1 session" else "$n sessions"

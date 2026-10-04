@@ -98,6 +98,7 @@ import dev.claudefleet.mobile.ui.SessionDetailsViewModel
 import dev.claudefleet.mobile.ui.RepoHandlers
 import dev.claudefleet.mobile.ui.RepoScreen
 import dev.claudefleet.mobile.ui.RepoViewModel
+import dev.claudefleet.mobile.ui.BulkViewModel
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.isPushed
 import dev.claudefleet.mobile.ui.SessionViewModel
@@ -417,6 +418,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     BackHandler(enabled = isPushed(screen)) { nav.back() }
 
     val sessions = remember(repository, scope) { SessionsViewModel(repository, scope, prefs = container.prefs) }
+    val bulk = remember(repository, scope) { BulkViewModel(repository, container.sessionActions, scope, credentials.canWrite) }
     // The fleet's scope, like the New session form's `callScope`: a resume
     // started from the sheet must not be cancelled by closing it.
     val tickets = remember(repository, scope) {
@@ -567,9 +569,11 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                     val ticketsState by tickets.state.collectAsState()
                     val todayState by today.state.collectAsState()
                     val agentState by agent.state.collectAsState()
+                    val bulkState by bulk.state.collectAsState()
                     SessionsScreen(
                         state = state,
                         agent = agentState,
+                        bulk = bulkState,
                         handlers = SessionsHandlers(
                             onOpenSession = nav::open,
                             onToggleNeedsAttention = sessions::toggleNeedsAttentionOnly,
@@ -602,6 +606,11 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                             onOpenToday = if (todayState.available) ({ today.open() }) else null,
                             onOpenAgent = if (agentState.available) ({ agent.open() }) else null,
                             onDismissAgentError = agent::dismissError,
+                            onToggleSelect = bulk::toggle,
+                            onClearSelection = bulk::clear,
+                            onBulkSend = { bulk.send(it) },
+                            onBulkKill = { bulk.kill() },
+                            onDismissBulkOutcome = bulk::dismissOutcome,
                         ),
                     )
                     if (state.filtersOpen) {
