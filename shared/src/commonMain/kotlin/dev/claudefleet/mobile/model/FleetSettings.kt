@@ -282,3 +282,17 @@ fun offeredPages(bundle: PagesBundle): List<Page> =
                 (p.layout == "category" && p.allSections.any { s -> s.items.any { PageItem.of(it) is PageItem.Field } })
             )
     }
+
+/** One write to a setting (`setting_history`, newest first): who, before and after, the proposal it applied. */
+@Serializable
+data class SettingWrite(
+    val id: Long,
+    val at: Long = 0,
+    val key: String = "",
+    val before: String? = null,
+    val after: String = "",
+    /** person, agent, operator, … — who wrote it. */
+    val actor: String = "",
+    @SerialName("actor_detail") val actorDetail: String? = null,
+    @SerialName("proposal_id") val proposalId: Long? = null,
+)

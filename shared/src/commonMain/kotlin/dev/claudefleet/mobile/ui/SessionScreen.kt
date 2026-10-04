@@ -318,6 +318,18 @@ fun SessionScreen(
         hasDraft = state.draft.isNotEmpty(),
         needsAnswer = state.card != null,
     )
+    // Find in the conversation: the query, and which match is shown (an
+    // index into `matches`, newest first like the list).
+    var findOpen by remember { mutableStateOf(false) }
+    var findQuery by remember { mutableStateOf("") }
+    var findAt by remember { mutableStateOf(0) }
+    val matches = remember(rows, findQuery) { findTurns(rows, findQuery) }
+    fun showMatch(at: Int) {
+        if (matches.isEmpty()) return
+        findAt = at.mod(matches.size)
+        stopReading()
+        scope.launch { listState.showTurn(matches[findAt]) }
+    }
     val header = headerChrome(chromeInputs)
     val footer = footerChrome(chromeInputs)
 
@@ -471,6 +483,7 @@ fun SessionScreen(
                         onDismissGhost = onDismissGhost,
                         onReview = onReview,
                         onRepair = onRepair,
+                        onFind = { findOpen = !findOpen; if (!findOpen) findQuery = "" },
                     )
                     // A tap unfolds it: out of immersive, out of the read-back,
                     // and — when typing is what folded it — the keyboard down.
@@ -484,6 +497,18 @@ fun SessionScreen(
                         },
                     )
                 }
+            }
+            if (findOpen) {
+                FindBar(
+                    query = findQuery,
+                    at = if (matches.isEmpty()) 0 else findAt + 1,
+                    count = matches.size,
+                    onQuery = { findQuery = it; findAt = 0; if (it.isNotBlank()) showMatch(0) },
+                    // Older is further up the list: a higher index.
+                    onOlder = { showMatch(findAt + 1) },
+                    onNewer = { showMatch(findAt - 1) },
+                    onClose = { findOpen = false; findQuery = "" },
+                )
             }
             ConnectionBanner(status, state.hubReachable)
             ErrorBanner(state.error, onDismiss = onDismissError)
@@ -898,6 +923,7 @@ private fun SessionBar(
     onDismissGhost: () -> Unit,
     onReview: (String) -> Unit,
     onRepair: () -> Unit,
+    onFind: () -> Unit,
 ) {
     val busy = state.loading || state.refreshing
     var pickingConversation by remember { mutableStateOf(false) }
@@ -936,6 +962,7 @@ private fun SessionBar(
             }
         },
         actions = {
+            IconButton(onClick = onFind) { Icon(FleetIcons.Search, contentDescription = "Find in conversation") }
             IconButton(onClick = onRefresh, enabled = !busy) {
                 Icon(
                     FleetIcons.Refresh,
@@ -2563,6 +2590,47 @@ private fun SlashSuggestions(commands: List<SlashCommand>, onPick: (SlashCommand
                 Text("/${c.name}", style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace, modifier = Modifier.width(120.dp))
                 Text(c.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+        }
+    }
+}
+
+/** Find in the conversation: the query, which match of how many, and the way to the older and newer ones. */
+@Composable
+private fun FindBar(
+    query: String,
+    at: Int,
+    count: Int,
+    onQuery: (String) -> Unit,
+    onOlder: () -> Unit,
+    onNewer: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+        Row(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextField(
+                value = query,
+                onValueChange = onQuery,
+                singleLine = true,
+                placeholder = { Text("Find in conversation") },
+                modifier = Modifier.weight(1f),
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
+                colors = TextFieldDefaults.colors(
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                ),
+            )
+            if (query.isNotBlank()) {
+                Text(if (count == 0) "none" else "$at of $count", style = MaterialTheme.typography.labelMedium)
+            }
+            IconButton(onClick = onOlder, enabled = count > 1) {
+                Icon(FleetIcons.ArrowBack, contentDescription = "Older match", modifier = Modifier.rotate(90f))
+            }
+            IconButton(onClick = onNewer, enabled = count > 1) {
+                Icon(FleetIcons.ArrowBack, contentDescription = "Newer match", modifier = Modifier.rotate(-90f))
+            }
+            IconButton(onClick = onClose) { Icon(FleetIcons.Close, contentDescription = "Close find") }
         }
     }
 }

@@ -106,6 +106,9 @@ data class HubCapabilities(
     val recreateSession: Boolean get() = RECREATE_SESSION in tools
     val dismissGhost: Boolean get() = DISMISS_GHOST_SESSION in tools
 
+    /** One setting's writes, for a field's History (a person's own device). */
+    val settingHistory: Boolean get() = SETTING_HISTORY in tools
+
     /** Estimated usage and the fleet's Claude accounts — both readonly. */
     val usage: Boolean get() = USAGE_REPORT in tools
     val accounts: Boolean get() = LIST_ACCOUNTS in tools
@@ -161,6 +164,7 @@ data class HubCapabilities(
         const val SESSION_CONVERSATIONS = "session_conversations"
         const val REPO_CHANGES = "repo_changes"
         const val USAGE_REPORT = "usage_report"
+        const val SETTING_HISTORY = "setting_history"
         const val PROBE_HOST = "probe_host"
         const val SPAWN_REVIEW = "spawn_review"
         const val REPAIR_SESSION = "repair_session"

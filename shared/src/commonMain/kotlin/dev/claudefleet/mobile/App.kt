@@ -521,6 +521,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
         FleetSettingsViewModel(container.fleetSettingsActions, scope, credentials.canWrite)
     }
     val settingsCaps by repository.capabilities.collectAsState()
+    LaunchedEffect(settingsCaps) { fleetSettings.setHistoryAvailable(settingsCaps.settingHistory) }
     LaunchedEffect(settingsCaps.fleetSettings) { if (settingsCaps.fleetSettings) fleetSettings.load() }
 
     Scaffold(
@@ -945,6 +946,8 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                                     onDecide = { id, apply -> fleetSettings.decide(id, apply) },
                                     onConfirm = fleetSettings::confirm,
                                     onCancelConfirm = fleetSettings::cancelConfirm,
+                                    onHistory = { fleetSettings.showHistory(it) },
+                                    onCloseHistory = fleetSettings::closeHistory,
                                 )
                             }
                         },

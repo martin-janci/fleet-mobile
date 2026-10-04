@@ -22,6 +22,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import dev.claudefleet.mobile.model.SettingWrite
 
 @Serializable
 private data class Registry(val pages: List<Page>, val descriptors: List<SettingDescriptor>)
@@ -54,6 +55,10 @@ private class FakeHub(
         return values.toMap()
     }
     override suspend fun pending() = SettingsPending(canWrite, proposals).also { calls += "setting_proposals" }
+    override suspend fun history(key: String): List<SettingWrite> {
+        calls += "setting_history $key"
+        return listOf(SettingWrite(id = 1, key = key, before = "1", after = "2", actor = "person"))
+    }
     override suspend fun decide(accept: List<Long>, reject: List<Long>): SettingsDecided {
         calls += "decide $accept $reject"
         val applied = proposals.filter { it.id in accept }
@@ -208,5 +213,22 @@ class FleetSettingsViewModelTest {
         assertTrue(vm.state.value.loaded)
         assertNull(vm.state.value.error)
         assertFalse(vm.state.value.canWrite)
+    }
+
+    @Test
+    fun a_fields_history_is_read_only_where_the_hub_serves_it() = runTest {
+        val hub = FakeHub()
+        val vm = FleetSettingsViewModel(hub, backgroundScope, credentialCanWrite = true)
+        vm.showHistory("work.recent_days").join()
+        assertTrue(hub.calls.none { it.startsWith("setting_history") }, "no tool the hub did not list")
+
+        vm.setHistoryAvailable(true)
+        vm.showHistory("work.recent_days").join()
+        runCurrent()
+        assertEquals("work.recent_days", vm.state.value.history?.first)
+        assertEquals("2", vm.state.value.history?.second?.single()?.after)
+
+        vm.closeHistory()
+        assertEquals(null, vm.state.value.history)
     }
 }

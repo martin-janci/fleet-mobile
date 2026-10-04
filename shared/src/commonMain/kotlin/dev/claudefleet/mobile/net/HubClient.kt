@@ -37,6 +37,7 @@ import dev.claudefleet.mobile.model.SessionEvent
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.UsageReport
 import dev.claudefleet.mobile.model.SettingDescriptor
+import dev.claudefleet.mobile.model.SettingWrite
 import dev.claudefleet.mobile.model.SettingsDecided
 import dev.claudefleet.mobile.model.SettingsPending
 import dev.claudefleet.mobile.model.Ticket
@@ -834,6 +835,16 @@ class HubClient(
         call("work", buildJsonObject { put("action", "today"); put("since", since) }) {
             json.decodeFromJsonElement(Today.serializer(), it)
         }
+
+    /** One setting's writes, newest first (`setting_history`, a person's own device). */
+    suspend fun settingHistory(key: String, limit: Int = 30): List<SettingWrite> =
+        call(
+            "setting_history",
+            buildJsonObject {
+                put("key", key)
+                put("limit", limit)
+            },
+        ) { json.decodeFromJsonElement(ListSerializer(SettingWrite.serializer()), it) }
 
     /** What Tidy-up suggests (`work { action: tidy }`). */
     suspend fun workTidy(): TidyReport =

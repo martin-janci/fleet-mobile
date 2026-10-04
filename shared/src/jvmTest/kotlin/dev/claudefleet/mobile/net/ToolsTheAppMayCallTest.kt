@@ -162,6 +162,9 @@ class ToolsTheAppMayCallTest {
         "spawn_review",
         "repair_session",
         "new_bg_session",
+        // A fleet setting's History: `Access::PersonDevice` and readonly —
+        // a person's own device, which is what reads Fleet settings at all.
+        "setting_history",
     )
 
     @Test
