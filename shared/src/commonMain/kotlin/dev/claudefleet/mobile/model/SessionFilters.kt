@@ -48,10 +48,10 @@ enum class TimeDirection(val label: String) {
 @Serializable
 enum class StatusFilter(val label: String, val wire: String?) {
     WORKING("Working", "working"),
-    BLOCKED("Blocked", "blocked"),
+    BLOCKED("Waiting for you", "blocked"),
     STUCK("Stuck", null),
     FAILED("Failed", "failed"),
-    COMPLETED("Completed", "completed"),
+    COMPLETED("Done", "completed"),
     IDLE("Idle", "idle"),
     STOPPED("Stopped", "stopped"),
 }

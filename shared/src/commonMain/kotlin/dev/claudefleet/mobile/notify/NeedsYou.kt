@@ -3,13 +3,20 @@ package dev.claudefleet.mobile.notify
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.reasonLabel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flow
 
-/** One "a session needs you" notification: which session, and the two lines it shows. */
-data class NeedsYouAlert(val sessionId: Long, val title: String, val text: String)
+/** What a look at the fleet tells the notifier: a session to announce, or one to stop announcing. */
+sealed interface NeedsYouEvent
+
+/** One "a session needs you" notification: which session, its two lines, and what it is doing. */
+data class NeedsYouAlert(val sessionId: Long, val title: String, val text: String, val detail: String? = null) : NeedsYouEvent
+
+/** A session that needed you no longer does — answered here or elsewhere: its notification goes. */
+data class NeedsYouResolved(val sessionId: Long) : NeedsYouEvent
 
 /**
  * What changed between two looks at the fleet that a person should hear
@@ -26,33 +33,54 @@ fun needsYouAlerts(seen: Map<Long, String?>, rows: List<SessionRow>): Pair<List<
     val alerts = rows.mapNotNull { row ->
         val reason = row.attentionReason ?: return@mapNotNull null
         if (seen[row.id] == reason) return@mapNotNull null
-        NeedsYouAlert(row.id, row.displayName, "${reasonWords(reason)} · ${row.hostAlias}")
+        NeedsYouAlert(row.id, row.displayName, "${reasonWords(reason)} · ${row.hostAlias}", row.supportingLine)
     }
     return alerts to now
 }
 
-/** The hub's attention reason as the notification says it. */
-fun reasonWords(reason: String): String = when (reason) {
-    "waiting" -> "Waiting for you"
-    "stuck" -> "Stuck"
-    "failed" -> "Failed"
-    "lifecycle" -> "Needs a decision"
-    else -> reason.replace('_', ' ').replaceFirstChar { it.uppercase() }
-}
+/** The hub's attention reason as the notification says it — the app's one table, [reasonLabel]. */
+fun reasonWords(reason: String): String = reasonLabel(reason)
 
 /**
- * The alerts a live fleet produces, as it changes. The first look once the
- * stream is connected is the baseline — what already needed a person then
- * is on the list, not news — and each later one is compared to the last.
+ * What a live fleet tells the notifier, as it changes. Each look is compared
+ * to the last: a session that came to need a person is an alert, one that
+ * stopped is resolved.
+ *
+ * The first connected look is compared to [remembered] — what the last run
+ * saw, kept by the caller through [onSeen] — so a session that started
+ * waiting while nothing watched is still news. With nothing remembered (the
+ * first run ever), that look is the baseline: what already waited is on the
+ * list, not news.
  */
-fun needsYouAlerts(fleet: FleetState): Flow<NeedsYouAlert> = flow {
-    var seen: Map<Long, String?>? = null
+fun needsYouEvents(
+    fleet: FleetState,
+    remembered: Map<Long, String?>? = null,
+    onSeen: (Map<Long, String?>) -> Unit = {},
+): Flow<NeedsYouEvent> = flow {
+    var seen: Map<Long, String?>? = remembered
     combine(fleet.sessions, fleet.status) { rows, status -> rows to status }
         .filter { (_, status) -> status is ConnectionStatus.Connected }
         .collect { (rows, _) ->
             val before = seen
             val (alerts, after) = needsYouAlerts(before.orEmpty(), rows)
             seen = after
-            if (before != null) alerts.forEach { emit(it) }
+            onSeen(after)
+            if (before != null) {
+                alerts.forEach { emit(it) }
+                before.filter { (id, reason) -> reason != null && after[id] == null }.keys.forEach { emit(NeedsYouResolved(it)) }
+            }
         }
 }
+
+/** Only the alerts — [needsYouEvents] without the resolutions or the memory. */
+fun needsYouAlerts(fleet: FleetState): Flow<NeedsYouAlert> = flow {
+    needsYouEvents(fleet).collect { if (it is NeedsYouAlert) emit(it) }
+}
+
+/** [needsYouEvents]'s memory as one line per session (`id=reason`, empty reason for none) — for a key-value store. */
+fun encodeSeen(seen: Map<Long, String?>): List<String> = seen.map { (id, reason) -> "$id=${reason.orEmpty()}" }
+
+fun decodeSeen(lines: List<String>): Map<Long, String?> = lines.mapNotNull { line ->
+    val id = line.substringBefore('=').toLongOrNull() ?: return@mapNotNull null
+    id to line.substringAfter('=', "").ifEmpty { null }
+}.toMap()

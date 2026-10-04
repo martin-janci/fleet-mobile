@@ -16,7 +16,10 @@ import dev.claudefleet.mobile.AppContainer
 import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.notify.BackgroundNotifier
 import dev.claudefleet.mobile.notify.NeedsYouAlert
-import dev.claudefleet.mobile.notify.needsYouAlerts
+import dev.claudefleet.mobile.notify.NeedsYouResolved
+import dev.claudefleet.mobile.notify.decodeSeen
+import dev.claudefleet.mobile.notify.encodeSeen
+import dev.claudefleet.mobile.notify.needsYouEvents
 import dev.claudefleet.mobile.store.AndroidPrefs
 import dev.claudefleet.mobile.store.AndroidSecrets
 import io.ktor.client.HttpClient
@@ -79,10 +82,53 @@ class NeedsYouService : Service() {
         }
         val fleet = container.repository(credentials, scope)
         fleet.start()
-        needsYouAlerts(fleet).collect { alert ->
-            // On screen, the app already shows it: no second word for it.
-            if (!AppVisibility.foreground) post(alert)
+        // What the last run saw, so a session that began waiting while the
+        // service was down is still news when it comes back.
+        val memory = getSharedPreferences("notifications", MODE_PRIVATE)
+        val remembered = memory.getStringSet(SEEN, null)?.let { decodeSeen(it.toList()) }
+        needsYouEvents(fleet, remembered) { seen -> memory.edit().putStringSet(SEEN, encodeSeen(seen).toSet()).apply() }
+            .collect { event ->
+                when (event) {
+                    // On screen, the app already shows it: no second word for it.
+                    is NeedsYouAlert -> if (!AppVisibility.foreground) post(event)
+                    // Answered here or elsewhere: it no longer needs saying.
+                    is NeedsYouResolved -> withdraw(event.sessionId)
+                }
+            }
+    }
+
+    /** The sessions with a notification up, for the group's summary. */
+    private val shown = linkedMapOf<Long, String>()
+
+    private fun withdraw(sessionId: Long) {
+        if (shown.remove(sessionId) == null) return
+        manager(this).cancel(alertId(sessionId))
+        summarize()
+    }
+
+    /**
+     * One summary over the group — "3 sessions need you" — so ten waiting
+     * agents are one heads-up and a list, not ten.
+     */
+    private fun summarize() {
+        val m = manager(this)
+        if (shown.size < 2) {
+            m.cancel(SUMMARY_ID)
+            return
         }
+        val style = NotificationCompat.InboxStyle()
+        shown.values.forEach { style.addLine(it) }
+        val n = NotificationCompat.Builder(this, ALERTS)
+            .setSmallIcon(R.drawable.ic_notify)
+            .setContentTitle("${shown.size} sessions need you")
+            .setStyle(style)
+            .setGroup(GROUP)
+            .setGroupSummary(true)
+            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
+            .setAutoCancel(true)
+            .setContentIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
+            .build()
+        m.notify(SUMMARY_ID, n)
     }
 
     private fun post(alert: NeedsYouAlert) {
@@ -99,14 +145,22 @@ class NeedsYouService : Service() {
             .setSmallIcon(R.drawable.ic_notify)
             .setContentTitle(alert.title)
             .setContentText(alert.text)
+            // What it is doing, when there is a line for it: the question is
+            // half of whether to pick the phone up.
+            .setStyle(NotificationCompat.BigTextStyle().bigText(listOfNotNull(alert.text, alert.detail).joinToString("\n")))
+            .setGroup(GROUP)
             .setContentIntent(tap)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
         // One per session: a session that needs you again replaces its own.
-        manager(this).notify(ALERT_BASE + (alert.sessionId % 100_000).toInt(), n)
+        manager(this).notify(alertId(alert.sessionId), n)
+        shown[alert.sessionId] = "${alert.title} — ${alert.text}"
+        summarize()
     }
+
+    private fun alertId(sessionId: Long) = ALERT_BASE + (sessionId % 100_000).toInt()
 
     private fun ongoing(): Notification {
         val open = PendingIntent.getActivity(
@@ -131,6 +185,9 @@ class NeedsYouService : Service() {
         private const val ALERTS = "needs_you"
         private const val ONGOING_ID = 1
         private const val ALERT_BASE = 1_000
+        private const val SUMMARY_ID = 2
+        private const val GROUP = "needs_you"
+        private const val SEEN = "seen"
 
         private fun manager(context: Context) = context.getSystemService(NotificationManager::class.java)
 

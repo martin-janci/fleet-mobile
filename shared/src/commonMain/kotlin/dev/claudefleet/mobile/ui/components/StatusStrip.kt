@@ -18,6 +18,7 @@ import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.theme.LocalStatusColors
 import dev.claudefleet.mobile.ui.theme.StatusTone
 import kotlin.math.roundToInt
+import dev.claudefleet.mobile.ui.theme.statusWord
 
 /**
  * The one-line summary under a session's title, led by its [StatusDot]: not just
@@ -105,14 +106,18 @@ internal const val CONTEXT_WARNING_PCT: Double = 80.0
  */
 fun statusStripText(row: SessionRow?, context: ConvContext?, nowSeconds: Long): String {
     if (row == null) return ""
+    // Stuck before any status: it is what a person has to go and clear, and
+    // what it is stuck on is the useful half.
+    row.stuckKind?.takeIf { it.isNotBlank() }?.let { return "stuck · ${it.replace('_', ' ')}" }
     return when (row.claudeStatus) {
         "working" -> workingStrip(row, context, nowSeconds)
+        "blocked" -> "waiting for you"
         "idle" -> {
             val elapsed = relativeTime(row.lastStopAt, nowSeconds)
             if (elapsed != null) "idle since $elapsed" else "idle"
         }
         null -> ""
-        else -> row.claudeStatus
+        else -> statusWord(row.claudeStatus)
     }
 }
 

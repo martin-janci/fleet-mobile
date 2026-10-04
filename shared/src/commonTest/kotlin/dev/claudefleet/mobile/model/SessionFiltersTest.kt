@@ -367,7 +367,7 @@ class SessionFiltersTest {
                 "Host: box",
                 "Idle beyond 24 hours",
                 "Search: “hub”",
-                "State: Blocked/Failed",
+                "State: Waiting for you/Failed",
                 "Background agents hidden",
             ),
             named,

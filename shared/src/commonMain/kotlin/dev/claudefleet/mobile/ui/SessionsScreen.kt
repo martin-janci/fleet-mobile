@@ -88,6 +88,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.semantics.semantics
 
 /**
  * Everything the fleet list reports.
@@ -223,7 +224,7 @@ fun SessionsScreen(
             )
         }
         HiddenAttentionBanner(count = state.hiddenAttention, onClearAll = handlers.onClearAll)
-        ConnectionBanner(state.status)
+        ConnectionBanner(state.status, staleFor = state.staleFor)
         ErrorBanner(state.error, onDismiss = handlers.onDismissError)
         ErrorBanner(agent.error, onDismiss = handlers.onDismissAgentError)
 
@@ -270,12 +271,28 @@ fun SessionsScreen(
                         onLongClick = select?.let { { it(row.id) } },
                     )
                 }
+                if (state.pinned.isNotEmpty()) {
+                    item(key = "pinned-heading") { PinnedHeading(state.pinned.size) }
+                    items(state.pinned, key = { "pinned-${it.id}" }) { row ->
+                        SessionRowItem(
+                            row = row,
+                            nowSeconds = state.nowSeconds,
+                            showWork = true,
+                            showHost = true,
+                            orgColor = row.orgOf?.let(state.orgColors::get),
+                            onClick = { tap(row.id) },
+                            selected = row.id in bulk.selected,
+                            onLongClick = select?.let { { it(row.id) } },
+                        )
+                    }
+                }
                 for (host in state.groups) {
                     stickyHeader(key = "host-${host.alias}") {
                         HostHeader(
                             alias = host.alias,
                             reachable = host.reachable,
                             sessions = host.sessionCount,
+                            attention = host.attentionCount,
                             collapsed = host.collapsed,
                             onClick = { handlers.onToggleHost(host.alias) },
                         )
@@ -559,6 +576,8 @@ private fun HostHeader(
     sessions: Int,
     collapsed: Boolean,
     onClick: () -> Unit,
+    /** Sessions under it that need a person — the one number a folded host must still say. */
+    attention: Int = 0,
 ) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         Row(
@@ -586,16 +605,32 @@ private fun HostHeader(
             }
             // A host that is not in `list_hosts` is unknown, not unreachable,
             // and says nothing rather than accusing it of being down.
-            Text(
-                text = when (reachable) {
-                    true -> "$sessions session${if (sessions == 1) "" else "s"}"
-                    false -> "unreachable · $sessions"
-                    null -> "$sessions"
-                },
-                style = MaterialTheme.typography.labelSmall,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (attention > 0) {
+                    Badge(containerColor = MaterialTheme.colorScheme.error) { Text("$attention need you") }
+                }
+                Text(
+                    text = when (reachable) {
+                        true -> "$sessions session${if (sessions == 1) "" else "s"}"
+                        false -> "unreachable · $sessions"
+                        null -> "$sessions"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
         }
     }
+}
+
+/** Over the pinned rows: how many sessions need a person, all hosts. */
+@Composable
+private fun PinnedHeading(count: Int) {
+    Text(
+        text = if (count == 1) "1 session needs you" else "$count sessions need you",
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.error,
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp).semantics { heading() },
+    )
 }
 
 @Composable
@@ -711,7 +746,7 @@ private fun SessionRowItem(
         },
         trailingContent = {
             Column(horizontalAlignment = Alignment.End) {
-                StatusChip(claudeStatus = row.claudeStatus, stuckKind = row.stuckKind)
+                StatusChip(claudeStatus = row.claudeStatus, stuckKind = row.stuckKind, reason = row.attentionReason)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     relativeTime(row.lastActivityAt, nowSeconds)?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
                     row.ciStatus?.let { ci ->
@@ -755,6 +790,16 @@ private fun EmptyFleet(
             modifier = Modifier.padding(32.dp),
         ) {
             when {
+                // Not "no sessions": nothing has been listed yet — what a
+                // person sees opening the app from a notification.
+                state.connecting -> {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                    Text(
+                        text = "Connecting to the hub…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 facets.isNotEmpty() -> {
                     Text(
                         text = emptySessionsSentence(facets.let(::facetSentence)),
