@@ -135,6 +135,7 @@ import dev.claudefleet.mobile.model.SessionFacetId
 import dev.claudefleet.mobile.ui.SessionsHandlers
 import dev.claudefleet.mobile.ui.SessionsScreen
 import dev.claudefleet.mobile.ui.SessionsSheet
+import dev.claudefleet.mobile.ui.DraftMemory
 import dev.claudefleet.mobile.ui.SessionsViewModel
 import dev.claudefleet.mobile.ui.FleetSettingsSection
 import dev.claudefleet.mobile.ui.FleetSettingsViewModel
@@ -265,6 +266,9 @@ class AppContainer(
      * of it and the draft history, which is this phone's alone.
      */
     val quickReplies: QuickReplies = QuickReplies(prefs, HubQuickReplyActions(session))
+
+    /** Unsent text per session, across visits to it. */
+    val drafts: DraftMemory = DraftMemory()
     val hints: Hints = Hints(prefs)
 
     /** The fleet's settings pages' calls (claude-fleet declarative pages P6). */
@@ -1153,6 +1157,7 @@ private fun SessionRoute(
             // The container's one instance, not a fresh one per session — see
             // `AppContainer.quickReplies`.
             quickReplies = container.quickReplies,
+            drafts = container.drafts,
         )
     }
     val workVm = remember(sessionId, repository, scope) {

@@ -200,4 +200,21 @@ class SessionReadingRoomTest {
         compose.onNodeWithContentDescription("Stop the agent").performClick()
         assertEquals(1, stopped)
     }
+
+    @Test
+    fun a_long_code_block_shows_its_head_and_a_way_to_the_rest() {
+        val code = (1..30).joinToString("\n") { "line-$it" }
+        show(
+            SessionUiState(
+                conversation = Conversation(
+                    turns = listOf(ConvTurn(prompt = "go on", at = "t1", endedAt = "t1", items = listOf(ConvItem.Text("```\n$code\n```")))),
+                ),
+                loaded = true,
+            ),
+        )
+        compose.onNodeWithText("line-30", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Show all 30 lines").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("line-30", substring = true).assertExists()
+    }
 }

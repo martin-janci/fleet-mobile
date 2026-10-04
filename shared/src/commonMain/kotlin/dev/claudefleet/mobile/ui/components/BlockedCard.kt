@@ -1,5 +1,10 @@
 package dev.claudefleet.mobile.ui.components
 
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.text.selection.SelectionContainer
+import dev.claudefleet.mobile.model.ConvItem
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -76,6 +81,12 @@ fun BlockedCardView(
     onShowTerminal: () -> Unit,
     onHideTerminal: () -> Unit,
     onRestart: (() -> Unit)? = null,
+    /**
+     * The call the dialog is about — the newest tool still waiting for its
+     * result. "Do you want to proceed?" alone had people approving a command
+     * they could only see cut to one line, behind this card.
+     */
+    asking: ConvItem.Tool? = null,
     modifier: Modifier = Modifier,
 ) {
     // The same amber/red triage the status chip and the row dot draw, from the
@@ -83,6 +94,7 @@ fun BlockedCardView(
     // second place in the app deciding what "blocked" looks like, and the two
     // would drift. A card offering a restart is one nobody can answer from
     // here — the stuck end of the triage — and reads red.
+    val haptics = LocalHapticFeedback.current
     val tone = if (card.offerRestart) StatusTone.STUCK else StatusTone.BLOCKED
     val colors = LocalStatusColors.current(tone)
     Surface(
@@ -108,6 +120,19 @@ fun BlockedCardView(
                     )
                 }
             }
+            asking?.let { tool ->
+                Spacer(Modifier.height(6.dp))
+                if (tool.name.isNotBlank()) Text(tool.name, style = MaterialTheme.typography.labelLarge)
+                SelectionContainer {
+                    Text(
+                        text = tool.target?.takeIf { it.isNotBlank() } ?: tool.summary,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 6,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
             card.explain?.let {
                 Spacer(Modifier.height(4.dp))
                 Text(text = it, style = MaterialTheme.typography.bodySmall)
@@ -130,7 +155,10 @@ fun BlockedCardView(
                 ) {
                     for (answer in card.answers) {
                         AssistChip(
-                            onClick = { onAnswer(answer) },
+                            // Felt as well as seen: a tap that answers a dialog
+                            // gave no sign it landed, and a second tap sent a
+                            // second keystroke.
+                            onClick = { haptics.performHapticFeedback(HapticFeedbackType.LongPress); onAnswer(answer) },
                             enabled = canAnswer,
                             label = { Text(answerLabel(answer)) },
                             // The chip sits ON the status container, so its

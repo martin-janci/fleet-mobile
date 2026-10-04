@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui.components
 
+import androidx.compose.material3.TextButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -1297,15 +1298,28 @@ private fun CodeBlock(code: MdBlock.Code, modifier: Modifier = Modifier) {
                 )
             }
         }
+        // A long block shows its head and a way to the rest: a 150-line dump
+        // drawn whole put the sentence after it many flings away.
+        val lines = remember(code) { code.text.lines() }
+        var all by remember(code) { mutableStateOf(false) }
+        val folded = !all && lines.size > CODE_FOLD_LINES
         Text(
-            text = code.text,
+            text = if (folded) lines.take(CODE_FOLD_LINES).joinToString("\n") else code.text,
             style = MaterialTheme.typography.bodySmall,
             fontFamily = FontFamily.Monospace,
             softWrap = wrap,
             modifier = Modifier
                 .fillMaxWidth()
                 .then(if (wrap) Modifier else Modifier.horizontalScroll(rememberScrollState()))
-                .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                .padding(start = 12.dp, end = 12.dp, bottom = if (lines.size > CODE_FOLD_LINES) 0.dp else 12.dp),
         )
+        if (lines.size > CODE_FOLD_LINES) {
+            TextButton(onClick = { all = !all }, modifier = Modifier.padding(start = 4.dp)) {
+                Text(if (all) "Show less" else "Show all ${lines.size} lines")
+            }
+        }
     }
 }
+
+/** A code block longer than this is folded to its first lines. */
+internal const val CODE_FOLD_LINES = 20

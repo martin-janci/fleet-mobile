@@ -1,5 +1,9 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.foundation.text.selection.SelectionContainer
 import dev.claudefleet.mobile.model.relativeAgo
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import androidx.compose.ui.semantics.Role
@@ -404,6 +408,17 @@ fun SessionScreen(
         }
     }
 
+    // Switching conversation — to an earlier one, or back to the current —
+    // opens it at its newest turn, not at an index carried over from the other.
+    val viewingId = state.viewing?.claudeSessionId
+    val shownConversation = remember(sessionId) { mutableStateOf(viewingId) }
+    LaunchedEffect(viewingId) {
+        if (shownConversation.value != viewingId) {
+            shownConversation.value = viewingId
+            listState.scrollToItem(0)
+        }
+    }
+
     // What the tail looked like the last time this screen was composed, so a
     // change to it can be told apart from any other recomposition.
     val tail = remember(sessionId) { TailWatch() }
@@ -429,7 +444,9 @@ fun SessionScreen(
             // themselves instead of a frame later. With none, index 0: a
             // fresh state already is, and one carried over from another
             // session at this call site must not keep that session's place.
-            val recalled = ScrollMemory.recall(sessionId)?.takeIf { !it.atBottom }
+            // Not for an earlier conversation: the anchor is the current one's,
+            // and its index landed a reader mid-way through the other.
+            val recalled = if (state.viewing != null) null else ScrollMemory.recall(sessionId)?.takeIf { !it.atBottom }
             if (recalled != null) {
                 val index = rows.indexOfFirst { it.key == recalled.firstVisibleKey }.takeIf { it >= 0 }
                     ?: if (recalled.firstVisibleKey == TRUNCATED_KEY && truncated) rows.size else null
@@ -667,6 +684,7 @@ fun SessionScreen(
                     // "is a restart worth offering", not `canManage` re-read here
                     // as a stand-in for it.
                     onRestart = if (state.canRestart) onRestart else null,
+                    asking = if (card.offerRestart) null else pendingTool(state.conversation.turns),
                     // Capped, and scrolls inside: an explanation, a row of
                     // answers and the terminal under them used to be able to take
                     // the conversation's whole height — the footer stays full
@@ -1890,7 +1908,17 @@ private fun Item(item: ConvItem) {
                 }
                 item.result?.takeIf { it.isNotBlank() }?.let {
                     Spacer(Modifier.height(4.dp))
-                    Text(it, style = MaterialTheme.typography.bodySmall)
+                    // Markdown, as the agent wrote it, and folded: a subagent's
+                    // report could be hundreds of lines of literal `**` and `|`
+                    // burying the reply it was for.
+                    var open by remember(it) { mutableStateOf(false) }
+                    val long = isLongResult(it)
+                    Box(modifier = if (long && !open) Modifier.heightIn(max = RESULT_FOLDED_HEIGHT).clipToBounds() else Modifier) {
+                        MarkdownText(it, style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (long) {
+                        TextButton(onClick = { open = !open }) { Text(if (open) "Show less" else "Show the whole report") }
+                    }
                 }
             }
         }
@@ -1970,18 +1998,34 @@ private fun Note(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             detail?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = if (monospace) FontFamily.Monospace else null,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 6,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // Six lines, then a way to the rest: `!git status` or `/cost`
+                // used to stop at "…" with nothing to tap. Selectable, so a
+                // path or an error line can be copied out of it.
+                var open by remember(it) { mutableStateOf(false) }
+                var cut by remember(it) { mutableStateOf(false) }
+                SelectionContainer {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = if (monospace) FontFamily.Monospace else null,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = if (open) Int.MAX_VALUE else 6,
+                        overflow = TextOverflow.Ellipsis,
+                        onTextLayout = { layout -> if (!open) cut = layout.hasVisualOverflow },
+                    )
+                }
+                if (cut || open) {
+                    TextButton(onClick = { open = !open }) { Text(if (open) "Show less" else "Show all") }
+                }
             }
         }
     }
 }
+
+/** A subagent's report taller than this many lines (or characters) is folded. */
+internal fun isLongResult(text: String): Boolean = text.lines().size > 10 || text.length > 800
+
+private val RESULT_FOLDED_HEIGHT = 160.dp
 
 /**
  * What the turn list shows instead of a `LazyColumn` once a read has answered
@@ -2183,6 +2227,7 @@ private fun PromptBox(
     focusNow: Boolean = false,
     onFocused: () -> Unit = {},
 ) {
+    val haptics = LocalHapticFeedback.current
     var showHistory by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(focusNow) {
@@ -2285,7 +2330,7 @@ private fun PromptBox(
             // Stop — the one way to halt a turn going wrong short of a kill.
             if (state.canStop) {
                 FilledIconButton(
-                    onClick = onStop,
+                    onClick = { haptics.performHapticFeedback(HapticFeedbackType.LongPress); onStop() },
                     colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = MaterialTheme.colorScheme.error,
                         contentColor = MaterialTheme.colorScheme.onError,
@@ -2296,7 +2341,7 @@ private fun PromptBox(
                 }
             } else {
                 FilledIconButton(
-                    onClick = onSend,
+                    onClick = { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); onSend() },
                     enabled = state.canSend,
                     modifier = Modifier.padding(bottom = 4.dp).size(48.dp),
                 ) {
@@ -2325,13 +2370,19 @@ private fun PromptBox(
             // Puts the picked entry in the draft; it is not sent — the
             // person still taps Send (or edits it first), same as tapping a
             // suggestion anywhere else in this screen never fires by itself.
-            onPick = { entry -> onDraftChange(entry); showHistory = false },
+            // Added after what is already typed, never over it: a pick used
+            // to wipe a half-written reply without a word.
+            onPick = { entry -> onDraftChange(withHistoryEntry(state.draft, entry)); showHistory = false },
             onDismiss = { showHistory = false },
         )
     }
 }
 
 /** What was actually sent, most recent first — picking one loads it into the draft, unsent. */
+/** [entry] into the box: alone when it is empty, on a line after what is there otherwise. */
+internal fun withHistoryEntry(draft: String, entry: String): String =
+    if (draft.isBlank()) entry else draft.trimEnd() + "\n" + entry
+
 @Composable
 private fun HistoryDialog(entries: List<String>, onPick: (String) -> Unit, onDismiss: () -> Unit) {
     AlertDialog(

@@ -47,6 +47,11 @@ data class BlockedCard(
  * the REPL has no keystroke for "10" that a dialog would not read as "1", so
  * a higher option is left to the terminal.
  */
+/** The newest call still waiting for its result: what a permission dialog is asking about. */
+internal fun pendingTool(turns: List<dev.claudefleet.mobile.model.ConvTurn>): dev.claudefleet.mobile.model.ConvItem.Tool? =
+    turns.lastOrNull()?.items?.lastOrNull { it is dev.claudefleet.mobile.model.ConvItem.Tool && !it.done }
+        as? dev.claudefleet.mobile.model.ConvItem.Tool
+
 fun blockedCard(row: SessionRow, hubVersion: String?): BlockedCard? {
     val stuck = row.stuckKind
     val blocked = row.claudeStatus == "blocked"

@@ -1,5 +1,11 @@
 package dev.claudefleet.mobile.ui
 
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -480,12 +486,17 @@ private fun BashDetail(command: String, result: String?, isError: Boolean) {
                         )
                     }
                     Spacer(Modifier.padding(top = 4.dp))
-                    Text(
-                        if (showEarlier) result.trimEnd('\n') else tail.joinToString("\n"),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp,
-                    )
+                    // Selectable, and copyable whole: the error line or path in
+                    // a command's output is often what goes back to the agent.
+                    SelectionContainer {
+                        Text(
+                            if (showEarlier) result.trimEnd('\n') else tail.joinToString("\n"),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
+                        )
+                    }
+                    CopyOutput(result.trimEnd('\n'), tint = colors.inversePrimary)
                 }
             }
         }
@@ -659,16 +670,38 @@ private fun Muted(text: String) {
 }
 
 /** Monospace text, capped at [FALLBACK_CAP] lines until asked for the rest. */
+/** Copy a tool's whole output, with the same brief check a code block's copy gives. */
+@Composable
+private fun CopyOutput(text: String, tint: Color) {
+    val clipboard = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
+    var copied by remember(text) { mutableStateOf(false) }
+    Text(
+        if (copied) "Copied" else "Copy output",
+        style = MaterialTheme.typography.labelMedium,
+        color = tint,
+        modifier = Modifier
+            .clickable(role = Role.Button) {
+                clipboard.setText(AnnotatedString(text))
+                copied = true
+                scope.launch { delay(1500); copied = false }
+            }
+            .padding(vertical = 8.dp),
+    )
+}
+
 @Composable
 private fun MonoBlock(text: String, isError: Boolean) {
     var showAll by remember(text) { mutableStateOf(false) }
     val lines = remember(text) { text.trimEnd('\n').split('\n') }
-    Text(
-        if (showAll || lines.size <= FALLBACK_CAP) lines.joinToString("\n") else lines.take(FALLBACK_CAP).joinToString("\n"),
-        style = MaterialTheme.typography.bodySmall,
-        fontFamily = FontFamily.Monospace,
-        color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-    )
+    SelectionContainer {
+        Text(
+            if (showAll || lines.size <= FALLBACK_CAP) lines.joinToString("\n") else lines.take(FALLBACK_CAP).joinToString("\n"),
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+            color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+        )
+    }
     if (!showAll && lines.size > FALLBACK_CAP) {
         TextButton(onClick = { showAll = true }) { Text("${lines.size - FALLBACK_CAP} more lines") }
     }
