@@ -245,12 +245,38 @@ costs one reconnect.
 
 - **Sessions** — every session across every host, grouped by host and then by
   project, with status, the one-line activity the hub already computes, and a
-  filter for the ones that need a human (blocked or stuck).
+  filter for the ones that need a human (blocked or stuck). A long press picks
+  sessions for **Send** (one prompt to each) or **Kill**. Search finds hosts,
+  projects (a new session in one) and tickets too, under the sessions it
+  matched.
 - **Session** — the conversation as turns, newest at the bottom; tool calls as
-  one-line summaries with a marker when one failed; a prompt box.
+  one-line summaries with a marker when one failed; a prompt box. Reading back
+  folds the header and the composer away (a double tap does it on purpose);
+  long prompts fold; **Find** steps through the turns that hold a word.
+  - Under each reply, ⋯: **Copy**, **Quote**, **Retry**, **Rewind here**,
+    **Fork here** (`rewind_conversation`, the desktop's rules).
+  - **Details** (a tap on the title): the row's facts, the sessions sharing its
+    worktree, its fleet tasks (with Cancel) and its event timeline.
+  - Earlier conversations (after a `/clear`, a resume, a compaction or a
+    rewind) read-only, and **Load older** turns.
+  - The composer suggests slash commands; ⋮ has **Model…** / **Effort…**,
+    **Review…**, **Repair workspace**, **Move to host…** (a dry run first,
+    now or when idle), **Recreate**, and for a ghost **Dismiss ghost**; a
+    ⏎ in the empty field presses Enter.
 - **Hosts** — reachability, Claude and tmux versions, session count. Hidden
   hosts are listed and marked rather than dropped, because the app cannot
-  unhide one and a hidden host can still own live sessions.
+  unhide one and a hidden host can still own live sessions. A host's ⋮ opens
+  its sheet: **Re-probe**, and after a reboot the sessions it lost (a plan,
+  then **Restore**) and the conversations fleet has no session for
+  (**Resume**).
+- **New session** — on a host and project, in a new worktree or an existing
+  one (each deletable when no session lives in it); **Add a project** (clone
+  a URL or a repository `gh` there sees, or a new one, on GitHub too after a
+  confirmation); or a **Background agent** started on a task.
+- **Usage** (Settings → Usage) — estimated cost over 24 h / 7 / 30 days: the
+  total, by host, by day and the costliest sessions; the fleet's Claude
+  accounts. A subscription's 5-hour and weekly windows are the desktop's own
+  read and are not served by the hub.
 - **Files** (a hub with file downloads, claude-fleet contract revision 7,
   when it lists `list_downloads`) — the files sessions sent to the hub
   (`send_file`, by Claude or from the desktop's file viewer), newest first:
@@ -280,7 +306,8 @@ costs one reconnect.
   agent proposed with its reason. A device the hub's operator trusts
   (`fleet-hub client trust <name>`) switches, picks and saves values (a change
   that needs confirming asks first) and applies or rejects proposals; any
-  other device reads them and is told the command. Maps, id lists and price
+  other device reads them and is told the command. Each field has its
+  **History** (who changed it, from what to what). Maps, id lists and price
   tables, resources (Trackers, Organisations) and data pages stay on a
   desktop.
 - **Work** (a hub with the work graph) — what each session is working on, as
@@ -306,7 +333,12 @@ costs one reconnect.
     since local midnight, one card per section, each session's reason as a
     coloured chip in words; chips narrow it by section, host or *Tickets
     only*, and **Copy standup** / **Share** hand on the desktop's text for
-    what is shown, to the clipboard or the system share sheet;
+    what is shown, to the clipboard or the system share sheet; under it,
+    **Tidy up…** — what the hub suggests retiring, by reason, each with the
+    choices its rule allows and the suggested ones ticked (a kill asked
+    first), and work that came back after it was done;
+  - **Summarize** on a task's past session: Claude's account of it, kept in
+    the work's journal;
   - **Ask for a handover** on a linked session: Claude writes a handover note
     for whoever picks the work up next, and the sheet says when it is written;
   - **Also start in** on *Start here*, for a full token on a hub that takes
