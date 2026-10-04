@@ -28,6 +28,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -1237,7 +1238,9 @@ private fun TableView(table: MdBlock.Table, style: TextStyle) {
 /**
  * A fenced code block on `surfaceContainerHigh`: a header strip with the
  * language label and a copy button (never drawn over the code), then the
- * code, horizontally scrollable (lines are not wrapped or truncated). The
+ * code, horizontally scrollable (lines are not wrapped or truncated) until
+ * the wrap toggle beside copy wraps them instead — on a phone a long line is
+ * otherwise read a screen-width at a time, sideways. The copy
  * button swaps to [FleetIcons.Check] for a beat after a tap --
  * [LocalClipboardManager] alone gives no other feedback that the tap
  * registered.
@@ -1247,6 +1250,7 @@ private fun CodeBlock(code: MdBlock.Code, modifier: Modifier = Modifier) {
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var copied by remember(code) { mutableStateOf(false) }
+    var wrap by rememberSaveable { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
 
     Column(
@@ -1266,6 +1270,14 @@ private fun CodeBlock(code: MdBlock.Code, modifier: Modifier = Modifier) {
                 maxLines = 1,
                 modifier = Modifier.weight(1f).padding(start = 12.dp),
             )
+            IconButton(onClick = { wrap = !wrap }, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    imageVector = FleetIcons.WrapText,
+                    contentDescription = if (wrap) "Scroll long lines" else "Wrap long lines",
+                    tint = if (wrap) colors.primary else colors.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
             IconButton(
                 onClick = {
                     clipboard.setText(AnnotatedString(code.text))
@@ -1289,10 +1301,10 @@ private fun CodeBlock(code: MdBlock.Code, modifier: Modifier = Modifier) {
             text = code.text,
             style = MaterialTheme.typography.bodySmall,
             fontFamily = FontFamily.Monospace,
-            softWrap = false,
+            softWrap = wrap,
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
+                .then(if (wrap) Modifier else Modifier.horizontalScroll(rememberScrollState()))
                 .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
         )
     }

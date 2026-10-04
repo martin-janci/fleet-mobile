@@ -1,6 +1,8 @@
 package dev.claudefleet.mobile.ui
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.SizeTransform
@@ -202,6 +204,13 @@ fun SessionScreen(
      * nothing — an older hub, a preview, or a test that does not care.
      */
     toolDetails: ToolDetailsHost = ToolDetailsHost.None,
+    /**
+     * Whether the once-only "double-tap for the whole screen" hint is still
+     * owed ([Hints.DOUBLE_TAP]); [onFoldHintShown] is told the moment it goes
+     * up. The default shows nothing — tests and previews.
+     */
+    showFoldHint: Boolean = false,
+    onFoldHintShown: () -> Unit = {},
 ) {
     val turns = state.conversation.turns
     val truncated = state.conversation.truncated
@@ -245,7 +254,10 @@ fun SessionScreen(
     val readingPx = with(LocalDensity.current) { READING_THRESHOLD.toPx() }
     val direction = remember(readingPx) { ReadingDirection(readingPx) }
     var readingUp by remember { mutableStateOf(false) }
-    var immersive by remember { mutableStateOf(false) }
+    // A phone on its side opens folded; see [startsImmersive].
+    val windowHeightDp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp().value }
+    val short = startsImmersive(windowHeightDp)
+    var immersive by remember(short) { mutableStateOf(short) }
     var promptFocused by remember { mutableStateOf(false) }
     var focusPrompt by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
@@ -295,6 +307,24 @@ fun SessionScreen(
     // Back at the newest turn by any route ends a read-back: the next drag
     // up starts a new one from zero.
     LaunchedEffect(atBottom) { if (atBottom) stopReading() }
+
+    // The first time reading back folds the chrome, say once that a double
+    // tap does it on purpose. Marked shown as it goes up, not when it goes
+    // away: it is a hint, not something to be acknowledged. Keyed on
+    // `readingUp` alone, so the owed flag flipping does not cancel it.
+    var foldHintUp by remember { mutableStateOf(false) }
+    val foldHintOwed by rememberUpdatedState(showFoldHint && !immersive)
+    LaunchedEffect(readingUp) {
+        if (readingUp && foldHintOwed) {
+            onFoldHintShown()
+            foldHintUp = true
+            try {
+                delay(FOLD_HINT_MS)
+            } finally {
+                foldHintUp = false
+            }
+        }
+    }
 
     // Remembers where this session was scrolled to across a visit to this
     // screen — closing it (navigating away; the composable leaving
@@ -461,6 +491,28 @@ fun SessionScreen(
                         }
                     }
                 }
+                // The once-only double-tap hint, over the top of the
+                // conversation (see `foldHintUp`).
+                // Qualified: inside the screen's Column the ColumnScope overload is the
+                // one resolved, and it cannot be called from this Box.
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = foldHintUp,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp),
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.inverseSurface,
+                        contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                    ) {
+                        Text(
+                            text = "Double-tap for the whole screen",
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
+                }
                 // The fast way back down, for whoever scrolled up to read
                 // something and either wants the bottom again or got fresh
                 // turns while they were up there — see `SessionUiState.newReply`
@@ -584,7 +636,13 @@ fun SessionScreen(
  */
 private fun LazyListScope.turnItems(rows: List<TurnRow>, working: Boolean) {
     itemsIndexed(rows, key = { _, row -> row.key }, contentType = { _, _ -> "turn" }) { index, row ->
-        Turn(row.turn, live = working && index == 0)
+        // Centred at a reading width: on a tablet a line the screen's whole
+        // width is too long to follow back to its start.
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+            Box(modifier = Modifier.widthIn(max = READING_WIDTH)) {
+                Turn(row.turn, live = working && index == 0)
+            }
+        }
     }
 }
 
@@ -596,6 +654,12 @@ internal const val TRUNCATED_KEY: String = "truncated"
  * the bottom — still followed when the tail moves, and shown no jump pill.
  */
 private val NEAR_NEWEST = 48.dp
+
+/** The widest a turn draws; a phone is narrower than this, a tablet is not. */
+private val READING_WIDTH = 720.dp
+
+/** How long the double-tap hint stays up. */
+private const val FOLD_HINT_MS = 3_500L
 
 /**
  * How far one drag has to run, one way, before the chrome folds (towards
@@ -1277,11 +1341,11 @@ internal fun Turn(turn: ConvTurn, live: Boolean = false) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = if (hasPrompt) 24.dp else 4.dp, bottom = 4.dp),
+            .padding(start = 12.dp, end = 12.dp, top = if (hasPrompt) 16.dp else 4.dp, bottom = 4.dp),
     ) {
         if (hasPrompt) {
             PromptBubble(prompt.orEmpty())
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
         }
         TurnItems(turn.items, live) { Item(it) }
     }

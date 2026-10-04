@@ -343,6 +343,29 @@ object FleetIcons {
     }
 
     /**
+     * Wrap long lines: a full line, a line that turns back on itself with an
+     * arrowhead, and a short one — a code block's toggle between scrolling
+     * sideways and wrapping. Stroke-only like [Copy].
+     */
+    val WrapText: ImageVector by lazy {
+        ImageVector.Builder("WrapText", 24.dp, 24.dp, 24f, 24f).apply {
+            path(
+                fill = null,
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                moveTo(3f, 6f); lineTo(21f, 6f)
+                moveTo(3f, 12f); lineTo(17f, 12f); quadTo(21f, 12f, 21f, 15f)
+                quadTo(21f, 18f, 17f, 18f); lineTo(13f, 18f)
+                moveTo(15f, 16f); lineTo(13f, 18f); lineTo(15f, 20f)
+                moveTo(3f, 18f); lineTo(9f, 18f)
+            }
+        }.build()
+    }
+
+    /**
      * The Work tab: a clipboard holding a checklist — tasks, not sessions.
      * Stroke-only like [Copy], so it tints the way the other tab glyphs do.
      */
