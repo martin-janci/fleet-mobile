@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -56,7 +58,7 @@ fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowS
             item {
                 val host = state.host
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
-                    Text(state.alias.orEmpty(), style = MaterialTheme.typography.titleLarge)
+                    Text(state.alias.orEmpty(), style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
                     Text(
                         listOfNotNull(
                             if (host?.reachable == true) "reachable" else "unreachable",

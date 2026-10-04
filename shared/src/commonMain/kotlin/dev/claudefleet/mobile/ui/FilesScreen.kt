@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.ui.components.DangerTextButton
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -146,7 +147,7 @@ fun FilesScreen(
             onDismissRequest = handlers.onCancelRemove,
             title = { Text("Remove ${file.name}?") },
             text = { Text("The hub forgets its copy, for every device. The file on its host is not touched.") },
-            confirmButton = { TextButton(onClick = handlers.onConfirmRemove) { Text("Remove") } },
+            confirmButton = { DangerTextButton(onClick = handlers.onConfirmRemove) { Text("Remove") } },
             dismissButton = { TextButton(onClick = handlers.onCancelRemove) { Text("Cancel") } },
         )
     }

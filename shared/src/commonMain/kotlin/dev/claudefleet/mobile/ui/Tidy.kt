@@ -32,6 +32,17 @@ private val REASON_LABELS = mapOf(
 
 internal fun tidyReasonLabel(reason: String): String = REASON_LABELS[reason] ?: reason.replace('_', ' ')
 
+/**
+ * One failed apply in words: the session's name rather than its row id, and
+ * the action as the menu said it rather than its wire value.
+ */
+internal fun tidyFailureLine(sessionId: Long, error: String?, action: String, candidates: List<TidyCandidate>): String {
+    val c = candidates.firstOrNull { it.sessionId == sessionId }
+    val name = c?.let { it.label?.takeIf { l -> l.isNotBlank() } ?: it.tmuxName } ?: "a session no longer listed"
+    val what = TidyChoice.entries.firstOrNull { it.wire == action }?.label ?: action.replace('_', ' ')
+    return "$name (${error ?: what})"
+}
+
 /** What [c] may become: its suggested kill, then what its link allows (archive, snooze, never), or keep. */
 internal fun tidyChoices(c: TidyCandidate): List<TidyChoice> = buildList {
     if (c.action == "safe_kill") add(TidyChoice.SafeKill)

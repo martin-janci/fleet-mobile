@@ -1,5 +1,10 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.heightIn
+import dev.claudefleet.mobile.ui.theme.statusLabel
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -71,7 +76,7 @@ fun SessionDetailsSheet(state: SessionDetailsUiState, handlers: SessionDetailsHa
                         style = MaterialTheme.typography.titleLarge,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).semantics { heading() },
                     )
                     TextButton(onClick = handlers.onReload, enabled = !state.loading) { Text("Refresh") }
                 }
@@ -140,7 +145,7 @@ private fun Facts(row: SessionRow, now: Long, sessions: List<SessionRow>, onOpen
         row.ciStatus?.let { Fact("CI", it) }
         if (row.tags.isNotEmpty()) Fact("Tags", row.tags.joinToString(", "))
         row.parentSessionId?.let { parent ->
-            val name = sessions.firstOrNull { it.id == parent }?.displayName ?: "#$parent"
+            val name = sessions.firstOrNull { it.id == parent }?.displayName ?: "an earlier session"
             Fact("Started from", name, onClick = { onOpenSession(parent) })
         }
         row.lastPrompt?.takeIf { it.isNotBlank() }?.let { Fact("Last prompt", it, lines = 3) }
@@ -152,14 +157,16 @@ private fun Fact(label: String, value: String, onClick: (() -> Unit)? = null, li
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            // A row that does something is a whole 48 dp target, not a line of text.
+            .then(if (onClick != null) Modifier.heightIn(min = 48.dp).clickable(onClick = onClick) else Modifier)
             .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             label,
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(112.dp),
+            modifier = Modifier.widthIn(min = 112.dp),
         )
         Text(
             value,
@@ -197,7 +204,13 @@ private fun SessionLine(row: SessionRow, onClick: () -> Unit) {
         StatusDot(row.claudeStatus, row.stuckKind)
         Column(modifier = Modifier.weight(1f)) {
             Text(row.displayName, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(row.hostAlias, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // The dot's status in words too: a colour alone says nothing to
+            // a screen reader or a colour-blind eye.
+            Text(
+                "${row.hostAlias} · ${statusLabel(row.claudeStatus, row.stuckKind)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -207,11 +220,11 @@ private fun TaskLine(task: FleetTask, state: SessionDetailsUiState, sessions: Li
     val mine = state.session?.id
     // The other side of the task: who asked, or who is working on it.
     val (role, other) = if (task.requesterSessionId == mine) "Asked" to task.workerSessionId else "Working for" to task.requesterSessionId
-    val otherName = other?.let { id -> sessions.firstOrNull { it.id == id }?.displayName ?: "#$id" }
+    val otherName = other?.let { id -> sessions.firstOrNull { it.id == id }?.displayName ?: "a session no longer listed" }
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "${task.state} · $role" + (otherName?.let { " $it" } ?: ""),
+                "${task.state.replace('_', ' ')} · $role" + (otherName?.let { " $it" } ?: ""),
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.weight(1f).then(
                     if (other != null) Modifier.clickable { handlers.onOpenSession(other) } else Modifier,
@@ -241,7 +254,7 @@ private fun EventLine(event: SessionEvent, now: Long) {
             relativeTime(event.at, now) ?: "",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(64.dp),
+            modifier = Modifier.widthIn(min = 64.dp),
         )
         Column(modifier = Modifier.weight(1f)) {
             Text(

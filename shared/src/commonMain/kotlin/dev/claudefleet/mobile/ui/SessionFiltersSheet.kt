@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -83,7 +85,7 @@ fun SessionFiltersSheet(state: SessionsUiState, handlers: SessionFiltersHandlers
                 modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Filters", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                Text("Filters", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).semantics { heading() })
                 // Enabled while anything the sheet can clear is on — showing
                 // archived sessions included, which *Clear all* hides again.
                 TextButton(onClick = handlers.onClearAll, enabled = filters.any || (state.workAvailable && filters.showArchived)) { Text("Clear all") }

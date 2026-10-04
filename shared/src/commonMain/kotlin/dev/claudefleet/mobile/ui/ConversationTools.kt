@@ -51,6 +51,8 @@ import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.EditDetail
 import dev.claudefleet.mobile.model.ToolDetail
+import dev.claudefleet.mobile.ui.theme.DiffColors
+import dev.claudefleet.mobile.ui.theme.diffColors
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 
 /*
@@ -343,30 +345,12 @@ private fun ToolDetailBody(tool: ConvItem.Tool, kind: ToolKind, detail: ToolDeta
 
 // ─── Edit / MultiEdit / Write ───────────────────────────────────────────────
 
-private data class DiffPalette(val addBg: Color, val addFg: Color, val delBg: Color, val delFg: Color)
-
-/**
- * Green for additions, whichever way the theme is lit — the Material baseline's
- * `tertiary` is a rose that reads as a second red beside `error`. The greens
- * are the fleet's own "completed" tone (`FleetTheme`'s status colours).
- */
-@Composable
-private fun diffPalette(): DiffPalette {
-    val colors = MaterialTheme.colorScheme
-    val dark = colors.surface.luminance() < 0.5f
-    return if (dark) {
-        DiffPalette(Color(0xFF1E4D2E).copy(alpha = 0.55f), Color(0xFF7CD292), colors.errorContainer.copy(alpha = 0.4f), colors.error)
-    } else {
-        DiffPalette(Color(0xFFD6F0DD), Color(0xFF1E8E3E), colors.errorContainer.copy(alpha = 0.4f), colors.error)
-    }
-}
-
 @Composable
 private fun EditDetailView(edit: EditDetail, isNewFile: Boolean) {
     val lines = remember(edit) { lineDiff(edit.old, edit.new) }
     val rows = remember(lines) { collapseContext(lines) }
     val stat = remember(lines) { diffStat(lines) }
-    val palette = diffPalette()
+    val palette = diffColors()
     val (name, dir) = remember(edit.filePath) { splitPath(edit.filePath) }
     var showAll by remember(edit) { mutableStateOf(false) }
 
@@ -387,10 +371,10 @@ private fun EditDetailView(edit: EditDetail, isNewFile: Boolean) {
             Text("new file", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.width(8.dp))
-        Text("+${stat.added}", style = MaterialTheme.typography.labelMedium, color = palette.addFg, fontWeight = FontWeight.SemiBold)
+        Text("+${stat.added}", style = MaterialTheme.typography.labelMedium, color = palette.addedFg, fontWeight = FontWeight.SemiBold)
         if (stat.removed > 0 || !isNewFile) {
             Spacer(Modifier.width(6.dp))
-            Text("−${stat.removed}", style = MaterialTheme.typography.labelMedium, color = palette.delFg, fontWeight = FontWeight.SemiBold)
+            Text("−${stat.removed}", style = MaterialTheme.typography.labelMedium, color = palette.removedFg, fontWeight = FontWeight.SemiBold)
         }
     }
     Spacer(Modifier.padding(top = 8.dp))
@@ -418,11 +402,11 @@ private fun EditDetailView(edit: EditDetail, isNewFile: Boolean) {
 }
 
 @Composable
-private fun DiffLineRow(line: DiffLine, palette: DiffPalette) {
+private fun DiffLineRow(line: DiffLine, palette: DiffColors) {
     val colors = MaterialTheme.colorScheme
     val (bg, signColor, sign) = when (line.kind) {
-        DiffKind.Add -> Triple(palette.addBg, palette.addFg, "+")
-        DiffKind.Del -> Triple(palette.delBg, palette.delFg, "−")
+        DiffKind.Add -> Triple(palette.addedBg, palette.addedFg, "+")
+        DiffKind.Del -> Triple(palette.removedBg, palette.removedFg, "−")
         DiffKind.Context -> Triple(Color.Transparent, colors.onSurfaceVariant, "")
     }
     val number = if (line.kind == DiffKind.Del) line.oldNo else line.newNo

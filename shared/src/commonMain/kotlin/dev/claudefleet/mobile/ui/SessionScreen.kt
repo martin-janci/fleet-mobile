@@ -1,5 +1,8 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.ui.components.DangerTextButton
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -874,7 +877,7 @@ private fun PromptPill(state: SessionUiState, onClick: () -> Unit) {
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
         Row(
-            modifier = Modifier.height(40.dp).padding(horizontal = 16.dp),
+            modifier = Modifier.heightIn(min = 40.dp).padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -1560,8 +1563,8 @@ private fun KillConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
             )
         },
         confirmButton = {
-            TextButton(onClick = onConfirm, enabled = enabled) {
-                Text("Kill now", color = MaterialTheme.colorScheme.error)
+            DangerTextButton(onClick = onConfirm, enabled = enabled) {
+                Text("Kill now")
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
@@ -1754,8 +1757,11 @@ private fun ForkDialog(suggested: String, onConfirm: (String?) -> Unit, onDismis
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("A new session starts on this conversation up to here. This session is left as it is.")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = ownTree, onCheckedChange = { ownTree = it })
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.toggleable(value = ownTree, role = Role.Checkbox) { ownTree = it },
+                ) {
+                    Checkbox(checked = ownTree, onCheckedChange = null)
                     Text("In a new worktree")
                 }
                 if (ownTree) {
@@ -2562,8 +2568,8 @@ private fun ManageQuickRepliesDialog(
                         IconButton(onClick = { onMove(chip, 1) }, enabled = i < chips.lastIndex) {
                             Text("↓")
                         }
-                        TextButton(onClick = { onRemove(chip) }) {
-                            Text("Remove", color = MaterialTheme.colorScheme.error)
+                        DangerTextButton(onClick = { onRemove(chip) }) {
+                            Text("Remove")
                         }
                     }
                     HorizontalDivider()
@@ -2601,8 +2607,8 @@ private fun EditQuickReplyDialog(
             title = { Text("Remove this quick reply?") },
             text = { Text("It goes from every device's chip row.") },
             confirmButton = {
-                TextButton(onClick = { confirmRemove = false; onRemove() }) {
-                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                DangerTextButton(onClick = { confirmRemove = false; onRemove() }) {
+                    Text("Remove")
                 }
             },
             dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("Cancel") } },
@@ -2629,16 +2635,16 @@ private fun EditQuickReplyDialog(
                 )
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.clickable { autoSend = !autoSend },
+                    modifier = Modifier.toggleable(value = autoSend, role = Role.Checkbox) { autoSend = it },
                 ) {
-                    Checkbox(checked = autoSend, onCheckedChange = { autoSend = it })
+                    Checkbox(checked = autoSend, onCheckedChange = null)
                     Text("Send on tap (otherwise only fills the box)")
                 }
                 // Not where Cancel sits: a tap meant to back out must never
                 // delete a chip from every device. Asked first, too.
                 if (onRemove != null) {
-                    TextButton(onClick = { confirmRemove = true }) {
-                        Text("Remove this quick reply…", color = MaterialTheme.colorScheme.error)
+                    DangerTextButton(onClick = { confirmRemove = true }) {
+                        Text("Remove this quick reply…")
                     }
                 }
             }
@@ -2682,7 +2688,7 @@ private fun SlashSuggestions(commands: List<SlashCommand>, onPick: (SlashCommand
                 modifier = Modifier.fillMaxWidth().clickable { onPick(c) }.padding(horizontal = 16.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("/${c.name}", style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace, modifier = Modifier.width(120.dp))
+                Text("/${c.name}", style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace, modifier = Modifier.widthIn(min = 120.dp))
                 Text(c.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }

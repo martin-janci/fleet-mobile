@@ -151,6 +151,15 @@ fun WorkStatusDot(category: StatusCategory, modifier: Modifier = Modifier) {
             .padding(end = 4.dp)
             .size(6.dp)
             .clip(CircleShape)
-            .background(LocalStatusColors.current(tone).dot),
+            .background(LocalStatusColors.current(tone).dot)
+            .semantics { contentDescription = workStatusWord(category) },
     )
+}
+
+/** A ticket's status bucket in words, for whoever cannot see the dot's colour. */
+internal fun workStatusWord(category: StatusCategory): String = when (category) {
+    StatusCategory.Todo -> "to do"
+    StatusCategory.InProgress -> "in progress"
+    StatusCategory.Done -> "done"
+    StatusCategory.Unknown -> "status unknown"
 }

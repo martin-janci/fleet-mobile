@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.foundation.layout.heightIn
+import dev.claudefleet.mobile.ui.components.DangerTextButton
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -268,7 +270,7 @@ internal fun ReloadRow(onReload: () -> Unit) {
 private fun OrgHeader(org: WorkOrgSection, onClick: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(40.dp).clickable(onClick = onClick).padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable(onClick = onClick).padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
@@ -479,7 +481,7 @@ private fun WorkFiltersSheet(state: MyWorkUiState, handlers: MyWorkHandlers) {
             FlowRow(modifier = Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (state.canSaveView) TextButton(onClick = { naming = true }) { Text("Save as view…") }
                 val active = state.views.firstOrNull { it.id == state.activeViewId }
-                if (active != null && state.canDeleteView) TextButton(onClick = { handlers.onDeleteView(active) }) { Text("Delete “${active.name}”") }
+                if (active != null && state.canDeleteView) DangerTextButton(onClick = { handlers.onDeleteView(active) }) { Text("Delete “${active.name}”") }
                 handlers.onOpenRules?.let { open -> TextButton(onClick = open) { Text("Placement rules") } }
             }
             if (state.viewsAvailable && state.views.isNotEmpty() && state.canSaveView) {

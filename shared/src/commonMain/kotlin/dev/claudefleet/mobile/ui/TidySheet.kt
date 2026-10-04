@@ -1,5 +1,11 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.heading
+import dev.claudefleet.mobile.ui.components.DangerTextButton
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,15 +62,15 @@ fun TidySheet(state: TidyUiState, handlers: TidyHandlers) {
     var confirmKills by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            Text("Tidy up", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp))
+            Text("Tidy up", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp).semantics { heading() })
             if (state.loading || state.applying) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp))
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
             state.results?.let { results ->
                 val failed = results.filter { !it.ok }
                 Text(
-                    "Applied ${results.size - failed.size} of ${results.size}." + if (failed.isNotEmpty()) " Not done: " + failed.joinToString { "#${it.sessionId} ${it.error ?: it.action}" } else "",
+                    "Applied ${results.size - failed.size} of ${results.size}." + if (failed.isNotEmpty()) " Not done: " + failed.joinToString { r -> tidyFailureLine(r.sessionId, r.error, r.action, state.candidates) } else "",
                     style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
                 )
             }
             LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f, fill = false)) {
@@ -100,7 +106,7 @@ fun TidySheet(state: TidyUiState, handlers: TidyHandlers) {
             onDismissRequest = { confirmKills = false },
             title = { Text("Kill ${sessionsWord(state.kills)}?") },
             text = { Text("A safe kill asks the session to commit and push first; a kill does not wait. The rest of the choices are applied too.") },
-            confirmButton = { TextButton(onClick = { confirmKills = false; handlers.onApply() }) { Text("Apply") } },
+            confirmButton = { DangerTextButton(onClick = { confirmKills = false; handlers.onApply() }) { Text("Kill and apply") } },
             dismissButton = { TextButton(onClick = { confirmKills = false }) { Text("Cancel") } },
         )
     }
@@ -111,7 +117,14 @@ private fun CandidateRow(c: TidyCandidate, state: TidyUiState, handlers: TidyHan
     var choosing by remember { mutableStateOf(false) }
     val choices = tidyChoices(c)
     Row(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked = c.sessionId in state.ticked, onCheckedChange = { handlers.onToggle(c.sessionId) }, enabled = choices.isNotEmpty())
+        // The row's words open the session, so the box carries its own name.
+        val name = c.label?.takeIf { it.isNotBlank() } ?: c.tmuxName
+        Checkbox(
+            checked = c.sessionId in state.ticked,
+            onCheckedChange = { handlers.onToggle(c.sessionId) },
+            enabled = choices.isNotEmpty(),
+            modifier = Modifier.semantics { contentDescription = "Tidy $name" },
+        )
         Column(modifier = Modifier.weight(1f).clickable { handlers.onOpenSession(c.sessionId) }) {
             Text(c.label?.takeIf { it.isNotBlank() } ?: c.tmuxName, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(

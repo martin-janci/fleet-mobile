@@ -1,5 +1,8 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import dev.claudefleet.mobile.ui.components.DangerTextButton
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -72,7 +75,7 @@ data class SessionTasksHandlers(
 fun SessionTasksSheet(state: SessionTasksUiState, handlers: SessionTasksHandlers) {
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            Text("Tasks", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp))
+            Text("Tasks", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp).semantics { heading() })
             if (!state.connected) {
                 Text(
                     "Offline — nothing can be changed until the hub is back; nothing is queued.",
@@ -158,7 +161,7 @@ private fun TaskLinkRow(link: WorkTaskLink, state: SessionTasksUiState, handlers
             when (link.state) {
                 LinkState.Active -> {
                     if (!link.primary && state.canMakePrimary) OutlinedButton(onClick = { handlers.onMakePrimary(link) }, enabled = enabled) { Text("Make primary") }
-                    if (state.canRemove) TextButton(onClick = { handlers.onRemove(link) }, enabled = enabled) { Text("Remove") }
+                    if (state.canRemove) DangerTextButton(onClick = { handlers.onRemove(link) }, enabled = enabled) { Text("Remove") }
                 }
                 LinkState.Suggested -> {
                     if (state.canConfirm) OutlinedButton(onClick = { handlers.onConfirm(link) }, enabled = enabled) { Text("Confirm") }

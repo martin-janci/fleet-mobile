@@ -1,5 +1,8 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.ui.components.DangerTextButton
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -203,7 +206,9 @@ fun NewSessionScreen(
             if (state.ticketKey == null) item(key = "worktree") {
                 HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                        .toggleable(value = state.newWorktree, enabled = editable, role = Role.Switch, onValueChange = onNewWorktree)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
@@ -215,7 +220,7 @@ fun NewSessionScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Switch(checked = state.newWorktree, onCheckedChange = onNewWorktree, enabled = editable)
+                    Switch(checked = state.newWorktree, onCheckedChange = null, enabled = editable)
                 }
             }
             // The project's worktrees on this host: start in one of them, or
@@ -231,8 +236,22 @@ fun NewSessionScreen(
                         leadingContent = { RadioButton(selected = picked, onClick = null, enabled = editable) },
                         trailingContent = if (tools.canDeleteWorktree && wt.name != "main") {
                             {
-                                TextButton(onClick = { toolHandlers.onDeleteWorktree(wt.id) }, enabled = tools.deleting == null) {
+                                // Asked first: a deleted worktree takes its branch's
+                                // checkout with it, and there is no undo.
+                                var asking by remember { mutableStateOf(false) }
+                                DangerTextButton(onClick = { asking = true }, enabled = tools.deleting == null) {
                                     Text(if (tools.deleting == wt.id) "Deleting…" else "Delete")
+                                }
+                                if (asking) {
+                                    AlertDialog(
+                                        onDismissRequest = { asking = false },
+                                        title = { Text("Delete the worktree ${wt.name}?") },
+                                        text = { Text("Its directory goes from the host. Refused while a session is in it or it holds changes not committed.") },
+                                        confirmButton = {
+                                            DangerTextButton(onClick = { asking = false; toolHandlers.onDeleteWorktree(wt.id) }) { Text("Delete") }
+                                        },
+                                        dismissButton = { TextButton(onClick = { asking = false }) { Text("Cancel") } },
+                                    )
                                 }
                             }
                         } else {
@@ -447,8 +466,11 @@ private fun AddProjectSheet(tools: ProjectToolsUiState, handlers: ProjectToolsHa
                 SectionLabel("New repository")
                 OutlinedTextField(value = owner, onValueChange = { owner = it }, singleLine = true, label = { Text("Owner") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = repo, onValueChange = { repo = it }, singleLine = true, label = { Text("Repository") }, modifier = Modifier.fillMaxWidth())
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = onGithub, onCheckedChange = { onGithub = it })
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.toggleable(value = onGithub, role = Role.Checkbox) { onGithub = it },
+                ) {
+                    Checkbox(checked = onGithub, onCheckedChange = null)
                     Text("Create it on GitHub too")
                 }
                 TextButton(
