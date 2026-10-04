@@ -142,7 +142,7 @@ fun SettingsScreen(
             var asking by remember { mutableStateOf(false) }
             Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                 DangerTextButton(onClick = { asking = true }, enabled = state.canForget) {
-                    Text(if (state.forgetting) "Forgetting…" else "Forget this hub…")
+                    Text(if (state.forgetting) "Forgetting…" else "Forget…")
                 }
             }
             if (asking) {
