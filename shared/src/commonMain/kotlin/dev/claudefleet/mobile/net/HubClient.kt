@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.net
 
 import dev.claudefleet.mobile.model.ActivityProbe
+import dev.claudefleet.mobile.model.AccountRow
 import dev.claudefleet.mobile.model.RepoTree
 import dev.claudefleet.mobile.model.FileDiff
 import dev.claudefleet.mobile.model.FileContent
@@ -25,6 +26,7 @@ import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionEvent
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.UsageReport
 import dev.claudefleet.mobile.model.SettingDescriptor
 import dev.claudefleet.mobile.model.SettingsDecided
 import dev.claudefleet.mobile.model.SettingsPending
@@ -460,6 +462,20 @@ class HubClient(
                 if (newWorktree != null) put("new_worktree", newWorktree)
             },
         ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
+
+    /**
+     * ESTIMATED usage (`usage_report`, readonly): totals, per host, per UTC
+     * day and per session. [sinceSecs] narrows to what changed in that many
+     * seconds; null is the hub's default, the last 30 days.
+     */
+    suspend fun usageReport(sinceSecs: Long? = null): UsageReport =
+        call("usage_report", buildJsonObject { if (sinceSecs != null) put("since_secs", sinceSecs) }) {
+            json.decodeFromJsonElement(UsageReport.serializer(), it)
+        }
+
+    /** The Claude accounts seen across the fleet's hosts (`list_accounts`, readonly). */
+    suspend fun listAccounts(): List<AccountRow> =
+        call("list_accounts") { json.decodeFromJsonElement(ListSerializer(AccountRow.serializer()), it) }
 
     /** A session's changed files, git status in its worktree (`repo_changes`, readonly). */
     suspend fun repoChanges(sessionId: Long): List<ChangedFile> =

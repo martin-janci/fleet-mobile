@@ -46,6 +46,7 @@ class EveryErrorBannerCanBeDismissedTest {
                 "SessionsScreen.kt",
                 "SettingsScreen.kt",
                 "TaskScreen.kt",
+                "UsageScreen.kt",
             ),
             callSites.keys.sorted(),
         )

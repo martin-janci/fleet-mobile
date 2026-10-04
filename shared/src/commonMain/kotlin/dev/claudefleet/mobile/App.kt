@@ -48,6 +48,8 @@ import dev.claudefleet.mobile.data.HubQuickReplyActions
 import dev.claudefleet.mobile.data.HubRepoActions
 import dev.claudefleet.mobile.data.RepoActions
 import dev.claudefleet.mobile.data.HubSessionActions
+import dev.claudefleet.mobile.data.HubUsageActions
+import dev.claudefleet.mobile.data.UsageActions
 import dev.claudefleet.mobile.data.HubSessionDetailsActions
 import dev.claudefleet.mobile.data.HubWorkActions
 import dev.claudefleet.mobile.data.WorkActions
@@ -100,6 +102,9 @@ import dev.claudefleet.mobile.ui.RepoScreen
 import dev.claudefleet.mobile.ui.RepoViewModel
 import dev.claudefleet.mobile.ui.BulkViewModel
 import dev.claudefleet.mobile.ui.SessionScreen
+import dev.claudefleet.mobile.ui.UsageHandlers
+import dev.claudefleet.mobile.ui.UsageScreen
+import dev.claudefleet.mobile.ui.UsageViewModel
 import dev.claudefleet.mobile.ui.isPushed
 import dev.claudefleet.mobile.ui.SessionViewModel
 import dev.claudefleet.mobile.ui.SessionWorkHandlers
@@ -192,6 +197,7 @@ class AppContainer(
     val sessionActions: SessionActions = HubSessionActions(session)
     val sessionDetailsActions: SessionDetailsActions = HubSessionDetailsActions(session)
     val repoActions: RepoActions = HubRepoActions(session)
+    val usageActions: UsageActions = HubUsageActions(session)
 
     /** The hub's own version, for the Settings screen to show beside this app's. */
     val versionActions: VersionActions = HubVersionActions(session)
@@ -784,6 +790,22 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         )
                     }
                 }
+                Screen.Usage -> {
+                    val usage = remember(repository, scope) { UsageViewModel(repository, container.usageActions, scope) }
+                    LaunchedEffect(usage) { usage.load() }
+                    val usageState by usage.state.collectAsState()
+                    UsageScreen(
+                        state = usageState,
+                        nowSeconds = epochSeconds(),
+                        handlers = UsageHandlers(
+                            onBack = { nav.back() },
+                            onRefresh = { usage.refresh() },
+                            onSelect = { usage.select(it) },
+                            onOpenSession = nav::open,
+                            onDismissError = usage::dismissError,
+                        ),
+                    )
+                }
                 is Screen.Repo -> key(current.sessionId) {
                     RepoRoute(
                         sessionId = current.sessionId,
@@ -853,6 +875,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         onForget = { settings.forget() },
                         onDismissError = settings::dismissError,
                         fleetPageOpen = settingsCaps.fleetSettings && fleet.openPage != null,
+                        onOpenUsage = nav::openUsage.takeIf { settingsCaps.usage || settingsCaps.accounts },
                         fleetSettings = {
                             if (settingsCaps.fleetSettings) {
                                 FleetSettingsSection(

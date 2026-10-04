@@ -140,6 +140,11 @@ class ToolsTheAppMayCallTest {
         "repo_commit_diff",
         "repo_tree",
         "repo_file",
+        // The Usage screen: estimated usage and the fleet's Claude accounts,
+        // both readonly and `Access::Client`. A subscription's 5-hour and
+        // weekly windows are the desktop's own read; the hub serves no tool.
+        "usage_report",
+        "list_accounts",
     )
 
     @Test
