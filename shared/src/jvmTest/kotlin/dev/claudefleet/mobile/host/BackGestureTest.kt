@@ -80,7 +80,8 @@ class TheBackGestureReachesTheNavigatorTest {
     /**
      * One file, and one handler per question. Two that answered the same
      * question would fight over the gesture in an order nobody picked. The
-     * one other is the worktree screen's, and it answers a different one:
+     * Settings tab's closes an open fleet settings page (drawn inside the
+     * tab, so not a pushed screen). The worktree screen's answers another:
      * enabled only while a diff, commit or file is open over its tab, and
      * composed inside the screen — after `App`'s — so it is asked first and
      * closes what is open before `nav.back()` leaves the screen.
@@ -92,6 +93,9 @@ class TheBackGestureReachesTheNavigatorTest {
 
         val app = Repo.shipped.single { it.name == "App.kt" }.readText()
         val enables = Regex("""BackHandler\(enabled = ([^)]+\)?)\)""").findAll(app).map { it.groupValues[1].trim() }.toList()
-        assertEquals(listOf("isPushed(screen)", "state.views.isNotEmpty()"), enables)
+        assertEquals(
+            listOf("isPushed(screen)", "settingsCaps.fleetSettings && fleet.openPage != null", "state.views.isNotEmpty()"),
+            enables,
+        )
     }
 }

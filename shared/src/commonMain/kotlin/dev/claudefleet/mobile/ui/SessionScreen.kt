@@ -2144,6 +2144,7 @@ private fun PromptBox(
     Column(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp)) {
         val why = when {
             state.readOnly -> "This device is paired read-only."
+            state.card != null -> "Answer with the buttons above, or Show terminal."
             !state.connected -> "The hub is offline; the prompt will not be delivered."
             state.session == null -> "This session is gone."
             else -> null
@@ -2156,7 +2157,7 @@ private fun PromptBox(
                     .weight(1f)
                     .focusRequester(focusRequester)
                     .onFocusChanged { onFocusChange(it.isFocused) },
-                enabled = !state.sending && !state.readOnly,
+                enabled = !state.sending && !state.readOnly && state.card == null,
                 // One line: a long session name wrapped the placeholder
                 // onto a second row and made an empty field look filled.
                 placeholder = {
@@ -2180,7 +2181,10 @@ private fun PromptBox(
                 },
                 // The desktop's ⏎ chip, where it costs no room: inside an
                 // empty field, gone the moment there is a draft to send.
-                trailingIcon = if (state.draft.isEmpty() && state.canSendQuick) {
+                // Never while the card is up: on a permission dialog Enter
+                // picks the highlighted option — it approves. The card's own
+                // Enter is the one that checks the dialog first.
+                trailingIcon = if (state.draft.isEmpty() && state.canSendQuick && state.card == null) {
                     {
                         IconButton(onClick = onPressEnter) {
                             Text("⏎", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { contentDescription = "Press Enter" })
@@ -2521,6 +2525,20 @@ private fun EditQuickReplyDialog(
     var text by remember { mutableStateOf(original?.text.orEmpty()) }
     // A new chip fills the box by default, as on the desktop.
     var autoSend by remember { mutableStateOf(original?.sendsOnTap ?: false) }
+    var confirmRemove by remember { mutableStateOf(false) }
+    if (confirmRemove && onRemove != null) {
+        AlertDialog(
+            onDismissRequest = { confirmRemove = false },
+            title = { Text("Remove this quick reply?") },
+            text = { Text("It goes from every device's chip row.") },
+            confirmButton = {
+                TextButton(onClick = { confirmRemove = false; onRemove() }) {
+                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("Cancel") } },
+        )
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (original == null) "New quick reply" else "Quick reply") },
@@ -2547,6 +2565,13 @@ private fun EditQuickReplyDialog(
                     Checkbox(checked = autoSend, onCheckedChange = { autoSend = it })
                     Text("Send on tap (otherwise only fills the box)")
                 }
+                // Not where Cancel sits: a tap meant to back out must never
+                // delete a chip from every device. Asked first, too.
+                if (onRemove != null) {
+                    TextButton(onClick = { confirmRemove = true }) {
+                        Text("Remove this quick reply…", color = MaterialTheme.colorScheme.error)
+                    }
+                }
             }
         },
         confirmButton = {
@@ -2557,15 +2582,7 @@ private fun EditQuickReplyDialog(
                 enabled = text.isNotBlank(),
             ) { Text("Save") }
         },
-        dismissButton = {
-            if (onRemove != null) {
-                TextButton(onClick = onRemove) {
-                    Text("Remove", color = MaterialTheme.colorScheme.error)
-                }
-            } else {
-                TextButton(onClick = onDismiss) { Text("Cancel") }
-            }
-        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
