@@ -26,9 +26,21 @@ enum class StatusTone(val outlined: Boolean = false, val dotted: Boolean = false
     }
 }
 
-/** The word on the chip: the stuck kind, the status, or a dash when the hub has said nothing. */
+/**
+ * The word on the chip, in the app's one vocabulary — the same words as the
+ * filter sheet, the session's strip, Today and the notifications: *waiting*
+ * for a person, *stuck*, *failed*, *done*. A dash when the hub has said
+ * nothing; an unknown status as the hub's own word, so it can still be read.
+ */
 fun statusLabel(claudeStatus: String?, stuckKind: String?): String = when {
-    !stuckKind.isNullOrBlank() -> stuckKind.replace('_', ' ')
+    !stuckKind.isNullOrBlank() -> "stuck"
     claudeStatus.isNullOrBlank() -> "—"
+    else -> statusWord(claudeStatus)
+}
+
+/** A `claude_status` as the app says it. */
+fun statusWord(claudeStatus: String): String = when (claudeStatus) {
+    "blocked" -> "waiting"
+    "completed" -> "done"
     else -> claudeStatus
 }

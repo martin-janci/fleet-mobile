@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.ui.theme.LocalStatusColors
 import dev.claudefleet.mobile.ui.theme.StatusTone
 import dev.claudefleet.mobile.ui.theme.statusLabel
+import dev.claudefleet.mobile.model.reasonLabel
 
 /**
  * A session's state in one word.
@@ -29,10 +30,17 @@ fun StatusChip(
     claudeStatus: String?,
     stuckKind: String? = null,
     modifier: Modifier = Modifier,
+    /**
+     * Why the hub says the session needs a person, when that is more than its
+     * status says (`ci_failing`, `context_full`, `stale_working`, …): shown
+     * in place of the status word, in the waiting tone.
+     */
+    reason: String? = null,
 ) {
-    val tone = StatusTone.of(claudeStatus, stuckKind)
+    val shown = reason?.takeIf { it !in STATUS_REASONS }
+    val tone = if (shown != null && StatusTone.of(claudeStatus, stuckKind) !in URGENT_TONES) StatusTone.BLOCKED else StatusTone.of(claudeStatus, stuckKind)
     val colors = LocalStatusColors.current(tone)
-    val text = statusLabel(claudeStatus, stuckKind)
+    val text = shown?.let { reasonLabel(it).lowercase().replace("ci ", "CI ") } ?: statusLabel(claudeStatus, stuckKind)
     val border = when {
         tone.dotted -> BorderStroke(1.dp, colors.onContainer.copy(alpha = 0.4f))
         tone.outlined -> BorderStroke(1.dp, colors.onContainer.copy(alpha = 0.6f))
@@ -66,3 +74,9 @@ fun StatusDot(claudeStatus: String?, stuckKind: String?, modifier: Modifier = Mo
             .then(if (stroke != null) Modifier.border(stroke, CircleShape) else Modifier),
     )
 }
+
+/** Reasons the status word already says: no need to replace it. */
+private val STATUS_REASONS = setOf("waiting", "stuck", "failed")
+
+/** Tones already loud enough that a reason keeps them rather than turning amber. */
+private val URGENT_TONES = setOf(StatusTone.STUCK, StatusTone.FAILED, StatusTone.BLOCKED)

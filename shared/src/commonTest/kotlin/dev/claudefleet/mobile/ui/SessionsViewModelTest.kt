@@ -30,6 +30,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -1700,5 +1701,57 @@ class CollapsingAHostTest {
             SessionsViewModel(fleet, backgroundScope, prefs = prefs).state.value.groups.single().collapsed,
             "the store must lose the alias, not merely stop reading it",
         )
+    }
+
+    // --- triage: what needs you comes first -----------------------------------
+
+    @Test
+    fun sessions_that_need_you_are_pinned_worst_first_above_the_groups() = runTest {
+        val fleet = FakeFleet(
+            rows = listOf(
+                session(1, host = "alpha"),
+                session(2, host = "zulu", claudeStatus = "blocked"),
+                session(3, host = "mid", stuckKind = "oom"),
+            ),
+        )
+        val vm = SessionsViewModel(fleet, backgroundScope)
+        runCurrent()
+
+        assertEquals(listOf(2L, 3L), vm.state.value.pinned.map { it.id }, "waiting before stuck, whatever the host")
+        assertEquals(1, vm.state.value.groups.single { it.alias == "zulu" }.attentionCount)
+    }
+
+    @Test
+    fun nothing_is_pinned_when_every_row_already_is_one() = runTest {
+        val fleet = FakeFleet(rows = listOf(session(2, claudeStatus = "blocked")))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+        vm.toggleNeedsAttentionOnly()
+        runCurrent()
+        assertTrue(vm.state.value.pinned.isEmpty())
+    }
+
+    @Test
+    fun before_the_first_live_list_the_screen_says_connecting_not_empty() = runTest {
+        val fleet = FakeFleet()
+        fleet.status.value = ConnectionStatus.Reconnecting(attempt = 1, reason = null)
+        val vm = SessionsViewModel(fleet, backgroundScope)
+        runCurrent()
+        assertTrue(vm.state.value.connecting)
+
+        fleet.status.value = ConnectionStatus.Connected("0.9.3")
+        runCurrent()
+        assertFalse(vm.state.value.connecting, "connected and empty is a real empty fleet")
+    }
+
+    @Test
+    fun offline_says_how_old_the_rows_are() = runTest {
+        val fleet = FakeFleet(rows = listOf(session(1)))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+        runCurrent()
+        assertNull(vm.state.value.staleFor, "live: nothing to say")
+
+        fleet.status.value = ConnectionStatus.Offline("no network")
+        runCurrent()
+        assertNotNull(vm.state.value.staleFor)
     }
 }

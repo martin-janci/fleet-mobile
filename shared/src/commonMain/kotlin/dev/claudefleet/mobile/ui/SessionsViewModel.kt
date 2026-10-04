@@ -17,6 +17,7 @@ import dev.claudefleet.mobile.model.StatusFilter
 import dev.claudefleet.mobile.model.TimeDirection
 import dev.claudefleet.mobile.model.TimeWindow
 import dev.claudefleet.mobile.model.byTriage
+import dev.claudefleet.mobile.model.triageBucket
 import dev.claudefleet.mobile.model.matches
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.WorkStatusFilter
@@ -43,6 +44,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import dev.claudefleet.mobile.model.relativeTime
 
 /**
  * The sessions of one project on one host — or, with *by work* on, of one
@@ -92,6 +94,9 @@ data class HostGroup(
     val collapsed: Boolean = false,
 ) {
     val sessionCount: Int get() = projects.sumOf { it.sessions.size }
+
+    /** How many of its sessions need a person — said on the heading, folded or not. */
+    val attentionCount: Int get() = projects.sumOf { p -> p.sessions.count { it.needsAttention } }
 }
 
 /**
@@ -176,6 +181,18 @@ data class SessionsUiState(
      * [groups] is empty because the queue has no headings to group under.
      */
     val urgent: List<SessionRow> = emptyList(),
+    /**
+     * Sessions that need a person, worst first, pinned above the groups in
+     * the project and work views — so one waiting on a host at the bottom of
+     * the alphabet, or on a folded host, is the first thing seen. Empty in
+     * the urgency view (it already is that order) and under *Needs you*
+     * (every row is one).
+     */
+    val pinned: List<SessionRow> = emptyList(),
+    /** Never yet connected, nothing to show: "connecting", not "no sessions". */
+    val connecting: Boolean = false,
+    /** While not live: how old the rows on screen are ("12 min"); null when live or never. */
+    val staleFor: String? = null,
     /** The hub has a tracker and answered *My work*: the chip is offered. */
     val myWorkAvailable: Boolean = false,
     /**
@@ -282,6 +299,8 @@ class SessionsViewModel(
     )
 
     private data class Local(
+        /** When the stream was last live: null until it first was — what is on screen then is not the fleet yet. */
+        val liveAt: Long? = null,
         val filters: SessionFilters = SessionFilters(),
         /**
          * The instant the activity window is measured from — **not** [now].
@@ -373,6 +392,16 @@ class SessionsViewModel(
     private val now = MutableStateFlow(clock())
 
     init {
+        scope.launch {
+            // Entering *and* leaving a live stream: the rows were current up
+            // to the moment it dropped, so that is what their age counts from.
+            var wasLive = false
+            fleet.status.collect { status ->
+                val live = status is ConnectionStatus.Connected
+                if (live || wasLive) local.update { it.copy(liveAt = clock()) }
+                wasLive = live
+            }
+        }
         scope.launch {
             while (isActive) {
                 delay(30_000)
@@ -789,6 +818,11 @@ class SessionsViewModel(
         val hiddenAttention = rows.count { row ->
             row.needsAttention && !kept(row, applied) && row.id !in archivedIds
         }
+        val pinned = if (urgency || filters.needsAttentionOnly) {
+            emptyList()
+        } else {
+            rows.filter { it.triageBucket(now = nowSeconds).needsYou && kept(it, applied) }.byTriage(now = nowSeconds)
+        }
         val groups = if (urgency) {
             emptyList()
         } else {
@@ -818,6 +852,9 @@ class SessionsViewModel(
             workAvailable = work.available,
             groupMode = groupMode,
             urgent = urgent,
+            pinned = pinned,
+            connecting = l.liveAt == null && sessions.isEmpty(),
+            staleFor = if (status is ConnectionStatus.Connected) null else l.liveAt?.let { relativeTime(it, nowSeconds) },
             myWorkAvailable = myWorkAvailable,
             orgChoices = choices,
             orgColors = orgColors(choices),

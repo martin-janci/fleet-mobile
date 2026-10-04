@@ -42,9 +42,11 @@ fun ConnectionBanner(
      */
     hubReachable: Boolean? = null,
     modifier: Modifier = Modifier,
+    /** How old what is on screen is, while not live ("12 min") — said, so a stale list never passes for a live one. */
+    staleFor: String? = null,
 ) {
     val text = connectionNotice(status, hubReachable) ?: return
-    Notice(text, modifier)
+    Notice(staleFor?.let { "$text · last updated $it ago" } ?: text, modifier)
 }
 
 /**

@@ -49,7 +49,8 @@ class NeedsYouTest {
     fun the_reasons_read_as_words() {
         assertEquals("Waiting for you", reasonWords("waiting"))
         assertEquals("Needs a decision", reasonWords("lifecycle"))
-        assertEquals("Ci failing", reasonWords("ci_failing"))
+        assertEquals("CI failing", reasonWords("ci_failing"))
+        assertEquals("Odd reason", reasonWords("odd_reason"))
     }
 
     private class Fleet : FleetState {
@@ -97,5 +98,42 @@ class NeedsYouTest {
         runCurrent()
         // What changed while away is news once the stream is back.
         assertEquals(listOf(2L), got.map { it.sessionId })
+    }
+
+    @Test
+    fun a_session_that_stops_needing_you_is_resolved() = runTest {
+        val fleet = Fleet()
+        fleet.status.value = ConnectionStatus.Connected("0.9.3")
+        val got = mutableListOf<NeedsYouEvent>()
+        backgroundScope.launch { needsYouEvents(fleet).collect { got += it } }
+        runCurrent()
+
+        fleet.sessions.value = listOf(row(1), row(2))
+        runCurrent()
+        assertEquals(listOf<NeedsYouEvent>(NeedsYouResolved(1)), got)
+    }
+
+    @Test
+    fun what_began_waiting_while_nothing_watched_is_news_on_the_next_run() = runTest {
+        val fleet = Fleet()
+        fleet.status.value = ConnectionStatus.Connected("0.9.3")
+        val got = mutableListOf<NeedsYouEvent>()
+        var kept: Map<Long, String?> = emptyMap()
+        // The last run saw session 1 waiting and session 2 fine.
+        backgroundScope.launch { needsYouEvents(fleet, remembered = mapOf(1L to "waiting", 2L to null)) { kept = it }.collect { got += it } }
+        runCurrent()
+
+        assertTrue(got.isEmpty(), "unchanged since the last run: nothing to say")
+        assertEquals(mapOf(1L to "waiting", 2L to null), kept)
+        fleet.sessions.value = listOf(row(1, "waiting"), row(2, "stuck"))
+        runCurrent()
+        assertEquals(listOf(2L), got.filterIsInstance<NeedsYouAlert>().map { it.sessionId })
+    }
+
+    @Test
+    fun the_memory_survives_a_round_trip_through_a_key_value_store() {
+        val seen = mapOf(1L to "waiting", 2L to null, 3L to "ci_failing")
+        assertEquals(seen, decodeSeen(encodeSeen(seen)))
+        assertEquals(emptyMap(), decodeSeen(listOf("garbage", "=x")))
     }
 }

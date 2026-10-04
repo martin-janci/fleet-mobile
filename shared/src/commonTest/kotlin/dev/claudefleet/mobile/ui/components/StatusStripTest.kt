@@ -87,7 +87,7 @@ class StatusStripTest {
     @Test
     fun a_plain_status_with_no_special_case_shows_the_word_alone() {
         val r = row(status = "blocked")
-        assertEquals("blocked", statusStripText(r, null, nowSeconds = 100))
+        assertEquals("waiting for you", statusStripText(r, null, nowSeconds = 100))
     }
 
     @Test

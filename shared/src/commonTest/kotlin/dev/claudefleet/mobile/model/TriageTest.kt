@@ -40,7 +40,10 @@ class TriageTest {
     @Test
     fun the_bucket_order_is_the_desktops_bucket_order() {
         assertEquals(
-            listOf("WAITING", "STUCK", "FAILED", "DONE_UNREAD", "LIFECYCLE", "IDLE_LONG", "WORKING", "IDLE"),
+            listOf(
+                "WAITING", "STUCK", "STOP_FAILED", "FAILED", "CONTEXT_FULL", "STALE_WORKING", "CI_FAILING",
+                "DONE_UNREAD", "LIFECYCLE", "IDLE_LONG", "WORKING", "IDLE",
+            ),
             TriageBucket.entries.map { it.name },
         )
     }
@@ -49,7 +52,30 @@ class TriageTest {
     fun blocked_outranks_stuck_outranks_failed() {
         assertEquals(TriageBucket.WAITING, row(claudeStatus = "blocked", stuckKind = "oom").triageBucket())
         assertEquals(TriageBucket.STUCK, row(claudeStatus = "failed", stuckKind = "oom").triageBucket())
-        assertEquals(TriageBucket.FAILED, row(claudeStatus = "failed").triageBucket())
+        // A turn that failed is a failed stop; only a background agent's is a plain failure.
+        assertEquals(TriageBucket.STOP_FAILED, row(claudeStatus = "failed").triageBucket())
+        assertEquals(TriageBucket.FAILED, row(claudeStatus = "failed", kind = "bg").triageBucket())
+    }
+
+    @Test
+    fun the_hubs_reason_decides_the_bucket() {
+        // Fields the phone never receives (stale_working_at, idle_since) decide
+        // these on the hub; its stamped reason is the answer.
+        val stalled = row(claudeStatus = "working").copy(attention = Attention("stale_working"))
+        assertEquals(TriageBucket.STALE_WORKING, stalled.triageBucket())
+        val ci = row(claudeStatus = "idle").copy(attention = Attention("ci_failing"))
+        assertEquals(TriageBucket.CI_FAILING, ci.triageBucket())
+        assertTrue(ci.triageScore(now = NOW) > row(claudeStatus = "working").triageScore(now = NOW))
+        // An external session is never a person's job, whatever is stamped.
+        val external = row(kind = "external", claudeStatus = "idle").copy(attention = Attention("ci_failing"))
+        assertEquals(TriageBucket.IDLE, external.triageBucket())
+    }
+
+    @Test
+    fun without_a_stamp_the_local_rules_find_a_full_context_and_failing_ci() {
+        assertEquals(TriageBucket.CONTEXT_FULL, row(claudeStatus = "working").copy(contextPct = 90.0).triageBucket())
+        assertEquals(TriageBucket.CI_FAILING, row(claudeStatus = "idle").copy(ciStatus = "failing").triageBucket())
+        assertEquals(TriageBucket.WORKING, row(claudeStatus = "working").copy(ciStatus = "failing").triageBucket())
     }
 
     @Test

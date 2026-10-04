@@ -250,16 +250,6 @@ val TodayView.sessions: List<TodaySession>
 /** The hosts the view's sessions run on, sorted — the sheet's host chips. */
 fun todayHosts(v: TodayView): List<String> = v.sessions.map { it.hostAlias }.filter { it.isNotEmpty() }.distinct().sorted()
 
-private val ATTENTION_LABELS = mapOf(
-    "waiting" to "Waiting for you",
-    "stuck" to "Stuck",
-    "stop_failed" to "Stop failed",
-    "failed" to "Turn failed",
-    "context_full" to "Context full",
-    "stale_working" to "Stalled",
-    "ci_failing" to "CI failing",
-    "lifecycle" to "Needs a look",
-)
 
 /**
  * The words on a session's attention chip. The hub's reasons
@@ -268,8 +258,7 @@ private val ATTENTION_LABELS = mapOf(
  * snake case. The standup keeps [sessionPhrase]'s words, the desktop's,
  * byte for byte; this is the sheet's alone.
  */
-fun attentionLabel(reason: String): String =
-    ATTENTION_LABELS[reason] ?: reason.replace('_', ' ').trim().replaceFirstChar { it.uppercaseChar() }
+fun attentionLabel(reason: String): String = reasonLabel(reason)
 
 /** The words on a stale session's chip: why it is listed under Stale. */
 fun staleLabel(stale: String): String = if (stale == "done") "Ticket done" else "Idle"

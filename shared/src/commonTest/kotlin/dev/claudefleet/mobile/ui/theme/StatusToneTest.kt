@@ -25,7 +25,10 @@ class StatusToneTest {
 
     @Test
     fun labels_read_as_words_and_unknown_is_a_dash() {
-        assertEquals("press enter", statusLabel("working", "press_enter"))
+        // One vocabulary: stuck is "stuck" (the strip says on what), blocked is "waiting".
+        assertEquals("stuck", statusLabel("working", "press_enter"))
+        assertEquals("waiting", statusLabel("blocked", null))
+        assertEquals("done", statusLabel("completed", null))
         assertEquals("working", statusLabel("working", null))
         assertEquals("—", statusLabel(null, null))
         assertEquals("hibernating", statusLabel("hibernating", null), "an unknown word is still shown so a person can read it")
