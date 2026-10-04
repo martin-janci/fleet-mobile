@@ -1289,6 +1289,7 @@ private fun SessionRoute(
         onRepair = { vm.repair() },
         onDismissRepair = vm::dismissRepair,
         onPressEnter = { vm.pressEnter() },
+        onStop = { vm.interrupt() },
         onMove = moveVm::open.takeIf { move.available },
         // A dismissed ghost has no screen left to show: back to where it was opened from.
         onDismissGhost = { vm.dismissGhost(onBack) },
