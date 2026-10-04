@@ -1,5 +1,8 @@
 package dev.claudefleet.mobile
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -485,39 +488,48 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
 
     Scaffold(
         bottomBar = {
-            NavigationBar {
-                val attention by sessions.state.collectAsState()
-                // Work only when the hub serves `work { tree }`, Files only
-                // when it keeps downloads.
-                val shown = Tab.entries.filter {
-                    (it != Tab.Work || workState.available) && (it != Tab.Files || filesState.available)
-                }
-                for (entry in shown) {
-                    NavigationBarItem(
-                        selected = tab == entry,
-                        onClick = { nav.select(entry) },
-                        icon = {
-                            val icon = when (entry) {
-                                Tab.Sessions -> FleetIcons.Sessions
-                                Tab.Work -> FleetIcons.Work
-                                Tab.Files -> FleetIcons.Files
-                                Tab.Hosts -> FleetIcons.Hosts
-                                Tab.Settings -> FleetIcons.Settings
-                            }
-                            if (entry == Tab.Sessions && attention.attentionCount > 0) {
-                                BadgedBox(badge = { Badge { Text("${attention.attentionCount}") } }) {
+            // Not on a session: it is a detail screen with its own Back, and
+            // on a phone the bar's 80 dp were the conversation's to lose —
+            // see `SessionChrome.kt`.
+            AnimatedVisibility(
+                visible = screen !is Screen.Session,
+                enter = expandVertically(expandFrom = Alignment.Top),
+                exit = shrinkVertically(shrinkTowards = Alignment.Top),
+            ) {
+                NavigationBar {
+                    val attention by sessions.state.collectAsState()
+                    // Work only when the hub serves `work { tree }`, Files only
+                    // when it keeps downloads.
+                    val shown = Tab.entries.filter {
+                        (it != Tab.Work || workState.available) && (it != Tab.Files || filesState.available)
+                    }
+                    for (entry in shown) {
+                        NavigationBarItem(
+                            selected = tab == entry,
+                            onClick = { nav.select(entry) },
+                            icon = {
+                                val icon = when (entry) {
+                                    Tab.Sessions -> FleetIcons.Sessions
+                                    Tab.Work -> FleetIcons.Work
+                                    Tab.Files -> FleetIcons.Files
+                                    Tab.Hosts -> FleetIcons.Hosts
+                                    Tab.Settings -> FleetIcons.Settings
+                                }
+                                if (entry == Tab.Sessions && attention.attentionCount > 0) {
+                                    BadgedBox(badge = { Badge { Text("${attention.attentionCount}") } }) {
+                                        Icon(icon, contentDescription = entry.name)
+                                    }
+                                } else if (entry == Tab.Work && workState.reviewCount > 0) {
+                                    BadgedBox(badge = { Badge { Text("${workState.reviewCount}") } }) {
+                                        Icon(icon, contentDescription = entry.name)
+                                    }
+                                } else {
                                     Icon(icon, contentDescription = entry.name)
                                 }
-                            } else if (entry == Tab.Work && workState.reviewCount > 0) {
-                                BadgedBox(badge = { Badge { Text("${workState.reviewCount}") } }) {
-                                    Icon(icon, contentDescription = entry.name)
-                                }
-                            } else {
-                                Icon(icon, contentDescription = entry.name)
-                            }
-                        },
-                        label = { Text(entry.name) },
-                    )
+                            },
+                            label = { Text(entry.name) },
+                        )
+                    }
                 }
             }
         },
