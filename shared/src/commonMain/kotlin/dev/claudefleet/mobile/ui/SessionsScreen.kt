@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.material3.Button
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -259,6 +260,7 @@ fun SessionsScreen(
                     item(key = "empty") {
                         EmptyFleet(
                             state = state,
+                            onNewSession = handlers.onNewSession,
                             onClearAll = handlers.onClearAll,
                             onSetShowArchived = handlers.onSetShowArchived,
                             modifier = Modifier.fillParentMaxSize(),
@@ -822,6 +824,8 @@ private fun SessionRowItem(
 @Composable
 private fun EmptyFleet(
     state: SessionsUiState,
+    /** Null for a readonly pairing, which can only point elsewhere. */
+    onNewSession: (() -> Unit)?,
     onClearAll: () -> Unit,
     onSetShowArchived: (Boolean) -> Unit,
     modifier: Modifier = Modifier.fillMaxSize(),
@@ -859,6 +863,20 @@ private fun EmptyFleet(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                state.status is ConnectionStatus.Refused -> Text(
+                    text = "This app and the hub cannot talk to each other. Update the app or the hub.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                // The phone can start one itself: say so, with the button.
+                onNewSession != null -> {
+                    Text(
+                        text = "No sessions yet.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Button(onClick = onNewSession) { Text("New session") }
+                }
                 else -> Text(
                     text = "No sessions. Start one from the desktop app or the terminal.",
                     style = MaterialTheme.typography.bodyMedium,

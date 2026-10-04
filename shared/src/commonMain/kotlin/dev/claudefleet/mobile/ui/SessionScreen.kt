@@ -546,7 +546,7 @@ fun SessionScreen(
                     .pointerInput(Unit) { detectTapGestures(onDoubleTap = { immersive = !immersive }) },
             ) {
                 if (state.loaded && turns.isEmpty()) {
-                    EmptyConversation(state)
+                    EmptyConversation(state, onRetry = onRefresh)
                 } else {
                     // Tagged so a device test can address this list rather than
                     // guessing which of the screen's scrollable nodes it meant.
@@ -1995,10 +1995,14 @@ private fun Note(
  * one — carries the `Modifier.weight` that gives it the `LazyColumn`'s space.
  */
 @Composable
-private fun EmptyConversation(state: SessionUiState) {
+private fun EmptyConversation(state: SessionUiState, onRetry: () -> Unit = {}) {
+    // A read that failed is not an empty conversation: saying "No turns yet"
+    // about a busy session the phone could not reach was simply untrue.
+    val failed = state.error != null && !state.errorFromSend && state.session?.kind != "shell"
     val text = when {
         state.session == null -> "This session was killed."
         state.session.kind == "shell" -> "Shell session — no conversation to show."
+        failed -> "Couldn't load the conversation."
         state.silent -> "Nothing has been said yet — send a prompt to start."
         else -> "No turns yet."
     }
@@ -2006,13 +2010,16 @@ private fun EmptyConversation(state: SessionUiState) {
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(32.dp),
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(start = 32.dp, end = 32.dp, top = 32.dp, bottom = 8.dp),
+            )
+            if (failed && state.session != null) TextButton(onClick = onRetry) { Text("Try again") }
+        }
     }
 }
 

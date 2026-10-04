@@ -39,6 +39,14 @@ interface AuthActions {
     fun clearUnpairReason()
 
     /**
+     * The hub a 401 just signed this device out of, so the Pair screen can
+     * keep its address: a bare code typed next would otherwise fail with "no
+     * hub" until the person retyped a URL the app knew a moment ago. Only the
+     * base URL, never the token; in memory, like [unpairReason].
+     */
+    val lastHub: String? get() = null
+
+    /**
      * Redeem [scanned] — a full pair URL or a bare code — for this client's own
      * token. [base] names the hub, and is consulted only when the input does
      * not name one itself.

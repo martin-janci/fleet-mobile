@@ -525,6 +525,7 @@ class AppSessionTest {
         assertFailsWith<HubError.Unauthorized> { app.withClient { it.listSessions() } }
 
         assertEquals(REVOKED_CREDENTIAL_REASON, app.unpairReason.value)
+        assertEquals(BASE, app.lastHub, "the Pair screen keeps the address it was signed out of")
     }
 
     /** A first launch with nothing stored has no story to tell. */
