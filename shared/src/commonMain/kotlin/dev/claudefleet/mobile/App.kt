@@ -107,6 +107,9 @@ import dev.claudefleet.mobile.ui.HostDetailHandlers
 import dev.claudefleet.mobile.ui.HostDetailSheet
 import dev.claudefleet.mobile.ui.HostDetailViewModel
 import dev.claudefleet.mobile.ui.SessionScreen
+import dev.claudefleet.mobile.ui.TidyHandlers
+import dev.claudefleet.mobile.ui.TidySheet
+import dev.claudefleet.mobile.ui.TidyViewModel
 import dev.claudefleet.mobile.ui.UsageHandlers
 import dev.claudefleet.mobile.ui.UsageScreen
 import dev.claudefleet.mobile.ui.UsageViewModel
@@ -445,6 +448,8 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
             prefs = container.prefs,
         )
     }
+    val tidy = remember(repository, scope) { TidyViewModel(repository, container.workActions, scope, credentials.canWrite) }
+    val tidyState by tidy.state.collectAsState()
     val today = remember(repository, scope) {
         TodayViewModel(
             fleet = repository,
@@ -676,6 +681,21 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                                 onSetHost = today::setHost,
                                 onToggleTicketsOnly = today::toggleTicketsOnly,
                                 onClearFilters = today::clearFilters,
+                                onOpenTidy = { today.close(); tidy.open(); Unit }.takeIf { tidyState.available },
+                            ),
+                        )
+                    }
+                    if (tidyState.open) {
+                        TidySheet(
+                            state = tidyState,
+                            handlers = TidyHandlers(
+                                onClose = tidy::close,
+                                onToggle = tidy::toggle,
+                                onChoose = tidy::choose,
+                                onApply = { tidy.apply() },
+                                onOpenSession = { id -> tidy.close(); nav.open(id) },
+                                onDismissReopened = { tidy.dismissReopened(it) },
+                                onDismissError = tidy::dismissError,
                             ),
                         )
                     }
@@ -1019,6 +1039,8 @@ private fun TaskRoute(
             onPlace = { group, note -> vm.place(group, note) },
             onClearPlacement = { vm.clearPlacement() },
             onDismissError = vm::dismissError,
+            onSummarize = { vm.summarize(it) },
+            onDismissSummary = vm::dismissSummary,
         ),
     )
 }

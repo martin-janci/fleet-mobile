@@ -342,4 +342,22 @@ class TaskViewModelTest {
         // A placement is local: its words never claim the tracker moved.
         assertEquals("placed by a person", groupSourceWords(WorkTask().group.copy(source = GroupSource.Manual)))
     }
+
+    @Test
+    fun a_past_session_is_summarised_and_the_summary_stays_until_dismissed() = runTest {
+        val actions = FakeWorkActions().apply { taskAnswer = PAST_ONLY }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        assertTrue(vm.state.value.canSummarize)
+        val past = vm.state.value.past.first()
+
+        vm.summarize(past)
+        runCurrent()
+
+        assertEquals("summarize ABC-12 ${past.linkId}", actions.calls.last())
+        assertEquals("It fixed the refund rounding.", vm.state.value.summary?.summary)
+        vm.dismissSummary()
+        runCurrent()
+        assertEquals(null, vm.state.value.summary)
+    }
 }

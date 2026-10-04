@@ -43,6 +43,11 @@ import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.components.WorkStatusDot
 import dev.claudefleet.mobile.ui.theme.FleetIcons
+import dev.claudefleet.mobile.model.PastWorkSummary
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.AlertDialog
 
 /** Everything a task's screen reports. */
 data class TaskHandlers(
@@ -57,6 +62,9 @@ data class TaskHandlers(
     val onPlace: (String, String) -> Unit = { _, _ -> },
     val onClearPlacement: () -> Unit = {},
     val onDismissError: () -> Unit = {},
+    /** Summarise a past session for the journal; close the summary. */
+    val onSummarize: (WorkTaskLink) -> Unit = {},
+    val onDismissSummary: () -> Unit = {},
 )
 
 /**
@@ -67,6 +75,7 @@ data class TaskHandlers(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandlers = TaskHandlers(), modifier: Modifier = Modifier) {
+    state.summary?.let { PastWorkSummaryDialog(it, handlers.onDismissSummary) }
     val task = state.task
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
@@ -145,9 +154,9 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
                 }
                 HorizontalDivider()
             }
-            linkSection("Active", state.active, handlers)
-            linkSection("Suggested", state.suggested, handlers)
-            linkSection("Past", state.past, handlers)
+            linkSection("Active", state.active, handlers, state)
+            linkSection("Suggested", state.suggested, handlers, state)
+            linkSection("Past", state.past, handlers, state)
             if (state.active.isEmpty() && state.suggested.isEmpty() && state.past.isEmpty()) {
                 item(key = "no-sessions") {
                     Text("No session has worked on this yet.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(16.dp))
@@ -163,7 +172,12 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
     if (state.placeOpen) PlaceSheet(state, handlers)
 }
 
-private fun androidx.compose.foundation.lazy.LazyListScope.linkSection(title: String, links: List<WorkTaskLink>, handlers: TaskHandlers) {
+private fun androidx.compose.foundation.lazy.LazyListScope.linkSection(
+    title: String,
+    links: List<WorkTaskLink>,
+    handlers: TaskHandlers,
+    state: TaskUiState,
+) {
     if (links.isEmpty()) return
     item(key = "h-$title") {
         Text(
@@ -173,11 +187,11 @@ private fun androidx.compose.foundation.lazy.LazyListScope.linkSection(title: St
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
         )
     }
-    items(links, key = { "l-$title-${it.linkId}" }) { link -> SessionLinkRow(link, handlers) }
+    items(links, key = { "l-$title-${it.linkId}" }) { link -> SessionLinkRow(link, handlers, state) }
 }
 
 @Composable
-private fun SessionLinkRow(link: WorkTaskLink, handlers: TaskHandlers) {
+private fun SessionLinkRow(link: WorkTaskLink, handlers: TaskHandlers, state: TaskUiState) {
     val live = link.sessionId != null && link.state != LinkState.Ended && link.state != LinkState.Rejected
     ListItem(
         modifier = if (live) Modifier.clickable { handlers.onOpenSession(link) } else Modifier,
@@ -191,7 +205,16 @@ private fun SessionLinkRow(link: WorkTaskLink, handlers: TaskHandlers) {
         supportingContent = {
             Text(sessionLinkLine(link), style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
         },
-        trailingContent = { if (live) TextButton(onClick = { handlers.onOpenSession(link) }) { Text("Open") } },
+        trailingContent = {
+            when {
+                live -> TextButton(onClick = { handlers.onOpenSession(link) }) { Text("Open") }
+                // A past session's own account of what it did, for the journal.
+                link.state == LinkState.Ended && state.canSummarize -> TextButton(
+                    onClick = { handlers.onSummarize(link) },
+                    enabled = state.summarizing == null,
+                ) { Text(if (state.summarizing == link.linkId) "Summarising…" else "Summarize") }
+            }
+        },
     )
 }
 
@@ -265,4 +288,25 @@ private fun PlaceSheet(state: TaskUiState, handlers: TaskHandlers) {
             }
         }
     }
+}
+
+/** A past session's summary, as Claude wrote it — untrusted text, drawn plain. */
+@Composable
+internal fun PastWorkSummaryDialog(summary: PastWorkSummary, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Summary · ${summary.key}") },
+        text = {
+            Column(modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                Text(summary.summary, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    listOfNotNull(summary.hostAlias, summary.model, if (summary.truncated) "cut short" else null, "kept in the work's journal").joinToString(" · "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
+    )
 }

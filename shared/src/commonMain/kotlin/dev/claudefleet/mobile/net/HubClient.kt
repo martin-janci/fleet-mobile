@@ -24,6 +24,11 @@ import dev.claudefleet.mobile.model.PagesBundle
 import dev.claudefleet.mobile.model.PairResult
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.QuickReply
+import dev.claudefleet.mobile.model.TidyReport
+import dev.claudefleet.mobile.model.TidyApplyItem
+import dev.claudefleet.mobile.model.TidyApplied
+import dev.claudefleet.mobile.model.ReopenedWork
+import dev.claudefleet.mobile.model.PastWorkSummary
 import dev.claudefleet.mobile.model.RepairReport
 import dev.claudefleet.mobile.model.NewBgSessionResult
 import dev.claudefleet.mobile.model.ResumePlan
@@ -829,6 +834,47 @@ class HubClient(
         call("work", buildJsonObject { put("action", "today"); put("since", since) }) {
             json.decodeFromJsonElement(Today.serializer(), it)
         }
+
+    /** What Tidy-up suggests (`work { action: tidy }`). */
+    suspend fun workTidy(): TidyReport =
+        call("work", buildJsonObject { put("action", "tidy") }) { json.decodeFromJsonElement(TidyReport.serializer(), it) }
+
+    /** Work that came back after it was done (`work { action: reopened }`). */
+    suspend fun workReopened(): List<ReopenedWork> =
+        call("work", buildJsonObject { put("action", "reopened") }) {
+            json.decodeFromJsonElement(ListSerializer(ReopenedWork.serializer()), it)
+        }
+
+    /** Apply Tidy-up choices (`work_link { action: tidy_apply }`); a kill among them may need a desktop confirmation. */
+    suspend fun workTidyApply(items: List<TidyApplyItem>): TidyApplied =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "tidy_apply")
+                put("items", json.encodeToJsonElement(ListSerializer(TidyApplyItem.serializer()), items))
+            },
+        ) { json.decodeFromJsonElement(TidyApplied.serializer(), it) }
+
+    /** Clear an item's "reopened" (`work_link { action: dismiss }`). */
+    suspend fun workDismissReopened(itemId: Long): Unit =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "dismiss")
+                put("item_id", itemId)
+            },
+        ) { }
+
+    /** A summary of a past session on [key], written by Claude and kept in its journal (`work_link { action: summarize }`). */
+    suspend fun workSummarize(key: String, linkId: Long): PastWorkSummary =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "summarize")
+                put("key", key)
+                put("link_id", linkId)
+            },
+        ) { json.decodeFromJsonElement(PastWorkSummary.serializer(), it) }
 
     /** A ticket's context card (claude-fleet M9.2): its acceptance criteria, from the hub's cache only. */
     suspend fun workCard(key: String): TicketCard =
