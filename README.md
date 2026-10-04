@@ -395,8 +395,13 @@ costs one reconnect.
   `work_admin`, which is master-only and which the app never names (the test
   forbids it). Starting or resuming work uses the hub's default brief; editing
   one stays on the desktop.
-- **No push notifications while the app is closed.** That needs a vendor push
-  service and a sender in the hub; it is its own piece of work.
+- **No push service.** On Android, *Notify me when a session needs me*
+  (Settings, off until turned on) keeps a foreground service holding the hub's
+  event stream open, with its own quiet notification, and posts one when a
+  session comes to need you — waiting, stuck, failed or needing a decision —
+  while the app is not on screen; a tap opens that session. iOS has no such
+  thing: it would need APNs and a sender in the hub, which is its own piece of
+  work.
 - **No offline mirror.** The last snapshot stays on screen when the hub is
   unreachable, with a banner, and actions are disabled rather than hidden.
 - **It never holds the master token**, only a paired client token, so a lost

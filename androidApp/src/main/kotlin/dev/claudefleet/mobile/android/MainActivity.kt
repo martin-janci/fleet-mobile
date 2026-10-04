@@ -35,8 +35,11 @@ class MainActivity : ComponentActivity() {
             // screen's fields and waits for a tap; a debug build submits, so a
             // dev machine can be set up with no hands. See `data/PairLink.kt`.
             autoPairFromLink = BuildConfig.DEBUG,
+            notifier = notifier,
         )
     }
+
+    private val notifier by lazy { AndroidBackgroundNotifier(applicationContext) }
 
     /**
      * A `claudefleet:` URL, from a cold start or from an already-running app.
@@ -47,6 +50,8 @@ class MainActivity : ComponentActivity() {
      * pairs a second time.
      */
     private fun deliver(intent: Intent?) {
+        // A tapped "needs you" notification: open that session.
+        intent?.getLongExtra(NeedsYouService.EXTRA_SESSION_ID, -1L)?.takeIf { it >= 0 }?.let(container::onOpenSession)
         intent?.takeIf { it.action == Intent.ACTION_VIEW }?.data?.let {
             container.onPairLink(it.toString())
         }
@@ -65,7 +70,20 @@ class MainActivity : ComponentActivity() {
         // then applied once, in `App`.
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // Started again at every launch while the person has it on: the
+        // system may have stopped it, or the phone restarted.
+        notifier.apply()
         deliver(intent)
         setContent { App(container) }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        AppVisibility.foreground = true
+    }
+
+    override fun onStop() {
+        AppVisibility.foreground = false
+        super.onStop()
     }
 }
