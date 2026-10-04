@@ -133,6 +133,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.milliseconds
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 
 /** The conversation list, for the device test that checks it follows new output. */
 const val CONVERSATION_LIST: String = "conversation-list"
@@ -655,7 +657,6 @@ fun SessionScreen(
                                         onEdit = onEditQuickReply,
                                         onRemove = onRemoveQuickReply,
                                         onMove = onMoveQuickReply,
-                                        onPressEnter = { scrollToNewest(); onPressEnter() },
                                     )
                                 }
                                 PromptBox(
@@ -666,6 +667,7 @@ fun SessionScreen(
                                     // turn their prompt starts is followed like any other.
                                     onSend = { scrollToNewest(); onSend() },
                                     onOpenHistory = onOpenHistory,
+                                    onPressEnter = { scrollToNewest(); onPressEnter() },
                                     onFocusChange = { promptFocused = it },
                                     focusNow = focusPrompt,
                                     onFocused = { focusPrompt = false },
@@ -2083,6 +2085,8 @@ private fun PromptBox(
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
     onOpenHistory: () -> List<String>,
+    /** Enter in the pane, for a REPL waiting on a bare Enter — the ⏎ in an empty field. */
+    onPressEnter: () -> Unit = {},
     /** The field gained or lost focus — what tells the screen someone is typing. */
     onFocusChange: (Boolean) -> Unit = {},
     /** Put the cursor in the field now (the folded footer's pill was tapped); [onFocused] once done. */
@@ -2137,6 +2141,17 @@ private fun PromptBox(
                     IconButton(onClick = { showHistory = true }) {
                         Icon(FleetIcons.History, contentDescription = "Draft history")
                     }
+                },
+                // The desktop's ⏎ chip, where it costs no room: inside an
+                // empty field, gone the moment there is a draft to send.
+                trailingIcon = if (state.draft.isEmpty() && state.canSendQuick) {
+                    {
+                        IconButton(onClick = onPressEnter) {
+                            Text("⏎", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { contentDescription = "Press Enter" })
+                        }
+                    }
+                } else {
+                    null
                 },
                 colors = TextFieldDefaults.colors(
                     focusedIndicatorColor = Color.Transparent,
@@ -2253,8 +2268,6 @@ private fun QuickRepliesRow(
     onEdit: (QuickReply, QuickReply) -> Unit,
     onRemove: (QuickReply) -> Unit,
     onMove: (QuickReply, Int) -> Unit,
-    /** The ⏎ chip: Enter in the pane, for a REPL waiting on a bare Enter. */
-    onPressEnter: () -> Unit = {},
 ) {
     var editing by remember { mutableStateOf<QuickReply?>(null) }
     var adding by remember { mutableStateOf(false) }
@@ -2264,9 +2277,6 @@ private fun QuickRepliesRow(
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp),
         modifier = Modifier.testTag(QUICK_REPLY_ROW),
     ) {
-        item {
-            SuggestionChip(onClick = onPressEnter, enabled = enabled, label = { Text("⏎ Enter") })
-        }
         items(chips) { chip ->
             val sends = chip.sendsOnTap
             QuickReplyChip(
