@@ -70,6 +70,21 @@ data class HubCapabilities(
      */
     val fleetSettings: Boolean get() = LIST_PAGES in tools && GET_SETTINGS in tools
 
+    /**
+     * File downloads (claude-fleet contract revision 7): the hub keeps copies
+     * of files a session sent and lists them (`list_downloads`, readonly).
+     * What draws the Files tab.
+     */
+    val downloads: Boolean get() = LIST_DOWNLOADS in tools
+
+    /**
+     * This token may ask for a file (`send_file`) and forget one
+     * (`remove_download`). Both are writes, which the hub does not list for a
+     * readonly token; the UI checks `canWrite` as well.
+     */
+    val sendFile: Boolean get() = SEND_FILE in tools
+    val removeDownload: Boolean get() = REMOVE_DOWNLOAD in tools
+
     fun has(tool: String, action: String): Boolean =
         tool in tools &&
             actions[tool]?.contains(action) != false &&
@@ -99,6 +114,9 @@ data class HubCapabilities(
         const val SESSION_TOOL_DETAIL = "session_tool_detail"
         const val LIST_PAGES = "list_pages"
         const val GET_SETTINGS = "get_settings"
+        const val LIST_DOWNLOADS = "list_downloads"
+        const val SEND_FILE = "send_file"
+        const val REMOVE_DOWNLOAD = "remove_download"
 
         fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions, params = catalog.params)
     }

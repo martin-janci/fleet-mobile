@@ -33,6 +33,8 @@ import androidx.lifecycle.compose.LifecycleStartEffect
 import dev.claudefleet.mobile.data.AgentActions
 import dev.claudefleet.mobile.data.AppSession
 import dev.claudefleet.mobile.data.AuthState
+import dev.claudefleet.mobile.data.DownloadActions
+import dev.claudefleet.mobile.data.HubDownloadActions
 import dev.claudefleet.mobile.data.FleetRepository
 import dev.claudefleet.mobile.data.HubAgentActions
 import dev.claudefleet.mobile.data.HubNewSessionActions
@@ -53,6 +55,10 @@ import dev.claudefleet.mobile.store.Credentials
 import dev.claudefleet.mobile.store.Prefs
 import dev.claudefleet.mobile.store.Secrets
 import dev.claudefleet.mobile.ui.AgentViewModel
+import dev.claudefleet.mobile.ui.FilesHandlers
+import dev.claudefleet.mobile.ui.FilesScreen
+import dev.claudefleet.mobile.ui.FilesViewModel
+import dev.claudefleet.mobile.ui.rememberFileHandoff
 import dev.claudefleet.mobile.ui.MyWorkHandlers
 import dev.claudefleet.mobile.ui.MyWorkScreen
 import dev.claudefleet.mobile.ui.MyWorkViewModel
@@ -195,6 +201,9 @@ class AppContainer(
 
     /** The fleet's settings pages' calls (claude-fleet declarative pages P6). */
     val fleetSettingsActions: FleetSettingsActions = HubFleetSettingsActions(session)
+
+    /** The Files tab's calls (claude-fleet file downloads), through the same `withClient`. */
+    val downloadActions: DownloadActions = HubDownloadActions(session)
 
     /**
      * The live fleet picture for one credential.
@@ -445,6 +454,22 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     // The hub stopped serving the Work view (or a reconnect found an older
     // hub): the tab leaves the bar, and the app leaves the tab.
     LaunchedEffect(workState.available) { if (!workState.available) nav.workUnavailable() }
+    // The Files tab (claude-fleet file downloads): drawn when the hub keeps
+    // downloads, following `download:changed` only while it is showing.
+    val fileHandoff = rememberFileHandoff()
+    val files = remember(repository, scope, fileHandoff) {
+        FilesViewModel(
+            fleet = repository,
+            actions = container.downloadActions,
+            scope = scope,
+            // `remove_download` is not readonly; the view model checks the
+            // hub's `tools/list` as well.
+            canWrite = credentials.canWrite,
+            handoff = fileHandoff,
+        )
+    }
+    val filesState by files.state.collectAsState()
+    LaunchedEffect(filesState.available) { if (!filesState.available) nav.filesUnavailable() }
     val hosts = remember(repository, scope) { HostsViewModel(repository, scope) }
     val settings = remember(container, scope) {
         SettingsViewModel(container.session, scope, container.appVersion, container.versionActions)
@@ -462,8 +487,12 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
         bottomBar = {
             NavigationBar {
                 val attention by sessions.state.collectAsState()
-                // Work only when the hub serves `work { tree }`.
-                for (entry in Tab.entries.filter { it != Tab.Work || workState.available }) {
+                // Work only when the hub serves `work { tree }`, Files only
+                // when it keeps downloads.
+                val shown = Tab.entries.filter {
+                    (it != Tab.Work || workState.available) && (it != Tab.Files || filesState.available)
+                }
+                for (entry in shown) {
                     NavigationBarItem(
                         selected = tab == entry,
                         onClick = { nav.select(entry) },
@@ -471,6 +500,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                             val icon = when (entry) {
                                 Tab.Sessions -> FleetIcons.Sessions
                                 Tab.Work -> FleetIcons.Work
+                                Tab.Files -> FleetIcons.Files
                                 Tab.Hosts -> FleetIcons.Hosts
                                 Tab.Settings -> FleetIcons.Settings
                             }
@@ -728,6 +758,29 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         onOpenSession = nav::open,
                         onStartHere = { nav.newSession(ticketKey = it) },
                         onBack = { nav.back() },
+                    )
+                }
+                Screen.Files -> {
+                    DisposableEffect(files) {
+                        files.attach()
+                        onDispose { files.detach() }
+                    }
+                    val status by repository.status.collectAsState()
+                    FilesScreen(
+                        state = filesState,
+                        status = status,
+                        handlers = FilesHandlers(
+                            onRefresh = { files.refresh() },
+                            onTap = { files.tap(it) },
+                            onCancelTransfer = files::cancelTransfer,
+                            onHandOff = { files.handOff(it) },
+                            onCloseOpened = files::closeOpened,
+                            onRemove = if (filesState.canRemove) files::askRemove else null,
+                            onConfirmRemove = { files.confirmRemove() },
+                            onCancelRemove = files::cancelRemove,
+                            onDismissError = files::dismissError,
+                            onDismissNotice = files::dismissNotice,
+                        ),
                     )
                 }
                 Screen.Hosts -> {

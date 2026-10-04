@@ -1340,4 +1340,37 @@ class FleetRepositoryTest {
         collector.cancel()
         repository.stop()
     }
+
+    /**
+     * `download:changed` (claude-fleet file downloads; ids only) reaches the
+     * Files tab as its id, and every `ready` as [ALL_DOWNLOADS_CHANGED] —
+     * a scoped stream never carries the frame, and anything may have moved
+     * while the stream was down. The snapshot is untouched by it.
+     */
+    @Test
+    fun download_frames_reach_downloadChanges_and_a_ready_asks_for_everything() = runTest {
+        val repository = repo(
+            FakeHub(sessionsJson = sessionRows(1)),
+            FakeStream {
+                emit(READY)
+                emit(rowEvent("download:changed", """{"id":7}"""))
+                emit(rowEvent("session:updated", """{"id":1,"tmux_name":"a","host_alias":"box"}"""))
+                emit(rowEvent("download:changed", """{"no_id":true}"""))
+                awaitCancellation()
+            },
+            backgroundScope,
+        )
+        val seen = mutableListOf<Long>()
+        val collector = backgroundScope.launch { repository.downloadChanges.collect { seen += it } }
+        runCurrent()
+
+        repository.start()
+        repository.sessions.first { it.singleOrNull()?.tmuxName == "a" }
+        runCurrent()
+
+        assertEquals(listOf(ALL_DOWNLOADS_CHANGED, 7L), seen, "the resync, then the one frame that names an id")
+        assertEquals(listOf(1L), repository.sessions.value.map { it.id })
+        collector.cancel()
+        repository.stop()
+    }
 }

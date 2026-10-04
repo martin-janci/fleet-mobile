@@ -32,13 +32,17 @@ sealed interface Screen {
 
     /** One task and all of its sessions, pushed over the Work view (or a session's Tasks). */
     data class Task(val taskId: String) : Screen
+
+    /** The hub's copies of files sessions sent (claude-fleet file downloads). A tab of its own. */
+    data object Files : Screen
 }
 
 /**
  * The destinations in the bottom bar. [Work] is drawn only when the hub
- * serves the Work view (`work { tree }`) — see `App.kt`.
+ * serves the Work view (`work { tree }`), and [Files] only when it keeps
+ * downloads (`list_downloads`) — see `App.kt`.
  */
-enum class Tab { Sessions, Work, Hosts, Settings }
+enum class Tab { Sessions, Work, Files, Hosts, Settings }
 
 /**
  * Where the app is, as a small object rather than as Compose state.
@@ -240,6 +244,9 @@ class Navigator {
      */
     fun workUnavailable() = move { if (it.tab == Tab.Work) it.copy(history = emptyList()).going(rootOf(Tab.Sessions)) else it }
 
+    /** The Files tab went away (a reconnect landed on a hub without downloads): as [workUnavailable]. */
+    fun filesUnavailable() = move { if (it.tab == Tab.Files) it.copy(history = emptyList()).going(rootOf(Tab.Sessions)) else it }
+
     private fun NavState.going(screen: Screen): NavState = copy(
         screen = screen,
         // A session or the form belongs to the tab it was opened from — the
@@ -281,6 +288,7 @@ internal fun isPushed(screen: Screen): Boolean =
 private fun rootOf(tab: Tab): Screen = when (tab) {
     Tab.Sessions -> Screen.Sessions()
     Tab.Work -> Screen.Work
+    Tab.Files -> Screen.Files
     Tab.Hosts -> Screen.Hosts
     Tab.Settings -> Screen.Settings
 }
@@ -290,6 +298,7 @@ private fun tabOf(screen: Screen): Tab? = when (screen) {
     is Screen.Sessions -> Tab.Sessions
     is Screen.Session, is Screen.NewSession -> null
     Screen.Work, is Screen.Task -> Tab.Work
+    Screen.Files -> Tab.Files
     Screen.Hosts -> Tab.Hosts
     Screen.Settings -> Tab.Settings
 }

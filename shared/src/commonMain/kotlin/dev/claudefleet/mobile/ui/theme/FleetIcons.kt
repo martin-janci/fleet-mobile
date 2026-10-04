@@ -370,6 +370,29 @@ object FleetIcons {
         }.build()
     }
 
+    /**
+     * The Files tab: an arrow down into a tray — what a session sent you.
+     * Stroke-only like [Work], so it tints the way the other tab glyphs do.
+     */
+    val Files: ImageVector by lazy {
+        ImageVector.Builder("Files", 24.dp, 24.dp, 24f, 24f).apply {
+            path(
+                fill = null,
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                // the arrow
+                moveTo(12f, 3f); lineTo(12f, 14f)
+                moveTo(7.5f, 9.5f); lineTo(12f, 14f); lineTo(16.5f, 9.5f)
+                // the tray
+                moveTo(4f, 14f); lineTo(4f, 19f); quadTo(4f, 20f, 5f, 20f)
+                lineTo(19f, 20f); quadTo(20f, 20f, 20f, 19f); lineTo(20f, 14f)
+            }
+        }.build()
+    }
+
     // ─── Tool rows in a conversation ─────────────────────────────────────────
     // Stroke-only at the same 2-unit weight as the rest, so each tints with
     // `onSurfaceVariant` or `error` like the text beside it.

@@ -456,6 +456,26 @@ class FleetSnapshotTest {
     }
 
     /**
+     * The stream asks for the snapshot's kinds plus `download`, a re-read
+     * signal for the Files tab — kept out of [SNAPSHOT_EVENT_KINDS] because it
+     * changes nothing here. Its `{ "id": n }` payload survives the `?fields=`
+     * projection, and only a `download:changed` frame names a download.
+     */
+    @Test
+    fun the_stream_also_asks_for_download_signals_which_leave_the_snapshot_alone() {
+        assertEquals(listOf("session", "host", "project", "work", "download"), STREAM_EVENT_KINDS)
+        assertEquals(listOf("download"), SIGNAL_EVENT_KINDS)
+
+        val frame = row("download:changed", """{"id":7}""")
+        val empty = FleetSnapshot()
+        assertTrue(empty.applying(frame) === empty, "a download signal is not a row")
+        assertEquals(7L, frame.downloadId())
+        assertTrue("id" in SNAPSHOT_PAYLOAD_FIELDS, "the projection would strip the id the frame carries")
+        assertNull(row("session:updated", sessionPayload(id = 7)).downloadId())
+        assertNull(row("download:changed", """{"what":7}""").downloadId())
+    }
+
+    /**
      * `?fields=` is ONE list for every frame on the connection, so a
      * session-shaped list would project a `host:probed` payload down to
      * nothing — and the failure would be a host row that quietly stopped

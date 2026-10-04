@@ -2,7 +2,7 @@ package dev.claudefleet.mobile.net
 
 /**
  * The hub wire-contract revisions this build understands (up to claude-fleet
- * revision 6). A hub
+ * revision 7). A hub
  * outside the range is refused the way the desktop refuses it: the banner
  * says which side is behind, and no row event from that hub is applied.
  *
@@ -22,7 +22,12 @@ package dev.claudefleet.mobile.net
  * current hub as "too old" (2026-09-28). Revision 6 made `catalog_admin` (a
  * paired desktop granted the asset catalog manages it) a hub tool the desktop
  * routes to; this app never calls it and reads no new row shape, so a
- * revision-6 hub is safe here too.
+ * revision-6 hub is safe here too. Revision 7 added file downloads — the
+ * tools `send_file`, `list_downloads` and `remove_download`, the `Download`
+ * row, `GET /downloads/<id>` and the `download:changed` event — all
+ * additive: this app calls the three tools only when `tools/list` names them
+ * (`HubCapabilities.downloads`), and reads the row and the event itself (the
+ * Files tab). Left at 6, it would refuse every hub that has the feature.
  *
  * [MIN_HUB_CONTRACT] does NOT mirror the desktop's minimum. The desktop
  * raised its own to 3 because a pre-3 hub would silently misperform
@@ -33,7 +38,7 @@ package dev.claudefleet.mobile.net
  * upgraded: this is the phone's own floor, not a copy of the desktop's.
  */
 const val MIN_HUB_CONTRACT: Int = 0
-const val MAX_HUB_CONTRACT: Int = 6
+const val MAX_HUB_CONTRACT: Int = 7
 
 /**
  * What a `contract` field that cannot be read as a revision counts as.

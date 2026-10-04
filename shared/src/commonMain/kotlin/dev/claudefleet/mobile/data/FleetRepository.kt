@@ -176,6 +176,10 @@ class FleetRepository(
     override val workChanges: Flow<Long> = _workChanges.asSharedFlow()
     private var workTicks = 0L
 
+    // Lossy and buffered like `_sessionChanges`: a hint to re-read, never the fact.
+    private val _downloadChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val downloadChanges: Flow<Long> = _downloadChanges.asSharedFlow()
+
     override fun actionMissing(tool: String, action: String) {
         _capabilities.update { it.forgetting(tool, action) }
     }
@@ -382,11 +386,13 @@ class FleetRepository(
                             event.now?.let { _clockSkewSeconds.value = it - clock() }
                             _status.value = ConnectionStatus.Connected(event.version)
                             _sessionChanges.tryEmit(ALL_SESSIONS_CHANGED)
+                            _downloadChanges.tryEmit(ALL_DOWNLOADS_CHANGED)
                             discover()
                         }
                         is HubEvent.Lagged -> {
                             refresh()
                             _sessionChanges.tryEmit(ALL_SESSIONS_CHANGED)
+                            _downloadChanges.tryEmit(ALL_DOWNLOADS_CHANGED)
                         }
                         is HubEvent.Row -> {
                             snapshotLock.withLock {
@@ -401,6 +407,7 @@ class FleetRepository(
                             // exists only to say "re-read". An unknown kind
                             // stays a no-op for the snapshot either way.
                             if (event.isWorkFrame()) _workChanges.tryEmit(++workTicks)
+                            event.downloadId()?.let { _downloadChanges.tryEmit(it) }
                         }
                     }
                 }

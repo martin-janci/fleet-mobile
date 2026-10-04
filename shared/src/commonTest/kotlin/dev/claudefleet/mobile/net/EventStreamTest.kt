@@ -166,7 +166,9 @@ class EventStreamTest {
         assertEquals("Bearer $TOKEN", request.headers[HttpHeaders.Authorization])
         assertEquals("text/event-stream", request.headers[HttpHeaders.Accept])
         assertEquals("/events", request.url.encodedPath)
-        assertEquals("session,host,project,work", request.url.parameters["kinds"])
+        // The four the snapshot applies, then `download` — a re-read signal
+        // for the Files tab (`download:changed`, ids only).
+        assertEquals("session,host,project,work,download", request.url.parameters["kinds"])
 
         // And only the payload keys it decodes. Not spelled out here: the set
         // is derived from the row serializers, so a literal would be a second
