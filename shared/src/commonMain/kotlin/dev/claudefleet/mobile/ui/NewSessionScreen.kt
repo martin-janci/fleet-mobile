@@ -117,6 +117,7 @@ fun NewSessionScreen(
         ConnectionBanner(state.status)
         ErrorBanner(state.error, onDismiss = onDismissError)
 
+        var projectsOpen by remember(state.projectId) { mutableStateOf(false) }
         LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
             item(key = "host-label") { SectionLabel("Host") }
             item(key = "hosts") {
@@ -169,7 +170,17 @@ fun NewSessionScreen(
                     Hint(if (state.projectQuery.isBlank()) "The hub knows no projects yet." else "No project matches.")
                 }
             }
-            items(state.projects, key = { "project-${it.id}" }) { project ->
+            // Once one is picked the list folds to it, so the fields still to
+            // fill are not forty rows down; a search or Change opens it again.
+            val folded = state.projectId != null && state.projectQuery.isBlank() && !projectsOpen &&
+                state.projects.any { it.id == state.projectId }
+            val shownProjects = if (folded) state.projects.filter { it.id == state.projectId } else state.projects
+            if (folded) item(key = "project-change") {
+                TextButton(onClick = { projectsOpen = true }, enabled = editable, modifier = Modifier.padding(horizontal = 8.dp)) {
+                    Text("Change project (${state.projects.size})")
+                }
+            }
+            items(shownProjects, key = { "project-${it.id}" }) { project ->
                 val selected = project.id == state.projectId
                 ListItem(
                     headlineContent = { Text(project.label) },
@@ -272,6 +283,8 @@ fun NewSessionScreen(
                             onValueChange = onBranchChange,
                             label = { Text("Branch") },
                             placeholder = { Text("feat/something") },
+                            isError = state.branchInvalid,
+                            supportingText = if (state.branchInvalid) ({ Text("A branch name has no spaces.") }) else null,
                             singleLine = true,
                             enabled = editable,
                             keyboardOptions = IDENTIFIER_KEYBOARD,
@@ -305,6 +318,15 @@ fun NewSessionScreen(
         }
 
         Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+          Column {
+            state.missing?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+                )
+            }
             Button(
                 onClick = onCreate,
                 enabled = state.canCreate,
@@ -333,6 +355,7 @@ fun NewSessionScreen(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 ) { Text("Background agent on ${state.host}…") }
             }
+          }
         }
     }
 

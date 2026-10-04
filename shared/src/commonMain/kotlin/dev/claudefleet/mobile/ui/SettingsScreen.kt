@@ -1,5 +1,10 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.ui.theme.FleetIcons
+import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
+import dev.claudefleet.mobile.ui.components.DangerTextButton
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Column
@@ -111,6 +116,8 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    // Says it opens somewhere: among settings fields it read as one more.
+                    Icon(FleetIcons.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -130,10 +137,22 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
+            // Asked first: getting back means a new pairing code from the
+            // operator, and this was one tap from nothing.
+            var asking by remember { mutableStateOf(false) }
             Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                OutlinedButton(onClick = onForget, enabled = state.canForget) {
-                    Text(if (state.forgetting) "Forgetting…" else "Forget")
+                DangerTextButton(onClick = { asking = true }, enabled = state.canForget) {
+                    Text(if (state.forgetting) "Forgetting…" else "Forget…")
                 }
+            }
+            if (asking) {
+                AlertDialog(
+                    onDismissRequest = { asking = false },
+                    title = { Text("Forget ${state.hub}?") },
+                    text = { Text("This phone stops seeing the fleet. To come back you need a new pairing code from the hub's operator.") },
+                    confirmButton = { DangerTextButton(onClick = { asking = false; onForget() }) { Text("Forget") } },
+                    dismissButton = { TextButton(onClick = { asking = false }) { Text("Cancel") } },
+                )
             }
             Spacer(Modifier.height(24.dp))
         }

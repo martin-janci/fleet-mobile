@@ -1,5 +1,8 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.epochSeconds
+import dev.claudefleet.mobile.model.relativeAgo
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,7 +67,17 @@ fun HostsScreen(
                 if (state.isEmpty) {
                     item(key = "empty") {
                         Box(modifier = Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(
+                            if (state.connecting) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    CircularProgressIndicator()
+                                    Text(
+                                        "Connecting to the hub…",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(16.dp),
+                                    )
+                                }
+                            } else Text(
                                 text = "No hosts. Add one from the desktop app or the terminal.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -153,4 +166,14 @@ private fun Reachability(host: HostLine) {
         "unreachable" to MaterialTheme.colorScheme.error
     }
     Text(text = label, style = MaterialTheme.typography.labelMedium, color = color)
+    // Since when: a host gone a minute is not one gone for days.
+    if (!host.reachable) {
+        relativeAgo(host.lastPingedAt, epochSeconds())?.let {
+            Text(
+                " · seen $it",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }

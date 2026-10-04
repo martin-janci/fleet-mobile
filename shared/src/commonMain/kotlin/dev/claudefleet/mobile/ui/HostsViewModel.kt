@@ -28,6 +28,8 @@ data class HostLine(
     val hidden: Boolean,
     /** `ssh` | `agent` — how the hub reaches it. */
     val transport: String,
+    /** When the hub last reached it: what an unreachable row says it has been gone since. */
+    val lastPingedAt: Long? = null,
 )
 
 data class HostsUiState(
@@ -37,6 +39,13 @@ data class HostsUiState(
     val error: Friendly? = null,
 ) {
     val isEmpty: Boolean get() = hosts.isEmpty()
+
+    /**
+     * Nothing listed because nothing has arrived yet, not because the fleet
+     * has no hosts: "No hosts" then sent a new user off to add hosts they had.
+     */
+    val connecting: Boolean
+        get() = hosts.isEmpty() && (status is ConnectionStatus.Offline || status is ConnectionStatus.Reconnecting)
 }
 
 /**
@@ -114,6 +123,7 @@ class HostsViewModel(
                     sessions = counts[host.alias] ?: 0,
                     hidden = host.hidden,
                     transport = host.transport,
+                    lastPingedAt = host.lastPingedAt,
                 )
             },
             status = status,

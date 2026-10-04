@@ -360,7 +360,10 @@ private fun TicketRow(ticket: Ticket, selected: Boolean, org: String?, handlers:
             if (line.isNotEmpty()) Text(line, maxLines = 2, overflow = TextOverflow.Ellipsis)
         },
         trailingContent = {
-            val status = ticket.statusName ?: if (ticket.liveSessionIds.isNotEmpty()) "live" else null
+            // Both: whether someone is on it is the question a list of
+            // tickets is scanned for, and a tracker status used to hide it.
+            val live = if (ticket.liveSessionIds.isNotEmpty()) "live" else null
+            val status = listOfNotNull(ticket.statusName, live).joinToString(" · ").ifEmpty { null }
             status?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
         },
     )

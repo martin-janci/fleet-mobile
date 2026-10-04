@@ -49,7 +49,7 @@ fun ConnectionBanner(
     staleFor: String? = null,
 ) {
     val text = connectionNotice(status, hubReachable) ?: return
-    Notice(staleFor?.let { "$text · last updated $it ago" } ?: text, modifier)
+    Notice(staleFor?.let { "$text · last updated ${if (it == "just now") it else "$it ago"}" } ?: text, modifier)
 }
 
 /**

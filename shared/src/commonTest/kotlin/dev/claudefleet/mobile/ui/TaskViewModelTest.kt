@@ -336,7 +336,7 @@ class TaskViewModelTest {
         val s = DETAIL.task.sessions
         assertEquals("primary · set by hand", sessionLinkLine(s[0]))
         assertEquals("suggested · branch abc-12 · R3", sessionLinkLine(s[1]))
-        assertEquals("ended · PR https://github.com/acme/api/pull/9 · killed", sessionLinkLine(s[2]))
+        assertEquals("ended · PR #9 · killed", sessionLinkLine(s[2]))
         assertEquals("not this", sessionLinkLine(s[3]))
         assertEquals("secondary", linkStateWords(s[0].copy(primary = false)))
         // A placement is local: its words never claim the tracker moved.

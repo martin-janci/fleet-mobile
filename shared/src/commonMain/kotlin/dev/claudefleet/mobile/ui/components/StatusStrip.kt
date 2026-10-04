@@ -139,5 +139,12 @@ internal fun formatUsd(micros: Long): String {
     val cents = (micros / 10_000.0).roundToInt()
     val dollars = cents / 100
     val remainder = (cents % 100).let { if (it < 0) -it else it }
-    return "$$dollars.${remainder.toString().padStart(2, '0')}"
+    return "$${groupThousands(dollars)}.${remainder.toString().padStart(2, '0')}"
+}
+
+/** `1,234,567` — a cost over a month reads at a glance, not by counting digits. */
+private fun groupThousands(n: Int): String {
+    val digits = (if (n < 0) -n else n).toString()
+    val grouped = digits.reversed().chunked(3).joinToString(",").reversed()
+    return if (n < 0) "-$grouped" else grouped
 }

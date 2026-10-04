@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.model.relativeAgo
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -134,8 +135,8 @@ private fun Facts(row: SessionRow, now: Long, sessions: List<SessionRow>, onOpen
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
         Fact("Host", row.hostAlias)
         row.branch?.let { Fact("Branch", it) }
-        relativeTime(row.startedAt ?: row.createdAt, now)?.let { Fact("Started", "$it ago") }
-        relativeTime(row.lastActivityAt, now)?.let { Fact("Last activity", "$it ago") }
+        relativeAgo(row.startedAt ?: row.createdAt, now)?.let { Fact("Started", it) }
+        relativeAgo(row.lastActivityAt, now)?.let { Fact("Last activity", it) }
         val usage = listOfNotNull(row.usageModel, row.usageCostMicros?.let(::formatUsd)).joinToString(" · ")
         if (usage.isNotEmpty()) Fact("Model", usage)
         row.contextPct?.let { Fact("Context", "${it.toInt()} %") }

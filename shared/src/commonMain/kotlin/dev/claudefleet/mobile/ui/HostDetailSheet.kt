@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.model.relativeAgo
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Arrangement
@@ -63,7 +64,7 @@ fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowS
                         listOfNotNull(
                             if (host?.reachable == true) "reachable" else "unreachable",
                             host?.transport?.takeIf { it != "ssh" },
-                            relativeTime(host?.lastPingedAt, nowSeconds)?.let { "pinged $it ago" },
+                            relativeAgo(host?.lastPingedAt, nowSeconds)?.let { "pinged $it" },
                         ).joinToString(" · "),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -148,7 +149,7 @@ fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowS
                         Column(modifier = Modifier.weight(1f)) {
                             Text(c.cwd, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(
-                                listOfNotNull(c.gitBranch, c.rankHint.replace('_', ' ').takeIf { it.isNotBlank() }, relativeTime(c.transcriptMtime, nowSeconds)?.let { "$it ago" })
+                                listOfNotNull(c.gitBranch, c.rankHint.replace('_', ' ').takeIf { it.isNotBlank() }, relativeAgo(c.transcriptMtime, nowSeconds))
                                     .joinToString(" · "),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,

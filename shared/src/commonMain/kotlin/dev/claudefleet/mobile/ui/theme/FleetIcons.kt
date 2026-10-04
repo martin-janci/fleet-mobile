@@ -495,6 +495,13 @@ object FleetIcons {
         }
     }
 
+    /** A rightward chevron: this row opens a screen of its own. */
+    val ChevronRight: ImageVector by lazy {
+        strokeIcon("ChevronRight") {
+            moveTo(9f, 6f); lineTo(15f, 12f); lineTo(9f, 18f)
+        }
+    }
+
     /** A downward chevron; rotated half a turn when its row is open. */
     val ChevronDown: ImageVector by lazy {
         strokeIcon("ChevronDown") {
