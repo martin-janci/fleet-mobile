@@ -55,10 +55,10 @@ class TheBackGestureReachesTheNavigatorTest {
     }
 
     /**
-     * Enabled on the three screens pushed over a tab — a session, the New
-     * session form, and a task (the Work view's detail) — and nowhere else,
-     * which is the navigator's contract (`isPushed`) expressed where the
-     * platform can see it.
+     * Enabled on the screens pushed over a tab — a session, the New session
+     * form, a task (the Work view's detail), a session's worktree — and
+     * nowhere else: the navigator's own contract, `isPushed`, read directly
+     * rather than spelled out again here where it could drift from it.
      *
      * On a tab the handler must be *disabled* rather than enabled-and-ignoring:
      * a disabled handler lets the gesture reach the system, which is how Android
@@ -67,21 +67,31 @@ class TheBackGestureReachesTheNavigatorTest {
      */
     @Test
     fun it_is_enabled_only_on_a_pushed_screen() {
-        val call = Regex("""BackHandler\(enabled = ([^)]+)\)""").find(app)
+        val call = Regex("""BackHandler\(enabled = ([^)]+\)?)\)""").find(app)
             ?: fail("BackHandler is not called with an explicit `enabled`")
 
-        assertEquals("screen is Screen.Session || screen is Screen.NewSession || screen is Screen.Task", call.groupValues[1].trim())
+        assertEquals("isPushed(screen)", call.groupValues[1].trim())
         assertTrue(
-            Regex("""BackHandler\([^)]*\)\s*\{\s*nav\.back\(\)\s*\}""").containsMatchIn(app),
+            Regex("""BackHandler\(enabled = isPushed\(screen\)\)\s*\{\s*nav\.back\(\)\s*\}""").containsMatchIn(app),
             "the handler must call nav.back() and nothing else",
         )
     }
 
-    /** One handler. Two would fight over the gesture in an order nobody picked. */
+    /**
+     * One file, and one handler per question. Two that answered the same
+     * question would fight over the gesture in an order nobody picked. The
+     * one other is the worktree screen's, and it answers a different one:
+     * enabled only while a diff, commit or file is open over its tab, and
+     * composed inside the screen — after `App`'s — so it is asked first and
+     * closes what is open before `nav.back()` leaves the screen.
+     */
     @Test
     fun there_is_exactly_one() {
         val callers = Repo.shipped.filter { "BackHandler(" in it.readText() }.map { it.name }
-
         assertEquals(listOf("App.kt"), callers.sorted())
+
+        val app = Repo.shipped.single { it.name == "App.kt" }.readText()
+        val enables = Regex("""BackHandler\(enabled = ([^)]+\)?)\)""").findAll(app).map { it.groupValues[1].trim() }.toList()
+        assertEquals(listOf("isPushed(screen)", "state.views.isNotEmpty()"), enables)
     }
 }

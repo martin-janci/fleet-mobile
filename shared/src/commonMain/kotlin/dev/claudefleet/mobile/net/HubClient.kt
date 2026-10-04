@@ -1,6 +1,12 @@
 package dev.claudefleet.mobile.net
 
 import dev.claudefleet.mobile.model.ActivityProbe
+import dev.claudefleet.mobile.model.RepoTree
+import dev.claudefleet.mobile.model.FileDiff
+import dev.claudefleet.mobile.model.FileContent
+import dev.claudefleet.mobile.model.CommitDetail
+import dev.claudefleet.mobile.model.Commit
+import dev.claudefleet.mobile.model.ChangedFile
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.ConversationSummary
 import dev.claudefleet.mobile.model.Download
@@ -454,6 +460,70 @@ class HubClient(
                 if (newWorktree != null) put("new_worktree", newWorktree)
             },
         ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
+
+    /** A session's changed files, git status in its worktree (`repo_changes`, readonly). */
+    suspend fun repoChanges(sessionId: Long): List<ChangedFile> =
+        call("repo_changes", buildJsonObject { put("session_id", sessionId) }) {
+            json.decodeFromJsonElement(ListSerializer(ChangedFile.serializer()), it)
+        }
+
+    /** A session's worktree files (`repo_tree`, readonly). */
+    suspend fun repoTree(sessionId: Long): RepoTree =
+        call("repo_tree", buildJsonObject { put("session_id", sessionId) }) {
+            json.decodeFromJsonElement(RepoTree.serializer(), it)
+        }
+
+    /** One worktree file's contents, capped (`repo_file`, readonly). */
+    suspend fun repoFile(sessionId: Long, path: String): FileContent =
+        call(
+            "repo_file",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("path", path)
+            },
+        ) { json.decodeFromJsonElement(FileContent.serializer(), it) }
+
+    /** One worktree file's diff against HEAD (`repo_diff`, readonly). */
+    suspend fun repoDiff(sessionId: Long, path: String): FileDiff =
+        call(
+            "repo_diff",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("path", path)
+            },
+        ) { json.decodeFromJsonElement(FileDiff.serializer(), it) }
+
+    /** The worktree's commit log, newest first (`repo_log`, readonly); [skip] pages back. */
+    suspend fun repoLog(sessionId: Long, limit: Int = 50, skip: Int = 0): List<Commit> =
+        call(
+            "repo_log",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("limit", limit)
+                put("skip", skip)
+            },
+        ) { json.decodeFromJsonElement(ListSerializer(Commit.serializer()), it) }
+
+    /** One commit and its files (`repo_commit`, readonly). */
+    suspend fun repoCommit(sessionId: Long, hash: String): CommitDetail =
+        call(
+            "repo_commit",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("hash", hash)
+            },
+        ) { json.decodeFromJsonElement(CommitDetail.serializer(), it) }
+
+    /** One file's diff in one commit (`repo_commit_diff`, readonly). */
+    suspend fun repoCommitDiff(sessionId: Long, hash: String, path: String): FileDiff =
+        call(
+            "repo_commit_diff",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("hash", hash)
+                put("path", path)
+            },
+        ) { json.decodeFromJsonElement(FileDiff.serializer(), it) }
 
     /** The Claude conversations a session has run, newest first (`session_conversations`, readonly). */
     suspend fun conversations(sessionId: Long): List<ConversationSummary> =

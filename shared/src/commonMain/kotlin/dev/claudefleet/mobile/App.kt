@@ -45,6 +45,8 @@ import dev.claudefleet.mobile.data.HubNewSessionActions
 import dev.claudefleet.mobile.data.FleetSettingsActions
 import dev.claudefleet.mobile.data.HubFleetSettingsActions
 import dev.claudefleet.mobile.data.HubQuickReplyActions
+import dev.claudefleet.mobile.data.HubRepoActions
+import dev.claudefleet.mobile.data.RepoActions
 import dev.claudefleet.mobile.data.HubSessionActions
 import dev.claudefleet.mobile.data.HubSessionDetailsActions
 import dev.claudefleet.mobile.data.HubWorkActions
@@ -93,7 +95,11 @@ import dev.claudefleet.mobile.ui.Screen
 import dev.claudefleet.mobile.ui.SessionDetailsHandlers
 import dev.claudefleet.mobile.ui.SessionDetailsSheet
 import dev.claudefleet.mobile.ui.SessionDetailsViewModel
+import dev.claudefleet.mobile.ui.RepoHandlers
+import dev.claudefleet.mobile.ui.RepoScreen
+import dev.claudefleet.mobile.ui.RepoViewModel
 import dev.claudefleet.mobile.ui.SessionScreen
+import dev.claudefleet.mobile.ui.isPushed
 import dev.claudefleet.mobile.ui.SessionViewModel
 import dev.claudefleet.mobile.ui.SessionWorkHandlers
 import dev.claudefleet.mobile.ui.SessionWorkViewModel
@@ -184,6 +190,7 @@ class AppContainer(
     /** The two calls a session screen may make, through the 401 rule. */
     val sessionActions: SessionActions = HubSessionActions(session)
     val sessionDetailsActions: SessionDetailsActions = HubSessionDetailsActions(session)
+    val repoActions: RepoActions = HubRepoActions(session)
 
     /** The hub's own version, for the Settings screen to show beside this app's. */
     val versionActions: VersionActions = HubVersionActions(session)
@@ -407,7 +414,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     // app handles back, and on a tab it does not, which lets Android close the
     // app and iOS do whatever it does with an unclaimed swipe. That is why the
     // return value still does not need reading here.
-    BackHandler(enabled = screen is Screen.Session || screen is Screen.NewSession || screen is Screen.Task) { nav.back() }
+    BackHandler(enabled = isPushed(screen)) { nav.back() }
 
     val sessions = remember(repository, scope) { SessionsViewModel(repository, scope, prefs = container.prefs) }
     // The fleet's scope, like the New session form's `callScope`: a resume
@@ -501,7 +508,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
             // on a phone the bar's 80 dp were the conversation's to lose —
             // see `SessionChrome.kt`.
             AnimatedVisibility(
-                visible = screen !is Screen.Session,
+                visible = screen !is Screen.Session && screen !is Screen.Repo,
                 enter = expandVertically(expandFrom = Alignment.Top),
                 exit = shrinkVertically(shrinkTowards = Alignment.Top),
             ) {
@@ -703,6 +710,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         onBack = { nav.back() },
                         onOpenTask = nav::openTask,
                         onOpenSession = nav::open,
+                        onOpenRepo = nav::openRepo,
                         // The fleet's scope: a change to the session's tasks
                         // is not cancelled by leaving the session.
                         callScope = scope,
@@ -766,6 +774,15 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                             ),
                         )
                     }
+                }
+                is Screen.Repo -> key(current.sessionId) {
+                    RepoRoute(
+                        sessionId = current.sessionId,
+                        container = container,
+                        repository = repository,
+                        credentials = credentials,
+                        onBack = { nav.back() },
+                    )
                 }
                 is Screen.Task -> key(current.taskId) {
                     TaskRoute(
@@ -954,6 +971,7 @@ private fun SessionRoute(
     onBack: () -> Unit,
     onOpenTask: (String) -> Unit,
     onOpenSession: (Long) -> Unit,
+    onOpenRepo: (Long) -> Unit,
     callScope: CoroutineScope,
 ) {
     val scope = rememberWorkScope()
@@ -1110,6 +1128,7 @@ private fun SessionRoute(
         onLoadOlder = { vm.loadOlder() },
         onViewConversation = { vm.view(it) },
         onBackToCurrent = vm::backToCurrent,
+        onOpenRepo = { onOpenRepo(sessionId) }.takeIf { caps.repo || caps.repoLog || caps.repoFiles },
         showFoldHint = foldHintOwed,
         onFoldHintShown = { container.hints.markShown(Hints.DOUBLE_TAP) },
     )
@@ -1126,7 +1145,55 @@ private fun SessionRoute(
                 // Another session: close the sheet, then open it a Back away.
                 onOpenSession = { id -> detailsVm.close(); onOpenSession(id) },
                 onDismissError = detailsVm::dismissError,
+                onOpenRepo = { detailsVm.close(); onOpenRepo(sessionId) }.takeIf { caps.repo || caps.repoLog || caps.repoFiles },
             ),
         )
     }
+}
+
+/**
+ * A session's worktree (changes, history, files), read-only. Back steps out
+ * of an open diff, commit or file before it leaves the screen — the inner
+ * handler is composed after `App`'s, so it is asked first.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun RepoRoute(
+    sessionId: Long,
+    container: AppContainer,
+    repository: FleetRepository,
+    credentials: Credentials,
+    onBack: () -> Unit,
+) {
+    val scope = rememberWorkScope()
+    val vm = remember(sessionId, repository, scope) {
+        RepoViewModel(
+            sessionId = sessionId,
+            fleet = repository,
+            actions = container.repoActions,
+            downloads = container.downloadActions,
+            scope = scope,
+            canWrite = credentials.canWrite,
+        )
+    }
+    LaunchedEffect(vm) { vm.load() }
+    val state by vm.state.collectAsState()
+    BackHandler(enabled = state.views.isNotEmpty()) { vm.back() }
+    RepoScreen(
+        state = state,
+        handlers = RepoHandlers(
+            onBack = { if (!vm.back()) onBack() },
+            onRefresh = { vm.refresh() },
+            onSelect = { vm.select(it) },
+            onQuery = vm::setQuery,
+            onOpenDiff = { vm.openDiff(it) },
+            onOpenCommit = { vm.openCommit(it) },
+            onOpenCommitDiff = { hash, path -> vm.openCommitDiff(hash, path) },
+            onOpenFile = { vm.openFile(it) },
+            onMoreLog = { vm.moreLog() },
+            onSendToDownloads = { vm.sendToDownloads(it) },
+            onDismissError = vm::dismissError,
+            onDismissNotice = vm::dismissNotice,
+        ),
+    )
 }

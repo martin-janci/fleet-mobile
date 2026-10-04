@@ -41,6 +41,7 @@ class EveryErrorBannerCanBeDismissedTest {
                 "MyWorkScreen.kt",
                 "NewSessionScreen.kt",
                 "PairScreen.kt",
+                "RepoScreen.kt",
                 "SessionScreen.kt",
                 "SessionsScreen.kt",
                 "SettingsScreen.kt",

@@ -231,6 +231,8 @@ fun SessionScreen(
     onLoadOlder: () -> Unit = {},
     onViewConversation: (ConversationSummary) -> Unit = {},
     onBackToCurrent: () -> Unit = {},
+    /** The session's worktree screen; null where the hub serves none of it. */
+    onOpenRepo: (() -> Unit)? = null,
 ) {
     val turns = state.conversation.turns
     val truncated = state.conversation.truncated
@@ -451,6 +453,7 @@ fun SessionScreen(
                         onOpenTasks = tasksHandlers.onOpen,
                         onOpenDetails = onOpenDetails,
                         onViewConversation = onViewConversation,
+                        onOpenRepo = onOpenRepo,
                     )
                     // A tap unfolds it: out of immersive, out of the read-back,
                     // and — when typing is what folded it — the keyboard down.
@@ -868,6 +871,7 @@ private fun SessionBar(
     onOpenTasks: () -> Unit,
     onOpenDetails: () -> Unit,
     onViewConversation: (ConversationSummary) -> Unit,
+    onOpenRepo: (() -> Unit)?,
 ) {
     val busy = state.loading || state.refreshing
     var pickingConversation by remember { mutableStateOf(false) }
@@ -933,6 +937,7 @@ private fun SessionBar(
                     onSetWork = workHandlers.onSetWork.takeIf { work.canSetWork },
                     onNameWork = workHandlers.onNameWork.takeIf { work.canNameWork },
                     onDetails = onOpenDetails,
+                    onRepo = onOpenRepo,
                 )
             }
         },
@@ -1064,6 +1069,7 @@ private fun SessionOverflowMenu(
     /** *Name this work…*; null unless the session has no work and this token and hub may name it. */
     onNameWork: ((String, String?) -> Unit)? = null,
     onDetails: () -> Unit = {},
+    onRepo: (() -> Unit)? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
@@ -1081,6 +1087,7 @@ private fun SessionOverflowMenu(
     }
     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
         DropdownMenuItem(text = { Text("Details") }, onClick = { expanded = false; onDetails() })
+        if (onRepo != null) DropdownMenuItem(text = { Text("Worktree") }, onClick = { expanded = false; onRepo() })
         if (onSetWork != null) {
             DropdownMenuItem(
                 text = { Text("Set work…") },

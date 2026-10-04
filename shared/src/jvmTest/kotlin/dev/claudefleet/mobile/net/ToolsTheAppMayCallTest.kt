@@ -130,6 +130,16 @@ class ToolsTheAppMayCallTest {
         // compaction or a rewind): readonly, `Access::Client`; each is then
         // read through `session_conversation { claude_session_id }`.
         "session_conversations",
+        // A session's worktree, read only (the desktop's Files panel without
+        // its writes): readonly, `Access::Client`. Stage, commit, checkout and
+        // push are not here — the hub refuses them to a client, LocalOnly.
+        "repo_changes",
+        "repo_diff",
+        "repo_log",
+        "repo_commit",
+        "repo_commit_diff",
+        "repo_tree",
+        "repo_file",
     )
 
     @Test

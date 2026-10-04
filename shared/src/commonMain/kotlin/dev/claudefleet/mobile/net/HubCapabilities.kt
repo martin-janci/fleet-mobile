@@ -85,6 +85,15 @@ data class HubCapabilities(
     val sendFile: Boolean get() = SEND_FILE in tools
     val removeDownload: Boolean get() = REMOVE_DOWNLOAD in tools
 
+    /**
+     * A session's worktree, read only: its changes and their diffs, the
+     * commit log and each commit's files, and the files themselves. All
+     * readonly tools; the screen asks for each only where the hub lists it.
+     */
+    val repo: Boolean get() = REPO_CHANGES in tools && REPO_DIFF in tools
+    val repoLog: Boolean get() = REPO_LOG in tools && REPO_COMMIT in tools && REPO_COMMIT_DIFF in tools
+    val repoFiles: Boolean get() = REPO_TREE in tools && REPO_FILE in tools
+
     /** A session's earlier conversations (`session_conversations`, readonly). */
     val conversations: Boolean get() = SESSION_CONVERSATIONS in tools
 
@@ -134,6 +143,13 @@ data class HubCapabilities(
         const val REWIND_CONVERSATION = "rewind_conversation"
         const val SESSION_HISTORY = "session_history"
         const val SESSION_CONVERSATIONS = "session_conversations"
+        const val REPO_CHANGES = "repo_changes"
+        const val REPO_DIFF = "repo_diff"
+        const val REPO_LOG = "repo_log"
+        const val REPO_COMMIT = "repo_commit"
+        const val REPO_COMMIT_DIFF = "repo_commit_diff"
+        const val REPO_TREE = "repo_tree"
+        const val REPO_FILE = "repo_file"
         const val RELATED_SESSIONS = "related_sessions"
         const val LIST_TASKS = "list_tasks"
         const val CANCEL_TASK = "cancel_task"
