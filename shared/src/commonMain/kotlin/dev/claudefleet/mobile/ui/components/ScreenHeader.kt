@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui.components
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -54,6 +55,8 @@ fun ScreenHeader(
     navigation: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
     below: (@Composable ColumnScope.() -> Unit)? = null,
+    /** A tap on the title and subtitle; null leaves them plain text. */
+    onTitleClick: (() -> Unit)? = null,
 ) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = modifier.fillMaxWidth()) {
         Column {
@@ -68,7 +71,12 @@ fun ScreenHeader(
                     navigation()
                     Spacer(Modifier.width(4.dp))
                 }
-                Column(modifier = Modifier.weight(1f).padding(vertical = 8.dp)) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .then(if (onTitleClick != null) Modifier.clickable(onClickLabel = "Details", onClick = onTitleClick) else Modifier)
+                        .padding(vertical = 8.dp),
+                ) {
                     Text(
                         text = title,
                         style = titleStyle,

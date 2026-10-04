@@ -85,6 +85,14 @@ data class HubCapabilities(
     val sendFile: Boolean get() = SEND_FILE in tools
     val removeDownload: Boolean get() = REMOVE_DOWNLOAD in tools
 
+    /** A session's Details sheet: its timeline, related sessions and tasks — all readonly. */
+    val sessionHistory: Boolean get() = SESSION_HISTORY in tools
+    val relatedSessions: Boolean get() = RELATED_SESSIONS in tools
+    val tasks: Boolean get() = LIST_TASKS in tools
+
+    /** Cancelling a task — a write, not listed for a readonly token. */
+    val cancelTask: Boolean get() = CANCEL_TASK in tools
+
     /** Reply actions — Rewind here, Retry, Fork here (`rewind_conversation`, a write). */
     val rewind: Boolean get() = REWIND_CONVERSATION in tools
 
@@ -121,6 +129,10 @@ data class HubCapabilities(
         const val SEND_FILE = "send_file"
         const val REMOVE_DOWNLOAD = "remove_download"
         const val REWIND_CONVERSATION = "rewind_conversation"
+        const val SESSION_HISTORY = "session_history"
+        const val RELATED_SESSIONS = "related_sessions"
+        const val LIST_TASKS = "list_tasks"
+        const val CANCEL_TASK = "cancel_task"
 
         fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions, params = catalog.params)
     }

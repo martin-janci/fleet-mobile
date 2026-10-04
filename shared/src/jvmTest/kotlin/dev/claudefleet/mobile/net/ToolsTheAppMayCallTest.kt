@@ -117,6 +117,15 @@ class ToolsTheAppMayCallTest {
         // token that may write. Its confirmation gate binds the operator
         // only (`rewind_conversation` is not `confirm: true`).
         "rewind_conversation",
+        // A session's Details sheet: the timeline, the sessions sharing its
+        // worktree and the fleet tasks — all readonly, `Access::Client`.
+        // `cancel_task` is the one write (`confirm: true` on the hub, which
+        // may answer `E_CONFIRM_REQUIRED`); offered only to a token that may
+        // write and a hub that lists it.
+        "session_history",
+        "related_sessions",
+        "list_tasks",
+        "cancel_task",
     )
 
     @Test

@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.Download
 import dev.claudefleet.mobile.model.DownloadList
 import dev.claudefleet.mobile.model.DownloadRemoved
+import dev.claudefleet.mobile.model.FleetTask
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.HubHealth
 import dev.claudefleet.mobile.model.MultiStart
@@ -15,6 +16,7 @@ import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SendPromptResult
+import dev.claudefleet.mobile.model.SessionEvent
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.SettingDescriptor
 import dev.claudefleet.mobile.model.SettingsDecided
@@ -449,6 +451,32 @@ class HubClient(
                 if (newWorktree != null) put("new_worktree", newWorktree)
             },
         ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
+
+    /** A session's event timeline, newest first (`session_history`, readonly). */
+    suspend fun sessionHistory(sessionId: Long, limit: Int = 100): List<SessionEvent> =
+        call(
+            "session_history",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("limit", limit)
+            },
+        ) { json.decodeFromJsonElement(ListSerializer(SessionEvent.serializer()), it) }
+
+    /** Sessions sharing this one's project and worktree (`related_sessions`, readonly). */
+    suspend fun relatedSessions(sessionId: Long): List<SessionRow> =
+        call("related_sessions", buildJsonObject { put("session_id", sessionId) }) {
+            json.decodeFromJsonElement(ListSerializer(SessionRow.serializer()), it)
+        }
+
+    /** Fleet tasks, newest first (`list_tasks`, readonly). */
+    suspend fun listTasks(limit: Int = 100): List<FleetTask> =
+        call("list_tasks", buildJsonObject { put("limit", limit) }) {
+            json.decodeFromJsonElement(ListSerializer(FleetTask.serializer()), it)
+        }
+
+    /** Cancel a queued or running task (`cancel_task`); the worker session keeps running. */
+    suspend fun cancelTask(taskId: Long): Unit =
+        call("cancel_task", buildJsonObject { put("task_id", taskId) }) { }
 
     /** Ask the session to persist its work, then arm deletion once it is clean. */
     suspend fun safeKill(sessionId: Long): Unit =

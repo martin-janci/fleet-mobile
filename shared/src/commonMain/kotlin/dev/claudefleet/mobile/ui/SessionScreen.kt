@@ -222,6 +222,8 @@ fun SessionScreen(
     onRewind: (String) -> Unit = {},
     onRetry: (String, String) -> Unit = { _, _ -> },
     onFork: (String?, String?) -> Unit = { _, _ -> },
+    /** Open the session's Details sheet; the default does nothing. */
+    onOpenDetails: () -> Unit = {},
 ) {
     val turns = state.conversation.turns
     val truncated = state.conversation.truncated
@@ -440,6 +442,7 @@ fun SessionScreen(
                         workHandlers = workHandlers,
                         tasks = tasks,
                         onOpenTasks = tasksHandlers.onOpen,
+                        onOpenDetails = onOpenDetails,
                     )
                     // A tap unfolds it: out of immersive, out of the read-back,
                     // and — when typing is what folded it — the keyboard down.
@@ -852,6 +855,7 @@ private fun SessionBar(
     workHandlers: SessionWorkHandlers,
     tasks: SessionTasksUiState,
     onOpenTasks: () -> Unit,
+    onOpenDetails: () -> Unit,
 ) {
     val busy = state.loading || state.refreshing
     val angle = refreshAngle(busy)
@@ -871,6 +875,9 @@ private fun SessionBar(
         // just to a name.
         subtitle = state.session?.hostAlias ?: "no longer in the fleet",
         titleStyle = MaterialTheme.typography.titleMedium,
+        // The session's Details: a readonly pairing has no ⋮ menu, so the
+        // title is the one way in that every pairing has.
+        onTitleClick = onOpenDetails,
         navigation = {
             IconButton(onClick = onBack) {
                 Icon(FleetIcons.ArrowBack, contentDescription = "Back")
@@ -903,6 +910,7 @@ private fun SessionBar(
                     onRename = onRename,
                     onSetWork = workHandlers.onSetWork.takeIf { work.canSetWork },
                     onNameWork = workHandlers.onNameWork.takeIf { work.canNameWork },
+                    onDetails = onOpenDetails,
                 )
             }
         },
@@ -1022,6 +1030,7 @@ private fun SessionOverflowMenu(
     onSetWork: ((String) -> Unit)? = null,
     /** *Name this work…*; null unless the session has no work and this token and hub may name it. */
     onNameWork: ((String, String?) -> Unit)? = null,
+    onDetails: () -> Unit = {},
 ) {
     var expanded by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
@@ -1038,6 +1047,7 @@ private fun SessionOverflowMenu(
         Icon(FleetIcons.MoreVert, contentDescription = "Session actions")
     }
     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenuItem(text = { Text("Details") }, onClick = { expanded = false; onDetails() })
         if (onSetWork != null) {
             DropdownMenuItem(
                 text = { Text("Set work…") },
