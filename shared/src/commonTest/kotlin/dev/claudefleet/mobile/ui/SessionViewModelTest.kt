@@ -475,6 +475,110 @@ class SessionViewModelTest {
     }
 
     @Test
+    fun a_prompt_leaves_the_box_at_once_and_is_shown_pending_until_it_lands() = runTest {
+        val actions = FakeActions()
+        val gate = CompletableDeferred<Unit>()
+        actions.sendGate = gate
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.onDraftChange("ship it")
+        runCurrent()
+
+        val job = vm.send()
+        runCurrent()
+        assertEquals("", vm.state.value.draft, "the box empties as the prompt goes, not when it lands")
+        assertEquals("ship it", vm.state.value.pending)
+
+        gate.complete(Unit)
+        job.join()
+        runCurrent()
+        assertNull(vm.state.value.pending)
+        assertEquals("", vm.state.value.draft)
+    }
+
+    @Test
+    fun a_failed_send_puts_the_prompt_back_and_says_so_by_the_box() = runTest {
+        val actions = FakeActions()
+        actions.sendFails = HubError.Tool("E_BUSY", "the session is mid-turn")
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.onDraftChange("ship it")
+
+        vm.send().join()
+        runCurrent()
+
+        assertNull(vm.state.value.pending)
+        assertEquals("ship it", vm.state.value.draft)
+        assertTrue(vm.state.value.errorFromSend, "a send's failure is drawn by the composer")
+    }
+
+    @Test
+    fun a_failed_send_never_overwrites_what_was_typed_meanwhile() = runTest {
+        val actions = FakeActions()
+        val gate = CompletableDeferred<Unit>()
+        actions.sendGate = gate
+        actions.sendFails = HubError.Tool("E_BUSY", "the session is mid-turn")
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.onDraftChange("first")
+        runCurrent()
+
+        val job = vm.send()
+        runCurrent()
+        vm.onDraftChange("second")
+        gate.complete(Unit)
+        job.join()
+        runCurrent()
+
+        assertEquals("second", vm.state.value.draft)
+        assertNotNull(vm.state.value.error)
+    }
+
+    @Test
+    fun a_read_failure_after_a_failed_send_goes_back_under_the_header() = runTest {
+        val actions = FakeActions()
+        actions.sendFails = HubError.Tool("E_BUSY", "the session is mid-turn")
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        vm.onDraftChange("ship it")
+        vm.send().join()
+        runCurrent()
+        assertTrue(vm.state.value.errorFromSend)
+
+        actions.readFails = HubError.Tool("E_NOTFOUND", "session 42 is gone")
+        vm.refresh().join()
+        runCurrent()
+        assertEquals("E_NOTFOUND: session 42 is gone", vm.state.value.error?.details)
+        assertFalse(vm.state.value.errorFromSend, "a read's failure is not the composer's")
+    }
+
+    @Test
+    fun a_working_agent_can_be_stopped_with_escape() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(listOf(row(status = "working"))), actions, backgroundScope)
+        runCurrent()
+        assertTrue(vm.state.value.canStop)
+
+        vm.interrupt().join()
+        runCurrent()
+        assertEquals(listOf("Escape"), actions.sentKeys, "Escape interrupts; a second Ctrl-C would quit Claude")
+    }
+
+    @Test
+    fun stop_is_not_offered_or_sent_where_it_does_not_apply() = runTest {
+        for (fleet in listOf(FakeFleetState(listOf(row(status = "idle"))), FakeFleetState(listOf(blockedRow())))) {
+            val actions = FakeActions()
+            val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+            runCurrent()
+            assertFalse(vm.state.value.canStop)
+            vm.interrupt().join()
+            assertEquals(emptyList(), actions.sentKeys)
+        }
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(listOf(row(status = "working"))), actions, backgroundScope)
+        vm.onDraftChange("more")
+        runCurrent()
+        assertFalse(vm.state.value.canStop, "with words in the box the button is Send")
+    }
+
+    @Test
     fun a_delivered_prompt_clears_the_box_and_refetches_the_conversation() = runTest {
         val actions = FakeActions()
         val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)

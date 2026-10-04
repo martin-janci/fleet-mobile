@@ -16,6 +16,7 @@ import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.ConversationSummary
+import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.ui.BlockedCard
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.SessionUiState
@@ -41,6 +42,7 @@ class SessionReadingRoomTest {
         onFoldHintShown: () -> Unit = {},
         onLoadOlder: () -> Unit = {},
         onBackToCurrent: () -> Unit = {},
+        onStop: () -> Unit = {},
     ) {
         compose.setContent {
             FleetTheme {
@@ -73,6 +75,7 @@ class SessionReadingRoomTest {
                     onFoldHintShown = onFoldHintShown,
                     onLoadOlder = onLoadOlder,
                     onBackToCurrent = onBackToCurrent,
+                    onStop = onStop,
                 )
             }
         }
@@ -185,5 +188,16 @@ class SessionReadingRoomTest {
         compose.onNodeWithText("Earlier conversation", substring = true).assertExists()
         compose.onNodeWithText("Back to current").performClick()
         assertEquals(1, back)
+    }
+
+    @Test
+    fun a_working_agent_offers_stop_in_send_s_place() {
+        var stopped = 0
+        val working = SessionRow(id = 201, tmuxName = "s", friendlyName = "s", hostAlias = "pine", claudeStatus = "working")
+        show(SessionUiState(conversation = oneTurn("go on"), loaded = true, session = working), onStop = { stopped++ })
+
+        compose.onNodeWithContentDescription("Send").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Stop the agent").performClick()
+        assertEquals(1, stopped)
     }
 }

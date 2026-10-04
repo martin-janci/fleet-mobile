@@ -180,7 +180,20 @@ data class SessionUiState(
     val repairAvailable: Boolean = false,
     /** What the last repair found and did, until dismissed. */
     val repair: RepairReport? = null,
+    /**
+     * The prompt on its way to the hub: out of the box at once and shown at
+     * the foot of the conversation as *Sending…*, so a send never looks like
+     * it vanished. Null once it landed — or failed, when it is back in the box.
+     */
+    val pending: String? = null,
+    /** [error] came from a send — drawn by the composer, where the thumb is, not under the header. */
+    val errorFromSend: Boolean = false,
 ) {
+    /** A working agent can be stopped (Escape) — Send's place while there is nothing to send. */
+    val canStop: Boolean
+        get() = idle(sending, answering, busy) && !readOnly && connected && card == null &&
+            session?.claudeStatus == "working" && draft.isEmpty()
+
     val canReview: Boolean
         get() = canManage && reviewAvailable
 
@@ -392,6 +405,13 @@ class SessionViewModel(
         val olderLoaded: Boolean = false,
         val loadingOlder: Boolean = false,
         val repair: RepairReport? = null,
+        val pending: String? = null,
+        /**
+         * The failure a send raised, by identity: the composer draws [error]
+         * only while it is still this one, so a later read's failure never
+         * lands by the box.
+         */
+        val sendError: Friendly? = null,
     )
 
     private val local = MutableStateFlow(Local())
@@ -904,17 +924,60 @@ class SessionViewModel(
      * ever sent.
      */
     private suspend fun deliver(text: String, clearDraft: Boolean) {
-        local.update { it.copy(sending = true, error = null) }
+        // Out of the box at once and shown as pending: the box is free and the
+        // prompt is visibly on its way, rather than both frozen until the hub
+        // answers. A failure puts it back.
+        local.update {
+            it.copy(
+                sending = true,
+                error = null,
+                pending = text,
+                draft = if (clearDraft) "" else it.draft,
+            )
+        }
         try {
             actions.sendPrompt(sessionId, text)
             quickReplies.remember(text)
             // What was sent lands in the current conversation: show that one.
-            local.update { it.copy(sending = false, draft = if (clearDraft) "" else it.draft, viewing = null, earlier = null) }
+            local.update { it.copy(sending = false, pending = null, viewing = null, earlier = null) }
+            requestRead(first = false)
+        } catch (e: CancellationException) {
+            local.update { it.copy(sending = false, pending = null, draft = if (clearDraft && it.draft.isEmpty()) text else it.draft) }
+            throw e
+        } catch (t: Throwable) {
+            val failure = friendly(t)
+            local.update {
+                it.copy(
+                    sending = false,
+                    pending = null,
+                    // Back in the box, unless something new was typed meanwhile.
+                    draft = if (clearDraft && it.draft.isEmpty()) text else it.draft,
+                    error = failure,
+                    sendError = failure,
+                )
+            }
+        }
+    }
+
+    /**
+     * Stop the working agent: Escape in its pane (`send_prompt { keys }`) —
+     * Claude's own interrupt, which unlike Ctrl-C never quits the REPL on a
+     * second press — and the phone's only way to stop a turn heading the
+     * wrong way short of killing the session. Never into a dialog.
+     */
+    fun interrupt(): Job = scope.launch {
+        val current = local.value
+        if (!canWriteNow(current) || blockedNow() || row()?.claudeStatus != "working") return@launch
+        local.update { it.copy(sending = true, error = null) }
+        try {
+            actions.sendKeys(sessionId, "Escape")
+            local.update { it.copy(sending = false) }
             requestRead(first = false)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(sending = false, error = friendly(t)) }
+            val failure = friendly(t)
+            local.update { it.copy(sending = false, error = failure, sendError = failure) }
         }
     }
 
@@ -1450,6 +1513,8 @@ class SessionViewModel(
         reviewAvailable = fleet.capabilities.value.spawnReview,
         repairAvailable = fleet.capabilities.value.repairSession,
         repair = l.repair,
+        pending = l.pending,
+        errorFromSend = l.error != null && l.error === l.sendError,
     )
 }
 

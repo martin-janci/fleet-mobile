@@ -135,6 +135,7 @@ import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.milliseconds
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.material3.IconButtonDefaults
 
 /** The conversation list, for the device test that checks it follows new output. */
 const val CONVERSATION_LIST: String = "conversation-list"
@@ -245,6 +246,8 @@ fun SessionScreen(
     onDismissRepair: () -> Unit = {},
     /** Press Enter in the pane (the ⏎ chip); the default does nothing. */
     onPressEnter: () -> Unit = {},
+    /** Stop the working agent (Escape); the default does nothing. */
+    onStop: () -> Unit = {},
     /** Move to another host; null where the hub or this pairing cannot. */
     onMove: (() -> Unit)? = null,
 ) {
@@ -514,7 +517,8 @@ fun SessionScreen(
                 )
             }
             ConnectionBanner(status, state.hubReachable)
-            ErrorBanner(state.error, onDismiss = onDismissError)
+            // A send's failure is drawn by the composer, where the thumb is.
+            if (!state.errorFromSend) ErrorBanner(state.error, onDismiss = onDismissError)
             // Behind an open sheet a banner cannot be read: the sheet shows it instead.
             if (!work.sheetOpen) ErrorBanner(work.error, onDismiss = workHandlers.onDismissError)
             if (work.sheetOpen) WorkTicketSheet(work, workHandlers)
@@ -605,18 +609,37 @@ fun SessionScreen(
                 // turns while they were up there — see `SessionUiState.newReply`
                 // and `SessionUiState.unseen`.
                 if (!shownAtBottom) {
-                    JumpToLatest(
-                        newReply = state.newReply,
-                        unseen = state.unseen,
-                        onClick = {
-                            scrollToNewest()
-                            // Clears `newReply` and the count now rather than
-                            // when the animation lands; `following` keeps the
-                            // screen's own report true for the length of it.
-                            onAtBottom(true)
-                        },
+                    // Reading back folds the header, and its ▲/▼ with it; the
+                    // same steps ride beside the pill, where the thumb is.
+                    val olderTurn by remember(listState, turns.size) {
+                        derivedStateOf { adjacentTurn(listState.firstVisibleItemIndex, turns.size, -1) }
+                    }
+                    val newerTurn by remember(listState, turns.size) {
+                        derivedStateOf { adjacentTurn(listState.firstVisibleItemIndex, turns.size, 1) }
+                    }
+                    Row(
                         modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
-                    )
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        TurnStep("▲", "Previous turn", olderTurn != null) {
+                            olderTurn?.let { target -> scope.launch { listState.showTurn(target) } }
+                        }
+                        JumpToLatest(
+                            newReply = state.newReply,
+                            unseen = state.unseen,
+                            onClick = {
+                                scrollToNewest()
+                                // Clears `newReply` and the count now rather than
+                                // when the animation lands; `following` keeps the
+                                // screen's own report true for the length of it.
+                                onAtBottom(true)
+                            },
+                        )
+                        TurnStep("▼", "Next turn", newerTurn != null) {
+                            newerTurn?.let { target -> scope.launch { listState.showTurn(target) } }
+                        }
+                    }
                 }
             }
 
@@ -696,6 +719,9 @@ fun SessionScreen(
                                     onSend = { scrollToNewest(); onSend() },
                                     onOpenHistory = onOpenHistory,
                                     onPressEnter = { scrollToNewest(); onPressEnter() },
+                                    onStop = onStop,
+                                    sendError = state.error.takeIf { state.errorFromSend },
+                                    onDismissSendError = onDismissError,
                                     onFocusChange = { promptFocused = it },
                                     focusNow = focusPrompt,
                                     onFocused = { focusPrompt = false },
@@ -1099,7 +1125,15 @@ private fun SessionBar(
                     // because a bare "requested" beside the status read as if
                     // the status itself were "requested".
                     if (retiring != null) {
-                        SuggestionChip(onClick = {}, label = { Text("retire: $retiring", maxLines = 1) })
+                        // Information, not a control: drawn as a label, so it does not invite a tap that does nothing.
+                        Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                            Text(
+                                "retire: $retiring",
+                                maxLines = 1,
+                                style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -1830,9 +1864,11 @@ private fun Item(item: ConvItem) {
         // non-general subset (see its file comment for why it exists instead
         // of a library) into native Compose `Text`/spans -- no HTML, no
         // WebView, nothing that fetches a remote image.
+        // A step above the prompt bubble and the tool rows: the agent's words
+        // are what the screen is read for.
         is ConvItem.Text -> MarkdownText(
             text = item.text,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodyLarge,
             modifier = Modifier.padding(vertical = 4.dp),
         )
         // Normally drawn by `TurnItems`, which folds runs of them; here for
@@ -1990,6 +2026,22 @@ private fun EmptyConversation(state: SessionUiState) {
     }
 }
 
+/** One step between turns beside the "↓ Latest" pill: a round 48 dp target. */
+@Composable
+private fun TurnStep(glyph: String, description: String, enabled: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = if (enabled) 1f else 0.6f),
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = if (enabled) 1f else 0.4f),
+        shadowElevation = 4.dp,
+        modifier = Modifier.size(48.dp).semantics { contentDescription = description },
+    ) {
+        Box(contentAlignment = Alignment.Center) { Text(glyph, style = MaterialTheme.typography.labelLarge) }
+    }
+}
+
 /**
  * The fast way back down: a filled pill that floats over the conversation,
  * with a badge counting the turns that arrived while the reader was away.
@@ -2123,6 +2175,11 @@ private fun PromptBox(
     onOpenHistory: () -> List<String>,
     /** Enter in the pane, for a REPL waiting on a bare Enter — the ⏎ in an empty field. */
     onPressEnter: () -> Unit = {},
+    /** Stop the working agent (Escape), offered in Send's place while there is nothing to send. */
+    onStop: () -> Unit = {},
+    /** A send's failure, drawn here by the box rather than under the header. */
+    sendError: Friendly? = null,
+    onDismissSendError: () -> Unit = {},
     /** The field gained or lost focus — what tells the screen someone is typing. */
     onFocusChange: (Boolean) -> Unit = {},
     /** Put the cursor in the field now (the folded footer's pill was tapped); [onFocused] once done. */
@@ -2157,7 +2214,9 @@ private fun PromptBox(
                     .weight(1f)
                     .focusRequester(focusRequester)
                     .onFocusChanged { onFocusChange(it.isFocused) },
-                enabled = !state.sending && !state.readOnly && state.card == null,
+                // Not disabled while a prompt is out: that dropped the
+                // keyboard on every send. The next one waits on Send instead.
+                enabled = !state.readOnly && state.card == null,
                 // One line: a long session name wrapped the placeholder
                 // onto a second row and made an empty field look filled.
                 placeholder = {
@@ -2225,16 +2284,43 @@ private fun PromptBox(
             // Bottom-aligned so it stays by the last line of a tall draft;
             // the 4 dp lifts it to the middle of the 56 dp field while the
             // draft is a single line, which is most of the time.
-            FilledIconButton(
-                onClick = onSend,
-                enabled = state.canSend,
-                modifier = Modifier.padding(bottom = 4.dp).size(48.dp),
-            ) {
-                if (state.sending) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                else Icon(FleetIcons.Send, contentDescription = "Send")
+            // Send's place while the agent works and there is nothing to send:
+            // Stop — the one way to halt a turn going wrong short of a kill.
+            if (state.canStop) {
+                FilledIconButton(
+                    onClick = onStop,
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
+                    modifier = Modifier.padding(bottom = 4.dp).size(48.dp),
+                ) {
+                    Text("■", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { contentDescription = "Stop the agent" })
+                }
+            } else {
+                FilledIconButton(
+                    onClick = onSend,
+                    enabled = state.canSend,
+                    modifier = Modifier.padding(bottom = 4.dp).size(48.dp),
+                ) {
+                    if (state.sending) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    else Icon(FleetIcons.Send, contentDescription = "Send")
+                }
             }
         }
+        // The prompt on its way: out of the box already, said until it lands.
+        state.pending?.let { text ->
+            Text(
+                "Sending: $text",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
         if (why != null) Text(why, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+        sendError?.let { ErrorBanner(it, onDismiss = onDismissSendError) }
     }
     if (showHistory) {
         HistoryDialog(
@@ -2631,6 +2717,9 @@ private fun FindBar(
     onNewer: () -> Unit,
     onClose: () -> Unit,
 ) {
+    // Opened to type into: the cursor is in the field, the keyboard up.
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         Row(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             TextField(
@@ -2638,7 +2727,7 @@ private fun FindBar(
                 onValueChange = onQuery,
                 singleLine = true,
                 placeholder = { Text("Find in conversation") },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).focusRequester(focus),
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
                 colors = TextFieldDefaults.colors(
                     focusedIndicatorColor = Color.Transparent,
