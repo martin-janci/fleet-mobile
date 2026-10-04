@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -203,7 +204,14 @@ private fun SessionLinkRow(link: WorkTaskLink, handlers: TaskHandlers, state: Ta
             )
         },
         supportingContent = {
-            Text(sessionLinkLine(link), style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Column {
+                Text(sessionLinkLine(link), style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                // The PR itself, one tap away rather than a URL to read.
+                link.prUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                    val uri = LocalUriHandler.current
+                    TextButton(onClick = { runCatching { uri.openUri(url) } }) { Text("Open ${prLabel(url)}") }
+                }
+            }
         },
         trailingContent = {
             when {
@@ -218,13 +226,17 @@ private fun SessionLinkRow(link: WorkTaskLink, handlers: TaskHandlers, state: Ta
     )
 }
 
+/** A pull request's URL as the few characters a row has room for: "PR #9", or "PR" when it has no number. */
+internal fun prLabel(url: String): String =
+    Regex("""/(?:pull|merge_requests)/(\d+)""").find(url)?.groupValues?.get(1)?.let { "PR #$it" } ?: "PR"
+
 /** A session under a task, in a line: its state, why it is here, and what it is doing. */
 internal fun sessionLinkLine(link: WorkTaskLink): String = buildList {
     add(linkStateWords(link))
     link.why?.takeIf { it.isNotBlank() }?.let { add(it) }
     if (link.needsYou) add("needs you")
     link.branch?.takeIf { it.isNotBlank() }?.let { add(it) }
-    link.prUrl?.takeIf { it.isNotBlank() }?.let { add("PR $it") }
+    link.prUrl?.takeIf { it.isNotBlank() }?.let { add(prLabel(it)) }
     if (link.crossOrg) add("another organisation")
     if (link.otherTasks > 0) add("+${link.otherTasks} other task${if (link.otherTasks == 1) "" else "s"}")
     link.endReason?.takeIf { it.isNotBlank() && link.state == LinkState.Ended }?.let { add(it) }

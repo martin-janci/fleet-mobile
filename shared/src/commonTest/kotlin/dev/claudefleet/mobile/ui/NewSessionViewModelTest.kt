@@ -187,6 +187,33 @@ class NewSessionViewModelTest {
     }
 
     @Test
+    fun a_disabled_create_says_what_is_missing() = runTest {
+        val vm = vm(FakeFleetForNew(listOf(PINE, BOX), listOf(REPO)), scope = backgroundScope)
+        runCurrent()
+        assertEquals("Pick a host.", vm.state.value.missing)
+
+        vm.selectHost("pine")
+        runCurrent()
+        assertEquals("Pick a project.", vm.state.value.missing)
+
+        vm.selectProject(3)
+        vm.setNewWorktree(true)
+        runCurrent()
+        assertEquals("Name the new branch.", vm.state.value.missing)
+        assertFalse(vm.state.value.branchInvalid, "an empty branch is not yet a wrong one")
+
+        vm.onBranchChange("feat x")
+        runCurrent()
+        assertEquals("A branch name has no spaces.", vm.state.value.missing)
+        assertTrue(vm.state.value.branchInvalid)
+
+        vm.onBranchChange("feat/x")
+        runCurrent()
+        assertTrue(vm.state.value.canCreate)
+        assertEquals(null, vm.state.value.missing)
+    }
+
+    @Test
     fun a_chosen_host_that_goes_unreachable_blocks_create() = runTest {
         val fleet = FakeFleetForNew(listOf(PINE, BOX), listOf(REPO))
         val vm = vm(fleet, scope = backgroundScope)

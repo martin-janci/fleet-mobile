@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.model.relativeWithin
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
@@ -65,7 +66,7 @@ fun MoveSheet(state: MoveUiState, handlers: MoveHandlers, nowSeconds: Long) {
             state.waiting?.let { w ->
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
                     Text(
-                        "Moving to ${w.toHost} once it is idle" + (relativeTime(nowSeconds, w.deadlineUnix)?.let { " (within $it)" } ?: "") + ".",
+                        "Moving to ${w.toHost} once it is idle" + (relativeWithin(w.deadlineUnix, nowSeconds)?.let { " (within $it)" } ?: "") + ".",
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
                     )

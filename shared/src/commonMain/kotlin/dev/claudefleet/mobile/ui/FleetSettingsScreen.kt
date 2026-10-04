@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.model.relativeAgo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.clickable
@@ -375,7 +376,7 @@ private fun SettingHistoryDialog(label: String, rows: List<SettingWrite>?, onDis
                         )
                         Text(
                             listOfNotNull(
-                                relativeTime(w.at, epochSeconds())?.let { "$it ago" },
+                                relativeAgo(w.at, epochSeconds()),
                                 listOfNotNull(w.actor, w.actorDetail).joinToString(" "),
                                 w.proposalId?.let { "proposal #$it" },
                             ).joinToString(" · "),

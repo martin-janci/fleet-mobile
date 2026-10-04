@@ -57,6 +57,13 @@ data class NewSessionUiState(
     val friendlyName: String = "",
     val creating: Boolean = false,
     val canCreate: Boolean = false,
+    /**
+     * Why Create is off, in words, while the person can fix it: a greyed
+     * button with no reason left them guessing which field was wrong.
+     */
+    val missing: String? = null,
+    /** The branch typed is not one git would take. */
+    val branchInvalid: Boolean = false,
     val status: ConnectionStatus = ConnectionStatus.Offline("not connected yet"),
     val error: Friendly? = null,
     /**
@@ -488,6 +495,15 @@ class NewSessionViewModel(
             work.tickets.firstOrNull { it.key == key }?.let(work.orgs::orgOf)?.let(work.orgs::name)
         }
         val canCreate = canWrite && !l.creating && host != null && ready
+        val branchInvalid = l.newWorktree && l.branch.isNotBlank() && !branchOk
+        val missing = when {
+            !canWrite || l.creating || canCreate -> null
+            host == null -> if (reachable.isEmpty()) "No host is reachable right now." else "Pick a host."
+            ticketKey == null && chosen == null -> "Pick a project."
+            ticketKey != null && l.mustPickProject && chosen == null -> "Pick a project — the hub could not choose one."
+            ticketKey == null && !branchOk -> if (l.branch.isBlank()) "Name the new branch." else "A branch name has no spaces."
+            else -> null
+        }
         val byId = projects.associateBy { it.id }
         val confirm = if (l.confirming && canCreate && host != null && ticketKey != null && chosen != null && ticked.isNotEmpty()) {
             MultiStartConfirm(
@@ -512,6 +528,8 @@ class NewSessionViewModel(
             friendlyName = l.friendlyName,
             creating = l.creating,
             canCreate = canCreate,
+            missing = missing,
+            branchInvalid = branchInvalid,
             status = status,
             error = l.error,
             ticketKey = ticketKey,

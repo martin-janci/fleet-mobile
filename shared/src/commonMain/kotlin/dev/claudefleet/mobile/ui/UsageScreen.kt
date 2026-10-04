@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.model.relativeAgo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -165,7 +166,7 @@ private fun AccountLine(account: AccountRow, nowSeconds: Long) {
                 account.organizationName,
                 account.seatTier,
                 if (account.hasExtraUsage) "extra usage on" else null,
-                relativeTime(account.lastSeenAt, nowSeconds)?.let { "seen $it ago" },
+                relativeAgo(account.lastSeenAt, nowSeconds)?.let { "seen $it" },
             ).joinToString(" · "),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

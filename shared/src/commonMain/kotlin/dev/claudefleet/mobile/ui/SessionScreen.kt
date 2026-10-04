@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.model.relativeAgo
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.selection.toggleable
@@ -2114,7 +2115,7 @@ internal fun conversationCaption(c: ConversationSummary, nowSeconds: Long): Stri
     listOfNotNull(
         c.startSource.takeIf { it.isNotBlank() && it != "unknown" },
         "${c.turns} turn" + if (c.turns == 1L) "" else "s",
-        relativeTime(c.startedAt, nowSeconds)?.let { "$it ago" },
+        relativeAgo(c.startedAt, nowSeconds),
     ).joinToString(" · ")
 
 @Composable
