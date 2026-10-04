@@ -695,6 +695,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         credentials = credentials,
                         onBack = { nav.back() },
                         onOpenTask = nav::openTask,
+                        onOpenSession = nav::open,
                         // The fleet's scope: a change to the session's tasks
                         // is not cancelled by leaving the session.
                         callScope = scope,
@@ -945,6 +946,7 @@ private fun SessionRoute(
     credentials: Credentials,
     onBack: () -> Unit,
     onOpenTask: (String) -> Unit,
+    onOpenSession: (Long) -> Unit,
     callScope: CoroutineScope,
 ) {
     val scope = rememberWorkScope()
@@ -1080,6 +1082,10 @@ private fun SessionRoute(
             states = toolDetailStates,
             request = toolDetailsModel::request,
         ),
+        onRewind = { anchor -> vm.rewind(anchor) },
+        onRetry = { anchor, prompt -> vm.retry(anchor, prompt) },
+        // A fork is a new session: open it, with this one a Back away.
+        onFork = { anchor, worktree -> vm.fork(anchor, worktree, onOpenSession) },
         showFoldHint = foldHintOwed,
         onFoldHintShown = { container.hints.markShown(Hints.DOUBLE_TAP) },
     )

@@ -233,6 +233,18 @@ data class ConvTurn(
      * not send it at all.
      */
     val reminders: List<String> = emptyList(),
+    /**
+     * The transcript entry this turn's prompt was, which `rewind_conversation`
+     * takes as its anchor (keep strictly before it). Null on a turn with no
+     * prompt of its own — a compaction boundary, a notification-only turn —
+     * and on an older hub.
+     */
+    @SerialName("prompt_uuid") val promptUuid: String? = null,
+    /**
+     * [prompt] is not the whole prompt: it was cut to fit the read, or it held
+     * an image. Retry would then send something other than what was asked.
+     */
+    @SerialName("prompt_partial") val promptPartial: Boolean = false,
 )
 
 /**

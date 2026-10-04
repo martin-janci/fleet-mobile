@@ -98,6 +98,8 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -211,6 +213,15 @@ fun SessionScreen(
      */
     showFoldHint: Boolean = false,
     onFoldHintShown: () -> Unit = {},
+    /**
+     * The reply actions that write: Rewind here (an anchor), Retry (an
+     * anchor and the prompt to send again), Fork here (an anchor or null for
+     * all of it, and a new worktree's name or null). Offered only while
+     * [SessionUiState.canRewind]; the defaults do nothing.
+     */
+    onRewind: (String) -> Unit = {},
+    onRetry: (String, String) -> Unit = { _, _ -> },
+    onFork: (String?, String?) -> Unit = { _, _ -> },
 ) {
     val turns = state.conversation.turns
     val truncated = state.conversation.truncated
@@ -483,7 +494,21 @@ fun SessionScreen(
                             // Room under the newest turn, so it does not sit flush on the composer.
                             contentPadding = PaddingValues(bottom = 12.dp),
                         ) {
-                            turnItems(rows, working = state.session?.claudeStatus == "working")
+                            turnItems(
+                                rows,
+                                working = state.session?.claudeStatus == "working",
+                                replies = ReplyHost(
+                                    turns = turns,
+                                    truncated = truncated,
+                                    supported = state.canRewind,
+                                    canQuote = !state.readOnly && state.session != null,
+                                    forkName = forkWorktreeName(state.session?.displayName ?: "session"),
+                                    onQuote = { quoted -> onDraftChange(quoted + state.draft) },
+                                    onRewind = onRewind,
+                                    onRetry = { anchor, prompt -> scrollToNewest(); onRetry(anchor, prompt) },
+                                    onFork = onFork,
+                                ),
+                            )
                             // After the oldest turn, so drawn above it.
                             if (truncated) {
                                 item(key = TRUNCATED_KEY, contentType = TRUNCATED_KEY) { TruncationNote() }
@@ -634,13 +659,24 @@ fun SessionScreen(
  * than its position, so that turns arriving at the newest end leave every
  * other item's key alone and the list can hold a scrolled-up reader still.
  */
-private fun LazyListScope.turnItems(rows: List<TurnRow>, working: Boolean) {
+private fun LazyListScope.turnItems(rows: List<TurnRow>, working: Boolean, replies: ReplyHost? = null) {
     itemsIndexed(rows, key = { _, row -> row.key }, contentType = { _, _ -> "turn" }) { index, row ->
+        val live = working && index == 0
         // Centred at a reading width: on a tablet a line the screen's whole
         // width is too long to follow back to its start.
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
             Box(modifier = Modifier.widthIn(max = READING_WIDTH)) {
-                Turn(row.turn, live = working && index == 0)
+                Turn(
+                    row.turn,
+                    live = live,
+                    // Not on the live turn: it is still being written, and the
+                    // hub refuses a rewind of a session that is not quiet.
+                    footer = if (replies != null && !live) {
+                        { ReplyMenu(row.turn, chronological = rows.size - 1 - index, host = replies) }
+                    } else {
+                        null
+                    },
+                )
             }
         }
     }
@@ -1335,7 +1371,7 @@ private fun refreshAngle(busy: Boolean): Float = if (busy) {
  * itself, since that is where the work is happening.
  */
 @Composable
-internal fun Turn(turn: ConvTurn, live: Boolean = false) {
+internal fun Turn(turn: ConvTurn, live: Boolean = false, footer: (@Composable () -> Unit)? = null) {
     val prompt = turn.prompt
     val hasPrompt = !prompt.isNullOrBlank()
     Column(
@@ -1348,7 +1384,164 @@ internal fun Turn(turn: ConvTurn, live: Boolean = false) {
             Spacer(Modifier.height(8.dp))
         }
         TurnItems(turn.items, live) { Item(it) }
+        footer?.invoke()
     }
+}
+
+/** What a turn's [ReplyMenu] needs from the screen: the conversation it sits in, and where its actions go. */
+private class ReplyHost(
+    val turns: List<ConvTurn>,
+    val truncated: Boolean,
+    val supported: Boolean,
+    val canQuote: Boolean,
+    val forkName: String,
+    val onQuote: (String) -> Unit,
+    val onRewind: (String) -> Unit,
+    val onRetry: (String, String) -> Unit,
+    val onFork: (String?, String?) -> Unit,
+)
+
+/**
+ * The actions under a reply, behind a small ⋯ at its end so they cost the
+ * conversation one short line rather than a row of buttons per turn: Copy
+ * and Quote the reply's words, and — where [replyActionsFor] allows it —
+ * Retry, Rewind here and Fork here. The three that rewrite the session ask
+ * first; Retry offered but unavailable says why instead of vanishing.
+ */
+@Composable
+private fun ReplyMenu(turn: ConvTurn, chronological: Int, host: ReplyHost) {
+    val view = remember(turn, chronological, host.turns, host.truncated, host.supported) {
+        replyActionsFor(host.turns, chronological, host.truncated, host.supported)
+    }
+    val text = remember(turn) { replyText(turn) }
+    if (text.isEmpty() && !view.canFork) return
+    val clipboard = LocalClipboardManager.current
+    var open by remember { mutableStateOf(false) }
+    var asking by remember { mutableStateOf<ReplyAsk?>(null) }
+    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+        IconButton(onClick = { open = true }, modifier = Modifier.size(32.dp)) {
+            Icon(FleetIcons.MoreVert, contentDescription = "Reply actions", modifier = Modifier.size(18.dp))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            if (text.isNotEmpty()) {
+                DropdownMenuItem(text = { Text("Copy") }, onClick = {
+                    clipboard.setText(AnnotatedString(text))
+                    open = false
+                })
+                if (host.canQuote) {
+                    DropdownMenuItem(text = { Text("Quote") }, onClick = {
+                        host.onQuote(quoteText(text))
+                        open = false
+                    })
+                }
+            }
+            if (view.canRewind) {
+                DropdownMenuItem(
+                    text = { Text("Retry") },
+                    enabled = view.canRetry,
+                    onClick = { asking = ReplyAsk.Retry; open = false },
+                )
+                view.retryUnavailable?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.widthIn(max = 260.dp).padding(horizontal = 16.dp, vertical = 4.dp),
+                    )
+                }
+                DropdownMenuItem(text = { Text("Rewind here") }, onClick = { asking = ReplyAsk.Rewind; open = false })
+            }
+            if (view.canFork) {
+                DropdownMenuItem(text = { Text("Fork here") }, onClick = { asking = ReplyAsk.Fork; open = false })
+            }
+        }
+    }
+    when (asking) {
+        ReplyAsk.Rewind -> ConfirmRewind(
+            title = "Rewind here?",
+            body = "This prompt and everything after it leave the session's conversation, and the session restarts on what is left. The original transcript is kept.",
+            confirm = "Rewind",
+            onConfirm = { view.rewindAnchor?.let(host.onRewind); asking = null },
+            onDismiss = { asking = null },
+        )
+        ReplyAsk.Retry -> ConfirmRewind(
+            title = "Retry this prompt?",
+            body = "The session rewinds to before this prompt, then the same prompt is sent again. The original transcript is kept.",
+            confirm = "Retry",
+            onConfirm = {
+                val anchor = view.rewindAnchor
+                val prompt = turn.prompt
+                if (anchor != null && prompt != null) host.onRetry(anchor, prompt)
+                asking = null
+            },
+            onDismiss = { asking = null },
+        )
+        ReplyAsk.Fork -> ForkDialog(
+            suggested = host.forkName,
+            onConfirm = { worktree -> host.onFork(view.forkAnchor, worktree); asking = null },
+            onDismiss = { asking = null },
+        )
+        null -> Unit
+    }
+}
+
+private enum class ReplyAsk { Rewind, Retry, Fork }
+
+@Composable
+private fun ConfirmRewind(title: String, body: String, confirm: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(body) },
+        confirmButton = { TextButton(onClick = onConfirm) { Text(confirm) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * Fork here: a new session on the conversation so far. In a new worktree by
+ * default — the desktop's default too — so the fork's edits do not land in
+ * the tree this session is working in; unticked, it shares that worktree.
+ */
+@Composable
+private fun ForkDialog(suggested: String, onConfirm: (String?) -> Unit, onDismiss: () -> Unit) {
+    var ownTree by remember { mutableStateOf(true) }
+    var name by remember { mutableStateOf(suggested) }
+    val slug = branchSlug(name)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Fork here") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("A new session starts on this conversation up to here. This session is left as it is.")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = ownTree, onCheckedChange = { ownTree = it })
+                    Text("In a new worktree")
+                }
+                if (ownTree) {
+                    // What git will be given, which is not always what was typed.
+                    TextField(
+                        supportingText = { if (slug != name) Text("As: ${slug.ifEmpty { "—" }}") },
+                        value = name,
+                        onValueChange = { name = it },
+                        singleLine = true,
+                        label = { Text("Worktree and branch") },
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.None,
+                            autoCorrectEnabled = false,
+                        ),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(if (ownTree) slug else null) },
+                enabled = !ownTree || slug.isNotEmpty(),
+            ) { Text("Fork") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 /**

@@ -111,6 +111,12 @@ class ToolsTheAppMayCallTest {
         "list_downloads",
         "send_file",
         "remove_download",
+        // Reply actions (Rewind here, Retry, Fork here): `Access::Client`,
+        // not readonly — the hub does not list it for a readonly token, and
+        // the screen offers it only with `HubCapabilities.rewind` and a
+        // token that may write. Its confirmation gate binds the operator
+        // only (`rewind_conversation` is not `confirm: true`).
+        "rewind_conversation",
     )
 
     @Test
