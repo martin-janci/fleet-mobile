@@ -81,6 +81,9 @@ class AppSession(
     private val _unpairReason = MutableStateFlow<String?>(null)
     override val unpairReason: StateFlow<String?> = _unpairReason.asStateFlow()
 
+    private var _lastHub: String? = null
+    override val lastHub: String? get() = _lastHub
+
     override fun clearUnpairReason() {
         _unpairReason.value = null
     }
@@ -170,7 +173,9 @@ class AppSession(
      * both go through here rather than through [forget].
      */
     suspend fun revoke() {
+        val hub = (_state.value as? AuthState.Paired)?.credentials?.hub
         secrets.clear()
+        _lastHub = hub
         _unpairReason.value = REVOKED_CREDENTIAL_REASON
         _state.value = AuthState.Unpaired
     }

@@ -853,7 +853,9 @@ class SessionsViewModel(
             groupMode = groupMode,
             urgent = urgent,
             pinned = pinned,
-            connecting = l.liveAt == null && sessions.isEmpty(),
+            // Never while refused: that hub will not connect however long the
+            // spinner turns, and the banner above already says why.
+            connecting = l.liveAt == null && sessions.isEmpty() && status !is ConnectionStatus.Refused,
             staleFor = if (status is ConnectionStatus.Connected) null else l.liveAt?.let { relativeTime(it, nowSeconds) },
             myWorkAvailable = myWorkAvailable,
             orgChoices = choices,

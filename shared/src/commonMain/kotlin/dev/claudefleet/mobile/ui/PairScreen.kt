@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -86,8 +87,14 @@ fun PairScreen(
         // `PairUiState` — so it is wrapped into a [Friendly] only here, at the
         // point `ErrorBanner` needs one, rather than pulling `PairViewModel`
         // into this task's scope.
-        val reasonAsFriendly = state.reason?.asGenericFriendly()
-        val errorAsFriendly = state.error?.asGenericFriendly()
+        // Titled for what happened, not "Something went wrong": a signed-out
+        // phone and a refused code are the two things this screen explains.
+        val reasonAsFriendly = state.reason?.let {
+            Friendly(title = "This phone was signed out", body = it.replaceFirstChar { c -> c.uppercaseChar() }, isError = true)
+        }
+        val errorAsFriendly = state.error?.let {
+            Friendly(title = "Couldn't pair", body = it.replaceFirstChar { c -> c.uppercaseChar() }, isError = true)
+        }
         ErrorBanner(reasonAsFriendly, onDismiss = onDismissReason)
         ErrorBanner(errorAsFriendly, onDismiss = onDismissError)
 
@@ -169,6 +176,8 @@ fun PairScreen(
                 autoCorrectEnabled = false,
                 imeAction = ImeAction.Done,
             ),
+            // Done pairs, rather than only closing the keyboard over the button.
+            keyboardActions = KeyboardActions(onDone = { if (state.canSubmit) onSubmit() }),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
         )
         Row(
@@ -197,6 +206,13 @@ fun PairScreen(
  * hub did I just hand a credential to" is worth reading once, especially for
  * someone who scanned a QR off a screen they do not own.
  */
+/** A pairing's mode as what it lets the person do — told now rather than found out from a disabled box. */
+internal fun pairedModeWords(mode: String): String = when (mode) {
+    "full" -> "full access"
+    "readonly" -> "read-only: you can watch sessions, not send prompts, answer questions or start sessions"
+    else -> mode
+}
+
 @Composable
 fun PairedScreen(paired: PairedHub, onContinue: () -> Unit, modifier: Modifier = Modifier) {
     Column(
@@ -213,7 +229,7 @@ fun PairedScreen(paired: PairedHub, onContinue: () -> Unit, modifier: Modifier =
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "as “${paired.clientName}”, ${paired.mode}",
+            text = "as “${paired.clientName}” · ${pairedModeWords(paired.mode)}",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -100,7 +100,12 @@ class PairViewModel(
     // is already "show it once" — and it means `dismissReason` can clear the
     // local copy without the flow it came from racing straight back in.
     private val _state = MutableStateFlow(
-        PairUiState(cameraAvailable = cameraAvailable, reason = auth.unpairReason.value),
+        PairUiState(
+            cameraAvailable = cameraAvailable,
+            reason = auth.unpairReason.value,
+            // Signed out by a 401: the address it was paired with stays filled in.
+            address = auth.unpairReason.value?.let { auth.lastHub }.orEmpty(),
+        ),
     )
     val state: StateFlow<PairUiState> = _state.asStateFlow()
 
@@ -282,7 +287,7 @@ class PairViewModel(
                 // or expired code needs a new QR, and a 429 needs less traffic,
                 // not thirty attempts a second more. Retrying is a deliberate
                 // act — a fresh QR, or the button.
-                _state.update { it.copy(pairing = false, error = explain(t)) }
+                _state.update { it.copy(pairing = false, error = explainPair(t)) }
             }
         }
     }

@@ -1744,6 +1744,15 @@ class CollapsingAHostTest {
     }
 
     @Test
+    fun a_refused_hub_never_spins_on_connecting() = runTest {
+        val fleet = FakeFleet()
+        fleet.status.value = ConnectionStatus.Refused("too old")
+        val vm = SessionsViewModel(fleet, backgroundScope)
+        runCurrent()
+        assertFalse(vm.state.value.connecting)
+    }
+
+    @Test
     fun offline_says_how_old_the_rows_are() = runTest {
         val fleet = FakeFleet(rows = listOf(session(1)))
         val vm = SessionsViewModel(fleet, backgroundScope)

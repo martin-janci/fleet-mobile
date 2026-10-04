@@ -34,3 +34,19 @@ internal fun explain(t: Throwable): String = when (t) {
 }
 
 private const val FALLBACK = "something went wrong"
+
+/**
+ * [explain] for a pairing attempt, the very first thing a new user does: the
+ * common refusals in words, with what to do next, and the hub's own answer
+ * kept after them for whoever reads the hub's log.
+ */
+internal fun explainPair(t: Throwable): String = when {
+    t is HubError.Http && t.status == 404 ->
+        "That code didn't work. A code works once and expires a few minutes after it is made — " +
+            "run `fleet-hub pair` for a new one. (${explain(t)})"
+    t is HubError.Http && t.status == 429 ->
+        "Too many tries in a row. Wait a minute, then try again. (${explain(t)})"
+    t is HubError.Transport ->
+        "Can't reach that address. Check it, and that this phone can reach the hub's network. (${explain(t)})"
+    else -> explain(t)
+}
