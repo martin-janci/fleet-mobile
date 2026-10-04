@@ -4,6 +4,7 @@ import dev.claudefleet.mobile.model.PagesBundle
 import dev.claudefleet.mobile.model.SettingDescriptor
 import dev.claudefleet.mobile.model.SettingsDecided
 import dev.claudefleet.mobile.model.SettingsPending
+import dev.claudefleet.mobile.model.SettingWrite
 
 /**
  * The calls the fleet's settings pages make (claude-fleet declarative pages
@@ -20,6 +21,8 @@ interface FleetSettingsActions {
     suspend fun set(key: String, value: String): Map<String, String>
     suspend fun pending(): SettingsPending
     suspend fun decide(accept: List<Long>, reject: List<Long>): SettingsDecided
+    /** One setting's writes, newest first (`setting_history`). */
+    suspend fun history(key: String): List<SettingWrite>
 }
 
 /** [FleetSettingsActions] against the paired hub. */
@@ -29,6 +32,7 @@ class HubFleetSettingsActions(private val session: AppSession) : FleetSettingsAc
     override suspend fun set(key: String, value: String): Map<String, String> =
         session.withClient { it.setSetting(key, value) }
     override suspend fun pending(): SettingsPending = session.withClient { it.settingProposals() }
+    override suspend fun history(key: String): List<SettingWrite> = session.withClient { it.settingHistory(key) }
     override suspend fun decide(accept: List<Long>, reject: List<Long>): SettingsDecided =
         session.withClient { it.decideSettingProposals(accept, reject) }
 }

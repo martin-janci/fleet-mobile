@@ -56,4 +56,18 @@ class TurnNavTest {
         assertNull(adjacentTurn(firstVisibleIndex = 0, turnCount = 1, delta = 1))
         assertNull(adjacentTurn(firstVisibleIndex = 0, turnCount = 1, delta = -1))
     }
+
+    @Test
+    fun find_matches_prompts_and_reply_text_newest_first() {
+        val turns = listOf(
+            dev.claudefleet.mobile.model.ConvTurn(prompt = "fix the Login bug", at = "t1"),
+            dev.claudefleet.mobile.model.ConvTurn(prompt = "now tests", at = "t2", items = listOf(dev.claudefleet.mobile.model.ConvItem.Text("the login flow passes"))),
+            dev.claudefleet.mobile.model.ConvTurn(prompt = "ship it", at = "t3"),
+        )
+        val rows = newestFirst(turns)
+        // Newest first: t3 is row 0, t2 row 1, t1 row 2.
+        kotlin.test.assertEquals(listOf(1, 2), findTurns(rows, "LOGIN"))
+        kotlin.test.assertEquals(emptyList(), findTurns(rows, "  "))
+        kotlin.test.assertEquals(emptyList(), findTurns(rows, "deploy"))
+    }
 }

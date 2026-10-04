@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import dev.claudefleet.mobile.model.SettingWrite
 
 /** A change that needs the person's yes first: the setting's own sentence. */
 data class PendingConfirm(val key: String, val value: String, val label: String, val message: String)
@@ -43,6 +44,10 @@ data class FleetSettingsUiState(
     val fieldErrors: Map<String, String> = emptyMap(),
     val confirm: PendingConfirm? = null,
     val error: String? = null,
+    /** A field offers its History (the hub serves `setting_history`). */
+    val historyAvailable: Boolean = false,
+    /** The setting whose history is open, and its writes (null while they load). */
+    val history: Pair<String, List<SettingWrite>?>? = null,
 ) {
     val page: Page? get() = pages.firstOrNull { it.id == openPage }
 
@@ -77,8 +82,33 @@ class FleetSettingsViewModel(
     private val scope: CoroutineScope,
     /** The credential's own permission ([dev.claudefleet.mobile.store.Credentials.canWrite]). */
     private val credentialCanWrite: Boolean,
+    /** The hub serves `setting_history` to this device. */
+    historyAvailable: Boolean = false,
 ) {
-    private val _state = MutableStateFlow(FleetSettingsUiState())
+    private val _state = MutableStateFlow(FleetSettingsUiState(historyAvailable = historyAvailable))
+
+    /** One setting's writes, newest first, in a dialog until [closeHistory]. */
+    fun showHistory(key: String): Job = scope.launch {
+        if (!_state.value.historyAvailable) return@launch
+        _state.update { it.copy(history = key to null) }
+        try {
+            val rows = actions.history(key)
+            _state.update { if (it.history?.first == key) it.copy(history = key to rows) else it }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            _state.update { it.copy(history = null, error = explain(t)) }
+        }
+    }
+
+    fun closeHistory() {
+        _state.update { it.copy(history = null) }
+    }
+
+    /** Whether the hub serves `setting_history` — learned with its tool list, after this is made. */
+    fun setHistoryAvailable(on: Boolean) {
+        _state.update { it.copy(historyAvailable = on) }
+    }
     val state: StateFlow<FleetSettingsUiState> = _state.asStateFlow()
 
     /** Read the pages, the settings and what waits for review. */

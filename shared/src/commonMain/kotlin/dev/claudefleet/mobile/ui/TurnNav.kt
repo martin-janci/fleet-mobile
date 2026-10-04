@@ -64,3 +64,19 @@ internal fun adjacentTurn(firstVisibleIndex: Int, turnCount: Int, delta: Int): I
     if (target < 0 || target > turnCount - 1) return null
     return target
 }
+
+/**
+ * The rows (newest first, as the list holds them) whose prompt or reply text
+ * holds [query], case-insensitively — what Find in the conversation steps
+ * through. Tool rows are left out: their one-line summaries are not what a
+ * person is looking for, and their details are not on the phone until opened.
+ */
+internal fun findTurns(rows: List<TurnRow>, query: String): List<Int> {
+    val q = query.trim().lowercase()
+    if (q.isEmpty()) return emptyList()
+    return rows.indices.filter { i ->
+        val turn = rows[i].turn
+        turn.prompt.orEmpty().lowercase().contains(q) ||
+            turn.items.any { it is dev.claudefleet.mobile.model.ConvItem.Text && it.text.lowercase().contains(q) }
+    }
+}

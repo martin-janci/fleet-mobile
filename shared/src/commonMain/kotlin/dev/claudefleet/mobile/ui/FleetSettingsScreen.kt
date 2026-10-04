@@ -39,6 +39,13 @@ import dev.claudefleet.mobile.model.inWords
 import dev.claudefleet.mobile.model.rangeText
 import dev.claudefleet.mobile.model.toDisplay
 import dev.claudefleet.mobile.model.unitWord
+import dev.claudefleet.mobile.epochSeconds
+import dev.claudefleet.mobile.model.relativeTime
+import dev.claudefleet.mobile.model.SettingWrite
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.PaddingValues
 
 /**
  * The fleet's settings, drawn from the hub's own page specs (claude-fleet
@@ -61,7 +68,10 @@ fun FleetSettingsSection(
     onDecide: (Long, Boolean) -> Unit,
     onConfirm: () -> Unit,
     onCancelConfirm: () -> Unit,
+    onHistory: (String) -> Unit = {},
+    onCloseHistory: () -> Unit = {},
 ) {
+    state.history?.let { (key, rows) -> SettingHistoryDialog(state.descriptors[key]?.label ?: key, rows, onCloseHistory) }
     if (state.loading && !state.loaded) {
         LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
     }
@@ -69,7 +79,7 @@ fun FleetSettingsSection(
     if (page == null) {
         PageList(state, clientName, onOpen)
     } else {
-        PageBody(state, page, onBack, onOpen, onSet, onRefuse, onDecide)
+        PageBody(state, page, onBack, onOpen, onSet, onRefuse, onDecide, onHistory)
     }
     state.confirm?.let { c ->
         AlertDialog(
@@ -128,6 +138,7 @@ private fun PageBody(
     onSet: (String, String) -> Unit,
     onRefuse: (String, String) -> Unit,
     onDecide: (Long, Boolean) -> Unit,
+    onHistory: (String) -> Unit,
 ) {
     TextButton(onClick = onBack, modifier = Modifier.padding(horizontal = 8.dp)) { Text("‹ Fleet settings") }
     Text(page.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
@@ -157,7 +168,7 @@ private fun PageBody(
                 is PageItem.Field -> {
                     val d = state.descriptors[item.key]
                     if (d != null && item.condition.holds(state.values)) {
-                        FieldRow(state, d, item.hint, item.readOnly, onSet, onRefuse, onDecide)
+                        FieldRow(state, d, item.hint, item.readOnly, onSet, onRefuse, onDecide, onHistory)
                     }
                 }
                 is PageItem.Notice -> Text(
@@ -187,6 +198,7 @@ private fun FieldRow(
     onSet: (String, String) -> Unit,
     onRefuse: (String, String) -> Unit,
     onDecide: (Long, Boolean) -> Unit,
+    onHistory: (String) -> Unit,
 ) {
     val value = state.values[d.key] ?: d.value
     val editable = state.editable(d.key) && !shownOnly
@@ -232,6 +244,9 @@ private fun FieldRow(
         )
         state.fieldErrors[d.key]?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         state.proposalFor(d.key)?.let { p -> Suggestion(state, d, p, onDecide) }
+        if (state.historyAvailable) {
+            TextButton(onClick = { onHistory(d.key) }, contentPadding = PaddingValues(0.dp)) { Text("History") }
+        }
     }
 }
 
@@ -329,4 +344,38 @@ private fun Review(state: FleetSettingsUiState, onDecide: (Long, Boolean) -> Uni
             }
         }
     }
+}
+
+/** One setting's writes, newest first: when, who, from what to what, and the proposal it applied. */
+@Composable
+private fun SettingHistoryDialog(label: String, rows: List<SettingWrite>?, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("History · $label") },
+        text = {
+            Column(modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
+                when {
+                    rows == null -> LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    rows.isEmpty() -> Text("Never changed: it has its default.", style = MaterialTheme.typography.bodySmall)
+                    else -> for (w in rows) {
+                        Text(
+                            "${w.before ?: "default"} → ${w.after}",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            listOfNotNull(
+                                relativeTime(w.at, epochSeconds())?.let { "$it ago" },
+                                listOfNotNull(w.actor, w.actorDetail).joinToString(" "),
+                                w.proposalId?.let { "proposal #$it" },
+                            ).joinToString(" · "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
+    )
 }
