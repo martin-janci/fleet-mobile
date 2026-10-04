@@ -42,14 +42,32 @@ class TheCameraIsAskedForOnlyWhenTheScannerOpensTest {
         assertEquals(emptyList(), offenders, "the camera permission is the scanner's to ask for")
     }
 
+    /**
+     * Two launchers, each for its own permission at its own moment: the
+     * scanner's (the camera, when it opens) and the notifications toggle's
+     * (`NotificationPermission.android.kt`: POST_NOTIFICATIONS, when the
+     * person turns "Notify me" on). Nothing else asks for anything.
+     */
     @Test
     fun only_the_scanner_launches_a_permission_request() {
         val offenders = Repo.shipped
-            .filterNot { it.isScanner() }
+            .filterNot { it.isScanner() || it.name == "NotificationPermission.android.kt" }
             .filter { "rememberLauncherForActivityResult" in it.readText() }
             .map { it.name }
 
         assertEquals(emptyList(), offenders, "a permission launcher outside the scanner")
+    }
+
+    /** The notifications launcher asks for notifications alone, and only the Settings toggle calls it. */
+    @Test
+    fun the_notifications_permission_is_asked_for_only_by_the_settings_toggle() {
+        val launcher = Repo.shipped.single { it.name == "NotificationPermission.android.kt" }.readText()
+        assertTrue("Manifest.permission.POST_NOTIFICATIONS" in launcher)
+        assertTrue("Manifest.permission.CAMERA" !in launcher)
+        val callers = Repo.shipped.filter { Regex("""rememberNotificationPermission\(\)""").containsMatchIn(it.readText()) }
+            .map { it.name }
+            .filterNot { it.startsWith("NotificationPermission.") }
+        assertEquals(listOf("SettingsScreen.kt"), callers, "asked when the person turns notifications on, and nowhere else")
     }
 
     /**
@@ -151,8 +169,9 @@ class TheAndroidManifestTest {
     }
 
     /**
-     * What the app asks for **of its own accord**. Two: the network, and — to
-     * scan a QR — the camera.
+     * What the app asks for **of its own accord**: the network; to scan a QR,
+     * the camera; and, for notifications the person turns on, a foreground
+     * service and leave to post them.
      *
      * It is deliberately not a claim about the installed app, because that is a
      * different and larger list, measured on the assembled APK rather than
@@ -176,13 +195,23 @@ class TheAndroidManifestTest {
      * See the Task 7 report for the size that chain also costs.
      */
     @Test
-    fun the_app_declares_exactly_two_permissions_of_its_own() {
+    fun the_app_declares_exactly_its_own_permissions() {
         val asked = PERMISSION.findAll(manifest).map { it.groupValues[1] }.toSet()
 
         assertEquals(
-            setOf("android.permission.INTERNET", "android.permission.CAMERA"),
+            setOf(
+                "android.permission.INTERNET",
+                "android.permission.CAMERA",
+                // "Notify me when a session needs me" (off until turned on):
+                // a foreground service of type specialUse holding the hub's
+                // stream open, and leave to post its notifications — asked
+                // for when the person turns it on. See `NeedsYouService`.
+                "android.permission.FOREGROUND_SERVICE",
+                "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+                "android.permission.POST_NOTIFICATIONS",
+            ),
             asked,
-            "a phone client needs the network and, to scan a QR, the camera — nothing else",
+            "the network; the camera to scan a QR; notifications the person turned on — nothing else",
         )
     }
 

@@ -21,6 +21,15 @@ import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.Alignment
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.material3.Switch
+import dev.claudefleet.mobile.notify.rememberNotificationPermission
+import dev.claudefleet.mobile.notify.NoBackgroundNotifier
+import dev.claudefleet.mobile.notify.BackgroundNotifier
 
 /**
  * Settings: which hub, under what name, with what rights, on what version —
@@ -50,6 +59,8 @@ fun SettingsScreen(
     fleetPageOpen: Boolean = false,
     /** The Usage screen; null where the hub reports neither usage nor accounts. */
     onOpenUsage: (() -> Unit)? = null,
+    /** Notifications while the app is away; [NoBackgroundNotifier] draws nothing. */
+    notifier: BackgroundNotifier = NoBackgroundNotifier,
 ) {
     // The header and the error stay put; only the fields scroll. The header
     // used to live inside the scrolling column and left with the content.
@@ -81,6 +92,8 @@ fun SettingsScreen(
             // was it read as the other half the time.
             Field("App version", state.appVersion)
             Field("Hub version", state.hubVersion)
+
+            if (notifier.supported) NotifyRow(notifier)
 
             onOpenUsage?.let { open ->
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -138,6 +151,43 @@ private fun Field(label: String, value: String) {
             style = MaterialTheme.typography.bodyLarge,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * Notify me when a session needs me — on Android, a foreground service with
+ * its own ongoing notification holds the hub's stream open, so it is the
+ * person's to turn on, and the system's leave is asked for right then.
+ */
+@Composable
+private fun NotifyRow(notifier: BackgroundNotifier) {
+    val on by notifier.enabled.collectAsState()
+    var refused by remember { mutableStateOf(false) }
+    val ask = rememberNotificationPermission()
+    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Notify me when a session needs me", style = MaterialTheme.typography.titleSmall)
+            Text(
+                if (refused) "Notifications are turned off for this app in the system's settings."
+                else "Waiting, stuck or failed — even with the app closed. Keeps a connection to the hub open, with its own notification.",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (refused) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = on,
+            onCheckedChange = { want ->
+                if (!want) {
+                    notifier.setEnabled(false)
+                } else {
+                    ask { granted ->
+                        refused = !granted
+                        if (granted) notifier.setEnabled(true)
+                    }
+                }
+            },
         )
     }
 }

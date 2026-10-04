@@ -4,6 +4,18 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!--
+      "Notify me when a session needs me" (Settings, off until turned on): a
+      foreground service holds the hub's event stream open while the app is
+      away and posts a notification when a session comes to need the person.
+      POST_NOTIFICATIONS is asked for when the person turns it on, and at no
+      other moment. `specialUse`: no named type is "watch a server for a
+      person". See `NeedsYouService`.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
       Pairing by QR. Declared by the app rather than by `:shared`, because the
       permissions an app asks for are the app's own to declare — and `required="false"`
       because the app must install and work on a device with no camera at all:
@@ -117,6 +129,14 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+        <service
+            android:name=".NeedsYouService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps a connection to the person's own fleet hub open to tell them when an agent session needs them." />
+        </service>
     </application>
 
 </manifest>

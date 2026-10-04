@@ -156,6 +156,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
+import dev.claudefleet.mobile.notify.NoBackgroundNotifier
+import dev.claudefleet.mobile.notify.BackgroundNotifier
 
 /**
  * The things a platform has to supply, in one object the shared UI can hold.
@@ -180,7 +182,25 @@ class AppContainer(
      * dev machine is that something other than a person is driving it.
      */
     val autoPairFromLink: Boolean = false,
+    /** Notifications while the app is away — Android's foreground service, or nothing. */
+    val notifier: BackgroundNotifier = NoBackgroundNotifier,
 ) {
+    /**
+     * A session a notification asked to open, until the paired screens take
+     * it — held for the same reason [pairLink] is: the tap can start the app
+     * cold, before the screens exist.
+     */
+    private val _openSession = MutableStateFlow<Long?>(null)
+    val openSession: StateFlow<Long?> = _openSession.asStateFlow()
+
+    /** The platform's entry point for a tapped "needs you" notification. */
+    fun onOpenSession(sessionId: Long) {
+        _openSession.value = sessionId
+    }
+
+    /** Taken exactly once. */
+    fun consumeOpenSession(): Long? = _openSession.getAndUpdate { null }
+
     /**
      * The last `claudefleet:` link the platform handed over, if the Pair screen
      * has not consumed it yet.
@@ -428,6 +448,9 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
 
     val nav = remember(credentials) { Navigator() }
     val screen by nav.screen.collectAsState()
+    // A tapped "needs you" notification: open its session.
+    val openRequest by container.openSession.collectAsState()
+    LaunchedEffect(openRequest) { if (openRequest != null) container.consumeOpenSession()?.let(nav::open) }
     val tab by nav.tab.collectAsState()
 
     // `Navigator.back()` returns false on a tab specifically so the
@@ -945,6 +968,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         onDismissError = settings::dismissError,
                         fleetPageOpen = settingsCaps.fleetSettings && fleet.openPage != null,
                         onOpenUsage = nav::openUsage.takeIf { settingsCaps.usage || settingsCaps.accounts },
+                        notifier = container.notifier,
                         fleetSettings = {
                             if (settingsCaps.fleetSettings) {
                                 FleetSettingsSection(
