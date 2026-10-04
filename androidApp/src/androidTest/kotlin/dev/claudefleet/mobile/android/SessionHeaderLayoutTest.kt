@@ -90,7 +90,10 @@ class SessionHeaderLayoutTest {
 
         // One line each, so the whole title block is short. The old bar's
         // title measured hundreds of dp tall once it wrapped.
-        val host = compose.onNodeWithText("claude-fleet-trn").getBoundsInRoot()
+        // Unmerged: the title block is one clickable target (it opens the
+        // session's Details), which merges its two lines into one node — the
+        // host line itself is the Text inside it.
+        val host = compose.onNodeWithText("claude-fleet-trn", useUnmergedTree = true).getBoundsInRoot()
         assertTrue("the host line wrapped: ${host.bottom - host.top} tall", host.bottom - host.top < 24.dp)
         assertTrue("the host line is squeezed to ${host.right - host.left}", host.right - host.left > 80.dp)
 

@@ -45,10 +45,12 @@ import dev.claudefleet.mobile.data.FleetSettingsActions
 import dev.claudefleet.mobile.data.HubFleetSettingsActions
 import dev.claudefleet.mobile.data.HubQuickReplyActions
 import dev.claudefleet.mobile.data.HubSessionActions
+import dev.claudefleet.mobile.data.HubSessionDetailsActions
 import dev.claudefleet.mobile.data.HubWorkActions
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.SessionActions
+import dev.claudefleet.mobile.data.SessionDetailsActions
 import dev.claudefleet.mobile.data.HubVersionActions
 import dev.claudefleet.mobile.data.VersionActions
 import dev.claudefleet.mobile.net.HubClient
@@ -87,6 +89,9 @@ import dev.claudefleet.mobile.ui.PairedScreen
 import dev.claudefleet.mobile.ui.Hints
 import dev.claudefleet.mobile.ui.QuickReplies
 import dev.claudefleet.mobile.ui.Screen
+import dev.claudefleet.mobile.ui.SessionDetailsHandlers
+import dev.claudefleet.mobile.ui.SessionDetailsSheet
+import dev.claudefleet.mobile.ui.SessionDetailsViewModel
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.SessionViewModel
 import dev.claudefleet.mobile.ui.SessionWorkHandlers
@@ -177,6 +182,7 @@ class AppContainer(
 
     /** The two calls a session screen may make, through the 401 rule. */
     val sessionActions: SessionActions = HubSessionActions(session)
+    val sessionDetailsActions: SessionDetailsActions = HubSessionDetailsActions(session)
 
     /** The hub's own version, for the Settings screen to show beside this app's. */
     val versionActions: VersionActions = HubVersionActions(session)
@@ -1012,6 +1018,17 @@ private fun SessionRoute(
     // the fleet's own value, not one this screen's view model owns.
     val caps by repository.capabilities.collectAsState()
     val toolDetailStates by toolDetailsModel.states.collectAsState()
+    val detailsVm = remember(sessionId, repository, scope) {
+        SessionDetailsViewModel(
+            sessionId = sessionId,
+            fleet = repository,
+            actions = container.sessionDetailsActions,
+            scope = scope,
+            canWrite = credentials.canWrite,
+            clock = { epochSeconds() },
+        )
+    }
+    val details by detailsVm.state.collectAsState()
     // Read once per visit: whether the hint is owed does not change under
     // a screen that is showing it.
     val foldHintOwed = remember(container) { !container.hints.shown(Hints.DOUBLE_TAP) }
@@ -1086,7 +1103,24 @@ private fun SessionRoute(
         onRetry = { anchor, prompt -> vm.retry(anchor, prompt) },
         // A fork is a new session: open it, with this one a Back away.
         onFork = { anchor, worktree -> vm.fork(anchor, worktree, onOpenSession) },
+        onOpenDetails = { detailsVm.open() },
         showFoldHint = foldHintOwed,
         onFoldHintShown = { container.hints.markShown(Hints.DOUBLE_TAP) },
     )
+    if (details.open) {
+        val rows by repository.sessions.collectAsState()
+        SessionDetailsSheet(
+            state = details,
+            sessions = rows,
+            handlers = SessionDetailsHandlers(
+                onClose = detailsVm::close,
+                onReload = { detailsVm.reload() },
+                onToggle = detailsVm::toggle,
+                onCancelTask = { detailsVm.cancel(it) },
+                // Another session: close the sheet, then open it a Back away.
+                onOpenSession = { id -> detailsVm.close(); onOpenSession(id) },
+                onDismissError = detailsVm::dismissError,
+            ),
+        )
+    }
 }

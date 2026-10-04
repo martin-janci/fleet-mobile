@@ -130,7 +130,7 @@ private fun workingStrip(row: SessionRow, context: ConvContext?, nowSeconds: Lon
 }
 
 /** `$1.84` from micro-USD, without `String.format`/`java.util` — this runs on every KMP target. */
-private fun formatUsd(micros: Long): String {
+internal fun formatUsd(micros: Long): String {
     val cents = (micros / 10_000.0).roundToInt()
     val dollars = cents / 100
     val remainder = (cents % 100).let { if (it < 0) -it else it }
