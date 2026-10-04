@@ -174,7 +174,7 @@ class SessionsFilterLayoutTest {
             }
         }
 
-        compose.onNodeWithContentDescription("State: Blocked. Remove filter").performClick()
+        compose.onNodeWithContentDescription("State: Waiting for you. Remove filter").performClick()
         assertEquals(listOf(SessionFacetId.STATE), cleared)
     }
 
