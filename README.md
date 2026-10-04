@@ -262,7 +262,7 @@ costs one reconnect.
   - The composer suggests slash commands; ⋮ has **Model…** / **Effort…**,
     **Review…**, **Repair workspace**, **Move to host…** (a dry run first,
     now or when idle), **Recreate**, and for a ghost **Dismiss ghost**; a
-    ⏎ chip presses Enter.
+    ⏎ in the empty field presses Enter.
 - **Hosts** — reachability, Claude and tmux versions, session count. Hidden
   hosts are listed and marked rather than dropped, because the app cannot
   unhide one and a hidden host can still own live sessions. A host's ⋮ opens
