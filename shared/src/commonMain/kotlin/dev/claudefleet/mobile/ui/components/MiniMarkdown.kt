@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui.components
 
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -922,6 +923,38 @@ private val MARKER_GAP = 6.dp
 private const val MAX_VISUAL_LIST_LEVEL = 3
 
 /**
+ * The conversation's Find query, provided over the turn list: every paragraph,
+ * heading and table cell marks what matches it, so "3 of 7" lands on the word
+ * rather than on the top of a long turn. Empty marks nothing.
+ */
+val LocalFindQuery = compositionLocalOf { "" }
+
+/** [text] with every case-insensitive occurrence of [query] given [color] behind it. */
+internal fun highlightMatches(text: AnnotatedString, query: String, color: Color): AnnotatedString {
+    val q = query.trim()
+    if (q.isEmpty()) return text
+    val starts = mutableListOf<Int>()
+    var i = text.text.indexOf(q, ignoreCase = true)
+    while (i >= 0) {
+        starts += i
+        i = text.text.indexOf(q, i + q.length, ignoreCase = true)
+    }
+    if (starts.isEmpty()) return text
+    return buildAnnotatedString {
+        append(text)
+        for (s in starts) addStyle(SpanStyle(background = color), s, s + q.length)
+    }
+}
+
+@Composable
+internal fun AnnotatedString.withFind(): AnnotatedString {
+    val q = LocalFindQuery.current
+    if (q.isBlank()) return this
+    val color = MaterialTheme.colorScheme.tertiaryContainer
+    return remember(this, q, color) { highlightMatches(this, q, color) }
+}
+
+/**
  * Renders [text] as Markdown with native Compose: paragraphs as `Text` with
  * spans, headings at distinct Material sizes, lists with a hanging indent,
  * quotes with a side bar, tables as a horizontally scrollable grid, and
@@ -951,7 +984,7 @@ private fun Blocks(blocks: List<MdBlock>, style: TextStyle, gap: Dp, listLevel: 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(gap)) {
         blocks.forEachIndexed { index, block ->
             when (block) {
-                is MdBlock.Paragraph -> Text(text = block.text, style = style)
+                is MdBlock.Paragraph -> Text(text = block.text.withFind(), style = style)
                 is MdBlock.Heading -> HeadingView(block, first = index == 0)
                 is MdBlock.Code -> CodeBlock(block)
                 is MdBlock.ListBlock -> ListView(block, style, listLevel)
@@ -985,7 +1018,7 @@ private fun HeadingView(block: MdBlock.Heading, first: Boolean) {
         else -> 8.dp
     }
     Text(
-        text = block.text,
+        text = block.text.withFind(),
         style = base.copy(fontWeight = FontWeight.SemiBold),
         color = color,
         modifier = Modifier.padding(top = above),
@@ -1184,7 +1217,7 @@ private fun TableView(table: MdBlock.Table, style: TextStyle) {
                             },
                         ) {
                             Text(
-                                text = cell,
+                                text = cell.withFind(),
                                 style = if (r < 0) headerStyle else style,
                                 textAlign = when (align) {
                                     MdAlign.Center -> TextAlign.Center
