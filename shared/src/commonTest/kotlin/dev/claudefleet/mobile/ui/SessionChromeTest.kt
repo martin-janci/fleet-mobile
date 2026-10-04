@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.store.FakePrefs
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -99,5 +100,22 @@ class SessionChromeTest {
         assertFalse(direction.readingUp)
         // The run started again from zero, not from the 10 before the reset.
         assertFalse(direction.onDrag(9f))
+    }
+
+    @Test
+    fun a_phone_on_its_side_starts_folded_and_a_phone_upright_does_not() {
+        assertTrue(startsImmersive(windowHeightDp = 411f))
+        assertFalse(startsImmersive(windowHeightDp = 480f))
+        assertFalse(startsImmersive(windowHeightDp = 915f))
+    }
+
+    @Test
+    fun a_hint_is_shown_once() {
+        val hints = Hints(FakePrefs())
+        assertFalse(hints.shown(Hints.DOUBLE_TAP))
+        hints.markShown(Hints.DOUBLE_TAP)
+        hints.markShown(Hints.DOUBLE_TAP)
+        assertTrue(hints.shown(Hints.DOUBLE_TAP))
+        assertFalse(hints.shown("another"))
     }
 }

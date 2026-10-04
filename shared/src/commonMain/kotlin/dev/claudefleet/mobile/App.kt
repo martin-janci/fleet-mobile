@@ -84,6 +84,7 @@ import dev.claudefleet.mobile.ui.PairScreen
 import dev.claudefleet.mobile.ui.PairViewModel
 import dev.claudefleet.mobile.ui.PairedHub
 import dev.claudefleet.mobile.ui.PairedScreen
+import dev.claudefleet.mobile.ui.Hints
 import dev.claudefleet.mobile.ui.QuickReplies
 import dev.claudefleet.mobile.ui.Screen
 import dev.claudefleet.mobile.ui.SessionScreen
@@ -201,6 +202,7 @@ class AppContainer(
      * of it and the draft history, which is this phone's alone.
      */
     val quickReplies: QuickReplies = QuickReplies(prefs, HubQuickReplyActions(session))
+    val hints: Hints = Hints(prefs)
 
     /** The fleet's settings pages' calls (claude-fleet declarative pages P6). */
     val fleetSettingsActions: FleetSettingsActions = HubFleetSettingsActions(session)
@@ -1008,6 +1010,9 @@ private fun SessionRoute(
     // the fleet's own value, not one this screen's view model owns.
     val caps by repository.capabilities.collectAsState()
     val toolDetailStates by toolDetailsModel.states.collectAsState()
+    // Read once per visit: whether the hint is owed does not change under
+    // a screen that is showing it.
+    val foldHintOwed = remember(container) { !container.hints.shown(Hints.DOUBLE_TAP) }
     SessionScreen(
         sessionId = sessionId,
         state = state,
@@ -1075,5 +1080,7 @@ private fun SessionRoute(
             states = toolDetailStates,
             request = toolDetailsModel::request,
         ),
+        showFoldHint = foldHintOwed,
+        onFoldHintShown = { container.hints.markShown(Hints.DOUBLE_TAP) },
     )
 }

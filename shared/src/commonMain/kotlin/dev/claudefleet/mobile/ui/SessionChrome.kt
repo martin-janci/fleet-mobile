@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.store.Prefs
+
 /**
  * How much of a session screen's chrome — the header above the conversation,
  * the quick replies and composer under it — is drawn, so that on a phone the
@@ -84,5 +86,35 @@ internal class ReadingDirection(private val thresholdPx: Float) {
     fun reset() {
         readingUp = false
         run = 0f
+    }
+}
+
+/**
+ * A window this short — a phone on its side — opens a session folded: the
+ * full chrome there is most of the height. Measured on the window, not on
+ * what the screen is given, or the keyboard coming up would count as a short
+ * window too.
+ */
+internal fun startsImmersive(windowHeightDp: Float): Boolean = windowHeightDp < SHORT_WINDOW_DP
+
+private const val SHORT_WINDOW_DP = 480f
+
+/**
+ * The once-only hints, kept in [Prefs] as one
+ * list of the keys already shown.
+ */
+class Hints(private val prefs: Prefs) {
+    fun shown(key: String): Boolean = key in prefs.getStringList(HINTS_KEY)
+
+    fun markShown(key: String) {
+        val seen = prefs.getStringList(HINTS_KEY)
+        if (key !in seen) prefs.putStringList(HINTS_KEY, seen + key)
+    }
+
+    companion object {
+        private const val HINTS_KEY = "hints_shown"
+
+        /** "Double-tap for the whole screen", the first time reading back folds the chrome. */
+        const val DOUBLE_TAP = "double_tap_fold"
     }
 }
