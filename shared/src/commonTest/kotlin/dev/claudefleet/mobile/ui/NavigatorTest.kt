@@ -433,4 +433,13 @@ class NavigatorTest {
         assertTrue(nav.back())
         assertEquals(Screen.Settings, nav.screen.value)
     }
+
+    @Test
+    fun a_new_session_in_a_project_opens_the_form_with_it_picked() {
+        val nav = Navigator()
+        nav.newSessionIn(3)
+        assertEquals(Screen.NewSession(projectId = 3), nav.screen.value)
+        assertTrue(nav.back())
+        assertEquals(Screen.Sessions(), nav.screen.value)
+    }
 }

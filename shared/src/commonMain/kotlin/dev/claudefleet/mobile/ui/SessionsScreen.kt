@@ -145,6 +145,10 @@ data class SessionsHandlers(
     val onBulkSend: (String) -> Unit = {},
     val onBulkKill: () -> Unit = {},
     val onDismissBulkOutcome: () -> Unit = {},
+    /** Search hits beyond sessions: a host's sessions, a new session in a project, a ticket lookup. */
+    val onSearchHost: (String) -> Unit = {},
+    val onSearchProject: (Long) -> Unit = {},
+    val onSearchTicket: (String) -> Unit = {},
 )
 
 /**
@@ -177,6 +181,8 @@ fun SessionsScreen(
     modifier: Modifier = Modifier,
     agent: AgentUiState = AgentUiState(),
     bulk: BulkUiState = BulkUiState(),
+    /** What the search finds beyond sessions; empty draws nothing. */
+    hits: SearchHits = SearchHits(),
 ) {
     // While something is picked a tap picks too; a long press starts it.
     val select: ((Long) -> Unit)? = if (bulk.enabled) handlers.onToggleSelect else null
@@ -300,6 +306,7 @@ fun SessionsScreen(
                 }
                 // Archived sessions are hidden by default; the list's last
                 // row says how many, and brings them all back in one tap.
+                if (state.searchOpen && !hits.isEmpty) searchHits(hits, handlers)
                 if (state.archivedRow && !state.isEmpty) {
                     item(key = "archived") {
                         ArchivedRow(
@@ -887,3 +894,36 @@ private fun BulkOutcomeDialog(outcome: List<BulkOutcome>, onDismiss: () -> Unit)
 
 /** "1 session", "3 sessions". */
 internal fun sessionsWord(n: Int): String = if (n == 1) "1 session" else "$n sessions"
+
+/** The search's other finds, under the sessions it matched: hosts, projects, and the query as a ticket. */
+private fun androidx.compose.foundation.lazy.LazyListScope.searchHits(hits: SearchHits, handlers: SessionsHandlers) {
+    item(key = "search-everywhere") {
+        Text(
+            "Everywhere",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+        )
+    }
+    if (hits.ticket) {
+        item(key = "search-ticket") {
+            SearchHitRow("Find ticket “${hits.query}”", "Tickets: a key, a link or words") { handlers.onSearchTicket(hits.query) }
+        }
+    }
+    items(hits.hosts, key = { "search-host-${it.alias}" }) { host ->
+        SearchHitRow(host.alias, if (host.reachable) "Host · its sessions" else "Host · unreachable") { handlers.onSearchHost(host.alias) }
+    }
+    if (handlers.onNewSession != null) {
+        items(hits.projects, key = { "search-project-${it.id}" }) { project ->
+            SearchHitRow(project.label, "New session in this project") { handlers.onSearchProject(project.id) }
+        }
+    }
+}
+
+@Composable
+private fun SearchHitRow(title: String, subtitle: String, onClick: () -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
