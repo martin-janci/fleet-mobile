@@ -1193,64 +1193,90 @@ private fun SessionOverflowMenu(
     IconButton(onClick = { expanded = true }) {
         Icon(FleetIcons.MoreVert, contentDescription = "Session actions")
     }
+    // Grouped, a divider between groups: what it is, its work, steering the
+    // agent, naming it, keeping it running, and — last, apart, in red — ending it.
+    val hasWork = onSetWork != null || onNameWork != null
+    val hasSteer = state.canSendQuick || state.canReview
+    val hasUpkeep = (onMove != null && manage) || state.canRepair || (manage && state.canRestart) ||
+        state.canRecreate || state.canDismissGhost
     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
         DropdownMenuItem(text = { Text("Details") }, onClick = { expanded = false; onDetails() })
         if (onRepo != null) DropdownMenuItem(text = { Text("Worktree") }, onClick = { expanded = false; onRepo() })
-        if (onSetWork != null) {
-            DropdownMenuItem(
-                text = { Text("Set work…") },
-                enabled = state.connected,
-                onClick = { expanded = false; showSetWork = true },
-            )
+        if (hasWork) {
+            HorizontalDivider()
+            if (onSetWork != null) {
+                DropdownMenuItem(
+                    text = { Text("Set work…") },
+                    enabled = state.connected,
+                    onClick = { expanded = false; showSetWork = true },
+                )
+            }
+            if (onNameWork != null) {
+                DropdownMenuItem(
+                    text = { Text("Name this work…") },
+                    enabled = state.connected,
+                    onClick = { expanded = false; showNameWork = true },
+                )
+            }
         }
-        if (onNameWork != null) {
-            DropdownMenuItem(
-                text = { Text("Name this work…") },
-                enabled = state.connected,
-                onClick = { expanded = false; showNameWork = true },
-            )
-        }
-        // The desktop's model and effort pickers: each sends `/model <alias>`
-        // or `/effort <level>` like a typed command.
-        if (state.canSendQuick) {
-            DropdownMenuItem(text = { Text("Model…") }, onClick = { expanded = false; picking = "model" })
-            DropdownMenuItem(text = { Text("Effort…") }, onClick = { expanded = false; picking = "effort" })
-        }
-        if (state.canReview) {
-            DropdownMenuItem(text = { Text("Review…") }, enabled = actionable, onClick = { expanded = false; showReview = true })
-        }
-        if (onMove != null && state.canManage) {
-            DropdownMenuItem(text = { Text("Move to host…") }, enabled = actionable, onClick = { expanded = false; onMove() })
-        }
-        if (state.canRepair) {
-            DropdownMenuItem(text = { Text("Repair workspace") }, enabled = actionable, onClick = { expanded = false; showRepairConfirm = true })
-        }
-        // A ghost first: bringing it back, or letting it go, is what it is for.
-        if (state.canRecreate) {
-            DropdownMenuItem(
-                text = { Text(if (state.ghost) "Recreate" else "Recreate (resume in a new pane)") },
-                enabled = actionable,
-                onClick = { expanded = false; showRecreateConfirm = true },
-            )
-        }
-        if (state.canDismissGhost) {
-            DropdownMenuItem(
-                text = { Text("Dismiss ghost") },
-                enabled = actionable,
-                onClick = { expanded = false; showDismissGhostConfirm = true },
-            )
+        if (hasSteer) {
+            HorizontalDivider()
+            // The desktop's model and effort pickers: each sends `/model <alias>`
+            // or `/effort <level>` like a typed command.
+            if (state.canSendQuick) {
+                DropdownMenuItem(text = { Text("Model…") }, onClick = { expanded = false; picking = "model" })
+                DropdownMenuItem(text = { Text("Effort…") }, onClick = { expanded = false; picking = "effort" })
+            }
+            if (state.canReview) {
+                DropdownMenuItem(text = { Text("Review…") }, enabled = actionable, onClick = { expanded = false; showReview = true })
+            }
         }
         if (manage) {
-            SessionManageItems(
-                state = state,
-                actionable = actionable,
-                close = { expanded = false },
-                showRename = { showRename = true },
-                showTags = { showTags = true },
-                showRestartConfirm = { showRestartConfirm = true },
-                showSafeKillConfirm = { showSafeKillConfirm = true },
-                showKillConfirm = { showKillConfirm = true },
+            HorizontalDivider()
+            DropdownMenuItem(text = { Text("Rename…") }, enabled = actionable, onClick = { expanded = false; showRename = true })
+            DropdownMenuItem(text = { Text("Tags…") }, enabled = actionable, onClick = { expanded = false; showTags = true })
+        }
+        if (hasUpkeep) {
+            HorizontalDivider()
+            // A ghost first: bringing it back, or letting it go, is what it is for.
+            if (state.canRecreate) {
+                DropdownMenuItem(
+                    text = { Text(if (state.ghost) "Recreate" else "Recreate (resume in a new pane)") },
+                    enabled = actionable,
+                    onClick = { expanded = false; showRecreateConfirm = true },
+                )
+            }
+            if (state.canDismissGhost) {
+                DropdownMenuItem(
+                    text = { Text("Dismiss ghost") },
+                    enabled = actionable,
+                    onClick = { expanded = false; showDismissGhostConfirm = true },
+                )
+            }
+            if (onMove != null && manage) {
+                DropdownMenuItem(text = { Text("Move to host…") }, enabled = actionable, onClick = { expanded = false; onMove() })
+            }
+            if (state.canRepair) {
+                DropdownMenuItem(text = { Text("Repair workspace") }, enabled = actionable, onClick = { expanded = false; showRepairConfirm = true })
+            }
+            if (manage && state.canRestart) {
+                DropdownMenuItem(text = { Text("Restart") }, enabled = actionable, onClick = { expanded = false; showRestartConfirm = true })
+            }
+        }
+        if (manage) {
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Retire safely") },
+                enabled = actionable,
+                onClick = { expanded = false; showSafeKillConfirm = true },
             )
+            if (state.canKill) {
+                DropdownMenuItem(
+                    text = { Text("Kill now", color = MaterialTheme.colorScheme.error) },
+                    enabled = actionable,
+                    onClick = { expanded = false; showKillConfirm = true },
+                )
+            }
         }
     }
 
@@ -1357,49 +1383,6 @@ private fun SessionOverflowMenu(
         onSafeKill = onSafeKill,
         onKill = onKill,
     )
-}
-
-/** The management half of the menu — only when [SessionUiState.canManage]. */
-@Composable
-private fun SessionManageItems(
-    state: SessionUiState,
-    actionable: Boolean,
-    close: () -> Unit,
-    showRename: () -> Unit,
-    showTags: () -> Unit,
-    showRestartConfirm: () -> Unit,
-    showSafeKillConfirm: () -> Unit,
-    showKillConfirm: () -> Unit,
-) {
-    DropdownMenuItem(
-        text = { Text("Rename…") },
-        enabled = actionable,
-        onClick = { close(); showRename() },
-    )
-    DropdownMenuItem(
-        text = { Text("Tags…") },
-        enabled = actionable,
-        onClick = { close(); showTags() },
-    )
-    if (state.canRestart) {
-        DropdownMenuItem(
-            text = { Text("Restart") },
-            enabled = actionable,
-            onClick = { close(); showRestartConfirm() },
-        )
-    }
-    DropdownMenuItem(
-        text = { Text("Retire safely") },
-        enabled = actionable,
-        onClick = { close(); showSafeKillConfirm() },
-    )
-    if (state.canKill) {
-        DropdownMenuItem(
-            text = { Text("Kill now", color = MaterialTheme.colorScheme.error) },
-            enabled = actionable,
-            onClick = { close(); showKillConfirm() },
-        )
-    }
 }
 
 @Composable

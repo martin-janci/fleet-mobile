@@ -442,4 +442,35 @@ class NavigatorTest {
         assertTrue(nav.back())
         assertEquals(Screen.Sessions(), nav.screen.value)
     }
+
+    @Test
+    fun back_from_a_session_opened_out_of_a_sheet_puts_the_sheet_back_up() {
+        val nav = Navigator()
+        nav.showSessionsFor("pine")
+        nav.openFrom(7, SessionsSheet.Today)
+        assertEquals(Screen.Session(7), nav.screen.value)
+
+        assertTrue(nav.back())
+        assertEquals(Screen.Sessions(hostAlias = "pine", reopen = SessionsSheet.Today), nav.screen.value)
+
+        nav.sheetReopened()
+        assertEquals(Screen.Sessions(hostAlias = "pine"), nav.screen.value, "reopened once, then forgotten")
+    }
+
+    @Test
+    fun opening_from_a_sheet_anywhere_but_the_list_is_a_plain_open() {
+        val nav = Navigator()
+        nav.select(Tab.Work)
+        nav.openFrom(7, SessionsSheet.Tickets)
+        assertTrue(nav.back())
+        assertEquals(Screen.Work, nav.screen.value)
+    }
+
+    @Test
+    fun a_tab_tap_never_brings_a_sheet_back() {
+        val nav = Navigator()
+        nav.openFrom(7, SessionsSheet.Tidy)
+        nav.select(Tab.Sessions)
+        assertEquals(Screen.Sessions(), nav.screen.value)
+    }
 }

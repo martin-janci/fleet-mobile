@@ -12,7 +12,15 @@ sealed interface Screen {
      * row on the Hosts screen does. `null` is "no filter", not "unknown host";
      * every ordinary navigation to Sessions (a tab tap, app start) passes it.
      */
-    data class Sessions(val hostAlias: String? = null) : Screen
+    data class Sessions(
+        val hostAlias: String? = null,
+        /**
+         * The sheet to put back up on arriving here: set only on the history
+         * entry [Navigator.openFrom] leaves, so back from a session opened out
+         * of Today, Tidy-up or Tickets lands in that sheet, not on the bare list.
+         */
+        val reopen: SessionsSheet? = null,
+    ) : Screen
     data class Session(val id: Long) : Screen
 
     /**
@@ -51,6 +59,9 @@ sealed interface Screen {
  * downloads (`list_downloads`) — see `App.kt`.
  */
 enum class Tab { Sessions, Work, Files, Hosts, Settings }
+
+/** The Sessions list's sheets a session can be opened from, and back returns to. */
+enum class SessionsSheet { Today, Tidy, Tickets }
 
 /**
  * Where the app is, as a small object rather than as Compose state.
@@ -130,6 +141,21 @@ class Navigator {
 
     /** Open one session's screen. */
     fun open(sessionId: Long) = move { it.pushing(it.screen).going(Screen.Session(sessionId)) }
+
+    /**
+     * Open a session from one of the list's sheets: back comes to the list
+     * with [sheet] put back up. Anywhere but the list it is a plain [open].
+     */
+    fun openFrom(sessionId: Long, sheet: SessionsSheet) = move { s ->
+        val from = (s.screen as? Screen.Sessions)?.copy(reopen = sheet) ?: s.screen
+        s.pushing(from).going(Screen.Session(sessionId))
+    }
+
+    /** The list put its sheet back up: forget it, so a later visit does not reopen it again. */
+    fun sheetReopened() = move { s ->
+        val current = s.screen
+        if (current is Screen.Sessions && current.reopen != null) s.copy(screen = current.copy(reopen = null)) else s
+    }
 
     /** Open the Usage screen over whatever is showing (Settings); back returns there. */
     fun openUsage() = move { s -> if (s.screen == Screen.Usage) s else s.pushing(s.screen).going(Screen.Usage) }

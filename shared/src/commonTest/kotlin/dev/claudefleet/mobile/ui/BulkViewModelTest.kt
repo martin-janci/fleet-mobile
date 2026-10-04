@@ -79,6 +79,37 @@ private val ROWS = listOf(
 class BulkViewModelTest {
 
     @Test
+    fun select_mode_can_start_with_nothing_picked_and_ends_on_clear() = runTest {
+        val vm = BulkViewModel(BulkFleet(ROWS), BulkCalls(), backgroundScope, canWrite = true)
+        vm.start()
+        runCurrent()
+        assertTrue(vm.state.value.active)
+        assertTrue(vm.state.value.selected.isEmpty())
+
+        vm.clear()
+        runCurrent()
+        assertFalse(vm.state.value.active)
+    }
+
+    @Test
+    fun a_readonly_pairing_never_enters_select_mode() = runTest {
+        val vm = BulkViewModel(BulkFleet(ROWS), BulkCalls(), backgroundScope, canWrite = false)
+        vm.start()
+        runCurrent()
+        assertFalse(vm.state.value.active)
+    }
+
+    @Test
+    fun a_finished_run_leaves_select_mode_with_its_selection() = runTest {
+        val vm = BulkViewModel(BulkFleet(ROWS), BulkCalls(), backgroundScope, canWrite = true)
+        vm.start()
+        vm.toggle(1)
+        vm.send("go on").join()
+        runCurrent()
+        assertFalse(vm.state.value.active)
+    }
+
+    @Test
     fun a_prompt_goes_to_every_picked_session_and_the_selection_clears() = runTest {
         val calls = BulkCalls()
         val vm = BulkViewModel(BulkFleet(ROWS), calls, backgroundScope, canWrite = true)
