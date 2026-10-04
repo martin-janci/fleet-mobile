@@ -16,6 +16,8 @@ data class NewSessionRequest(
     val baseBranch: String? = null,
     /** The sidebar label; `null` lets the hub derive one from the branch. */
     val friendlyName: String? = null,
+    /** An existing worktree of the project to start in, rather than its main checkout. */
+    val worktreeId: Long? = null,
 )
 
 /**
@@ -48,6 +50,7 @@ class HubNewSessionActions(private val session: AppSession) : NewSessionActions 
                 newWorktree = request.newWorktree,
                 baseBranch = request.baseBranch,
                 friendlyName = request.friendlyName,
+                worktreeId = request.worktreeId,
             )
         }
 }

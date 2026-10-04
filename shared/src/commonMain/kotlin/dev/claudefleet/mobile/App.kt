@@ -49,7 +49,9 @@ import dev.claudefleet.mobile.data.HubRepoActions
 import dev.claudefleet.mobile.data.RepoActions
 import dev.claudefleet.mobile.data.HostActions
 import dev.claudefleet.mobile.data.HubHostActions
+import dev.claudefleet.mobile.data.HubProjectActions
 import dev.claudefleet.mobile.data.HubSessionActions
+import dev.claudefleet.mobile.data.ProjectActions
 import dev.claudefleet.mobile.data.HubUsageActions
 import dev.claudefleet.mobile.data.UsageActions
 import dev.claudefleet.mobile.data.HubSessionDetailsActions
@@ -106,6 +108,8 @@ import dev.claudefleet.mobile.ui.BulkViewModel
 import dev.claudefleet.mobile.ui.HostDetailHandlers
 import dev.claudefleet.mobile.ui.HostDetailSheet
 import dev.claudefleet.mobile.ui.HostDetailViewModel
+import dev.claudefleet.mobile.ui.ProjectToolsHandlers
+import dev.claudefleet.mobile.ui.ProjectToolsViewModel
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.searchEverywhere
 import dev.claudefleet.mobile.ui.TidyHandlers
@@ -208,6 +212,7 @@ class AppContainer(
     val repoActions: RepoActions = HubRepoActions(session)
     val usageActions: UsageActions = HubUsageActions(session)
     val hostActions: HostActions = HubHostActions(session)
+    val projectActions: ProjectActions = HubProjectActions(session)
 
     /** The hub's own version, for the Settings screen to show beside this app's. */
     val versionActions: VersionActions = HubVersionActions(session)
@@ -986,6 +991,9 @@ private fun NewSessionRoute(
     }
     val state by vm.state.collectAsState()
     LaunchedEffect(vm, initialProject) { initialProject?.let(vm::selectProject) }
+    val tools = remember(repository, scope) { ProjectToolsViewModel(repository, container.projectActions, scope, credentials.canWrite) }
+    val toolsState by tools.state.collectAsState()
+    LaunchedEffect(tools, state.host, state.projectId) { tools.loadWorktrees(state.host, state.projectId) }
     NewSessionScreen(
         state = state,
         onBack = onBack,
@@ -1001,6 +1009,18 @@ private fun NewSessionRoute(
         // An agent the hub could not match to a row yet has no screen to
         // open: back to the list, where it appears with the next pass.
         onStartBackground = { name, prompt -> vm.startBackground(name, prompt) { onBack() } },
+        tools = toolsState,
+        toolHandlers = ProjectToolsHandlers(
+            onOpenAdd = { tools.openAdd(it) },
+            onCloseAdd = tools::closeAdd,
+            onClone = { url -> tools.clone(url, vm::selectProject) },
+            onCreate = { owner, repo, onGithub -> tools.create(owner, repo, onGithub, vm::selectProject) },
+            onConfirmCreate = { tools.confirmCreate(vm::selectProject) },
+            onCancelCreate = tools::cancelCreate,
+            onDeleteWorktree = { tools.deleteWorktree(it) },
+            onDismissError = tools::dismissError,
+        ),
+        onSelectWorktree = vm::selectWorktree,
         multiStart = MultiStartHandlers(
             onToggle = vm::toggleAlsoIn,
             onConfirm = { vm.confirmMultiStart() },

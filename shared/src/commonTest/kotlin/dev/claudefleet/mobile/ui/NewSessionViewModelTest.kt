@@ -618,4 +618,22 @@ class NewSessionViewModelTest {
         runCurrent()
         assertFalse(vm.state.value.backgroundAvailable)
     }
+
+    @Test
+    fun an_existing_worktree_is_sent_and_a_new_branch_turns_it_off() = runTest {
+        val actions = FakeCreate()
+        val vm = vm(FakeFleetForNew(listOf(PINE), listOf(ProjectRow(id = 1, owner = "o", repo = "r"))), actions, backgroundScope, initialHost = "pine")
+        runCurrent()
+        vm.selectProject(1)
+        vm.selectWorktree(7)
+        runCurrent()
+        vm.create()?.join()
+        runCurrent()
+        assertEquals(7L, actions.requests.single().worktreeId)
+
+        vm.selectWorktree(7)
+        vm.setNewWorktree(true)
+        runCurrent()
+        assertEquals(null, vm.state.value.worktreeId)
+    }
 }

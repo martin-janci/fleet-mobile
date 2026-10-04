@@ -14,8 +14,10 @@ import dev.claudefleet.mobile.model.Download
 import dev.claudefleet.mobile.model.DownloadList
 import dev.claudefleet.mobile.model.DownloadRemoved
 import dev.claudefleet.mobile.model.FleetTask
+import dev.claudefleet.mobile.model.GithubRepo
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.HubHealth
+import dev.claudefleet.mobile.model.HostWorktrees
 import dev.claudefleet.mobile.model.RestoreReport
 import dev.claudefleet.mobile.model.LostCandidate
 import dev.claudefleet.mobile.model.MultiStart
@@ -835,6 +837,62 @@ class HubClient(
         call("work", buildJsonObject { put("action", "today"); put("since", since) }) {
             json.decodeFromJsonElement(Today.serializer(), it)
         }
+
+    /**
+     * Add a project on [hostAlias] (`add_project`): clone [cloneUrl], or make
+     * a new repository [owner]/[repo] — on GitHub too when [createRemote],
+     * which the hub refuses once with a token ([confirm]) to send back.
+     * Answers the project row.
+     */
+    suspend fun addProject(
+        hostAlias: String,
+        cloneUrl: String? = null,
+        owner: String? = null,
+        repo: String? = null,
+        createRemote: Boolean = false,
+        confirm: String? = null,
+    ): ProjectRow =
+        call(
+            "add_project",
+            buildJsonObject {
+                put("host_alias", hostAlias)
+                put(
+                    "source",
+                    buildJsonObject {
+                        if (cloneUrl != null) {
+                            put("kind", "clone")
+                            put("url", cloneUrl)
+                        } else {
+                            put("kind", "new")
+                            put("owner", owner.orEmpty())
+                            put("repo", repo.orEmpty())
+                            put("create_remote", createRemote)
+                            confirm?.let { put("confirm", it) }
+                        }
+                    },
+                )
+            },
+        ) { json.decodeFromJsonElement(ProjectRow.serializer(), it) }
+
+    /** Repositories `gh` on [hostAlias] can see (`list_github_repos`, readonly). */
+    suspend fun listGithubRepos(hostAlias: String): List<GithubRepo> =
+        call("list_github_repos", buildJsonObject { put("host_alias", hostAlias) }) {
+            json.decodeFromJsonElement(ListSerializer(GithubRepo.serializer()), it)
+        }
+
+    /** A project's worktrees as they are on [hostAlias] (`list_host_worktrees`, readonly). */
+    suspend fun listHostWorktrees(hostAlias: String, projectId: Long): HostWorktrees =
+        call(
+            "list_host_worktrees",
+            buildJsonObject {
+                put("host_alias", hostAlias)
+                put("project_id", projectId)
+            },
+        ) { json.decodeFromJsonElement(HostWorktrees.serializer(), it) }
+
+    /** Delete a worktree on its host (`delete_worktree`, no --force); refused while a session lives in it. */
+    suspend fun deleteWorktree(worktreeId: Long): Unit =
+        call("delete_worktree", buildJsonObject { put("worktree_id", worktreeId) }) { }
 
     /** One setting's writes, newest first (`setting_history`, a person's own device). */
     suspend fun settingHistory(key: String, limit: Int = 30): List<SettingWrite> =

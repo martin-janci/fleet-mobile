@@ -45,6 +45,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 
 /**
  * The New session form. Stateless, like every screen here: it draws a
@@ -74,7 +79,21 @@ fun NewSessionScreen(
     multiStart: MultiStartHandlers = MultiStartHandlers(),
     /** Start a background agent on the chosen host, with a name and a prompt. */
     onStartBackground: (String, String) -> Unit = { _, _ -> },
+    /** Adding a project, and the chosen project's worktrees on the chosen host. */
+    tools: ProjectToolsUiState = ProjectToolsUiState(),
+    toolHandlers: ProjectToolsHandlers = ProjectToolsHandlers(),
+    onSelectWorktree: (Long?) -> Unit = {},
 ) {
+    if (tools.addingOn != null) AddProjectSheet(tools, toolHandlers)
+    tools.pendingCreate?.let { p ->
+        AlertDialog(
+            onDismissRequest = toolHandlers.onCancelCreate,
+            title = { Text("Create ${p.owner}/${p.repo} on GitHub?") },
+            text = { Text("The repository is created with the host's own gh login, then the project is added on the host.") },
+            confirmButton = { TextButton(onClick = toolHandlers.onConfirmCreate) { Text("Create") } },
+            dismissButton = { TextButton(onClick = toolHandlers.onCancelCreate) { Text("Cancel") } },
+        )
+    }
     val editable = !state.creating
     var askingBackground by remember { mutableStateOf(false) }
     if (askingBackground) {
@@ -123,6 +142,12 @@ fun NewSessionScreen(
                     state.projectLabel != null -> Hint("Selected: ${state.projectLabel}")
                     // Ticket mode: the hub picks the project that last worked on the key's prefix.
                     state.ticketKey != null -> Hint("Optional — left empty, the hub picks the project that last worked on it.")
+                }
+                val host = state.host
+                if (tools.canAdd && host != null && state.ticketKey == null) {
+                    TextButton(onClick = { toolHandlers.onOpenAdd(host) }, enabled = editable, modifier = Modifier.padding(horizontal = 8.dp)) {
+                        Text("Add a project on $host…")
+                    }
                 }
             }
             item(key = "project-query") {
@@ -191,6 +216,30 @@ fun NewSessionScreen(
                         )
                     }
                     Switch(checked = state.newWorktree, onCheckedChange = onNewWorktree, enabled = editable)
+                }
+            }
+            // The project's worktrees on this host: start in one of them, or
+            // delete one no session lives in.
+            val worktrees = tools.worktrees
+            if (state.ticketKey == null && !state.newWorktree && worktrees != null && worktrees.worktrees.isNotEmpty()) {
+                item(key = "worktrees-label") { Hint("Or start in one of its worktrees on ${worktrees.hostAlias}:") }
+                items(worktrees.worktrees, key = { "wt-${it.id}" }) { wt ->
+                    val picked = wt.id == state.worktreeId
+                    ListItem(
+                        headlineContent = { Text(wt.name.ifBlank { wt.path }) },
+                        supportingContent = wt.branch?.let { { Text(it, style = MaterialTheme.typography.bodySmall) } },
+                        leadingContent = { RadioButton(selected = picked, onClick = null, enabled = editable) },
+                        trailingContent = if (tools.canDeleteWorktree && wt.name != "main") {
+                            {
+                                TextButton(onClick = { toolHandlers.onDeleteWorktree(wt.id) }, enabled = tools.deleting == null) {
+                                    Text(if (tools.deleting == wt.id) "Deleting…" else "Delete")
+                                }
+                            }
+                        } else {
+                            null
+                        },
+                        modifier = Modifier.clickable(enabled = editable) { onSelectWorktree(if (picked) null else wt.id) },
+                    )
                 }
             }
             if (state.newWorktree && state.ticketKey == null) {
@@ -336,4 +385,78 @@ private fun BackgroundAgentDialog(host: String, onStart: (String, String) -> Uni
         confirmButton = { TextButton(onClick = { onStart(name, prompt) }, enabled = prompt.isNotBlank()) { Text("Start") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+/** What the project tools report. */
+data class ProjectToolsHandlers(
+    val onOpenAdd: (String) -> Unit = {},
+    val onCloseAdd: () -> Unit = {},
+    val onClone: (String) -> Unit = {},
+    val onCreate: (String, String, Boolean) -> Unit = { _, _, _ -> },
+    val onConfirmCreate: () -> Unit = {},
+    val onCancelCreate: () -> Unit = {},
+    val onDeleteWorktree: (Long) -> Unit = {},
+    val onDismissError: () -> Unit = {},
+)
+
+/**
+ * Add a project on a host, the desktop's three ways but the folder one (a
+ * path on the hub's own machine): clone a URL, clone one of the
+ * repositories `gh` there can see, or make a new one — on GitHub too, which
+ * is confirmed first.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddProjectSheet(tools: ProjectToolsUiState, handlers: ProjectToolsHandlers) {
+    var url by remember { mutableStateOf("") }
+    var owner by remember { mutableStateOf("") }
+    var repo by remember { mutableStateOf("") }
+    var onGithub by remember { mutableStateOf(false) }
+    ModalBottomSheet(onDismissRequest = handlers.onCloseAdd) {
+        LazyColumn(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+            item {
+                Text("Add a project on ${tools.addingOn}", style = MaterialTheme.typography.titleLarge)
+                if (tools.adding) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
+                tools.error?.let {
+                    Text(it.title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+                SectionLabel("Clone")
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    singleLine = true,
+                    label = { Text("GitHub URL") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
+                )
+                TextButton(onClick = { handlers.onClone(url) }, enabled = url.isNotBlank() && !tools.adding) { Text("Clone") }
+            }
+            val repos = tools.repos
+            if (tools.canListGithub) {
+                item { Hint(if (repos == null) "Asking gh on the host for its repositories…" else "Or one gh on the host can see:") }
+                items(repos.orEmpty(), key = { "gh-${it.nameWithOwner}" }) { r ->
+                    ListItem(
+                        headlineContent = { Text(r.nameWithOwner) },
+                        supportingContent = r.description?.takeIf { it.isNotBlank() }?.let { { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
+                        trailingContent = { if (r.isPrivate) Text("private", style = MaterialTheme.typography.labelSmall) },
+                        modifier = Modifier.clickable(enabled = !tools.adding) { handlers.onClone("https://github.com/${r.nameWithOwner}") },
+                    )
+                }
+            }
+            item {
+                SectionLabel("New repository")
+                OutlinedTextField(value = owner, onValueChange = { owner = it }, singleLine = true, label = { Text("Owner") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = repo, onValueChange = { repo = it }, singleLine = true, label = { Text("Repository") }, modifier = Modifier.fillMaxWidth())
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = onGithub, onCheckedChange = { onGithub = it })
+                    Text("Create it on GitHub too")
+                }
+                TextButton(
+                    onClick = { handlers.onCreate(owner, repo, onGithub) },
+                    enabled = owner.isNotBlank() && repo.isNotBlank() && !tools.adding,
+                ) { Text("Create") }
+                Spacer(Modifier.height(24.dp))
+            }
+        }
+    }
 }
