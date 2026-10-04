@@ -10,6 +10,7 @@ import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
+import dev.claudefleet.mobile.model.ConversationSummary
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.PendingInput
@@ -160,7 +161,19 @@ private class FakeActions : SessionActions {
     /** The cursor each read carried, so a test can assert the hub was told where the screen got to. */
     val cursors = mutableListOf<Long?>()
 
-    override suspend fun conversation(sessionId: Long, turns: Int?, sinceTurn: Long?): Conversation {
+    /** Every read's (turns, claude_session_id), in order. */
+    val asked = mutableListOf<Pair<Int?, String?>>()
+
+    /** What a read of an earlier conversation answers. */
+    var earlierAnswer: Conversation = Conversation()
+
+    var conversationList: List<ConversationSummary> = emptyList()
+
+    override suspend fun conversations(sessionId: Long): List<ConversationSummary> = conversationList
+
+    override suspend fun conversation(sessionId: Long, turns: Int?, sinceTurn: Long?, claudeSessionId: String?): Conversation {
+        asked += turns to claudeSessionId
+        if (claudeSessionId != null) return earlierAnswer
         reads += 1
         cursors += sinceTurn
         inFlightReads += 1
@@ -186,7 +199,7 @@ private class FakeActions : SessionActions {
         }
     }
 
-    override suspend fun toolDetail(sessionId: Long, toolUseId: String): ToolDetail =
+    override suspend fun toolDetail(sessionId: Long, toolUseId: String, claudeSessionId: String?): ToolDetail =
         ToolDetail(id = toolUseId)
 
     override suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult {
@@ -2914,5 +2927,89 @@ class SessionViewModelTest {
         runCurrent()
 
         assertTrue(actions.rewound.isEmpty())
+    }
+
+    // --- earlier conversations and older turns ------------------------------
+
+    private val earlier = ConversationSummary(claudeSessionId = "c-old", turns = 3, startSource = "startup")
+    private val current = ConversationSummary(claudeSessionId = "c-now", turns = 2, startSource = "clear", current = true)
+
+    @Test
+    fun the_conversations_are_read_on_open_where_the_hub_has_the_tool() = runTest {
+        val actions = FakeActions()
+        actions.conversationList = listOf(current, earlier)
+        val vm = SessionViewModel(ID, FakeFleetState(tools = setOf(HubCapabilities.SESSION_CONVERSATIONS)), actions, backgroundScope)
+
+        vm.load().join()
+        runCurrent()
+
+        assertEquals(listOf("c-now", "c-old"), vm.state.value.conversations.map { it.claudeSessionId })
+    }
+
+    @Test
+    fun viewing_an_earlier_conversation_shows_it_read_only_and_back_restores_the_current() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(turns = listOf(ConvTurn(prompt = "now", at = "t9")))
+        actions.earlierAnswer = Conversation(turns = listOf(ConvTurn(prompt = "then", at = "t1")))
+        val vm = SessionViewModel(ID, FakeFleetState(tools = setOf(HubCapabilities.REWIND_CONVERSATION)), actions, backgroundScope)
+        vm.load().join()
+        runCurrent()
+
+        vm.view(earlier).join()
+        runCurrent()
+        assertEquals(listOf("then"), vm.state.value.conversation.turns.map { it.prompt })
+        assertEquals(OLDER_TURNS to "c-old", actions.asked.last())
+        assertFalse(vm.state.value.canRewind, "an earlier conversation offers no rewind")
+
+        vm.backToCurrent()
+        runCurrent()
+        assertEquals(listOf("now"), vm.state.value.conversation.turns.map { it.prompt })
+        assertTrue(vm.state.value.canRewind)
+    }
+
+    @Test
+    fun sending_while_viewing_an_earlier_conversation_goes_back_to_the_current_one() = runTest {
+        val actions = FakeActions()
+        actions.earlierAnswer = Conversation(turns = listOf(ConvTurn(prompt = "then", at = "t1")))
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        vm.view(earlier).join()
+        runCurrent()
+
+        vm.onDraftChange("hello")
+        vm.send().join()
+        runCurrent()
+
+        assertNull(vm.state.value.viewing)
+    }
+
+    @Test
+    fun load_older_reads_the_widest_window_in_place_of_the_one_on_screen() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(turns = listOf(ConvTurn(prompt = "c", at = "t3")), truncated = true)
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        runCurrent()
+        assertTrue(vm.state.value.canLoadOlder)
+
+        actions.answer = Conversation(
+            turns = listOf(ConvTurn(prompt = "a", at = "t1"), ConvTurn(prompt = "b", at = "t2"), ConvTurn(prompt = "c", at = "t3")),
+        )
+        vm.loadOlder().join()
+        runCurrent()
+
+        assertEquals(OLDER_TURNS to null, actions.asked.last())
+        assertEquals(listOf("a", "b", "c"), vm.state.value.conversation.turns.map { it.prompt })
+        assertFalse(vm.state.value.canLoadOlder, "the widest window is read once")
+    }
+
+    @Test
+    fun a_conversation_with_nothing_older_offers_no_load_older() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(turns = listOf(ConvTurn(prompt = "c", at = "t3")), truncated = false)
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        runCurrent()
+        assertFalse(vm.state.value.canLoadOlder)
     }
 }

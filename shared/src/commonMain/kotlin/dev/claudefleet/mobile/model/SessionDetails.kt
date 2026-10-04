@@ -37,3 +37,23 @@ data class FleetTask(
     /** Still going: a cancel would mean something. */
     val open: Boolean get() = state == "queued" || state == "running"
 }
+
+/**
+ * One Claude conversation a session has run (`session_conversations`),
+ * newest first: a `/clear`, a `/resume`, a compaction or a rewind starts a
+ * new one in the same session. [current] is the one the session is in now.
+ */
+@Serializable
+data class ConversationSummary(
+    @SerialName("claude_session_id") val claudeSessionId: String,
+    @SerialName("started_at") val startedAt: Long = 0,
+    @SerialName("ended_at") val endedAt: Long? = null,
+    /** startup, resume, clear, compact, fork, fleet, unknown. */
+    @SerialName("start_source") val startSource: String = "",
+    @SerialName("end_reason") val endReason: String? = null,
+    val model: String? = null,
+    @SerialName("first_prompt") val firstPrompt: String? = null,
+    val turns: Long = 0,
+    val compactions: Long = 0,
+    val current: Boolean = false,
+)

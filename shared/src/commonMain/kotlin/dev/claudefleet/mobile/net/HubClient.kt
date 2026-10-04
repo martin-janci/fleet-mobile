@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.net
 
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
+import dev.claudefleet.mobile.model.ConversationSummary
 import dev.claudefleet.mobile.model.Download
 import dev.claudefleet.mobile.model.DownloadList
 import dev.claudefleet.mobile.model.DownloadRemoved
@@ -330,6 +331,7 @@ class HubClient(
         sessionId: Long,
         turns: Int? = null,
         sinceTurn: Long? = null,
+        claudeSessionId: String? = null,
     ): Conversation =
         call(
             "session_conversation",
@@ -337,6 +339,7 @@ class HubClient(
                 put("session_id", sessionId)
                 if (turns != null) put("turns", turns)
                 if (sinceTurn != null) put("since_turn", sinceTurn)
+                if (claudeSessionId != null) put("claude_session_id", claudeSessionId)
                 put("events_limit", 0)
             },
         ) { json.decodeFromJsonElement(Conversation.serializer(), it) }
@@ -451,6 +454,12 @@ class HubClient(
                 if (newWorktree != null) put("new_worktree", newWorktree)
             },
         ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
+
+    /** The Claude conversations a session has run, newest first (`session_conversations`, readonly). */
+    suspend fun conversations(sessionId: Long): List<ConversationSummary> =
+        call("session_conversations", buildJsonObject { put("session_id", sessionId) }) {
+            json.decodeFromJsonElement(ListSerializer(ConversationSummary.serializer()), it)
+        }
 
     /** A session's event timeline, newest first (`session_history`, readonly). */
     suspend fun sessionHistory(sessionId: Long, limit: Int = 100): List<SessionEvent> =

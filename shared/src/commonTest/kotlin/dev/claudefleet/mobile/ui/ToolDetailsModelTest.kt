@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
+import dev.claudefleet.mobile.model.ConversationSummary
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SendPromptResult
@@ -47,14 +48,15 @@ class ToolDetailsModelTest {
         var gate: CompletableDeferred<Unit>? = null
         var result: String? = "ok"
 
-        override suspend fun toolDetail(sessionId: Long, toolUseId: String): ToolDetail {
+        override suspend fun toolDetail(sessionId: Long, toolUseId: String, claudeSessionId: String?): ToolDetail {
             asked += sessionId to toolUseId
             gate?.await()
             fail?.let { throw it }
             return ToolDetail(id = toolUseId, name = "Bash", result = result)
         }
 
-        override suspend fun conversation(sessionId: Long, turns: Int?, sinceTurn: Long?): Conversation = error("unused")
+        override suspend fun conversation(sessionId: Long, turns: Int?, sinceTurn: Long?, claudeSessionId: String?): Conversation = error("unused")
+        override suspend fun conversations(sessionId: Long): List<ConversationSummary> = error("unused")
         override suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult = error("unused")
         override suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult = error("unused")
         override suspend fun activity(sessionId: Long): ActivityProbe = error("unused")

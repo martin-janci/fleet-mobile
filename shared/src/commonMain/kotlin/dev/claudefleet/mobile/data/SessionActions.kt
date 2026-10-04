@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
+import dev.claudefleet.mobile.model.ConversationSummary
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.ToolDetail
@@ -38,14 +39,19 @@ interface SessionActions {
         sessionId: Long,
         turns: Int? = null,
         sinceTurn: Long? = null,
+        /** An earlier conversation of the session (from [conversations]); null is the current one. */
+        claudeSessionId: String? = null,
     ): Conversation
+
+    /** The Claude conversations the session has run, newest first (`session_conversations`). */
+    suspend fun conversations(sessionId: Long): List<ConversationSummary>
 
     /**
      * One tool call's input and result (`session_tool_detail`, readonly), for
      * an expanded tool row. Only called when the hub lists the tool — see
      * [dev.claudefleet.mobile.net.HubCapabilities.toolDetail].
      */
-    suspend fun toolDetail(sessionId: Long, toolUseId: String): ToolDetail
+    suspend fun toolDetail(sessionId: Long, toolUseId: String, claudeSessionId: String? = null): ToolDetail
 
     /** Deliver [text] to the session's REPL and submit it. */
     suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult
@@ -111,10 +117,14 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
         sessionId: Long,
         turns: Int?,
         sinceTurn: Long?,
-    ): Conversation = session.withClient { it.conversation(sessionId, turns, sinceTurn) }
+        claudeSessionId: String?,
+    ): Conversation = session.withClient { it.conversation(sessionId, turns, sinceTurn, claudeSessionId) }
 
-    override suspend fun toolDetail(sessionId: Long, toolUseId: String): ToolDetail =
-        session.withClient { it.toolDetail(sessionId, toolUseId) }
+    override suspend fun conversations(sessionId: Long): List<ConversationSummary> =
+        session.withClient { it.conversations(sessionId) }
+
+    override suspend fun toolDetail(sessionId: Long, toolUseId: String, claudeSessionId: String?): ToolDetail =
+        session.withClient { it.toolDetail(sessionId, toolUseId, claudeSessionId) }
 
     override suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult =
         session.withClient { it.sendPrompt(sessionId, text) }

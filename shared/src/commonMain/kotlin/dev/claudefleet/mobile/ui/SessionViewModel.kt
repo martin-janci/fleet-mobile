@@ -11,6 +11,7 @@ import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
+import dev.claudefleet.mobile.model.ConversationSummary
 import dev.claudefleet.mobile.model.PendingInput
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.SessionRow
@@ -160,6 +161,17 @@ data class SessionUiState(
      * [canManage], what offers Rewind here, Retry and Fork here under a reply.
      */
     val rewindAvailable: Boolean = false,
+    /** The session's Claude conversations, newest first; empty until read or on an older hub. */
+    val conversations: List<ConversationSummary> = emptyList(),
+    /**
+     * The earlier conversation on screen instead of the current one, or null.
+     * Read-only history: a prompt still goes to the session's current
+     * conversation, and a reply there offers no rewind or fork.
+     */
+    val viewing: ConversationSummary? = null,
+    /** The current conversation's older turns may be asked for (see [SessionViewModel.loadOlder]). */
+    val canLoadOlder: Boolean = false,
+    val loadingOlder: Boolean = false,
 ) {
     /**
      * Whether the ⋮ menu is offered at all: a readonly credential may not
@@ -175,7 +187,7 @@ data class SessionUiState(
 
     /** Whether a reply offers Rewind here, Retry and Fork here at all — see [replyActionsFor]. */
     val canRewind: Boolean
-        get() = canManage && rewindAvailable
+        get() = canManage && rewindAvailable && viewing == null
 
     /** Restart carries no narrowing beyond [canManage] — see [BlockedCard.offerRestart] for when it is worth showing. */
     val canRestart: Boolean
@@ -346,6 +358,13 @@ class SessionViewModel(
         val terminal: String? = null,
         /** See [SessionUiState.busy]. */
         val busy: Boolean = false,
+        val conversations: List<ConversationSummary> = emptyList(),
+        val viewing: ConversationSummary? = null,
+        /** The earlier conversation's turns while [viewing]; the current one keeps updating underneath. */
+        val earlier: Conversation? = null,
+        /** The widest window has been read: there is nothing older to ask for. */
+        val olderLoaded: Boolean = false,
+        val loadingOlder: Boolean = false,
     )
 
     private val local = MutableStateFlow(Local())
@@ -562,6 +581,7 @@ class SessionViewModel(
         // conversation must not wait on a row of buttons, and the cached row
         // is already drawn.
         refreshQuickReplies()
+        loadConversations()
         requestRead(first = true)
     }
 
@@ -839,7 +859,8 @@ class SessionViewModel(
         try {
             actions.sendPrompt(sessionId, text)
             quickReplies.remember(text)
-            local.update { it.copy(sending = false, draft = if (clearDraft) "" else it.draft) }
+            // What was sent lands in the current conversation: show that one.
+            local.update { it.copy(sending = false, draft = if (clearDraft) "" else it.draft, viewing = null, earlier = null) }
             requestRead(first = false)
         } catch (e: CancellationException) {
             throw e
@@ -854,6 +875,74 @@ class SessionViewModel(
      * [SessionUiState.canRestart]) when it draws one at all.
      */
     fun restart(): Job = runManaged(::canRestartNow) { actions.restart(sessionId) }
+
+    /**
+     * Read the session's conversations (`session_conversations`), for the
+     * header's picker. Silent on failure: the picker simply is not offered.
+     */
+    fun loadConversations(): Job = scope.launch {
+        if (refused() || !fleet.capabilities.value.conversations) return@launch
+        try {
+            val list = actions.conversations(sessionId)
+            local.update { it.copy(conversations = list) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+        }
+    }
+
+    /**
+     * Show [summary] instead of the current conversation — or go back to the
+     * current one when [summary] is it. An earlier conversation is read once,
+     * as wide as the hub allows; it does not move.
+     */
+    fun view(summary: ConversationSummary): Job = scope.launch {
+        if (summary.current) {
+            backToCurrent()
+            return@launch
+        }
+        local.update { it.copy(viewing = summary, earlier = Conversation(), loadingOlder = true, error = null) }
+        try {
+            val read = actions.conversation(sessionId, turns = OLDER_TURNS, claudeSessionId = summary.claudeSessionId)
+            local.update { if (it.viewing == summary) it.copy(earlier = read, loadingOlder = false) else it }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { if (it.viewing == summary) it.copy(viewing = null, earlier = null, loadingOlder = false, error = friendly(t)) else it }
+        }
+    }
+
+    /** Back to the conversation the session is in now. */
+    fun backToCurrent() {
+        local.update { it.copy(viewing = null, earlier = null, loadingOlder = false) }
+    }
+
+    /**
+     * The current conversation's older turns: one read as wide as the hub
+     * allows ([OLDER_TURNS]), which takes the place of the window on screen —
+     * it holds every turn the screen had, and the ones before them.
+     */
+    fun loadOlder(): Job = scope.launch {
+        val l = local.value
+        if (refused() || l.loadingOlder || l.viewing != null) return@launch
+        local.update { it.copy(loadingOlder = true, error = null) }
+        try {
+            fetchLock.withLock {
+                val wide = actions.conversation(sessionId, turns = OLDER_TURNS)
+                local.update {
+                    it.copy(
+                        conversation = if (wide.turns.size >= it.conversation.turns.size) wide else it.conversation,
+                        olderLoaded = true,
+                        loadingOlder = false,
+                    )
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(loadingOlder = false, error = friendly(t)) }
+        }
+    }
 
     /**
      * Rewind here: restart this session on its transcript cut before
@@ -905,7 +994,9 @@ class SessionViewModel(
     /** After a rewind the session is on a new conversation: drop the old one rather than append to it. */
     private fun startOver() {
         drawnTurnSeq = null
-        local.update { it.copy(conversation = Conversation(), loaded = false, newReply = false, unseen = 0) }
+        local.update {
+            it.copy(conversation = Conversation(), loaded = false, newReply = false, unseen = 0, olderLoaded = false, viewing = null, earlier = null)
+        }
     }
 
     /**
@@ -1233,7 +1324,7 @@ class SessionViewModel(
         nowSeconds: Long,
     ) = SessionUiState(
         session = row,
-        conversation = l.conversation,
+        conversation = l.earlier ?: l.conversation,
         loaded = l.loaded,
         draft = l.draft,
         loading = l.loading,
@@ -1259,6 +1350,11 @@ class SessionViewModel(
         // Read rather than combined: the hub's tool list is learned once per
         // connection, before any row this screen could draw arrives.
         rewindAvailable = fleet.capabilities.value.rewind,
+        conversations = l.conversations,
+        viewing = l.viewing,
+        canLoadOlder = l.viewing == null && l.conversation.truncated && !l.olderLoaded &&
+            l.conversation.turns.size < OLDER_TURNS,
+        loadingOlder = l.loadingOlder,
     )
 }
 
@@ -1416,3 +1512,6 @@ private val RETRY_NOT_READY = Friendly(
     "The session did not come back to its prompt in time. Your prompt is in the box; send it when the session is ready.",
     isError = true,
 )
+
+/** The widest window `session_conversation` answers: its `turns` maximum. */
+internal const val OLDER_TURNS: Int = 100
