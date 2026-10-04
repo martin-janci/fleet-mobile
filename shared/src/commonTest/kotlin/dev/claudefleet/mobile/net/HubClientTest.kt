@@ -1198,6 +1198,30 @@ class HubClientTest {
         assertTrue(caps.forgetting("work_link", "resume").accepts("work_link", "project_ids"), "forgetting an action keeps the arguments")
     }
 
+    /**
+     * Every tool the hub bounds at `Deadline::Lifecycle` rides the lifecycle
+     * deadline — a rewind respawns a pane over SSH, a restore may bring back
+     * many sessions — and `add_project`, bounded at `LONG_POLL_CAP` (660 s),
+     * a longer one still. On the ordinary 45 s they failed on the phone while
+     * the hub went on doing them.
+     */
+    @Test
+    fun slow_tools_ride_a_deadline_above_the_hubs_own_cap() = runTest {
+        val calls = Calls()
+        val engine = MockEngine { request ->
+            calls.requests += request
+            respond(sse(okResult("""{"id":1,"tmux_name":"t","host_alias":"h","owner":"o","repo":"r"}""")), HttpStatusCode.OK, sseHeaders)
+        }
+        val hub = HubClient(HttpClient(engine).withHubTimeouts(), BASE, "tok-phone")
+
+        hub.rewind(1, "u", "rewind", null)
+        hub.addProject("h", cloneUrl = "https://github.com/o/r")
+
+        val deadlines = calls.requests.map { it.getCapabilityOrNull(HttpTimeoutCapability)?.requestTimeoutMillis }
+        assertEquals(listOf<Long?>(HUB_LIFECYCLE_TIMEOUT_MS, HUB_LONG_POLL_TIMEOUT_MS), deadlines)
+        assertTrue(HUB_LONG_POLL_TIMEOUT_MS > 660_000L, "at or under the hub's own cap would cut a clone short")
+    }
+
     /** Starting work creates a session — a worktree, perhaps a clone — so it rides the lifecycle mount. */
     @Test
     fun work_link_rides_the_framed_mount_under_the_lifecycle_deadline() = runTest {

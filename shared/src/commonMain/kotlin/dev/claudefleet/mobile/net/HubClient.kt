@@ -153,8 +153,12 @@ class HubClient(
             put("name", tool)
             put("arguments", args)
         }
-        val deadline = if (tool in LIFECYCLE_TOOLS) HUB_LIFECYCLE_TIMEOUT_MS else null
-        val framed = tool in FRAMED_TOOLS || tool in LIFECYCLE_TOOLS
+        val deadline = when (tool) {
+            in LONG_POLL_TOOLS -> HUB_LONG_POLL_TIMEOUT_MS
+            in LIFECYCLE_TOOLS -> HUB_LIFECYCLE_TIMEOUT_MS
+            else -> null
+        }
+        val framed = tool in FRAMED_TOOLS || tool in LIFECYCLE_TOOLS || tool in LONG_POLL_TOOLS
         val result = rpc("tools/call", params, framed, deadline)
         if (result["isError"]?.asBooleanOrNull() == true) throw toolError(result)
         // Inside the try, not outside it: [HubError] claims to be the closed set
@@ -1627,7 +1631,34 @@ class HubClient(
          * same mount costs nothing but the framing. `ensure_operator` is
          * `Deadline::Lifecycle` on the hub too: the first call starts Claude.
          */
-        val LIFECYCLE_TOOLS = setOf("new_session", "work_link", "ensure_operator")
+        val LIFECYCLE_TOOLS = setOf(
+            "new_session",
+            "work_link",
+            "ensure_operator",
+            // Every other tool this app calls that the hub bounds at
+            // `Deadline::Lifecycle` (`TOOL_POLICIES` in its `guard.rs`): each
+            // runs on a host over SSH, some for minutes — a restore of many
+            // sessions, a recreate, a move. Left on the ordinary deadline they
+            // gave up at 45 s on work the hub was still doing.
+            "rewind_conversation",
+            "spawn_review",
+            "recreate_session",
+            "repair_session",
+            "new_bg_session",
+            "restore_host_sessions",
+            "discover_lost_sessions",
+            "probe_host",
+            "usage_report",
+            "delete_worktree",
+            "move_session",
+        )
+
+        /**
+         * Tools the hub bounds at its `LONG_POLL_CAP` (660 s): `add_project`
+         * may clone a large repository. [HUB_LONG_POLL_TIMEOUT_MS] is half a
+         * minute above that, for the same reason as [HUB_LIFECYCLE_TIMEOUT_MS].
+         */
+        val LONG_POLL_TOOLS = setOf("add_project")
         const val UNKNOWN_CODE = "E_UNKNOWN"
     }
 }
@@ -1700,6 +1731,9 @@ internal const val HUB_CONNECT_TIMEOUT_MS = 15_000L
  * the connection went.
  */
 internal const val HUB_LIFECYCLE_TIMEOUT_MS = 330_000L
+
+/** The deadline for a call the hub bounds at `LONG_POLL_CAP` (660 s): half a minute above it. */
+internal const val HUB_LONG_POLL_TIMEOUT_MS = 690_000L
 
 /**
  * How much of one reply this app will read, in bytes.
