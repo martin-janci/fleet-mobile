@@ -431,6 +431,25 @@ class HubClient(
     suspend fun restart(sessionId: Long): Unit =
         call("restart_session", buildJsonObject { put("session_id", sessionId) }) { }
 
+    /**
+     * Copy the session's transcript up to [anchorUuid] (a turn's
+     * `prompt_uuid`; null keeps all of it) into a new conversation:
+     * [mode] `"rewind"` restarts this session on the copy, `"fork"` starts a
+     * new session on it — in a new worktree of [newWorktree]'s name when one
+     * is given. The original transcript is never changed. Answers the row:
+     * a fork's is the new session.
+     */
+    suspend fun rewind(sessionId: Long, anchorUuid: String?, mode: String, newWorktree: String?): SessionRow =
+        call(
+            "rewind_conversation",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("mode", mode)
+                if (anchorUuid != null) put("anchor_uuid", anchorUuid)
+                if (newWorktree != null) put("new_worktree", newWorktree)
+            },
+        ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
+
     /** Ask the session to persist its work, then arm deletion once it is clean. */
     suspend fun safeKill(sessionId: Long): Unit =
         call("safe_kill_session", buildJsonObject { put("session_id", sessionId) }) { }

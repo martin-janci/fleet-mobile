@@ -155,6 +155,11 @@ data class SessionUiState(
      * happened to be built.
      */
     val nowSeconds: Long = 0,
+    /**
+     * The hub has `rewind_conversation` (`HubCapabilities.rewind`). With
+     * [canManage], what offers Rewind here, Retry and Fork here under a reply.
+     */
+    val rewindAvailable: Boolean = false,
 ) {
     /**
      * Whether the ⋮ menu is offered at all: a readonly credential may not
@@ -167,6 +172,10 @@ data class SessionUiState(
      */
     val canManage: Boolean
         get() = !readOnly && session != null && !session.isController
+
+    /** Whether a reply offers Rewind here, Retry and Fork here at all — see [replyActionsFor]. */
+    val canRewind: Boolean
+        get() = canManage && rewindAvailable
 
     /** Restart carries no narrowing beyond [canManage] — see [BlockedCard.offerRestart] for when it is worth showing. */
     val canRestart: Boolean
@@ -846,6 +855,83 @@ class SessionViewModel(
      */
     fun restart(): Job = runManaged(::canRestartNow) { actions.restart(sessionId) }
 
+    /**
+     * Rewind here: restart this session on its transcript cut before
+     * [anchorUuid] — the turn's own prompt and everything after it go. The
+     * original transcript is kept by the hub; the screen starts over on the
+     * new conversation rather than merging it into the old one.
+     */
+    fun rewind(anchorUuid: String): Job = runManaged(::canManageNow) {
+        actions.rewind(sessionId, anchorUuid, MODE_REWIND)
+        startOver()
+    }
+
+    /**
+     * Retry: [rewind] to before [prompt], then send [prompt] again once the
+     * respawned REPL is back at its input ([awaitReplReady]). A REPL that
+     * does not come back in time, or a send that fails, leaves [prompt] in
+     * the composer with the reason, so it is never silently lost.
+     */
+    fun retry(anchorUuid: String, prompt: String): Job = runManagedThen(::canManageNow) {
+        actions.rewind(sessionId, anchorUuid, MODE_REWIND)
+        startOver()
+        if (!awaitReplReady()) {
+            local.update { it.copy(draft = prompt) }
+            return@runManagedThen RETRY_NOT_READY
+        }
+        try {
+            actions.sendPrompt(sessionId, prompt)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(draft = prompt) }
+            throw t
+        }
+        null
+    }
+
+    /**
+     * Fork here: a new session on a copy of this one's transcript kept
+     * through [anchorUuid] (null keeps all of it), in a new worktree named
+     * [newWorktree] when given. This session is left alone; [onForked] is
+     * handed the new session's id to open.
+     */
+    fun fork(anchorUuid: String?, newWorktree: String?, onForked: (Long) -> Unit): Job =
+        runManaged(::canManageNow) {
+            val row = actions.rewind(sessionId, anchorUuid, MODE_FORK, newWorktree)
+            onForked(row.id)
+        }
+
+    /** After a rewind the session is on a new conversation: drop the old one rather than append to it. */
+    private fun startOver() {
+        drawnTurnSeq = null
+        local.update { it.copy(conversation = Conversation(), loaded = false, newReply = false, unseen = 0) }
+    }
+
+    /**
+     * Poll `session_activity` until the REPL reads [isReplReady] on
+     * [READY_STREAK] probes in a row, for at most [READY_TIMEOUT_MS]. A probe
+     * that fails is not readiness: it resets the streak.
+     */
+    private suspend fun awaitReplReady(): Boolean {
+        var streak = 0
+        var waited = 0L
+        while (true) {
+            delay(READY_POLL_MS)
+            waited += READY_POLL_MS
+            val ready = try {
+                isReplReady(actions.activity(sessionId))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                false
+            }
+            streak = if (ready) streak + 1 else 0
+            if (streak >= READY_STREAK) return true
+            if (waited >= READY_TIMEOUT_MS) return false
+        }
+    }
+
     /** Ask the session to persist its work, then arm deletion once it is clean. */
     fun safeKill(): Job = runManaged(::canManageNow) { actions.safeKill(sessionId) }
 
@@ -883,13 +969,22 @@ class SessionViewModel(
      * row it would act on next has actually been refreshed, and Send/answer
      * cannot fire into the middle of it either.
      */
-    private fun runManaged(guard: () -> Boolean, call: suspend () -> Unit): Job = scope.launch {
+    private fun runManaged(guard: () -> Boolean, call: suspend () -> Unit): Job =
+        runManagedThen(guard) { call(); null }
+
+    /**
+     * [runManaged] for a call that can succeed and still have something to
+     * say: what [call] answers is put on the banner AFTER the follow-up read,
+     * since a read that lands clears the banner (it is about reads and sends).
+     */
+    private fun runManagedThen(guard: () -> Boolean, call: suspend () -> Friendly?): Job = scope.launch {
         val l = local.value
         if (!guard() || !connected() || !idle(l.sending, l.answering, l.busy)) return@launch
         local.update { it.copy(busy = true, error = null) }
         try {
-            call()
+            val after = call()
             requestRead(first = false)
+            if (after != null) local.update { it.copy(error = after) }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -1161,6 +1256,9 @@ class SessionViewModel(
         terminal = l.terminal,
         busy = l.busy,
         nowSeconds = nowSeconds,
+        // Read rather than combined: the hub's tool list is learned once per
+        // connection, before any row this screen could draw arrives.
+        rewindAvailable = fleet.capabilities.value.rewind,
     )
 }
 
@@ -1308,3 +1406,13 @@ private object EphemeralPrefs : Prefs {
 private object EphemeralQuickReplies : QuickReplyActions {
     override suspend fun quickReplies(set: List<QuickReply>?): List<QuickReply> = set ?: emptyList()
 }
+
+private const val MODE_REWIND = "rewind"
+private const val MODE_FORK = "fork"
+
+/** Retry's rewind landed but the REPL did not come back in time; the prompt waits in the composer. */
+private val RETRY_NOT_READY = Friendly(
+    "Rewound — the prompt was not sent again",
+    "The session did not come back to its prompt in time. Your prompt is in the box; send it when the session is ready.",
+    isError = true,
+)

@@ -85,6 +85,9 @@ data class HubCapabilities(
     val sendFile: Boolean get() = SEND_FILE in tools
     val removeDownload: Boolean get() = REMOVE_DOWNLOAD in tools
 
+    /** Reply actions — Rewind here, Retry, Fork here (`rewind_conversation`, a write). */
+    val rewind: Boolean get() = REWIND_CONVERSATION in tools
+
     fun has(tool: String, action: String): Boolean =
         tool in tools &&
             actions[tool]?.contains(action) != false &&
@@ -117,6 +120,7 @@ data class HubCapabilities(
         const val LIST_DOWNLOADS = "list_downloads"
         const val SEND_FILE = "send_file"
         const val REMOVE_DOWNLOAD = "remove_download"
+        const val REWIND_CONVERSATION = "rewind_conversation"
 
         fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions, params = catalog.params)
     }

@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.data
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.SendPromptResult
+import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.ToolDetail
 import dev.claudefleet.mobile.model.WaitResult
 import kotlinx.coroutines.CancellationException
@@ -67,6 +68,14 @@ interface SessionActions {
     /** Kill and recreate the tmux session in place — for a wedged REPL. */
     suspend fun restart(sessionId: Long)
 
+    /**
+     * `rewind_conversation`: [mode] `"rewind"` restarts this session on its
+     * transcript cut before [anchorUuid]; `"fork"` starts a new session on
+     * the copy, in a new worktree of [newWorktree]'s name when given.
+     * Answers the row — a fork's is the new session.
+     */
+    suspend fun rewind(sessionId: Long, anchorUuid: String?, mode: String, newWorktree: String? = null): SessionRow
+
     /** Ask the session to persist its work, then arm deletion once it is clean. */
     suspend fun safeKill(sessionId: Long)
 
@@ -124,6 +133,9 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
 
     override suspend fun restart(sessionId: Long) =
         session.withClient { it.restart(sessionId) }
+
+    override suspend fun rewind(sessionId: Long, anchorUuid: String?, mode: String, newWorktree: String?): SessionRow =
+        session.withClient { it.rewind(sessionId, anchorUuid, mode, newWorktree) }
 
     override suspend fun safeKill(sessionId: Long) =
         session.withClient { it.safeKill(sessionId) }

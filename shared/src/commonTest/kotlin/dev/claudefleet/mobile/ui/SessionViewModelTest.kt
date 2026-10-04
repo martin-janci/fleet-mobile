@@ -21,6 +21,7 @@ import dev.claudefleet.mobile.model.ToolDetail
 import dev.claudefleet.mobile.model.WaitResult
 import dev.claudefleet.mobile.net.HUB_VERSION_DIGIT_KEYS
 import dev.claudefleet.mobile.net.HUB_VERSION_KEYS
+import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.data.FakeQuickReplyActions
 import dev.claudefleet.mobile.store.FakePrefs
@@ -44,6 +45,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 private const val ID = 42L
+private const val FORKED = 77L
 
 private fun row(
     status: String? = "working",
@@ -74,7 +76,11 @@ private fun turn(at: String, prompt: String, vararg items: ConvItem) =
 
 private fun text(s: String) = ConvItem.Text(s)
 
-private class FakeFleetState(rows: List<SessionRow> = listOf(row())) : FleetState {
+private class FakeFleetState(
+    rows: List<SessionRow> = listOf(row()),
+    tools: Set<String> = emptySet(),
+) : FleetState {
+    override val capabilities = MutableStateFlow(HubCapabilities(tools = tools))
     override val sessions = MutableStateFlow(rows)
     override val hosts = MutableStateFlow(listOf(HostRow(alias = "pine", reachable = true)))
     override val projects = MutableStateFlow(listOf(ProjectRow(id = 1, owner = "o", repo = "r")))
@@ -217,10 +223,13 @@ private class FakeActions : SessionActions {
     var probes = 0
         private set
 
+    /** When set, answers each probe in turn instead of [probeAnswer]. */
+    var onProbe: (() -> ActivityProbe)? = null
+
     override suspend fun activity(sessionId: Long): ActivityProbe {
         probes += 1
         probeFails?.let { throw it }
-        return probeAnswer
+        return onProbe?.invoke() ?: probeAnswer
     }
 
     override suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult {
@@ -261,6 +270,16 @@ private class FakeActions : SessionActions {
 
     override suspend fun restart(sessionId: Long) {
         restarted += sessionId
+    }
+
+    /** Every `rewind_conversation` call, as (anchor, mode, new worktree). */
+    val rewound = mutableListOf<Triple<String?, String, String?>>()
+    var rewindFails: Throwable? = null
+
+    override suspend fun rewind(sessionId: Long, anchorUuid: String?, mode: String, newWorktree: String?): SessionRow {
+        rewound += Triple(anchorUuid, mode, newWorktree)
+        rewindFails?.let { throw it }
+        return if (mode == "fork") row().copy(id = FORKED) else row()
     }
 
     override suspend fun safeKill(sessionId: Long) {
@@ -2776,5 +2795,124 @@ class SessionViewModelTest {
         restarting.join()
         runCurrent()
         assertTrue(vm.state.value.canAnswer, "live again once the management call has landed")
+    }
+
+    // --- reply actions -------------------------------------------------------
+
+    private val rewindable = setOf(HubCapabilities.REWIND_CONVERSATION)
+
+    private val ready = ActivityProbe(claudeStatus = "idle")
+
+    @Test
+    fun reply_actions_are_offered_only_by_a_hub_that_has_the_tool_to_a_token_that_may_write() = runTest {
+        assertFalse(SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope).state.value.canRewind)
+        assertTrue(SessionViewModel(ID, FakeFleetState(tools = rewindable), FakeActions(), backgroundScope).state.value.canRewind)
+        assertFalse(
+            SessionViewModel(ID, FakeFleetState(tools = rewindable), FakeActions(), backgroundScope, canSendPrompts = false)
+                .state.value.canRewind,
+        )
+    }
+
+    @Test
+    fun rewind_calls_the_hub_and_starts_the_conversation_over() = runTest {
+        val actions = FakeActions()
+        actions.answer = Conversation(turns = listOf(ConvTurn(prompt = "a", at = "t1"), ConvTurn(prompt = "b", at = "t2")))
+        val vm = SessionViewModel(ID, FakeFleetState(tools = rewindable), actions, backgroundScope)
+        vm.load().join()
+        runCurrent()
+        actions.answer = Conversation(turns = listOf(ConvTurn(prompt = "a", at = "t1")))
+
+        vm.rewind("uuid-b").join()
+        runCurrent()
+
+        assertEquals(listOf(Triple<String?, String, String?>("uuid-b", "rewind", null)), actions.rewound)
+        // Replaced, not merged: the rewound-away turn is gone from the screen.
+        assertEquals(listOf("a"), vm.state.value.conversation.turns.map { it.prompt })
+        assertFalse(vm.state.value.busy)
+    }
+
+    @Test
+    fun retry_rewinds_then_sends_the_prompt_once_the_repl_is_back() = runTest {
+        val actions = FakeActions()
+        actions.probeAnswer = ready
+        val vm = SessionViewModel(ID, FakeFleetState(tools = rewindable), actions, backgroundScope)
+
+        vm.retry("uuid-b", "do it again").join()
+        runCurrent()
+
+        assertEquals("rewind", actions.rewound.single().second)
+        assertEquals(listOf("do it again"), actions.sentPrompts)
+        assertTrue(actions.probes >= READY_STREAK, "it waited for the REPL before sending")
+    }
+
+    @Test
+    fun retry_keeps_the_prompt_in_the_box_when_the_repl_does_not_come_back() = runTest {
+        val actions = FakeActions()
+        actions.probeAnswer = ActivityProbe(claudeStatus = "working", spinner = "Thinking…")
+        val vm = SessionViewModel(ID, FakeFleetState(tools = rewindable), actions, backgroundScope)
+
+        vm.retry("uuid-b", "do it again").join()
+        runCurrent()
+
+        assertTrue(actions.sentPrompts.isEmpty())
+        assertEquals("do it again", vm.state.value.draft)
+        assertNotNull(vm.state.value.error)
+    }
+
+    @Test
+    fun a_ready_probe_between_two_unready_ones_is_not_enough() = runTest {
+        val actions = FakeActions()
+        val answers = ArrayDeque(listOf(ready, ActivityProbe(claudeStatus = "working"), ready, ready))
+        actions.probeAnswer = ready
+        actions.onProbe = { answers.removeFirstOrNull() ?: ready }
+        val vm = SessionViewModel(ID, FakeFleetState(tools = rewindable), actions, backgroundScope)
+
+        vm.retry("uuid-b", "again").join()
+        runCurrent()
+
+        assertEquals(4, actions.probes)
+        assertEquals(listOf("again"), actions.sentPrompts)
+    }
+
+    @Test
+    fun fork_opens_the_new_session() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(tools = rewindable), actions, backgroundScope)
+        var opened: Long? = null
+
+        vm.fork("uuid-c", "fork-of-x") { opened = it }.join()
+        runCurrent()
+
+        assertEquals(listOf(Triple<String?, String, String?>("uuid-c", "fork", "fork-of-x")), actions.rewound)
+        assertEquals(FORKED, opened)
+    }
+
+    @Test
+    fun a_refused_rewind_says_why_and_changes_nothing() = runTest {
+        val actions = FakeActions()
+        actions.rewindFails = HubError.Tool("E_INVALID_STATE", "the session is working")
+        actions.answer = Conversation(turns = listOf(ConvTurn(prompt = "a", at = "t1")))
+        val vm = SessionViewModel(ID, FakeFleetState(tools = rewindable), actions, backgroundScope)
+        vm.load().join()
+        runCurrent()
+
+        vm.rewind("uuid-a").join()
+        runCurrent()
+
+        assertNotNull(vm.state.value.error)
+        assertEquals(listOf("a"), vm.state.value.conversation.turns.map { it.prompt })
+    }
+
+    @Test
+    fun reply_actions_make_no_call_for_a_readonly_credential() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(tools = rewindable), actions, backgroundScope, canSendPrompts = false)
+
+        vm.rewind("u").join()
+        vm.retry("u", "p").join()
+        vm.fork(null, null) {}.join()
+        runCurrent()
+
+        assertTrue(actions.rewound.isEmpty())
     }
 }

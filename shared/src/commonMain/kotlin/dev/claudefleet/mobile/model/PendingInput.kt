@@ -38,13 +38,15 @@ fun PendingInput.fingerprint(): List<Any?> =
  * What `session_activity` answers: one `capture-pane` read of the session's
  * pane, seconds old rather than up to a reconcile tick old like the row.
  * [pendingInput] is the dialog on screen right now. The hub also sends
- * `current_activity`, `waiting_for` and `spinner`, left off here because the
- * only thing this app reads the probe for is the check made immediately
- * before a dialog answer goes out.
+ * `current_activity` and `waiting_for`, left off here because nothing reads
+ * them: the probe is the check made immediately before a dialog answer goes
+ * out, and Retry's wait for a respawned REPL (see `isReplReady`), which is
+ * what [spinner] — the "generating" line, when one is on screen — is for.
  */
 @Serializable
 data class ActivityProbe(
     @SerialName("claude_status") val claudeStatus: String? = null,
     @SerialName("stuck_kind") val stuckKind: String? = null,
     @SerialName("pending_input") val pendingInput: PendingInput? = null,
+    val spinner: String? = null,
 )
