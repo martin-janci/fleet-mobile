@@ -20,6 +20,11 @@ import dev.claudefleet.mobile.model.WorkTreeFilters
 import dev.claudefleet.mobile.model.WorkTreePage
 import dev.claudefleet.mobile.model.WorkView
 import dev.claudefleet.mobile.model.WorkViewDraft
+import dev.claudefleet.mobile.model.TidyReport
+import dev.claudefleet.mobile.model.TidyApplyResult
+import dev.claudefleet.mobile.model.TidyApplyItem
+import dev.claudefleet.mobile.model.ReopenedWork
+import dev.claudefleet.mobile.model.PastWorkSummary
 
 /**
  * The work-graph calls a screen may make — narrow for the same reason
@@ -46,6 +51,19 @@ interface WorkActions {
 
     /** [key]'s context card: acceptance criteria from the hub's cache. */
     suspend fun card(key: String): TicketCard
+
+    /** What Tidy-up suggests, and the work that came back after it was done. */
+    suspend fun tidy(): TidyReport
+    suspend fun reopened(): List<ReopenedWork>
+
+    /** Apply Tidy-up's choices; each item's outcome. */
+    suspend fun tidyApply(items: List<TidyApplyItem>): List<TidyApplyResult>
+
+    /** Clear an item's "reopened". */
+    suspend fun dismissReopened(itemId: Long)
+
+    /** A Claude-written summary of a past session on [key], kept in its journal. */
+    suspend fun summarize(key: String, linkId: Long): PastWorkSummary
 
     /**
      * Accept a suggestion. [primary] false confirms it as a secondary link;
@@ -159,6 +177,17 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
     override suspend fun lookup(keyOrUrl: String): Ticket = session.withClient { it.workLookup(keyOrUrl) }
 
     override suspend fun resumePlan(key: String): ResumePlan = session.withClient { it.workResumePlan(key) }
+
+    override suspend fun tidy(): TidyReport = session.withClient { it.workTidy() }
+
+    override suspend fun reopened(): List<ReopenedWork> = session.withClient { it.workReopened() }
+
+    override suspend fun tidyApply(items: List<TidyApplyItem>): List<TidyApplyResult> =
+        session.withClient { it.workTidyApply(items) }.results
+
+    override suspend fun dismissReopened(itemId: Long) = session.withClient { it.workDismissReopened(itemId) }
+
+    override suspend fun summarize(key: String, linkId: Long): PastWorkSummary = session.withClient { it.workSummarize(key, linkId) }
 
     override suspend fun today(since: Long): Today = session.withClient { it.workToday(since) }
 

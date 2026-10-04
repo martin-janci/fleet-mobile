@@ -49,6 +49,11 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import dev.claudefleet.mobile.model.TidyReport
+import dev.claudefleet.mobile.model.TidyApplyResult
+import dev.claudefleet.mobile.model.TidyApplyItem
+import dev.claudefleet.mobile.model.ReopenedWork
+import dev.claudefleet.mobile.model.PastWorkSummary
 
 /** A fleet whose capabilities the test sets, and which forgets actions the way the repository does. */
 internal class WorkFleet(
@@ -186,6 +191,34 @@ internal class FakeWorkActions : WorkActions {
     override suspend fun card(key: String): TicketCard {
         cardCalls += key
         return cardAnswer ?: throw HubError.Tool("E_NOTFOUND", "no card")
+    }
+
+    var tidyAnswer = TidyReport()
+    var reopenedAnswer: List<ReopenedWork> = emptyList()
+    val applied = mutableListOf<List<TidyApplyItem>>()
+    var summaryAnswer = PastWorkSummary(key = "PAY-9", summary = "It fixed the refund rounding.")
+
+    override suspend fun tidy(): TidyReport {
+        calls += "tidy"
+        return tidyAnswer
+    }
+
+    override suspend fun reopened(): List<ReopenedWork> = reopenedAnswer
+
+    override suspend fun tidyApply(items: List<TidyApplyItem>): List<TidyApplyResult> {
+        applied += items
+        fail?.let { throw it }
+        return items.map { TidyApplyResult(sessionId = it.sessionId, action = it.action, ok = true) }
+    }
+
+    override suspend fun dismissReopened(itemId: Long) {
+        calls += "dismiss $itemId"
+    }
+
+    override suspend fun summarize(key: String, linkId: Long): PastWorkSummary {
+        calls += "summarize $key $linkId"
+        fail?.let { throw it }
+        return summaryAnswer
     }
 
     override suspend fun handover(sessionId: Long) = record("handover $sessionId")

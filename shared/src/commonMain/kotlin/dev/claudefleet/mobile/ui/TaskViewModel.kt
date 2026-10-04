@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import dev.claudefleet.mobile.model.PastWorkSummary
 
 data class TaskUiState(
     val taskId: String,
@@ -77,6 +78,12 @@ data class TaskUiState(
     /** The hub does not know this task, or it is not visible to this token. */
     val gone: Boolean = false,
     val stale: String? = null,
+    /** A past session can be summarised for the journal (`work_link { action: summarize }`). */
+    val canSummarize: Boolean = false,
+    /** The past session being summarised (its link), while the model call runs. */
+    val summarizing: Long? = null,
+    /** The last summary, until dismissed. */
+    val summary: PastWorkSummary? = null,
 ) {
     val task get() = detail?.task
 }
@@ -133,6 +140,8 @@ class TaskViewModel(
         val error: Friendly? = null,
         val conflict: Boolean = false,
         val gone: Boolean = false,
+        val summarizing: Long? = null,
+        val summary: PastWorkSummary? = null,
     )
 
     private val local = MutableStateFlow(Local())
@@ -274,6 +283,31 @@ class TaskViewModel(
     /** Back to the derived group: an empty `group`. */
     fun clearPlacement(): Job? = if (state.value.canClearPlacement) place("") else null
 
+    /**
+     * A Claude-written summary of a past session on this task (a model call
+     * on its host), kept in the work's journal and shown until dismissed.
+     */
+    fun summarize(link: WorkTaskLink): Job? {
+        val s = state.value
+        val key = s.task?.key ?: return null
+        if (!s.canSummarize || local.value.summarizing != null) return null
+        local.update { it.copy(summarizing = link.linkId, error = null) }
+        return callScope.launch {
+            try {
+                val summary = actions.summarize(key, link.linkId)
+                local.update { it.copy(summarizing = null, summary = summary) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                local.update { it.copy(summarizing = null, error = friendly(t)) }
+            }
+        }
+    }
+
+    fun dismissSummary() {
+        local.update { it.copy(summary = null) }
+    }
+
     fun dismissError() {
         local.update { it.copy(error = null, conflict = false) }
     }
@@ -327,6 +361,9 @@ class TaskViewModel(
             conflict = l.conflict,
             gone = l.gone,
             stale = if (!connected && detail != null) l.asOf?.let { staleLine(it, utcOffset(it)) } else null,
+            canSummarize = key != null && allowed(caps, status, SUMMARIZE),
+            summarizing = l.summarizing,
+            summary = l.summary,
         )
     }
 
@@ -353,5 +390,6 @@ class TaskViewModel(
         const val PLACE = "place"
         const val RESUME = "resume"
         const val START = "start"
+        const val SUMMARIZE = "summarize"
     }
 }

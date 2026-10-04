@@ -85,6 +85,8 @@ data class TodayHandlers(
     val onSetHost: (String?) -> Unit = {},
     val onToggleTicketsOnly: () -> Unit = {},
     val onClearFilters: () -> Unit = {},
+    /** Tidy-up — what is stale, and the choice of what to do with it; null where it is not offered. */
+    val onOpenTidy: (() -> Unit)? = null,
 )
 
 /**
@@ -163,6 +165,11 @@ fun TodaySheet(state: TodayUiState, handlers: TodayHandlers) {
                     }
                 }
                 groupSection(TodaySection.Stale, v.stale, handlers)
+                handlers.onOpenTidy?.let { tidy ->
+                    item(key = "tidy") {
+                        TextButton(onClick = tidy, modifier = Modifier.padding(horizontal = 8.dp)) { Text("Tidy up…") }
+                    }
+                }
             }
             TodayFooter(
                 enabled = state.loaded,
