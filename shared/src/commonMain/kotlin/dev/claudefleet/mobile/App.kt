@@ -50,7 +50,9 @@ import dev.claudefleet.mobile.data.RepoActions
 import dev.claudefleet.mobile.data.HostActions
 import dev.claudefleet.mobile.data.HubHostActions
 import dev.claudefleet.mobile.data.HubProjectActions
+import dev.claudefleet.mobile.data.HubMoveActions
 import dev.claudefleet.mobile.data.HubSessionActions
+import dev.claudefleet.mobile.data.MoveActions
 import dev.claudefleet.mobile.data.ProjectActions
 import dev.claudefleet.mobile.data.HubUsageActions
 import dev.claudefleet.mobile.data.UsageActions
@@ -110,6 +112,9 @@ import dev.claudefleet.mobile.ui.HostDetailSheet
 import dev.claudefleet.mobile.ui.HostDetailViewModel
 import dev.claudefleet.mobile.ui.ProjectToolsHandlers
 import dev.claudefleet.mobile.ui.ProjectToolsViewModel
+import dev.claudefleet.mobile.ui.MoveHandlers
+import dev.claudefleet.mobile.ui.MoveSheet
+import dev.claudefleet.mobile.ui.MoveViewModel
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.searchEverywhere
 import dev.claudefleet.mobile.ui.TidyHandlers
@@ -213,6 +218,7 @@ class AppContainer(
     val usageActions: UsageActions = HubUsageActions(session)
     val hostActions: HostActions = HubHostActions(session)
     val projectActions: ProjectActions = HubProjectActions(session)
+    val moveActions: MoveActions = HubMoveActions(session)
 
     /** The hub's own version, for the Settings screen to show beside this app's. */
     val versionActions: VersionActions = HubVersionActions(session)
@@ -1167,6 +1173,10 @@ private fun SessionRoute(
         )
     }
     val details by detailsVm.state.collectAsState()
+    val moveVm = remember(sessionId, repository, scope) {
+        MoveViewModel(sessionId, repository, container.moveActions, scope, credentials.canWrite)
+    }
+    val move by moveVm.state.collectAsState()
     // A tool row in an earlier conversation is looked up in that transcript.
     SideEffect { toolDetailsModel.claudeSessionId = state.viewing?.claudeSessionId }
     // Read once per visit: whether the hint is owed does not change under
@@ -1252,12 +1262,29 @@ private fun SessionRoute(
         onRepair = { vm.repair() },
         onDismissRepair = vm::dismissRepair,
         onPressEnter = { vm.pressEnter() },
+        onMove = moveVm::open.takeIf { move.available },
         // A dismissed ghost has no screen left to show: back to where it was opened from.
         onDismissGhost = { vm.dismissGhost(onBack) },
         onOpenRepo = { onOpenRepo(sessionId) }.takeIf { caps.repo || caps.repoLog || caps.repoFiles },
         showFoldHint = foldHintOwed,
         onFoldHintShown = { container.hints.markShown(Hints.DOUBLE_TAP) },
     )
+    if (move.open) {
+        MoveSheet(
+            state = move,
+            nowSeconds = epochSeconds(),
+            handlers = MoveHandlers(
+                onClose = moveVm::close,
+                onTarget = { moveVm.selectTarget(it) },
+                onKeepSource = moveVm::setKeepSource,
+                onWhenIdle = moveVm::setWhenIdle,
+                // The moved session is another row: open it, with this one a Back away.
+                onMove = { moveVm.move(onOpenSession) },
+                onCancelWait = { moveVm.cancelWait() },
+                onDismissError = moveVm::dismissError,
+            ),
+        )
+    }
     if (details.open) {
         val rows by repository.sessions.collectAsState()
         SessionDetailsSheet(

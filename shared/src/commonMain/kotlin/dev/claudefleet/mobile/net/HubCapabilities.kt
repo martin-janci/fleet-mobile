@@ -106,6 +106,9 @@ data class HubCapabilities(
     val recreateSession: Boolean get() = RECREATE_SESSION in tools
     val dismissGhost: Boolean get() = DISMISS_GHOST_SESSION in tools
 
+    /** Moving a session to another host. */
+    val moveSession: Boolean get() = MOVE_SESSION in tools
+
     /** Adding a project and a host's worktrees. */
     val addProject: Boolean get() = ADD_PROJECT in tools
     val githubRepos: Boolean get() = LIST_GITHUB_REPOS in tools
@@ -172,6 +175,7 @@ data class HubCapabilities(
         const val USAGE_REPORT = "usage_report"
         const val SETTING_HISTORY = "setting_history"
         const val ADD_PROJECT = "add_project"
+        const val MOVE_SESSION = "move_session"
         const val LIST_GITHUB_REPOS = "list_github_repos"
         const val LIST_HOST_WORKTREES = "list_host_worktrees"
         const val DELETE_WORKTREE = "delete_worktree"
