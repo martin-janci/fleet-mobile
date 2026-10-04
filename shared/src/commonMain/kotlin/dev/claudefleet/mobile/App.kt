@@ -107,6 +107,7 @@ import dev.claudefleet.mobile.ui.HostDetailHandlers
 import dev.claudefleet.mobile.ui.HostDetailSheet
 import dev.claudefleet.mobile.ui.HostDetailViewModel
 import dev.claudefleet.mobile.ui.SessionScreen
+import dev.claudefleet.mobile.ui.searchEverywhere
 import dev.claudefleet.mobile.ui.TidyHandlers
 import dev.claudefleet.mobile.ui.TidySheet
 import dev.claudefleet.mobile.ui.TidyViewModel
@@ -588,10 +589,16 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                     val todayState by today.state.collectAsState()
                     val agentState by agent.state.collectAsState()
                     val bulkState by bulk.state.collectAsState()
+                    val searchHosts by repository.hosts.collectAsState()
+                    val searchProjects by repository.projects.collectAsState()
+                    val hits = remember(state.filters.query, searchHosts, searchProjects, ticketsState.available) {
+                        searchEverywhere(state.filters.query, searchHosts, searchProjects, ticketsState.available)
+                    }
                     SessionsScreen(
                         state = state,
                         agent = agentState,
                         bulk = bulkState,
+                        hits = hits,
                         handlers = SessionsHandlers(
                             onOpenSession = nav::open,
                             onToggleNeedsAttention = sessions::toggleNeedsAttentionOnly,
@@ -629,6 +636,9 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                             onBulkSend = { bulk.send(it) },
                             onBulkKill = { bulk.kill() },
                             onDismissBulkOutcome = bulk::dismissOutcome,
+                            onSearchHost = { nav.showSessionsFor(it) },
+                            onSearchProject = { nav.newSessionIn(it) },
+                            onSearchTicket = { q -> tickets.open(); tickets.onQuery(q); tickets.search() },
                         ),
                     )
                     if (state.filtersOpen) {
@@ -733,6 +743,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                     NewSessionRoute(
                         initialHost = current.hostAlias,
                         ticketKey = current.ticketKey,
+                        initialProject = current.projectId,
                         container = container,
                         repository = repository,
                         credentials = credentials,
@@ -948,6 +959,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
 private fun NewSessionRoute(
     initialHost: String?,
     ticketKey: String?,
+    initialProject: Long? = null,
     container: AppContainer,
     repository: FleetRepository,
     credentials: Credentials,
@@ -970,6 +982,7 @@ private fun NewSessionRoute(
         )
     }
     val state by vm.state.collectAsState()
+    LaunchedEffect(vm, initialProject) { initialProject?.let(vm::selectProject) }
     NewSessionScreen(
         state = state,
         onBack = onBack,

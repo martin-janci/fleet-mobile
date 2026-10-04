@@ -23,6 +23,8 @@ sealed interface Screen {
         val hostAlias: String? = null,
         /** Ticket mode (M8.4): start work on this key rather than a plain session. */
         val ticketKey: String? = null,
+        /** The project to start in, chosen already (a search hit). */
+        val projectId: Long? = null,
     ) : Screen
     data object Hosts : Screen
     data object Settings : Screen
@@ -166,6 +168,9 @@ class Navigator {
      * form, in ticket mode, and [created] opens what it makes exactly as for
      * a plain session.
      */
+    /** The New session form with [projectId] picked already — a search hit's "New session in…". */
+    fun newSessionIn(projectId: Long) = move { s -> s.pushing(s.screen).going(Screen.NewSession(projectId = projectId)) }
+
     fun newSession(ticketKey: String? = null) = move { s ->
         val current = s.screen
         val host = when (current) {
