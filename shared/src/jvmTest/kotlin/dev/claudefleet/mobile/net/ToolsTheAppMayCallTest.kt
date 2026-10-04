@@ -155,6 +155,13 @@ class ToolsTheAppMayCallTest {
         "discover_lost_sessions",
         "recreate_session",
         "dismiss_ghost_session",
+        // A review session, a workspace repair, a background agent: writes,
+        // `Access::Client`, offered only to a token that may write.
+        // `repair_session` is `confirm: true` on the hub and may answer
+        // `E_CONFIRM_REQUIRED` (approve it on the desktop).
+        "spawn_review",
+        "repair_session",
+        "new_bg_session",
     )
 
     @Test

@@ -38,6 +38,8 @@ data class HostChoice(val alias: String, val reachable: Boolean)
 data class ProjectChoice(val id: Long, val label: String)
 
 data class NewSessionUiState(
+    /** A background agent may be started from here (`new_bg_session`, a pairing that may write, not ticket mode). */
+    val backgroundAvailable: Boolean = false,
     val hosts: List<HostChoice> = emptyList(),
     /** The host the session will go to: the person's pick, or the form's guess. */
     val host: String? = null,
@@ -336,6 +338,31 @@ class NewSessionViewModel(
     }
 
     /**
+     * A background agent on the chosen host instead: headless, supervised,
+     * started on [prompt] (`new_bg_session`). Its fleet row arrives with the
+     * next reconcile when the hub could not match it at once; then
+     * [onUntracked] says so rather than [onCreated] opening nothing.
+     */
+    fun startBackground(name: String, prompt: String, onUntracked: (String?) -> Unit): Job? {
+        val s = current()
+        val host = s.host ?: return null
+        if (!s.backgroundAvailable || s.creating || prompt.isBlank()) return null
+        local.update { it.copy(creating = true, error = null) }
+        return callScope.launch {
+            try {
+                val result = actions.newBackground(host, name.trim().ifEmpty { prompt.trim().take(40) }, prompt.trim())
+                local.update { it.copy(creating = false) }
+                val row = result.session
+                if (row != null) onCreated(row.id) else onUntracked(result.warning)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                local.update { it.copy(creating = false, error = friendly(t)) }
+            }
+        }
+    }
+
+    /**
      * Ticket mode's create: `work_link start` on the chosen host, with the
      * project only when the person picked one — otherwise the hub uses the
      * project that last worked on the key's prefix.
@@ -485,6 +512,7 @@ class NewSessionViewModel(
             orgLabel = orgLabel,
             confirm = confirm,
             result = l.result,
+            backgroundAvailable = canWrite && ticketKey == null && caps.newBgSession,
         )
     }
 

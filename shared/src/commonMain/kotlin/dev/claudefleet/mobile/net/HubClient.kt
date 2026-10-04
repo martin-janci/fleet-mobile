@@ -24,6 +24,8 @@ import dev.claudefleet.mobile.model.PagesBundle
 import dev.claudefleet.mobile.model.PairResult
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.QuickReply
+import dev.claudefleet.mobile.model.RepairReport
+import dev.claudefleet.mobile.model.NewBgSessionResult
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionEvent
@@ -478,6 +480,33 @@ class HubClient(
     /** The Claude accounts seen across the fleet's hosts (`list_accounts`, readonly). */
     suspend fun listAccounts(): List<AccountRow> =
         call("list_accounts") { json.decodeFromJsonElement(ListSerializer(AccountRow.serializer()), it) }
+
+    /** A review session in [sourceSessionId]'s worktree, seeded with [prompt] (`spawn_review`); answers its row. */
+    suspend fun spawnReview(sourceSessionId: Long, prompt: String): SessionRow =
+        call(
+            "spawn_review",
+            buildJsonObject {
+                put("source_session_id", sourceSessionId)
+                put("prompt", prompt)
+            },
+        ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
+
+    /** Make a session's directory a healthy worktree with its pane running there (`repair_session`). */
+    suspend fun repairSession(sessionId: Long): RepairReport =
+        call("repair_session", buildJsonObject { put("session_id", sessionId) }) {
+            json.decodeFromJsonElement(RepairReport.serializer(), it)
+        }
+
+    /** A supervised headless Claude session on [hostAlias] with [prompt] (`new_bg_session`). */
+    suspend fun newBgSession(hostAlias: String, name: String, prompt: String): NewBgSessionResult =
+        call(
+            "new_bg_session",
+            buildJsonObject {
+                put("host_alias", hostAlias)
+                put("name", name)
+                put("prompt", prompt)
+            },
+        ) { json.decodeFromJsonElement(NewBgSessionResult.serializer(), it) }
 
     /** Re-probe a host's reachability and versions (`probe_host`); answers its row. */
     suspend fun probeHost(alias: String): HostRow =

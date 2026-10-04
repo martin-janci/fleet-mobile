@@ -11,6 +11,7 @@ import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.ConversationSummary
+import dev.claudefleet.mobile.model.RepairReport
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.PendingInput
@@ -47,6 +48,7 @@ import kotlin.test.assertTrue
 
 private const val ID = 42L
 private const val FORKED = 77L
+private const val REVIEW = 78L
 
 private fun row(
     status: String? = "working",
@@ -284,6 +286,16 @@ private class FakeActions : SessionActions {
     override suspend fun restart(sessionId: Long) {
         restarted += sessionId
     }
+
+    val reviews = mutableListOf<String>()
+    var repairAnswer = RepairReport(healthy = true, actions = listOf("respawned the pane"))
+
+    override suspend fun spawnReview(sessionId: Long, prompt: String): SessionRow {
+        reviews += prompt
+        return row().copy(id = REVIEW)
+    }
+
+    override suspend fun repair(sessionId: Long): RepairReport = repairAnswer
 
     val recreated = mutableListOf<Long>()
     val dismissed = mutableListOf<Long>()
@@ -3071,5 +3083,37 @@ class SessionViewModelTest {
         vm.recreate().join()
         runCurrent()
         assertEquals(listOf(ID), actions.recreated)
+    }
+
+    // --- review and repair ---------------------------------------------------
+
+    private val reviewTools = setOf(HubCapabilities.SPAWN_REVIEW, HubCapabilities.REPAIR_SESSION)
+
+    @Test
+    fun a_review_starts_with_the_prompt_and_opens() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(tools = reviewTools), actions, backgroundScope)
+        assertTrue(vm.state.value.canReview)
+        var opened: Long? = null
+
+        vm.spawnReview(DEFAULT_REVIEW_PROMPT) { opened = it }.join()
+        runCurrent()
+
+        assertEquals(listOf(DEFAULT_REVIEW_PROMPT), actions.reviews)
+        assertEquals(REVIEW, opened)
+    }
+
+    @Test
+    fun a_repair_report_stays_until_dismissed_even_after_the_reread() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(tools = reviewTools), actions, backgroundScope)
+
+        vm.repair().join()
+        runCurrent()
+        assertEquals(listOf("respawned the pane"), vm.state.value.repair?.actions)
+
+        vm.dismissRepair()
+        runCurrent()
+        assertNull(vm.state.value.repair)
     }
 }

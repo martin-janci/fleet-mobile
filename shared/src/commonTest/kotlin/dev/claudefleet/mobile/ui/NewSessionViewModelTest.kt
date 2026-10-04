@@ -28,6 +28,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import dev.claudefleet.mobile.model.NewBgSessionResult
 
 private class FakeFleetForNew(
     hostRows: List<HostRow> = emptyList(),
@@ -41,6 +42,7 @@ private class FakeFleetForNew(
     override val clockSkewSeconds = MutableStateFlow(0L)
     override val sessionChanges = emptyFlow<Long>()
     override suspend fun refresh() {}
+    override val capabilities = MutableStateFlow(HubCapabilities(tools = setOf(HubCapabilities.NEW_BG_SESSION)))
 }
 
 private class FakeCreate : NewSessionActions {
@@ -54,6 +56,15 @@ private class FakeCreate : NewSessionActions {
         gate?.await()
         failWith?.let { throw it }
         return SessionRow(id = nextId, tmuxName = "dev-me-repo", hostAlias = request.hostAlias)
+    }
+
+    val backgrounds = mutableListOf<Triple<String, String, String>>()
+    /** What `new_bg_session` answers: a matched row, or none yet. */
+    var backgroundRow: SessionRow? = SessionRow(id = 90, tmuxName = "bg")
+
+    override suspend fun newBackground(hostAlias: String, name: String, prompt: String): NewBgSessionResult {
+        backgrounds += Triple(hostAlias, name, prompt)
+        return NewBgSessionResult(claudeSessionId = "c", session = backgroundRow)
     }
 }
 
@@ -566,5 +577,45 @@ class NewSessionViewModelTest {
         hidden.create(); readonly.create()
         runCurrent()
         assertEquals(emptyList(), work.calls)
+    }
+
+    // --- a background agent --------------------------------------------------
+
+    @Test
+    fun a_background_agent_starts_on_the_chosen_host_and_opens_when_matched() = runTest {
+        val actions = FakeCreate()
+        val opened = mutableListOf<Long>()
+        val vm = vm(FakeFleetForNew(listOf(PINE)), actions, backgroundScope, initialHost = "pine", opened = opened)
+        runCurrent()
+        assertTrue(vm.state.value.backgroundAvailable)
+
+        vm.startBackground("", "tidy the docs") { error("matched") }?.join()
+        runCurrent()
+
+        assertEquals(listOf(Triple("pine", "tidy the docs", "tidy the docs")), actions.backgrounds)
+        assertEquals(listOf(90L), opened)
+    }
+
+    @Test
+    fun a_background_agent_not_matched_yet_says_so_instead_of_opening() = runTest {
+        val actions = FakeCreate()
+        actions.backgroundRow = null
+        val opened = mutableListOf<Long>()
+        val vm = vm(FakeFleetForNew(listOf(PINE)), actions, backgroundScope, initialHost = "pine", opened = opened)
+        runCurrent()
+        var untracked = false
+
+        vm.startBackground("docs", "tidy the docs") { untracked = true }?.join()
+        runCurrent()
+
+        assertTrue(untracked)
+        assertTrue(opened.isEmpty())
+    }
+
+    @Test
+    fun a_readonly_pairing_is_offered_no_background_agent() = runTest {
+        val vm = vm(FakeFleetForNew(listOf(PINE)), FakeCreate(), backgroundScope, canWrite = false, initialHost = "pine")
+        runCurrent()
+        assertFalse(vm.state.value.backgroundAvailable)
     }
 }
