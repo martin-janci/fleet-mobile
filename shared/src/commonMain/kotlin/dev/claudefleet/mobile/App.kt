@@ -962,6 +962,9 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                     // the meantime would otherwise be reported at whatever
                     // version it ran when the app started.
                     LaunchedEffect(settings) { settings.load() }
+                    // A fleet settings page is drawn inside the Settings tab:
+                    // back closes the page, not the app.
+                    BackHandler(enabled = settingsCaps.fleetSettings && fleet.openPage != null) { fleetSettings.back() }
                     SettingsScreen(
                         state = state,
                         onForget = { settings.forget() },

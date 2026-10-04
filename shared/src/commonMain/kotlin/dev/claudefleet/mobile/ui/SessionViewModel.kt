@@ -254,7 +254,7 @@ data class SessionUiState(
      * answer already in flight does — see [idle].
      */
     val canSend: Boolean
-        get() = idle(sending, answering, busy) && !readOnly && connected && session != null && draft.isNotBlank()
+        get() = idle(sending, answering, busy) && !readOnly && connected && session != null && draft.isNotBlank() && card == null
 
     /**
      * Whether the card's answer chips do anything — the other half of
@@ -873,7 +873,9 @@ class SessionViewModel(
      */
     fun pressEnter(): Job = scope.launch {
         val current = local.value
-        if (!canWriteNow(current) || row() == null) return@launch
+        // Not into a dialog: there Enter approves, and the card's own Enter
+        // re-reads the pane first.
+        if (!canWriteNow(current) || row() == null || blockedNow()) return@launch
         local.update { it.copy(sending = true, error = null) }
         try {
             actions.sendKeys(sessionId, "Enter")
@@ -1190,7 +1192,14 @@ class SessionViewModel(
     private fun canWriteNow(l: Local): Boolean = idle(l.sending, l.answering, l.busy) && !readOnly && connected()
 
     private fun canSendNow(l: Local): Boolean =
-        canWriteNow(l) && l.draft.isNotBlank() && row() != null
+        canWriteNow(l) && l.draft.isNotBlank() && row() != null && !blockedNow()
+
+    /**
+     * The row draws a card — the session is waiting on a dialog or stuck.
+     * The hub refuses typed text into a blocked session, and a bare Enter
+     * would answer the dialog unchecked: both go through the card instead.
+     */
+    private fun blockedNow(): Boolean = row()?.let { blockedCard(it, fleet.hubVersion.value) } != null
 
     /** [isConnected] read from the live sources, for [send]'s own check. */
     private fun connected(): Boolean = isConnected(fleet.status.value, probe.value)

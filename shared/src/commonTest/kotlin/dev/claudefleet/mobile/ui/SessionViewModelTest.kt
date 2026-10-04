@@ -2339,19 +2339,23 @@ class SessionViewModelTest {
         val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
         vm.onDraftChange("ship it")
         runCurrent()
-        assertTrue(vm.state.value.canSend, "setup: the composer is live before the answer")
+        // The card answers a blocked session; the composer does not — the hub
+        // refuses typed text into one.
+        assertFalse(vm.state.value.canSend, "no typing into a session the card is answering")
+        assertTrue(vm.state.value.canAnswer, "setup: the card is live")
 
         val answering = vm.answer(Answer.Enter)
         runCurrent()
-        assertFalse(vm.state.value.canSend, "an answer in flight must darken Send")
-        assertFalse(vm.state.value.canAnswer, "and darken the chips it came from")
+        assertFalse(vm.state.value.canAnswer, "an answer in flight darkens the chips it came from")
         vm.send().join()
         assertTrue(actions.sentPrompts.isEmpty(), "and send must not even try")
 
         gate.complete(Unit)
         answering.join()
+        // The agent moved on: the row is no longer blocked.
+        fleet.sessions.value = listOf(row())
         runCurrent()
-        assertTrue(vm.state.value.canSend, "live again once the answer has landed")
+        assertTrue(vm.state.value.canSend, "live again once the answer has landed and the card is gone")
     }
 
     /** The same rule from the other side. */
@@ -2360,7 +2364,8 @@ class SessionViewModelTest {
         val actions = FakeActions()
         val gate = CompletableDeferred<Unit>()
         actions.sendGate = gate
-        val fleet = FakeFleetState(listOf(blockedRow()))
+        // Not blocked when the prompt goes out; the dialog comes up while it is in flight.
+        val fleet = FakeFleetState(listOf(row()))
         fleet.hubVersion.value = HUB_VERSION_KEYS
         val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
         vm.onDraftChange("ship it")
@@ -2369,6 +2374,8 @@ class SessionViewModelTest {
         val sending = vm.send()
         runCurrent()
         assertTrue(vm.state.value.sending, "setup: the prompt is out")
+        fleet.sessions.value = listOf(blockedRow())
+        runCurrent()
         assertFalse(vm.state.value.canAnswer, "and the chips say so before the tap does")
         vm.answer(Answer.Enter).join()
 
@@ -3137,5 +3144,19 @@ class SessionViewModelTest {
         vm.pressEnter().join()
         runCurrent()
         assertTrue(actions.sentKeys.isEmpty())
+    }
+
+    @Test
+    fun the_enter_key_is_never_pressed_into_a_dialog() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+
+        vm.pressEnter().join()
+        runCurrent()
+
+        assertTrue(actions.sentKeys.isEmpty(), "Enter on a permission dialog approves; only the card's checked Enter may")
     }
 }
