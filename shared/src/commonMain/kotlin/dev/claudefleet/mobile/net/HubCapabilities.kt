@@ -94,6 +94,10 @@ data class HubCapabilities(
     val repoLog: Boolean get() = REPO_LOG in tools && REPO_COMMIT in tools && REPO_COMMIT_DIFF in tools
     val repoFiles: Boolean get() = REPO_TREE in tools && REPO_FILE in tools
 
+    /** Estimated usage and the fleet's Claude accounts — both readonly. */
+    val usage: Boolean get() = USAGE_REPORT in tools
+    val accounts: Boolean get() = LIST_ACCOUNTS in tools
+
     /** A session's earlier conversations (`session_conversations`, readonly). */
     val conversations: Boolean get() = SESSION_CONVERSATIONS in tools
 
@@ -144,6 +148,8 @@ data class HubCapabilities(
         const val SESSION_HISTORY = "session_history"
         const val SESSION_CONVERSATIONS = "session_conversations"
         const val REPO_CHANGES = "repo_changes"
+        const val USAGE_REPORT = "usage_report"
+        const val LIST_ACCOUNTS = "list_accounts"
         const val REPO_DIFF = "repo_diff"
         const val REPO_LOG = "repo_log"
         const val REPO_COMMIT = "repo_commit"

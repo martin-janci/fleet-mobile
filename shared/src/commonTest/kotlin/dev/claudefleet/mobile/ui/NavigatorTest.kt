@@ -421,4 +421,16 @@ class NavigatorTest {
         assertTrue(nav.back())
         assertEquals(Screen.Session(7), nav.screen.value)
     }
+
+    @Test
+    fun usage_opens_over_settings_and_back_returns_there() {
+        val nav = Navigator()
+        nav.select(Tab.Settings)
+        nav.openUsage()
+
+        assertEquals(Screen.Usage, nav.screen.value)
+        assertEquals(Tab.Settings, nav.tab.value)
+        assertTrue(nav.back())
+        assertEquals(Screen.Settings, nav.screen.value)
+    }
 }

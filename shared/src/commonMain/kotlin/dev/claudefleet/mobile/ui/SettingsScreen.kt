@@ -19,6 +19,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.Alignment
 
 /**
  * Settings: which hub, under what name, with what rights, on what version —
@@ -46,6 +48,8 @@ fun SettingsScreen(
     fleetSettings: @Composable () -> Unit = {},
     /** A fleet settings page is open: it takes the screen. */
     fleetPageOpen: Boolean = false,
+    /** The Usage screen; null where the hub reports neither usage nor accounts. */
+    onOpenUsage: (() -> Unit)? = null,
 ) {
     // The header and the error stay put; only the fields scroll. The header
     // used to live inside the scrolling column and left with the content.
@@ -77,6 +81,23 @@ fun SettingsScreen(
             // was it read as the other half the time.
             Field("App version", state.appVersion)
             Field("Hub version", state.hubVersion)
+
+            onOpenUsage?.let { open ->
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable(onClick = open).padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Usage", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "Estimated cost by host, day and session; the fleet's Claude accounts",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             fleetSettings()
