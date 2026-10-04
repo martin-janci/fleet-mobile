@@ -1,6 +1,8 @@
 package dev.claudefleet.mobile.android
 
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import dev.claudefleet.mobile.model.AccountRow
@@ -41,7 +43,8 @@ class UsageScreenTest {
                 UsageScreen(state, UsageHandlers(onSelect = { windows += it }, onOpenSession = { opened += it }), nowSeconds = 0)
             }
         }
-        compose.onNodeWithText("$12.34").assertExists()
+        // The total, the one host's bar and the one session all come to it.
+        compose.onAllNodesWithText("$12.34").onFirst().assertExists()
         compose.onNodeWithText("24 h").performClick()
         assertEquals(listOf(UsageWindow.Day), windows)
         compose.onNodeWithText("the costly one").performClick()
