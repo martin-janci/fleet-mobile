@@ -165,6 +165,14 @@ class ToolsTheAppMayCallTest {
         // A fleet setting's History: `Access::PersonDevice` and readonly —
         // a person's own device, which is what reads Fleet settings at all.
         "setting_history",
+        // Adding a project and a host's worktrees: `add_project` and
+        // `delete_worktree` are writes (a token that may write; the first
+        // refuses a GitHub creation once, with a token to send back), the
+        // lists readonly. All `Access::Client`.
+        "add_project",
+        "list_github_repos",
+        "list_host_worktrees",
+        "delete_worktree",
     )
 
     @Test

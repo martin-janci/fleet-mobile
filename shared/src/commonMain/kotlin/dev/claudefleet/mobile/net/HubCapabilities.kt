@@ -106,6 +106,12 @@ data class HubCapabilities(
     val recreateSession: Boolean get() = RECREATE_SESSION in tools
     val dismissGhost: Boolean get() = DISMISS_GHOST_SESSION in tools
 
+    /** Adding a project and a host's worktrees. */
+    val addProject: Boolean get() = ADD_PROJECT in tools
+    val githubRepos: Boolean get() = LIST_GITHUB_REPOS in tools
+    val hostWorktrees: Boolean get() = LIST_HOST_WORKTREES in tools
+    val deleteWorktree: Boolean get() = DELETE_WORKTREE in tools
+
     /** One setting's writes, for a field's History (a person's own device). */
     val settingHistory: Boolean get() = SETTING_HISTORY in tools
 
@@ -165,6 +171,10 @@ data class HubCapabilities(
         const val REPO_CHANGES = "repo_changes"
         const val USAGE_REPORT = "usage_report"
         const val SETTING_HISTORY = "setting_history"
+        const val ADD_PROJECT = "add_project"
+        const val LIST_GITHUB_REPOS = "list_github_repos"
+        const val LIST_HOST_WORKTREES = "list_host_worktrees"
+        const val DELETE_WORKTREE = "delete_worktree"
         const val PROBE_HOST = "probe_host"
         const val SPAWN_REVIEW = "spawn_review"
         const val REPAIR_SESSION = "repair_session"

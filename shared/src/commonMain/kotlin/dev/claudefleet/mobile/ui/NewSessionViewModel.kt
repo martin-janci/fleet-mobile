@@ -38,6 +38,8 @@ data class HostChoice(val alias: String, val reachable: Boolean)
 data class ProjectChoice(val id: Long, val label: String)
 
 data class NewSessionUiState(
+    /** The existing worktree picked to start in, if any. */
+    val worktreeId: Long? = null,
     /** A background agent may be started from here (`new_bg_session`, a pairing that may write, not ticket mode). */
     val backgroundAvailable: Boolean = false,
     val hosts: List<HostChoice> = emptyList(),
@@ -165,6 +167,8 @@ class NewSessionViewModel(
         val branch: String = "",
         val baseBranch: String = "",
         val friendlyName: String = "",
+        /** An existing worktree of the project on the host to start in (from the worktree list). */
+        val worktreeId: Long? = null,
         val creating: Boolean = false,
         val error: Friendly? = null,
         /** The projects an `E_AMBIGUOUS` start offered; the list narrows to them. */
@@ -204,7 +208,7 @@ class NewSessionViewModel(
     /** Pick a host. One the hub cannot reach is ignored — the row is greyed for that reason. */
     fun selectHost(alias: String) {
         if (fleet.hosts.value.none { it.alias == alias && it.reachable }) return
-        local.update { it.copy(pickedHost = alias) }
+        local.update { it.copy(pickedHost = alias, worktreeId = null) }
     }
 
     fun onProjectQuery(query: String) {
@@ -212,11 +216,16 @@ class NewSessionViewModel(
     }
 
     fun selectProject(id: Long) {
-        local.update { it.copy(projectId = id) }
+        local.update { it.copy(projectId = id, worktreeId = null) }
+    }
+
+    /** Start in an existing worktree of the project (null: its main checkout); a new branch's worktree is off then. */
+    fun selectWorktree(id: Long?) {
+        local.update { it.copy(worktreeId = id, newWorktree = if (id != null) false else it.newWorktree) }
     }
 
     fun setNewWorktree(on: Boolean) {
-        local.update { it.copy(newWorktree = on) }
+        local.update { it.copy(newWorktree = on, worktreeId = if (on) null else it.worktreeId) }
     }
 
     fun onBranchChange(text: String) {
@@ -513,6 +522,7 @@ class NewSessionViewModel(
             confirm = confirm,
             result = l.result,
             backgroundAvailable = canWrite && ticketKey == null && caps.newBgSession,
+            worktreeId = l.worktreeId,
         )
     }
 
@@ -524,6 +534,7 @@ class NewSessionViewModel(
             newWorktree = s.branch.trim().takeIf { s.newWorktree },
             baseBranch = s.baseBranch.trim().takeIf { s.newWorktree && it.isNotEmpty() },
             friendlyName = s.friendlyName.trim().ifEmpty { null },
+            worktreeId = s.worktreeId.takeIf { !s.newWorktree },
         )
     }
 }
