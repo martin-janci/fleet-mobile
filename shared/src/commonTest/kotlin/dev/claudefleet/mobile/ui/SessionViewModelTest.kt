@@ -285,6 +285,18 @@ private class FakeActions : SessionActions {
         restarted += sessionId
     }
 
+    val recreated = mutableListOf<Long>()
+    val dismissed = mutableListOf<Long>()
+
+    override suspend fun recreate(sessionId: Long): SessionRow {
+        recreated += sessionId
+        return row()
+    }
+
+    override suspend fun dismissGhost(sessionId: Long) {
+        dismissed += sessionId
+    }
+
     /** Every `rewind_conversation` call, as (anchor, mode, new worktree). */
     val rewound = mutableListOf<Triple<String?, String, String?>>()
     var rewindFails: Throwable? = null
@@ -3011,5 +3023,53 @@ class SessionViewModelTest {
         vm.load().join()
         runCurrent()
         assertFalse(vm.state.value.canLoadOlder)
+    }
+
+    // --- ghosts --------------------------------------------------------------
+
+    private val ghostTools = setOf(HubCapabilities.RECREATE_SESSION, HubCapabilities.DISMISS_GHOST_SESSION)
+
+    @Test
+    fun a_ghost_can_be_recreated_or_dismissed_and_a_live_session_only_recreated() = runTest {
+        val ghost = row().copy(lostAt = 100)
+        val vm = SessionViewModel(ID, FakeFleetState(listOf(ghost), tools = ghostTools), FakeActions(), backgroundScope)
+        assertTrue(vm.state.value.ghost)
+        assertTrue(vm.state.value.canRecreate)
+        assertTrue(vm.state.value.canDismissGhost)
+
+        val live = SessionViewModel(ID, FakeFleetState(tools = ghostTools), FakeActions(), backgroundScope)
+        assertTrue(live.state.value.canRecreate)
+        assertFalse(live.state.value.canDismissGhost)
+    }
+
+    @Test
+    fun dismissing_a_ghost_deletes_its_row_and_leaves_the_screen() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(listOf(row().copy(lostAt = 100)), tools = ghostTools), actions, backgroundScope)
+        var gone = false
+
+        vm.dismissGhost { gone = true }.join()
+        runCurrent()
+
+        assertEquals(listOf(ID), actions.dismissed)
+        assertTrue(gone)
+    }
+
+    @Test
+    fun a_live_session_is_never_dismissed_as_a_ghost() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(tools = ghostTools), actions, backgroundScope)
+        vm.dismissGhost {}.join()
+        runCurrent()
+        assertTrue(actions.dismissed.isEmpty())
+    }
+
+    @Test
+    fun recreate_calls_the_hub_and_refetches() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(tools = ghostTools), actions, backgroundScope)
+        vm.recreate().join()
+        runCurrent()
+        assertEquals(listOf(ID), actions.recreated)
     }
 }

@@ -94,6 +94,13 @@ data class HubCapabilities(
     val repoLog: Boolean get() = REPO_LOG in tools && REPO_COMMIT in tools && REPO_COMMIT_DIFF in tools
     val repoFiles: Boolean get() = REPO_TREE in tools && REPO_FILE in tools
 
+    /** A host's re-probe and its recovery after a reboot; a ghost's recreate or dismissal. */
+    val probeHost: Boolean get() = PROBE_HOST in tools
+    val restoreSessions: Boolean get() = RESTORE_HOST_SESSIONS in tools
+    val discoverLost: Boolean get() = DISCOVER_LOST_SESSIONS in tools
+    val recreateSession: Boolean get() = RECREATE_SESSION in tools
+    val dismissGhost: Boolean get() = DISMISS_GHOST_SESSION in tools
+
     /** Estimated usage and the fleet's Claude accounts — both readonly. */
     val usage: Boolean get() = USAGE_REPORT in tools
     val accounts: Boolean get() = LIST_ACCOUNTS in tools
@@ -149,6 +156,11 @@ data class HubCapabilities(
         const val SESSION_CONVERSATIONS = "session_conversations"
         const val REPO_CHANGES = "repo_changes"
         const val USAGE_REPORT = "usage_report"
+        const val PROBE_HOST = "probe_host"
+        const val RESTORE_HOST_SESSIONS = "restore_host_sessions"
+        const val DISCOVER_LOST_SESSIONS = "discover_lost_sessions"
+        const val RECREATE_SESSION = "recreate_session"
+        const val DISMISS_GHOST_SESSION = "dismiss_ghost_session"
         const val LIST_ACCOUNTS = "list_accounts"
         const val REPO_DIFF = "repo_diff"
         const val REPO_LOG = "repo_log"
