@@ -134,6 +134,7 @@ import dev.claudefleet.mobile.ui.SessionFiltersSheet
 import dev.claudefleet.mobile.model.SessionFacetId
 import dev.claudefleet.mobile.ui.SessionsHandlers
 import dev.claudefleet.mobile.ui.SessionsScreen
+import dev.claudefleet.mobile.ui.SessionsSheet
 import dev.claudefleet.mobile.ui.SessionsViewModel
 import dev.claudefleet.mobile.ui.FleetSettingsSection
 import dev.claudefleet.mobile.ui.FleetSettingsViewModel
@@ -478,7 +479,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
             actions = container.workActions,
             scope = scope,
             canWrite = credentials.canWrite,
-            onOpenSession = { nav.open(it) },
+            onOpenSession = { nav.openFrom(it, SessionsSheet.Tickets) },
             onStartHere = { nav.newSession(ticketKey = it) },
             prefs = container.prefs,
         )
@@ -491,7 +492,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
             actions = container.workActions,
             scope = scope,
             orgFilter = sessions.orgFilter,
-            onOpenSession = { nav.open(it) },
+            onOpenSession = { nav.openFrom(it, SessionsSheet.Today) },
         )
     }
     val agent = remember(repository, scope) {
@@ -562,9 +563,10 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
         bottomBar = {
             // Not on a session: it is a detail screen with its own Back, and
             // on a phone the bar's 80 dp were the conversation's to lose —
-            // see `SessionChrome.kt`.
+            // see `SessionChrome.kt`. Not on the New session form either: a
+            // tab tapped by mistake there threw away a half-filled form.
             AnimatedVisibility(
-                visible = screen !is Screen.Session && screen !is Screen.Repo,
+                visible = screen !is Screen.Session && screen !is Screen.Repo && screen !is Screen.NewSession,
                 enter = expandVertically(expandFrom = Alignment.Top),
                 exit = shrinkVertically(shrinkTowards = Alignment.Top),
             ) {
@@ -619,6 +621,16 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                     // does NOT re-fire this effect, which is fine: the view
                     // model already holds the filter the chip just set.
                     LaunchedEffect(current) { sessions.setHostFilter(current.hostAlias) }
+                    // Back from a session opened out of a sheet: that sheet again.
+                    LaunchedEffect(current.reopen) {
+                        when (current.reopen) {
+                            SessionsSheet.Today -> today.open()
+                            SessionsSheet.Tidy -> tidy.open()
+                            SessionsSheet.Tickets -> tickets.open()
+                            null -> return@LaunchedEffect
+                        }
+                        nav.sheetReopened()
+                    }
                     val state by sessions.state.collectAsState()
                     val ticketsState by tickets.state.collectAsState()
                     val todayState by today.state.collectAsState()
@@ -668,6 +680,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                             onDismissAgentError = agent::dismissError,
                             onToggleSelect = bulk::toggle,
                             onClearSelection = bulk::clear,
+                            onStartSelect = bulk::start,
                             onBulkSend = { bulk.send(it) },
                             onBulkKill = { bulk.kill() },
                             onDismissBulkOutcome = bulk::dismissOutcome,
@@ -738,7 +751,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                                 onToggle = tidy::toggle,
                                 onChoose = tidy::choose,
                                 onApply = { tidy.apply() },
-                                onOpenSession = { id -> tidy.close(); nav.open(id) },
+                                onOpenSession = { id -> tidy.close(); nav.openFrom(id, SessionsSheet.Tidy) },
                                 onDismissReopened = { tidy.dismissReopened(it) },
                                 onDismissError = tidy::dismissError,
                             ),

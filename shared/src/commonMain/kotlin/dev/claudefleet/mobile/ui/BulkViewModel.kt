@@ -27,8 +27,10 @@ data class BulkUiState(
     val outcome: List<BulkOutcome>? = null,
     /** Which picked sessions Kill now would really kill; the rest it skips and says why. */
     val killable: Int = 0,
+    /** Select mode was asked for (the list's *Select*), with or without anything picked yet. */
+    val selecting: Boolean = false,
 ) {
-    val active: Boolean get() = selected.isNotEmpty()
+    val active: Boolean get() = selecting || selected.isNotEmpty()
 }
 
 /**
@@ -48,6 +50,7 @@ class BulkViewModel(
         val selected: Set<Long> = emptySet(),
         val running: Boolean = false,
         val outcome: List<BulkOutcome>? = null,
+        val selecting: Boolean = false,
     )
 
     private val local = MutableStateFlow(Local())
@@ -61,6 +64,7 @@ class BulkViewModel(
             running = l.running,
             outcome = l.outcome,
             killable = rows.count { it.id in live && killRefusal(it) == null },
+            selecting = l.selecting,
         )
     }.stateIn(scope, SharingStarted.Eagerly, BulkUiState(enabled = canWrite))
 
@@ -69,8 +73,17 @@ class BulkViewModel(
         local.update { it.copy(selected = if (sessionId in it.selected) it.selected - sessionId else it.selected + sessionId) }
     }
 
+    /**
+     * Select mode with nothing picked yet: the visible way in, beside the
+     * long press, so a person who never long-presses still finds it.
+     */
+    fun start() {
+        if (!canWrite) return
+        local.update { it.copy(selecting = true) }
+    }
+
     fun clear() {
-        local.update { it.copy(selected = emptySet()) }
+        local.update { it.copy(selected = emptySet(), selecting = false) }
     }
 
     fun dismissOutcome() {
@@ -106,7 +119,7 @@ class BulkViewModel(
         }
         // What went through leaves the selection; what did not stays picked to try again.
         val done = outcome.filter { it.ok }.mapTo(HashSet()) { it.sessionId }
-        local.update { it.copy(running = false, outcome = outcome, selected = it.selected - done) }
+        local.update { it.copy(running = false, outcome = outcome, selected = it.selected - done, selecting = false) }
     }
 }
 

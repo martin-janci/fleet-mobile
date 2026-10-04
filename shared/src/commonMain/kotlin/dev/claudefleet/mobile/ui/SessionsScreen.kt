@@ -27,6 +27,9 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -143,6 +146,8 @@ data class SessionsHandlers(
     /** Multi-select: pick or unpick a row, drop the selection, act on it, close its outcome. */
     val onToggleSelect: (Long) -> Unit = {},
     val onClearSelection: () -> Unit = {},
+    /** *Select* in the header's overflow: select mode with nothing picked yet. */
+    val onStartSelect: () -> Unit = {},
     val onBulkSend: (String) -> Unit = {},
     val onBulkKill: () -> Unit = {},
     val onDismissBulkOutcome: () -> Unit = {},
@@ -198,8 +203,7 @@ fun SessionsScreen(
             onToggleSearch = handlers.onToggleSearch,
             onOpenTickets = handlers.onOpenTickets,
             onOpenToday = handlers.onOpenToday,
-            onOpenAgent = handlers.onOpenAgent,
-            agentWaking = agent.waking,
+            onStartSelect = handlers.onStartSelect.takeIf { bulk.enabled },
         ) {
             if (state.searchOpen) {
                 SearchField(query = state.filters.query, onSetQuery = handlers.onSetQuery)
@@ -244,8 +248,12 @@ fun SessionsScreen(
             // the one session a person scrolled all the way down to reach.
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = if (handlers.onNewSession != null) 88.dp else 0.dp),
+                contentPadding = PaddingValues(bottom = if (handlers.onOpenAgent != null) 148.dp else if (handlers.onNewSession != null) 88.dp else 0.dp),
             ) {
+                // First, while searching: at the end of a long list they were
+                // found only by whoever scrolled past every session — and with
+                // no session matching, under an empty state filling the screen.
+                if (state.searchOpen && !hits.isEmpty) searchHits(hits, handlers)
                 if (state.isEmpty) {
                     item(key = "empty") {
                         EmptyFleet(
@@ -323,7 +331,6 @@ fun SessionsScreen(
                 }
                 // Archived sessions are hidden by default; the list's last
                 // row says how many, and brings them all back in one tap.
-                if (state.searchOpen && !hits.isEmpty) searchHits(hits, handlers)
                 if (state.archivedRow && !state.isEmpty) {
                     item(key = "archived") {
                         ArchivedRow(
@@ -336,12 +343,31 @@ fun SessionsScreen(
                     }
                 }
             }
-            handlers.onNewSession?.takeIf { !bulk.active }?.let { newSession ->
-                FloatingActionButton(
-                    onClick = newSession,
+            if (!bulk.active && (handlers.onNewSession != null || handlers.onOpenAgent != null)) {
+                Column(
                     modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Icon(FleetIcons.Add, contentDescription = "New session")
+                    // The desktop's ✦: its agent is a session on the hub, and this
+                    // opens it on the Session screen. The first press may start it.
+                    handlers.onOpenAgent?.let { openAgent ->
+                        SmallFloatingActionButton(
+                            onClick = { if (!agent.waking) openAgent() },
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            modifier = Modifier.semantics {
+                                contentDescription = if (agent.waking) "Agent waking" else "Open the fleet agent"
+                            },
+                        ) {
+                            if (agent.waking) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            else Text("✦", style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
+                    handlers.onNewSession?.let { newSession ->
+                        FloatingActionButton(onClick = newSession) {
+                            Icon(FleetIcons.Add, contentDescription = "New session")
+                        }
+                    }
                 }
             }
         }
@@ -356,8 +382,7 @@ private fun SessionsBar(
     onToggleSearch: () -> Unit,
     onOpenTickets: (() -> Unit)?,
     onOpenToday: (() -> Unit)?,
-    onOpenAgent: (() -> Unit)?,
-    agentWaking: Boolean,
+    onStartSelect: (() -> Unit)?,
     filters: @Composable () -> Unit,
 ) {
     val live = when (status) {
@@ -384,12 +409,20 @@ private fun SessionsBar(
                 onClick = onToggleSearch,
             )
             if (onOpenToday != null) TextButton(onClick = onOpenToday) { Text("Today") }
-            if (onOpenTickets != null) TextButton(onClick = onOpenTickets) { Text("Tickets") }
-            // The desktop's ✦: its agent is a session on the hub, and this
-            // opens it on the Session screen. The first press may start it.
-            if (onOpenAgent != null) {
-                TextButton(onClick = onOpenAgent, enabled = !agentWaking) {
-                    Text(if (agentWaking) "✦ Waking…" else "✦ Agent")
+            // The rest behind ⋮: three text buttons and an icon left the title
+            // no room on a phone. The agent is a floating button over the list.
+            if (onOpenTickets != null || onStartSelect != null) {
+                var more by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { more = true }) { Icon(FleetIcons.MoreVert, contentDescription = "More") }
+                    DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                        if (onOpenTickets != null) {
+                            DropdownMenuItem(text = { Text("Tickets") }, onClick = { more = false; onOpenTickets() })
+                        }
+                        if (onStartSelect != null) {
+                            DropdownMenuItem(text = { Text("Select sessions") }, onClick = { more = false; onStartSelect() })
+                        }
+                    }
                 }
             }
         },
@@ -868,9 +901,9 @@ private fun SelectionBar(bulk: BulkUiState, handlers: SessionsHandlers) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = handlers.onClearSelection) { Icon(FleetIcons.Close, contentDescription = "Clear selection") }
-            Text("${bulk.selected.size} selected", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Text(if (bulk.selected.isEmpty()) "Tap sessions to pick" else "${bulk.selected.size} selected", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             if (bulk.running) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-            TextButton(onClick = { sending = true }, enabled = !bulk.running) { Text("Send") }
+            TextButton(onClick = { sending = true }, enabled = !bulk.running && bulk.selected.isNotEmpty()) { Text("Send") }
             TextButton(onClick = { killing = true }, enabled = !bulk.running && bulk.killable > 0) { Text("Kill") }
         }
     }
@@ -940,7 +973,7 @@ private fun BulkOutcomeDialog(outcome: List<BulkOutcome>, onDismiss: () -> Unit)
 /** "1 session", "3 sessions". */
 internal fun sessionsWord(n: Int): String = if (n == 1) "1 session" else "$n sessions"
 
-/** The search's other finds, under the sessions it matched: hosts, projects, and the query as a ticket. */
+/** The search's other finds, above the sessions it matched: hosts, projects, and the query as a ticket. */
 private fun androidx.compose.foundation.lazy.LazyListScope.searchHits(hits: SearchHits, handlers: SessionsHandlers) {
     item(key = "search-everywhere") {
         Text(

@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.android
 
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
@@ -99,5 +100,39 @@ class BulkSelectTest {
         }
         compose.onNodeWithText("first").performTouchInput { longClick() }
         assertEquals(emptyList<Long>(), picked)
+    }
+
+    @Test
+    fun select_is_offered_in_the_header_menu_without_a_long_press() {
+        var started = 0
+        compose.setContent {
+            FleetTheme {
+                SessionsScreen(
+                    state = state,
+                    handlers = SessionsHandlers(onStartSelect = { started++ }),
+                    bulk = BulkUiState(enabled = true),
+                )
+            }
+        }
+        compose.onNodeWithContentDescription("More").performClick()
+        compose.onNodeWithText("Select sessions").performClick()
+        assertEquals(1, started)
+    }
+
+    @Test
+    fun select_mode_with_nothing_picked_says_what_to_do_and_a_tap_picks() {
+        val picked = mutableListOf<Long>()
+        compose.setContent {
+            FleetTheme {
+                SessionsScreen(
+                    state = state,
+                    handlers = SessionsHandlers(onToggleSelect = { picked += it }),
+                    bulk = BulkUiState(enabled = true, selecting = true),
+                )
+            }
+        }
+        compose.onNodeWithText("Tap sessions to pick").assertExists()
+        compose.onNodeWithText("first").performClick()
+        assertEquals(listOf(1L), picked)
     }
 }

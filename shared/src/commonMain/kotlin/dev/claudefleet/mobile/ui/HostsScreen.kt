@@ -86,7 +86,13 @@ private fun HostLineItem(host: HostLine, onClick: () -> Unit, onDetails: (() -> 
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(
             modifier = Modifier.weight(1f)
-                .clickable(onClickLabel = "Show sessions on ${host.alias}", onClick = onClick)
+                // The host's own sheet where the hub has one — it offers Show
+                // sessions too — so a tap stays on this tab rather than jumping
+                // to another one that Back would then leave the app from.
+                .clickable(
+                    onClickLabel = if (onDetails != null) "Open ${host.alias}" else "Show sessions on ${host.alias}",
+                    onClick = onDetails ?: onClick,
+                )
                 .padding(horizontal = 16.dp, vertical = 10.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -134,10 +140,6 @@ private fun HostLineItem(host: HostLine, onClick: () -> Unit, onDetails: (() -> 
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        }
-        // The host's own sheet — the row itself opens its sessions, as it always has.
-        if (onDetails != null) {
-            IconButton(onClick = onDetails) { Icon(FleetIcons.MoreVert, contentDescription = "Host ${host.alias}") }
         }
     }
     HorizontalDivider()

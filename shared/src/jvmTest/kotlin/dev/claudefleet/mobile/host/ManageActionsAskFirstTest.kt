@@ -33,7 +33,7 @@ class ManageActionsAskFirstTest {
         ).filter { (label, call) -> call in menuClick(label) }
 
         assertEquals(emptyMap(), direct, "a menu item that ends the session without asking")
-        assertTrue("showSafeKillConfirm()" in menuClick("Retire safely"))
+        assertTrue("showSafeKillConfirm = true" in menuClick("Retire safely"))
     }
 
     @Test
