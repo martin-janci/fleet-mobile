@@ -149,4 +149,12 @@ class TidyTest {
         assertEquals("2 h", formatIdle(7_300))
         assertEquals("2 d", formatIdle(200_000))
     }
+
+    @Test
+    fun a_failed_apply_names_the_session_and_says_the_action_in_words() {
+        val named = TidyCandidate(sessionId = 5, tmuxName = "fleet-api", label = "API work", reason = "done_idle", action = "safe_kill")
+        assertEquals("API work (Safe kill)", tidyFailureLine(5, null, "safe_kill", listOf(named)))
+        assertEquals("API work (E_BUSY: dirty)", tidyFailureLine(5, "E_BUSY: dirty", "kill", listOf(named)))
+        assertEquals("a session no longer listed (resume or expire)", tidyFailureLine(9, null, "resume_or_expire", listOf(named)))
+    }
 }

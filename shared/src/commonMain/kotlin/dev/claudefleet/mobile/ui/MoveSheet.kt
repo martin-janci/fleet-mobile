@@ -1,5 +1,9 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -50,7 +54,7 @@ fun MoveSheet(state: MoveUiState, handlers: MoveHandlers, nowSeconds: Long) {
     var confirming by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).verticalScroll(rememberScrollState())) {
-            Text("Move to another host", style = MaterialTheme.typography.titleLarge)
+            Text("Move to another host", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
             Text(
                 "Its uncommitted and unpushed work, small git-ignored files, its Claude conversation and memory go with it.",
                 style = MaterialTheme.typography.bodySmall,
@@ -128,11 +132,14 @@ private fun PreviewLines(p: MovePreview) {
 
 @Composable
 private fun Toggle(title: String, help: String, on: Boolean, onChange: (Boolean) -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        modifier = Modifier.fillMaxWidth().toggleable(value = on, role = Role.Switch, onValueChange = onChange).padding(top = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
             Text(help, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Switch(checked = on, onCheckedChange = onChange)
+        Switch(checked = on, onCheckedChange = null)
     }
 }

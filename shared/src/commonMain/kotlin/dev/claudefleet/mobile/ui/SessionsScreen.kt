@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.ui.components.DangerTextButton
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -616,7 +617,7 @@ private fun HostHeader(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(40.dp)
+                .heightIn(min = 40.dp)
                 .clickable(onClick = onClick)
                 .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -782,9 +783,19 @@ private fun SessionRowItem(
                 StatusChip(claudeStatus = row.claudeStatus, stuckKind = row.stuckKind, reason = row.attentionReason)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     relativeTime(row.lastActivityAt, nowSeconds)?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
+                    // A mark and a word, not a dot alone: a colour is not a status.
                     row.ciStatus?.let { ci ->
-                        val tone = when (ci) { "passing" -> StatusTone.COMPLETED; "failing" -> StatusTone.FAILED; else -> StatusTone.IDLE }
-                        Box(Modifier.padding(start = 4.dp).size(6.dp).clip(CircleShape).background(LocalStatusColors.current(tone).dot))
+                        val (tone, mark) = when (ci) {
+                            "passing" -> StatusTone.COMPLETED to "CI ✓"
+                            "failing" -> StatusTone.FAILED to "CI ✗"
+                            else -> StatusTone.IDLE to "CI …"
+                        }
+                        Text(
+                            mark,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = LocalStatusColors.current(tone).onContainer,
+                            modifier = Modifier.padding(start = 6.dp).semantics { contentDescription = "CI $ci" },
+                        )
                     }
                 }
             }
@@ -904,7 +915,7 @@ private fun SelectionBar(bulk: BulkUiState, handlers: SessionsHandlers) {
             Text(if (bulk.selected.isEmpty()) "Tap sessions to pick" else "${bulk.selected.size} selected", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             if (bulk.running) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
             TextButton(onClick = { sending = true }, enabled = !bulk.running && bulk.selected.isNotEmpty()) { Text("Send") }
-            TextButton(onClick = { killing = true }, enabled = !bulk.running && bulk.killable > 0) { Text("Kill") }
+            DangerTextButton(onClick = { killing = true }, enabled = !bulk.running && bulk.killable > 0) { Text("Kill") }
         }
     }
     if (sending) {
@@ -938,7 +949,7 @@ private fun SelectionBar(bulk: BulkUiState, handlers: SessionsHandlers) {
                         if (skipped > 0) " $skipped picked cannot be killed from here and are skipped." else "",
                 )
             },
-            confirmButton = { TextButton(onClick = { handlers.onBulkKill(); killing = false }) { Text("Kill") } },
+            confirmButton = { DangerTextButton(onClick = { handlers.onBulkKill(); killing = false }) { Text("Kill") } },
             dismissButton = { TextButton(onClick = { killing = false }) { Text("Cancel") } },
         )
     }

@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -102,7 +104,7 @@ fun TicketsSheet(state: TicketsUiState, handlers: TicketsHandlers) {
             return@ModalBottomSheet
         }
         Column(modifier = Modifier.fillMaxWidth()) {
-            Text("Tickets", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp))
+            Text("Tickets", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp).semantics { heading() })
             OutlinedTextField(
                 value = state.query,
                 onValueChange = handlers.onQuery,
@@ -221,7 +223,7 @@ private fun TicketFiltersPage(state: TicketsUiState, handlers: TicketsHandlers) 
             IconButton(onClick = handlers.onCloseFilters) {
                 Icon(FleetIcons.ArrowBack, contentDescription = "Back to tickets")
             }
-            Text("Filters", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            Text("Filters", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).semantics { heading() })
             TextButton(onClick = handlers.onClearAll, enabled = state.facets.isNotEmpty()) { Text("Clear all") }
         }
         Column(

@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -166,7 +168,24 @@ private fun NotifyRow(notifier: BackgroundNotifier) {
     var refused by remember { mutableStateOf(false) }
     val ask = rememberNotificationPermission()
     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    val flip: (Boolean) -> Unit = { want ->
+        if (!want) {
+            notifier.setEnabled(false)
+        } else {
+            ask { granted ->
+                refused = !granted
+                if (granted) notifier.setEnabled(true)
+            }
+        }
+    }
+    // The whole row is the switch: a tap on its words flips it, and a screen
+    // reader reads the words as the switch's own.
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .toggleable(value = on, role = Role.Switch, onValueChange = flip)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Column(modifier = Modifier.weight(1f)) {
             Text("Notify me when a session needs me", style = MaterialTheme.typography.titleSmall)
             Text(
@@ -178,16 +197,7 @@ private fun NotifyRow(notifier: BackgroundNotifier) {
         }
         Switch(
             checked = on,
-            onCheckedChange = { want ->
-                if (!want) {
-                    notifier.setEnabled(false)
-                } else {
-                    ask { granted ->
-                        refused = !granted
-                        if (granted) notifier.setEnabled(true)
-                    }
-                }
-            },
+            onCheckedChange = null,
         )
     }
 }

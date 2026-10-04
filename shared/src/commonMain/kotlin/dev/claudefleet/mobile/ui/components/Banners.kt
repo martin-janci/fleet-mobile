@@ -1,5 +1,8 @@
 package dev.claudefleet.mobile.ui.components
 
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -121,7 +124,9 @@ fun ErrorBanner(error: Friendly?, onDismiss: (() -> Unit)? = null, modifier: Mod
     var showDetails by remember(error) { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        // Announced when it appears: a failure nobody can see is one a screen
+        // reader user never hears about.
+        modifier = modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
         color = if (tone == BannerTone.Error) colors.errorContainer else colors.secondaryContainer,
         contentColor = if (tone == BannerTone.Error) colors.onErrorContainer else colors.onSecondaryContainer,
     ) {

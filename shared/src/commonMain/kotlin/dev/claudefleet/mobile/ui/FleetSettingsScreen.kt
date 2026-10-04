@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -204,10 +206,19 @@ private fun FieldRow(
     val editable = state.editable(d.key) && !shownOnly
     val busy = d.key in state.busy
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        val isSwitch = editable && d.kind.type == "bool"
+        Row(
+            // A switch row is the switch: its label is what a screen reader reads.
+            modifier = if (isSwitch) {
+                Modifier.toggleable(value = value == "true", enabled = !busy, role = Role.Switch) {
+                    onSet(d.key, if (it) "true" else "false")
+                }
+            } else Modifier,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(d.label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-            if (editable && d.kind.type == "bool") {
-                Switch(checked = value == "true", enabled = !busy, onCheckedChange = { onSet(d.key, if (it) "true" else "false") })
+            if (isSwitch) {
+                Switch(checked = value == "true", enabled = !busy, onCheckedChange = null)
             } else if (!editable || d.kind.type != "choice") {
                 if (!editable || d.kind.type !in setOf("secs", "int", "text")) {
                     Text(d.inWords(value), style = MaterialTheme.typography.bodyMedium)

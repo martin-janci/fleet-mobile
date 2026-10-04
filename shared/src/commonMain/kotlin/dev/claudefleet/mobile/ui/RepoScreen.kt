@@ -1,5 +1,8 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -37,6 +40,7 @@ import dev.claudefleet.mobile.model.FileContent
 import dev.claudefleet.mobile.model.FileDiff
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
+import dev.claudefleet.mobile.ui.theme.diffColors
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 
 /** What the worktree screen reports. */
@@ -154,12 +158,33 @@ private fun ChangesList(changes: List<ChangedFile>?, handlers: RepoHandlers) {
 @Composable
 private fun StatusLetter(status: String) {
     val letter = status.trim().take(1).ifEmpty { "?" }
+    val diff = diffColors()
     val color = when (letter) {
-        "A", "?" -> DIFF_ADDED
-        "D" -> MaterialTheme.colorScheme.error
+        "A", "?" -> diff.addedFg
+        "D" -> diff.removedFg
         else -> MaterialTheme.colorScheme.primary
     }
-    Text(letter, style = MaterialTheme.typography.labelLarge, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = color, modifier = Modifier.width(16.dp))
+    // The letter is git's; the colour is a hint. A screen reader gets the word.
+    Text(
+        letter,
+        style = MaterialTheme.typography.labelLarge,
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        color = color,
+        modifier = Modifier.widthIn(min = 16.dp).semantics { contentDescription = gitStatusWord(letter) },
+    )
+}
+
+/** git's status letter as a word. */
+internal fun gitStatusWord(letter: String): String = when (letter) {
+    "A" -> "added"
+    "D" -> "deleted"
+    "M" -> "modified"
+    "R" -> "renamed"
+    "C" -> "copied"
+    "U" -> "conflicted"
+    "?" -> "untracked"
+    else -> "changed"
 }
 
 @Composable
@@ -314,15 +339,14 @@ internal fun diffLines(diff: String): List<CodeLine> = diff.trimEnd('\n').split(
     CodeLine(line, kind)
 }
 
-private val DIFF_ADDED = Color(0xFF2E7D32)
-
 @Composable
 private fun CodeLines(lines: List<CodeLine>, truncated: Boolean) {
     LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
         itemsIndexed(lines) { _, line ->
+            val diff = diffColors()
             val (bg, fg) = when (line.kind) {
-                LineKind.Added -> DIFF_ADDED.copy(alpha = 0.14f) to MaterialTheme.colorScheme.onSurface
-                LineKind.Removed -> MaterialTheme.colorScheme.error.copy(alpha = 0.14f) to MaterialTheme.colorScheme.onSurface
+                LineKind.Added -> diff.addedBg to MaterialTheme.colorScheme.onSurface
+                LineKind.Removed -> diff.removedBg to MaterialTheme.colorScheme.onSurface
                 LineKind.Hunk -> MaterialTheme.colorScheme.surfaceContainerHigh to MaterialTheme.colorScheme.primary
                 LineKind.Meta -> Color.Transparent to MaterialTheme.colorScheme.onSurfaceVariant
                 LineKind.Plain -> Color.Transparent to MaterialTheme.colorScheme.onSurface

@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -65,7 +67,7 @@ fun ReviewSheet(state: ReviewUiState, handlers: ReviewHandlers) {
                 Text(
                     "To review" + if (state.total > 0) " · ${state.total}" else "",
                     style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).semantics { heading() },
                 )
                 IconButton(onClick = handlers.onReload, enabled = state.connected && !state.loading) {
                     Icon(FleetIcons.Refresh, contentDescription = "Refresh")

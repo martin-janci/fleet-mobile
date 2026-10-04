@@ -1260,7 +1260,7 @@ private fun CodeBlock(code: MdBlock.Code, modifier: Modifier = Modifier) {
             .background(colors.surfaceContainerHigh),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(32.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 32.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
