@@ -72,6 +72,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.InputChipDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SuggestionChip
@@ -109,6 +110,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.ConvItem
+import dev.claudefleet.mobile.model.relativeTime
+import dev.claudefleet.mobile.model.ConversationSummary
 import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.tailMarker
@@ -224,6 +227,10 @@ fun SessionScreen(
     onFork: (String?, String?) -> Unit = { _, _ -> },
     /** Open the session's Details sheet; the default does nothing. */
     onOpenDetails: () -> Unit = {},
+    /** Earlier conversations and older turns; the defaults do nothing. */
+    onLoadOlder: () -> Unit = {},
+    onViewConversation: (ConversationSummary) -> Unit = {},
+    onBackToCurrent: () -> Unit = {},
 ) {
     val turns = state.conversation.turns
     val truncated = state.conversation.truncated
@@ -443,6 +450,7 @@ fun SessionScreen(
                         tasks = tasks,
                         onOpenTasks = tasksHandlers.onOpen,
                         onOpenDetails = onOpenDetails,
+                        onViewConversation = onViewConversation,
                     )
                     // A tap unfolds it: out of immersive, out of the read-back,
                     // and — when typing is what folded it — the keyboard down.
@@ -462,6 +470,7 @@ fun SessionScreen(
             // Behind an open sheet a banner cannot be read: the sheet shows it instead.
             if (!work.sheetOpen) ErrorBanner(work.error, onDismiss = workHandlers.onDismissError)
             if (work.sheetOpen) WorkTicketSheet(work, workHandlers)
+        state.viewing?.let { EarlierConversationBanner(it, state.nowSeconds, state.loadingOlder, onBackToCurrent) }
             if (tasks.sheetOpen) SessionTasksSheet(tasks, tasksHandlers)
 
             // `weight(1f)`: the list takes what the bar and the footer leave, so
@@ -514,7 +523,9 @@ fun SessionScreen(
                             )
                             // After the oldest turn, so drawn above it.
                             if (truncated) {
-                                item(key = TRUNCATED_KEY, contentType = TRUNCATED_KEY) { TruncationNote() }
+                                item(key = TRUNCATED_KEY, contentType = TRUNCATED_KEY) {
+                                    TruncationNote(canLoadOlder = state.canLoadOlder, loading = state.loadingOlder, onLoadOlder = onLoadOlder)
+                                }
                             }
                         }
                     }
@@ -856,8 +867,19 @@ private fun SessionBar(
     tasks: SessionTasksUiState,
     onOpenTasks: () -> Unit,
     onOpenDetails: () -> Unit,
+    onViewConversation: (ConversationSummary) -> Unit,
 ) {
     val busy = state.loading || state.refreshing
+    var pickingConversation by remember { mutableStateOf(false) }
+    if (pickingConversation) {
+        ConversationsDialog(
+            conversations = state.conversations,
+            viewing = state.viewing,
+            nowSeconds = state.nowSeconds,
+            onPick = { pickingConversation = false; onViewConversation(it) },
+            onDismiss = { pickingConversation = false },
+        )
+    }
     val angle = refreshAngle(busy)
     // Recomputed from `listState.firstVisibleItemIndex` — a snapshot-backed
     // read, and in this `reverseLayout` list the item at the bottom of the
@@ -956,7 +978,8 @@ private fun SessionBar(
             val tight = contextIsTight(state.session, state.conversation.context)
             val retiring = state.safeKillState
             val ticket = work.chip
-            if (tight || retiring != null || ticket != null || tasks.available) {
+            val manyConversations = state.conversations.size > 1
+            if (tight || retiring != null || ticket != null || tasks.available || manyConversations) {
                 FlowRow(
                     modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -988,6 +1011,16 @@ private fun SessionBar(
                         SuggestionChip(
                             onClick = onOpenTasks,
                             label = { Text(if (tasks.count > 0) "Tasks · ${tasks.count}" else "Tasks", maxLines = 1) },
+                            modifier = Modifier.align(Alignment.CenterVertically),
+                        )
+                    }
+                    // A `/clear`, a resume, a compaction or a rewind started
+                    // another conversation in this session: the earlier ones
+                    // are a tap away, read-only.
+                    if (manyConversations) {
+                        SuggestionChip(
+                            onClick = { pickingConversation = true },
+                            label = { Text("Conversations · ${state.conversations.size}", maxLines = 1) },
                             modifier = Modifier.align(Alignment.CenterVertically),
                         )
                     }
@@ -1809,13 +1842,96 @@ private fun JumpToLatest(newReply: Boolean, unseen: Int, onClick: () -> Unit, mo
     }
 }
 
+/**
+ * Above the oldest turn on screen when older ones exist: a way to ask for
+ * them while there is a wider window to ask for, and the plain fact once
+ * there is not.
+ */
 @Composable
-private fun TruncationNote() {
-    Text(
-        text = "Older turns are not shown.",
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
+private fun TruncationNote(canLoadOlder: Boolean, loading: Boolean, onLoadOlder: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = if (canLoadOlder) "Older turns are not shown." else "Older turns are not shown here.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        if (canLoadOlder) {
+            TextButton(onClick = onLoadOlder, enabled = !loading) { Text(if (loading) "Loading…" else "Load older") }
+        }
+    }
+}
+
+/** Over the conversation while an earlier one is on screen: which, and the way back. */
+@Composable
+private fun EarlierConversationBanner(viewing: ConversationSummary, nowSeconds: Long, loading: Boolean, onBack: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.tertiaryContainer, contentColor = MaterialTheme.colorScheme.onTertiaryContainer) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Earlier conversation · ${conversationCaption(viewing, nowSeconds)}",
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onBack) { Text("Back to current") }
+            }
+            if (loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+/** "clear · 12 turns · 3 h" — how it started, how long it ran, how long ago. */
+internal fun conversationCaption(c: ConversationSummary, nowSeconds: Long): String =
+    listOfNotNull(
+        c.startSource.takeIf { it.isNotBlank() && it != "unknown" },
+        "${c.turns} turn" + if (c.turns == 1L) "" else "s",
+        relativeTime(c.startedAt, nowSeconds)?.let { "$it ago" },
+    ).joinToString(" · ")
+
+@Composable
+private fun ConversationsDialog(
+    conversations: List<ConversationSummary>,
+    viewing: ConversationSummary?,
+    nowSeconds: Long,
+    onPick: (ConversationSummary) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Conversations") },
+        text = {
+            Column(modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                for ((index, c) in conversations.withIndex()) {
+                    val shown = if (viewing == null) c.current else c.claudeSessionId == viewing.claudeSessionId
+                    Column(
+                        modifier = Modifier.fillMaxWidth().clickable { onPick(c) }.padding(vertical = 10.dp),
+                    ) {
+                        Text(
+                            (if (c.current) "Current · " else "") + (c.firstPrompt?.takeIf { it.isNotBlank() } ?: "(no prompt)"),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (shown) FontWeight.Bold else null,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            conversationCaption(c, nowSeconds),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (index != conversations.lastIndex) HorizontalDivider()
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
 }
 

@@ -49,6 +49,12 @@ class ToolDetailsModel(
      * that one answer is read again rather than kept. A failure is retried
      * only when asked again (the row's Retry).
      */
+    /**
+     * The earlier conversation on screen, or null for the current one: a tool
+     * row there is looked up in that conversation's transcript.
+     */
+    var claudeSessionId: String? = null
+
     fun request(toolUseId: String, done: Boolean = true) {
         if (!fleet.capabilities.value.toolDetail) return
         var start = false
@@ -66,7 +72,7 @@ class ToolDetailsModel(
         if (!start) return
         scope.launch {
             val next = try {
-                ToolDetailLoad.Loaded(actions.toolDetail(sessionId, toolUseId))
+                ToolDetailLoad.Loaded(actions.toolDetail(sessionId, toolUseId, claudeSessionId))
             } catch (e: CancellationException) {
                 _states.update { it - toolUseId }
                 throw e

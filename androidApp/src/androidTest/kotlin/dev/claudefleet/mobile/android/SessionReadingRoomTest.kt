@@ -15,6 +15,7 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.Conversation
+import dev.claudefleet.mobile.model.ConversationSummary
 import dev.claudefleet.mobile.ui.BlockedCard
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.SessionUiState
@@ -34,7 +35,13 @@ class SessionReadingRoomTest {
     @get:Rule
     val compose = createComposeRule()
 
-    private fun show(state: SessionUiState, showFoldHint: Boolean = false, onFoldHintShown: () -> Unit = {}) {
+    private fun show(
+        state: SessionUiState,
+        showFoldHint: Boolean = false,
+        onFoldHintShown: () -> Unit = {},
+        onLoadOlder: () -> Unit = {},
+        onBackToCurrent: () -> Unit = {},
+    ) {
         compose.setContent {
             FleetTheme {
                 SessionScreen(
@@ -64,6 +71,8 @@ class SessionReadingRoomTest {
                     onOpenHistory = { emptyList() },
                     showFoldHint = showFoldHint,
                     onFoldHintShown = onFoldHintShown,
+                    onLoadOlder = onLoadOlder,
+                    onBackToCurrent = onBackToCurrent,
                 )
             }
         }
@@ -155,5 +164,26 @@ class SessionReadingRoomTest {
 
         compose.onNodeWithText("Double-tap for the whole screen").assertExists()
         assertEquals(1, marked)
+    }
+
+    @Test
+    fun older_turns_can_be_asked_for_where_there_are_some() {
+        var asked = 0
+        val conversation = oneTurn("go on").copy(truncated = true)
+        show(SessionUiState(conversation = conversation, loaded = true, canLoadOlder = true), onLoadOlder = { asked++ })
+
+        compose.onNodeWithText("Load older").performClick()
+        assertEquals(1, asked)
+    }
+
+    @Test
+    fun an_earlier_conversation_says_so_and_offers_the_way_back() {
+        var back = 0
+        val viewing = ConversationSummary(claudeSessionId = "c-old", turns = 4, startSource = "startup")
+        show(SessionUiState(conversation = oneTurn("then"), loaded = true, viewing = viewing), onBackToCurrent = { back++ })
+
+        compose.onNodeWithText("Earlier conversation", substring = true).assertExists()
+        compose.onNodeWithText("Back to current").performClick()
+        assertEquals(1, back)
     }
 }

@@ -126,6 +126,10 @@ class ToolsTheAppMayCallTest {
         "related_sessions",
         "list_tasks",
         "cancel_task",
+        // A session's earlier conversations (after a /clear, a resume, a
+        // compaction or a rewind): readonly, `Access::Client`; each is then
+        // read through `session_conversation { claude_session_id }`.
+        "session_conversations",
     )
 
     @Test

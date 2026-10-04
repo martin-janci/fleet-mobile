@@ -25,6 +25,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -1029,6 +1030,8 @@ private fun SessionRoute(
         )
     }
     val details by detailsVm.state.collectAsState()
+    // A tool row in an earlier conversation is looked up in that transcript.
+    SideEffect { toolDetailsModel.claudeSessionId = state.viewing?.claudeSessionId }
     // Read once per visit: whether the hint is owed does not change under
     // a screen that is showing it.
     val foldHintOwed = remember(container) { !container.hints.shown(Hints.DOUBLE_TAP) }
@@ -1104,6 +1107,9 @@ private fun SessionRoute(
         // A fork is a new session: open it, with this one a Back away.
         onFork = { anchor, worktree -> vm.fork(anchor, worktree, onOpenSession) },
         onOpenDetails = { detailsVm.open() },
+        onLoadOlder = { vm.loadOlder() },
+        onViewConversation = { vm.view(it) },
+        onBackToCurrent = vm::backToCurrent,
         showFoldHint = foldHintOwed,
         onFoldHintShown = { container.hints.markShown(Hints.DOUBLE_TAP) },
     )
