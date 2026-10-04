@@ -58,3 +58,22 @@ data class LostCandidate(
     @SerialName("rank_hint") val rankHint: String = "",
     val resumable: Boolean = false,
 )
+
+/** What `repair_session` found and did to a session's workspace. */
+@Serializable
+data class RepairReport(
+    val healthy: Boolean = false,
+    val actions: List<String> = emptyList(),
+    val warnings: List<String> = emptyList(),
+    /** What it would not do on its own and left for a person. */
+    val deferred: List<String> = emptyList(),
+    @SerialName("needs_explicit_repair") val needsExplicitRepair: Boolean = false,
+)
+
+/** `new_bg_session`: the headless session's Claude id, and its fleet row once reconcile matched it. */
+@Serializable
+data class NewBgSessionResult(
+    @SerialName("claude_session_id") val claudeSessionId: String? = null,
+    val warning: String? = null,
+    val session: SessionRow? = null,
+)

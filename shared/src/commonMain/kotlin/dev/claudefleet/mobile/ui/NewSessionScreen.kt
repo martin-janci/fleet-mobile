@@ -39,6 +39,12 @@ import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.theme.FleetIcons
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
 
 /**
  * The New session form. Stateless, like every screen here: it draws a
@@ -66,8 +72,18 @@ fun NewSessionScreen(
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
     multiStart: MultiStartHandlers = MultiStartHandlers(),
+    /** Start a background agent on the chosen host, with a name and a prompt. */
+    onStartBackground: (String, String) -> Unit = { _, _ -> },
 ) {
     val editable = !state.creating
+    var askingBackground by remember { mutableStateOf(false) }
+    if (askingBackground) {
+        BackgroundAgentDialog(
+            host = state.host.orEmpty(),
+            onStart = { name, prompt -> askingBackground = false; onStartBackground(name, prompt) },
+            onDismiss = { askingBackground = false },
+        )
+    }
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
             title = state.ticketKey?.let { "Start $it" } ?: "New session",
@@ -240,6 +256,15 @@ fun NewSessionScreen(
                     )
                 }
             }
+            // The desktop's other kind: headless, supervised, given its task
+            // up front — needs a host, not a project.
+            if (state.backgroundAvailable && state.host != null) {
+                TextButton(
+                    onClick = { askingBackground = true },
+                    enabled = editable,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                ) { Text("Background agent on ${state.host}…") }
+            }
         }
     }
 
@@ -286,3 +311,29 @@ private val IDENTIFIER_KEYBOARD = KeyboardOptions(
     autoCorrectEnabled = false,
     imeAction = ImeAction.Next,
 )
+
+/** A background agent: a name (optional — the prompt names it otherwise) and the task it starts on. */
+@Composable
+private fun BackgroundAgentDialog(host: String, onStart: (String, String) -> Unit, onDismiss: () -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var prompt by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Background agent on $host") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("A headless Claude session the fleet supervises, started on the task below. It shows in the list once the hub has matched it.")
+                OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, label = { Text("Name (optional)") })
+                OutlinedTextField(
+                    value = prompt,
+                    onValueChange = { prompt = it },
+                    minLines = 3,
+                    label = { Text("Task") },
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onStart(name, prompt) }, enabled = prompt.isNotBlank()) { Text("Start") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}

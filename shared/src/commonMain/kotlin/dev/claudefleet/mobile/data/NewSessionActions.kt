@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.NewBgSessionResult
 
 /**
  * What the New session form sends: already trimmed, with every optional field
@@ -29,10 +30,16 @@ data class NewSessionRequest(
 interface NewSessionActions {
     /** Create the session and return its row, as the hub stored it. */
     suspend fun newSession(request: NewSessionRequest): SessionRow
+
+    /** A supervised headless (background) Claude session on [hostAlias], started on [prompt] (`new_bg_session`). */
+    suspend fun newBackground(hostAlias: String, name: String, prompt: String): NewBgSessionResult
 }
 
 /** [NewSessionActions] against the paired hub, through [AppSession.withClient]. */
 class HubNewSessionActions(private val session: AppSession) : NewSessionActions {
+    override suspend fun newBackground(hostAlias: String, name: String, prompt: String): NewBgSessionResult =
+        session.withClient { it.newBgSession(hostAlias, name, prompt) }
+
     override suspend fun newSession(request: NewSessionRequest): SessionRow =
         session.withClient {
             it.newSession(

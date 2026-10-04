@@ -962,6 +962,9 @@ private fun NewSessionRoute(
         onFriendlyNameChange = vm::onFriendlyNameChange,
         onCreate = { vm.create() },
         onDismissError = vm::dismissError,
+        // An agent the hub could not match to a row yet has no screen to
+        // open: back to the list, where it appears with the next pass.
+        onStartBackground = { name, prompt -> vm.startBackground(name, prompt) { onBack() } },
         multiStart = MultiStartHandlers(
             onToggle = vm::toggleAlsoIn,
             onConfirm = { vm.confirmMultiStart() },
@@ -1187,6 +1190,9 @@ private fun SessionRoute(
         onViewConversation = { vm.view(it) },
         onBackToCurrent = vm::backToCurrent,
         onRecreate = { vm.recreate() },
+        onReview = { prompt -> vm.spawnReview(prompt, onOpenSession) },
+        onRepair = { vm.repair() },
+        onDismissRepair = vm::dismissRepair,
         // A dismissed ghost has no screen left to show: back to where it was opened from.
         onDismissGhost = { vm.dismissGhost(onBack) },
         onOpenRepo = { onOpenRepo(sessionId) }.takeIf { caps.repo || caps.repoLog || caps.repoFiles },

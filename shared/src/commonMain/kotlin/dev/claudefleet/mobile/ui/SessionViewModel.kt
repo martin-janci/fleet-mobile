@@ -12,6 +12,7 @@ import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.ConversationSummary
+import dev.claudefleet.mobile.model.RepairReport
 import dev.claudefleet.mobile.model.PendingInput
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.SessionRow
@@ -175,7 +176,17 @@ data class SessionUiState(
     /** The hub can recreate a session / dismiss a ghost (`recreate_session`, `dismiss_ghost_session`). */
     val recreateAvailable: Boolean = false,
     val dismissGhostAvailable: Boolean = false,
+    val reviewAvailable: Boolean = false,
+    val repairAvailable: Boolean = false,
+    /** What the last repair found and did, until dismissed. */
+    val repair: RepairReport? = null,
 ) {
+    val canReview: Boolean
+        get() = canManage && reviewAvailable
+
+    val canRepair: Boolean
+        get() = canManage && repairAvailable
+
     /**
      * Lost from tmux — a reboot, a killed server — with its row kept: a
      * ghost, which can be brought back (Recreate) or let go (Dismiss).
@@ -380,6 +391,7 @@ class SessionViewModel(
         /** The widest window has been read: there is nothing older to ask for. */
         val olderLoaded: Boolean = false,
         val loadingOlder: Boolean = false,
+        val repair: RepairReport? = null,
     )
 
     private val local = MutableStateFlow(Local())
@@ -1039,6 +1051,26 @@ class SessionViewModel(
     }
 
     /**
+     * A review session in this one's worktree, seeded with [prompt]; [onStarted]
+     * is handed its id to open.
+     */
+    fun spawnReview(prompt: String, onStarted: (Long) -> Unit): Job = runManaged(::canManageNow) {
+        val row = actions.spawnReview(sessionId, prompt)
+        onStarted(row.id)
+    }
+
+    /** Repair the workspace; what was found and done is shown until [dismissRepair]. */
+    fun repair(): Job = runManagedThen(::canManageNow) {
+        val report = actions.repair(sessionId)
+        local.update { it.copy(repair = report) }
+        null
+    }
+
+    fun dismissRepair() {
+        local.update { it.copy(repair = null) }
+    }
+
+    /**
      * Kill and rebuild the session in its worktree, resuming the same
      * conversation — for a wedged REPL, or to bring a ghost back.
      */
@@ -1386,6 +1418,9 @@ class SessionViewModel(
         loadingOlder = l.loadingOlder,
         recreateAvailable = fleet.capabilities.value.recreateSession,
         dismissGhostAvailable = fleet.capabilities.value.dismissGhost,
+        reviewAvailable = fleet.capabilities.value.spawnReview,
+        repairAvailable = fleet.capabilities.value.repairSession,
+        repair = l.repair,
     )
 }
 
@@ -1546,3 +1581,15 @@ private val RETRY_NOT_READY = Friendly(
 
 /** The widest window `session_conversation` answers: its `turns` maximum. */
 internal const val OLDER_TURNS: Int = 100
+
+/**
+ * The desktop's review prompt (`DEFAULT_REVIEW_PROMPT` in `sessions.ts`), so a
+ * review started from the phone asks for the same three passes.
+ */
+internal const val DEFAULT_REVIEW_PROMPT: String = """Review the work in this worktree. Run `git diff` and `git log` against the base branch to see what changed.
+
+Pass 1 — correctness: does the code do what it should? Any bugs?
+Pass 2 — code quality: clarity, structure, test coverage.
+Pass 3 — risk: anything dangerous, security-sensitive, or destructive?
+
+Cite file:line for every point. End with an overall verdict: approve / approve-with-fixes / needs-rework."""

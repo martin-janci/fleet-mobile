@@ -94,6 +94,11 @@ data class HubCapabilities(
     val repoLog: Boolean get() = REPO_LOG in tools && REPO_COMMIT in tools && REPO_COMMIT_DIFF in tools
     val repoFiles: Boolean get() = REPO_TREE in tools && REPO_FILE in tools
 
+    /** A review session, a workspace repair, a background agent — all writes. */
+    val spawnReview: Boolean get() = SPAWN_REVIEW in tools
+    val repairSession: Boolean get() = REPAIR_SESSION in tools
+    val newBgSession: Boolean get() = NEW_BG_SESSION in tools
+
     /** A host's re-probe and its recovery after a reboot; a ghost's recreate or dismissal. */
     val probeHost: Boolean get() = PROBE_HOST in tools
     val restoreSessions: Boolean get() = RESTORE_HOST_SESSIONS in tools
@@ -157,6 +162,9 @@ data class HubCapabilities(
         const val REPO_CHANGES = "repo_changes"
         const val USAGE_REPORT = "usage_report"
         const val PROBE_HOST = "probe_host"
+        const val SPAWN_REVIEW = "spawn_review"
+        const val REPAIR_SESSION = "repair_session"
+        const val NEW_BG_SESSION = "new_bg_session"
         const val RESTORE_HOST_SESSIONS = "restore_host_sessions"
         const val DISCOVER_LOST_SESSIONS = "discover_lost_sessions"
         const val RECREATE_SESSION = "recreate_session"

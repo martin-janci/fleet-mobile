@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.data
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.ConversationSummary
+import dev.claudefleet.mobile.model.RepairReport
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.ToolDetail
@@ -82,6 +83,12 @@ interface SessionActions {
      */
     suspend fun rewind(sessionId: Long, anchorUuid: String?, mode: String, newWorktree: String? = null): SessionRow
 
+    /** A review session in this session's worktree, seeded with [prompt]; answers its row. */
+    suspend fun spawnReview(sessionId: Long, prompt: String): SessionRow
+
+    /** Make the session's directory a healthy worktree with its pane running there. */
+    suspend fun repair(sessionId: Long): RepairReport
+
     /** Kill and rebuild the session in its worktree, resuming its conversation — a ghost too. */
     suspend fun recreate(sessionId: Long): SessionRow
 
@@ -152,6 +159,11 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
 
     override suspend fun rewind(sessionId: Long, anchorUuid: String?, mode: String, newWorktree: String?): SessionRow =
         session.withClient { it.rewind(sessionId, anchorUuid, mode, newWorktree) }
+
+    override suspend fun spawnReview(sessionId: Long, prompt: String): SessionRow =
+        session.withClient { it.spawnReview(sessionId, prompt) }
+
+    override suspend fun repair(sessionId: Long): RepairReport = session.withClient { it.repairSession(sessionId) }
 
     override suspend fun recreate(sessionId: Long): SessionRow = session.withClient { it.recreateSession(sessionId) }
 

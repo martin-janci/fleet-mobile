@@ -112,6 +112,7 @@ import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.model.ConversationSummary
+import dev.claudefleet.mobile.model.RepairReport
 import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.tailMarker
@@ -236,7 +237,12 @@ fun SessionScreen(
     /** Recreate the session / let a ghost go; the defaults do nothing. */
     onRecreate: () -> Unit = {},
     onDismissGhost: () -> Unit = {},
+    /** Start a review session with a prompt; repair the workspace; close a repair's report. */
+    onReview: (String) -> Unit = {},
+    onRepair: () -> Unit = {},
+    onDismissRepair: () -> Unit = {},
 ) {
+    state.repair?.let { RepairReportDialog(it, onDismissRepair) }
     val turns = state.conversation.turns
     val truncated = state.conversation.truncated
     // Newest first, under a `reverseLayout` list: item 0 is the newest turn
@@ -459,6 +465,8 @@ fun SessionScreen(
                         onOpenRepo = onOpenRepo,
                         onRecreate = onRecreate,
                         onDismissGhost = onDismissGhost,
+                        onReview = onReview,
+                        onRepair = onRepair,
                     )
                     // A tap unfolds it: out of immersive, out of the read-back,
                     // and — when typing is what folded it — the keyboard down.
@@ -879,6 +887,8 @@ private fun SessionBar(
     onOpenRepo: (() -> Unit)?,
     onRecreate: () -> Unit,
     onDismissGhost: () -> Unit,
+    onReview: (String) -> Unit,
+    onRepair: () -> Unit,
 ) {
     val busy = state.loading || state.refreshing
     var pickingConversation by remember { mutableStateOf(false) }
@@ -947,6 +957,8 @@ private fun SessionBar(
                     onRepo = onOpenRepo,
                     onRecreate = onRecreate,
                     onDismissGhost = onDismissGhost,
+                    onReview = onReview,
+                    onRepair = onRepair,
                 )
             }
         },
@@ -1081,8 +1093,12 @@ private fun SessionOverflowMenu(
     onRepo: (() -> Unit)? = null,
     onRecreate: () -> Unit = {},
     onDismissGhost: () -> Unit = {},
+    onReview: (String) -> Unit = {},
+    onRepair: () -> Unit = {},
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var showReview by remember { mutableStateOf(false) }
+    var showRepairConfirm by remember { mutableStateOf(false) }
     var showRecreateConfirm by remember { mutableStateOf(false) }
     var showDismissGhostConfirm by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
@@ -1115,6 +1131,12 @@ private fun SessionOverflowMenu(
                 onClick = { expanded = false; showNameWork = true },
             )
         }
+        if (state.canReview) {
+            DropdownMenuItem(text = { Text("Review…") }, enabled = actionable, onClick = { expanded = false; showReview = true })
+        }
+        if (state.canRepair) {
+            DropdownMenuItem(text = { Text("Repair workspace") }, enabled = actionable, onClick = { expanded = false; showRepairConfirm = true })
+        }
         // A ghost first: bringing it back, or letting it go, is what it is for.
         if (state.canRecreate) {
             DropdownMenuItem(
@@ -1144,6 +1166,36 @@ private fun SessionOverflowMenu(
         }
     }
 
+    if (showReview) {
+        var prompt by remember { mutableStateOf(DEFAULT_REVIEW_PROMPT) }
+        AlertDialog(
+            onDismissRequest = { showReview = false },
+            title = { Text("Review this worktree") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("A new session in this session's worktree, seeded with the prompt below. It reviews the worktree as it is now.")
+                    TextField(
+                        value = prompt,
+                        onValueChange = { prompt = it },
+                        minLines = 4,
+                        maxLines = 10,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { showReview = false; onReview(prompt) }, enabled = prompt.isNotBlank()) { Text("Start review") } },
+            dismissButton = { TextButton(onClick = { showReview = false }) { Text("Cancel") } },
+        )
+    }
+    if (showRepairConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRepairConfirm = false },
+            title = { Text("Repair the workspace?") },
+            text = { Text("Makes the session's directory a healthy git worktree on its branch, with its pane running there. Nothing happens to a healthy one.") },
+            confirmButton = { TextButton(onClick = { showRepairConfirm = false; onRepair() }) { Text("Repair") } },
+            dismissButton = { TextButton(onClick = { showRepairConfirm = false }) { Text("Cancel") } },
+        )
+    }
     if (showRecreateConfirm) {
         AlertDialog(
             onDismissRequest = { showRecreateConfirm = false },
@@ -2426,5 +2478,23 @@ private fun EditQuickReplyDialog(
                 TextButton(onClick = onDismiss) { Text("Cancel") }
             }
         },
+    )
+}
+
+/** What a repair found and did: healthy or not, its actions, its warnings, what it left for a person. */
+@Composable
+private fun RepairReportDialog(report: RepairReport, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (report.healthy) "The workspace is healthy" else "The workspace still needs attention") },
+        text = {
+            Column(modifier = Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (report.actions.isEmpty()) Text("Nothing needed doing.", style = MaterialTheme.typography.bodySmall)
+                for (a in report.actions) Text("• $a", style = MaterialTheme.typography.bodySmall)
+                for (w in report.warnings) Text("⚠ $w", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                for (d in report.deferred) Text("Left for you: $d", style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
     )
 }

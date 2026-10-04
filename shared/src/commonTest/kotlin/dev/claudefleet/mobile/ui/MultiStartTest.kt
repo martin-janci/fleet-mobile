@@ -10,6 +10,7 @@ import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.OrgTracker
 import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.NewBgSessionResult
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.StartFailure
 import dev.claudefleet.mobile.model.StartSkip
@@ -56,6 +57,8 @@ private val SINGLE_ONLY = HubCapabilities.of(
 
 private object NoCreate : NewSessionActions {
     override suspend fun newSession(request: NewSessionRequest): SessionRow = fail("a ticket start never calls new_session")
+    override suspend fun newBackground(hostAlias: String, name: String, prompt: String): NewBgSessionResult =
+        fail("a ticket start never starts a background agent")
 }
 
 private fun started(id: Long, project: Long) = SessionRow(id = id, tmuxName = "pay-9-$id", hostAlias = "pine", projectId = project)
