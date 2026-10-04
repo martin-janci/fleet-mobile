@@ -395,4 +395,30 @@ class NavigatorTest {
         assertTrue(nav.back())
         assertEquals(Screen.Work, nav.screen.value)
     }
+
+    @Test
+    fun a_worktree_opens_over_its_session_and_back_returns_to_it() {
+        val nav = Navigator()
+        nav.open(7)
+        nav.openRepo(7)
+
+        assertEquals(Screen.Repo(7), nav.screen.value)
+        assertEquals(Tab.Sessions, nav.tab.value)
+
+        assertTrue(nav.back())
+        assertEquals(Screen.Session(7), nav.screen.value)
+        assertTrue(nav.back())
+        assertEquals(Screen.Sessions(), nav.screen.value)
+    }
+
+    @Test
+    fun opening_the_same_worktree_twice_is_one_step() {
+        val nav = Navigator()
+        nav.open(7)
+        nav.openRepo(7)
+        nav.openRepo(7)
+
+        assertTrue(nav.back())
+        assertEquals(Screen.Session(7), nav.screen.value)
+    }
 }

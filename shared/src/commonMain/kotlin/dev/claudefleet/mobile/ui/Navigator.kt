@@ -35,6 +35,9 @@ sealed interface Screen {
 
     /** The hub's copies of files sessions sent (claude-fleet file downloads). A tab of its own. */
     data object Files : Screen
+
+    /** One session's worktree — changes, history, files — pushed over that session. */
+    data class Repo(val sessionId: Long) : Screen
 }
 
 /**
@@ -122,6 +125,11 @@ class Navigator {
 
     /** Open one session's screen. */
     fun open(sessionId: Long) = move { it.pushing(it.screen).going(Screen.Session(sessionId)) }
+
+    /** Open a session's worktree (changes, history, files); back returns to the session. */
+    fun openRepo(sessionId: Long) = move { s ->
+        if (s.screen == Screen.Repo(sessionId)) s else s.pushing(s.screen, sessionIsAPlace = true).going(Screen.Repo(sessionId))
+    }
 
     /**
      * Open one task's screen (the Work view): from the Work view, from a
@@ -283,7 +291,7 @@ class Navigator {
 
 /** A screen pushed over a tab, which back leaves; a tab's own screen is not one. */
 internal fun isPushed(screen: Screen): Boolean =
-    screen is Screen.Session || screen is Screen.NewSession || screen is Screen.Task
+    screen is Screen.Session || screen is Screen.NewSession || screen is Screen.Task || screen is Screen.Repo
 
 private fun rootOf(tab: Tab): Screen = when (tab) {
     Tab.Sessions -> Screen.Sessions()
@@ -296,7 +304,7 @@ private fun rootOf(tab: Tab): Screen = when (tab) {
 /** The tab a screen lights, or null for one that belongs to whichever it was opened from. */
 private fun tabOf(screen: Screen): Tab? = when (screen) {
     is Screen.Sessions -> Tab.Sessions
-    is Screen.Session, is Screen.NewSession -> null
+    is Screen.Session, is Screen.NewSession, is Screen.Repo -> null
     Screen.Work, is Screen.Task -> Tab.Work
     Screen.Files -> Tab.Files
     Screen.Hosts -> Tab.Hosts

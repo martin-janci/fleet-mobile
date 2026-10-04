@@ -263,8 +263,15 @@ costs one reconnect.
   10+: the phone's *Downloads*, through MediaStore — no storage permission),
   **Share** and **Open** (a `FileProvider` URI); on iOS, the share sheet,
   which holds *Save to Files*. **Remove** (a `full` token only, asked first)
-  forgets the hub's copy for every device. The app has no file browser of its
-  own, so it does not offer *Send to downloads*; that is the desktop's.
+  forgets the hub's copy for every device. A file reaches this list from a
+  session's **Worktree** too (*Send to Downloads* on a file there).
+- **Worktree** — a session's worktree, read-only (from its ⋮ menu or its
+  Details, when the hub serves the `repo_*` reads): **Changes** (git status,
+  each with its diff against HEAD), **History** (the commit log, paged; each
+  commit's files and their diffs) and **Files** (the tree, found by words in
+  the path; a file's contents, or *Send to Downloads* for anything the phone
+  should open itself). Stage, commit, checkout and push stay on the desktop:
+  the hub refuses them to a client.
 - **Settings** — which hub, which client name, the app version, and *Forget
   this hub*. Under it, **Fleet settings** (claude-fleet declarative pages P6,
   when the hub serves `list_pages` and `get_settings`): the hub's own settings
@@ -349,7 +356,9 @@ costs one reconnect.
   those, so the app does not offer a button that would produce an error. The
   tools it may call are pinned by a test (`ToolsTheAppMayCallTest`), as an
   allow-list rather than a list of things someone thought to forbid.
-- **No file browsing or diffs.**
+- **No writes to a worktree.** The Worktree screen reads changes, history and
+  files; staging, committing, checking out and pushing are the desktop's,
+  and the hub refuses them to a client token.
 - **No tracker administration, and no brief editing.** Connecting Jira is
   `work_admin`, which is master-only and which the app never names (the test
   forbids it). Starting or resuming work uses the hub's default brief; editing

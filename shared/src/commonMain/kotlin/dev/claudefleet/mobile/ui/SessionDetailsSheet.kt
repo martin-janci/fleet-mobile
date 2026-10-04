@@ -44,6 +44,8 @@ data class SessionDetailsHandlers(
     val onCancelTask: (Long) -> Unit = {},
     val onOpenSession: (Long) -> Unit = {},
     val onDismissError: () -> Unit = {},
+    /** The session's worktree screen; null where the hub serves none of it. */
+    val onOpenRepo: (() -> Unit)? = null,
 )
 
 /**
@@ -72,6 +74,9 @@ fun SessionDetailsSheet(state: SessionDetailsUiState, handlers: SessionDetailsHa
                         modifier = Modifier.weight(1f),
                     )
                     TextButton(onClick = handlers.onReload, enabled = !state.loading) { Text("Refresh") }
+                }
+                handlers.onOpenRepo?.let { open ->
+                    TextButton(onClick = open, modifier = Modifier.padding(horizontal = 12.dp)) { Text("Worktree: changes, history, files") }
                 }
                 if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 24.dp))
                 ErrorBanner(state.error, onDismiss = handlers.onDismissError)
