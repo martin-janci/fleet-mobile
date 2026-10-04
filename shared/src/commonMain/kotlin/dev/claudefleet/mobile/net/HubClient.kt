@@ -17,6 +17,8 @@ import dev.claudefleet.mobile.model.FleetTask
 import dev.claudefleet.mobile.model.GithubRepo
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.HubHealth
+import dev.claudefleet.mobile.model.MoveOutcome
+import dev.claudefleet.mobile.model.moveOutcomeOf
 import dev.claudefleet.mobile.model.HostWorktrees
 import dev.claudefleet.mobile.model.RestoreReport
 import dev.claudefleet.mobile.model.LostCandidate
@@ -519,6 +521,32 @@ class HubClient(
                 put("prompt", prompt)
             },
         ) { json.decodeFromJsonElement(NewBgSessionResult.serializer(), it) }
+
+    /**
+     * Move a session to [targetHost] (`move_session`), carrying its
+     * uncommitted and unpushed work and its Claude state. [dryRun] previews
+     * and changes nothing; [whenIdle] waits for the session to go idle
+     * first; [cancelWait] ends such a wait. The hub may ask for a desktop
+     * confirmation (`E_CONFIRM_REQUIRED`).
+     */
+    suspend fun moveSession(
+        sessionId: Long,
+        targetHost: String,
+        keepSource: Boolean = false,
+        dryRun: Boolean = false,
+        whenIdle: Boolean = false,
+        cancelWait: Boolean = false,
+    ): MoveOutcome =
+        call(
+            "move_session",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("target_host_alias", targetHost)
+                put("keep_source", keepSource)
+                put("dry_run", dryRun)
+                put("when", if (cancelWait) "cancel" else if (whenIdle) "idle" else "now")
+            },
+        ) { moveOutcomeOf(it) { strategy, element -> json.decodeFromJsonElement(strategy, element) } }
 
     /** Re-probe a host's reachability and versions (`probe_host`); answers its row. */
     suspend fun probeHost(alias: String): HostRow =

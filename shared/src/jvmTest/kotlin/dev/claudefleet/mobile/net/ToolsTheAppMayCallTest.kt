@@ -173,6 +173,10 @@ class ToolsTheAppMayCallTest {
         "list_github_repos",
         "list_host_worktrees",
         "delete_worktree",
+        // Move to host: a write, `Access::Client`, `confirm: true` on the hub
+        // (a desktop may have to approve it: `E_CONFIRM_REQUIRED`). Offered
+        // only to a token that may write.
+        "move_session",
     )
 
     @Test

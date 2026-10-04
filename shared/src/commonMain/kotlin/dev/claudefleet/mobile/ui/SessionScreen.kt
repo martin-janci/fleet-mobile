@@ -245,6 +245,8 @@ fun SessionScreen(
     onDismissRepair: () -> Unit = {},
     /** Press Enter in the pane (the ⏎ chip); the default does nothing. */
     onPressEnter: () -> Unit = {},
+    /** Move to another host; null where the hub or this pairing cannot. */
+    onMove: (() -> Unit)? = null,
 ) {
     state.repair?.let { RepairReportDialog(it, onDismissRepair) }
     val turns = state.conversation.turns
@@ -484,6 +486,7 @@ fun SessionScreen(
                         onReview = onReview,
                         onRepair = onRepair,
                         onFind = { findOpen = !findOpen; if (!findOpen) findQuery = "" },
+                        onMove = onMove,
                     )
                     // A tap unfolds it: out of immersive, out of the read-back,
                     // and — when typing is what folded it — the keyboard down.
@@ -924,6 +927,7 @@ private fun SessionBar(
     onReview: (String) -> Unit,
     onRepair: () -> Unit,
     onFind: () -> Unit,
+    onMove: (() -> Unit)?,
 ) {
     val busy = state.loading || state.refreshing
     var pickingConversation by remember { mutableStateOf(false) }
@@ -996,6 +1000,7 @@ private fun SessionBar(
                     onReview = onReview,
                     onRepair = onRepair,
                     onSendCommand = onSendCommand,
+                    onMove = onMove,
                 )
             }
         },
@@ -1133,6 +1138,7 @@ private fun SessionOverflowMenu(
     onReview: (String) -> Unit = {},
     onRepair: () -> Unit = {},
     onSendCommand: (String) -> Unit = {},
+    onMove: (() -> Unit)? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     var picking by remember { mutableStateOf<String?>(null) }
@@ -1178,6 +1184,9 @@ private fun SessionOverflowMenu(
         }
         if (state.canReview) {
             DropdownMenuItem(text = { Text("Review…") }, enabled = actionable, onClick = { expanded = false; showReview = true })
+        }
+        if (onMove != null && state.canManage) {
+            DropdownMenuItem(text = { Text("Move to host…") }, enabled = actionable, onClick = { expanded = false; onMove() })
         }
         if (state.canRepair) {
             DropdownMenuItem(text = { Text("Repair workspace") }, enabled = actionable, onClick = { expanded = false; showRepairConfirm = true })
