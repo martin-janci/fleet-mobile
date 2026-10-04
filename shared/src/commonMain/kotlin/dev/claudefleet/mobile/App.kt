@@ -1215,6 +1215,7 @@ private fun SessionRoute(
         onReview = { prompt -> vm.spawnReview(prompt, onOpenSession) },
         onRepair = { vm.repair() },
         onDismissRepair = vm::dismissRepair,
+        onPressEnter = { vm.pressEnter() },
         // A dismissed ghost has no screen left to show: back to where it was opened from.
         onDismissGhost = { vm.dismissGhost(onBack) },
         onOpenRepo = { onOpenRepo(sessionId) }.takeIf { caps.repo || caps.repoLog || caps.repoFiles },

@@ -133,6 +133,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.milliseconds
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 
 /** The conversation list, for the device test that checks it follows new output. */
 const val CONVERSATION_LIST: String = "conversation-list"
@@ -241,6 +243,8 @@ fun SessionScreen(
     onReview: (String) -> Unit = {},
     onRepair: () -> Unit = {},
     onDismissRepair: () -> Unit = {},
+    /** Press Enter in the pane (the ⏎ chip); the default does nothing. */
+    onPressEnter: () -> Unit = {},
 ) {
     state.repair?.let { RepairReportDialog(it, onDismissRepair) }
     val turns = state.conversation.turns
@@ -631,6 +635,10 @@ fun SessionScreen(
                     ) { shown ->
                         when (shown) {
                             Chrome.Full -> Column {
+                                // The desktop's slash menu: while the draft is one
+                                // `/word`, the commands it could be; a tap fills it in.
+                                val slash = if (state.readOnly) emptyList() else matchSlashCommands(state.draft)
+                                if (slash.isNotEmpty()) SlashSuggestions(slash, onPick = { onDraftChange(completeSlashCommand(it)) })
                                 // Hidden outright, not merely dimmed, in the same two cases
                                 // the card itself takes over the space for: while it is up
                                 // (the answer goes there instead) and on a readonly device (no
@@ -659,6 +667,7 @@ fun SessionScreen(
                                     // turn their prompt starts is followed like any other.
                                     onSend = { scrollToNewest(); onSend() },
                                     onOpenHistory = onOpenHistory,
+                                    onPressEnter = { scrollToNewest(); onPressEnter() },
                                     onFocusChange = { promptFocused = it },
                                     focusNow = focusPrompt,
                                     onFocused = { focusPrompt = false },
@@ -959,6 +968,7 @@ private fun SessionBar(
                     onDismissGhost = onDismissGhost,
                     onReview = onReview,
                     onRepair = onRepair,
+                    onSendCommand = onSendCommand,
                 )
             }
         },
@@ -1095,8 +1105,10 @@ private fun SessionOverflowMenu(
     onDismissGhost: () -> Unit = {},
     onReview: (String) -> Unit = {},
     onRepair: () -> Unit = {},
+    onSendCommand: (String) -> Unit = {},
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var picking by remember { mutableStateOf<String?>(null) }
     var showReview by remember { mutableStateOf(false) }
     var showRepairConfirm by remember { mutableStateOf(false) }
     var showRecreateConfirm by remember { mutableStateOf(false) }
@@ -1130,6 +1142,12 @@ private fun SessionOverflowMenu(
                 enabled = state.connected,
                 onClick = { expanded = false; showNameWork = true },
             )
+        }
+        // The desktop's model and effort pickers: each sends `/model <alias>`
+        // or `/effort <level>` like a typed command.
+        if (state.canSendQuick) {
+            DropdownMenuItem(text = { Text("Model…") }, onClick = { expanded = false; picking = "model" })
+            DropdownMenuItem(text = { Text("Effort…") }, onClick = { expanded = false; picking = "effort" })
         }
         if (state.canReview) {
             DropdownMenuItem(text = { Text("Review…") }, enabled = actionable, onClick = { expanded = false; showReview = true })
@@ -1166,6 +1184,27 @@ private fun SessionOverflowMenu(
         }
     }
 
+    picking?.let { command ->
+        AlertDialog(
+            onDismissRequest = { picking = null },
+            title = { Text(if (command == "model") "Switch the model" else "Set the effort") },
+            text = {
+                Column(modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
+                    for (option in if (command == "model") MODEL_OPTIONS else EFFORT_OPTIONS) {
+                        Text(
+                            option.label,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                picking = null
+                                pickerCommand(command, option.value)?.let(onSendCommand)
+                            }.padding(vertical = 12.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { picking = null }) { Text("Cancel") } },
+        )
+    }
     if (showReview) {
         var prompt by remember { mutableStateOf(DEFAULT_REVIEW_PROMPT) }
         AlertDialog(
@@ -2046,6 +2085,8 @@ private fun PromptBox(
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
     onOpenHistory: () -> List<String>,
+    /** Enter in the pane, for a REPL waiting on a bare Enter — the ⏎ in an empty field. */
+    onPressEnter: () -> Unit = {},
     /** The field gained or lost focus — what tells the screen someone is typing. */
     onFocusChange: (Boolean) -> Unit = {},
     /** Put the cursor in the field now (the folded footer's pill was tapped); [onFocused] once done. */
@@ -2100,6 +2141,17 @@ private fun PromptBox(
                     IconButton(onClick = { showHistory = true }) {
                         Icon(FleetIcons.History, contentDescription = "Draft history")
                     }
+                },
+                // The desktop's ⏎ chip, where it costs no room: inside an
+                // empty field, gone the moment there is a draft to send.
+                trailingIcon = if (state.draft.isEmpty() && state.canSendQuick) {
+                    {
+                        IconButton(onClick = onPressEnter) {
+                            Text("⏎", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { contentDescription = "Press Enter" })
+                        }
+                    }
+                } else {
+                    null
                 },
                 colors = TextFieldDefaults.colors(
                     focusedIndicatorColor = Color.Transparent,
@@ -2497,4 +2549,20 @@ private fun RepairReportDialog(report: RepairReport, onDismiss: () -> Unit) {
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
     )
+}
+
+/** The slash commands the draft could be, each with what it does; a tap fills it in. */
+@Composable
+private fun SlashSuggestions(commands: List<SlashCommand>, onPick: (SlashCommand) -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().heightIn(max = 168.dp).verticalScroll(rememberScrollState()).padding(top = 4.dp)) {
+        for (c in commands) {
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { onPick(c) }.padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("/${c.name}", style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace, modifier = Modifier.width(120.dp))
+                Text(c.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
 }
