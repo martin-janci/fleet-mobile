@@ -233,6 +233,9 @@ fun SessionScreen(
     onBackToCurrent: () -> Unit = {},
     /** The session's worktree screen; null where the hub serves none of it. */
     onOpenRepo: (() -> Unit)? = null,
+    /** Recreate the session / let a ghost go; the defaults do nothing. */
+    onRecreate: () -> Unit = {},
+    onDismissGhost: () -> Unit = {},
 ) {
     val turns = state.conversation.turns
     val truncated = state.conversation.truncated
@@ -454,6 +457,8 @@ fun SessionScreen(
                         onOpenDetails = onOpenDetails,
                         onViewConversation = onViewConversation,
                         onOpenRepo = onOpenRepo,
+                        onRecreate = onRecreate,
+                        onDismissGhost = onDismissGhost,
                     )
                     // A tap unfolds it: out of immersive, out of the read-back,
                     // and — when typing is what folded it — the keyboard down.
@@ -872,6 +877,8 @@ private fun SessionBar(
     onOpenDetails: () -> Unit,
     onViewConversation: (ConversationSummary) -> Unit,
     onOpenRepo: (() -> Unit)?,
+    onRecreate: () -> Unit,
+    onDismissGhost: () -> Unit,
 ) {
     val busy = state.loading || state.refreshing
     var pickingConversation by remember { mutableStateOf(false) }
@@ -938,6 +945,8 @@ private fun SessionBar(
                     onNameWork = workHandlers.onNameWork.takeIf { work.canNameWork },
                     onDetails = onOpenDetails,
                     onRepo = onOpenRepo,
+                    onRecreate = onRecreate,
+                    onDismissGhost = onDismissGhost,
                 )
             }
         },
@@ -1070,8 +1079,12 @@ private fun SessionOverflowMenu(
     onNameWork: ((String, String?) -> Unit)? = null,
     onDetails: () -> Unit = {},
     onRepo: (() -> Unit)? = null,
+    onRecreate: () -> Unit = {},
+    onDismissGhost: () -> Unit = {},
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var showRecreateConfirm by remember { mutableStateOf(false) }
+    var showDismissGhostConfirm by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
     var showSetWork by remember { mutableStateOf(false) }
     var showNameWork by remember { mutableStateOf(false) }
@@ -1102,6 +1115,21 @@ private fun SessionOverflowMenu(
                 onClick = { expanded = false; showNameWork = true },
             )
         }
+        // A ghost first: bringing it back, or letting it go, is what it is for.
+        if (state.canRecreate) {
+            DropdownMenuItem(
+                text = { Text(if (state.ghost) "Recreate" else "Recreate (resume in a new pane)") },
+                enabled = actionable,
+                onClick = { expanded = false; showRecreateConfirm = true },
+            )
+        }
+        if (state.canDismissGhost) {
+            DropdownMenuItem(
+                text = { Text("Dismiss ghost") },
+                enabled = actionable,
+                onClick = { expanded = false; showDismissGhostConfirm = true },
+            )
+        }
         if (manage) {
             SessionManageItems(
                 state = state,
@@ -1116,6 +1144,24 @@ private fun SessionOverflowMenu(
         }
     }
 
+    if (showRecreateConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRecreateConfirm = false },
+            title = { Text("Recreate this session?") },
+            text = { Text("Its tmux session is killed and rebuilt in the same worktree, resuming the same conversation. The process does not survive; the conversation does.") },
+            confirmButton = { TextButton(onClick = { showRecreateConfirm = false; onRecreate() }) { Text("Recreate") } },
+            dismissButton = { TextButton(onClick = { showRecreateConfirm = false }) { Text("Cancel") } },
+        )
+    }
+    if (showDismissGhostConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDismissGhostConfirm = false },
+            title = { Text("Dismiss this ghost?") },
+            text = { Text("Its row is deleted for good. Its conversation stays on the host, and can still be found from the host's sheet.") },
+            confirmButton = { TextButton(onClick = { showDismissGhostConfirm = false; onDismissGhost() }) { Text("Dismiss") } },
+            dismissButton = { TextButton(onClick = { showDismissGhostConfirm = false }) { Text("Cancel") } },
+        )
+    }
     if (showSetWork && onSetWork != null) {
         SetWorkDialog(
             onConfirm = { showSetWork = false; onSetWork(it) },

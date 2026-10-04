@@ -145,6 +145,16 @@ class ToolsTheAppMayCallTest {
         // weekly windows are the desktop's own read; the hub serves no tool.
         "usage_report",
         "list_accounts",
+        // A host's sheet and a ghost: `probe_host` and `discover_lost_sessions`
+        // are readonly; `restore_host_sessions`, `recreate_session` and
+        // `dismiss_ghost_session` are writes, offered only to a token that
+        // may write. All `Access::Client`. A resumed conversation starts
+        // through `new_session { resume_claude_session_id }`.
+        "probe_host",
+        "restore_host_sessions",
+        "discover_lost_sessions",
+        "recreate_session",
+        "dismiss_ghost_session",
     )
 
     @Test

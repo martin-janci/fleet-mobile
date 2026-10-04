@@ -172,7 +172,22 @@ data class SessionUiState(
     /** The current conversation's older turns may be asked for (see [SessionViewModel.loadOlder]). */
     val canLoadOlder: Boolean = false,
     val loadingOlder: Boolean = false,
+    /** The hub can recreate a session / dismiss a ghost (`recreate_session`, `dismiss_ghost_session`). */
+    val recreateAvailable: Boolean = false,
+    val dismissGhostAvailable: Boolean = false,
 ) {
+    /**
+     * Lost from tmux — a reboot, a killed server — with its row kept: a
+     * ghost, which can be brought back (Recreate) or let go (Dismiss).
+     */
+    val ghost: Boolean
+        get() = session?.lostAt != null || session?.status == "ghost"
+
+    val canRecreate: Boolean
+        get() = canManage && recreateAvailable
+
+    val canDismissGhost: Boolean
+        get() = canManage && ghost && dismissGhostAvailable
     /**
      * Whether the ⋮ menu is offered at all: a readonly credential may not
      * call any of these tools, a session that has left the fleet has nothing
@@ -1023,6 +1038,20 @@ class SessionViewModel(
         }
     }
 
+    /**
+     * Kill and rebuild the session in its worktree, resuming the same
+     * conversation — for a wedged REPL, or to bring a ghost back.
+     */
+    fun recreate(): Job = runManaged(::canManageNow) {
+        actions.recreate(sessionId)
+    }
+
+    /** Let a ghost go: its row is deleted, and [onGone] takes the screen away. */
+    fun dismissGhost(onGone: () -> Unit): Job = runManaged({ canManageNow() && row()?.lostAt != null }) {
+        actions.dismissGhost(sessionId)
+        onGone()
+    }
+
     /** Ask the session to persist its work, then arm deletion once it is clean. */
     fun safeKill(): Job = runManaged(::canManageNow) { actions.safeKill(sessionId) }
 
@@ -1355,6 +1384,8 @@ class SessionViewModel(
         canLoadOlder = l.viewing == null && l.conversation.truncated && !l.olderLoaded &&
             l.conversation.turns.size < OLDER_TURNS,
         loadingOlder = l.loadingOlder,
+        recreateAvailable = fleet.capabilities.value.recreateSession,
+        dismissGhostAvailable = fleet.capabilities.value.dismissGhost,
     )
 }
 

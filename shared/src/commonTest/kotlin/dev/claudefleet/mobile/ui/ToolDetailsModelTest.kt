@@ -64,6 +64,8 @@ class ToolDetailsModelTest {
         override suspend fun waitForTurn(sessionId: Long, turn: Long, timeoutS: Int): WaitResult = error("unused")
         override suspend fun restart(sessionId: Long) = error("unused")
         override suspend fun rewind(sessionId: Long, anchorUuid: String?, mode: String, newWorktree: String?): SessionRow = error("unused")
+        override suspend fun recreate(sessionId: Long): SessionRow = error("unused")
+        override suspend fun dismissGhost(sessionId: Long) = error("unused")
         override suspend fun safeKill(sessionId: Long) = error("unused")
         override suspend fun kill(sessionId: Long) = error("unused")
         override suspend fun setTags(sessionId: Long, tags: List<String>) = error("unused")

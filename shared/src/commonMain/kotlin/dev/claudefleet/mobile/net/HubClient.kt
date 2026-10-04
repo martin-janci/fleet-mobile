@@ -16,6 +16,8 @@ import dev.claudefleet.mobile.model.DownloadRemoved
 import dev.claudefleet.mobile.model.FleetTask
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.HubHealth
+import dev.claudefleet.mobile.model.RestoreReport
+import dev.claudefleet.mobile.model.LostCandidate
 import dev.claudefleet.mobile.model.MultiStart
 import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.PagesBundle
@@ -477,6 +479,39 @@ class HubClient(
     suspend fun listAccounts(): List<AccountRow> =
         call("list_accounts") { json.decodeFromJsonElement(ListSerializer(AccountRow.serializer()), it) }
 
+    /** Re-probe a host's reachability and versions (`probe_host`); answers its row. */
+    suspend fun probeHost(alias: String): HostRow =
+        call("probe_host", buildJsonObject { put("alias", alias) }) { json.decodeFromJsonElement(HostRow.serializer(), it) }
+
+    /**
+     * Restore the sessions [alias] lost to a reboot or a tmux restart
+     * (`restore_host_sessions`): [dryRun] answers the plan alone.
+     */
+    suspend fun restoreHostSessions(alias: String, dryRun: Boolean): RestoreReport =
+        call(
+            "restore_host_sessions",
+            buildJsonObject {
+                put("host_alias", alias)
+                put("dry_run", dryRun)
+            },
+        ) { json.decodeFromJsonElement(RestoreReport.serializer(), it) }
+
+    /** Conversations on [alias] fleet has no live pane for (`discover_lost_sessions`, readonly). */
+    suspend fun discoverLostSessions(alias: String): List<LostCandidate> =
+        call("discover_lost_sessions", buildJsonObject { put("host_alias", alias) }) {
+            json.decodeFromJsonElement(ListSerializer(LostCandidate.serializer()), it)
+        }
+
+    /** Kill and rebuild a session in its worktree, resuming its conversation (`recreate_session`) — a ghost too. */
+    suspend fun recreateSession(sessionId: Long): SessionRow =
+        call("recreate_session", buildJsonObject { put("session_id", sessionId) }) {
+            json.decodeFromJsonElement(SessionRow.serializer(), it)
+        }
+
+    /** Delete a ghost's row for good (`dismiss_ghost_session`). */
+    suspend fun dismissGhost(sessionId: Long): Unit =
+        call("dismiss_ghost_session", buildJsonObject { put("session_id", sessionId) }) { }
+
     /** A session's changed files, git status in its worktree (`repo_changes`, readonly). */
     suspend fun repoChanges(sessionId: Long): List<ChangedFile> =
         call("repo_changes", buildJsonObject { put("session_id", sessionId) }) {
@@ -689,13 +724,21 @@ class HubClient(
         newWorktree: String? = null,
         baseBranch: String? = null,
         friendlyName: String? = null,
+        /** An existing worktree of the project to start in, rather than its main checkout. */
+        worktreeId: Long? = null,
+        /** Resume this Claude conversation rather than start a new one (`discover_lost_sessions`). */
+        resumeClaudeSessionId: String? = null,
+        /** The tmux name to ask for; blank lets the hub pick one. */
+        name: String = "",
     ): SessionRow =
         call(
             "new_session",
             buildJsonObject {
                 put("host_alias", hostAlias)
                 put("project_id", projectId)
-                put("name", "")
+                put("name", name)
+                worktreeId?.let { put("worktree_id", it) }
+                resumeClaudeSessionId?.let { put("resume_claude_session_id", it) }
                 newWorktree?.takeIf { it.isNotBlank() }?.let { put("new_worktree", it) }
                 baseBranch?.takeIf { it.isNotBlank() }?.let { put("base_branch", it) }
                 friendlyName?.takeIf { it.isNotBlank() }?.let { put("friendly_name", it) }

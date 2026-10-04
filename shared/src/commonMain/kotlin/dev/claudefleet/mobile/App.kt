@@ -47,6 +47,8 @@ import dev.claudefleet.mobile.data.HubFleetSettingsActions
 import dev.claudefleet.mobile.data.HubQuickReplyActions
 import dev.claudefleet.mobile.data.HubRepoActions
 import dev.claudefleet.mobile.data.RepoActions
+import dev.claudefleet.mobile.data.HostActions
+import dev.claudefleet.mobile.data.HubHostActions
 import dev.claudefleet.mobile.data.HubSessionActions
 import dev.claudefleet.mobile.data.HubUsageActions
 import dev.claudefleet.mobile.data.UsageActions
@@ -101,6 +103,9 @@ import dev.claudefleet.mobile.ui.RepoHandlers
 import dev.claudefleet.mobile.ui.RepoScreen
 import dev.claudefleet.mobile.ui.RepoViewModel
 import dev.claudefleet.mobile.ui.BulkViewModel
+import dev.claudefleet.mobile.ui.HostDetailHandlers
+import dev.claudefleet.mobile.ui.HostDetailSheet
+import dev.claudefleet.mobile.ui.HostDetailViewModel
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.UsageHandlers
 import dev.claudefleet.mobile.ui.UsageScreen
@@ -198,6 +203,7 @@ class AppContainer(
     val sessionDetailsActions: SessionDetailsActions = HubSessionDetailsActions(session)
     val repoActions: RepoActions = HubRepoActions(session)
     val usageActions: UsageActions = HubUsageActions(session)
+    val hostActions: HostActions = HubHostActions(session)
 
     /** The hub's own version, for the Settings screen to show beside this app's. */
     val versionActions: VersionActions = HubVersionActions(session)
@@ -425,6 +431,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
 
     val sessions = remember(repository, scope) { SessionsViewModel(repository, scope, prefs = container.prefs) }
     val bulk = remember(repository, scope) { BulkViewModel(repository, container.sessionActions, scope, credentials.canWrite) }
+    val hostDetail = remember(repository, scope) { HostDetailViewModel(repository, container.hostActions, scope, credentials.canWrite) }
     // The fleet's scope, like the New session form's `callScope`: a resume
     // started from the sheet must not be cancelled by closing it.
     val tickets = remember(repository, scope) {
@@ -855,12 +862,31 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                 }
                 Screen.Hosts -> {
                     val state by hosts.state.collectAsState()
+                    val hostCaps by repository.capabilities.collectAsState()
+                    val hostSheet by hostDetail.state.collectAsState()
                     HostsScreen(
                         state = state,
                         onRefresh = { hosts.refresh() },
                         onDismissError = hosts::dismissError,
                         onOpenHost = { nav.showSessionsFor(it) },
+                        onHostDetails = { alias: String -> hostDetail.open(alias); Unit }
+                            .takeIf { hostCaps.probeHost || hostCaps.restoreSessions || hostCaps.discoverLost },
                     )
+                    if (hostSheet.alias != null) {
+                        HostDetailSheet(
+                            state = hostSheet,
+                            nowSeconds = epochSeconds(),
+                            handlers = HostDetailHandlers(
+                                onClose = hostDetail::close,
+                                onProbe = { hostDetail.probe() },
+                                onShowSessions = { hostSheet.alias?.let { alias -> hostDetail.close(); nav.showSessionsFor(alias) } },
+                                onCheckLost = { hostDetail.checkLost() },
+                                onRestore = { hostDetail.restore() },
+                                onResume = { c -> hostDetail.resume(c) { id -> hostDetail.close(); nav.open(id) } },
+                                onDismissError = hostDetail::dismissError,
+                            ),
+                        )
+                    }
                 }
                 Screen.Settings -> {
                     val state by settings.state.collectAsState()
@@ -1160,6 +1186,9 @@ private fun SessionRoute(
         onLoadOlder = { vm.loadOlder() },
         onViewConversation = { vm.view(it) },
         onBackToCurrent = vm::backToCurrent,
+        onRecreate = { vm.recreate() },
+        // A dismissed ghost has no screen left to show: back to where it was opened from.
+        onDismissGhost = { vm.dismissGhost(onBack) },
         onOpenRepo = { onOpenRepo(sessionId) }.takeIf { caps.repo || caps.repoLog || caps.repoFiles },
         showFoldHint = foldHintOwed,
         onFoldHintShown = { container.hints.markShown(Hints.DOUBLE_TAP) },

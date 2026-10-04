@@ -82,6 +82,12 @@ interface SessionActions {
      */
     suspend fun rewind(sessionId: Long, anchorUuid: String?, mode: String, newWorktree: String? = null): SessionRow
 
+    /** Kill and rebuild the session in its worktree, resuming its conversation — a ghost too. */
+    suspend fun recreate(sessionId: Long): SessionRow
+
+    /** Delete a ghost's row for good. */
+    suspend fun dismissGhost(sessionId: Long)
+
     /** Ask the session to persist its work, then arm deletion once it is clean. */
     suspend fun safeKill(sessionId: Long)
 
@@ -146,6 +152,10 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
 
     override suspend fun rewind(sessionId: Long, anchorUuid: String?, mode: String, newWorktree: String?): SessionRow =
         session.withClient { it.rewind(sessionId, anchorUuid, mode, newWorktree) }
+
+    override suspend fun recreate(sessionId: Long): SessionRow = session.withClient { it.recreateSession(sessionId) }
+
+    override suspend fun dismissGhost(sessionId: Long) = session.withClient { it.dismissGhost(sessionId) }
 
     override suspend fun safeKill(sessionId: Long) =
         session.withClient { it.safeKill(sessionId) }

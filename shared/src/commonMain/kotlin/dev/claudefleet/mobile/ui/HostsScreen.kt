@@ -26,6 +26,9 @@ import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import dev.claudefleet.mobile.ui.theme.FleetIcons
 
 /**
  * The machines: reachability, the versions the hub found, and how many sessions
@@ -43,6 +46,8 @@ fun HostsScreen(
     onDismissError: () -> Unit,
     onOpenHost: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /** A host's sheet (re-probe, recovery after a reboot); null where the hub offers none of it. */
+    onHostDetails: ((String) -> Unit)? = null,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(title = "Hosts")
@@ -69,7 +74,7 @@ fun HostsScreen(
                     }
                 }
                 items(state.hosts, key = { it.alias }) { host ->
-                    HostLineItem(host, onClick = { onOpenHost(host.alias) })
+                    HostLineItem(host, onClick = { onOpenHost(host.alias) }, onDetails = onHostDetails?.let { { it(host.alias) } })
                 }
             }
         }
@@ -77,57 +82,63 @@ fun HostsScreen(
 }
 
 @Composable
-private fun HostLineItem(host: HostLine, onClick: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxWidth()
-            .clickable(onClickLabel = "Show sessions on ${host.alias}", onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = host.alias,
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
+private fun HostLineItem(host: HostLine, onClick: () -> Unit, onDetails: (() -> Unit)? = null) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(
+            modifier = Modifier.weight(1f)
+                .clickable(onClickLabel = "Show sessions on ${host.alias}", onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = host.alias,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Reachability(host)
+            }
+            Spacer(Modifier.height(2.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "${host.sessions} session${if (host.sessions == 1) "" else "s"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                // Only worth a word when it is not the ordinary case.
+                if (host.transport != "ssh") {
+                    Text(
+                        text = host.transport,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (host.hidden) {
+                    Text(
+                        text = "hidden",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            // A host that has never been probed has no versions, and saying so is
+            // different from saying it has none.
+            val versions = listOfNotNull(
+                host.claudeVersion?.let { "claude $it" },
+                host.tmuxVersion?.let { "tmux $it" },
             )
-            Spacer(Modifier.width(8.dp))
-            Reachability(host)
-        }
-        Spacer(Modifier.height(2.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
-                text = "${host.sessions} session${if (host.sessions == 1) "" else "s"}",
+                text = if (versions.isEmpty()) "not probed yet" else versions.joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            // Only worth a word when it is not the ordinary case.
-            if (host.transport != "ssh") {
-                Text(
-                    text = host.transport,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (host.hidden) {
-                Text(
-                    text = "hidden",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
         }
-        // A host that has never been probed has no versions, and saying so is
-        // different from saying it has none.
-        val versions = listOfNotNull(
-            host.claudeVersion?.let { "claude $it" },
-            host.tmuxVersion?.let { "tmux $it" },
-        )
-        Text(
-            text = if (versions.isEmpty()) "not probed yet" else versions.joinToString(" · "),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        // The host's own sheet — the row itself opens its sessions, as it always has.
+        if (onDetails != null) {
+            IconButton(onClick = onDetails) { Icon(FleetIcons.MoreVert, contentDescription = "Host ${host.alias}") }
+        }
     }
     HorizontalDivider()
 }
