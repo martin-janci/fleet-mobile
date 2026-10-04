@@ -3263,4 +3263,29 @@ class SessionViewModelTest {
 
         assertTrue(actions.sentKeys.isEmpty(), "Enter on a permission dialog approves; only the card's checked Enter may")
     }
+
+    @Test
+    fun an_unsent_draft_is_there_again_on_the_next_visit() = runTest {
+        val drafts = DraftMemory()
+        val first = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope, drafts = drafts)
+        first.onDraftChange("half a thought")
+        runCurrent()
+
+        val again = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope, drafts = drafts)
+        runCurrent()
+        assertEquals("half a thought", again.state.value.draft)
+    }
+
+    @Test
+    fun a_sent_draft_is_not_brought_back() = runTest {
+        val drafts = DraftMemory()
+        val first = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope, drafts = drafts)
+        first.onDraftChange("ship it")
+        first.send().join()
+        runCurrent()
+
+        val again = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope, drafts = drafts)
+        runCurrent()
+        assertEquals("", again.state.value.draft)
+    }
 }

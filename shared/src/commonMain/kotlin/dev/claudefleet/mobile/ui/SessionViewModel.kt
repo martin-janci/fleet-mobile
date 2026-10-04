@@ -2,6 +2,8 @@
 
 package dev.claudefleet.mobile.ui
 
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import dev.claudefleet.mobile.data.ALL_SESSIONS_CHANGED
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
@@ -355,6 +357,7 @@ class SessionViewModel(
     canSendPrompts: Boolean = true,
     private val clock: () -> Long = { epochSeconds() },
     val quickReplies: QuickReplies = QuickReplies(EphemeralPrefs, EphemeralQuickReplies),
+    private val drafts: DraftMemory = DraftMemory(),
 ) {
     /**
      * The screen state this class owns, as opposed to what the fleet owns.
@@ -414,7 +417,7 @@ class SessionViewModel(
         val sendError: Friendly? = null,
     )
 
-    private val local = MutableStateFlow(Local())
+    private val local = MutableStateFlow(Local(draft = drafts.recall(sessionId)))
     private val readOnly = !canSendPrompts
 
     /**
@@ -513,6 +516,11 @@ class SessionViewModel(
         )
 
     init {
+        // Every change to the box, however it came — typing, a quote, a send
+        // clearing it, a failure putting it back — is what a return finds.
+        scope.launch {
+            local.map { it.draft }.distinctUntilChanged().collect { drafts.keep(sessionId, it) }
+        }
         // Ticks `now` every 30s — the same period [SessionsViewModel] uses for
         // the fleet list — so the strip's "2 min" / "idle since 2 h" wording
         // advances without a per-second recomposition on a screen a person
