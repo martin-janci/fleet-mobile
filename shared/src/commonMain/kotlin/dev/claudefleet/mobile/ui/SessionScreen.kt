@@ -31,6 +31,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -86,6 +87,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -115,6 +117,7 @@ import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.components.StatusStrip
 import dev.claudefleet.mobile.ui.components.WorkChip
 import dev.claudefleet.mobile.ui.components.contextIsTight
+import dev.claudefleet.mobile.ui.components.statusStripText
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.data.ConnectionStatus
 import kotlinx.coroutines.CoroutineScope
@@ -235,10 +238,10 @@ fun SessionScreen(
 
     // The chrome's focus — see `SessionChrome.kt` for the policy. `readingUp`
     // mirrors `direction` as Compose state; `immersive` is the double tap's
-    // toggle; `promptFocused` is the field's own focus. That is composing
-    // even after the back gesture has put the keyboard away (the field keeps
-    // focus): the keyboard's own inset is not readable from common code, and
-    // a tap on the folded header clears the focus.
+    // toggle; `promptFocused` is the field's own focus, which counts as
+    // composing only while the keyboard is up: the field keeps focus after
+    // the back gesture puts the keyboard away, and the header should come
+    // back with it.
     val readingPx = with(LocalDensity.current) { READING_THRESHOLD.toPx() }
     val direction = remember(readingPx) { ReadingDirection(readingPx) }
     var readingUp by remember { mutableStateOf(false) }
@@ -264,7 +267,7 @@ fun SessionScreen(
         atBottom = atBottom || following,
         readingUp = readingUp,
         immersive = immersive,
-        composing = promptFocused,
+        composing = promptFocused && keyboardVisible(),
         hasDraft = state.draft.isNotEmpty(),
         needsAnswer = state.card != null,
     )
@@ -369,195 +372,204 @@ fun SessionScreen(
         if (wasAtBottom) scrollToNewest()
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
-        AnimatedContent(
-            targetState = header,
-            transitionSpec = { chromeTransition() },
-            label = "session header",
-        ) { shown ->
-            when (shown) {
-                Chrome.Full -> SessionBar(
-                    state = state,
-                    onBack = onBack,
-                    onRefresh = onRefresh,
-                    listState = listState,
-                    turnCount = turns.size,
-                    scope = scope,
-                    onRestart = onRestart,
-                    onSafeKill = onSafeKill,
-                    onKill = onKill,
-                    onSetTags = onSetTags,
-                    onRename = onRename,
-                    onSendCommand = onSendCommand,
-                    work = work,
-                    workHandlers = workHandlers,
-                    tasks = tasks,
-                    onOpenTasks = tasksHandlers.onOpen,
-                )
-                // A tap unfolds it: out of immersive, out of the read-back,
-                // and — when typing is what folded it — the keyboard down.
-                Chrome.Compact -> CompactSessionBar(
-                    state = state,
-                    onBack = onBack,
-                    onExpand = {
-                        immersive = false
-                        stopReading()
-                        focusManager.clearFocus()
-                    },
-                )
+    // Measured for the blocked card's cap (see [CARD_MAX_FRACTION]).
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val cardMax = maxHeight * CARD_MAX_FRACTION
+        Column(modifier = Modifier.fillMaxSize()) {
+            AnimatedContent(
+                targetState = header,
+                transitionSpec = { chromeTransition() },
+                label = "session header",
+            ) { shown ->
+                when (shown) {
+                    Chrome.Full -> SessionBar(
+                        state = state,
+                        onBack = onBack,
+                        onRefresh = onRefresh,
+                        listState = listState,
+                        turnCount = turns.size,
+                        scope = scope,
+                        onRestart = onRestart,
+                        onSafeKill = onSafeKill,
+                        onKill = onKill,
+                        onSetTags = onSetTags,
+                        onRename = onRename,
+                        onSendCommand = onSendCommand,
+                        work = work,
+                        workHandlers = workHandlers,
+                        tasks = tasks,
+                        onOpenTasks = tasksHandlers.onOpen,
+                    )
+                    // A tap unfolds it: out of immersive, out of the read-back,
+                    // and — when typing is what folded it — the keyboard down.
+                    Chrome.Compact -> CompactSessionBar(
+                        state = state,
+                        onBack = onBack,
+                        onExpand = {
+                            immersive = false
+                            stopReading()
+                            focusManager.clearFocus()
+                        },
+                    )
+                }
             }
-        }
-        ConnectionBanner(status, state.hubReachable)
-        ErrorBanner(state.error, onDismiss = onDismissError)
-        // Behind an open sheet a banner cannot be read: the sheet shows it instead.
-        if (!work.sheetOpen) ErrorBanner(work.error, onDismiss = workHandlers.onDismissError)
-        if (work.sheetOpen) WorkTicketSheet(work, workHandlers)
-        if (tasks.sheetOpen) SessionTasksSheet(tasks, tasksHandlers)
+            ConnectionBanner(status, state.hubReachable)
+            ErrorBanner(state.error, onDismiss = onDismissError)
+            // Behind an open sheet a banner cannot be read: the sheet shows it instead.
+            if (!work.sheetOpen) ErrorBanner(work.error, onDismiss = workHandlers.onDismissError)
+            if (work.sheetOpen) WorkTicketSheet(work, workHandlers)
+            if (tasks.sheetOpen) SessionTasksSheet(tasks, tasksHandlers)
 
-        // `weight(1f)`: the list takes what the bar and the footer leave, so
-        // it shrinks when the keyboard raises the footer (`App` applies the
-        // IME inset, once, with the rest of `safeDrawing`), and with
-        // `reverseLayout` the newest turn stays against the footer as it does.
-        //
-        // `readingWatch` hears every drag the list moves by; the double tap
-        // toggles the whole screen for the conversation. A turn's own
-        // clickable rows consume their taps first, so a double tap there
-        // stays theirs and does not also toggle.
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .nestedScroll(readingWatch)
-                .pointerInput(Unit) { detectTapGestures(onDoubleTap = { immersive = !immersive }) },
-        ) {
-            if (state.loaded && turns.isEmpty()) {
-                EmptyConversation(state)
-            } else {
-                // Tagged so a device test can address this list rather than
-                // guessing which of the screen's scrollable nodes it meant.
-                // `atBottom` above is derived from measurement, so it only
-                // means anything where there is measurement, and the test that
-                // checks it has to run on a device — see `ConversationScrollTest`.
-                CompositionLocalProvider(LocalToolDetails provides toolDetails) {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize().testTag(CONVERSATION_LIST),
-                        // Item 0 — the newest turn — at the bottom.
-                        reverseLayout = true,
-                        // Room under the newest turn, so it does not sit flush on the composer.
-                        contentPadding = PaddingValues(bottom = 12.dp),
-                    ) {
-                        turnItems(rows, working = state.session?.claudeStatus == "working")
-                        // After the oldest turn, so drawn above it.
-                        if (truncated) {
-                            item(key = TRUNCATED_KEY, contentType = TRUNCATED_KEY) { TruncationNote() }
+            // `weight(1f)`: the list takes what the bar and the footer leave, so
+            // it shrinks when the keyboard raises the footer (`App` applies the
+            // IME inset, once, with the rest of `safeDrawing`), and with
+            // `reverseLayout` the newest turn stays against the footer as it does.
+            //
+            // `readingWatch` hears every drag the list moves by; the double tap
+            // toggles the whole screen for the conversation. A turn's own
+            // clickable rows consume their taps first, so a double tap there
+            // stays theirs and does not also toggle.
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .nestedScroll(readingWatch)
+                    .pointerInput(Unit) { detectTapGestures(onDoubleTap = { immersive = !immersive }) },
+            ) {
+                if (state.loaded && turns.isEmpty()) {
+                    EmptyConversation(state)
+                } else {
+                    // Tagged so a device test can address this list rather than
+                    // guessing which of the screen's scrollable nodes it meant.
+                    // `atBottom` above is derived from measurement, so it only
+                    // means anything where there is measurement, and the test that
+                    // checks it has to run on a device — see `ConversationScrollTest`.
+                    CompositionLocalProvider(LocalToolDetails provides toolDetails) {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxSize().testTag(CONVERSATION_LIST),
+                            // Item 0 — the newest turn — at the bottom.
+                            reverseLayout = true,
+                            // Room under the newest turn, so it does not sit flush on the composer.
+                            contentPadding = PaddingValues(bottom = 12.dp),
+                        ) {
+                            turnItems(rows, working = state.session?.claudeStatus == "working")
+                            // After the oldest turn, so drawn above it.
+                            if (truncated) {
+                                item(key = TRUNCATED_KEY, contentType = TRUNCATED_KEY) { TruncationNote() }
+                            }
                         }
                     }
                 }
+                // The fast way back down, for whoever scrolled up to read
+                // something and either wants the bottom again or got fresh
+                // turns while they were up there — see `SessionUiState.newReply`
+                // and `SessionUiState.unseen`.
+                if (!shownAtBottom) {
+                    JumpToLatest(
+                        newReply = state.newReply,
+                        unseen = state.unseen,
+                        onClick = {
+                            scrollToNewest()
+                            // Clears `newReply` and the count now rather than
+                            // when the animation lands; `following` keeps the
+                            // screen's own report true for the length of it.
+                            onAtBottom(true)
+                        },
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
+                    )
+                }
             }
-            // The fast way back down, for whoever scrolled up to read
-            // something and either wants the bottom again or got fresh
-            // turns while they were up there — see `SessionUiState.newReply`
-            // and `SessionUiState.unseen`.
-            if (!shownAtBottom) {
-                JumpToLatest(
-                    newReply = state.newReply,
-                    unseen = state.unseen,
-                    onClick = {
-                        scrollToNewest()
-                        // Clears `newReply` and the count now rather than
-                        // when the animation lands; `following` keeps the
-                        // screen's own report true for the length of it.
-                        onAtBottom(true)
-                    },
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
+
+            // Between the conversation and the composer: a person who opened this
+            // screen because the agent is waiting should not have to scroll to
+            // answer it, and the card sits where the answer goes.
+            state.card?.let { card ->
+                BlockedCardView(
+                    card = card,
+                    answering = state.answering,
+                    stillWaiting = state.stillWaiting,
+                    terminal = state.terminal,
+                    readOnly = state.readOnly,
+                    canAnswer = state.canAnswer,
+                    connected = state.connected,
+                    onAnswer = onAnswer,
+                    onShowTerminal = onShowTerminal,
+                    onHideTerminal = onHideTerminal,
+                    // The same `canRestart` the ⋮ menu's own Restart item gates
+                    // on (see [SessionOverflowMenu]) — one source of truth for
+                    // "is a restart worth offering", not `canManage` re-read here
+                    // as a stand-in for it.
+                    onRestart = if (state.canRestart) onRestart else null,
+                    // Capped, and scrolls inside: an explanation, a row of
+                    // answers and the terminal under them used to be able to take
+                    // the conversation's whole height — the footer stays full
+                    // while the card is up, so nothing else gave way.
+                    modifier = Modifier.heightIn(max = cardMax),
                 )
             }
-        }
 
-        // Between the conversation and the composer: a person who opened this
-        // screen because the agent is waiting should not have to scroll to
-        // answer it, and the card sits where the answer goes.
-        state.card?.let { card ->
-            BlockedCardView(
-                card = card,
-                answering = state.answering,
-                stillWaiting = state.stillWaiting,
-                terminal = state.terminal,
-                readOnly = state.readOnly,
-                canAnswer = state.canAnswer,
-                connected = state.connected,
-                onAnswer = onAnswer,
-                onShowTerminal = onShowTerminal,
-                onHideTerminal = onHideTerminal,
-                // The same `canRestart` the ⋮ menu's own Restart item gates
-                // on (see [SessionOverflowMenu]) — one source of truth for
-                // "is a restart worth offering", not `canManage` re-read here
-                // as a stand-in for it.
-                onRestart = if (state.canRestart) onRestart else null,
-            )
-        }
-
-        // The footer: quick replies and the composer on one surface, the
-        // mirror of the header. The chips used to sit on the conversation's
-        // own background with the composer on a tinted band under them, so
-        // they read as the last line of the transcript rather than as part
-        // of the answer box.
-        Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-            Column {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                AnimatedContent(
-                    targetState = footer,
-                    transitionSpec = { chromeTransition() },
-                    label = "session footer",
-                ) { shown ->
-                    when (shown) {
-                        Chrome.Full -> Column {
-                            // Hidden outright, not merely dimmed, in the same two cases
-                            // the card itself takes over the space for: while it is up
-                            // (the answer goes there instead) and on a readonly device (no
-                            // chip may offer a write it cannot make) — spec 1.1.
-                            if (state.card == null && !state.readOnly) {
-                                QuickRepliesRow(
-                                    chips = quickReplies,
-                                    draft = state.draft,
-                                    enabled = state.canSendQuick,
-                                    editable = quickRepliesEditable,
-                                    // A chip that sends is the reader answering: show
-                                    // them the newest turn, where the answer will land.
-                                    onSendQuick = { scrollToNewest(); onSendQuick(it) },
-                                    onFill = onDraftChange,
-                                    onAdd = onAddQuickReply,
-                                    onEdit = onEditQuickReply,
-                                    onRemove = onRemoveQuickReply,
-                                    onMove = onMoveQuickReply,
+            // The footer: quick replies and the composer on one surface, the
+            // mirror of the header. The chips used to sit on the conversation's
+            // own background with the composer on a tinted band under them, so
+            // they read as the last line of the transcript rather than as part
+            // of the answer box.
+            Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+                Column {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    AnimatedContent(
+                        targetState = footer,
+                        transitionSpec = { chromeTransition() },
+                        label = "session footer",
+                    ) { shown ->
+                        when (shown) {
+                            Chrome.Full -> Column {
+                                // Hidden outright, not merely dimmed, in the same two cases
+                                // the card itself takes over the space for: while it is up
+                                // (the answer goes there instead) and on a readonly device (no
+                                // chip may offer a write it cannot make) — spec 1.1.
+                                if (state.card == null && !state.readOnly) {
+                                    QuickRepliesRow(
+                                        chips = quickReplies,
+                                        draft = state.draft,
+                                        enabled = state.canSendQuick,
+                                        editable = quickRepliesEditable,
+                                        // A chip that sends is the reader answering: show
+                                        // them the newest turn, where the answer will land.
+                                        onSendQuick = { scrollToNewest(); onSendQuick(it) },
+                                        onFill = onDraftChange,
+                                        onAdd = onAddQuickReply,
+                                        onEdit = onEditQuickReply,
+                                        onRemove = onRemoveQuickReply,
+                                        onMove = onMoveQuickReply,
+                                    )
+                                }
+                                PromptBox(
+                                    state = state,
+                                    onDraftChange = onDraftChange,
+                                    // Whoever just sent wants to see it land, wherever they
+                                    // had scrolled to — and once at the newest turn, the
+                                    // turn their prompt starts is followed like any other.
+                                    onSend = { scrollToNewest(); onSend() },
+                                    onOpenHistory = onOpenHistory,
+                                    onFocusChange = { promptFocused = it },
+                                    focusNow = focusPrompt,
+                                    onFocused = { focusPrompt = false },
                                 )
                             }
-                            PromptBox(
+                            // The pill a folded footer leaves. A tap is someone
+                            // about to write: unfold, and put the cursor in the
+                            // field — but not move the list, since what they are
+                            // answering may be the turn they scrolled up to.
+                            Chrome.Compact -> PromptPill(
                                 state = state,
-                                onDraftChange = onDraftChange,
-                                // Whoever just sent wants to see it land, wherever they
-                                // had scrolled to — and once at the newest turn, the
-                                // turn their prompt starts is followed like any other.
-                                onSend = { scrollToNewest(); onSend() },
-                                onOpenHistory = onOpenHistory,
-                                onFocusChange = { promptFocused = it },
-                                focusNow = focusPrompt,
-                                onFocused = { focusPrompt = false },
+                                onClick = {
+                                    immersive = false
+                                    stopReading()
+                                    if (!state.readOnly) focusPrompt = true
+                                },
                             )
                         }
-                        // The pill a folded footer leaves. A tap is someone
-                        // about to write: unfold, and put the cursor in the
-                        // field — but not move the list, since what they are
-                        // answering may be the turn they scrolled up to.
-                        Chrome.Compact -> PromptPill(
-                            state = state,
-                            onClick = {
-                                immersive = false
-                                stopReading()
-                                if (!state.readOnly) focusPrompt = true
-                            },
-                        )
                     }
                 }
             }
@@ -598,8 +610,8 @@ private fun AnimatedContentTransitionScope<Chrome>.chromeTransition(): ContentTr
         .using(SizeTransform(clip = true) { _, _ -> tween(220) })
 
 /**
- * The header folded to one line: back, the session's status dot and its
- * name. The rest of the line is one target that unfolds the full header —
+ * The header folded to one line: back, the session's status dot, its name
+ * and the status strip's text under it. The rest of the line is one target that unfolds the full header —
  * everything the full one carries (status strip, turn arrows, ticket and
  * tasks chips, the ⋮ menu) is a tap away rather than gone.
  */
@@ -626,13 +638,26 @@ private fun CompactSessionBar(state: SessionUiState, onBack: () -> Unit, onExpan
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     StatusDot(state.session?.claudeStatus, state.session?.stuckKind)
-                    Text(
-                        text = state.session?.displayName ?: "Session",
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = state.session?.displayName ?: "Session",
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        // The strip's own words, small: a dot alone said
+                        // working but not for how long or how full.
+                        val status = statusStripText(state.session, state.conversation.context, state.nowSeconds)
+                        if (status.isNotBlank()) {
+                            Text(
+                                text = status,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -1255,22 +1280,65 @@ internal fun Turn(turn: ConvTurn, live: Boolean = false) {
             .padding(start = 16.dp, end = 16.dp, top = if (hasPrompt) 24.dp else 4.dp, bottom = 4.dp),
     ) {
         if (hasPrompt) {
-            Surface(
-                color = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                shape = MaterialTheme.shapes.medium,
-            ) {
-                Text(
-                    text = prompt.orEmpty(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(12.dp),
-                )
-            }
+            PromptBubble(prompt.orEmpty())
             Spacer(Modifier.height(12.dp))
         }
         TurnItems(turn.items, live) { Item(it) }
     }
 }
+
+/**
+ * What the person sent, folded to [PROMPT_FOLD_LINES] when it is longer: a
+ * pasted log or spec drew whole, and the answer under it — what the screen
+ * is opened for — was hundreds of lines further down. A tap on the bubble
+ * unfolds it and folds it again. Saveable, so a prompt someone opened stays
+ * open when its turn scrolls off and back.
+ */
+@Composable
+private fun PromptBubble(prompt: String) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var folds by remember { mutableStateOf(false) }
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.clickable(
+            enabled = folds,
+            onClickLabel = if (expanded) PROMPT_LESS else PROMPT_MORE,
+        ) { expanded = !expanded },
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = prompt,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = if (expanded) Int.MAX_VALUE else PROMPT_FOLD_LINES,
+                overflow = TextOverflow.Ellipsis,
+                // Only a folded layout can say whether folding cut anything;
+                // an unfolded one keeps the answer it had.
+                onTextLayout = { if (!expanded) folds = it.hasVisualOverflow },
+            )
+            if (folds) {
+                Text(
+                    text = if (expanded) PROMPT_LESS else PROMPT_MORE,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+        }
+    }
+}
+
+/** How many lines of a prompt show before it folds. */
+internal const val PROMPT_FOLD_LINES: Int = 6
+private const val PROMPT_MORE = "Show more"
+private const val PROMPT_LESS = "Show less"
+
+/**
+ * The most of the screen the blocked card may take; past it, the card
+ * scrolls inside itself.
+ */
+private const val CARD_MAX_FRACTION = 0.45f
 
 @Composable
 private fun Item(item: ConvItem) {

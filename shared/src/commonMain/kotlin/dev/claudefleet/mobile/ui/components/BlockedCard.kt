@@ -91,7 +91,8 @@ fun BlockedCardView(
         contentColor = colors.onContainer,
         shape = MaterialTheme.shapes.medium,
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+        // Scrolls inside itself once the caller's height cap is reached.
+        Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = card.headline,
