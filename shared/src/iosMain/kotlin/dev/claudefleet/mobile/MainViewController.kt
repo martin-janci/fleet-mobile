@@ -2,10 +2,20 @@ package dev.claudefleet.mobile
 
 import androidx.compose.ui.uikit.OnFocusBehavior
 import androidx.compose.ui.window.ComposeUIViewController
+import dev.claudefleet.mobile.notify.IosAlertPoster
+import dev.claudefleet.mobile.notify.IosBackgroundNotifier
+import dev.claudefleet.mobile.notify.NeedsYouCheck
+import dev.claudefleet.mobile.notify.submitNeedsYouRefresh
 import dev.claudefleet.mobile.store.IosPrefs
 import dev.claudefleet.mobile.store.KeychainSecrets
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.darwin.Darwin
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlin.native.Platform
 import platform.Foundation.NSBundle
 import platform.UIKit.UIViewController
@@ -28,12 +38,8 @@ import platform.UIKit.UIViewController
  * exactly as `MainActivity` does on Android: the secure store (the Keychain, no
  * context needed) and the Ktor engine (Darwin).
  *
- * **Linked, never run.** This file is compiled into `Shared.framework` and
- * linked into `iosApp` by both a local `xcodebuild … build` and the `macos`
- * job in `.github/workflows/ci.yml` — neither one launches the result, and
- * there is deliberately no simulator runtime in CI, only the SDK. See
- * `README.md` → *What a Mac still has to check* for everything that still
- * needs a real run.
+ * **Run on a device since 2026-10.** See `README.md` → *What a Mac still has to check*
+ * for what a device has and has not shown.
  */
 fun MainViewController(): UIViewController = ComposeUIViewController(
     configure = {
@@ -95,7 +101,62 @@ private val iosContainer: AppContainer by lazy {
         // API changes, and a module-wide flag is a promise nobody is reminded
         // of. A release build fills the Pair screen's fields and waits.
         autoPairFromLink = Platform.isDebugBinary,
+        notifier = iosNotifier,
     )
+}
+
+/** The one notifier, shared by the container (Settings, the open app) and the background check. */
+private val iosNotifier: IosBackgroundNotifier by lazy { IosBackgroundNotifier(IosAlertPoster()) }
+
+/**
+ * A tapped "needs you" notification, from `AppDelegate`'s notification
+ * delegate. Held by the container until the paired screens take it — a tap can
+ * start the app cold.
+ */
+fun onOpenSession(sessionId: Long) {
+    iosContainer.onOpenSession(sessionId)
+}
+
+/** A running background check; `AppDelegate` cancels it when iOS's time is up. */
+class NeedsYouRun internal constructor(private val job: Job) {
+    fun cancel() {
+        job.cancel()
+    }
+}
+
+/**
+ * Start one background check for `AppDelegate`'s `BGAppRefreshTask` handler.
+ * [onDone] is called exactly once — true when the check finished, false when
+ * it was cancelled — on an arbitrary thread; `setTaskCompleted` is safe from
+ * any.
+ *
+ * A handle rather than a coroutine entry point on purpose: an exported one
+ * must start on the main thread, and cancelling the Swift `Task` awaiting it
+ * does not cancel the coroutine behind it.
+ *
+ * Only cancellation may end the job abnormally: on Kotlin/Native an unhandled
+ * exception in a launched coroutine terminates the process, and the check
+ * guards only its fetch — the `Prefs` and [AlertPoster] calls after it are not.
+ */
+fun startNeedsYouCheck(onDone: (Boolean) -> Unit): NeedsYouRun {
+    val job = CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+        if (iosNotifier.enabled.value) {
+            try {
+                NeedsYouCheck(iosContainer.session, iosContainer.prefs, iosNotifier.alertPoster).once()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                println("needs-you: check failed: ${e.message}")
+            }
+        }
+    }
+    job.invokeOnCompletion { cause -> onDone(cause == null) }
+    return NeedsYouRun(job)
+}
+
+/** Request the next check if alerts are on — from the task handler, and whenever the app goes to the background. */
+fun scheduleNeedsYouRefreshIfEnabled() {
+    if (iosNotifier.enabled.value) submitNeedsYouRefresh()?.let { println("needs-you: refresh not scheduled: $it") }
 }
 
 /**
