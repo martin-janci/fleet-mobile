@@ -2,7 +2,7 @@ package dev.claudefleet.mobile.net
 
 /**
  * The hub wire-contract revisions this build understands (up to claude-fleet
- * revision 7). A hub
+ * revision 8). A hub
  * outside the range is refused the way the desktop refuses it: the banner
  * says which side is behind, and no row event from that hub is applied.
  *
@@ -28,6 +28,11 @@ package dev.claudefleet.mobile.net
  * additive: this app calls the three tools only when `tools/list` names them
  * (`HubCapabilities.downloads`), and reads the row and the event itself (the
  * Files tab). Left at 6, it would refuse every hub that has the feature.
+ * Revision 8 made multi-user M1's sharing tools (`session_share`,
+ * `session_unshare`, `session_narrow`, `session_access`, `my_grants`) hub
+ * tools; this app calls none of them, and M1's new `SessionRow` fields
+ * (`owner_person_id`, `visibility`) are additive, so a revision-8 hub is
+ * safe here. Left at 7, it refused the 0.4.8 hub as "too old" (2026-10-05).
  *
  * [MIN_HUB_CONTRACT] does NOT mirror the desktop's minimum. The desktop
  * raised its own to 3 because a pre-3 hub would silently misperform
@@ -38,7 +43,7 @@ package dev.claudefleet.mobile.net
  * upgraded: this is the phone's own floor, not a copy of the desktop's.
  */
 const val MIN_HUB_CONTRACT: Int = 0
-const val MAX_HUB_CONTRACT: Int = 7
+const val MAX_HUB_CONTRACT: Int = 8
 
 /**
  * What a `contract` field that cannot be read as a revision counts as.
