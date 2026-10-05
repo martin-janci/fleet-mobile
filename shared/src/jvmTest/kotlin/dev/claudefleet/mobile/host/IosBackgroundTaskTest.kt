@@ -39,4 +39,47 @@ class IosBackgroundTaskTest {
             "an unhandled exception in a launched coroutine terminates a Kotlin/Native process; only cancellation may escape the check",
         )
     }
+
+    private val plist: String by lazy { Repo.file("iosApp/iosApp/Info.plist").readText() }
+    private val delegate: String by lazy { Repo.file("iosApp/iosApp/AppDelegate.swift").readText() }
+    private val app: String by lazy { Repo.file("iosApp/iosApp/iOSApp.swift").readText() }
+    private val project: String by lazy { Repo.file("iosApp/iosApp.xcodeproj/project.pbxproj").readText() }
+
+    @Test
+    fun the_identifier_is_the_same_in_kotlin_swift_and_the_plist() {
+        val id = "dev.claudefleet.mobile.needs-you"
+        assertTrue(Regex("""<key>BGTaskSchedulerPermittedIdentifiers</key>\s*<array>\s*<string>${Regex.escape(id)}</string>""").containsMatchIn(plist))
+        assertTrue("forTaskWithIdentifier: \"$id\"" in delegate)
+    }
+
+    @Test
+    fun background_fetch_is_declared_and_push_is_not() {
+        assertTrue(Regex("""<key>UIBackgroundModes</key>\s*<array>\s*<string>fetch</string>""").containsMatchIn(plist))
+        assertTrue("remote-notification" !in plist)
+        val entitlements = Repo.root.walkTopDown().filter { it.extension == "entitlements" }.toList()
+        assertTrue(entitlements.none { "aps-environment" in it.readText() }, "push is the next sub-project, not this one")
+    }
+
+    @Test
+    fun the_delegate_registers_at_launch_and_routes_taps() {
+        assertTrue("didFinishLaunchingWithOptions" in delegate)
+        assertTrue("UNUserNotificationCenter.current().delegate = self" in delegate)
+        assertTrue("userInfo[\"sessionId\"]" in delegate, "the key is NEEDS_YOU_SESSION_KEY")
+        assertTrue("MainViewControllerKt.onOpenSession" in delegate)
+        assertTrue("task.expirationHandler = { run.cancel() }" in delegate)
+        assertTrue("completionHandler([])" in delegate, "no banner while the app is on screen")
+    }
+
+    @Test
+    fun the_app_uses_the_delegate_and_schedules_on_background() {
+        assertTrue("@UIApplicationDelegateAdaptor(AppDelegate.self)" in app)
+        assertTrue("MainViewControllerKt.scheduleNeedsYouRefreshIfEnabled()" in app)
+    }
+
+    @Test
+    fun the_delegate_is_compiled_into_the_app() {
+        assertTrue("/* AppDelegate.swift in Sources */ = {isa = PBXBuildFile;" in project)
+        val appSources = project.substringAfter("5FE0A10000000000000000AD /* Sources */ = {").substringBefore("};")
+        assertTrue("AppDelegate.swift in Sources" in appSources)
+    }
 }

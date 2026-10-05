@@ -270,18 +270,19 @@ class TheIosHostAsksForNothingAtLaunchTest {
     }
 
     /**
-     * The host is two files and stays two files.
+     * The host is three files and stays three files.
      *
      * Not a style rule: every screen, view model and network call is in
-     * `:shared` so that Android and iOS cannot drift, and the moment app logic
-     * starts appearing in Swift that guarantee is gone with nothing to announce
-     * it. The number is asserted rather than the shape because any third file
-     * deserves someone's attention.
+     * `:shared` so that Android and iOS cannot drift. The third file,
+     * `AppDelegate.swift`, exists only because iOS requires background-task
+     * registration before launch finishes and a notification delegate, both of
+     * which belong to an app delegate; the check it runs is shared Kotlin.
+     * Any fourth file deserves someone's attention.
      */
     @Test
-    fun the_host_is_two_files() {
+    fun the_host_is_three_files() {
         assertEquals(
-            listOf("ContentView.swift", "iOSApp.swift"),
+            listOf("AppDelegate.swift", "ContentView.swift", "iOSApp.swift"),
             Repo.shippedSwift.map { it.name }.sorted(),
             "app logic belongs in shared/src/commonMain, not in the iOS host",
         )
