@@ -242,12 +242,13 @@ class KeepSeenWhileOpenTest {
 
     @Test
     fun what_the_open_app_saw_is_not_news_to_the_background_check() = runTest {
-        val prefs = FakePrefs()
+        val prefs = FakePrefs().apply { writeSeen(mapOf(1L to null)) }
         val poster = RecordingPoster()
         val fleet = OpenFleet(row(1, "waiting"))
         val watching = backgroundScope.launch { keepSeenWhileOpen(fleet, prefs, poster) }
         runCurrent()
         watching.cancel()
+        assertEquals(mapOf(1L to "waiting"), prefs.readSeen(), "the open app wrote what the person saw")
 
         val hub = Hub().apply { reply = { sse(okResult(rows(1L to "waiting"))) to HttpStatusCode.OK } }
         withContext(Dispatchers.Default) { check(hub, prefs = prefs, poster = poster).once() }
