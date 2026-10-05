@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.notify
 
+import platform.Foundation.NSNumber
+import platform.Foundation.numberWithLongLong
 import platform.UserNotifications.UNMutableNotificationContent
 import platform.UserNotifications.UNNotification
 import platform.UserNotifications.UNNotificationRequest
@@ -24,7 +26,7 @@ class IosAlertPoster : AlertPoster {
             setTitle(c.title)
             setBody(c.body)
             setThreadIdentifier(c.thread)
-            setUserInfo(mapOf<Any?, Any?>(NEEDS_YOU_SESSION_KEY to c.sessionId))
+            setUserInfo(mapOf<Any?, Any?>(NEEDS_YOU_SESSION_KEY to NSNumber.numberWithLongLong(c.sessionId)))
             setSound(UNNotificationSound.defaultSound)
         }
         center.addNotificationRequest(UNNotificationRequest.requestWithIdentifier(c.id, content, null), withCompletionHandler = null)

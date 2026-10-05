@@ -48,17 +48,20 @@ an agent's:
    in this spec, in `iosApp.xcodeproj` and in the release job together. A
    bundle ID change later loses every pairing (see *Pairing survives*).
 3. Create an **App Store Connect API key** with the *App Manager* role. Store
-   four repository secrets on `fleet-mobile`: `ASC_KEY_ID`, `ASC_ISSUER_ID`,
-   `ASC_KEY_P8` (the key file's contents) and `APPLE_TEAM_ID`.
+   four secrets on `fleet-mobile`: `ASC_KEY_ID`, `ASC_ISSUER_ID`,
+   `ASC_KEY_P8` (the key file's contents) and `APPLE_TEAM_ID`. They are stored
+   as **environment secrets of a GitHub Environment named `testflight`** whose
+   deployment rule allows only `v*` tags and `main`.
 4. Add yourself as an internal tester and install the TestFlight app on the phone.
 
 ## 1. Signing and distribution
 
 ### Local: the device loop
 
-- **`iosApp/Signing.xcconfig`** (committed) is set as the base configuration
-  of the `iosApp`, `iosAppTests` and `iosAppUITests` targets, in both
-  configurations. Its only content is `#include? "Signing.local.xcconfig"`.
+- **`iosApp/Signing.xcconfig`** (committed) is the base configuration of the
+  **project**, in both configurations. The `iosApp`, `iosAppTests` and
+  `iosAppUITests` targets inherit it because their own `DEVELOPMENT_TEAM = ""`
+  lines were removed (a target's own setting would beat it). Its only content is `#include? "Signing.local.xcconfig"`.
   The `?` makes the include optional, so without the local file every build
   setting is exactly what the project has today.
 - **`iosApp/Signing.local.xcconfig`** (gitignored) holds `DEVELOPMENT_TEAM`.

@@ -66,7 +66,9 @@ class IosBackgroundTaskTest {
         assertTrue("UNUserNotificationCenter.current().delegate = self" in delegate)
         assertTrue("userInfo[\"sessionId\"]" in delegate, "the key is NEEDS_YOU_SESSION_KEY")
         assertTrue("MainViewControllerKt.onOpenSession" in delegate)
-        assertTrue("task.expirationHandler = { run.cancel() }" in delegate)
+        assertTrue("task.expirationHandler = { check.cancel() }" in delegate)
+        assertTrue("nonisolated private static func run" in delegate, "the launch handler runs on a background queue")
+        assertTrue("@Sendable task in" in delegate)
         assertTrue("completionHandler([])" in delegate, "no banner while the app is on screen")
     }
 

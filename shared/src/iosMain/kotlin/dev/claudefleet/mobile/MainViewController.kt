@@ -38,8 +38,9 @@ import platform.UIKit.UIViewController
  * exactly as `MainActivity` does on Android: the secure store (the Keychain, no
  * context needed) and the Ktor engine (Darwin).
  *
- * **Run on a device since 2026-10.** See `README.md` → *What a Mac still has to check*
- * for what a device has and has not shown.
+ * **Built for a device, not yet run on one.** The iOS app gets its first device run through
+ * `README.md` → *What a Mac still has to check*; until that list says otherwise, treat
+ * everything here as linked, not proven.
  */
 fun MainViewController(): UIViewController = ComposeUIViewController(
     configure = {

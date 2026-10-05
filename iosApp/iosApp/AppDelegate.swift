@@ -19,21 +19,26 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // Same identifier as NEEDS_YOU_TASK in NeedsYouRefresh.kt and
         // BGTaskSchedulerPermittedIdentifiers in Info.plist; IosBackgroundTaskTest
         // holds all three equal. A mismatch with the plist crashes here.
-        BGTaskScheduler.shared.register(forTaskWithIdentifier: "dev.claudefleet.mobile.needs-you", using: nil) { task in
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: "dev.claudefleet.mobile.needs-you", using: nil) { @Sendable task in
             AppDelegate.run(task)
         }
         UNUserNotificationCenter.current().delegate = self
         return true
     }
 
-    private static func run(_ task: BGTask) {
+    // The launch handler runs on a background queue, not the main actor, and
+    // this class is implicitly @MainActor (UIApplicationDelegate). Without
+    // `nonisolated` the handler would call a main-actor function from the wrong
+    // queue, which Swift 6 traps at run time. The Kotlin check it starts does
+    // not touch UIKit, so nothing here needs the main actor.
+    nonisolated private static func run(_ task: BGTask) {
         // Ask for the next one first, so a check that runs out of time does
         // not end the chain.
         MainViewControllerKt.scheduleNeedsYouRefreshIfEnabled()
-        let run = MainViewControllerKt.startNeedsYouCheck { finished in
+        let check = MainViewControllerKt.startNeedsYouCheck { finished in
             task.setTaskCompleted(success: finished.boolValue)
         }
-        task.expirationHandler = { run.cancel() }
+        task.expirationHandler = { check.cancel() }
     }
 
     func userNotificationCenter(

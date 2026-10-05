@@ -56,7 +56,7 @@ class TestFlightWorkflowTest {
     fun only_a_pushed_release_tag_uploads() {
         val version = stepAt("Derive the version and build number")
         assertTrue("[[ -n \"\$suffix\" ]] && upload=false" in version, "a -suffix tag must not upload")
-        assertTrue("dispatch" in version && "upload=false" in version, "workflow_dispatch must not upload")
+        assertTrue("x=0 y=0 z=1 upload=false" in version, "workflow_dispatch must not upload")
         val export = stepAt("Export, and upload when this is a release tag")
         assertTrue("Set :destination export" in export, "without upload, the export options must say export")
     }
@@ -106,8 +106,17 @@ class TestFlightWorkflowTest {
         val pins = { t: String -> Regex("""uses:\s*([\w./-]+)@(\S+)""").findAll(t).associate { it.groupValues[1] to it.groupValues[2] } }
         val ciPins = pins(ci)
         for ((action, pin) in pins(wf)) {
-            assertTrue(Regex("""^v?\d+(\.\d+){0,2}$""").matches(pin), "$action@$pin")
-            ciPins[action]?.let { assertEquals(it, pin, "$action pinned differently from ci.yml") }
+            val sha = Regex("""^[0-9a-f]{40}$""").matches(pin)
+            assertTrue(sha || Regex("""^v?\d+(\.\d+){0,2}$""").matches(pin), "$action@$pin")
+            if (!sha) ciPins[action]?.let { assertEquals(it, pin, "$action pinned differently from ci.yml") }
         }
+    }
+
+    @Test
+    fun the_signing_job_runs_in_the_testflight_environment() {
+        assertTrue("    environment: testflight" in wf, "the secrets are environment secrets, gated by the environment's branch rule")
+        assertTrue("persist-credentials: false" in wf, "checkout must not leave a token in .git/config")
+        assertTrue(Regex("""uses:\s*maxim-lobanov/setup-xcode@[0-9a-f]{40}\s+# v1\.\d+\.\d+""").containsMatchIn(wf), "setup-xcode is pinned to a commit")
+        assertTrue("timeout-minutes: 60" in wf)
     }
 }
