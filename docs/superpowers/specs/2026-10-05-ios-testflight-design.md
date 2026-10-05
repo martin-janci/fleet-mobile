@@ -83,9 +83,11 @@ an agent's:
 
 ### CI: TestFlight on every release tag
 
-A new job, **`ios`**, in `.github/workflows/release.yml`, on `macos-15`,
-triggered by the same `v*` tag that builds the APK. It is independent of the
-APK job: a failure in one does not stop the other.
+A new workflow, **`.github/workflows/testflight.yml`** (job `testflight`), on
+`macos-15`, triggered by the same `v*` tag that builds the APK. It is
+independent of the APK job: a failure in one does not stop the other. It is a
+separate file because `release.yml` is held by `ReleaseWorkflowTest` to tag
+pushes only, and the dry run below needs `workflow_dispatch`.
 
 1. **Version.** The tag is validated by the same rule as the APK job, through
    `env:`, never interpolated. `MARKETING_VERSION` is `X.Y.Z`.
@@ -174,11 +176,11 @@ person just looked at.
 
 While the paired screens are started (the same `LifecycleStartEffect` that
 starts the event stream) **and** `notifier.enabled` is true **and**
-`notifier.sharesSeenWithForeground` is true, `App` collects
+`notifier.poster` is non-null, `App` collects
 `needsYouEvents(fleet, remembered = prefs[needs_you_seen], onSeen = write)`,
 posting nothing and calling `poster.withdraw` for each `NeedsYouResolved`.
-`sharesSeenWithForeground` is a new `BackgroundNotifier` property, `false` by
-default and on Android, whose service keeps its own seen set in its own
+`poster` is a new nullable `BackgroundNotifier` property, `null` by default
+and on Android, whose service keeps its own seen set in its own
 `SharedPreferences`.
 
 ### iOS platform code (`iosMain`)
@@ -190,7 +192,7 @@ default and on Android, whose service keeps its own seen set in its own
   removes the delivered notification by identifier. The mapping from alert
   to content is a pure function, tested apart from the notification center.
 - **`IosBackgroundNotifier`**: `supported = true`,
-  `sharesSeenWithForeground = true`, the setting in `NSUserDefaults`.
+  `poster` = its `IosAlertPoster`, the setting in `NSUserDefaults`.
   Turning it on submits a refresh request. Turning it off cancels the request
   and removes every delivered `needs_you` notification. A `submit` failure
   (always `unavailable` on a simulator) is logged and does not turn the toggle
@@ -217,9 +219,13 @@ both working on the one process-wide `iosContainer`, which a background
 launch builds lazily without any UI:
 
 - `onOpenSession(sessionId: Long)` → `iosContainer.onOpenSession`.
-- `@Throws(CancellationException::class) suspend fun needsYouCheckOnce()` →
-  `NeedsYouCheck(iosContainer.session, iosContainer.prefs, IosAlertPoster()).once()`.
-  Swift sees it as `async throws`.
+- `startNeedsYouCheck(onDone: (Boolean) -> Unit): NeedsYouRun` launches
+  `NeedsYouCheck.once()` on `Dispatchers.Default` and calls `onDone(true)` when
+  it finishes, `onDone(false)` when cancelled; `NeedsYouRun.cancel()` cancels
+  it. Swift never awaits a Kotlin suspend function: cancelling a Swift `Task`
+  would not reach the coroutine, and exported suspend functions must start on
+  the main thread.
+- `scheduleNeedsYouRefreshIfEnabled()` submits the next request when alerts are on.
 
 ### Swift host
 
@@ -230,8 +236,8 @@ launch builds lazily without any UI:
   requires it: register the task identifier `dev.claudefleet.mobile.needs-you`,
   and become the `UNUserNotificationCenter` delegate.
 - The task handler first submits the next request (`earliestBeginDate` 15
-  minutes out), then runs `needsYouCheckOnce()` in a Swift `Task`. `expirationHandler`
-  cancels that `Task`. Either way the handler calls `setTaskCompleted`.
+  minutes out), then calls `startNeedsYouCheck`; `expirationHandler` calls the returned
+  run's `cancel()`. Either way the handler calls `setTaskCompleted`.
 - `willPresent`: no banner while the app is on screen. The list already shows
   it, the same rule as Android's "on screen, no second word".
 - `didReceive`: reads `sessionId` and calls `MainViewControllerKt.onOpenSession`,
@@ -282,8 +288,8 @@ and the items that are now proven move out of it.
 |---|---|
 | `commonTest` (JVM and `iosSimulatorArm64Test`) | `NeedsYouCheck` with `MockEngine`, a fake poster and in-memory `Prefs`: baseline first run; new reason alerts; same reason does not; resolved withdraws; 401 unpairs and posts nothing; network error, timeout and an unavailable Keychain keep the old seen set; a seen set written by the foreground collector suppresses a repeat. The foreground collector itself: writes, withdraws, posts nothing. |
 | `jvmTest` source scans | The task identifier matches across Kotlin, Swift and `Info.plist`; `UIBackgroundModes` has `fetch`; `ITSAppUsesNonExemptEncryption` is `false`; no `aps-environment` entitlement; `Signing.xcconfig`'s include is optional; no `.p8`, `.p12` or `.mobileprovision` is tracked; `Signing.local.xcconfig` is ignored; the `ios` release job reads the key only from secrets, deletes it in an `always()` step, and uploads only for a tag without a suffix. |
-| `iosTest` (Kotlin/Native) | Alert-to-content mapping; seen-set round trip through `IosPrefs`. |
-| `iosAppTests` (XCTest in the app) | `IosAlertPoster` adds and removes a delivered notification; a refresh `submit` that fails with `unavailable` leaves the toggle on. |
+| `commonTest` on Kotlin/Native | The alert-to-content mapping and the seen-set encoding run there too, through `iosSimulatorArm64Test`. |
+| `iosAppTests` (XCTest in the app) | A refresh `submit` that fails with `unavailable` leaves the toggle on. `IosAlertPoster` is not tested here: a simulator XCTest cannot grant notification permission, so nothing is delivered to observe. Its content mapping is in `commonTest`; posting is checklist item 9. |
 | CI | `workflow_dispatch` on the `ios` job: archive, sign and export without upload. |
 | Device | The checklist above. |
 
