@@ -1,6 +1,12 @@
 package dev.claudefleet.mobile.notify
 
 import dev.claudefleet.mobile.data.AppSession
+import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.data.FleetState
+import dev.claudefleet.mobile.model.Attention
+import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.store.Credentials
 import dev.claudefleet.mobile.store.FakePrefs
 import dev.claudefleet.mobile.store.Prefs
@@ -15,6 +21,10 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.TestResult
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -211,5 +221,53 @@ class NeedsYouCheckTest {
     @Test
     fun content_without_a_detail_is_one_line() {
         assertEquals("Stuck · pine", needsYouContent(NeedsYouAlert(1, "a", "Stuck · pine")).body)
+    }
+}
+
+private fun row(id: Long, reason: String? = null) =
+    SessionRow(id = id, tmuxName = "s$id", friendlyName = "session $id", hostAlias = "pine", attention = reason?.let { Attention(it) })
+
+private class OpenFleet(vararg initial: SessionRow) : FleetState {
+    override val sessions = MutableStateFlow(initial.toList())
+    override val hosts = MutableStateFlow(listOf(HostRow("pine", reachable = true)))
+    override val projects = MutableStateFlow(emptyList<ProjectRow>())
+    override val status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Connected("0.9.3"))
+    override val hubVersion = MutableStateFlow<String?>(null)
+    override val clockSkewSeconds = MutableStateFlow(0L)
+    override val sessionChanges = MutableSharedFlow<Long>()
+    override suspend fun refresh() = Unit
+}
+
+class KeepSeenWhileOpenTest {
+
+    @Test
+    fun what_the_open_app_saw_is_not_news_to_the_background_check() = runTest {
+        val prefs = FakePrefs()
+        val poster = RecordingPoster()
+        val fleet = OpenFleet(row(1, "waiting"))
+        val watching = backgroundScope.launch { keepSeenWhileOpen(fleet, prefs, poster) }
+        runCurrent()
+        watching.cancel()
+
+        val hub = Hub().apply { reply = { sse(okResult(rows(1L to "waiting"))) to HttpStatusCode.OK } }
+        withContext(Dispatchers.Default) { check(hub, prefs = prefs, poster = poster).once() }
+
+        assertEquals(emptyList(), poster.posted, "the person saw session 1 waiting in the app")
+    }
+
+    @Test
+    fun the_open_app_posts_nothing_and_withdraws_what_resolves() = runTest {
+        val prefs = FakePrefs().apply { writeSeen(mapOf(1L to null)) }
+        val poster = RecordingPoster()
+        val fleet = OpenFleet(row(1, "waiting"))
+        backgroundScope.launch { keepSeenWhileOpen(fleet, prefs, poster) }
+        runCurrent()
+
+        fleet.sessions.value = listOf(row(1))
+        runCurrent()
+
+        assertEquals(emptyList(), poster.posted, "on screen, the list already says it")
+        assertEquals(listOf(1L), poster.withdrawn)
+        assertEquals(mapOf(1L to null), prefs.readSeen())
     }
 }

@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.notify
 
 import dev.claudefleet.mobile.data.AppSession
+import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
@@ -71,4 +72,17 @@ class NeedsYouCheck(
         }
         prefs.writeSeen(after)
     }
+}
+
+/**
+ * While the app is open on a platform with no always-on watcher, keep the
+ * seen set current — so the next background look compares against what the
+ * person last saw, not against what the last background look saw — and take
+ * down the notification of any session that stops needing them meanwhile.
+ *
+ * Posts nothing: on screen, the list already says it. Runs until cancelled.
+ */
+suspend fun keepSeenWhileOpen(fleet: FleetState, prefs: Prefs, poster: AlertPoster) {
+    needsYouEvents(fleet, prefs.readSeen()) { prefs.writeSeen(it) }
+        .collect { event -> if (event is NeedsYouResolved) poster.withdraw(event.sessionId) }
 }
