@@ -76,7 +76,7 @@ if [[ -n "$TEAM_ARG" ]]; then
 elif [[ -n "$current" ]]; then
   team="$current"
 else
-  team=$(team_from_keychain)
+  team=$(team_from_keychain || true)
   [[ -n "$team" ]] || die "no Apple Development certificate in the keychain; sign in to Xcode → Settings → Accounts once, or pass --team"
 fi
 if [[ -n "$current" && "$team" != "$current" && -z "$TEAM_ARG" ]]; then

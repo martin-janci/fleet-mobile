@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.host
 
+import java.io.File
+import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -61,5 +63,43 @@ class IosDeviceScriptTest {
         assertTrue("-allowProvisioningUpdates" in script)
         assertTrue("devicectl device install app" in script)
         assertTrue("devicectl device process launch" in script)
+    }
+
+    private fun stub(dir: File, name: String, exit: Int) {
+        val f = File(dir, name)
+        f.writeText("#!/bin/sh\nexit $exit\n")
+        f.setExecutable(true)
+    }
+
+    @Test
+    fun no_signing_certificate_is_explained_not_a_silent_exit() {
+        // A copy of the repo layout: the script cd's to its own parent, so LOCAL lands in the copy.
+        val root = Files.createTempDirectory("ios-device-test").toFile()
+        try {
+            val scripts = File(root, "scripts").apply { mkdirs() }
+            File(root, "iosApp").mkdirs()
+            val copy = File(scripts, "ios-device.sh")
+            copy.writeText(script)
+            copy.setExecutable(true)
+            val bin = Files.createTempDirectory(root.toPath(), "stubs").toFile()
+            stub(bin, "xcodebuild", 0)
+            stub(bin, "security", 44)
+            stub(bin, "openssl", 1)
+
+            val pb = ProcessBuilder("bash", copy.path).redirectErrorStream(true)
+            pb.environment().apply {
+                put("PATH", "${bin.path}:/usr/bin:/bin")
+                put("JAVA_HOME", "/tmp")
+                put("DEVELOPER_DIR", "/tmp")
+            }
+            val p = pb.start()
+            val out = p.inputStream.bufferedReader().readText()
+            assertTrue(p.waitFor(60, TimeUnit.SECONDS))
+            assertTrue(p.exitValue() != 0, out)
+            assertTrue("no Apple Development certificate" in out, "the script exited without saying why: $out")
+            assertTrue(!File(root, "iosApp/Signing.local.xcconfig").exists(), "nothing may be written before a team is known")
+        } finally {
+            root.deleteRecursively()
+        }
     }
 }
