@@ -172,9 +172,9 @@ class HubContractVerdictTest {
      * is present; this is the half that runs everywhere, CI included.
      */
     @Test
-    fun the_range_is_zero_to_seven() {
+    fun the_range_is_zero_to_eight() {
         assertEquals(0, MIN_HUB_CONTRACT)
-        assertEquals(7, MAX_HUB_CONTRACT)
+        assertEquals(8, MAX_HUB_CONTRACT)
     }
 
     @Test
@@ -233,6 +233,18 @@ class HubContractVerdictTest {
     }
 
     /**
+     * Revision 8 — multi-user M1's sharing tools (`session_share`,
+     * `session_unshare`, `session_narrow`, `session_access`, `my_grants`) —
+     * is in range: this app calls none of them, and the new `SessionRow`
+     * fields (`owner_person_id`, `visibility`) are additive. At 7 it refused
+     * the 0.4.8 hub outright as "this app is too old" (2026-10-05).
+     */
+    @Test
+    fun revision_eight_is_ok() {
+        assertEquals(ContractVerdict.Ok, contractVerdict(8))
+    }
+
+    /**
      * A contract this app cannot read is refused as "the hub is ahead of me",
      * and says so in words rather than printing 2147483647 at a person.
      */
@@ -249,8 +261,8 @@ class HubContractVerdictTest {
     @Test
     fun a_readable_out_of_range_contract_still_names_itself() {
         assertEquals(
-            "This app is too old for this hub (contract 8). Update the app.",
-            contractVerdict(8).sentence(),
+            "This app is too old for this hub (contract 9). Update the app.",
+            contractVerdict(9).sentence(),
         )
     }
 }
