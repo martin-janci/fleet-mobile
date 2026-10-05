@@ -119,6 +119,14 @@
 		</dict>
 	</array>
 
+	<!--
+	  The app's only encryption is HTTPS through the system, which is exempt.
+	  Without this key every TestFlight build waits in App Store Connect for
+	  someone to answer the export-compliance question by hand.
+	-->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
