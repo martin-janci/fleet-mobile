@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.net.MAX_JSON_DEPTH
 import dev.claudefleet.mobile.net.nestsWithin
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -384,6 +385,98 @@ internal fun parseTodos(input: String): List<TodoEntry>? {
         }
         TodoEntry(content, status)
     }
+}
+
+/**
+ * A call whose input is mostly words written for another agent — a
+ * `SendMessage`'s `message`, a `prompt` — split into that text and the short
+ * fields beside it (`to`, `summary`, …).
+ */
+internal data class ProseInput(
+    /** Short one-line fields, in input order, the prose key left out. */
+    val fields: List<Pair<String, String>>,
+    /** Which key the text came from: `message` or `prompt`. */
+    val key: String,
+    /** The text as the agent wrote it — Markdown, usually. */
+    val body: String,
+)
+
+/** The keys whose value is written prose rather than an argument. */
+private val PROSE_KEYS = listOf("message", "prompt")
+
+/** A field longer than this, or on more than one line, is not shown beside the text. */
+private const val PROSE_FIELD_MAX = 120
+
+/**
+ * The input as [ProseInput], or null when it has none of [PROSE_KEYS] as a
+ * non-blank string.
+ *
+ * Instructions to an agent are long, and the hub caps the pretty-printed
+ * input at 8 000 characters, ending it in "…" — which is no longer JSON. So
+ * when the input does not parse, it is read line by line instead: in
+ * pretty-printed JSON every top-level field is one line indented by two
+ * spaces (a string's own newlines are escaped), and only the last one can be
+ * cut short.
+ */
+internal fun parseProseInput(input: String): ProseInput? {
+    val entries: List<Pair<String, String>> = parseObject(input)?.mapNotNull { (key, value) ->
+        (value as? JsonPrimitive)?.takeIf { it !is JsonNull }?.let { key to it.content }
+    } ?: prettyTopLevelStrings(input)
+    val (key, body) = PROSE_KEYS.firstNotNullOfOrNull { k ->
+        entries.firstOrNull { it.first == k && it.second.isNotBlank() }
+    } ?: return null
+    val fields = entries.filter { (k, v) ->
+        k != key && v.isNotBlank() && '\n' !in v && v.length <= PROSE_FIELD_MAX
+    }
+    return ProseInput(fields, key, body)
+}
+
+private val TOP_LEVEL_FIELD = Regex("""^ {2}"((?:[^"\\]|\\.)*)": (.*)$""")
+
+/** Each top-level `"key": value` of pretty-printed JSON, strings decoded, the rest as written. */
+private fun prettyTopLevelStrings(input: String): List<Pair<String, String>> =
+    input.split('\n').mapNotNull { line ->
+        val match = TOP_LEVEL_FIELD.matchEntire(line.removeSuffix("\r")) ?: return@mapNotNull null
+        val raw = match.groupValues[2].trimEnd().removeSuffix(",")
+        val value = if (raw.startsWith('"')) decodeJsonString(raw) else raw
+        decodeJsonString("\"" + match.groupValues[1] + "\"") to value
+    }
+
+/**
+ * A JSON string literal's content, from its opening quote to its closing one
+ * or, when the text was cut, to the end of what is there.
+ */
+private fun decodeJsonString(literal: String): String {
+    val out = StringBuilder()
+    var i = 1
+    while (i < literal.length) {
+        val c = literal[i]
+        when {
+            c == '"' -> return out.toString()
+            c != '\\' -> out.append(c)
+            i + 1 >= literal.length -> return out.toString()
+            else -> {
+                i++
+                when (val e = literal[i]) {
+                    'n' -> out.append('\n')
+                    't' -> out.append('\t')
+                    'r' -> out.append('\r')
+                    'b' -> out.append('\b')
+                    'f' -> out.append('\u000C')
+                    'u' -> {
+                        val hex = literal.substring(i + 1, minOf(i + 5, literal.length))
+                        val code = if (hex.length == 4) hex.toIntOrNull(16) else null
+                        if (code == null) return out.toString()
+                        out.append(code.toChar())
+                        i += 4
+                    }
+                    else -> out.append(e)
+                }
+            }
+        }
+        i++
+    }
+    return out.toString()
 }
 
 /** One string argument of a call's input JSON (`file_path`, `pattern` …). */
