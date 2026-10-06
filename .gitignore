@@ -31,3 +31,10 @@ Pods/
 
 # OS
 .DS_Store
+
+# Local signing (scripts/ios-device.sh writes it) and Apple credentials.
+# The TestFlight job reads its App Store Connect key from a secret into
+# $RUNNER_TEMP; nothing Apple issues ever belongs in the tree.
+iosApp/Signing.local.xcconfig
+*.p8
+*.mobileprovision

@@ -119,6 +119,32 @@
 		</dict>
 	</array>
 
+	<!--
+	  The app's only encryption is HTTPS through the system, which is exempt.
+	  Without this key every TestFlight build waits in App Store Connect for
+	  someone to answer the export-compliance question by hand.
+	-->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
+	<!--
+	  The "needs you" check when the app is closed: iOS wakes the app for about
+	  thirty seconds at a time of its choosing and AppDelegate hands that to
+	  NeedsYouCheck. The identifier must match AppDelegate.swift and
+	  NEEDS_YOU_TASK in NeedsYouRefresh.kt (IosBackgroundTaskTest); registering
+	  an identifier missing from this list crashes at launch. `fetch` is the
+	  background mode BGAppRefreshTask needs. No push: that is the next
+	  sub-project, and it needs a paid-only entitlement this app does not have.
+	-->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>dev.claudefleet.mobile.needs-you</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
+
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

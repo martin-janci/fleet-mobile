@@ -1,0 +1,8 @@
+// Signing for builds made on a developer's Mac, and nothing else.
+//
+// The included file holds DEVELOPMENT_TEAM and is never committed; see
+// scripts/ios-device.sh, which writes it on first run. The `?` makes the
+// include optional: without the file — every CI job, every fresh clone —
+// no setting changes, and the simulator build stays unsigned exactly as the
+// `macos` CI job expects. TestFlight builds pass the team on the command line.
+#include? "Signing.local.xcconfig"

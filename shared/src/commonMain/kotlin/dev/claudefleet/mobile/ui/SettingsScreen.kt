@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -186,6 +187,11 @@ private fun NotifyRow(notifier: BackgroundNotifier) {
     val on by notifier.enabled.collectAsState()
     var refused by remember { mutableStateOf(false) }
     val ask = rememberNotificationPermission()
+    val note by notifier.note.collectAsState()
+    LifecycleResumeEffect(notifier) {
+        notifier.refreshNote()
+        onPauseOrDispose { }
+    }
     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
     val flip: (Boolean) -> Unit = { want ->
         if (!want) {
@@ -209,7 +215,7 @@ private fun NotifyRow(notifier: BackgroundNotifier) {
             Text("Notify me when a session needs me", style = MaterialTheme.typography.titleSmall)
             Text(
                 if (refused) "Notifications are turned off for this app in the system's settings."
-                else "Waiting, stuck or failed — even with the app closed. Keeps a connection to the hub open, with its own notification.",
+                else note ?: "Waiting, stuck or failed — even with the app closed. Keeps a connection to the hub open, with its own notification.",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (refused) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -154,12 +154,14 @@ import dev.claudefleet.mobile.ui.theme.FleetTheme
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
 import dev.claudefleet.mobile.notify.NoBackgroundNotifier
 import dev.claudefleet.mobile.notify.BackgroundNotifier
+import dev.claudefleet.mobile.notify.keepSeenWhileOpen
 
 /**
  * The things a platform has to supply, in one object the shared UI can hold.
@@ -449,6 +451,18 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     LifecycleStartEffect(repository) {
         repository.start()
         onStopOrDispose { repository.stop() }
+    }
+
+    // A platform with no always-on watcher (iOS): while the app is open, keep
+    // the seen set the background check reads, so the first check after
+    // closing the app does not announce what the person just looked at.
+    val poster = container.notifier.poster
+    val alertsOn by container.notifier.enabled.collectAsState()
+    if (poster != null && alertsOn) {
+        LifecycleStartEffect(repository, poster) {
+            val job = scope.launch { keepSeenWhileOpen(repository, container.prefs, poster) }
+            onStopOrDispose { job.cancel() }
+        }
     }
 
     val nav = remember(credentials) { Navigator() }

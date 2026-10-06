@@ -1,0 +1,143 @@
+name: TestFlight
+
+# A separate workflow from release.yml on purpose: release.yml is held to tag
+# pushes only (ReleaseWorkflowTest), and signing needs a dry run that can be
+# started by hand before the first real tag. A dispatch never uploads.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: testflight-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  testflight:
+    name: Archive, sign and upload to TestFlight
+    runs-on: macos-15
+    # The four App Store Connect secrets are environment secrets of
+    # `testflight`, whose deployment-branch rule allows only `v*` tags and
+    # `main`, so a dispatch from any other branch cannot read them.
+    environment: testflight
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
+        with:
+          xcode-version: latest-stable
+
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # The tag is attacker-controlled input; it arrives through env and is
+      # validated before anything uses it.
+      - name: Derive the version and build number
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT" == "push" ]]; then
+            if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::tag '$TAG' is not vX.Y.Z[-suffix]" >&2
+              exit 1
+            fi
+            x=${BASH_REMATCH[1]} y=${BASH_REMATCH[2]} z=${BASH_REMATCH[3]} suffix=${BASH_REMATCH[4]}
+            upload=true
+            [[ -n "$suffix" ]] && upload=false
+          else
+            # dispatch: prove the signing, never upload
+            x=0 y=0 z=1 upload=false
+          fi
+          if (( 10#$y >= 100 || 10#$z >= 100 )); then
+            echo "::error::minor and patch must be below 100 to make a build number" >&2
+            exit 1
+          fi
+          echo "marketing=$x.$y.$z" >> "$GITHUB_OUTPUT"
+          echo "build=$(( 10#$x * 10000 + 10#$y * 100 + 10#$z ))" >> "$GITHUB_OUTPUT"
+          echo "upload=$upload" >> "$GITHUB_OUTPUT"
+
+      - name: Check the App Store Connect secrets
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -n "$ASC_KEY_ID" ]] || missing+=(ASC_KEY_ID)
+          [[ -n "$ASC_ISSUER_ID" ]] || missing+=(ASC_ISSUER_ID)
+          [[ -n "$ASC_KEY_P8" ]] || missing+=(ASC_KEY_P8)
+          [[ -n "$APPLE_TEAM_ID" ]] || missing+=(APPLE_TEAM_ID)
+          if (( ${#missing[@]} )); then
+            echo "::error::missing repository secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Write the App Store Connect key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc_key.p8"
+
+      - name: Archive
+        working-directory: iosApp
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          MARKETING: ${{ steps.version.outputs.marketing }}
+          BUILD: ${{ steps.version.outputs.build }}
+        run: |
+          set -euo pipefail
+          xcodebuild archive -project iosApp.xcodeproj -scheme iosApp -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/iosApp.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc_key.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" MARKETING_VERSION="$MARKETING" CURRENT_PROJECT_VERSION="$BUILD"
+
+      - name: Export, and upload when this is a release tag
+        working-directory: iosApp
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          UPLOAD: ${{ steps.version.outputs.upload }}
+        run: |
+          set -euo pipefail
+          opts="$RUNNER_TEMP/ExportOptions.plist"
+          cp ExportOptions.plist "$opts"
+          /usr/libexec/PlistBuddy -c "Add :teamID string $APPLE_TEAM_ID" "$opts"
+          if [[ "$UPLOAD" != "true" ]]; then
+            /usr/libexec/PlistBuddy -c 'Set :destination export' "$opts"
+          fi
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/iosApp.xcarchive" \
+            -exportOptionsPlist "$opts" -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc_key.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Remove the App Store Connect key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/asc_key.p8"

@@ -183,3 +183,16 @@ final class KeychainRoundTripTests: XCTestCase {
         XCTAssertEqual(read.name, awkward.name, "the name crosses a C boundary as UTF-8")
     }
 }
+
+/// On a simulator `BGTaskScheduler.submit` always fails with `unavailable`.
+/// Turning alerts on must survive that: the choice stands, and a device
+/// schedules the check.
+final class NeedsYouToggleTests: XCTestCase {
+    func testTurningAlertsOnSurvivesASchedulerThatRefuses() {
+        let notifier = IosBackgroundNotifier(alertPoster: IosAlertPoster(), defaults: UserDefaults(suiteName: "needs-you-tests")!)
+        notifier.setEnabled(on: true)
+        XCTAssertTrue((notifier.enabled.value as! KotlinBoolean).boolValue)
+        notifier.setEnabled(on: false)
+        XCTAssertFalse((notifier.enabled.value as! KotlinBoolean).boolValue)
+    }
+}
