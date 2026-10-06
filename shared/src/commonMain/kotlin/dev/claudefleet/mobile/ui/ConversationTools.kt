@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.EditDetail
 import dev.claudefleet.mobile.model.ToolDetail
+import dev.claudefleet.mobile.ui.components.MarkdownText
 import dev.claudefleet.mobile.ui.theme.DiffColors
 import dev.claudefleet.mobile.ui.theme.diffColors
 import dev.claudefleet.mobile.ui.theme.FleetIcons
@@ -345,7 +346,10 @@ private fun ToolDetailBody(tool: ConvItem.Tool, kind: ToolKind, detail: ToolDeta
             val todos = remember(detail.input) { parseTodos(detail.input) }
             if (todos != null) TodoDetail(todos) else FallbackDetail(detail)
         }
-        else -> FallbackDetail(detail)
+        else -> {
+            val prose = remember(detail.input) { parseProseInput(detail.input) }
+            if (prose != null) ProseDetail(prose, detail) else FallbackDetail(detail)
+        }
     }
 }
 
@@ -633,6 +637,45 @@ private fun FallbackDetail(detail: ToolDetail) {
         MonoBlock(detail.input, false)
         Spacer(Modifier.padding(top = 8.dp))
     }
+    Label(if (detail.isError) "Error" else "Result")
+    if (detail.result == null) Muted("Waiting for the result…") else MonoBlock(detail.result, detail.isError)
+}
+
+// ─── A message or a prompt for another agent ───────────────────────────────
+
+/**
+ * A `SendMessage`, or any call that hands an agent a `prompt`: the words are
+ * Markdown written for an agent to read, so they draw as Markdown — headings,
+ * lists and code as the agent will see them — instead of one escaped JSON
+ * string. The short fields beside them (`to`, `summary`) head the card.
+ */
+@Composable
+private fun ProseDetail(prose: ProseInput, detail: ToolDetail) {
+    prose.fields.forEach { (key, value) ->
+        Row(modifier = Modifier.padding(bottom = 2.dp)) {
+            Text(
+                key,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.width(72.dp),
+            )
+            Text(value, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+        }
+    }
+    if (prose.fields.isNotEmpty()) Spacer(Modifier.padding(top = 6.dp))
+    Label(prose.key.replaceFirstChar { it.uppercase() })
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        MarkdownText(
+            prose.body,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+        )
+    }
+    Spacer(Modifier.padding(top = 8.dp))
     Label(if (detail.isError) "Error" else "Result")
     if (detail.result == null) Muted("Waiting for the result…") else MonoBlock(detail.result, detail.isError)
 }

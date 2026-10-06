@@ -351,4 +351,47 @@ class ToolCallsTest {
         assertEquals("11", tail.first())
         assertEquals("40", tail.last())
     }
+
+    @Test
+    fun a_send_message_reads_as_its_text_with_the_short_fields_beside_it() {
+        val input = """
+            |{
+            |  "message": "## Task 8\n\n- **Enter:** never applies a stray row\n- arrows reach the input",
+            |  "summary": "fix the actions menu",
+            |  "to": "implementer"
+            |}
+        """.trimMargin()
+        val prose = parseProseInput(input)!!
+        assertEquals("message", prose.key)
+        assertEquals("## Task 8\n\n- **Enter:** never applies a stray row\n- arrows reach the input", prose.body)
+        assertEquals(listOf("summary" to "fix the actions menu", "to" to "implementer"), prose.fields)
+    }
+
+    @Test
+    fun a_prompt_counts_and_a_long_or_multi_line_field_stays_out_of_the_header() {
+        val long = "x".repeat(200)
+        val prose = parseProseInput("""{"prompt":"do it","note":"a\nb","long":"$long","n":3,"none":null}""")!!
+        assertEquals("prompt", prose.key)
+        assertEquals("do it", prose.body)
+        assertEquals(listOf("n" to "3"), prose.fields)
+    }
+
+    @Test
+    fun an_input_cut_by_the_hub_cap_still_reads_as_its_text() {
+        // The hub ends a pretty-printed input over 8 000 characters with "…",
+        // which no longer parses as JSON.
+        val input = "{\n  \"to\": \"implementer\",\n  \"message\": \"line one\\n\\\"quoted\\\" \\u00e9 and then the c…"
+        val prose = parseProseInput(input)!!
+        assertEquals("line one\n\"quoted\" é and then the c…", prose.body)
+        assertEquals(listOf("to" to "implementer"), prose.fields)
+    }
+
+    @Test
+    fun an_input_with_no_prose_is_not_prose() {
+        assertNull(parseProseInput("""{"to":"implementer"}"""))
+        assertNull(parseProseInput("""{"message":"  "}"""))
+        assertNull(parseProseInput("not json"))
+        assertNull(parseProseInput(""))
+        assertNull(parseProseInput("[".repeat(10_000)))
+    }
 }

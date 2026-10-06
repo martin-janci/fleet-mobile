@@ -36,6 +36,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -1917,28 +1918,20 @@ private fun Item(item: ConvItem) {
                 }
                 item.result?.takeIf { it.isNotBlank() }?.let {
                     Spacer(Modifier.height(4.dp))
-                    // Markdown, as the agent wrote it, and folded: a subagent's
-                    // report could be hundreds of lines of literal `**` and `|`
-                    // burying the reply it was for.
-                    var open by remember(it) { mutableStateOf(false) }
-                    val long = isLongResult(it)
-                    Box(modifier = if (long && !open) Modifier.heightIn(max = RESULT_FOLDED_HEIGHT).clipToBounds() else Modifier) {
-                        MarkdownText(it, style = MaterialTheme.typography.bodySmall)
-                    }
-                    if (long) {
-                        TextButton(onClick = { open = !open }) { Text(if (open) "Show less" else "Show the whole report") }
-                    }
+                    FoldedReport(it)
                 }
             }
         }
         // A background job reporting in. Before the hub parsed these they
         // arrived as raw XML in a text item; the point of drawing them is that
         // they stay on the screen now they arrive tagged.
-        is ConvItem.Notification -> Note(
-            marker = "◆",
-            text = item.label,
-            detail = item.result?.takeIf { it.isNotBlank() && it != item.summary },
-        )
+        is ConvItem.Notification -> {
+            val report = item.result?.takeIf { it.isNotBlank() && it != item.summary }
+            // A job that only says it moved (a Monitor line, "started") stays
+            // a quiet marker; one that hands back a report gets a block of
+            // its own, like the subagent it usually is.
+            if (report == null) Note(marker = "◆", text = item.label) else NotificationBlock(item, report)
+        }
         // Quiet by design: what matters is that it happened and roughly where.
         is ConvItem.Compact -> Note(marker = "⋯", text = item.label)
         is ConvItem.Interrupt -> Note(marker = "■", text = item.label)
@@ -2028,6 +2021,83 @@ private fun Note(
                 }
             }
         }
+    }
+}
+
+/**
+ * A background job's report — most often a subagent saying it finished, and
+ * what it did. It used to be a [Note]: one grey line with the report under it
+ * as plain text, so a report's `**Enter:**` and `- ` lists showed as literal
+ * characters and ran straight into the reply above it. Now it is a block of
+ * its own, set apart from the turn's text, its report drawn as Markdown.
+ */
+@Composable
+private fun NotificationBlock(item: ConvItem.Notification, report: String) {
+    val colors = MaterialTheme.colorScheme
+    val failed = item.status == "failed" || item.status == "killed"
+    val accent = when {
+        failed -> colors.error
+        item.status == "completed" -> colors.primary
+        else -> colors.onSurfaceVariant
+    }
+    Surface(
+        color = colors.surfaceContainerLow,
+        contentColor = colors.onSurface,
+        shape = MaterialTheme.shapes.small,
+        border = BorderStroke(1.dp, colors.outlineVariant),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Text("◆", style = MaterialTheme.typography.labelLarge, color = accent)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = item.label,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = if (failed) colors.error else colors.onSurface,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            notificationStatusWord(item.status)?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = accent,
+                    modifier = Modifier.padding(start = 20.dp, top = 2.dp),
+                )
+            }
+            HorizontalDivider(color = colors.outlineVariant, modifier = Modifier.padding(vertical = 8.dp))
+            FoldedReport(report)
+        }
+    }
+}
+
+/** The status a notification's block names under its title; null when the title says it all. */
+internal fun notificationStatusWord(status: String?): String? = when (status) {
+    "completed" -> "Completed"
+    "failed" -> "Failed"
+    "stopped" -> "Stopped"
+    "killed" -> "Killed"
+    else -> null
+}
+
+/**
+ * A report as Markdown, as the agent wrote it, and folded: a subagent's
+ * report could be hundreds of lines of literal `**` and `|` burying the reply
+ * it was for.
+ */
+@Composable
+private fun FoldedReport(text: String) {
+    var open by remember(text) { mutableStateOf(false) }
+    val long = isLongResult(text)
+    Box(modifier = if (long && !open) Modifier.heightIn(max = RESULT_FOLDED_HEIGHT).clipToBounds() else Modifier) {
+        MarkdownText(text, style = MaterialTheme.typography.bodySmall)
+    }
+    if (long) {
+        TextButton(onClick = { open = !open }) { Text(if (open) "Show less" else "Show the whole report") }
     }
 }
 
