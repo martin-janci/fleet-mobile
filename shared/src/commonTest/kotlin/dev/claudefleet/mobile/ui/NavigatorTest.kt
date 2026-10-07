@@ -435,6 +435,19 @@ class NavigatorTest {
     }
 
     @Test
+    fun company_opens_over_settings_and_back_returns_there() {
+        val nav = Navigator()
+        nav.select(Tab.Settings)
+        nav.openCompany()
+        nav.openCompany()
+
+        assertEquals(Screen.Company, nav.screen.value)
+        assertEquals(Tab.Settings, nav.tab.value)
+        assertTrue(nav.back())
+        assertEquals(Screen.Settings, nav.screen.value)
+    }
+
+    @Test
     fun a_new_session_in_a_project_opens_the_form_with_it_picked() {
         val nav = Navigator()
         nav.newSessionIn(3)

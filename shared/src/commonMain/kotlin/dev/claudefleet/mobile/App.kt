@@ -55,6 +55,8 @@ import dev.claudefleet.mobile.data.HubSessionActions
 import dev.claudefleet.mobile.data.MoveActions
 import dev.claudefleet.mobile.data.ProjectActions
 import dev.claudefleet.mobile.data.HubUsageActions
+import dev.claudefleet.mobile.data.CompanyActions
+import dev.claudefleet.mobile.data.HubCompanyActions
 import dev.claudefleet.mobile.data.UsageActions
 import dev.claudefleet.mobile.data.HubSessionDetailsActions
 import dev.claudefleet.mobile.data.HubWorkActions
@@ -121,6 +123,9 @@ import dev.claudefleet.mobile.ui.TidyHandlers
 import dev.claudefleet.mobile.ui.TidySheet
 import dev.claudefleet.mobile.ui.TidyViewModel
 import dev.claudefleet.mobile.ui.UsageHandlers
+import dev.claudefleet.mobile.ui.CompanyHandlers
+import dev.claudefleet.mobile.ui.CompanyScreen
+import dev.claudefleet.mobile.ui.CompanyViewModel
 import dev.claudefleet.mobile.ui.UsageScreen
 import dev.claudefleet.mobile.ui.UsageViewModel
 import dev.claudefleet.mobile.ui.isPushed
@@ -240,6 +245,7 @@ class AppContainer(
     val sessionDetailsActions: SessionDetailsActions = HubSessionDetailsActions(session)
     val repoActions: RepoActions = HubRepoActions(session)
     val usageActions: UsageActions = HubUsageActions(session)
+    val companyActions: CompanyActions = HubCompanyActions(session)
     val hostActions: HostActions = HubHostActions(session)
     val projectActions: ProjectActions = HubProjectActions(session)
     val moveActions: MoveActions = HubMoveActions(session)
@@ -574,6 +580,8 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
         FleetSettingsViewModel(container.fleetSettingsActions, scope, credentials.canWrite)
     }
     val settingsCaps by repository.capabilities.collectAsState()
+    // The Company entry shows once the hub has listed an org to this device.
+    val orgDirectory by repository.orgs.collectAsState()
     LaunchedEffect(settingsCaps) { fleetSettings.setHistoryAvailable(settingsCaps.settingHistory) }
     LaunchedEffect(settingsCaps.fleetSettings) { if (settingsCaps.fleetSettings) fleetSettings.load() }
 
@@ -910,6 +918,23 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         ),
                     )
                 }
+                Screen.Company -> {
+                    val company = remember(repository, scope) { CompanyViewModel(repository, container.companyActions, scope) }
+                    LaunchedEffect(company) { company.load() }
+                    val companyState by company.state.collectAsState()
+                    // An org's detail is drawn inside this screen: back closes it first.
+                    BackHandler(enabled = companyState.openId != null) { company.close() }
+                    CompanyScreen(
+                        state = companyState,
+                        nowSeconds = epochSeconds(),
+                        handlers = CompanyHandlers(
+                            onBack = { if (!company.close()) nav.back() },
+                            onRefresh = { company.refresh() },
+                            onOpen = company::open,
+                            onDismissError = company::dismissError,
+                        ),
+                    )
+                }
                 is Screen.Repo -> key(current.sessionId) {
                     RepoRoute(
                         sessionId = current.sessionId,
@@ -1002,6 +1027,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         onDismissError = settings::dismissError,
                         fleetPageOpen = settingsCaps.fleetSettings && fleet.openPage != null,
                         onOpenUsage = nav::openUsage.takeIf { settingsCaps.usage || settingsCaps.accounts },
+                        onOpenCompany = nav::openCompany.takeIf { orgDirectory.orgs.isNotEmpty() },
                         notifier = container.notifier,
                         fleetSettings = {
                             if (settingsCaps.fleetSettings) {

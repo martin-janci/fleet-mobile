@@ -31,6 +31,50 @@ class OrgAndCardTest {
         assertNull(dir.orgOf(Ticket(id = 72)))
     }
 
+    /**
+     * The org overview (company administration A–D) as an administrator is
+     * sent it, and as a plain member is: what the hub leaves out stays null,
+     * never an empty list or a zero that would read as a claim.
+     */
+    @Test
+    fun the_org_overview_reads_what_the_hub_sent_and_nothing_it_did_not() {
+        val details = json.decodeFromString(
+            ListSerializer(OrgDetail.serializer()),
+            """[{"id":1,"name":"Acme","isolate_sessions":false,"created_at":1,"owns_hub":true,
+                 "rules":[],"hosts":["pine","oak"],"trackers":[],"catalogs":["base"],
+                 "session_count":4,"needs_you":1,
+                 "devices":[{"name":"ada phone","mode":"readonly","trusted":true,"last_seen_at":100}],
+                 "settings":[{"key":"work.auto_tidy"}],
+                 "spent_today_micros":2500000,"spent_week_micros":9000000,"spent_month_micros":31000000,
+                 "budget_daily_usd":0,"budget_monthly_usd":30,"over_budget":["monthly"],
+                 "members":[{"person_id":5,"name":"ada","display_name":"Ada L.","role":"admin"},
+                            {"person_id":6,"name":"bo","role":"viewer"}],
+                 "my_role":"admin"},
+                {"id":2,"name":"Side","isolate_sessions":true,"created_at":2,"rules":[],"hosts":[],"trackers":[],
+                 "session_count":0,"needs_you":0,"members":[{"person_id":6,"name":"bo","role":"member"}],"my_role":"member"}]""",
+        )
+        val acme = details[0]
+        assertTrue(acme.ownsHub)
+        assertEquals(listOf("pine", "oak"), acme.hosts)
+        assertEquals(4, acme.sessionCount)
+        assertEquals(1, acme.needsYou)
+        assertEquals("readonly", acme.devices?.single()?.mode)
+        assertEquals(100L, acme.devices?.single()?.lastSeenAt)
+        assertTrue(acme.hasSpend)
+        assertEquals(31_000_000L, acme.spentMonthMicros)
+        assertEquals(30L, acme.budgetMonthlyUsd)
+        assertEquals(listOf("monthly"), acme.overBudget)
+        assertEquals(listOf("Ada L.", "bo"), acme.members?.map { it.label })
+        assertEquals("admin", acme.myRole)
+
+        val side = details[1]
+        assertFalse(side.ownsHub)
+        assertNull(side.devices, "a member is not sent the org's devices")
+        assertFalse(side.hasSpend, "nor its spend")
+        assertNull(side.budgetMonthlyUsd)
+        assertEquals("member", side.myRole)
+    }
+
     /** A row's org is its own; a hub before M8.6 leaves it out of the phone view, and the work's stands in. */
     @Test
     fun a_rows_org_is_its_own_else_its_works() {
