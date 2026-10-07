@@ -84,7 +84,10 @@ class TheBackGestureReachesTheNavigatorTest {
      * tab, so not a pushed screen). The worktree screen's answers another:
      * enabled only while a diff, commit or file is open over its tab, and
      * composed inside the screen — after `App`'s — so it is asked first and
-     * closes what is open before `nav.back()` leaves the screen.
+     * closes what is open before `nav.back()` leaves the screen. The Company
+     * screen's is the same shape: enabled only while one org's overview is
+     * open over its list, and composed after `App`'s, so back closes the org
+     * before it leaves the screen.
      */
     @Test
     fun there_is_exactly_one() {
@@ -94,7 +97,7 @@ class TheBackGestureReachesTheNavigatorTest {
         val app = Repo.shipped.single { it.name == "App.kt" }.readText()
         val enables = Regex("""BackHandler\(enabled = ([^)]+\)?)\)""").findAll(app).map { it.groupValues[1].trim() }.toList()
         assertEquals(
-            listOf("isPushed(screen)", "settingsCaps.fleetSettings && fleet.openPage != null", "state.views.isNotEmpty()"),
+            listOf("isPushed(screen)", "companyState.openId != null", "settingsCaps.fleetSettings && fleet.openPage != null", "state.views.isNotEmpty()"),
             enables,
         )
     }

@@ -6,8 +6,15 @@ import kotlinx.serialization.Serializable
 /**
  * One organisation as `work { action: orgs }` lists it (claude-fleet M5's
  * `OrgDetail`): the name and colour a label draws, and the trackers whose
- * tickets belong to it. The hub also sends the org's rules and hosts, which
- * the phone does not read.
+ * tickets belong to it. The hub also sends the org's rules, which the phone
+ * does not read.
+ *
+ * Everything past [trackers] is the org overview (claude-fleet's company
+ * administration, phases A–D), read by the Company screen. The hub decides
+ * who is sent what: [devices], spend and budgets only to whoever administers
+ * the org, [members] to its administrators and its own people, [myRole] only
+ * to a member. Absent is "not yours to see" (or an older hub), never zero —
+ * so each of those stays null rather than defaulting to an empty value.
  */
 @Serializable
 data class OrgDetail(
@@ -15,10 +22,52 @@ data class OrgDetail(
     val name: String = "",
     val color: String? = null,
     val trackers: List<OrgTracker> = emptyList(),
+    val hosts: List<String> = emptyList(),
+    @SerialName("session_count") val sessionCount: Int = 0,
+    @SerialName("needs_you") val needsYou: Int = 0,
+    /** This company owns the hub, so its admins administer every host. */
+    @SerialName("owns_hub") val ownsHub: Boolean = false,
+    val devices: List<OrgDevice>? = null,
+    @SerialName("spent_today_micros") val spentTodayMicros: Long? = null,
+    @SerialName("spent_week_micros") val spentWeekMicros: Long? = null,
+    @SerialName("spent_month_micros") val spentMonthMicros: Long? = null,
+    /** Whole USD; `0` is "no budget". */
+    @SerialName("budget_daily_usd") val budgetDailyUsd: Long? = null,
+    @SerialName("budget_monthly_usd") val budgetMonthlyUsd: Long? = null,
+    /** `daily` / `monthly`: the budgets it has reached. */
+    @SerialName("over_budget") val overBudget: List<String> = emptyList(),
+    val members: List<OrgMember>? = null,
+    /** `admin` / `member` / `viewer`; null when the caller is not in it. */
+    @SerialName("my_role") val myRole: String? = null,
 )
 
 @Serializable
 data class OrgTracker(val id: Long, val name: String = "")
+
+/** A paired device bound to an org. The hub never sends its token. */
+@Serializable
+data class OrgDevice(
+    val name: String = "",
+    /** `full` or `readonly`. */
+    val mode: String = "",
+    val trusted: Boolean = false,
+    @SerialName("last_seen_at") val lastSeenAt: Long? = null,
+)
+
+/** A person in an org, with their role (`admin` / `member` / `viewer`). */
+@Serializable
+data class OrgMember(
+    @SerialName("person_id") val personId: Long,
+    val name: String = "",
+    @SerialName("display_name") val displayName: String? = null,
+    val role: String = "",
+) {
+    /** What a list draws: the display name when there is one. */
+    val label: String get() = displayName?.takeIf { it.isNotBlank() } ?: name
+}
+
+/** The hub sent this caller the org's spend (its administrators only). */
+val OrgDetail.hasSpend: Boolean get() = spentTodayMicros != null || spentWeekMicros != null || spentMonthMicros != null
 
 /** An org as a label draws it. */
 data class OrgInfo(val id: Long, val name: String, val color: String? = null)

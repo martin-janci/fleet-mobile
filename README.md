@@ -277,6 +277,15 @@ costs one reconnect.
   total, by host, by day and the costliest sessions; the fleet's Claude
   accounts. A subscription's 5-hour and weekly windows are the desktop's own
   read and are not served by the hub.
+- **Company** (Settings → Company, once the hub lists an organisation to this
+  device) — claude-fleet's org overview, read only: each org's sessions and
+  how many need you, its hosts and trackers, and, as far as the hub sends
+  them to this token, its spend today / this week / this month against its
+  budgets, its members with their roles, and its bound devices. The hub
+  decides who is sent what (an org's administrators see spend and devices,
+  its people see its members); the phone draws what came back and never
+  fills a gap with a zero. It is the same `work { action: orgs }` read as the
+  org directory, re-read on opening; nothing on it changes an org.
 - **Files** (a hub with file downloads, claude-fleet contract revision 7,
   when it lists `list_downloads`) — the files sessions sent to the hub
   (`send_file`, by Claude or from the desktop's file viewer), newest first:
@@ -391,6 +400,10 @@ costs one reconnect.
 - **No writes to a worktree.** The Worktree screen reads changes, history and
   files; staging, committing, checking out and pushing are the desktop's,
   and the hub refuses them to a client token.
+- **No company administration.** Adding a member, changing a role, pairing or
+  revoking a device and setting a budget are the desktop's (Settings →
+  Organisations, through the hub's `org_admin`), which the app never names.
+  The Company screen only reads.
 - **No tracker administration, and no brief editing.** Connecting Jira is
   `work_admin`, which is master-only and which the app never names (the test
   forbids it). Starting or resuming work uses the hub's default brief; editing

@@ -51,6 +51,9 @@ sealed interface Screen {
 
     /** The fleet's estimated usage and its Claude accounts, pushed over Settings. */
     data object Usage : Screen
+
+    /** The company's organisations, read-only (claude-fleet's company administration), pushed over Settings. */
+    data object Company : Screen
 }
 
 /**
@@ -159,6 +162,9 @@ class Navigator {
 
     /** Open the Usage screen over whatever is showing (Settings); back returns there. */
     fun openUsage() = move { s -> if (s.screen == Screen.Usage) s else s.pushing(s.screen).going(Screen.Usage) }
+
+    /** Open the Company screen over whatever is showing (Settings); back returns there. */
+    fun openCompany() = move { s -> if (s.screen == Screen.Company) s else s.pushing(s.screen).going(Screen.Company) }
 
     /** Open a session's worktree (changes, history, files); back returns to the session. */
     fun openRepo(sessionId: Long) = move { s ->
@@ -329,7 +335,7 @@ class Navigator {
 /** A screen pushed over a tab, which back leaves; a tab's own screen is not one. */
 internal fun isPushed(screen: Screen): Boolean =
     screen is Screen.Session || screen is Screen.NewSession || screen is Screen.Task || screen is Screen.Repo ||
-        screen == Screen.Usage
+        screen == Screen.Usage || screen == Screen.Company
 
 private fun rootOf(tab: Tab): Screen = when (tab) {
     Tab.Sessions -> Screen.Sessions()
@@ -342,7 +348,7 @@ private fun rootOf(tab: Tab): Screen = when (tab) {
 /** The tab a screen lights, or null for one that belongs to whichever it was opened from. */
 private fun tabOf(screen: Screen): Tab? = when (screen) {
     is Screen.Sessions -> Tab.Sessions
-    is Screen.Session, is Screen.NewSession, is Screen.Repo, Screen.Usage -> null
+    is Screen.Session, is Screen.NewSession, is Screen.Repo, Screen.Usage, Screen.Company -> null
     Screen.Work, is Screen.Task -> Tab.Work
     Screen.Files -> Tab.Files
     Screen.Hosts -> Tab.Hosts

@@ -36,6 +36,7 @@ class EveryErrorBannerCanBeDismissedTest {
     fun every_screen_draws_one() {
         assertEquals(
             listOf(
+                "CompanyScreen.kt",
                 "FilesScreen.kt",
                 "HostsScreen.kt",
                 "MyWorkScreen.kt",

@@ -67,6 +67,8 @@ fun SettingsScreen(
     fleetPageOpen: Boolean = false,
     /** The Usage screen; null where the hub reports neither usage nor accounts. */
     onOpenUsage: (() -> Unit)? = null,
+    /** The Company screen; null where the hub lists no organisation to this device. */
+    onOpenCompany: (() -> Unit)? = null,
     /** Notifications while the app is away; [NoBackgroundNotifier] draws nothing. */
     notifier: BackgroundNotifier = NoBackgroundNotifier,
 ) {
@@ -118,6 +120,24 @@ fun SettingsScreen(
                         )
                     }
                     // Says it opens somewhere: among settings fields it read as one more.
+                    Icon(FleetIcons.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            onOpenCompany?.let { open ->
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable(onClick = open).padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Company", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "Organisations, their spend, members and devices — read only",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     Icon(FleetIcons.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
