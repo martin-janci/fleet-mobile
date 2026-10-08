@@ -14,6 +14,7 @@ import dev.claudefleet.mobile.model.ConversationSummary
 import dev.claudefleet.mobile.model.Download
 import dev.claudefleet.mobile.model.DownloadList
 import dev.claudefleet.mobile.model.DownloadRemoved
+import dev.claudefleet.mobile.model.PullRequestList
 import dev.claudefleet.mobile.model.FleetTask
 import dev.claudefleet.mobile.model.GithubRepo
 import dev.claudefleet.mobile.model.HostRow
@@ -1105,6 +1106,22 @@ class HubClient(
                 perTask?.let { put("per_task", it) }
             },
         ) { json.decodeFromJsonElement(WorkTreePage.serializer(), it) }
+
+    /**
+     * Pull requests (claude-fleet redesign 6.4, `prs { list }`): every PR a
+     * session's branch has had, newest first, only those whose opening
+     * session this token may see. [state] is `open`, `merged`, `closed` or
+     * `all`.
+     */
+    suspend fun listPullRequests(state: String = "open", limit: Int? = null): PullRequestList =
+        call(
+            "prs",
+            buildJsonObject {
+                put("action", "list")
+                put("state", state)
+                limit?.let { put("limit", it) }
+            },
+        ) { json.decodeFromJsonElement(PullRequestList.serializer(), it) }
 
     /** One task with every session it has (and their evidence), where its org and group come from. */
     suspend fun workTask(taskId: String): TaskDetail =

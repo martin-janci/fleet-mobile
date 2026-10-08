@@ -342,6 +342,14 @@ internal class FakeWorkActions : WorkActions {
     override suspend fun deleteView(viewId: Long) {
         calls += "view_delete $viewId"
     }
+
+    var prsAnswer = dev.claudefleet.mobile.model.PullRequestList()
+
+    override suspend fun pullRequests(state: String, limit: Int?): dev.claudefleet.mobile.model.PullRequestList {
+        calls += "prs $state"
+        fail?.let { throw it }
+        return prsAnswer
+    }
 }
 
 private val PAY7 = WorkSummary(linkId = 11, itemId = 70, key = "PAY-7", title = "Refund retries", source = "branch", state = "confirmed")

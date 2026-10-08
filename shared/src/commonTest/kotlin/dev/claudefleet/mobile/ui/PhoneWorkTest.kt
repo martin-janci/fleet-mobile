@@ -98,6 +98,38 @@ class PhoneWorkTest {
     }
 
     @Test
+    fun a_blocked_task_reads_needs_you_with_what_it_waits_on() {
+        // Redesign 6.7: Blocked shows as Needs you, its reason on the line.
+        val labels = mapOf("item:7" to "FLEET-12")
+        val idle = task(status = "To Do").copy(blocked = true, blockedBy = listOf("item:7"))
+        val line = taskLine(idle, { null }, labels::get)
+        assertEquals(StatusWord.NEEDS_YOU, line.word)
+        assertEquals("Blocked on FLEET-12", line.lead)
+        // What it last had is still said after the reason.
+        assertEquals("No session yet · To Do", line.line)
+
+        // A live session's own word still leads; the reason follows it.
+        val rows = mapOf(1L to row(1, "working"))
+        val working = task(link(1)).copy(blocked = true, blockedBy = listOf("item:7", "item:8"))
+        val busy = taskLine(working, rows::get, labels::get)
+        assertEquals(StatusWord.WORKING, busy.word)
+        assertEquals("1 working", busy.lead)
+        assertEquals("Blocked on FLEET-12 and 1 more · In Progress", busy.line)
+    }
+
+    @Test
+    fun a_blocker_the_phone_has_not_loaded_is_counted_never_named() {
+        fun blocked(vararg by: String) = task().copy(blocked = true, blockedBy = by.toList())
+        assertEquals("Blocked on another task", blockedLine(blocked("item:9"), { null }))
+        assertEquals("Blocked on 2 tasks", blockedLine(blocked("item:9", "item:10"), { null }))
+        // The hub leaves out blockers this token may not see.
+        assertEquals("Blocked", blockedLine(blocked(), { null }))
+        // An older hub never sends `blocked`: nothing is said.
+        assertNull(blockedLine(task(), { "FLEET-12" }))
+        assertNull(taskLine(task(status = "To Do"), { null }).word)
+    }
+
+    @Test
     fun counts_from_the_hub_stand_in_for_sessions_not_on_the_page() {
         val line = taskLine(task(counts = TaskCounts(active = 2)), { null })
         assertEquals("2 active", line.lead)

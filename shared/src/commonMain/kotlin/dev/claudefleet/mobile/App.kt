@@ -100,6 +100,9 @@ import dev.claudefleet.mobile.ui.MyWorkViewModel
 import dev.claudefleet.mobile.ui.ReviewHandlers
 import dev.claudefleet.mobile.ui.ReviewSheet
 import dev.claudefleet.mobile.ui.ReviewViewModel
+import dev.claudefleet.mobile.ui.PhonePullRequestsSheet
+import dev.claudefleet.mobile.ui.PullRequestsHandlers
+import dev.claudefleet.mobile.ui.PullRequestsViewModel
 import dev.claudefleet.mobile.ui.SessionTasksHandlers
 import dev.claudefleet.mobile.ui.SessionTasksViewModel
 import dev.claudefleet.mobile.ui.TaskHandlers
@@ -690,6 +693,10 @@ private fun FleetRoute(
             onChanged = { myWork.reload() },
         )
     }
+    // Work's Pull requests sheet (redesign 6.7): drawn on a hub that serves `prs`.
+    val pullRequests = remember(repository, scope) {
+        PullRequestsViewModel(fleet = repository, actions = container.workActions, scope = scope)
+    }
     val workState by myWork.state.collectAsState()
     // The hub stopped serving the Work view (or a reconnect found an older
     // hub): the tab leaves the bar, and the app leaves the tab.
@@ -1030,6 +1037,7 @@ private fun FleetRoute(
                         onDispose { myWork.detach() }
                     }
                     val reviewState by review.state.collectAsState()
+                    val prState by pullRequests.state.collectAsState()
                     val workHandlers = MyWorkHandlers(
                         onOpenTask = nav::openTask,
                         onRefresh = { myWork.refresh() },
@@ -1054,6 +1062,7 @@ private fun FleetRoute(
                         onUpdateView = { myWork.updateView(it) },
                         onDeleteView = { myWork.deleteView(it) },
                         onOpenReview = if (reviewState.available) ({ review.open() }) else null,
+                        onOpenPullRequests = if (prState.available) ({ pullRequests.open() }) else null,
                         onOpenRules = if (workState.rulesAvailable) ({ myWork.openRules() }) else null,
                         onCloseRules = myWork::closeRules,
                         onDismissError = myWork::dismissError,
@@ -1075,6 +1084,20 @@ private fun FleetRoute(
                         )
                     } else {
                         MyWorkScreen(state = workState, handlers = workHandlers)
+                    }
+                    if (prState.open && layout == PhoneLayout.New) {
+                        PhonePullRequestsSheet(
+                            state = prState,
+                            handlers = PullRequestsHandlers(
+                                onClose = pullRequests::close,
+                                onSetFilter = { pullRequests.setFilter(it) },
+                                onReload = { pullRequests.reload() },
+                                onOpenSession = { id -> pullRequests.close(); nav.open(id) },
+                                onDismissError = pullRequests::dismissError,
+                            ),
+                            nowSeconds = epochSeconds(),
+                            sessionLive = { id -> workRows.any { it.id == id } },
+                        )
                     }
                     if (reviewState.open) {
                         val reviewHandlers = ReviewHandlers(

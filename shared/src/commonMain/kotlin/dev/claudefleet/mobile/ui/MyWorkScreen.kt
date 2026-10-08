@@ -94,6 +94,8 @@ data class MyWorkHandlers(
     val onDeleteView: (WorkView) -> Unit = {},
     /** Null hides the Review button — a hub without `work { review }`. */
     val onOpenReview: (() -> Unit)? = null,
+    /** Work's Pull requests sheet (redesign 6.7); null on a hub without `prs`. */
+    val onOpenPullRequests: (() -> Unit)? = null,
     /** Null hides *Rules* — a hub without `work { rules }`. */
     val onOpenRules: (() -> Unit)? = null,
     val onCloseRules: () -> Unit = {},
