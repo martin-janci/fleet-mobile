@@ -208,6 +208,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
+import kotlinx.coroutines.flow.update
 import dev.claudefleet.mobile.notify.NoBackgroundNotifier
 import dev.claudefleet.mobile.notify.BackgroundNotifier
 import dev.claudefleet.mobile.notify.keepSeenWhileOpen
@@ -246,9 +247,27 @@ class AppContainer(
     private val _openSession = MutableStateFlow<Long?>(null)
     val openSession: StateFlow<Long?> = _openSession.asStateFlow()
 
+    /**
+     * The session a notification asked to show its question for (redesign
+     * 14.8). Kept apart from [openSession], which the navigator takes at once:
+     * the session screen takes this one, so a tap lands on the conversation
+     * and its question card even when that session was already open on
+     * another tab.
+     */
+    private val _questionFocus = MutableStateFlow<Long?>(null)
+    val questionFocus: StateFlow<Long?> = _questionFocus.asStateFlow()
+
     /** The platform's entry point for a tapped "needs you" notification. */
     fun onOpenSession(sessionId: Long) {
+        _questionFocus.value = sessionId
         _openSession.value = sessionId
+    }
+
+    /** True once for [sessionId] after a notification asked for its question; then false. */
+    fun consumeQuestionFocus(sessionId: Long): Boolean {
+        var taken = false
+        _questionFocus.update { if (it == sessionId) { taken = true; null } else it }
+        return taken
     }
 
     /** Taken exactly once. */
@@ -1575,6 +1594,11 @@ private fun SessionRoute(
             SessionTab.Details -> detailsVm.open()
             SessionTab.Conversation -> Unit
         }
+    }
+    // A tapped notification lands on the conversation, where the question card is (redesign 14.8).
+    val focus by container.questionFocus.collectAsState()
+    LaunchedEffect(focus, sessionId) {
+        if (focus == sessionId && container.consumeQuestionFocus(sessionId)) selectTab(SessionTab.Conversation)
     }
     // Back closes an open diff, commit or file in the Files tab before it
     // leaves the session; composed after `App`'s handler, so asked first.

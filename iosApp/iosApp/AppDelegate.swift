@@ -54,6 +54,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
+        // "Later" only puts the notification away (redesign 14.8); everything
+        // else (the tap, Answer, Open) opens the session at its question.
+        if response.actionIdentifier == "later" {
+            completionHandler()
+            return
+        }
         if let id = response.notification.request.content.userInfo["sessionId"] as? NSNumber {
             MainViewControllerKt.onOpenSession(sessionId: id.int64Value)
         }

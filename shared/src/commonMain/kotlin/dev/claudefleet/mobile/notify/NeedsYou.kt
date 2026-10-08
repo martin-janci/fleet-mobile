@@ -23,6 +23,12 @@ data class NeedsYouAlert(
     val text: String,
     val detail: String? = null,
     val reason: String? = null,
+    /**
+     * The question the session asks, as the agent put it ("Allow Bash: git
+     * push …?") — the notification carries the question, never an answer to
+     * it (redesign 14.8). Null when it asks nothing in words.
+     */
+    val question: String? = null,
 ) : NeedsYouEvent
 
 /** A session that needed you no longer does — answered here or elsewhere: its notification goes. */
@@ -43,7 +49,14 @@ fun needsYouAlerts(seen: Map<Long, String?>, rows: List<SessionRow>): Pair<List<
     val alerts = rows.mapNotNull { row ->
         val reason = row.attentionReason ?: return@mapNotNull null
         if (seen[row.id] == reason) return@mapNotNull null
-        NeedsYouAlert(row.id, row.displayName, "${reasonWords(reason)} · ${row.hostAlias}", row.supportingLine, reason)
+        NeedsYouAlert(
+            row.id,
+            row.displayName,
+            "${reasonWords(reason)} · ${row.hostAlias}",
+            row.supportingLine,
+            reason,
+            question = row.pendingInput?.question?.trim()?.takeIf { it.isNotEmpty() },
+        )
     }
     return alerts to now
 }
