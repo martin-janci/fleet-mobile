@@ -221,6 +221,3 @@ internal fun RepairResultCard(
         }
     }
 }
-
-/** What "Ask Claude Code to commit" puts in the box: a request, sent only when the person sends it. */
-internal const val ASK_TO_COMMIT = "Commit the uncommitted changes in the worktree with a clear message."
