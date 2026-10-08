@@ -41,7 +41,7 @@ class TriageTest {
     fun the_bucket_order_is_the_desktops_bucket_order() {
         assertEquals(
             listOf(
-                "WAITING", "STUCK", "STOP_FAILED", "FAILED", "CONTEXT_FULL", "STALE_WORKING", "CI_FAILING",
+                "WAITING", "STUCK", "HOST_DOWN", "ACCOUNT_LIMIT", "NO_CREDENTIALS", "STOP_FAILED", "FAILED", "CONTEXT_FULL", "STALE_WORKING", "CI_FAILING",
                 "DONE_UNREAD", "LIFECYCLE", "IDLE_LONG", "WORKING", "IDLE",
             ),
             TriageBucket.entries.map { it.name },
@@ -69,6 +69,26 @@ class TriageTest {
         // An external session is never a person's job, whatever is stamped.
         val external = row(kind = "external", claudeStatus = "idle").copy(attention = Attention("ci_failing"))
         assertEquals(TriageBucket.IDLE, external.triageBucket())
+    }
+
+    /** Contract 11: the hub's three Blocked reasons rank right after Stuck and ask for a person. */
+    @Test
+    fun the_blocked_reasons_rank_after_stuck_and_need_you() {
+        val cases = mapOf(
+            "host_down" to TriageBucket.HOST_DOWN,
+            "account_limit" to TriageBucket.ACCOUNT_LIMIT,
+            "no_credentials" to TriageBucket.NO_CREDENTIALS,
+        )
+        for ((reason, bucket) in cases) {
+            val r = row(claudeStatus = "idle").copy(attention = Attention(reason))
+            assertEquals(bucket, r.triageBucket())
+            assertTrue(bucket.needsYou)
+            assertTrue(r.triageScore(now = NOW) < row(stuckKind = "oom").triageScore(now = NOW))
+            assertTrue(r.triageScore(now = NOW) > row(claudeStatus = "failed").triageScore(now = NOW))
+        }
+        assertEquals("Paused · limit", reasonLabel("account_limit"))
+        assertEquals("Host down", reasonLabel("host_down"))
+        assertEquals("Signed out", reasonLabel("no_credentials"))
     }
 
     @Test
