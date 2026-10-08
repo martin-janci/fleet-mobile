@@ -147,9 +147,11 @@ class ToolsTheAppMayCallTest {
         "repo_file",
         // The Usage screen: estimated usage and the fleet's Claude accounts,
         // both readonly and `Access::Client`. A subscription's 5-hour and
-        // weekly windows are the desktop's own read; the hub serves no tool.
+        // weekly windows come from `account_usage` (readonly, contract 11),
+        // called only when `tools/list` names it.
         "usage_report",
         "list_accounts",
+        "account_usage",
         // A host's sheet and a ghost: `probe_host` and `discover_lost_sessions`
         // are readonly; `restore_host_sessions`, `recreate_session` and
         // `dismiss_ghost_session` are writes, offered only to a token that
