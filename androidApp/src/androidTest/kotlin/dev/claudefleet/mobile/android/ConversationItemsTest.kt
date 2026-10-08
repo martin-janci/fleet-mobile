@@ -64,6 +64,16 @@ class ConversationItemsTest {
                     ConvItem.Command(name = "review", args = "--fast", output = "no findings"),
                     ConvItem.Interrupt(duringTool = true),
                     ConvItem.Unsupported(kind = "whatever-comes-next"),
+                    // Text holding cards (RichCards.kt): a run's done marker
+                    // and its report, and a fleet-ui tutorial.
+                    ConvItem.Text(
+                        "FLEET_TASK_DONE_ab12\n```json\n" +
+                            "{\"summary\": \"wrote the guide\", \"outcome\": \"done\", \"followups\": [\"open a PR\"]}\n```",
+                    ),
+                    ConvItem.Text(
+                        "```fleet-ui\n{\"spec\": \"fleet.ui/1\", \"kind\": \"steps\", \"title\": \"Set it up\", " +
+                            "\"steps\": [{\"title\": \"Install it\"}]}\n```",
+                    ),
                 ),
             ),
         ),
@@ -125,6 +135,12 @@ class ConversationItemsTest {
             "/review --fast",
             "no findings",
             "Interrupted during a tool call",
+            // Cards, not their JSON.
+            "Task report",
+            "wrote the guide",
+            "open a PR",
+            "Set it up",
+            "0 of 1 done",
         )) {
             // Scrolled to one by one: the turn is taller than a phone's
             // screen since tool rows became 48dp touch targets, so the last
