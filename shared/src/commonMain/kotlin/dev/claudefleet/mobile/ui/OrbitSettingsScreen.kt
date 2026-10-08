@@ -124,7 +124,8 @@ fun OrbitSettingsScreen(
         } else {
             ScreenHeader(title = title, subtitle = subtitle)
         }
-        ErrorBanner(input.settings.error?.asGenericFriendly(), onDismiss = handlers.onDismissError)
+        val errorAsFriendly = input.settings.error?.asGenericFriendly()
+        ErrorBanner(errorAsFriendly, onDismiss = handlers.onDismissError)
         Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             if (fleetPageOpen) {
                 fleetPage()

@@ -93,10 +93,8 @@ fun PairScreen(
     onManualChange: (Boolean) -> Unit = {},
     onPaste: (String?) -> Unit = {},
     onCancel: () -> Unit = {},
-    /** Draws the camera; replaced in previews, where there is none. */
-    scanner: @Composable (Modifier) -> Unit = { m ->
-        QrScannerView(onScanned = onScanned, onUnavailable = onScannerUnavailable, modifier = m)
-    },
+    /** Draws the camera in place of the real one; previews pass one, where there is no camera. */
+    scanner: (@Composable (Modifier) -> Unit)? = null,
 ) {
     val o = Fleet.colors
     val gutter = OrbitTokens.spacing("phone-gutter").dp
@@ -157,7 +155,11 @@ fun PairScreen(
                         .border(2.dp, o.accent, phoneCard()),
                     contentAlignment = Alignment.Center,
                 ) {
-                    scanner(Modifier.fillMaxSize())
+                    if (scanner != null) {
+                        scanner(Modifier.fillMaxSize())
+                    } else {
+                        QrScannerView(onScanned = onScanned, onUnavailable = onScannerUnavailable, modifier = Modifier.fillMaxSize())
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
                 Text("Camera on · point it at the code", style = Fleet.type.textSm, color = o.fgMuted)
