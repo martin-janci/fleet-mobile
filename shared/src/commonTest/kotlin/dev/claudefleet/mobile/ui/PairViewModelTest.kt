@@ -886,7 +886,7 @@ class PairLinkTest {
         vm.submit()
         runCurrent()
 
-        assertEquals(listOf("ABCD1234" to HUB), auth.pairs, "a bare code goes to the kept address")
+        assertEquals(listOf<Pair<String, String?>>("ABCD1234" to HUB), auth.pairs, "a bare code goes to the kept address")
         assertNotNull(vm.state.value.paired)
     }
 
