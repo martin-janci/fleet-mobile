@@ -139,6 +139,8 @@ data class SessionsHandlers(
     val onOpenTickets: (() -> Unit)? = null,
     /** Open the Today sheet. Null hides the action — a hub without `work today`. */
     val onOpenToday: (() -> Unit)? = null,
+    /** Open the Missions sheet. Null hides the action — a hub without missions. */
+    val onOpenMissions: (() -> Unit)? = null,
     /**
      * Open the fleet's agent (the desktop's ✦). Null hides the action — a hub
      * without `ensure_operator`, or a `readonly` pairing.
@@ -205,6 +207,7 @@ fun SessionsScreen(
             onToggleSearch = handlers.onToggleSearch,
             onOpenTickets = handlers.onOpenTickets,
             onOpenToday = handlers.onOpenToday,
+            onOpenMissions = handlers.onOpenMissions,
             onStartSelect = handlers.onStartSelect.takeIf { bulk.enabled },
         ) {
             if (state.searchOpen) {
@@ -385,6 +388,7 @@ private fun SessionsBar(
     onToggleSearch: () -> Unit,
     onOpenTickets: (() -> Unit)?,
     onOpenToday: (() -> Unit)?,
+    onOpenMissions: (() -> Unit)?,
     onStartSelect: (() -> Unit)?,
     filters: @Composable () -> Unit,
 ) {
@@ -414,13 +418,16 @@ private fun SessionsBar(
             if (onOpenToday != null) TextButton(onClick = onOpenToday) { Text("Today") }
             // The rest behind ⋮: three text buttons and an icon left the title
             // no room on a phone. The agent is a floating button over the list.
-            if (onOpenTickets != null || onStartSelect != null) {
+            if (onOpenTickets != null || onOpenMissions != null || onStartSelect != null) {
                 var more by remember { mutableStateOf(false) }
                 Box {
                     IconButton(onClick = { more = true }) { Icon(FleetIcons.MoreVert, contentDescription = "More") }
                     DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
                         if (onOpenTickets != null) {
                             DropdownMenuItem(text = { Text("Tickets") }, onClick = { more = false; onOpenTickets() })
+                        }
+                        if (onOpenMissions != null) {
+                            DropdownMenuItem(text = { Text("Missions") }, onClick = { more = false; onOpenMissions() })
                         }
                         if (onStartSelect != null) {
                             DropdownMenuItem(text = { Text("Select sessions") }, onClick = { more = false; onStartSelect() })

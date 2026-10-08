@@ -29,6 +29,10 @@ import dev.claudefleet.mobile.model.PairResult
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.TidyReport
+import dev.claudefleet.mobile.model.Mission
+import dev.claudefleet.mobile.model.MissionCard
+import dev.claudefleet.mobile.model.MissionDetail
+import dev.claudefleet.mobile.model.StartOutcome
 import dev.claudefleet.mobile.model.TidyApplyItem
 import dev.claudefleet.mobile.model.TidyApplied
 import dev.claudefleet.mobile.model.ReopenedWork
@@ -987,6 +991,61 @@ class HubClient(
     suspend fun workOrgs(): List<OrgDetail> =
         call("work", buildJsonObject { put("action", "orgs") }) {
             json.decodeFromJsonElement(ListSerializer(OrgDetail.serializer()), it)
+        }
+
+    // ---- missions (claude-fleet orchestration O1–O8) ----
+
+    /** The missions this token may see (`work { action: missions }`). */
+    suspend fun workMissions(): List<Mission> =
+        call("work", buildJsonObject { put("action", "missions") }) {
+            json.decodeFromJsonElement(ListSerializer(Mission.serializer()), it)
+        }
+
+    /** One mission with its members, graph and loop (`work { action: mission }`). */
+    suspend fun workMission(missionId: Long): MissionDetail =
+        call("work", buildJsonObject { put("action", "mission"); put("mission_id", missionId) }) {
+            json.decodeFromJsonElement(MissionDetail.serializer(), it)
+        }
+
+    /** Take the mission's next steps, or only the one [step] names (`run:12`) — a person's press. */
+    suspend fun startMission(missionId: Long, step: String? = null): StartOutcome =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "mission_start")
+                put("mission_id", missionId)
+                step?.let { put("step", it) }
+            },
+        ) { json.decodeFromJsonElement(StartOutcome.serializer(), it) }
+
+    /** Apply ([ok]) or dismiss a card of the confirm queue; a question is answered with [note]. */
+    suspend fun decideMissionCard(cardId: Long, ok: Boolean, note: String? = null): MissionCard =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "card_decide")
+                put("card_id", cardId)
+                put("ok", ok)
+                note?.takeIf { it.isNotBlank() }?.let { put("note", it.trim()) }
+            },
+        ) { json.decodeFromJsonElement(MissionCard.serializer(), it) }
+
+    /** Pause or resume one mission (`mission_state`), under its [expectedVersion]. */
+    suspend fun setMissionState(missionId: Long, state: String, expectedVersion: Long): Mission =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "mission_state")
+                put("mission_id", missionId)
+                put("status", state)
+                put("expected_version", expectedVersion)
+            },
+        ) { json.decodeFromJsonElement(Mission.serializer(), it) }
+
+    /** Pause every active mission this token may change and end their grants; answers their ids. */
+    suspend fun pauseAllMissions(): List<Long> =
+        call("work_link", buildJsonObject { put("action", "missions_pause_all") }) {
+            json.decodeFromJsonElement(ListSerializer(Long.serializer()), it)
         }
 
     // ---- the Work view (claude-fleet M14) ----
