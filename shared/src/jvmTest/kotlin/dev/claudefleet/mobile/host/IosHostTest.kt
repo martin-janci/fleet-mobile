@@ -173,6 +173,24 @@ class TheIosHostEmbedsComposeCorrectlyTest {
     }
 
     /**
+     * Full screen hides the status bar on iOS too (redesign 14.21). Compose
+     * cannot: the bar belongs to the SwiftUI scene, so `HideSystemBars`
+     * holds a flag Swift listens to, and nothing here fails when either half
+     * is missing.
+     */
+    @Test
+    fun full_screen_reaches_the_swift_status_bar() {
+        val actual = Repo.file("shared/src/iosMain/kotlin/dev/claudefleet/mobile/ui/SystemBars.ios.kt").readText()
+        val main = Repo.file("shared/src/iosMain/kotlin/dev/claudefleet/mobile/MainViewController.kt").readText()
+        val swift = Repo.file("iosApp/iosApp/ContentView.swift").readText()
+
+        assertTrue("iosSystemBars.hold()" in actual && "iosSystemBars.release()" in actual)
+        assertTrue("fun onSystemBarsHidden(listener: (Boolean) -> Unit)" in main)
+        assertTrue("MainViewControllerKt.onSystemBarsHidden" in swift, "Swift has to listen")
+        assertTrue(".statusBar(hidden: systemBars.hidden)" in swift, "…and hide the bar with what it hears")
+    }
+
+    /**
      * Exactly one Swift file makes the controller.
      *
      * A second call site would be a second Compose window: two lifecycles, two

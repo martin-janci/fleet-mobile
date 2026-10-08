@@ -8,6 +8,7 @@ import dev.claudefleet.mobile.notify.NeedsYouCheck
 import dev.claudefleet.mobile.notify.submitNeedsYouRefresh
 import dev.claudefleet.mobile.store.IosPrefs
 import dev.claudefleet.mobile.store.KeychainSecrets
+import dev.claudefleet.mobile.ui.iosSystemBars
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.darwin.Darwin
 import kotlinx.coroutines.CancellationException
@@ -77,6 +78,16 @@ fun MainViewController(): UIViewController = ComposeUIViewController(
  */
 fun onPairLink(uri: String) {
     iosContainer.onPairLink(uri)
+}
+
+/**
+ * Whether a full-screen layout wants the status bar out of the way (redesign
+ * 14.21). `ContentView.swift` passes a listener once and applies each answer
+ * with `statusBar(hidden:)`; it hears the current one at once. Called on the
+ * main thread.
+ */
+fun onSystemBarsHidden(listener: (Boolean) -> Unit) {
+    iosSystemBars.listen(listener)
 }
 
 /**

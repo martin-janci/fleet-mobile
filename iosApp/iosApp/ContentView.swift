@@ -19,7 +19,22 @@ struct ComposeView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
 }
 
+/// Whether the shared app wants the status bar hidden: a full-screen layout
+/// (landscape, the agent full screen) asks through `HideSystemBars`, whose iOS
+/// half lands here, because only the SwiftUI scene can hide the bar.
+final class SystemBars: ObservableObject {
+    @Published var hidden = false
+
+    init() {
+        MainViewControllerKt.onSystemBarsHidden { [weak self] hidden in
+            self?.hidden = hidden.boolValue
+        }
+    }
+}
+
 struct ContentView: View {
+    @StateObject private var systemBars = SystemBars()
+
     var body: some View {
         ComposeView()
             // The Compose view takes the whole window and insets itself, which
@@ -34,6 +49,10 @@ struct ContentView: View {
             // prompt box itself. If SwiftUI moved the whole view up as well,
             // the box would travel twice as far as the keyboard.
             .ignoresSafeArea(.all)
+            // Full screen (14.21): the status bar and the home indicator go,
+            // as the system bars do on Android; Compose's insets follow.
+            .statusBar(hidden: systemBars.hidden)
+            .persistentSystemOverlays(systemBars.hidden ? .hidden : .automatic)
             // Pairing from a link. The URL goes straight to the shared
             // container, which holds it until the Pair screen asks — a cold
             // launch from `simctl openurl` delivers it before Compose has built
