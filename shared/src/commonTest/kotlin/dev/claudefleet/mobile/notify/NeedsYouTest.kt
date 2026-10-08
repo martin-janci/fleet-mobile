@@ -45,6 +45,25 @@ class NeedsYouTest {
         assertEquals(listOf(2L), alerts.map { it.sessionId })
     }
 
+    /** 14.11: a session that finished its task is a Done alert once, and never one running outside fleet. */
+    @Test
+    fun a_finished_session_is_a_done_alert_once() {
+        val done = row(3).copy(claudeStatus = "completed")
+        val (first, seen) = needsYouAlerts(mapOf(3L to null), listOf(done))
+        assertEquals(DONE_REASON, first.single().reason)
+        assertEquals("Done · pine", first.single().text)
+        assertEquals("session 3 is done", needsYouContent(first.single()).title)
+        assertEquals(listOf("Open", "Later"), needsYouContent(first.single()).actions.map { it.label })
+
+        val (again, _) = needsYouAlerts(seen, listOf(done))
+        assertTrue(again.isEmpty(), "still done is not news")
+
+        val (external, _) = needsYouAlerts(emptyMap(), listOf(done.copy(kind = "external")))
+        assertTrue(external.isEmpty())
+        val (asks, _) = needsYouAlerts(emptyMap(), listOf(row(4, "waiting").copy(claudeStatus = "completed")))
+        assertEquals("waiting", asks.single().reason, "a session that asks something is Needs you, not Done")
+    }
+
     @Test
     fun the_reasons_read_as_words() {
         assertEquals("Waiting for you", reasonWords("waiting"))

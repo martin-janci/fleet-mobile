@@ -217,9 +217,12 @@ class TheAndroidManifestTest {
                 // The app's own update (14.18): handed to Android's installer,
                 // which asks the person to confirm. See `AndroidAppInstaller`.
                 "android.permission.REQUEST_INSTALL_PACKAGES",
+                // This phone's lock (14.11), only while the person has it on:
+                // the system's fingerprint check. See `PhoneLock.android.kt`.
+                "android.permission.USE_BIOMETRIC",
             ),
             asked,
-            "the network; the camera to scan a QR; notifications the person turned on; installing its own update — nothing else",
+            "the network; the camera to scan a QR; notifications the person turned on; installing its own update; the lock the person turned on — nothing else",
         )
     }
 

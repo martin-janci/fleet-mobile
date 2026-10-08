@@ -15,7 +15,7 @@ const val NEEDS_YOU_ID_PREFIX: String = "needs-you-"
  */
 const val NEEDS_YOU_CATEGORY: String = "needs_you"
 
-/** The category of a failure's notification: its open button reads Open rather than Answer. */
+/** The category of a failure's or a finished session's notification: its open button reads Open rather than Answer. */
 const val NEEDS_YOU_FAILED_CATEGORY: String = "needs_you_failed"
 
 /** Open the session at its question card (the tap does the same). */
@@ -40,14 +40,14 @@ data class NotifyAction(val id: String, val label: String, val kind: NotifyActio
 
 /** The buttons for a notification of [kind]: Answer (Open, for a failure) and Later. */
 fun needsYouActions(kind: NotifyKind): List<NotifyAction> = listOf(
-    NotifyAction(NEEDS_YOU_ACTION_OPEN, if (kind == NotifyKind.FAILED) "Open" else "Answer", NotifyActionKind.Open),
+    NotifyAction(NEEDS_YOU_ACTION_OPEN, if (kind == NotifyKind.NEEDS_YOU) "Answer" else "Open", NotifyActionKind.Open),
     NotifyAction(NEEDS_YOU_ACTION_LATER, "Later", NotifyActionKind.Later),
 )
 
 fun needsYouActions(alert: NeedsYouAlert): List<NotifyAction> = needsYouActions(notifyKindOf(alert.reason))
 
 /** The category a notification of [kind] is posted in. */
-fun needsYouCategory(kind: NotifyKind): String = if (kind == NotifyKind.FAILED) NEEDS_YOU_FAILED_CATEGORY else NEEDS_YOU_CATEGORY
+fun needsYouCategory(kind: NotifyKind): String = if (kind == NotifyKind.NEEDS_YOU) NEEDS_YOU_CATEGORY else NEEDS_YOU_FAILED_CATEGORY
 
 /** Every category with its buttons — what iOS registers, all at once, so one never replaces another. */
 fun needsYouCategories(): Map<String, List<NotifyAction>> =
@@ -71,10 +71,11 @@ data class NeedsYouContent(
     val actions: List<NotifyAction> = emptyList(),
 )
 
-/** "<session> needs you", or "<session> failed" for a failure (MobileControl). */
+/** "<session> needs you", "<session> failed" for a failure (MobileControl), "<session> is done" when it finished. */
 fun needsYouHeadline(alert: NeedsYouAlert): String = when (notifyKindOf(alert.reason)) {
     NotifyKind.FAILED -> "${alert.title} failed"
     NotifyKind.NEEDS_YOU -> "${alert.title} needs you"
+    NotifyKind.DONE -> "${alert.title} is done"
 }
 
 fun needsYouContent(alert: NeedsYouAlert): NeedsYouContent {

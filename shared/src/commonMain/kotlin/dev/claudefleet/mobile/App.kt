@@ -104,7 +104,11 @@ import dev.claudefleet.mobile.ui.FilesViewModel
 import dev.claudefleet.mobile.ui.rememberFileHandoff
 import dev.claudefleet.mobile.ui.MyWorkHandlers
 import dev.claudefleet.mobile.ui.MyWorkScreen
+import dev.claudefleet.mobile.ui.PhoneLockScreen
 import dev.claudefleet.mobile.ui.PhoneTidyHandlers
+import dev.claudefleet.mobile.ui.guard
+import dev.claudefleet.mobile.ui.lockShown
+import dev.claudefleet.mobile.ui.rememberBiometricGate
 import dev.claudefleet.mobile.ui.PhoneTidySheet
 import dev.claudefleet.mobile.ui.PhoneTaskHandlers
 import dev.claudefleet.mobile.ui.PhoneTaskScreen
@@ -569,6 +573,14 @@ fun App(container: AppContainer) {
                             PairedScreen(paired, onContinue = { justPaired = null }, notifier = container.notifier)
                         } else {
                             FleetRoute(container, state.credentials, fleetCheck = fleetCheck, onFleetCheckDone = { fleetCheck = false })
+                            // This phone's lock (redesign 14.11): over the fleet
+                            // until the check passes, once per start of the app.
+                            val gate = rememberBiometricGate()
+                            val lockOn by container.phone.lock.collectAsState()
+                            val unlocked by container.phone.unlocked.collectAsState()
+                            if (lockShown(lockOn, unlocked, gate.available)) {
+                                PhoneLockScreen(gate, onUnlocked = container.phone::unlock)
+                            }
                         }
                     }
                 }
@@ -1609,6 +1621,8 @@ private fun FleetRoute(
                         val place by settings.place.collectAsState()
                         val theme by container.phone.theme.collectAsState()
                         val notifyKinds by container.phone.notifyKinds.collectAsState()
+                        val lockOn by container.phone.lock.collectAsState()
+                        val gate = rememberBiometricGate()
                         BackHandler(enabled = fleetPageOpen || place != SettingsPlace.Home) {
                             if (!fleetSettings.back()) settings.back()
                         }
@@ -1620,6 +1634,7 @@ private fun FleetRoute(
                                 theme = theme,
                                 notifyKinds = notifyKinds,
                                 updateMode = updateState.mode.takeIf { updateState.supported },
+                                lock = lockOn,
                             ),
                             handlers = OrbitSettingsHandlers(
                                 onOpen = settings::open,
@@ -1628,6 +1643,12 @@ private fun FleetRoute(
                                 onSetTheme = container.phone::setTheme,
                                 onSetNotify = container.phone::setNotify,
                                 onSetUpdateMode = updates::setMode,
+                                // Either way, only once the check has passed.
+                                onSetLock = if (gate.available) {
+                                    { on: Boolean -> gate.ask(if (on) "Turn on the lock" else "Turn off the lock") { ok -> if (ok) container.phone.setLock(on) } }
+                                } else {
+                                    null
+                                },
                                 onForget = { settings.forget() },
                                 onDismissError = settings::dismissError,
                                 onOpenUsage = onOpenUsage,
@@ -2154,6 +2175,8 @@ private fun SessionRoute(
     // Read once per visit: whether the hint is owed does not change under
     // a screen that is showing it.
     val foldHintOwed = remember(container) { !container.hints.shown(Hints.DOUBLE_TAP) }
+    val answerGate = rememberBiometricGate()
+    val answerLock by container.phone.lock.collectAsState()
     SessionScreen(
         sessionId = sessionId,
         state = state,
@@ -2164,7 +2187,8 @@ private fun SessionRoute(
         onBack = onBack,
         onDismissError = vm::dismissError,
         onAtBottom = vm::onAtBottom,
-        onAnswer = { vm.answer(it) },
+        // With This phone's lock on, an answer waits for the fingerprint (14.11).
+        onAnswer = { a -> answerGate.guard(answerLock, "Answer ${state.session?.displayName ?: "the session"}") { vm.answer(a) } },
         onShowTerminal = { vm.showTerminal() },
         onHideTerminal = vm::hideTerminal,
         onRestart = { vm.restart() },

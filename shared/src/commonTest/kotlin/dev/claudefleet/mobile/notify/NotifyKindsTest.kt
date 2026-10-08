@@ -36,7 +36,26 @@ class NotifyKindsTest {
     @Test
     fun a_stored_kind_this_build_does_not_know_is_ignored() {
         val prefs = FakePrefs()
-        prefs.putStringList("phone.notify.off", listOf("DONE", "FAILED"))
-        assertEquals(NotifyKinds(setOf(NotifyKind.FAILED)), prefs.notifyKinds())
+        prefs.putStringList("phone.notify.off", listOf("QUIET", "FAILED"))
+        assertEquals(NotifyKinds(setOf(NotifyKind.FAILED, NotifyKind.DONE)), prefs.notifyKinds())
+    }
+
+    /** 14.11: Done starts off — a finished session asks nothing — and is announced once turned on. */
+    @Test
+    fun done_starts_off_and_stays_on_once_turned_on() {
+        val prefs = FakePrefs()
+        assertEquals(NotifyKind.DONE, notifyKindOf(DONE_REASON))
+        assertFalse(prefs.notifyKinds().allows(DONE_REASON))
+
+        prefs.writeNotifyKinds(prefs.notifyKinds().with(NotifyKind.DONE, on = true))
+        assertTrue(prefs.notifyKinds().allows(DONE_REASON))
+        assertTrue(prefs.notifyKinds().allows("waiting"))
+
+        prefs.writeNotifyKinds(prefs.notifyKinds().with(NotifyKind.FAILED, on = false))
+        assertTrue(prefs.notifyKinds().allows(DONE_REASON), "turning another kind off keeps Done on")
+        assertFalse(prefs.notifyKinds().allows("failed"))
+
+        prefs.writeNotifyKinds(prefs.notifyKinds().with(NotifyKind.DONE, on = false))
+        assertFalse(prefs.notifyKinds().allows(DONE_REASON))
     }
 }

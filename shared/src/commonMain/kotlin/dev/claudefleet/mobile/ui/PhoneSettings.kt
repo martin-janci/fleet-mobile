@@ -25,11 +25,13 @@ enum class ThemeChoice(val label: String) {
 }
 
 private const val THEME_PREF = "phone.theme"
+private const val LOCK_PREF = "phone.lock"
 
 /**
  * The settings that belong to this phone alone (redesign 14.11, "This phone"):
- * which notifications it posts and which theme it draws in. Kept on the
- * device, never sent to the hub, and saved as they change; there is no Save.
+ * which notifications it posts, which theme it draws in, and whether the
+ * fingerprint lock is on. Kept on the device, never sent to the hub, and
+ * saved as they change; there is no Save.
  *
  * One instance for the app, held by `AppContainer`, so the theme switch
  * recolours every screen at once. The notification kinds are written through
@@ -42,6 +44,18 @@ class PhoneSettings(private val prefs: Prefs) {
     private val _notifyKinds = MutableStateFlow(prefs.notifyKinds())
     val notifyKinds: StateFlow<NotifyKinds> = _notifyKinds.asStateFlow()
 
+    /** The fingerprint lock: asked when the app opens and before an answer to a session's question. */
+    private val _lock = MutableStateFlow(prefs.getStringList(LOCK_PREF).firstOrNull() == "on")
+    val lock: StateFlow<Boolean> = _lock.asStateFlow()
+
+    /**
+     * The lock was passed since the app opened. Held here, not saved: one
+     * instance lives as long as the app's container, so a new start asks
+     * again and a turned phone does not.
+     */
+    private val _unlocked = MutableStateFlow(false)
+    val unlocked: StateFlow<Boolean> = _unlocked.asStateFlow()
+
     fun setTheme(choice: ThemeChoice) {
         prefs.putStringList(THEME_PREF, listOf(choice.name.lowercase()))
         _theme.value = choice
@@ -51,6 +65,20 @@ class PhoneSettings(private val prefs: Prefs) {
         val next = _notifyKinds.value.with(kind, on)
         prefs.writeNotifyKinds(next)
         _notifyKinds.value = next
+    }
+
+    /**
+     * Turn the lock on or off — only after the check has just passed (the
+     * caller asks first), so turning it on counts as this run's unlock.
+     */
+    fun setLock(on: Boolean) {
+        prefs.putStringList(LOCK_PREF, listOf(if (on) "on" else "off"))
+        _lock.value = on
+        if (on) _unlocked.value = true
+    }
+
+    fun unlock() {
+        _unlocked.value = true
     }
 
     private fun readTheme(): ThemeChoice {

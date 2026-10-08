@@ -45,9 +45,9 @@ data class NeedsYouResolved(val sessionId: Long) : NeedsYouEvent
  * nothing); the answer carries the reasons as of [rows], for the next look.
  */
 fun needsYouAlerts(seen: Map<Long, String?>, rows: List<SessionRow>): Pair<List<NeedsYouAlert>, Map<Long, String?>> {
-    val now = rows.associate { it.id to it.attentionReason }
+    val now = rows.associate { it.id to it.notifyReason }
     val alerts = rows.mapNotNull { row ->
-        val reason = row.attentionReason ?: return@mapNotNull null
+        val reason = row.notifyReason ?: return@mapNotNull null
         if (seen[row.id] == reason) return@mapNotNull null
         NeedsYouAlert(
             row.id,
@@ -60,6 +60,14 @@ fun needsYouAlerts(seen: Map<Long, String?>, rows: List<SessionRow>): Pair<List<
     }
     return alerts to now
 }
+
+/**
+ * What a session is announced for: the hub's attention reason, else
+ * [DONE_REASON] for one that finished its task (`completed`, the hub's word
+ * for a background agent done) — never for one running outside fleet.
+ */
+internal val SessionRow.notifyReason: String?
+    get() = attentionReason ?: DONE_REASON.takeIf { claudeStatus == "completed" && kind != "external" }
 
 /** The hub's attention reason as the notification says it — the app's one table, [reasonLabel]. */
 fun reasonWords(reason: String): String = reasonLabel(reason)
