@@ -703,6 +703,11 @@ class SessionsViewModel(
         filter { it.copy(orgFilter = if (it.orgFilter == org) null else org) }
     }
 
+    /** Show only [org]'s rows: an organisation's Sessions row (14.17) opens the list this way. */
+    fun showOrg(org: Long) {
+        filter { it.copy(orgFilter = org) }
+    }
+
     /**
      * The org the list is narrowed to, as the screen applies it — what the
      * Today sheet scopes itself by, so the two never disagree.

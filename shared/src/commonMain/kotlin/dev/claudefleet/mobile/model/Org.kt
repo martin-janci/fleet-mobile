@@ -39,6 +39,8 @@ data class OrgDetail(
     val members: List<OrgMember>? = null,
     /** `admin` / `member` / `viewer`; null when the caller is not in it. */
     @SerialName("my_role") val myRole: String? = null,
+    /** This org consented to Jev (decision-model) calls; null from a hub that does not say. */
+    @SerialName("jev_allowed") val jevAllowed: Boolean? = null,
 )
 
 @Serializable
