@@ -115,6 +115,14 @@ enum class GroupMode(val label: String) {
     PROJECT("project"),
     WORK("work"),
     URGENCY("urgency"),
+
+    /**
+     * Hosts with their sessions straight under them, no project headings —
+     * the New layout's "Group: host" (MobileNav). Offered by the New
+     * layout's filter sheet only; the Classic chip's cycle skips it, so a
+     * Classic list never lands here unless New chose it.
+     */
+    HOST("host"),
 }
 
 /**
@@ -675,7 +683,7 @@ class SessionsViewModel(
      * ignored, so the cycle a person sees is the cycle they get.
      */
     fun cycleGroupMode(workAvailable: Boolean) {
-        val modes = GroupMode.entries.filter { it != GroupMode.WORK || workAvailable }
+        val modes = GroupMode.entries.filter { it != GroupMode.HOST && (it != GroupMode.WORK || workAvailable) }
         val next = modes[(modes.indexOf(local.value.groupMode).coerceAtLeast(0) + 1) % modes.size]
         setGroupMode(next)
     }
@@ -836,6 +844,7 @@ class SessionsViewModel(
                 myWork,
                 orgLabel = if (choices.isNotEmpty() && filters.orgFilter == null) work.orgs::name else null,
                 collapsedHosts = l.collapsedHosts,
+                flat = groupMode == GroupMode.HOST,
             )
         }
         return SessionsUiState(
@@ -993,6 +1002,8 @@ internal fun groupSessions(
     myWork: Set<Long>? = null,
     orgLabel: ((Long) -> String)? = null,
     collapsedHosts: Set<String> = emptySet(),
+    /** [GroupMode.HOST]: one unlabelled group per host, most recent first, in place of its projects. */
+    flat: Boolean = false,
 ): List<HostGroup> {
     val byId = projects.associateBy { it.id }
     val kept = sessions.filter { row ->
@@ -1009,6 +1020,14 @@ internal fun groupSessions(
         .entries
         .sortedBy { it.key }
         .map { (alias, rows) ->
+            if (flat) {
+                return@map HostGroup(
+                    alias = alias,
+                    reachable = reachability[alias],
+                    collapsed = alias in collapsedHosts,
+                    projects = listOf(ProjectGroup(projectId = null, label = "", sessions = rows.sortedWith(BY_RECENCY))),
+                )
+            }
             val (keyed, rest) = if (byWork) rows.partition { it.workGroupKey != null } else emptyList<SessionRow>() to rows
             HostGroup(
                 alias = alias,

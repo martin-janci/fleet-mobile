@@ -14,8 +14,24 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** One session's outcome in a bulk action: done, skipped (with why) or failed (with why). */
-data class BulkOutcome(val sessionId: Long, val name: String, val ok: Boolean, val reason: String? = null)
+/**
+ * One session's outcome in a bulk action: done, skipped (with why) or failed
+ * (with why). [retryable] is false for a skip — the hub would refuse it again,
+ * so the outcome offers no Retry on it.
+ */
+data class BulkOutcome(
+    val sessionId: Long,
+    val name: String,
+    val ok: Boolean,
+    val reason: String? = null,
+    val retryable: Boolean = !ok,
+)
+
+/** What a bulk action did, so its outcome can name it and Retry can do it again. */
+sealed interface BulkAction {
+    data class Send(val text: String) : BulkAction
+    data object Kill : BulkAction
+}
 
 /** The sessions list's multi-select: which rows are picked, and the last bulk action's outcome. */
 data class BulkUiState(
@@ -29,8 +45,13 @@ data class BulkUiState(
     val killable: Int = 0,
     /** Select mode was asked for (the list's *Select*), with or without anything picked yet. */
     val selecting: Boolean = false,
+    /** The action [outcome] reports on; Retry repeats it. */
+    val action: BulkAction? = null,
 ) {
     val active: Boolean get() = selecting || selected.isNotEmpty()
+
+    /** The outcome rows Retry can try again: failures, not skips. */
+    val retryable: List<BulkOutcome> get() = outcome.orEmpty().filter { !it.ok && it.retryable }
 }
 
 /**
@@ -51,6 +72,7 @@ class BulkViewModel(
         val running: Boolean = false,
         val outcome: List<BulkOutcome>? = null,
         val selecting: Boolean = false,
+        val action: BulkAction? = null,
     )
 
     private val local = MutableStateFlow(Local())
@@ -65,6 +87,7 @@ class BulkViewModel(
             outcome = l.outcome,
             killable = rows.count { it.id in live && killRefusal(it) == null },
             selecting = l.selecting,
+            action = l.action,
         )
     }.stateIn(scope, SharingStarted.Eagerly, BulkUiState(enabled = canWrite))
 
@@ -82,6 +105,12 @@ class BulkViewModel(
         local.update { it.copy(selecting = true) }
     }
 
+    /** Pick every one of [ids] (the rows on screen): the selection bar's *Select all*. */
+    fun selectAll(ids: Collection<Long>) {
+        if (!canWrite) return
+        local.update { it.copy(selected = it.selected + ids, selecting = true) }
+    }
+
     fun clear() {
         local.update { it.copy(selected = emptySet(), selecting = false) }
     }
@@ -91,21 +120,45 @@ class BulkViewModel(
     }
 
     /** Send [text] to every picked session. */
-    fun send(text: String): Job = run(skip = { null }) { actions.sendPrompt(it.id, text) }
+    fun send(text: String): Job = run(BulkAction.Send(text), local.value.selected, merge = false)
 
     /** Kill every picked session the hub would let go; skip and name the rest. */
-    fun kill(): Job = run(skip = ::killRefusal) { actions.kill(it.id) }
+    fun kill(): Job = run(BulkAction.Kill, local.value.selected, merge = false)
 
-    private fun run(skip: (SessionRow) -> String?, call: suspend (SessionRow) -> Unit): Job = scope.launch {
+    /**
+     * The last action again, for one session the outcome says did not go
+     * through. Its line in the outcome is replaced by the new answer; the
+     * rest stay as they were (MobileSessionsTools: "Retry, alone or all at once").
+     */
+    fun retry(sessionId: Long): Job = retryWhere { it.sessionId == sessionId }
+
+    /** The last action again, for every session it did not reach. */
+    fun retryFailed(): Job = retryWhere { true }
+
+    private fun retryWhere(pick: (BulkOutcome) -> Boolean): Job {
         val l = local.value
-        if (!canWrite || l.running || l.selected.isEmpty()) return@launch
+        val ids = l.outcome.orEmpty().filter { !it.ok && it.retryable && pick(it) }.mapTo(LinkedHashSet()) { it.sessionId }
+        val action = l.action ?: return scope.launch { }
+        return run(action, ids, merge = true)
+    }
+
+    private fun run(action: BulkAction, ids: Set<Long>, merge: Boolean): Job = scope.launch {
+        val l = local.value
+        if (!canWrite || l.running || ids.isEmpty()) return@launch
+        fun skip(row: SessionRow): String? = if (action == BulkAction.Kill) killRefusal(row) else null
+        suspend fun call(row: SessionRow) {
+            when (action) {
+                is BulkAction.Send -> actions.sendPrompt(row.id, action.text)
+                BulkAction.Kill -> actions.kill(row.id)
+            }
+        }
         val rows = fleet.sessions.value
-        val picked = l.selected.mapNotNull { id -> rows.firstOrNull { it.id == id } }
-        local.update { it.copy(running = true, outcome = null) }
+        val picked = ids.mapNotNull { id -> rows.firstOrNull { it.id == id } }
+        local.update { it.copy(running = true, outcome = if (merge) it.outcome else null, action = action) }
         val outcome = picked.map { row ->
             val refusal = skip(row)
             if (refusal != null) {
-                BulkOutcome(row.id, row.displayName, ok = false, reason = refusal)
+                BulkOutcome(row.id, row.displayName, ok = false, reason = refusal, retryable = false)
             } else {
                 try {
                     call(row)
@@ -119,7 +172,10 @@ class BulkViewModel(
         }
         // What went through leaves the selection; what did not stays picked to try again.
         val done = outcome.filter { it.ok }.mapTo(HashSet()) { it.sessionId }
-        local.update { it.copy(running = false, outcome = outcome, selected = it.selected - done, selecting = false) }
+        local.update { cur ->
+            val merged = if (merge) cur.outcome.orEmpty().map { o -> outcome.firstOrNull { it.sessionId == o.sessionId } ?: o } else outcome
+            cur.copy(running = false, outcome = merged, selected = cur.selected - done, selecting = false)
+        }
     }
 }
 
