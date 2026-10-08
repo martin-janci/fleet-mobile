@@ -86,7 +86,10 @@ class TheBackGestureReachesTheNavigatorTest {
      * tab, so not a pushed screen). The worktree screen's answers another:
      * enabled only while a diff, commit or file is open over its tab, and
      * composed inside the screen — after `App`'s — so it is asked first and
-     * closes what is open before `nav.back()` leaves the screen. The Company
+     * closes what is open before `nav.back()` leaves the screen. A session's
+     * Files tab on the New bar (redesign 14.4) is that worktree inside the
+     * session, and its handler is the same shape: enabled only while the tab
+     * shows an open diff, commit or file. The Company
      * screen's is the same shape: enabled only while one org's overview is
      * open over its list, and composed after `App`'s, so back closes the org
      * before it leaves the screen.
@@ -99,7 +102,13 @@ class TheBackGestureReachesTheNavigatorTest {
         val app = Repo.shipped.single { it.name == "App.kt" }.readText()
         val enables = Regex("""BackHandler\(enabled = ([^)]+\)?)\)""").findAll(app).map { it.groupValues[1].trim() }.toList()
         assertEquals(
-            listOf("nav.isPushed(screen)", "companyState.openId != null", "settingsCaps.fleetSettings && fleet.openPage != null", "state.views.isNotEmpty()"),
+            listOf(
+                "nav.isPushed(screen)",
+                "companyState.openId != null",
+                "settingsCaps.fleetSettings && fleet.openPage != null",
+                "filesOpen",
+                "state.views.isNotEmpty()",
+            ),
             enables,
         )
     }

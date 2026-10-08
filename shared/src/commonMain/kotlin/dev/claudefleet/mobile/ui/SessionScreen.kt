@@ -263,6 +263,13 @@ fun SessionScreen(
     onStop: () -> Unit = {},
     /** Move to another host; null where the hub or this pairing cannot. */
     onMove: (() -> Unit)? = null,
+    /**
+     * The session's tabs on the New bar (redesign 14.4); null on the Classic
+     * bar, where this screen is the conversation alone, as before.
+     */
+    tabs: SessionTabsHost? = null,
+    /** Answer the question up now with the draft ([SessionViewModel.answerInWords]); New bar only. */
+    onAnswerInWords: () -> Unit = {},
 ) {
     state.repair?.let { RepairReportDialog(it, onDismissRepair) }
     val turns = state.conversation.turns
@@ -550,6 +557,25 @@ fun SessionScreen(
             if (work.sheetOpen) WorkTicketSheet(work, workHandlers)
         state.viewing?.let { EarlierConversationBanner(it, state.nowSeconds, state.loadingOlder, onBackToCurrent) }
             if (tasks.sheetOpen) SessionTasksSheet(tasks, tasksHandlers)
+            // The New bar's tabs: under the header, and still there when a
+            // read-back folds it, so another tab is never more than a tap away.
+            tabs?.let { SessionTabRow(it) }
+            val pane = tabs?.selected?.takeIf { it != SessionTab.Conversation }
+            if (tabs != null && pane != null) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    when (pane) {
+                        SessionTab.Agent -> AgentPane(
+                            state = state,
+                            agent = tabs.agent,
+                            onCapture = onShowTerminal,
+                            onAnswer = onAnswer,
+                        )
+                        SessionTab.Files -> tabs.files()
+                        SessionTab.Details -> tabs.details()
+                        SessionTab.Conversation -> Unit
+                    }
+                }
+            } else {
 
             // `weight(1f)`: the list takes what the bar and the footer leave, so
             // it shrinks when the keyboard raises the footer (`App` applies the
@@ -683,6 +709,24 @@ fun SessionScreen(
             // screen because the agent is waiting should not have to scroll to
             // answer it, and the card sits where the answer goes.
             state.card?.let { card ->
+                if (tabs != null) {
+                    QuestionCard(
+                        card = card,
+                        state = state,
+                        agent = tabs.agent,
+                        asking = if (card.offerRestart) null else pendingTool(state.conversation.turns),
+                        onAnswer = onAnswer,
+                        onAnswerInWords = {
+                            immersive = false
+                            stopReading()
+                            focusPrompt = true
+                        },
+                        onShowAgent = { tabs.onSelect(SessionTab.Agent) },
+                        onRestart = if (state.canRestart) onRestart else null,
+                        modifier = Modifier.heightIn(max = cardMax),
+                    )
+                    return@let
+                }
                 BlockedCardView(
                     card = card,
                     answering = state.answering,
@@ -762,6 +806,12 @@ fun SessionScreen(
                                     onFocusChange = { promptFocused = it },
                                     focusNow = focusPrompt,
                                     onFocused = { focusPrompt = false },
+                                    // Open for the whole time a question with a No is up — not
+                                    // only while an answer could go out — so the keyboard is not
+                                    // dropped mid-answer. Send itself waits on `canSendWords`.
+                                    wordsMode = tabs != null && !state.readOnly && state.card?.let(::declineOption) != null,
+                                    agent = tabs?.agent,
+                                    onAnswerInWords = { scrollToNewest(); onAnswerInWords() },
                                 )
                             }
                             // The pill a folded footer leaves. A tap is someone
@@ -779,6 +829,7 @@ fun SessionScreen(
                         }
                     }
                 }
+            }
             }
         }
     }
@@ -2316,6 +2367,15 @@ private fun PromptBox(
     /** Put the cursor in the field now (the folded footer's pill was tapped); [onFocused] once done. */
     focusNow: Boolean = false,
     onFocused: () -> Unit = {},
+    /**
+     * The question card is up and can be answered in words (New bar, 14.4):
+     * the field stays open, and Send says no to the question and sends the
+     * words ([onAnswerInWords]) instead of being dark.
+     */
+    wordsMode: Boolean = false,
+    onAnswerInWords: () -> Unit = {},
+    /** The agent tab's name on the New bar, where the terminal is that tab; null on the Classic bar. */
+    agent: String? = null,
 ) {
     val haptics = LocalHapticFeedback.current
     var showHistory by remember { mutableStateOf(false) }
@@ -2333,7 +2393,8 @@ private fun PromptBox(
     Column(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp)) {
         val why = when {
             state.readOnly -> "This device is paired read-only."
-            state.card != null -> "Answer with the buttons above, or Show terminal."
+            wordsMode -> "Send says No to the question and gives your words instead."
+            state.card != null -> if (agent != null) "Answer with the buttons above, or Show in $agent." else "Answer with the buttons above, or Show terminal."
             !state.connected -> "The hub is offline; the prompt will not be delivered."
             state.session == null -> "This session is gone."
             else -> null
@@ -2348,12 +2409,12 @@ private fun PromptBox(
                     .onFocusChanged { onFocusChange(it.isFocused) },
                 // Not disabled while a prompt is out: that dropped the
                 // keyboard on every send. The next one waits on Send instead.
-                enabled = !state.readOnly && state.card == null,
+                enabled = !state.readOnly && (state.card == null || wordsMode),
                 // One line: a long session name wrapped the placeholder
                 // onto a second row and made an empty field look filled.
                 placeholder = {
                     Text(
-                        "Message ${state.session?.displayName ?: "session"}…",
+                        if (wordsMode) "Or type an answer…" else "Message ${state.session?.displayName ?: "session"}…",
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -2431,8 +2492,11 @@ private fun PromptBox(
                 }
             } else {
                 FilledIconButton(
-                    onClick = { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); onSend() },
-                    enabled = state.canSend,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        if (wordsMode) onAnswerInWords() else onSend()
+                    },
+                    enabled = if (wordsMode) state.canSendWords else state.canSend,
                     modifier = Modifier.padding(bottom = 4.dp).size(48.dp),
                 ) {
                     if (state.sending) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)

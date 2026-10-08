@@ -25,6 +25,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -65,67 +66,101 @@ data class SessionDetailsHandlers(
 @Composable
 fun SessionDetailsSheet(state: SessionDetailsUiState, handlers: SessionDetailsHandlers, sessions: List<SessionRow>) {
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
-        val row = state.session
-        LazyColumn(modifier = Modifier.fillMaxWidth()) {
+        SessionDetailsList(state, handlers, sessions)
+    }
+}
+
+/** One of the Details tab's actions: its words, and what a tap does. */
+data class DetailsAction(val label: String, val onClick: () -> Unit)
+
+/**
+ * The Details sheet's content — on the New bar (redesign 14.4) it is the
+ * session's Details tab instead of a sheet, with the session's [actions]
+ * (Move to host…, Tasks, the ticket) as a row of buttons under the facts.
+ * Everything else in the ⋮ menu stays there.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun SessionDetailsList(
+    state: SessionDetailsUiState,
+    handlers: SessionDetailsHandlers,
+    sessions: List<SessionRow>,
+    actions: List<DetailsAction> = emptyList(),
+    modifier: Modifier = Modifier,
+) {
+    val row = state.session
+    LazyColumn(modifier = modifier.fillMaxWidth()) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    row?.displayName ?: "Session",
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).semantics { heading() },
+                )
+                TextButton(onClick = handlers.onReload, enabled = !state.loading) { Text("Refresh") }
+            }
+            handlers.onOpenRepo?.let { open ->
+                TextButton(onClick = open, modifier = Modifier.padding(horizontal = 12.dp)) { Text("Worktree: changes, history, files") }
+            }
+            if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 24.dp))
+            ErrorBanner(state.error, onDismiss = handlers.onDismissError)
+        }
+        if (row != null) {
+            item { Facts(row, state.nowSeconds, sessions, handlers.onOpenSession) }
+        }
+        if (actions.isNotEmpty()) {
             item {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                SectionTitle("Actions")
+                FlowRow(
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(
-                        row?.displayName ?: "Session",
-                        style = MaterialTheme.typography.titleLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f).semantics { heading() },
-                    )
-                    TextButton(onClick = handlers.onReload, enabled = !state.loading) { Text("Refresh") }
-                }
-                handlers.onOpenRepo?.let { open ->
-                    TextButton(onClick = open, modifier = Modifier.padding(horizontal = 12.dp)) { Text("Worktree: changes, history, files") }
-                }
-                if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 24.dp))
-                ErrorBanner(state.error, onDismiss = handlers.onDismissError)
-            }
-            if (row != null) {
-                item { Facts(row, state.nowSeconds, sessions, handlers.onOpenSession) }
-            }
-            if (state.relatedAvailable && state.related.isNotEmpty()) {
-                item { SectionTitle("Same worktree") }
-                items(state.related, key = { "related:${it.id}" }) { other ->
-                    SessionLine(other, onClick = { handlers.onOpenSession(other.id) })
-                }
-            }
-            if (state.tasksAvailable && state.tasks.isNotEmpty()) {
-                item { SectionTitle("Tasks") }
-                items(state.tasks, key = { "task:${it.id}" }) { task ->
-                    TaskLine(task, state, sessions, handlers)
-                }
-            }
-            if (state.historyAvailable) {
-                item {
-                    SectionTitle("Timeline")
-                    FlowRow(
-                        modifier = Modifier.padding(horizontal = 24.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        for (category in FILTER_CATEGORIES) {
-                            FilterChip(
-                                selected = category in state.filter,
-                                onClick = { handlers.onToggle(category) },
-                                label = { Text(category.label) },
-                            )
-                        }
+                    for (action in actions) {
+                        OutlinedButton(onClick = action.onClick, modifier = Modifier.heightIn(min = 48.dp)) { Text(action.label) }
                     }
                 }
-                val shown = state.shownEvents
-                if (shown.isEmpty() && !state.loading) {
-                    item { Quiet(if (state.events.isEmpty()) "No events recorded yet." else "Nothing in these filters.") }
-                }
-                items(shown, key = { "event:${it.id}" }) { EventLine(it, state.nowSeconds) }
             }
-            item { Spacer(Modifier.height(24.dp)) }
         }
+        if (state.relatedAvailable && state.related.isNotEmpty()) {
+            item { SectionTitle("Same worktree") }
+            items(state.related, key = { "related:${it.id}" }) { other ->
+                SessionLine(other, onClick = { handlers.onOpenSession(other.id) })
+            }
+        }
+        if (state.tasksAvailable && state.tasks.isNotEmpty()) {
+            item { SectionTitle("Tasks") }
+            items(state.tasks, key = { "task:${it.id}" }) { task ->
+                TaskLine(task, state, sessions, handlers)
+            }
+        }
+        if (state.historyAvailable) {
+            item {
+                SectionTitle("Timeline")
+                FlowRow(
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    for (category in FILTER_CATEGORIES) {
+                        FilterChip(
+                            selected = category in state.filter,
+                            onClick = { handlers.onToggle(category) },
+                            label = { Text(category.label) },
+                        )
+                    }
+                }
+            }
+            val shown = state.shownEvents
+            if (shown.isEmpty() && !state.loading) {
+                item { Quiet(if (state.events.isEmpty()) "No events recorded yet." else "Nothing in these filters.") }
+            }
+            items(shown, key = { "event:${it.id}" }) { EventLine(it, state.nowSeconds) }
+        }
+        item { Spacer(Modifier.height(24.dp)) }
     }
 }
 
