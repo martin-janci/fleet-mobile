@@ -39,16 +39,16 @@ private class WizardFleet(
     override val capabilities = MutableStateFlow(HubCapabilities(tools = setOf(HubCapabilities.NEW_BG_SESSION)))
 }
 
-private object NoCreate : NewSessionActions {
+private object WizardNoCreate : NewSessionActions {
     override suspend fun newSession(request: NewSessionRequest): SessionRow = SessionRow(id = 1, hostAlias = request.hostAlias)
     override suspend fun newBackground(hostAlias: String, name: String, prompt: String) =
         NewBgSessionResult(claudeSessionId = "c", session = null)
 }
 
-private val PINE = HostRow("pine", reachable = true)
-private val BOX = HostRow("box", reachable = true)
-private val DOWN = HostRow("down", reachable = false)
-private val REPO = ProjectRow(3, owner = "me", repo = "repo", lastSessionAt = 100)
+private val WIZ_PINE = HostRow("pine", reachable = true)
+private val WIZ_BOX = HostRow("box", reachable = true)
+private val WIZ_DOWN = HostRow("down", reachable = false)
+private val WIZ_REPO = ProjectRow(3, owner = "me", repo = "repo", lastSessionAt = 100)
 
 /**
  * The New session wizard (redesign 14.6): the step gates and words. The
@@ -59,7 +59,7 @@ private val REPO = ProjectRow(3, owner = "me", repo = "repo", lastSessionAt = 10
 class NewSessionWizardTest {
 
     private fun vm(fleet: FleetState, scope: CoroutineScope, ticketKey: String? = null) =
-        NewSessionViewModel(fleet, NoCreate, scope, canWrite = true, initialHost = null, onCreated = {}, ticketKey = ticketKey)
+        NewSessionViewModel(fleet, WizardNoCreate, scope, canWrite = true, initialHost = null, onCreated = {}, ticketKey = ticketKey)
 
     @Test
     fun the_steps_are_where_project_review() {
@@ -79,7 +79,7 @@ class NewSessionWizardTest {
 
     @Test
     fun where_waits_for_a_reachable_host_and_says_so() = runTest {
-        val vm = vm(WizardFleet(listOf(PINE, BOX, DOWN)), backgroundScope)
+        val vm = vm(WizardFleet(listOf(WIZ_PINE, WIZ_BOX, WIZ_DOWN)), backgroundScope)
         runCurrent()
         assertEquals("Pick a host.", nextBlocker(WizardStep.Where, vm.state.value))
 
@@ -87,18 +87,18 @@ class NewSessionWizardTest {
         runCurrent()
         assertNull(nextBlocker(WizardStep.Where, vm.state.value))
 
-        val none = vm(WizardFleet(listOf(DOWN)), backgroundScope)
+        val none = vm(WizardFleet(listOf(WIZ_DOWN)), backgroundScope)
         runCurrent()
         assertEquals("No host is reachable right now.", nextBlocker(WizardStep.Where, none.state.value))
     }
 
     @Test
     fun project_waits_for_a_project() = runTest {
-        val vm = vm(WizardFleet(listOf(PINE), listOf(REPO)), backgroundScope)
+        val vm = vm(WizardFleet(listOf(WIZ_PINE), listOf(WIZ_REPO)), backgroundScope)
         runCurrent()
         assertEquals("Pick a project.", nextBlocker(WizardStep.Project, vm.state.value))
 
-        vm.selectProject(REPO.id)
+        vm.selectProject(WIZ_REPO.id)
         runCurrent()
         assertNull(nextBlocker(WizardStep.Project, vm.state.value))
         assertTrue(vm.state.value.canCreate)
@@ -107,8 +107,8 @@ class NewSessionWizardTest {
     /** The plan's Verify for 14.6: Start stays disabled on an invalid branch. */
     @Test
     fun an_invalid_branch_holds_project_and_keeps_start_off() = runTest {
-        val vm = vm(WizardFleet(listOf(PINE), listOf(REPO)), backgroundScope)
-        vm.selectProject(REPO.id)
+        val vm = vm(WizardFleet(listOf(WIZ_PINE), listOf(WIZ_REPO)), backgroundScope)
+        vm.selectProject(WIZ_REPO.id)
         vm.setNewWorktree(true)
         runCurrent()
         assertEquals("Name the new branch.", nextBlocker(WizardStep.Project, vm.state.value))
@@ -143,7 +143,7 @@ class NewSessionWizardTest {
             SessionRow(id = 5, hostAlias = "pine", claudeStatus = "working", lostAt = 10),
             SessionRow(id = 6, hostAlias = "box", claudeStatus = "working"),
         )
-        val vm = vm(WizardFleet(listOf(PINE, BOX, DOWN), sessionRows = sessions), backgroundScope)
+        val vm = vm(WizardFleet(listOf(WIZ_PINE, WIZ_BOX, WIZ_DOWN), sessionRows = sessions), backgroundScope)
         runCurrent()
         val byAlias = vm.state.value.hosts.associateBy { it.alias }
 
