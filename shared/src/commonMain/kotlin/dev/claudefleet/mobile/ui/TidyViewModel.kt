@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.model.ReopenedWork
+import dev.claudefleet.mobile.model.TidyApplyItem
 import dev.claudefleet.mobile.model.TidyApplyResult
 import dev.claudefleet.mobile.model.TidyCandidate
 import dev.claudefleet.mobile.net.HubCapabilities
@@ -29,6 +30,12 @@ data class TidyUiState(
     val applying: Boolean = false,
     val results: List<TidyApplyResult>? = null,
     val error: Friendly? = null,
+    /** Each result's session by name, kept from before the re-read that drops it from the list. */
+    val resultNames: Map<Long, String> = emptyMap(),
+    /** Archives taken back with Undo. */
+    val undone: Set<Long> = emptySet(),
+    /** Sessions whose Undo or Retry is on the wire. */
+    val pending: Set<Long> = emptySet(),
 ) {
     fun choiceOf(c: TidyCandidate): TidyChoice? = chosen[c.sessionId] ?: tidyDefault(c)
 
@@ -50,6 +57,12 @@ class TidyViewModel(
     private val actions: WorkActions,
     private val scope: CoroutineScope,
     private val canWrite: Boolean,
+    /**
+     * Whether a new candidate comes in ticked. Classic ticks the rule's
+     * suggestions; the New layout (redesign 14.15) opens with nothing ticked,
+     * so nothing is applied that a person did not pick.
+     */
+    private val preselect: () -> Boolean = { true },
 ) {
     private data class Local(
         val open: Boolean = false,
@@ -61,6 +74,10 @@ class TidyViewModel(
         val applying: Boolean = false,
         val results: List<TidyApplyResult>? = null,
         val error: Friendly? = null,
+        val resultNames: Map<Long, String> = emptyMap(),
+        val sent: Map<Long, TidyApplyItem> = emptyMap(),
+        val undone: Set<Long> = emptySet(),
+        val pending: Set<Long> = emptySet(),
     )
 
     private val local = MutableStateFlow(Local())
@@ -77,11 +94,14 @@ class TidyViewModel(
             applying = l.applying,
             results = l.results,
             error = l.error,
+            resultNames = l.resultNames,
+            undone = l.undone,
+            pending = l.pending,
         )
     }.stateIn(scope, SharingStarted.Eagerly, TidyUiState())
 
     fun open(): Job = scope.launch {
-        local.update { it.copy(open = true, results = null, error = null) }
+        local.update { it.copy(open = true, results = null, error = null, resultNames = emptyMap(), sent = emptyMap(), undone = emptySet(), pending = emptySet()) }
         read()
     }
 
@@ -107,15 +127,70 @@ class TidyViewModel(
         if (!state.value.available || l.applying) return@launch
         val items = tidyItems(l.candidates, l.ticked, l.chosen)
         if (items.isEmpty()) return@launch
+        val names = l.candidates.associate { c -> c.sessionId to (c.label?.takeIf { it.isNotBlank() } ?: c.tmuxName) }
         local.update { it.copy(applying = true, error = null) }
         try {
             val results = actions.tidyApply(items)
-            local.update { it.copy(applying = false, results = results) }
+            local.update {
+                it.copy(
+                    applying = false,
+                    results = results,
+                    resultNames = names.filterKeys { id -> results.any { r -> r.sessionId == id } },
+                    sent = items.associateBy { i -> i.sessionId },
+                    undone = emptySet(),
+                )
+            }
             read()
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
             local.update { it.copy(applying = false, error = friendly(t)) }
+        }
+    }
+
+    /**
+     * **Undo** on an archive in the result: `tidy_apply` with `unarchive`
+     * for the same link, then a re-read so the session is a candidate again.
+     */
+    fun undo(sessionId: Long): Job? {
+        val l = local.value
+        val sent = l.sent[sessionId] ?: return null
+        if (!tidyUndoable(sent) || sessionId in l.undone || sessionId in l.pending) return null
+        if (l.results.orEmpty().none { it.sessionId == sessionId && it.ok }) return null
+        return redo(sessionId, TidyApplyItem(sessionId = sessionId, action = UNARCHIVE, linkId = sent.linkId)) { ok ->
+            if (ok) copy(undone = undone + sessionId) else this
+        }
+    }
+
+    /** **Retry** a choice the hub refused: the same item again; its row in the result takes the new answer. */
+    fun retry(sessionId: Long): Job? {
+        val l = local.value
+        val sent = l.sent[sessionId] ?: return null
+        if (sessionId in l.pending || l.results.orEmpty().none { it.sessionId == sessionId && !it.ok }) return null
+        return redo(sessionId, sent) { this }
+    }
+
+    private fun redo(sessionId: Long, item: TidyApplyItem, after: Local.(Boolean) -> Local): Job? {
+        if (!state.value.available) return null
+        local.update { it.copy(pending = it.pending + sessionId, error = null) }
+        return scope.launch {
+            try {
+                val answer = actions.tidyApply(listOf(item)).firstOrNull { it.sessionId == sessionId }
+                local.update { l ->
+                    val ok = answer?.ok == true
+                    // A Retry's answer replaces the row's; an Undo leaves the archive's row and marks it.
+                    val results = if (item.action == UNARCHIVE || answer == null) l.results else l.results?.map { if (it.sessionId == sessionId) answer else it }
+                    val withError = if (item.action == UNARCHIVE && !ok) {
+                        l.copy(error = Friendly("Could not undo", answer?.error ?: "The hub did not take the undo.", isError = true))
+                    } else l
+                    withError.copy(results = results, pending = l.pending - sessionId).after(ok)
+                }
+                read()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                local.update { it.copy(pending = it.pending - sessionId, error = friendly(t)) }
+            }
         }
     }
 
@@ -141,7 +216,8 @@ class TidyViewModel(
                 val known = l.candidates.mapTo(HashSet()) { it.sessionId }
                 // New candidates come in with the suggested tick; ones already
                 // shown keep whatever the person did with theirs.
-                val ticked = report.candidates.filter { c -> if (c.sessionId in known) c.sessionId in l.ticked else tidyPreselected(c) }
+                val ticks = preselect()
+                val ticked = report.candidates.filter { c -> if (c.sessionId in known) c.sessionId in l.ticked else ticks && tidyPreselected(c) }
                     .mapTo(HashSet()) { it.sessionId }
                 l.copy(loading = false, candidates = report.candidates, ticked = ticked, reopened = reopened)
             }
@@ -152,3 +228,5 @@ class TidyViewModel(
         }
     }
 }
+
+private const val UNARCHIVE = "unarchive"

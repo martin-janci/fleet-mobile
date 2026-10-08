@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.model.TidyApplyItem
+import dev.claudefleet.mobile.model.TidyApplyResult
 import dev.claudefleet.mobile.model.TidyCandidate
 
 /**
@@ -86,4 +87,56 @@ internal fun tidyItems(
         linkId = c.linkId,
         days = KEEP_DAYS.takeIf { choice == TidyChoice.Snooze || choice == TidyChoice.Keep },
     )
+}
+
+/** An applied choice that **Undo** can take back: an archive (`unarchive` restores the link). */
+internal fun tidyUndoable(item: TidyApplyItem): Boolean = item.action == TidyChoice.Archive.wire && item.linkId != null
+
+/** One applied choice in the result's words: "Archived", "Killed", "Snoozed 7 d". */
+internal fun tidyDoneWord(action: String): String = when (action) {
+    TidyChoice.Archive.wire -> "Archived"
+    TidyChoice.Kill.wire, TidyChoice.SafeKill.wire -> "Killed"
+    TidyChoice.Snooze.wire -> "Snoozed $KEEP_DAYS d"
+    TidyChoice.Keep.wire -> "Kept $KEEP_DAYS d"
+    TidyChoice.Never.wire -> "Never for this work"
+    else -> action.replace('_', ' ').replaceFirstChar { it.uppercase() }
+}
+
+/**
+ * The result's headline: "✓ Archived 2, killed 1", counting what the hub
+ * took (an archive taken back with Undo no longer counts); "Nothing was
+ * applied" when it took none.
+ */
+internal fun tidyDoneLine(results: List<TidyApplyResult>, undone: Set<Long>): String {
+    val took = results.filter { it.ok && it.sessionId !in undone }
+    if (took.isEmpty()) return "Nothing was applied"
+    val parts = took.groupBy { tidyDoneWord(it.action).substringBefore(' ') }.entries.mapIndexed { i, (word, rs) ->
+        (if (i == 0) word else word.lowercase()) + " ${rs.size}"
+    }
+    return "✓ " + parts.joinToString(", ")
+}
+
+/** What one row of the result says under the session's name. */
+internal fun tidyOutcomeLine(r: TidyApplyResult, undone: Boolean): String = when {
+    undone -> "Undone · back in the list"
+    r.ok -> tidyDoneWord(r.action) + (r.outcome?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "")
+    else -> "Could not ${tidyVerb(r.action)}" +
+        (r.error?.takeIf { it.isNotBlank() }?.let { ": $it" } ?: "")
+}
+
+/** A candidate's reason line on the New sheet: the rule's reason, its ticket, how long it has been idle. */
+internal fun tidyReasonLine(c: TidyCandidate): String = listOfNotNull(
+    tidyReasonLabel(c.reason),
+    c.key?.takeIf { it.isNotBlank() }?.let { k -> listOfNotNull(k, c.itemStatus?.takeIf { it.isNotBlank() }).joinToString(" is ") },
+    c.idleSecs?.let { "idle ${formatIdle(it)}" },
+).joinToString(" · ")
+
+/** The verb for a choice, as "Could not …" says it. */
+private fun tidyVerb(action: String): String = when (action) {
+    TidyChoice.Kill.wire, TidyChoice.SafeKill.wire -> "kill"
+    TidyChoice.Archive.wire -> "archive"
+    TidyChoice.Snooze.wire -> "snooze"
+    TidyChoice.Keep.wire -> "keep"
+    TidyChoice.Never.wire -> "set never"
+    else -> action.replace('_', ' ')
 }
