@@ -32,10 +32,12 @@ fun hostsLine(hosts: List<HostRow>): String {
  * Files and Settings open over this screen and back returns here.
  */
 @Composable
-fun MoreScreen(entries: List<MoreEntry>, modifier: Modifier = Modifier) {
+fun MoreScreen(entries: List<MoreEntry>, modifier: Modifier = Modifier, top: @Composable () -> Unit = {}) {
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(title = "More")
         Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+            // Update ready (14.18) sits above the rows, as a card.
+            top()
             EntryRows(entries)
         }
     }

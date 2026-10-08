@@ -36,6 +36,10 @@ class MainActivity : ComponentActivity() {
             // dev machine can be set up with no hands. See `data/PairLink.kt`.
             autoPairFromLink = BuildConfig.DEBUG,
             notifier = notifier,
+            // The app's own update from GitHub releases (14.18). A debug build
+            // has its own application id, so the signature check refuses a
+            // release on it and says why.
+            installer = AndroidAppInstaller(applicationContext),
         )
     }
 
