@@ -8,6 +8,10 @@ package dev.claudefleet.mobile.model
  * clients, so the phone and the desktop cannot drift into disagreeing about
  * which session is worst.
  *
+ * The three Blocked buckets ([HOST_DOWN], [ACCOUNT_LIMIT], [NO_CREDENTIALS],
+ * contract 11) come only from the hub's stamped reason: they read fleet facts
+ * (a host's reachability, an account's usage) the phone never receives.
+ *
  * Two buckets are reachable and stay empty here, as they do on the desktop:
  * [DONE_UNREAD] needs a `last_viewed_at` the hub does not yet stamp, and
  * [IDLE_LONG] only fills when a caller passes a non-zero idle threshold.
@@ -15,6 +19,9 @@ package dev.claudefleet.mobile.model
 enum class TriageBucket(val label: String) {
     WAITING("Waiting for you"),
     STUCK("Stuck"),
+    HOST_DOWN("Host down"),
+    ACCOUNT_LIMIT("Paused · limit"),
+    NO_CREDENTIALS("Signed out"),
     STOP_FAILED("Stop failed"),
     FAILED("Failed"),
     CONTEXT_FULL("Context full"),
@@ -35,7 +42,7 @@ enum class TriageBucket(val label: String) {
  * Age is capped so no wait, however long, lets a row jump its bucket — the
  * desktop's `AGE_CAP_SECS`. A `Long` here where the desktop uses a JS number:
  * the score multiplies by this, and on Kotlin/Native an `Int` would overflow
- * at twelve buckets × a million seconds.
+ * at fifteen buckets × a million seconds.
  */
 private const val AGE_CAP_SECONDS = 1_000_000L
 
@@ -84,6 +91,9 @@ private val IDLE_STATUSES = setOf("idle", "completed", "stopped")
 private fun bucketOfReason(reason: String): TriageBucket? = when (reason) {
     "waiting" -> TriageBucket.WAITING
     "stuck" -> TriageBucket.STUCK
+    "host_down" -> TriageBucket.HOST_DOWN
+    "account_limit" -> TriageBucket.ACCOUNT_LIMIT
+    "no_credentials" -> TriageBucket.NO_CREDENTIALS
     "stop_failed" -> TriageBucket.STOP_FAILED
     "failed" -> TriageBucket.FAILED
     "context_full" -> TriageBucket.CONTEXT_FULL
