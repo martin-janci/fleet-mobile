@@ -72,12 +72,6 @@ internal object OrbitTokens {
 
     /** Spacing and layout sizes, in the manual's px, drawn as dp. */
     val spacing: Map<String, Float> = mapOf(
-        ColorToken("control-border", dark = 0xFF3A3A3A, light = 0xFFD4D4D8),
-        ColorToken("status-working", dark = 0xFF7FA3FF, light = 0xFF3157C9),
-        ColorToken("status-waiting", dark = 0xFFD29B4A, light = 0xFF8F520B),
-        ColorToken("status-failed", dark = 0xFFEF5350, light = 0xFFC62828),
-        ColorToken("status-done", dark = 0xFF5DD17A, light = 0xFF17723E),
-        ColorToken("status-idle", dark = 0xFFA09FA8, light = 0xFF6B6B74),
         "space-1" to 4f,
         "space-2" to 8f,
         "space-3" to 12f,
