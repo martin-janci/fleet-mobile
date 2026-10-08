@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.net
 
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.AccountRow
+import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.FormView
 import dev.claudefleet.mobile.model.RepoTree
 import dev.claudefleet.mobile.model.FileDiff
@@ -500,6 +501,10 @@ class HubClient(
     /** The Claude accounts seen across the fleet's hosts (`list_accounts`, readonly). */
     suspend fun listAccounts(): List<AccountRow> =
         call("list_accounts") { json.decodeFromJsonElement(ListSerializer(AccountRow.serializer()), it) }
+
+    /** Each account's 5-hour and weekly limits as the hub last read them (`account_usage`, readonly). */
+    suspend fun accountUsage(): List<AccountUsageSnapshot> =
+        call("account_usage") { json.decodeFromJsonElement(ListSerializer(AccountUsageSnapshot.serializer()), it) }
 
     /** A review session in [sourceSessionId]'s worktree, seeded with [prompt] (`spawn_review`); answers its row. */
     suspend fun spawnReview(sourceSessionId: Long, prompt: String): SessionRow =

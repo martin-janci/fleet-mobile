@@ -3,7 +3,10 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.UsageActions
+import dev.claudefleet.mobile.model.AccountLimits
 import dev.claudefleet.mobile.model.AccountRow
+import dev.claudefleet.mobile.model.AccountUsageSnapshot
+import dev.claudefleet.mobile.model.LimitWindow
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
@@ -16,6 +19,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 private class UsageFleet(tools: Set<String>) : FleetState {
@@ -40,6 +44,11 @@ private class UsageCalls : UsageActions {
     override suspend fun accounts(): List<AccountRow> {
         accountReads += 1
         return listOf(AccountRow(uuid = "u1", email = "a@b.c"))
+    }
+    var limitReads = 0
+    override suspend fun limits(): List<AccountUsageSnapshot> {
+        limitReads += 1
+        return listOf(AccountUsageSnapshot(accountUuid = "u1", usage = AccountLimits(fiveHour = LimitWindow(62.0)), status = "ok"))
     }
 }
 
@@ -81,6 +90,21 @@ class UsageViewModelTest {
         runCurrent()
         assertTrue(calls.windows.isEmpty())
         assertEquals(0, calls.accountReads)
+        assertEquals(0, calls.limitReads)
+        assertFalse(vm.state.value.limitsAvailable)
+    }
+
+    @Test
+    fun a_hub_that_serves_the_limits_has_them_read_with_the_accounts() = runTest {
+        val calls = UsageCalls()
+        val vm = UsageViewModel(UsageFleet(both + HubCapabilities.ACCOUNT_USAGE), calls, backgroundScope)
+        vm.load().join()
+        vm.select(UsageWindow.Day).join()
+        runCurrent()
+
+        assertEquals(1, calls.limitReads)
+        assertTrue(vm.state.value.limitsAvailable)
+        assertEquals(62.0, vm.state.value.limits["u1"]?.usage?.fiveHour?.utilization)
     }
 
     @Test

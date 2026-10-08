@@ -135,6 +135,7 @@ data class HubCapabilities(
     /** Estimated usage and the fleet's Claude accounts — both readonly. */
     val usage: Boolean get() = USAGE_REPORT in tools
     val accounts: Boolean get() = LIST_ACCOUNTS in tools
+    val accountUsage: Boolean get() = ACCOUNT_USAGE in tools
 
     /** A session's earlier conversations (`session_conversations`, readonly). */
     val conversations: Boolean get() = SESSION_CONVERSATIONS in tools
@@ -220,6 +221,7 @@ data class HubCapabilities(
         const val RECREATE_SESSION = "recreate_session"
         const val DISMISS_GHOST_SESSION = "dismiss_ghost_session"
         const val LIST_ACCOUNTS = "list_accounts"
+        const val ACCOUNT_USAGE = "account_usage"
         const val REPO_DIFF = "repo_diff"
         const val REPO_LOG = "repo_log"
         const val REPO_COMMIT = "repo_commit"

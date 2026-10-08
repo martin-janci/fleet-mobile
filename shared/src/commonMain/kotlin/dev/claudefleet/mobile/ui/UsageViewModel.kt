@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.UsageActions
 import dev.claudefleet.mobile.model.AccountRow
+import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.UsageReport
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -28,6 +29,10 @@ data class UsageUiState(
     val window: UsageWindow = UsageWindow.Week,
     val report: UsageReport? = null,
     val accounts: List<AccountRow> = emptyList(),
+    /** Whether the hub serves the 5-hour and weekly limits (`account_usage`). */
+    val limitsAvailable: Boolean = false,
+    /** Each account's limits, by its uuid. */
+    val limits: Map<String, AccountUsageSnapshot> = emptyMap(),
     val loading: Boolean = false,
     val error: Friendly? = null,
 )
@@ -35,9 +40,8 @@ data class UsageUiState(
 /**
  * The fleet's ESTIMATED usage — the desktop's Usage page as far as the hub
  * serves it to a client: totals, by host, by day and the costliest sessions
- * over a chosen window, and the Claude accounts seen on the hosts. A
- * subscription's 5-hour and weekly windows are read on the desktop's own
- * machine and are not offered by the hub, so they are not here.
+ * over a chosen window, and the Claude accounts seen on the hosts with
+ * their 5-hour and weekly limits where the hub serves them (`account_usage`).
  */
 class UsageViewModel(
     private val fleet: FleetState,
@@ -48,6 +52,7 @@ class UsageViewModel(
         val window: UsageWindow = UsageWindow.Week,
         val report: UsageReport? = null,
         val accounts: List<AccountRow> = emptyList(),
+        val limits: Map<String, AccountUsageSnapshot> = emptyMap(),
         val loading: Boolean = false,
         val error: Friendly? = null,
     )
@@ -61,6 +66,8 @@ class UsageViewModel(
             window = l.window,
             report = l.report,
             accounts = l.accounts,
+            limitsAvailable = caps.accountUsage,
+            limits = l.limits,
             loading = l.loading,
             error = l.error,
         )
@@ -92,6 +99,10 @@ class UsageViewModel(
             if (withAccounts && caps.accounts) {
                 val accounts = actions.accounts()
                 local.update { it.copy(accounts = accounts) }
+            }
+            if (withAccounts && caps.accountUsage) {
+                val limits = actions.limits().associateBy { it.accountUuid }
+                local.update { it.copy(limits = limits) }
             }
         } catch (e: CancellationException) {
             throw e

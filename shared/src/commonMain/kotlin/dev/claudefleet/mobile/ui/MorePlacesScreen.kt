@@ -40,10 +40,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.model.AccountLimits
 import dev.claudefleet.mobile.model.AccountRow
+import dev.claudefleet.mobile.model.AccountUsageSnapshot
+import dev.claudefleet.mobile.model.LimitWindow
 import dev.claudefleet.mobile.model.UsageReport
 import dev.claudefleet.mobile.model.relativeAgo
 import dev.claudefleet.mobile.model.relativeTime
+import dev.claudefleet.mobile.model.relativeWithin
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import dev.claudefleet.mobile.ui.components.ErrorBanner
@@ -218,10 +222,10 @@ private fun HostRowItem(host: HostLine, nowSeconds: Long, behind: Boolean, check
 
 /**
  * Accounts and usage under More: the Claude accounts first, then the
- * estimated spend for a window, by host, by day and by session. The 5-hour
- * and weekly limits are read on the desktop's machine and the hub does not
- * serve them to a phone yet, so the screen says where they are rather than
- * drawing an empty meter.
+ * estimated spend for a window, by host, by day and by session. Each
+ * account shows its 5-hour and weekly limits as meters where the hub serves
+ * them (`account_usage`); an older hub keeps them on the desktop's machine,
+ * so the screen says where they are rather than drawing an empty meter.
  */
 @Composable
 fun OrbitUsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: Long, modifier: Modifier = Modifier) {
@@ -235,8 +239,13 @@ fun OrbitUsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: L
         OrbitPullToRefresh(isRefreshing = state.loading, onRefresh = handlers.onRefresh, modifier = Modifier.fillMaxSize()) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 if (state.accountsAvailable && state.accounts.isNotEmpty()) {
-                    items(state.accounts, key = { "account:${it.uuid}" }) { AccountItem(it, nowSeconds) }
-                    item(key = "limits") { Quiet(LIMITS_ON_DESKTOP, small = true) }
+                    items(state.accounts, key = { "account:${it.uuid}" }) {
+                        Column {
+                            AccountItem(it, nowSeconds)
+                            if (state.limitsAvailable) AccountLimitsBlock(state.limits[it.uuid], nowSeconds)
+                        }
+                    }
+                    if (!state.limitsAvailable) item(key = "limits") { Quiet(LIMITS_ON_DESKTOP, small = true) }
                 }
                 if (state.available) {
                     item(key = "windows") {
@@ -259,6 +268,71 @@ fun OrbitUsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: L
 /** Where the 5-hour and weekly limits are, while the hub keeps them on the desktop's machine. */
 internal const val LIMITS_ON_DESKTOP =
     "Session and weekly limits are read on the desktop's machine; this hub does not send them to phones yet."
+
+/** The windows an account has, in the board's order, each with its name. */
+internal fun limitRows(usage: AccountLimits): List<Pair<String, LimitWindow>> = listOfNotNull(
+    usage.fiveHour?.let { "5-hour" to it },
+    usage.sevenDay?.let { "Weekly" to it },
+    usage.sevenDayOpus?.let { "Weekly Opus" to it },
+    usage.sevenDaySonnet?.let { "Weekly Sonnet" to it },
+)
+
+/** "62% used · resets in 2 h"; the figure always beside the bar, never the colour alone. */
+internal fun limitFigure(w: LimitWindow, nowSeconds: Long): String {
+    val pct = "${kotlin.math.round(w.utilization.coerceIn(0.0, 100.0)).toInt()}% used"
+    val resets = relativeWithin(w.resetsAt?.takeIf { it > nowSeconds }, nowSeconds)?.let { "resets in $it" }
+    return listOfNotNull(pct, resets).joinToString(" · ")
+}
+
+/** A window close to its limit: its meter turns to the failed colour and says so in words too. */
+internal fun nearLimit(w: LimitWindow): Boolean = w.utilization >= 90.0
+
+/**
+ * What a read that did not come back says, in words, and how old the meters
+ * above it are; null when the latest read is good.
+ */
+internal fun limitsNote(snap: AccountUsageSnapshot?, nowSeconds: Long): String? {
+    if (snap == null) return "Not read yet."
+    val why = when (snap.status) {
+        "ok" -> return null
+        "never_fetched" -> "Not read yet"
+        "no_credentials" -> "No Claude login on its host"
+        "access_token_expired", "login_expired" -> "Its login expired; sign in again on the host"
+        "token_rejected" -> "Claude refused its login; sign in again on the host"
+        "rate_limited" -> "Claude asked to wait before reading again"
+        "host_unsupported" -> "Its host cannot read limits"
+        "no_online_host" -> "No host with this account is online"
+        else -> "Could not read the limits"
+    }
+    val age = if (snap.usage != null) relativeAgo(snap.fetchedAt, nowSeconds)?.let { "meters from $it" } else null
+    return listOfNotNull(why, age).joinToString(" · ") + "."
+}
+
+@Composable
+private fun AccountLimitsBlock(snap: AccountUsageSnapshot?, nowSeconds: Long) {
+    val o = Fleet.colors
+    Column(modifier = Modifier.fillMaxWidth().padding(start = gutter(), end = gutter(), bottom = 10.dp)) {
+        for ((name, w) in snap?.usage?.let(::limitRows).orEmpty()) {
+            val near = nearLimit(w)
+            Row(modifier = Modifier.padding(top = 6.dp)) {
+                Text(name, color = o.fg, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.weight(1f))
+                Text(
+                    (if (near) "Near the limit · " else "") + limitFigure(w, nowSeconds),
+                    color = if (near) o.statusFailed else o.fgMuted,
+                    fontSize = 13.sp,
+                    lineHeight = 20.sp,
+                )
+            }
+            Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(4.dp).background(o.track, RoundedCornerShape(2.dp))) {
+                Box(
+                    Modifier.fillMaxWidth((w.utilization / 100.0).toFloat().coerceIn(0f, 1f)).fillMaxHeight()
+                        .background(if (near) o.statusFailed else o.accent, RoundedCornerShape(2.dp)),
+                )
+            }
+        }
+        limitsNote(snap, nowSeconds)?.let { Text(it, color = o.fgMuted, fontSize = 13.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 6.dp)) }
+    }
+}
 
 @Composable
 private fun AccountItem(account: AccountRow, nowSeconds: Long) {
