@@ -28,6 +28,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -732,6 +733,7 @@ private fun BulkActionBar(bulk: BulkUiState, onSend: () -> Unit, onKill: () -> U
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SendSheet(count: Int, onDismiss: () -> Unit, onSend: (String) -> Unit) {
     var text by remember { mutableStateOf("") }
@@ -752,6 +754,7 @@ private fun SendSheet(count: Int, onDismiss: () -> Unit, onSend: (String) -> Uni
 }
 
 /** Kill asks again and names the sessions (MobileSessionsTools), and says what it skips. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun KillSheet(killable: List<String>, skipped: Int, onDismiss: () -> Unit, onKill: () -> Unit) {
     BottomSheet(
@@ -787,6 +790,7 @@ internal fun bulkOutcomeLine(action: BulkAction?, outcome: List<BulkOutcome>): S
  * session, what did not go through with its reason and Retry, and Retry for
  * all of them at once.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BulkOutcomeSheet(
     outcome: List<BulkOutcome>,
