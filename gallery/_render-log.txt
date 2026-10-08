@@ -51,9 +51,7 @@ ok   74-files-empty
 ok   80-hosts-list
 ok   81-hosts-empty
 ok   82-host-detail-sheet
-FAIL 83-host-detail-recovery: MissingFieldException: Field 'session_id' is required for type with serial name 'dev.claudefleet.mobile.model.RestorePlanEntry', but it was missing at path: $.plan[0]
-  cause: MissingFieldException: Field 'session_id' is required for type with serial name 'dev.claudefleet.mobile.model.RestorePlanEntry', but it was missing at path: $.plan[0]
-  cause: MissingFieldException: Field 'session_id' is required for type with serial name 'dev.claudefleet.mobile.model.RestorePlanEntry', but it was missing
+ok   83-host-detail-recovery
 ok   90-settings
 ok   91-settings-long
 ok   92-fleet-settings-page-1-settings
@@ -65,12 +63,8 @@ ok   92-fleet-settings-page-6-settings-decisions
 ok   93-settings-forget-error
 ok   94-usage
 ok   95-usage-long
-FAIL 96-company-list: MissingFieldException: Field 'person_id' is required for type with serial name 'dev.claudefleet.mobile.model.OrgMember', but it was missing at path: $[0].members[0]
-  cause: MissingFieldException: Field 'person_id' is required for type with serial name 'dev.claudefleet.mobile.model.OrgMember', but it was missing at path: $[0].members[0]
-  cause: MissingFieldException: Field 'person_id' is required for type with serial name 'dev.claudefleet.mobile.model.OrgMember', but it was missing
-FAIL 97-company-org: MissingFieldException: Field 'person_id' is required for type with serial name 'dev.claudefleet.mobile.model.OrgMember', but it was missing at path: $[0].members[0]
-  cause: MissingFieldException: Field 'person_id' is required for type with serial name 'dev.claudefleet.mobile.model.OrgMember', but it was missing at path: $[0].members[0]
-  cause: MissingFieldException: Field 'person_id' is required for type with serial name 'dev.claudefleet.mobile.model.OrgMember', but it was missing
+ok   96-company-list
+ok   97-company-org
 ok   100-new-session-pick-host
 ok   101-new-session-pick-project
 ok   102-new-session-worktree
