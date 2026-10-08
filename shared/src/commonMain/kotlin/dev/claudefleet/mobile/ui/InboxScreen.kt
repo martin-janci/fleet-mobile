@@ -57,6 +57,8 @@ fun InboxScreen(
     live: Boolean = true,
     refreshing: Boolean = false,
     onRefresh: () -> Unit = {},
+    /** Above the list: the hub-version banner and the Update ready line (14.18), when there are any. */
+    top: @Composable () -> Unit = {},
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
@@ -64,6 +66,7 @@ fun InboxScreen(
             subtitle = inboxSubtitle(rows.size, running),
             actions = { onOpenToday?.let { TextButton(onClick = it) { Text("Today") } } },
         )
+        top()
         OrbitPullToRefresh(isRefreshing = refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 if (rows.isEmpty()) {

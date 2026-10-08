@@ -72,6 +72,12 @@ import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.data.SessionDetailsActions
 import dev.claudefleet.mobile.data.HubVersionActions
+import dev.claudefleet.mobile.update.AppInstaller
+import dev.claudefleet.mobile.update.GitHubReleases
+import dev.claudefleet.mobile.update.ReleaseSource
+import dev.claudefleet.mobile.update.UpdateViewModel
+import dev.claudefleet.mobile.update.hubMismatch
+import dev.claudefleet.mobile.update.takeWhatsNew
 import dev.claudefleet.mobile.data.VersionActions
 import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.net.HubEventStream
@@ -102,6 +108,12 @@ import dev.claudefleet.mobile.ui.MultiStartHandlers
 import dev.claudefleet.mobile.ui.ControlScreen
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.InboxScreen
+import dev.claudefleet.mobile.ui.HubVersionBanner
+import dev.claudefleet.mobile.ui.UpdateCard
+import dev.claudefleet.mobile.ui.UpdateHandlers
+import dev.claudefleet.mobile.ui.UpdateInboxLine
+import dev.claudefleet.mobile.ui.UpdateScreen
+import dev.claudefleet.mobile.ui.WhatsNewScreen
 import dev.claudefleet.mobile.ui.MoreEntry
 import dev.claudefleet.mobile.ui.MoreScreen
 import dev.claudefleet.mobile.ui.Navigator
@@ -237,6 +249,12 @@ class AppContainer(
     val autoPairFromLink: Boolean = false,
     /** Notifications while the app is away — Android's foreground service, or nothing. */
     val notifier: BackgroundNotifier = NoBackgroundNotifier,
+    /**
+     * The app's own updates (redesign 14.18): Android downloads and installs
+     * the signed APK from GitHub releases; null where the app is updated
+     * elsewhere (iOS, through TestFlight), and then no update card shows.
+     */
+    val installer: AppInstaller? = null,
 ) {
     /**
      * A session a notification asked to open, until the paired screens take
@@ -296,6 +314,9 @@ class AppContainer(
 
     /** The hub's own version, for the Settings screen to show beside this app's. */
     val versionActions: VersionActions = HubVersionActions(session)
+
+    /** Where a newer release of this app is found: fleet-mobile's GitHub releases. */
+    val releases: ReleaseSource = GitHubReleases(this.http)
 
     /** The New session form's one call, through the same 401 rule. */
     val newSessionActions: NewSessionActions = HubNewSessionActions(session)
@@ -649,6 +670,20 @@ private fun FleetRoute(
     val settings = remember(container, scope) {
         SettingsViewModel(container.session, scope, container.appVersion, container.versionActions)
     }
+    // The app's own update (redesign 14.18): looked for once per pairing,
+    // offered on More and in the Inbox, never installed without a tap.
+    val updates = remember(container, scope) {
+        UpdateViewModel(container.releases, container.installer, container.prefs, container.appVersion, scope)
+    }
+    LaunchedEffect(updates) { updates.check() }
+    // Back from Android's "install unknown apps" page: Install works now.
+    LifecycleStartEffect(updates) {
+        updates.recheckPermission()
+        onStopOrDispose { }
+    }
+    val updateState by updates.state.collectAsState()
+    // Once, on the first launch after an update: the wordmark and what changed.
+    var whatsNew by remember(container) { mutableStateOf(takeWhatsNew(container.prefs, container.appVersion)) }
     // The fleet's settings (claude-fleet declarative pages P6): offered when
     // the hub serves this token the page specs and the settings, read again
     // on every connection that does.
@@ -1097,6 +1132,12 @@ private fun FleetRoute(
                     val rows = remember(all) { inboxRows(all) }
                     val todayInbox by today.state.collectAsState()
                     val inboxList by sessions.state.collectAsState()
+                    // The hub's version, read again on every connection: an owner
+                    // can upgrade it under a running app.
+                    val connected = inboxList.status is ConnectionStatus.Connected
+                    var hubVersion by remember { mutableStateOf<String?>(null) }
+                    LaunchedEffect(connected) { if (connected) hubVersion = container.versionActions.hubVersion() }
+                    val mismatch = remember(hubVersion) { hubMismatch(container.appVersion, hubVersion) }
                     InboxScreen(
                         rows = rows,
                         running = all.count { it.claudeStatus == "working" },
@@ -1107,6 +1148,10 @@ private fun FleetRoute(
                         onOpenSession = nav::open,
                         // Today is an Inbox view until Control grows its own.
                         onOpenToday = if (todayInbox.available) ({ today.open() }) else null,
+                        top = {
+                            mismatch?.let { m -> HubVersionBanner(m, onUpdate = nav::openUpdate.takeIf { updateState.available != null }) }
+                            updateState.available?.let { UpdateInboxLine(it, onOpen = nav::openUpdate) }
+                        },
                     )
                 }
                 Screen.Control -> {
@@ -1138,6 +1183,7 @@ private fun FleetRoute(
                 Screen.More -> {
                     val hostRows by repository.hosts.collectAsState()
                     MoreScreen(
+                        top = { updateState.available?.let { UpdateCard(it, container.appVersion, onOpen = nav::openUpdate) } },
                         entries = buildList {
                             add(MoreEntry("Hosts", hostsLine(hostRows)) { nav.openFromMore(Screen.Hosts) })
                             if (settingsCaps.usage || settingsCaps.accounts) {
@@ -1157,6 +1203,18 @@ private fun FleetRoute(
                         },
                     )
                 }
+                Screen.Update -> UpdateScreen(
+                    state = updateState,
+                    appVersion = container.appVersion,
+                    handlers = UpdateHandlers(
+                        onBack = { nav.back() },
+                        onDownload = updates::download,
+                        onPause = updates::pause,
+                        onCancel = updates::cancel,
+                        onInstall = updates::install,
+                        onRetry = updates::reset,
+                    ),
+                )
                 Screen.Settings -> {
                     val state by settings.state.collectAsState()
                     val fleet by fleetSettings.state.collectAsState()
@@ -1206,6 +1264,7 @@ private fun FleetRoute(
                                 fleet = fleet.takeIf { settingsCaps.fleetSettings },
                                 theme = theme,
                                 notifyKinds = notifyKinds,
+                                updateMode = updateState.mode.takeIf { updateState.supported },
                             ),
                             handlers = OrbitSettingsHandlers(
                                 onOpen = settings::open,
@@ -1213,6 +1272,7 @@ private fun FleetRoute(
                                 onOpenPage = fleetSettings::open,
                                 onSetTheme = container.phone::setTheme,
                                 onSetNotify = container.phone::setNotify,
+                                onSetUpdateMode = updates::setMode,
                                 onForget = { settings.forget() },
                                 onDismissError = settings::dismissError,
                                 onOpenUsage = onOpenUsage,
@@ -1227,20 +1287,31 @@ private fun FleetRoute(
                         // A fleet settings page is drawn inside the Settings tab:
                         // back closes the page, not the app.
                         BackHandler(enabled = fleetPageOpen) { fleetSettings.back() }
-                        SettingsScreen(
-                            state = state,
-                            onForget = { settings.forget() },
-                            onDismissError = settings::dismissError,
-                            fleetPageOpen = fleetPageOpen,
-                            onOpenUsage = onOpenUsage,
-                            onOpenCompany = onOpenCompany,
-                            notifier = container.notifier,
-                            layout = layout,
-                            onSetLayout = onSetLayout,
-                            fleetSettings = fleetSection,
-                        )
+                        // Classic has no More: Update ready sits at the top of Settings.
+                        Column(Modifier.fillMaxSize()) {
+                            updateState.available?.let { UpdateCard(it, container.appVersion, onOpen = nav::openUpdate) }
+                            SettingsScreen(
+                                state = state,
+                                onForget = { settings.forget() },
+                                onDismissError = settings::dismissError,
+                                fleetPageOpen = fleetPageOpen,
+                                onOpenUsage = onOpenUsage,
+                                onOpenCompany = onOpenCompany,
+                                notifier = container.notifier,
+                                layout = layout,
+                                onSetLayout = onSetLayout,
+                                fleetSettings = fleetSection,
+                            )
+                        }
                     }
                 }
+            }
+            whatsNew?.let { news ->
+                WhatsNewScreen(
+                    whatsNew = news,
+                    backLabel = if (layout == PhoneLayout.New) "Back to Inbox" else "Back to Sessions",
+                    onBack = { whatsNew = null },
+                )
             }
             // Today (with its Tidy) and Missions open from Inbox, Control and More on the New bar
             // as well as from the Sessions header, so they are drawn over any tab.
