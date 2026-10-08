@@ -135,6 +135,12 @@ data class OrbitHostsHandlers(
     val onCheck: ((String) -> Unit)? = null,
     /** The reboot plan and the conversations the host has no row for (the host's sheet). */
     val onRecovery: ((String) -> Unit)? = null,
+    /**
+     * Install the agent on a host the hub reaches over SSH (14.19): opens the
+     * review, never installs. Null where the hub does not list the job to
+     * this pairing.
+     */
+    val onInstallAgent: ((String) -> Unit)? = null,
 )
 
 /**
@@ -208,6 +214,7 @@ private fun HostRowItem(host: HostLine, nowSeconds: Long, behind: Boolean, check
                 else -> {
                     OrbitChip(host.transport)
                     if (behind) OrbitChip("claude ${host.claudeVersion?.substringBefore(' ')} · behind")
+                    if (host.transport == "ssh") handlers.onInstallAgent?.let { add -> RowAction("Install agent") { add(host.alias) } }
                 }
             }
         },

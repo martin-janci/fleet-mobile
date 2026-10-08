@@ -191,6 +191,15 @@ class ToolsTheAppMayCallTest {
         // `prs { list }`, readonly and `Access::Client`; a row is served only
         // to a token that may see the session that opened it.
         "prs",
+        // A host joining from the phone (redesign 14.19, claude-fleet 4.9):
+        // `agent_installs` is readonly and `Access::Client`. `install_agent`
+        // is `Access::Master` today, like `add_host`: the hub filters
+        // `tools/list` per token, so a client pairing is never offered it and
+        // the phone only calls it when the hub lists it to this token
+        // (`HubCapabilities.installAgent`). Whether a paired device may ever
+        // be offered it is the hub's call, not the phone's.
+        "install_agent",
+        "agent_installs",
         // Automation (redesign 8.9): routines, their runs and their switch.
         // `Access::Client`, not readonly, so the hub does not list it for a
         // readonly token; never a per-host token's (`NOT_FOR_HOST_TOKENS`).
