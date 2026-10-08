@@ -117,6 +117,15 @@ data class HubCapabilities(
     /** Plain shells beside a session: its Terminals tab (redesign 14.14). */
     val shellSessions: Boolean get() = NEW_SHELL_SESSION in tools
 
+    /**
+     * The fleet-agent install job (claude-fleet 4.9, redesign 14.19): reading
+     * jobs is a client's, starting one the hub lists only to a token that may
+     * (`tools/list` is filtered per caller), so a pairing that cannot is never
+     * offered the button.
+     */
+    val agentInstalls: Boolean get() = AGENT_INSTALLS in tools
+    val installAgent: Boolean get() = INSTALL_AGENT in tools && AGENT_INSTALLS in tools
+
     /** Archiving a session from its ⋮ menu (`work_link { action: archive }`). */
     val archiveSession: Boolean get() = has(WORK_LINK, "archive")
 
@@ -135,6 +144,9 @@ data class HubCapabilities(
     /** Estimated usage and the fleet's Claude accounts — both readonly. */
     val usage: Boolean get() = USAGE_REPORT in tools
     val accounts: Boolean get() = LIST_ACCOUNTS in tools
+
+    /** Accounts' usage readings (`account_usage`): when a paused row's limit resets (step 4.10). */
+    val accountUsage: Boolean get() = ACCOUNT_USAGE in tools
 
     /** A session's earlier conversations (`session_conversations`, readonly). */
     val conversations: Boolean get() = SESSION_CONVERSATIONS in tools
@@ -164,6 +176,31 @@ data class HubCapabilities(
 
     /** Reply actions — Rewind here, Retry, Fork here (`rewind_conversation`, a write). */
     val rewind: Boolean get() = REWIND_CONVERSATION in tools
+
+    /**
+     * Routines (claude-fleet redesign 8.5): the list, a routine's runs, and
+     * its on/off switch. A write tool, so a readonly token is not served it.
+     * Its `action` is a free string, so the tool's presence is the gate.
+     */
+    val routines: Boolean get() = ROUTINES in tools
+
+    /**
+     * Debug devices (contract revision 10): the test phones on the fleet's
+     * hosts, claimed, booted and read from here. Not readonly on the hub, so
+     * a readonly token is not served it.
+     */
+    val debugDevices: Boolean get() = DEBUG_DEVICES in tools
+
+    /**
+     * Org administration (`org_admin`, company administration phase D): the
+     * Company screen lists an org's members and changes their roles. Not
+     * readonly on the hub, and the hub refuses anyone who does not
+     * administer that org; the phone offers it only to an org's admins.
+     */
+    val orgAdmin: Boolean get() = ORG_ADMIN in tools
+
+    /** Fleet settings can be written as this device (`set_setting`); the hub still refuses an untrusted one. */
+    val setSetting: Boolean get() = SET_SETTING in tools
 
     fun has(tool: String, action: String): Boolean =
         tool in tools &&
@@ -208,6 +245,8 @@ data class HubCapabilities(
         const val ADD_PROJECT = "add_project"
         const val MOVE_SESSION = "move_session"
         const val NEW_SHELL_SESSION = "new_shell_session"
+        const val INSTALL_AGENT = "install_agent"
+        const val AGENT_INSTALLS = "agent_installs"
         const val LIST_GITHUB_REPOS = "list_github_repos"
         const val LIST_HOST_WORKTREES = "list_host_worktrees"
         const val DELETE_WORKTREE = "delete_worktree"
@@ -220,6 +259,7 @@ data class HubCapabilities(
         const val RECREATE_SESSION = "recreate_session"
         const val DISMISS_GHOST_SESSION = "dismiss_ghost_session"
         const val LIST_ACCOUNTS = "list_accounts"
+        const val ACCOUNT_USAGE = "account_usage"
         const val REPO_DIFF = "repo_diff"
         const val REPO_LOG = "repo_log"
         const val REPO_COMMIT = "repo_commit"
@@ -232,6 +272,10 @@ data class HubCapabilities(
         const val ASK = "ask"
         const val SETTING_PROPOSALS = "setting_proposals"
         const val DECIDE_SETTING_PROPOSALS = "decide_setting_proposals"
+        const val ROUTINES = "routines"
+        const val SET_SETTING = "set_setting"
+        const val DEBUG_DEVICES = "debug_devices"
+        const val ORG_ADMIN = "org_admin"
 
         fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions, params = catalog.params)
     }

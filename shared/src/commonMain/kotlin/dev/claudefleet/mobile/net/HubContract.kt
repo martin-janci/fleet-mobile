@@ -41,9 +41,9 @@ package dev.claudefleet.mobile.net
  * naming `ask`, so an older hub simply shows no form card).
  * Revision 10 added debug devices: the `debug_devices` tool (phones,
  * emulators and simulators on the fleet's hosts) becomes a hub tool the
- * desktop routes its Debug devices page to. This app calls no device tool
- * yet and reads no new row shape, so a revision-10 hub is safe here; a
- * device page on the phone is its own change.
+ * desktop routes its Debug devices page to. The phone's own Debug devices
+ * sheet (redesign 11.10) calls it too, gated on `tools/list` naming it, so
+ * an older hub simply shows no row on More.
  * Revision 11 is the Orbit Fleet redesign's M2: `needs_attention.reason`
  * gains `host_down`, `account_limit` and `no_credentials`, and
  * `needs_attention` carries a `state` beside the reason; session rows gain

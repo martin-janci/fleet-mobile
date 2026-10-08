@@ -146,10 +146,12 @@ class ToolsTheAppMayCallTest {
         "repo_tree",
         "repo_file",
         // The Usage screen: estimated usage and the fleet's Claude accounts,
-        // both readonly and `Access::Client`. A subscription's 5-hour and
-        // weekly windows are the desktop's own read; the hub serves no tool.
+        // both readonly and `Access::Client`.
         "usage_report",
         "list_accounts",
+        // Each account's 5-hour and weekly windows (claude-fleet contract
+        // revision 11, readonly): when a paused row's limit resets (4.10).
+        "account_usage",
         // A host's sheet and a ghost: `probe_host` and `discover_lost_sessions`
         // are readonly; `restore_host_sessions`, `recreate_session` and
         // `dismiss_ghost_session` are writes, offered only to a token that
@@ -191,6 +193,26 @@ class ToolsTheAppMayCallTest {
         // `prs { list }`, readonly and `Access::Client`; a row is served only
         // to a token that may see the session that opened it.
         "prs",
+        // A host joining from the phone (redesign 14.19, claude-fleet 4.9):
+        // `agent_installs` is readonly and `Access::Client`. `install_agent`
+        // is `Access::Master` today, like `add_host`: the hub filters
+        // `tools/list` per token, so a client pairing is never offered it and
+        // the phone only calls it when the hub lists it to this token
+        // (`HubCapabilities.installAgent`). Whether a paired device may ever
+        // be offered it is the hub's call, not the phone's.
+        "install_agent",
+        "agent_installs",
+        // Automation (redesign 8.9): routines, their runs and their switch.
+        // `Access::Client`, not readonly, so the hub does not list it for a
+        // readonly token; never a per-host token's (`NOT_FOR_HOST_TOKENS`).
+        "routines",
+        // Debug devices (redesign 11.10): the test phones on the hosts.
+        // `Access::Client`, not readonly, so a readonly token is not served it.
+        "debug_devices",
+        // Org members (redesign 11.10, member actions on Company): list,
+        // change a role, remove. `Access::Device`, not readonly; the hub
+        // answers an org's own admins and refuses anyone else.
+        "org_admin",
     )
 
     @Test

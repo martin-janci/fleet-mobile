@@ -108,12 +108,19 @@ data class OrbitOrgsHandlers(
     val onOpenSessions: (Long) -> Unit = {},
     /** The Hosts list. */
     val onOpenHosts: () -> Unit = {},
+    /** An org's members sheet; null where the hub does not serve `org_admin` to this phone. */
+    val onOpenMembers: ((OrgDetail) -> Unit)? = null,
 )
+
+/** This phone may change [org]'s members: it administers it and the hub serves member actions. */
+private fun OrbitOrgsHandlers.managesMembers(org: OrgDetail): Boolean = onOpenMembers != null && administers(org)
 
 /**
  * Organisations under More: the list, then one organisation with its swatch,
  * your role, its owner, the budget meter, and rows that open filtered lists.
- * Read-only on the phone; the screen says where changes are made.
+ * An org's admins change its members' roles and remove them from here
+ * (redesign 11.10); the rest is read-only, and the screen says where it is
+ * changed.
  */
 @Composable
 fun OrbitOrgsScreen(state: CompanyUiState, handlers: OrbitOrgsHandlers, nowSeconds: Long, modifier: Modifier = Modifier) {
@@ -163,7 +170,7 @@ private fun LazyListScope.orgDetail(org: OrgDetail, handlers: OrbitOrgsHandlers,
                     Column {
                         Text(org.name.ifBlank { "Organisation ${org.id}" }, color = o.fg, fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold)
                         Text(
-                            listOfNotNull(orgOwners(org), "read-only on the phone").joinToString(" · "),
+                            listOfNotNull(orgOwners(org), if (handlers.managesMembers(org)) "members change here" else "read-only on the phone").joinToString(" · "),
                             color = o.fgMuted,
                             fontSize = 13.sp,
                             lineHeight = 18.sp,
@@ -186,7 +193,13 @@ private fun LazyListScope.orgDetail(org: OrgDetail, handlers: OrbitOrgsHandlers,
     if (org.hosts.isNotEmpty()) {
         item(key = "hosts") { PhoneRow(title = "Hosts", line = org.hosts.joinToString(", "), lead = null, dot = false, onClick = handlers.onOpenHosts) }
     }
-    membersLine(org)?.let { line -> item(key = "members") { PhoneRow(title = "Members", line = line, lead = null, dot = false) } }
+    val openMembers = handlers.onOpenMembers
+    val members = membersLine(org) ?: if (openMembers != null) "Who is in it" else null
+    members?.let { line ->
+        item(key = "members") {
+            PhoneRow(title = "Members", line = line, lead = null, dot = false, onClick = openMembers?.let { open -> { open(org) } })
+        }
+    }
     if (org.trackers.isNotEmpty()) {
         item(key = "trackers") { PhoneRow(title = "Trackers", line = org.trackers.joinToString(", ") { it.name }, lead = null, dot = false) }
     }
@@ -212,7 +225,16 @@ private fun LazyListScope.orgDetail(org: OrgDetail, handlers: OrbitOrgsHandlers,
             )
         }
     }
-    item(key = "note") { Quiet("Members, roles, devices and budgets are changed on the desktop: Settings → Organisations.", small = true) }
+    item(key = "note") {
+        Quiet(
+            if (handlers.managesMembers(org)) {
+                "Adding members, pairing devices and budgets stay on the desktop: Settings → Organisations."
+            } else {
+                "Members, roles, devices and budgets are changed on the desktop: Settings → Organisations."
+            },
+            small = true,
+        )
+    }
 }
 
 @Composable

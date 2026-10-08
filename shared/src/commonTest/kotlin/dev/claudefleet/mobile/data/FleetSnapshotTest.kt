@@ -463,8 +463,8 @@ class FleetSnapshotTest {
      */
     @Test
     fun the_stream_also_asks_for_download_signals_which_leave_the_snapshot_alone() {
-        assertEquals(listOf("session", "host", "project", "work", "download"), STREAM_EVENT_KINDS)
-        assertEquals(listOf("download"), SIGNAL_EVENT_KINDS)
+        assertEquals(listOf("session", "host", "project", "work", "download", "account_usage"), STREAM_EVENT_KINDS)
+        assertEquals(listOf("download", "account_usage"), SIGNAL_EVENT_KINDS)
 
         val frame = row("download:changed", """{"id":7}""")
         val empty = FleetSnapshot()
@@ -616,5 +616,15 @@ class FleetSnapshotTest {
         assertFalse(after.tickets.first { it.id == 80L }.unavailable)
         assertSame(after, after.applying(row("work:tracker_removed", """{"id":1}""")), "already marked: a no-op")
         assertSame(cached, cached.applying(row("work:tracker_removed", """{"id":"x"}""")))
+    }
+
+    /** Step 4.10: an `account_usage:updated` frame is a re-read signal, never a row. */
+    @Test
+    fun an_account_usage_frame_is_a_signal_that_leaves_the_snapshot_alone() {
+        val frame = row("account_usage:updated", """{"account_uuid":"a","status":"ok"}""")
+        val empty = FleetSnapshot()
+        assertTrue(empty.applying(frame) === empty, "a usage reading is not a row")
+        assertTrue(frame.isAccountUsageFrame())
+        assertTrue(!row("session:updated", sessionPayload(id = 7)).isAccountUsageFrame())
     }
 }

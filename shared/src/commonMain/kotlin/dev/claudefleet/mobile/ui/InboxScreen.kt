@@ -15,6 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.AccountUsageSnapshot
+import dev.claudefleet.mobile.model.limitAt
 import dev.claudefleet.mobile.model.askedAt
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.help.TourAnchor
@@ -66,6 +68,8 @@ fun InboxScreen(
     anchors: TourAnchors? = null,
     /** Account uuid → label, for a row's account and a paused row's line (step 4.10). */
     accountNames: Map<String, String> = emptyMap(),
+    /** Account uuid → usage reading, for when a paused row's limit resets (step 4.10). */
+    accountUsage: Map<String, AccountUsageSnapshot> = emptyMap(),
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
@@ -104,6 +108,7 @@ fun InboxScreen(
                         showHost = true,
                         since = row.askedAt,
                         accountName = row.accountUuid?.let(accountNames::get),
+                        limit = row.accountUuid?.let(accountUsage::get)?.limitAt(nowSeconds),
                         onClick = { onOpenSession(row.id) },
                     )
                 }
