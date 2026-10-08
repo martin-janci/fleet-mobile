@@ -210,6 +210,8 @@ import dev.claudefleet.mobile.ui.TidySheet
 import dev.claudefleet.mobile.ui.TidyViewModel
 import dev.claudefleet.mobile.ui.MissionsHandlers
 import dev.claudefleet.mobile.ui.MissionsSheet
+import dev.claudefleet.mobile.ui.OrbitMissionsHandlers
+import dev.claudefleet.mobile.ui.OrbitMissionsScreen
 import dev.claudefleet.mobile.ui.MissionsViewModel
 import dev.claudefleet.mobile.ui.UsageHandlers
 import dev.claudefleet.mobile.ui.CompanyHandlers
@@ -1360,7 +1362,7 @@ private fun FleetRoute(
                                     ),
                                 )
                                 if (missionsState.available) {
-                                    add(MoreEntry("Missions", "${missionsState.missions.size} missions · Pause all inside") { missions.open() })
+                                    add(MoreEntry("Missions", "${missionsState.missions.size} missions · Pause all inside") { nav.openMissions() })
                                 }
                             },
                         )
@@ -1376,7 +1378,7 @@ private fun FleetRoute(
                                 add(MoreEntry("Accounts and usage", "Quotas, and estimated spend by host and day") { nav.openUsage() })
                             }
                             if (missionsState.available) {
-                                add(MoreEntry("Automation", "Missions, and Pause all") { missions.open() })
+                                add(MoreEntry("Automation", "Missions, and Pause all") { nav.openMissions() })
                             }
                             if (filesState.available) {
                                 val line = if (filesState.loaded) "${filesState.files.size} files" else "Files sessions sent to the hub"
@@ -1405,6 +1407,22 @@ private fun FleetRoute(
                         onLesson = helpSettings::startLesson,
                         onGuide = nav::openGuide,
                         tip = { TipFor(Tip.LEARN, help, helpSettings) },
+                    )
+                }
+                Screen.Missions -> {
+                    val agentState by agent.state.collectAsState()
+                    LaunchedEffect(Unit) { missions.refresh() }
+                    OrbitMissionsScreen(
+                        state = missionsState,
+                        nowSeconds = epochSeconds(),
+                        handlers = OrbitMissionsHandlers(
+                            onBack = { nav.back() },
+                            onRefresh = { missions.refresh() },
+                            onOpen = { missions.openOne(it) },
+                            onPauseAll = if (missionsState.canPauseAll) ({ missions.pauseAll(); Unit }) else null,
+                            onNewInControl = if (agentState.available) ({ agent.open(); Unit }) else null,
+                            onDismissError = missions::dismissError,
+                        ),
                     )
                 }
                 Screen.Practice -> {

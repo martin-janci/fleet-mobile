@@ -221,4 +221,15 @@ class MissionsTest {
         assertEquals(2, actions.calls.count { it == "missions" })
         assertEquals("Paused 2 missions.", vm.state.value.notice)
     }
+
+    @Test
+    fun a_tap_on_the_missions_screen_opens_the_sheet_on_that_mission() = runTest {
+        val actions = FakeMissionActions()
+        val vm = MissionsViewModel(MissionsFleet(loop), actions, backgroundScope, canWrite = true)
+        vm.openOne(1).join()
+        runCurrent()
+        assertTrue(vm.state.value.open)
+        assertEquals(1L, vm.state.value.detail?.mission?.id)
+        assertEquals(listOf("mission 1"), actions.calls, "the screen has the list already; only the mission is read")
+    }
 }
