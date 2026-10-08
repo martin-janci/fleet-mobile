@@ -196,6 +196,7 @@ class AutomationTest {
         runCurrent()
         assertEquals(listOf(11L, 12L), vm.state.value.detail?.runs?.map { it.id })
         vm.back()
+        runCurrent()
         assertNull(vm.state.value.detail)
     }
 
