@@ -9,6 +9,7 @@ import dev.claudefleet.mobile.model.FileDiff
 import dev.claudefleet.mobile.model.FileContent
 import dev.claudefleet.mobile.model.CommitDetail
 import dev.claudefleet.mobile.model.Commit
+import dev.claudefleet.mobile.model.AgentInstall
 import dev.claudefleet.mobile.model.ChangedFile
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.ConversationSummary
@@ -27,6 +28,9 @@ import dev.claudefleet.mobile.model.RestoreReport
 import dev.claudefleet.mobile.model.LostCandidate
 import dev.claudefleet.mobile.model.MultiStart
 import dev.claudefleet.mobile.model.OrgDetail
+import dev.claudefleet.mobile.model.MemberGrants
+import dev.claudefleet.mobile.model.MemberRemoved
+import dev.claudefleet.mobile.model.OrgMemberRow
 import dev.claudefleet.mobile.model.PagesBundle
 import dev.claudefleet.mobile.model.PairResult
 import dev.claudefleet.mobile.model.ProjectRow
@@ -34,6 +38,9 @@ import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.TidyReport
 import dev.claudefleet.mobile.model.Mission
 import dev.claudefleet.mobile.model.Routine
+import dev.claudefleet.mobile.model.DebugDevice
+import dev.claudefleet.mobile.model.DebugDeviceList
+import dev.claudefleet.mobile.model.DeviceOutput
 import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.MissionCard
@@ -621,6 +628,20 @@ class HubClient(
             },
         ) { }
 
+    /**
+     * Start the hub's fleet-agent install job on [alias] (`install_agent`,
+     * claude-fleet 4.9). Returns the job at once; [agentInstalls] follows it.
+     * Called only where the hub lists the tool to this token.
+     */
+    suspend fun installAgent(alias: String): AgentInstall =
+        call("install_agent", buildJsonObject { put("alias", alias) }) { json.decodeFromJsonElement(AgentInstall.serializer(), it) }
+
+    /** fleet-agent install jobs, newest first (`agent_installs`); only [alias]'s when given. */
+    suspend fun agentInstalls(alias: String? = null): List<AgentInstall> =
+        call("agent_installs", buildJsonObject { alias?.let { put("alias", it) } }) {
+            json.decodeFromJsonElement(ListSerializer(AgentInstall.serializer()), it)
+        }
+
     /** Delete a ghost's row for good (`dismiss_ghost_session`). */
     suspend fun dismissGhost(sessionId: Long): Unit =
         call("dismiss_ghost_session", buildJsonObject { put("session_id", sessionId) }) { }
@@ -1162,6 +1183,123 @@ class HubClient(
                 put("enabled", enabled)
             },
         ) { json.decodeFromJsonElement(Routine.serializer(), it) }
+
+    // ---- debug devices (claude-fleet contract revision 10) ----
+    //
+    // `debug_devices` is not readonly on the hub, so a readonly token is not
+    // served it, and nothing here is called unless `tools/list` names it
+    // (`HubCapabilities.debugDevices`). `device` takes the row's id.
+
+    /** The test phones this person may see, and each host's last scan; [refresh] rescans hosts not scanned lately. */
+    suspend fun debugDevices(refresh: Boolean = false): DebugDeviceList =
+        call(
+            "debug_devices",
+            buildJsonObject {
+                put("action", "list")
+                if (refresh) put("refresh", true)
+            },
+        ) { json.decodeFromJsonElement(DebugDeviceList.serializer(), it) }
+
+    /** Scan every host for attached and running devices now. What it found comes back through [debugDevices]. */
+    suspend fun scanDebugDevices() {
+        call("debug_devices", buildJsonObject { put("action", "scan") }) { it }
+    }
+
+    /** Hold [deviceId] for this device (`client:<name>`) so sessions keep off it. */
+    suspend fun claimDebugDevice(deviceId: Long, note: String? = null): DebugDevice =
+        deviceCall("claim", deviceId) { note?.let { put("note", it) } }
+
+    /** Let go of [deviceId], whoever held it; a person may release any claim. */
+    suspend fun releaseDebugDevice(deviceId: Long): DebugDevice = deviceCall("release", deviceId)
+
+    /** Shut down an emulator or simulator. */
+    suspend fun shutdownDebugDevice(deviceId: Long): DebugDevice = deviceCall("shutdown", deviceId)
+
+    /** Start a stopped emulator or simulator; answers the hub's word for its state. */
+    suspend fun bootDebugDevice(deviceId: Long): String =
+        call(
+            "debug_devices",
+            buildJsonObject {
+                put("action", "boot")
+                put("device", deviceId.toString())
+            },
+        ) { (it as? JsonObject)?.get("state")?.let { s -> (s as? JsonPrimitive)?.content } ?: "" }
+
+    /** The device's last [lines] log lines. */
+    suspend fun debugDeviceLogs(deviceId: Long, lines: Int): DeviceOutput =
+        call(
+            "debug_devices",
+            buildJsonObject {
+                put("action", "logs")
+                put("device", deviceId.toString())
+                put("lines", lines)
+            },
+        ) { json.decodeFromJsonElement(DeviceOutput.serializer(), it) }
+
+    private suspend fun deviceCall(
+        action: String,
+        deviceId: Long,
+        more: JsonObjectBuilder.() -> Unit = {},
+    ): DebugDevice =
+        call(
+            "debug_devices",
+            buildJsonObject {
+                put("action", action)
+                put("device", deviceId.toString())
+                more()
+            },
+        ) { json.decodeFromJsonElement(DebugDevice.serializer(), it) }
+
+    // ---- org members (claude-fleet `org_admin`, company administration phase D) ----
+    //
+    // Only the member actions: the hub answers an org's admins (or the hub
+    // owner) and refuses anyone else, and an admin cannot change their own
+    // membership or the hub owner's. Nothing here pairs, binds or renames.
+
+    /** The org's live members, admins first. */
+    suspend fun orgMembers(orgId: Long): List<OrgMemberRow> =
+        memberCall("list_members", orgId) { json.decodeFromJsonElement(ListSerializer(OrgMemberRow.serializer()), it) }
+
+    /** Give [personId] [role] (`admin` / `member` / `viewer`) in [orgId]; answers the members after. */
+    suspend fun setOrgMember(orgId: Long, personId: Long, role: String): List<OrgMemberRow> =
+        memberCall("set_member", orgId, {
+            put("person_id", personId)
+            put("role", role)
+        }) { json.decodeFromJsonElement(ListSerializer(OrgMemberRow.serializer()), it) }
+
+    /** How many of [orgId]'s sessions are shared with [personId], to watch and to drive. */
+    suspend fun memberGrants(orgId: Long, personId: Long): MemberGrants =
+        memberCall("member_grants", orgId, { put("person_id", personId) }) { json.decodeFromJsonElement(MemberGrants.serializer(), it) }
+
+    /** Turn [personId]'s drive shares on [orgId]'s sessions into watch shares; answers how many. */
+    suspend fun narrowMemberGrants(orgId: Long, personId: Long): Int =
+        memberCall("narrow_member_grants", orgId, { put("person_id", personId) }) { count(it, "narrowed") }
+
+    /** Take [personId] out of [orgId]; their shares there go too unless [keepGrants]. */
+    suspend fun removeOrgMember(orgId: Long, personId: Long, keepGrants: Boolean): MemberRemoved =
+        memberCall("remove_member", orgId, {
+            put("person_id", personId)
+            if (keepGrants) put("keep_grants", true)
+        }) { json.decodeFromJsonElement(MemberRemoved.serializer(), it) }
+
+    private fun count(answer: JsonElement, key: String): Int =
+        ((answer as? JsonObject)?.get(key) as? JsonPrimitive)?.content?.toIntOrNull() ?: 0
+
+    private suspend fun <T> memberCall(
+        action: String,
+        orgId: Long,
+        more: JsonObjectBuilder.() -> Unit = {},
+        decode: (JsonElement) -> T,
+    ): T =
+        call(
+            "org_admin",
+            buildJsonObject {
+                put("action", action)
+                put("org_id", orgId)
+                more()
+            },
+            decode,
+        )
 
     // ---- the Work view (claude-fleet M14) ----
 
@@ -1870,6 +2008,9 @@ class HubClient(
             "delete_worktree",
             "move_session",
             "new_shell_session",
+            // Routines (redesign 8.9): `Deadline::Lifecycle` on the hub,
+            // because `run_now` starts a session.
+            "routines",
         )
 
         /**
@@ -1882,6 +2023,9 @@ class HubClient(
             // `ask` is the hub's `Deadline::LongPoll` too: an answer that
             // carries a secret is written to the session's host over SSH.
             "ask",
+            // Debug devices: `Deadline::LongPoll` on the hub. A scan, a boot
+            // or a log read runs over SSH on the device's host.
+            "debug_devices",
         )
         const val UNKNOWN_CODE = "E_UNKNOWN"
     }

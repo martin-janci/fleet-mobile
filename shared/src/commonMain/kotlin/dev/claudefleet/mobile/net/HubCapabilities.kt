@@ -117,6 +117,15 @@ data class HubCapabilities(
     /** Plain shells beside a session: its Terminals tab (redesign 14.14). */
     val shellSessions: Boolean get() = NEW_SHELL_SESSION in tools
 
+    /**
+     * The fleet-agent install job (claude-fleet 4.9, redesign 14.19): reading
+     * jobs is a client's, starting one the hub lists only to a token that may
+     * (`tools/list` is filtered per caller), so a pairing that cannot is never
+     * offered the button.
+     */
+    val agentInstalls: Boolean get() = AGENT_INSTALLS in tools
+    val installAgent: Boolean get() = INSTALL_AGENT in tools && AGENT_INSTALLS in tools
+
     /** Archiving a session from its ⋮ menu (`work_link { action: archive }`). */
     val archiveSession: Boolean get() = has(WORK_LINK, "archive")
 
@@ -175,6 +184,21 @@ data class HubCapabilities(
      */
     val routines: Boolean get() = ROUTINES in tools
 
+    /**
+     * Debug devices (contract revision 10): the test phones on the fleet's
+     * hosts, claimed, booted and read from here. Not readonly on the hub, so
+     * a readonly token is not served it.
+     */
+    val debugDevices: Boolean get() = DEBUG_DEVICES in tools
+
+    /**
+     * Org administration (`org_admin`, company administration phase D): the
+     * Company screen lists an org's members and changes their roles. Not
+     * readonly on the hub, and the hub refuses anyone who does not
+     * administer that org; the phone offers it only to an org's admins.
+     */
+    val orgAdmin: Boolean get() = ORG_ADMIN in tools
+
     /** Fleet settings can be written as this device (`set_setting`); the hub still refuses an untrusted one. */
     val setSetting: Boolean get() = SET_SETTING in tools
 
@@ -221,6 +245,8 @@ data class HubCapabilities(
         const val ADD_PROJECT = "add_project"
         const val MOVE_SESSION = "move_session"
         const val NEW_SHELL_SESSION = "new_shell_session"
+        const val INSTALL_AGENT = "install_agent"
+        const val AGENT_INSTALLS = "agent_installs"
         const val LIST_GITHUB_REPOS = "list_github_repos"
         const val LIST_HOST_WORKTREES = "list_host_worktrees"
         const val DELETE_WORKTREE = "delete_worktree"
@@ -248,6 +274,8 @@ data class HubCapabilities(
         const val DECIDE_SETTING_PROPOSALS = "decide_setting_proposals"
         const val ROUTINES = "routines"
         const val SET_SETTING = "set_setting"
+        const val DEBUG_DEVICES = "debug_devices"
+        const val ORG_ADMIN = "org_admin"
 
         fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions, params = catalog.params)
     }

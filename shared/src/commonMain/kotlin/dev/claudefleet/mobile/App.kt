@@ -57,6 +57,8 @@ import dev.claudefleet.mobile.data.HubHostActions
 import dev.claudefleet.mobile.data.HubProjectActions
 import dev.claudefleet.mobile.data.HubMoveActions
 import dev.claudefleet.mobile.data.HubSessionExtrasActions
+import dev.claudefleet.mobile.data.HubAgentInstallActions
+import dev.claudefleet.mobile.data.AgentInstallActions
 import dev.claudefleet.mobile.data.SessionExtrasActions
 import dev.claudefleet.mobile.data.HubSessionActions
 import dev.claudefleet.mobile.data.MoveActions
@@ -64,6 +66,8 @@ import dev.claudefleet.mobile.data.ProjectActions
 import dev.claudefleet.mobile.data.HubUsageActions
 import dev.claudefleet.mobile.data.CompanyActions
 import dev.claudefleet.mobile.data.HubCompanyActions
+import dev.claudefleet.mobile.data.HubMemberActions
+import dev.claudefleet.mobile.data.MemberActions
 import dev.claudefleet.mobile.data.UsageActions
 import dev.claudefleet.mobile.data.HubSessionDetailsActions
 import dev.claudefleet.mobile.data.HubWorkActions
@@ -71,6 +75,8 @@ import dev.claudefleet.mobile.data.HubMissionActions
 import dev.claudefleet.mobile.data.MissionActions
 import dev.claudefleet.mobile.data.HubRoutineActions
 import dev.claudefleet.mobile.data.RoutineActions
+import dev.claudefleet.mobile.data.DeviceActions
+import dev.claudefleet.mobile.data.HubDeviceActions
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.SessionActions
@@ -116,15 +122,29 @@ import dev.claudefleet.mobile.ui.SessionTasksViewModel
 import dev.claudefleet.mobile.ui.TaskHandlers
 import dev.claudefleet.mobile.ui.TaskScreen
 import dev.claudefleet.mobile.ui.TaskViewModel
+import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.GroupRef
 import dev.claudefleet.mobile.ui.HostsScreen
 import dev.claudefleet.mobile.ui.OrbitFilesScreen
 import dev.claudefleet.mobile.ui.OrbitHostsHandlers
+import dev.claudefleet.mobile.ui.FirstRun
+import dev.claudefleet.mobile.ui.NoHubScreen
+import dev.claudefleet.mobile.ui.WELCOME_HINT
+import dev.claudefleet.mobile.ui.WelcomeScreen
+import dev.claudefleet.mobile.ui.rememberShareText
+import dev.claudefleet.mobile.ui.showWelcome
+import dev.claudefleet.mobile.ui.AgentInstallHandlers
+import dev.claudefleet.mobile.ui.AgentInstallViewModel
+import dev.claudefleet.mobile.ui.InstallAgentSheet
+import dev.claudefleet.mobile.ui.InstallingScreen
 import dev.claudefleet.mobile.ui.OrbitHostsScreen
 import dev.claudefleet.mobile.ui.OrbitUsageScreen
 import dev.claudefleet.mobile.ui.DECISIONS_PAGE
 import dev.claudefleet.mobile.ui.DecisionsHead
 import dev.claudefleet.mobile.ui.OrbitOrgsHandlers
+import dev.claudefleet.mobile.ui.MembersHandlers
+import dev.claudefleet.mobile.ui.MembersSheet
+import dev.claudefleet.mobile.ui.MembersViewModel
 import dev.claudefleet.mobile.ui.OrbitOrgsScreen
 import dev.claudefleet.mobile.ui.ProposedChangeCard
 import dev.claudefleet.mobile.ui.HostsViewModel
@@ -216,6 +236,10 @@ import dev.claudefleet.mobile.ui.AutomationHandlers
 import dev.claudefleet.mobile.ui.AutomationSheet
 import dev.claudefleet.mobile.ui.AutomationViewModel
 import dev.claudefleet.mobile.ui.automationLine
+import dev.claudefleet.mobile.ui.DebugDevicesHandlers
+import dev.claudefleet.mobile.ui.DebugDevicesSheet
+import dev.claudefleet.mobile.ui.DebugDevicesViewModel
+import dev.claudefleet.mobile.ui.devicesLine
 import dev.claudefleet.mobile.ui.MissionsViewModel
 import dev.claudefleet.mobile.ui.UsageHandlers
 import dev.claudefleet.mobile.ui.CompanyHandlers
@@ -377,12 +401,16 @@ class AppContainer(
     val repoActions: RepoActions = HubRepoActions(session)
     val usageActions: UsageActions = HubUsageActions(session)
     val companyActions: CompanyActions = HubCompanyActions(session)
+    val memberActions: MemberActions = HubMemberActions(session)
     val hostActions: HostActions = HubHostActions(session)
     val projectActions: ProjectActions = HubProjectActions(session)
     val moveActions: MoveActions = HubMoveActions(session)
 
     /** A session's Terminals tab and its ⋮ Archive (redesign 14.14). */
     val sessionExtrasActions: SessionExtrasActions = HubSessionExtrasActions(session)
+
+    /** The fleet-agent install job, from Hosts (redesign 14.19). */
+    val agentInstallActions: AgentInstallActions = HubAgentInstallActions(session)
 
     /** The hub's own version, for the Settings screen to show beside this app's. */
     val versionActions: VersionActions = HubVersionActions(session)
@@ -401,6 +429,9 @@ class AppContainer(
 
     /** Routines and Pause all (redesign 8.9), through the same `withClient`. */
     val routineActions: RoutineActions = HubRoutineActions(session)
+
+    /** Debug devices (redesign 11.10), through the same `withClient`. */
+    val deviceActions: DeviceActions = HubDeviceActions(session)
 
     /** The way into the hub's agent, through the same `withClient`. */
     val agentActions: AgentActions = HubAgentActions(session)
@@ -505,9 +536,29 @@ fun App(container: AppContainer) {
                             justPaired = null
                             fleetCheck = false
                         }
-                        PairRoute(container) {
-                            justPaired = it
-                            fleetCheck = true
+                        // The New layout's first run (14.19): a welcome once
+                        // per phone, and the "no hub yet" steps, before Pair.
+                        val unpairReason by container.session.unpairReason.collectAsState()
+                        var firstRun by remember(container) {
+                            val welcome = showWelcome(
+                                layout = loadPhoneLayout(container.prefs),
+                                welcomed = container.hints.shown(WELCOME_HINT),
+                                signedOut = unpairReason != null,
+                            )
+                            mutableStateOf(if (welcome) FirstRun.Welcome else FirstRun.Pair)
+                        }
+                        val share = rememberShareText()
+                        val toPair = {
+                            container.hints.markShown(WELCOME_HINT)
+                            firstRun = FirstRun.Pair
+                        }
+                        when (firstRun) {
+                            FirstRun.Welcome -> WelcomeScreen(onPair = toPair, onNoHub = { firstRun = FirstRun.NoHub })
+                            FirstRun.NoHub -> NoHubScreen(onBack = { firstRun = FirstRun.Welcome }, onPair = toPair, onShare = share)
+                            FirstRun.Pair -> PairRoute(container) {
+                                justPaired = it
+                                fleetCheck = true
+                            }
                         }
                     }
                     is AuthState.Paired -> {
@@ -665,6 +716,11 @@ private fun FleetRoute(
     val sessions = remember(repository, scope) { SessionsViewModel(repository, scope, prefs = container.prefs) }
     val bulk = remember(repository, scope) { BulkViewModel(repository, container.sessionActions, scope, credentials.canWrite) }
     val hostDetail = remember(repository, scope) { HostDetailViewModel(repository, container.hostActions, scope, credentials.canWrite) }
+    // A host joining from the phone (14.19): held here so leaving Hosts and
+    // coming back finds the install where it was.
+    val installs = remember(repository, scope) {
+        AgentInstallViewModel(repository, container.agentInstallActions, scope, credentials.canWrite)
+    }
     // The fleet's scope, like the New session form's `callScope`: a resume
     // started from the sheet must not be cancelled by closing it.
     val tickets = remember(repository, scope) {
@@ -684,6 +740,8 @@ private fun FleetRoute(
     val missionsState by missions.state.collectAsState()
     val automation = remember(repository, scope) { AutomationViewModel(repository, container.routineActions, scope, credentials.canWrite) }
     val automationState by automation.state.collectAsState()
+    val debugDevices = remember(repository, scope) { DebugDevicesViewModel(repository, container.deviceActions, scope, credentials.canWrite) }
+    val debugDevicesState by debugDevices.state.collectAsState()
     val today = remember(repository, scope) {
         TodayViewModel(
             fleet = repository,
@@ -1179,6 +1237,8 @@ private fun FleetRoute(
                     // An org's detail is drawn inside this screen: back closes it first.
                     BackHandler(enabled = companyState.openId != null) { company.close() }
                     if (layout == PhoneLayout.New) {
+                        val members = remember(repository, scope) { MembersViewModel(repository, container.memberActions, scope, credentials.canWrite) }
+                        val membersState by members.state.collectAsState()
                         OrbitOrgsScreen(
                             state = companyState,
                             nowSeconds = epochSeconds(),
@@ -1189,8 +1249,23 @@ private fun FleetRoute(
                                 onDismissError = company::dismissError,
                                 onOpenSessions = { org -> sessions.showOrg(org); nav.select(Tab.Sessions) },
                                 onOpenHosts = { nav.openFromMore(Screen.Hosts) },
+                                onOpenMembers = { org: OrgDetail -> members.open(org); Unit }.takeIf { membersState.available },
                             ),
                         )
+                        if (membersState.open) {
+                            MembersSheet(
+                                state = membersState,
+                                nowSeconds = epochSeconds(),
+                                handlers = MembersHandlers(
+                                    onClose = { members.close(); company.refresh() },
+                                    onSetRole = { m, role -> members.setRole(m, role) },
+                                    onRemove = { members.askRemove(it) },
+                                    onConfirmRemove = { members.remove(it) },
+                                    onCancelRemove = members::cancelRemove,
+                                    onDismissError = members::dismissError,
+                                ),
+                            )
+                        }
                     } else {
                         CompanyScreen(
                             state = companyState,
@@ -1281,6 +1356,9 @@ private fun FleetRoute(
                                 // The host's sheet runs the reboot plan's dry run and the lost-conversation scan on opening.
                                 onRecovery = { alias: String -> hostDetail.open(alias); Unit }
                                     .takeIf { (credentials.canWrite && hostCaps.restoreSessions) || hostCaps.discoverLost },
+                                // Only where the hub lists the job to this pairing; the tap opens the review, not the install.
+                                onInstallAgent = { alias: String -> installs.open(alias) }
+                                    .takeIf { credentials.canWrite && hostCaps.installAgent },
                             ),
                         )
                     } else {
@@ -1306,6 +1384,16 @@ private fun FleetRoute(
                                 onDismissError = hostDetail::dismissError,
                             ),
                         )
+                    }
+                    val installState by installs.state.collectAsState()
+                    val installHandlers = remember(installs) {
+                        AgentInstallHandlers(onInstall = { installs.install() }, onClose = installs::close, onDismissError = installs::dismissError)
+                    }
+                    if (installState.reviewing) InstallAgentSheet(installState, installHandlers)
+                    if (installState.installing) {
+                        // Back leaves the install's screen first; the job runs on the hub either way.
+                        BackHandler(enabled = installState.installing) { installs.close() }
+                        InstallingScreen(installState, installHandlers)
                     }
                 }
                 Screen.Inbox -> {
@@ -1381,6 +1469,7 @@ private fun FleetRoute(
                 Screen.More -> {
                     val hostRows by repository.hosts.collectAsState()
                     LaunchedEffect(automationState.available) { if (automationState.available) automation.refresh() }
+                    LaunchedEffect(debugDevicesState.available) { if (debugDevicesState.available) debugDevices.refresh() }
                     MoreScreen(
                         top = { updateState.available?.let { UpdateCard(it, container.appVersion, onOpen = nav::openUpdate) } },
                         entries = buildList {
@@ -1393,6 +1482,10 @@ private fun FleetRoute(
                                 add(MoreEntry("Automation", automationLine(automationState.routines, automationState.paused)) { automation.open() })
                             } else if (missionsState.available) {
                                 add(MoreEntry("Automation", "Missions, and Pause all") { missions.open() })
+                            }
+                            if (debugDevicesState.available) {
+                                // Test phones on the hosts (11.10), not the people's own devices.
+                                add(MoreEntry("Debug devices", devicesLine(debugDevicesState.devices)) { debugDevices.open() })
                             }
                             if (filesState.available) {
                                 val line = if (filesState.loaded) "${filesState.files.size} files" else "Files sessions sent to the hub"
@@ -1645,6 +1738,19 @@ private fun FleetRoute(
                         onOpenSession = { id -> automation.close(); nav.open(id) },
                         onOpenMissions = if (missionsState.available) ({ automation.close(); missions.open() }) else null,
                         onDismissError = automation::dismissError,
+                    ),
+                )
+            }
+            if (debugDevicesState.open) {
+                DebugDevicesSheet(
+                    state = debugDevicesState,
+                    nowSeconds = epochSeconds(),
+                    handlers = DebugDevicesHandlers(
+                        onClose = debugDevices::close,
+                        onScan = { debugDevices.scan() },
+                        onPress = { d, move -> debugDevices.press(d, move) },
+                        onCloseLogs = debugDevices::closeLogs,
+                        onDismissError = debugDevices::dismissError,
                     ),
                 )
             }

@@ -256,7 +256,7 @@ class HubContractVerdictTest {
 
     /**
      * Revision 10 — debug devices: the `debug_devices` hub tool — is in range:
-     * this app calls no device tool yet and reads no new row shape.
+     * the phone calls it only where `tools/list` names it (redesign 11.10).
      */
     @Test
     fun revision_ten_is_ok() {

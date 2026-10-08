@@ -104,7 +104,9 @@ class TheBackGestureReachesTheNavigatorTest {
      * session is open, so back returns to the sample list before it leaves.
      * A session's full screen (redesign 14.21) is enabled only while the
      * conversation or the agent's screen has the whole phone, and composed
-     * after the Files tab's, so back leaves full screen first.
+     * after the Files tab's, so back leaves full screen first. A host's
+     * agent install (redesign 14.19) is enabled only while its screen is
+     * up over Hosts, so back leaves it (the job runs on the hub) first.
      */
     @Test
     fun there_is_exactly_one() {
@@ -117,6 +119,7 @@ class TheBackGestureReachesTheNavigatorTest {
             listOf(
                 "nav.isPushed(screen)",
                 "companyState.openId != null",
+                "installState.installing",
                 "practiceState.open != null",
                 "fleetPageOpen || place != SettingsPlace.Home",
                 "fleetPageOpen",
