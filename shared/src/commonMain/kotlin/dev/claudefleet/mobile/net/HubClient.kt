@@ -8,6 +8,7 @@ import dev.claudefleet.mobile.model.FileDiff
 import dev.claudefleet.mobile.model.FileContent
 import dev.claudefleet.mobile.model.CommitDetail
 import dev.claudefleet.mobile.model.Commit
+import dev.claudefleet.mobile.model.AgentInstall
 import dev.claudefleet.mobile.model.ChangedFile
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.ConversationSummary
@@ -612,6 +613,20 @@ class HubClient(
                 put("session_id", sessionId)
             },
         ) { }
+
+    /**
+     * Start the hub's fleet-agent install job on [alias] (`install_agent`,
+     * claude-fleet 4.9). Returns the job at once; [agentInstalls] follows it.
+     * Called only where the hub lists the tool to this token.
+     */
+    suspend fun installAgent(alias: String): AgentInstall =
+        call("install_agent", buildJsonObject { put("alias", alias) }) { json.decodeFromJsonElement(AgentInstall.serializer(), it) }
+
+    /** fleet-agent install jobs, newest first (`agent_installs`); only [alias]'s when given. */
+    suspend fun agentInstalls(alias: String? = null): List<AgentInstall> =
+        call("agent_installs", buildJsonObject { alias?.let { put("alias", it) } }) {
+            json.decodeFromJsonElement(ListSerializer(AgentInstall.serializer()), it)
+        }
 
     /** Delete a ghost's row for good (`dismiss_ghost_session`). */
     suspend fun dismissGhost(sessionId: Long): Unit =

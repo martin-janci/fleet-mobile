@@ -57,6 +57,8 @@ import dev.claudefleet.mobile.data.HubHostActions
 import dev.claudefleet.mobile.data.HubProjectActions
 import dev.claudefleet.mobile.data.HubMoveActions
 import dev.claudefleet.mobile.data.HubSessionExtrasActions
+import dev.claudefleet.mobile.data.HubAgentInstallActions
+import dev.claudefleet.mobile.data.AgentInstallActions
 import dev.claudefleet.mobile.data.SessionExtrasActions
 import dev.claudefleet.mobile.data.HubSessionActions
 import dev.claudefleet.mobile.data.MoveActions
@@ -116,6 +118,16 @@ import dev.claudefleet.mobile.model.GroupRef
 import dev.claudefleet.mobile.ui.HostsScreen
 import dev.claudefleet.mobile.ui.OrbitFilesScreen
 import dev.claudefleet.mobile.ui.OrbitHostsHandlers
+import dev.claudefleet.mobile.ui.FirstRun
+import dev.claudefleet.mobile.ui.NoHubScreen
+import dev.claudefleet.mobile.ui.WELCOME_HINT
+import dev.claudefleet.mobile.ui.WelcomeScreen
+import dev.claudefleet.mobile.ui.rememberShareText
+import dev.claudefleet.mobile.ui.showWelcome
+import dev.claudefleet.mobile.ui.AgentInstallHandlers
+import dev.claudefleet.mobile.ui.AgentInstallViewModel
+import dev.claudefleet.mobile.ui.InstallAgentSheet
+import dev.claudefleet.mobile.ui.InstallingScreen
 import dev.claudefleet.mobile.ui.OrbitHostsScreen
 import dev.claudefleet.mobile.ui.OrbitUsageScreen
 import dev.claudefleet.mobile.ui.DECISIONS_PAGE
@@ -376,6 +388,9 @@ class AppContainer(
     /** A session's Terminals tab and its ⋮ Archive (redesign 14.14). */
     val sessionExtrasActions: SessionExtrasActions = HubSessionExtrasActions(session)
 
+    /** The fleet-agent install job, from Hosts (redesign 14.19). */
+    val agentInstallActions: AgentInstallActions = HubAgentInstallActions(session)
+
     /** The hub's own version, for the Settings screen to show beside this app's. */
     val versionActions: VersionActions = HubVersionActions(session)
 
@@ -494,9 +509,29 @@ fun App(container: AppContainer) {
                             justPaired = null
                             fleetCheck = false
                         }
-                        PairRoute(container) {
-                            justPaired = it
-                            fleetCheck = true
+                        // The New layout's first run (14.19): a welcome once
+                        // per phone, and the "no hub yet" steps, before Pair.
+                        val unpairReason by container.session.unpairReason.collectAsState()
+                        var firstRun by remember(container) {
+                            val welcome = showWelcome(
+                                layout = loadPhoneLayout(container.prefs),
+                                welcomed = container.hints.shown(WELCOME_HINT),
+                                signedOut = unpairReason != null,
+                            )
+                            mutableStateOf(if (welcome) FirstRun.Welcome else FirstRun.Pair)
+                        }
+                        val share = rememberShareText()
+                        val toPair = {
+                            container.hints.markShown(WELCOME_HINT)
+                            firstRun = FirstRun.Pair
+                        }
+                        when (firstRun) {
+                            FirstRun.Welcome -> WelcomeScreen(onPair = toPair, onNoHub = { firstRun = FirstRun.NoHub })
+                            FirstRun.NoHub -> NoHubScreen(onBack = { firstRun = FirstRun.Welcome }, onPair = toPair, onShare = share)
+                            FirstRun.Pair -> PairRoute(container) {
+                                justPaired = it
+                                fleetCheck = true
+                            }
                         }
                     }
                     is AuthState.Paired -> {
@@ -654,6 +689,11 @@ private fun FleetRoute(
     val sessions = remember(repository, scope) { SessionsViewModel(repository, scope, prefs = container.prefs) }
     val bulk = remember(repository, scope) { BulkViewModel(repository, container.sessionActions, scope, credentials.canWrite) }
     val hostDetail = remember(repository, scope) { HostDetailViewModel(repository, container.hostActions, scope, credentials.canWrite) }
+    // A host joining from the phone (14.19): held here so leaving Hosts and
+    // coming back finds the install where it was.
+    val installs = remember(repository, scope) {
+        AgentInstallViewModel(repository, container.agentInstallActions, scope, credentials.canWrite)
+    }
     // The fleet's scope, like the New session form's `callScope`: a resume
     // started from the sheet must not be cancelled by closing it.
     val tickets = remember(repository, scope) {
@@ -1268,6 +1308,9 @@ private fun FleetRoute(
                                 // The host's sheet runs the reboot plan's dry run and the lost-conversation scan on opening.
                                 onRecovery = { alias: String -> hostDetail.open(alias); Unit }
                                     .takeIf { (credentials.canWrite && hostCaps.restoreSessions) || hostCaps.discoverLost },
+                                // Only where the hub lists the job to this pairing; the tap opens the review, not the install.
+                                onInstallAgent = { alias: String -> installs.open(alias) }
+                                    .takeIf { credentials.canWrite && hostCaps.installAgent },
                             ),
                         )
                     } else {
@@ -1293,6 +1336,16 @@ private fun FleetRoute(
                                 onDismissError = hostDetail::dismissError,
                             ),
                         )
+                    }
+                    val installState by installs.state.collectAsState()
+                    val installHandlers = remember(installs) {
+                        AgentInstallHandlers(onInstall = { installs.install() }, onClose = installs::close, onDismissError = installs::dismissError)
+                    }
+                    if (installState.reviewing) InstallAgentSheet(installState, installHandlers)
+                    if (installState.installing) {
+                        // Back leaves the install's screen first; the job runs on the hub either way.
+                        BackHandler(enabled = installState.installing) { installs.close() }
+                        InstallingScreen(installState, installHandlers)
                     }
                 }
                 Screen.Inbox -> {
