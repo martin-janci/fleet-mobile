@@ -71,37 +71,3 @@ data class AccountRow(
 ) {
     val label: String get() = nickname?.takeIf { it.isNotBlank() } ?: displayName?.takeIf { it.isNotBlank() } ?: email ?: uuid.take(8)
 }
-
-/** One limit window of a subscription: how much of it is used (0–100) and when it starts over. */
-@Serializable
-data class LimitWindow(
-    val utilization: Double = 0.0,
-    @SerialName("resets_at") val resetsAt: Long? = null,
-)
-
-/** A subscription's limit windows, each absent where the account has none. */
-@Serializable
-data class AccountLimits(
-    @SerialName("five_hour") val fiveHour: LimitWindow? = null,
-    @SerialName("seven_day") val sevenDay: LimitWindow? = null,
-    @SerialName("seven_day_opus") val sevenDayOpus: LimitWindow? = null,
-    @SerialName("seven_day_sonnet") val sevenDaySonnet: LimitWindow? = null,
-)
-
-/**
- * `account_usage`: an account's last read of its 5-hour and weekly limits,
- * as the hub polls them on a host. [status] is the outcome of the latest
- * try (`ok`, `rate_limited`, `login_expired`, …); [usage] is the last good
- * read and may be older than a failed try.
- */
-@Serializable
-data class AccountUsageSnapshot(
-    @SerialName("account_uuid") val accountUuid: String,
-    val usage: AccountLimits? = null,
-    val subscription: String? = null,
-    @SerialName("fetched_at") val fetchedAt: Long? = null,
-    @SerialName("source_host") val sourceHost: String? = null,
-    val status: String = "never_fetched",
-    val detail: String? = null,
-    @SerialName("next_try_at") val nextTryAt: Long = 0,
-)
