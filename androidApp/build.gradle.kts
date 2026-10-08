@@ -96,5 +96,7 @@ dependencies {
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.compose.ui.test.junit4)
+    // A chat form's spec is JSON (MobileControlTest builds one).
+    androidTestImplementation(libs.kotlinx.serialization.json)
     debugImplementation(libs.compose.ui.test.manifest)
 }
