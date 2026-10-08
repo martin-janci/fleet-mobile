@@ -86,7 +86,31 @@ fun NewSessionScreen(
     tools: ProjectToolsUiState = ProjectToolsUiState(),
     toolHandlers: ProjectToolsHandlers = ProjectToolsHandlers(),
     onSelectWorktree: (Long?) -> Unit = {},
+    /** The New navigation's three-step wizard ([NewSessionWizard]) instead of the long form. */
+    wizard: Boolean = false,
 ) {
+    if (wizard) {
+        NewSessionWizard(
+            state = state,
+            onBack = onBack,
+            onSelectHost = onSelectHost,
+            onProjectQuery = onProjectQuery,
+            onSelectProject = onSelectProject,
+            onNewWorktree = onNewWorktree,
+            onBranchChange = onBranchChange,
+            onBaseBranchChange = onBaseBranchChange,
+            onFriendlyNameChange = onFriendlyNameChange,
+            onCreate = onCreate,
+            onDismissError = onDismissError,
+            multiStart = multiStart,
+            onStartBackground = onStartBackground,
+            tools = tools,
+            toolHandlers = toolHandlers,
+            onSelectWorktree = onSelectWorktree,
+            modifier = modifier,
+        )
+        return
+    }
     if (tools.addingOn != null) AddProjectSheet(tools, toolHandlers)
     tools.pendingCreate?.let { p ->
         AlertDialog(
@@ -397,7 +421,7 @@ private fun Hint(text: String) {
  * `feat/x` or "corrects" a repo name is a silent edit to what reaches the hub.
  * The Pair screen and the prompt box turn the same two things off.
  */
-private val IDENTIFIER_KEYBOARD = KeyboardOptions(
+internal val IDENTIFIER_KEYBOARD = KeyboardOptions(
     capitalization = KeyboardCapitalization.None,
     autoCorrectEnabled = false,
     imeAction = ImeAction.Next,
@@ -405,7 +429,7 @@ private val IDENTIFIER_KEYBOARD = KeyboardOptions(
 
 /** A background agent: a name (optional — the prompt names it otherwise) and the task it starts on. */
 @Composable
-private fun BackgroundAgentDialog(host: String, onStart: (String, String) -> Unit, onDismiss: () -> Unit) {
+internal fun BackgroundAgentDialog(host: String, onStart: (String, String) -> Unit, onDismiss: () -> Unit) {
     var name by remember { mutableStateOf("") }
     var prompt by remember { mutableStateOf("") }
     AlertDialog(
@@ -449,7 +473,7 @@ data class ProjectToolsHandlers(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddProjectSheet(tools: ProjectToolsUiState, handlers: ProjectToolsHandlers) {
+internal fun AddProjectSheet(tools: ProjectToolsUiState, handlers: ProjectToolsHandlers) {
     var url by remember { mutableStateOf("") }
     var owner by remember { mutableStateOf("") }
     var repo by remember { mutableStateOf("") }

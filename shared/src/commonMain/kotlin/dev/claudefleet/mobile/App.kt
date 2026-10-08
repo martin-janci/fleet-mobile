@@ -837,6 +837,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         callScope = scope,
                         onCreated = nav::created,
                         onBack = { nav.back() },
+                        wizard = layout == PhoneLayout.New,
                     )
                 }
                 is Screen.Session -> key(current.id) {
@@ -1199,6 +1200,7 @@ private fun NewSessionRoute(
     callScope: CoroutineScope,
     onCreated: (Long) -> Unit,
     onBack: () -> Unit,
+    wizard: Boolean = false,
 ) {
     val scope = rememberWorkScope()
     val vm = remember(repository, scope) {
@@ -1253,6 +1255,7 @@ private fun NewSessionRoute(
             onOpen = vm::openStarted,
             onDone = vm::dismissResult,
         ),
+        wizard = wizard,
     )
 }
 
