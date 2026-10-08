@@ -2,7 +2,7 @@ package dev.claudefleet.mobile.net
 
 /**
  * The hub wire-contract revisions this build understands (up to claude-fleet
- * revision 8). A hub
+ * revision 9). A hub
  * outside the range is refused the way the desktop refuses it: the banner
  * says which side is behind, and no row event from that hub is applied.
  *
@@ -33,6 +33,12 @@ package dev.claudefleet.mobile.net
  * tools; this app calls none of them, and M1's new `SessionRow` fields
  * (`owner_person_id`, `visibility`) are additive, so a revision-8 hub is
  * safe here. Left at 7, it refused the 0.4.8 hub as "too old" (2026-10-05).
+ * Revision 9 added chat forms: the `ask` tool (an agent opens a form in its
+ * session's chat; a person answers it) becomes a hub tool the desktop routes
+ * `list_forms` / `get_form` / `answer_form` / `decline_form` to, and
+ * `SessionRow` gains `pending_form`. This app calls none of those yet and
+ * `ignoreUnknownKeys` absorbs the new field, so a revision-9 hub is safe here;
+ * the form card on the phone is its own change.
  *
  * [MIN_HUB_CONTRACT] does NOT mirror the desktop's minimum. The desktop
  * raised its own to 3 because a pre-3 hub would silently misperform
@@ -43,7 +49,7 @@ package dev.claudefleet.mobile.net
  * upgraded: this is the phone's own floor, not a copy of the desktop's.
  */
 const val MIN_HUB_CONTRACT: Int = 0
-const val MAX_HUB_CONTRACT: Int = 8
+const val MAX_HUB_CONTRACT: Int = 9
 
 /**
  * What a `contract` field that cannot be read as a revision counts as.
