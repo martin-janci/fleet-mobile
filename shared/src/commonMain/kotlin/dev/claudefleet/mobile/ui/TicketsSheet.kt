@@ -43,6 +43,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.ResumeCandidate
+import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.ui.kit.PhoneRow
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.TicketFacetId
 import dev.claudefleet.mobile.model.TicketList
@@ -97,7 +99,12 @@ data class TicketsHandlers(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TicketsSheet(state: TicketsUiState, handlers: TicketsHandlers) {
+fun TicketsSheet(
+    state: TicketsUiState,
+    handlers: TicketsHandlers,
+    /** The New layout (redesign 14.15): each ticket says what its sessions are doing, from their rows. Null keeps Classic's row. */
+    rowOf: ((Long) -> SessionRow?)? = null,
+) {
     state.confirmResume?.let { ResumeConfirmDialog(it, handlers) }
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
         if (state.filtersOpen) {
@@ -143,7 +150,7 @@ fun TicketsSheet(state: TicketsUiState, handlers: TicketsHandlers) {
                 state.found?.let { found ->
                     item(key = "found") { SectionTitle("Found") }
                     item(key = "found-${found.id}") {
-                        TicketRow(found, state.selected?.ticket?.id == found.id, state.ticketOrgs[found.id], handlers)
+                        TicketRow(found, state.selected?.ticket?.id == found.id, state.ticketOrgs[found.id], handlers, rowOf)
                     }
                     state.selected?.takeIf { it.ticket.id == found.id }?.let { detail ->
                         item(key = "found-actions-${found.id}") { TicketActions(detail, state.busy, handlers) }
@@ -170,7 +177,7 @@ fun TicketsSheet(state: TicketsUiState, handlers: TicketsHandlers) {
                     // down or off the screen.
                     for (ticket in section.tickets) {
                         item(key = "${section.view}-${ticket.id}") {
-                            TicketRow(ticket, state.selected?.ticket?.id == ticket.id, state.ticketOrgs[ticket.id], handlers)
+                            TicketRow(ticket, state.selected?.ticket?.id == ticket.id, state.ticketOrgs[ticket.id], handlers, rowOf)
                         }
                         state.selected?.takeIf { it.ticket.id == ticket.id }?.let { detail ->
                             item(key = "${section.view}-actions-${ticket.id}") { TicketActions(detail, state.busy, handlers) }
@@ -355,7 +362,20 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
-private fun TicketRow(ticket: Ticket, selected: Boolean, org: String?, handlers: TicketsHandlers) {
+private fun TicketRow(ticket: Ticket, selected: Boolean, org: String?, handlers: TicketsHandlers, rowOf: ((Long) -> SessionRow?)? = null) {
+    if (rowOf != null) {
+        val line = ticketLine(ticket, org, rowOf)
+        PhoneRow(
+            title = listOfNotNull(ticket.key?.takeIf { it.isNotBlank() }, ticket.title.takeIf { it.isNotBlank() }).joinToString(" "),
+            line = line.line,
+            word = line.word,
+            lead = line.lead,
+            separator = " · ",
+            selected = selected,
+            onClick = { handlers.onSelect(if (selected) null else ticket) },
+        )
+        return
+    }
     WorkRow(
         label = ticket.label,
         title = ticket.title,
@@ -377,6 +397,28 @@ internal fun ticketRowLine(ticket: Ticket, org: String?): String = listOfNotNull
     if (ticket.liveSessionIds.isNotEmpty()) "live" else null,
     org,
 ).joinToString(" · ")
+
+/**
+ * A ticket's line on the New layout: the status words of its live sessions
+ * ("1 needs you · 1 working"), else "no session", then the tracker's status
+ * and the organisation.
+ */
+internal fun ticketLine(ticket: Ticket, org: String?, rowOf: (Long) -> SessionRow?): TaskLine {
+    val words = ticket.liveSessionIds.mapNotNull { id -> rowOf(id)?.let(::phoneWord) }
+    val counts = BAND_ORDER.filterNotNull().mapNotNull { w -> words.count { it == w }.takeIf { it > 0 }?.let { w to it } }
+    val lead = when {
+        counts.isNotEmpty() -> counts.joinToString(" · ") { (w, n) -> "$n ${w.label.lowercase()}" }
+        ticket.liveSessionIds.isNotEmpty() -> "${ticket.liveSessionIds.size} live"
+        else -> null
+    }
+    val rest = listOfNotNull(
+        ticket.statusName?.takeIf { it.isNotBlank() },
+        "no session".takeIf { ticket.liveSessionIds.isEmpty() },
+        "unavailable".takeIf { ticket.unavailable },
+        org,
+    )
+    return TaskLine(counts.firstOrNull()?.first, lead, rest.joinToString(" · "))
+}
 
 /** Open, Start here, or Resume with a host picker — only what the hub and the token allow. */
 @OptIn(ExperimentalLayoutApi::class)

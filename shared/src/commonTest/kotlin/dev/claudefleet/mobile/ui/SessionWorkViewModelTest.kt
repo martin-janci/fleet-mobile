@@ -196,6 +196,8 @@ internal class FakeWorkActions : WorkActions {
     var tidyAnswer = TidyReport()
     var reopenedAnswer: List<ReopenedWork> = emptyList()
     val applied = mutableListOf<List<TidyApplyItem>>()
+    /** Sessions whose tidy item the hub refuses, until the set changes. */
+    var tidyRefuse: Set<Long> = emptySet()
     var summaryAnswer = PastWorkSummary(key = "PAY-9", summary = "It fixed the refund rounding.")
 
     override suspend fun tidy(): TidyReport {
@@ -208,7 +210,10 @@ internal class FakeWorkActions : WorkActions {
     override suspend fun tidyApply(items: List<TidyApplyItem>): List<TidyApplyResult> {
         applied += items
         fail?.let { throw it }
-        return items.map { TidyApplyResult(sessionId = it.sessionId, action = it.action, ok = true) }
+        return items.map {
+            val refused = it.sessionId in tidyRefuse
+            TidyApplyResult(sessionId = it.sessionId, action = it.action, ok = !refused, error = if (refused) "mercury did not answer" else null)
+        }
     }
 
     override suspend fun dismissReopened(itemId: Long) {

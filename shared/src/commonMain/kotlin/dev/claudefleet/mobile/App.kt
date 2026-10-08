@@ -94,6 +94,8 @@ import dev.claudefleet.mobile.ui.FilesViewModel
 import dev.claudefleet.mobile.ui.rememberFileHandoff
 import dev.claudefleet.mobile.ui.MyWorkHandlers
 import dev.claudefleet.mobile.ui.MyWorkScreen
+import dev.claudefleet.mobile.ui.PhoneTidyHandlers
+import dev.claudefleet.mobile.ui.PhoneTidySheet
 import dev.claudefleet.mobile.ui.PhoneTaskHandlers
 import dev.claudefleet.mobile.ui.PhoneTaskScreen
 import dev.claudefleet.mobile.ui.PhoneReviewSheet
@@ -660,7 +662,7 @@ private fun FleetRoute(
             prefs = container.prefs,
         )
     }
-    val tidy = remember(repository, scope) { TidyViewModel(repository, container.workActions, scope, credentials.canWrite) }
+    val tidy = remember(repository, scope) { TidyViewModel(repository, container.workActions, scope, credentials.canWrite, preselect = { nav.layout.value == PhoneLayout.Classic }) }
     val tidyState by tidy.state.collectAsState()
     val missions = remember(repository, scope) { MissionsViewModel(repository, container.missionActions, scope, credentials.canWrite) }
     val missionsState by missions.state.collectAsState()
@@ -975,6 +977,7 @@ private fun FleetRoute(
                         )
                     }
                     if (ticketsState.open) {
+                        val ticketRows by repository.sessions.collectAsState()
                         TicketsSheet(
                             state = ticketsState,
                             handlers = TicketsHandlers(
@@ -1001,6 +1004,7 @@ private fun FleetRoute(
                                 onClearAll = tickets::clearAll,
                                 onCycleSort = tickets::cycleSort,
                             ),
+                            rowOf = if (layout == PhoneLayout.New) ({ id -> ticketRows.firstOrNull { it.id == id } }) else null,
                         )
                     }
                 }
@@ -1564,18 +1568,24 @@ private fun FleetRoute(
                 )
             }
             if (tidyState.open) {
-                TidySheet(
-                    state = tidyState,
-                    handlers = TidyHandlers(
-                        onClose = tidy::close,
-                        onToggle = tidy::toggle,
-                        onChoose = tidy::choose,
-                        onApply = { tidy.apply() },
-                        onOpenSession = { id -> tidy.close(); nav.openFrom(id, SessionsSheet.Tidy) },
-                        onDismissReopened = { tidy.dismissReopened(it) },
-                        onDismissError = tidy::dismissError,
-                    ),
+                val tidyHandlers = TidyHandlers(
+                    onClose = tidy::close,
+                    onToggle = tidy::toggle,
+                    onChoose = tidy::choose,
+                    onApply = { tidy.apply() },
+                    onOpenSession = { id -> tidy.close(); nav.openFrom(id, SessionsSheet.Tidy) },
+                    onDismissReopened = { tidy.dismissReopened(it) },
+                    onDismissError = tidy::dismissError,
                 )
+                // New (redesign 14.15): nothing ticked, the outcome per session with Undo and Retry.
+                if (layout == PhoneLayout.New) {
+                    PhoneTidySheet(
+                        state = tidyState,
+                        handlers = PhoneTidyHandlers(tidy = tidyHandlers, onUndo = { tidy.undo(it) }, onRetry = { tidy.retry(it) }),
+                    )
+                } else {
+                    TidySheet(state = tidyState, handlers = tidyHandlers)
+                }
             }
             if (missionsState.open) {
                 MissionsSheet(

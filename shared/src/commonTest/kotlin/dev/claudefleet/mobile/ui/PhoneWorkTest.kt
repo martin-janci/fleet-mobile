@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.model.LinkState
 import dev.claudefleet.mobile.model.PastWorkSummary
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.TaskCounts
+import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.WorkTask
 import dev.claudefleet.mobile.model.WorkTaskLink
 import dev.claudefleet.mobile.ui.kit.StatusWord
@@ -146,5 +147,19 @@ class PhoneWorkTest {
     fun the_bulk_action_names_only_ordinary_suggestions() {
         assertEquals("Link the 1 ordinary suggestion", linkAllLabel(1))
         assertEquals("Link the 3 ordinary suggestions", linkAllLabel(3))
+    }
+
+    /** 14.15: a ticket in the Tickets sheet says what its sessions are doing, or that it has none. */
+    @Test
+    fun a_ticket_says_what_its_sessions_are_doing() {
+        val rows = mapOf(1L to row(1, "blocked"), 2L to row(2, "working"))
+        val busy = ticketLine(Ticket(id = 1, key = "FLEET-142", statusName = "In Progress", liveSessionIds = listOf(1, 2)), null, rows::get)
+        assertEquals(StatusWord.NEEDS_YOU, busy.word)
+        assertEquals("1 needs you · 1 working", busy.lead)
+        assertEquals("In Progress", busy.line)
+
+        val idle = ticketLine(Ticket(id = 2, key = "FLEET-150", statusName = "To Do"), "Personal", rows::get)
+        assertNull(idle.lead)
+        assertEquals("To Do · no session · Personal", idle.line)
     }
 }

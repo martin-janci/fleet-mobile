@@ -157,4 +157,84 @@ class TidyTest {
         assertEquals("API work (E_BUSY: dirty)", tidyFailureLine(5, "E_BUSY: dirty", "kill", listOf(named)))
         assertEquals("a session no longer listed (resume or expire)", tidyFailureLine(9, null, "resume_or_expire", listOf(named)))
     }
+
+    // ── The New layout (redesign 14.15, MobileTidyTickets) ──
+
+    @Test
+    fun the_new_layout_opens_with_nothing_ticked() = runTest {
+        val work = FakeWorkActions()
+        work.tidyAnswer = TidyReport(candidates = listOf(linkedDone, merged))
+        val vm = TidyViewModel(TidyFleet(tools), work, backgroundScope, canWrite = true, preselect = { false })
+        vm.open().join()
+        runCurrent()
+        assertEquals(emptySet(), vm.state.value.ticked)
+        // Nothing ticked, nothing sent.
+        vm.apply().join()
+        runCurrent()
+        assertTrue(work.applied.isEmpty())
+    }
+
+    @Test
+    fun undo_restores_every_archived_row_the_result_lists() = runTest {
+        val work = FakeWorkActions()
+        val other = merged.copy(sessionId = 6, linkId = 60, tmuxName = "verify-email")
+        work.tidyAnswer = TidyReport(candidates = listOf(merged.copy(tmuxName = "background-review"), other, unlinkedIdle))
+        val vm = TidyViewModel(TidyFleet(tools), work, backgroundScope, canWrite = true, preselect = { false })
+        vm.open().join()
+        runCurrent()
+        vm.toggle(4)
+        vm.toggle(6)
+        vm.choose(2, TidyChoice.SafeKill)
+        runCurrent()
+        work.tidyAnswer = TidyReport(candidates = emptyList())
+        vm.apply().join()
+        runCurrent()
+        val results = vm.state.value.results!!
+        assertEquals("✓ Archived 2, killed 1", tidyDoneLine(results, vm.state.value.undone))
+        // Names survive the re-read that dropped the rows.
+        assertEquals("background-review", vm.state.value.resultNames[4])
+
+        for (r in results.filter { it.action == "archive" }) {
+            vm.undo(r.sessionId)!!.join()
+            runCurrent()
+        }
+        assertEquals(
+            listOf(TidyApplyItem(sessionId = 4, action = "unarchive", linkId = 40), TidyApplyItem(sessionId = 6, action = "unarchive", linkId = 60)),
+            work.applied.drop(1).flatten(),
+        )
+        assertEquals(setOf(4L, 6L), vm.state.value.undone)
+        assertEquals("✓ Killed 1", tidyDoneLine(vm.state.value.results!!, vm.state.value.undone))
+        // A kill has no Undo; an undone archive is not undone twice.
+        assertEquals(null, vm.undo(2))
+        assertEquals(null, vm.undo(4))
+    }
+
+    @Test
+    fun retry_sends_a_refused_choice_again_and_takes_the_new_answer() = runTest {
+        val work = FakeWorkActions()
+        work.tidyAnswer = TidyReport(candidates = listOf(unlinkedIdle.copy(tmuxName = "hosts-spike")))
+        work.tidyRefuse = setOf(2)
+        val vm = TidyViewModel(TidyFleet(tools), work, backgroundScope, canWrite = true, preselect = { false })
+        vm.open().join()
+        runCurrent()
+        vm.choose(2, TidyChoice.SafeKill)
+        vm.apply().join()
+        runCurrent()
+        val failed = vm.state.value.results!!.single()
+        assertFalse(failed.ok)
+        assertEquals("Could not kill: mercury did not answer", tidyOutcomeLine(failed, undone = false))
+
+        work.tidyRefuse = emptySet()
+        vm.retry(2)!!.join()
+        runCurrent()
+        assertEquals(listOf(TidyApplyItem(sessionId = 2, action = "safe_kill")), work.applied.last())
+        assertTrue(vm.state.value.results!!.single().ok)
+        assertEquals(null, vm.retry(2), "nothing left to retry")
+    }
+
+    @Test
+    fun a_candidate_says_its_rule_its_ticket_and_how_long_it_idled() {
+        val c = TidyCandidate(sessionId = 7, reason = "done_idle", key = "FLEET-142", itemStatus = "In Review", idleSecs = 2 * 86_400)
+        assertEquals("Done and idle · FLEET-142 is In Review · idle 2 d", tidyReasonLine(c))
+    }
 }
