@@ -35,10 +35,10 @@ import dev.claudefleet.mobile.ui.theme.OrbitTokens
  * One session's tabs on the New bar (redesign 14.4), the desktop's tabs on a
  * phone: the conversation, the agent's own screen named after the agent, the
  * worktree (which replaces the separate worktree screen) and Details (which
- * replaces the Details sheet). Shell terminals are step 14.14's and join here
- * then; on the Classic bar none of this is drawn.
+ * replaces the Details sheet), and the shells beside the agent (14.14). On
+ * the Classic bar none of this is drawn.
  */
-enum class SessionTab { Conversation, Agent, Files, Details }
+enum class SessionTab { Conversation, Agent, Terminals, Files, Details }
 
 /**
  * The agent tab's name: the agent's, never "Terminal". Every session is a
@@ -56,6 +56,7 @@ const val DEFAULT_AGENT_NAME: String = "Claude Code"
 fun SessionTab.label(agent: String): String = when (this) {
     SessionTab.Conversation -> "Conversation"
     SessionTab.Agent -> agent
+    SessionTab.Terminals -> terminalsTabLabel(0)
     SessionTab.Files -> "Files"
     SessionTab.Details -> "Details"
 }
@@ -64,9 +65,17 @@ fun SessionTab.label(agent: String): String = when (this) {
  * The tabs a session shows, in the desktop's order. Files only where the hub
  * serves a worktree at all (`repo_changes`, `repo_log` or `repo_tree`): an
  * empty tab that can only say "this hub has none" is a tab nobody needs.
+ * Terminals likewise only where [terminals]: the hub can start a shell here,
+ * or one is already running beside the session.
  */
-fun sessionTabs(hasWorktree: Boolean): List<SessionTab> =
-    SessionTab.entries.filter { it != SessionTab.Files || hasWorktree }
+fun sessionTabs(hasWorktree: Boolean, terminals: Boolean = false): List<SessionTab> =
+    SessionTab.entries.filter {
+        when (it) {
+            SessionTab.Files -> hasWorktree
+            SessionTab.Terminals -> terminals
+            else -> true
+        }
+    }
 
 /**
  * What the session screen needs to draw its tabs: which one is showing, how to
@@ -81,6 +90,9 @@ class SessionTabsHost(
     val onSelect: (SessionTab) -> Unit,
     val files: @Composable () -> Unit = {},
     val details: @Composable () -> Unit = {},
+    val terminals: @Composable () -> Unit = {},
+    /** How many shells run beside the session, for the tab's label. */
+    val terminalCount: Int = 0,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -96,7 +108,10 @@ internal fun SessionTabRow(host: SessionTabsHost) {
             Tab(
                 selected = tab == host.selected,
                 onClick = { host.onSelect(tab) },
-                text = { Text(tab.label(host.agent), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                text = {
+                    val words = if (tab == SessionTab.Terminals) terminalsTabLabel(host.terminalCount) else tab.label(host.agent)
+                    Text(words, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                },
                 selectedContentColor = Fleet.colors.fg,
                 unselectedContentColor = Fleet.colors.fgMuted,
             )

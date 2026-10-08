@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
 
 /**
@@ -65,18 +66,52 @@ internal fun adjacentTurn(firstVisibleIndex: Int, turnCount: Int, delta: Int): I
     return target
 }
 
+/** What Find looks through (redesign 14.14): the New bar's scopes; the Classic bar finds in [Everything]. */
+enum class FindScope(val label: String) {
+    Everything("Everything"),
+    Mine("My messages"),
+    Tools("Tools"),
+    Errors("Errors"),
+}
+
 /**
  * The rows (newest first, as the list holds them) whose prompt or reply text
  * holds [query], case-insensitively — what Find in the conversation steps
- * through. Tool rows are left out: their one-line summaries are not what a
- * person is looking for, and their details are not on the phone until opened.
+ * through. Tool rows are left out of [FindScope.Everything]: their one-line
+ * summaries are not what a person is usually looking for, and their details
+ * are not on the phone until opened.
+ *
+ * The other scopes narrow or widen it: [FindScope.Mine] reads only the
+ * prompts; [FindScope.Tools] only the tool rows (a call's summary and target,
+ * a `!` command and its output); [FindScope.Errors] only what failed, and
+ * with no query lists every turn where something did.
  */
-internal fun findTurns(rows: List<TurnRow>, query: String): List<Int> {
+internal fun findTurns(rows: List<TurnRow>, query: String, scope: FindScope = FindScope.Everything): List<Int> {
     val q = query.trim().lowercase()
-    if (q.isEmpty()) return emptyList()
+    if (q.isEmpty() && scope != FindScope.Errors) return emptyList()
+    fun has(text: String?) = text != null && text.lowercase().contains(q)
     return rows.indices.filter { i ->
         val turn = rows[i].turn
-        turn.prompt.orEmpty().lowercase().contains(q) ||
-            turn.items.any { it is dev.claudefleet.mobile.model.ConvItem.Text && it.text.lowercase().contains(q) }
+        when (scope) {
+            FindScope.Everything -> has(turn.prompt) || turn.items.any { it is ConvItem.Text && has(it.text) }
+            FindScope.Mine -> has(turn.prompt)
+            FindScope.Tools -> turn.items.any { toolText(it).any(::has) }
+            FindScope.Errors -> turn.items.any { failed(it) && (q.isEmpty() || toolText(it).any(::has)) }
+        }
     }
+}
+
+/** What a tool-ish row says, for [FindScope.Tools] and [FindScope.Errors]. */
+private fun toolText(item: ConvItem): List<String?> = when (item) {
+    is ConvItem.Tool -> listOf(item.summary, item.target, item.name)
+    is ConvItem.Bash -> listOf(item.command, item.output)
+    is ConvItem.Subagent -> listOf(item.label, item.result)
+    else -> emptyList()
+}
+
+private fun failed(item: ConvItem): Boolean = when (item) {
+    is ConvItem.Tool -> item.error
+    is ConvItem.Subagent -> item.error
+    // A `!` command's stderr is not a failure: plenty of tools write progress there.
+    else -> false
 }

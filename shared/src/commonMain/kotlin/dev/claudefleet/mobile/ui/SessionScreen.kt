@@ -42,6 +42,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -75,6 +76,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -146,6 +148,7 @@ import dev.claudefleet.mobile.ui.components.WorkChip
 import dev.claudefleet.mobile.ui.components.contextIsTight
 import dev.claudefleet.mobile.ui.components.statusStripText
 import dev.claudefleet.mobile.ui.theme.FleetIcons
+import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.data.ConnectionStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -291,6 +294,11 @@ fun SessionScreen(
     onRetryNotSent: () -> Unit = {},
     onEditNotSent: () -> Unit = {},
     onRetryLastTurn: (String) -> Unit = {},
+    /** ⋮ Archive (redesign 14.14); null where this hub, pairing or bar has none. */
+    onArchive: (() -> Unit)? = null,
+    /** One more thing that went wrong, drawn with the screen's other banners (Archive's refusal). */
+    notice: Friendly? = null,
+    onDismissNotice: () -> Unit = {},
 ) {
     // On the New bar the result sits in the conversation instead (RepairResultCard).
     if (tabs == null) state.repair?.let { RepairReportDialog(it, onDismissRepair) }
@@ -378,7 +386,9 @@ fun SessionScreen(
     var findOpen by remember { mutableStateOf(false) }
     var findQuery by remember { mutableStateOf("") }
     var findAt by remember { mutableStateOf(0) }
-    val matches = remember(rows, findQuery) { findTurns(rows, findQuery) }
+    // The New bar's scopes (redesign 14.14); the Classic bar always finds in Everything.
+    var findScope by remember { mutableStateOf(FindScope.Everything) }
+    val matches = remember(rows, findQuery, findScope) { findTurns(rows, findQuery, findScope) }
     fun showMatch(at: Int) {
         if (matches.isEmpty()) return
         findAt = at.mod(matches.size)
@@ -551,8 +561,16 @@ fun SessionScreen(
                         onDismissGhost = onDismissGhost,
                         onReview = onReview,
                         onRepair = onRepair,
-                        onFind = { findOpen = !findOpen; if (!findOpen) findQuery = "" },
+                        onFind = { findOpen = !findOpen; if (!findOpen) { findQuery = ""; findScope = FindScope.Everything } },
                         onMove = onMove,
+                        orbit = tabs?.let {
+                            OrbitMenu(
+                                onArchive = onArchive,
+                                onTicket = workHandlers.onOpen.takeIf { work.chip != null || work.canSetWork || work.canNameWork },
+                                ticketKey = work.chip?.key,
+                                onTasks = tasksHandlers.onOpen.takeIf { tasks.available },
+                            )
+                        },
                     )
                     // A tap unfolds it: out of immersive, out of the read-back,
                     // and — when typing is what folded it — the keyboard down.
@@ -568,6 +586,8 @@ fun SessionScreen(
                 }
             }
             if (findOpen) {
+                // A new scope starts from its newest match, once `matches` holds that scope's.
+                LaunchedEffect(findScope) { findAt = 0; showMatch(0) }
                 FindBar(
                     query = findQuery,
                     at = if (matches.isEmpty()) 0 else findAt + 1,
@@ -576,12 +596,15 @@ fun SessionScreen(
                     // Older is further up the list: a higher index.
                     onOlder = { showMatch(findAt + 1) },
                     onNewer = { showMatch(findAt - 1) },
-                    onClose = { findOpen = false; findQuery = "" },
+                    onClose = { findOpen = false; findQuery = ""; findScope = FindScope.Everything },
+                    scope = findScope.takeIf { tabs != null },
+                    onScope = { findScope = it },
                 )
             }
             ConnectionBanner(status, state.hubReachable)
             // A send's failure is drawn by the composer, where the thumb is.
             if (!state.errorFromSend) ErrorBanner(state.error, onDismiss = onDismissError)
+            ErrorBanner(notice, onDismiss = onDismissNotice)
             // Behind an open sheet a banner cannot be read: the sheet shows it instead.
             if (!work.sheetOpen) ErrorBanner(work.error, onDismiss = workHandlers.onDismissError)
             if (work.sheetOpen) WorkTicketSheet(work, workHandlers)
@@ -600,6 +623,7 @@ fun SessionScreen(
                             onCapture = onShowTerminal,
                             onAnswer = onAnswer,
                         )
+                        SessionTab.Terminals -> tabs.terminals()
                         SessionTab.Files -> tabs.files()
                         SessionTab.Details -> tabs.details()
                         SessionTab.Conversation -> Unit
@@ -1146,6 +1170,7 @@ private fun SessionBar(
     onRepair: () -> Unit,
     onFind: () -> Unit,
     onMove: (() -> Unit)?,
+    orbit: OrbitMenu? = null,
 ) {
     val busy = state.loading || state.refreshing
     var pickingConversation by remember { mutableStateOf(false) }
@@ -1219,6 +1244,7 @@ private fun SessionBar(
                     onRepair = onRepair,
                     onSendCommand = onSendCommand,
                     onMove = onMove,
+                    orbit = orbit,
                 )
             }
         },
@@ -1365,6 +1391,8 @@ private fun SessionOverflowMenu(
     onRepair: () -> Unit = {},
     onSendCommand: (String) -> Unit = {},
     onMove: (() -> Unit)? = null,
+    /** The New bar's written-out menu (redesign 14.14); null keeps the Classic one. */
+    orbit: OrbitMenu? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     var picking by remember { mutableStateOf<String?>(null) }
@@ -1391,7 +1419,69 @@ private fun SessionOverflowMenu(
     val hasSteer = state.canSendQuick || state.canReview
     val hasUpkeep = (onMove != null && manage) || state.canRepair || (manage && state.canRestart) ||
         state.canRecreate || state.canDismissGhost
-    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+    val clipboard = LocalClipboardManager.current
+    if (orbit != null) {
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            val session = state.session
+            val items = orbitMenuItems(
+                OrbitMenuFacts(
+                    manage = manage,
+                    hostAlias = session?.hostAlias,
+                    tmuxName = session?.tmuxName,
+                    ticketKey = orbit.ticketKey,
+                    ticket = orbit.onTicket != null || onSetWork != null,
+                    tasks = orbit.onTasks != null,
+                    move = onMove != null && manage,
+                    repair = state.canRepair,
+                    recreate = state.canRecreate,
+                    ghost = state.ghost,
+                    dismissGhost = state.canDismissGhost,
+                    restart = manage && state.canRestart,
+                    steer = state.canSendQuick,
+                    review = state.canReview,
+                    archive = orbit.onArchive != null,
+                    kill = manage && state.canKill,
+                    worktree = onRepo != null,
+                ),
+            )
+            for ((i, item) in items.withIndex()) {
+                if (i > 0 && items[i - 1].group != item.group) HorizontalDivider()
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(item.label, color = if (item.danger) Fleet.colors.statusFailed else Fleet.colors.fg)
+                            item.detail?.let { Text(it, style = Fleet.type.textXs, color = Fleet.colors.fgMuted) }
+                        }
+                    },
+                    enabled = actionable || !item.writes,
+                    modifier = Modifier.testTag(ORBIT_MENU_TAG + item.id.name),
+                    onClick = {
+                        expanded = false
+                        when (item.id) {
+                            OrbitItem.Rename -> showRename = true
+                            OrbitItem.Ticket -> (orbit.onTicket ?: orbit.onTasks)?.invoke() ?: run { showSetWork = true }
+                            OrbitItem.Move -> onMove?.invoke()
+                            OrbitItem.Repair -> showRepairConfirm = true
+                            OrbitItem.Recreate -> showRecreateConfirm = true
+                            OrbitItem.Restart -> showRestartConfirm = true
+                            OrbitItem.DismissGhost -> showDismissGhostConfirm = true
+                            OrbitItem.CopyAttach -> session?.let { clipboard.setText(AnnotatedString(tmuxAttachCommand(it.tmuxName))) }
+                            OrbitItem.Details -> onDetails()
+                            OrbitItem.Worktree -> onRepo?.invoke()
+                            OrbitItem.Model -> picking = "model"
+                            OrbitItem.Effort -> picking = "effort"
+                            OrbitItem.Review -> showReview = true
+                            OrbitItem.Tags -> showTags = true
+                            OrbitItem.Archive -> orbit.onArchive?.invoke()
+                            OrbitItem.Retire -> showSafeKillConfirm = true
+                            OrbitItem.Kill -> showKillConfirm = true
+                        }
+                        Unit
+                    },
+                )
+            }
+        }
+    } else DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
         DropdownMenuItem(text = { Text("Details") }, onClick = { expanded = false; onDetails() })
         if (onRepo != null) DropdownMenuItem(text = { Text("Worktree") }, onClick = { expanded = false; onRepo() })
         if (hasWork) {
@@ -3040,39 +3130,61 @@ private fun FindBar(
     onOlder: () -> Unit,
     onNewer: () -> Unit,
     onClose: () -> Unit,
+    /** The chosen scope on the New bar, whose chips sit under the field; null on the Classic bar. */
+    scope: FindScope? = null,
+    onScope: (FindScope) -> Unit = {},
 ) {
     // Opened to type into: the cursor is in the field, the keyboard up.
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-        Row(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextField(
-                value = query,
-                onValueChange = onQuery,
-                singleLine = true,
-                placeholder = { Text("Find in conversation") },
-                modifier = Modifier.weight(1f).focusRequester(focus),
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
-                colors = TextFieldDefaults.colors(
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                ),
-            )
-            if (query.isNotBlank()) {
-                Text(if (count == 0) "none" else "$at of $count", style = MaterialTheme.typography.labelMedium)
+        Column {
+            Row(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextField(
+                    value = query,
+                    onValueChange = onQuery,
+                    singleLine = true,
+                    placeholder = { Text("Find in conversation") },
+                    modifier = Modifier.weight(1f).focusRequester(focus),
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
+                    colors = TextFieldDefaults.colors(
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                    ),
+                )
+                if (query.isNotBlank() || scope == FindScope.Errors) {
+                    Text(if (count == 0) "none" else "$at of $count", style = MaterialTheme.typography.labelMedium)
+                }
+                IconButton(onClick = onOlder, enabled = count > 1) {
+                    Icon(FleetIcons.ArrowBack, contentDescription = "Older match", modifier = Modifier.rotate(90f))
+                }
+                IconButton(onClick = onNewer, enabled = count > 1) {
+                    Icon(FleetIcons.ArrowBack, contentDescription = "Newer match", modifier = Modifier.rotate(-90f))
+                }
+                IconButton(onClick = onClose) { Icon(FleetIcons.Close, contentDescription = "Close find") }
             }
-            IconButton(onClick = onOlder, enabled = count > 1) {
-                Icon(FleetIcons.ArrowBack, contentDescription = "Older match", modifier = Modifier.rotate(90f))
+            if (scope != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp).padding(bottom = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    for (s in FindScope.entries) {
+                        FilterChip(
+                            selected = s == scope,
+                            onClick = { onScope(s) },
+                            label = { Text(s.label) },
+                            modifier = Modifier.testTag(FIND_SCOPE_TAG + s.name),
+                        )
+                    }
+                }
             }
-            IconButton(onClick = onNewer, enabled = count > 1) {
-                Icon(FleetIcons.ArrowBack, contentDescription = "Newer match", modifier = Modifier.rotate(-90f))
-            }
-            IconButton(onClick = onClose) { Icon(FleetIcons.Close, contentDescription = "Close find") }
         }
     }
 }
+
+const val FIND_SCOPE_TAG = "find.scope."
 
 /** The chips a failed session shows in place of the quick replies: Retry (the last turn) and Show the error (the agent tab). */
 @Composable
