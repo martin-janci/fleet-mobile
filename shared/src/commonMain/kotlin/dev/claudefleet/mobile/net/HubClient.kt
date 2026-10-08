@@ -28,6 +28,9 @@ import dev.claudefleet.mobile.model.RestoreReport
 import dev.claudefleet.mobile.model.LostCandidate
 import dev.claudefleet.mobile.model.MultiStart
 import dev.claudefleet.mobile.model.OrgDetail
+import dev.claudefleet.mobile.model.MemberGrants
+import dev.claudefleet.mobile.model.MemberRemoved
+import dev.claudefleet.mobile.model.OrgMemberRow
 import dev.claudefleet.mobile.model.PagesBundle
 import dev.claudefleet.mobile.model.PairResult
 import dev.claudefleet.mobile.model.ProjectRow
@@ -1246,6 +1249,57 @@ class HubClient(
                 more()
             },
         ) { json.decodeFromJsonElement(DebugDevice.serializer(), it) }
+
+    // ---- org members (claude-fleet `org_admin`, company administration phase D) ----
+    //
+    // Only the member actions: the hub answers an org's admins (or the hub
+    // owner) and refuses anyone else, and an admin cannot change their own
+    // membership or the hub owner's. Nothing here pairs, binds or renames.
+
+    /** The org's live members, admins first. */
+    suspend fun orgMembers(orgId: Long): List<OrgMemberRow> =
+        memberCall("list_members", orgId) { json.decodeFromJsonElement(ListSerializer(OrgMemberRow.serializer()), it) }
+
+    /** Give [personId] [role] (`admin` / `member` / `viewer`) in [orgId]; answers the members after. */
+    suspend fun setOrgMember(orgId: Long, personId: Long, role: String): List<OrgMemberRow> =
+        memberCall("set_member", orgId, {
+            put("person_id", personId)
+            put("role", role)
+        }) { json.decodeFromJsonElement(ListSerializer(OrgMemberRow.serializer()), it) }
+
+    /** How many of [orgId]'s sessions are shared with [personId], to watch and to drive. */
+    suspend fun memberGrants(orgId: Long, personId: Long): MemberGrants =
+        memberCall("member_grants", orgId, { put("person_id", personId) }) { json.decodeFromJsonElement(MemberGrants.serializer(), it) }
+
+    /** Turn [personId]'s drive shares on [orgId]'s sessions into watch shares; answers how many. */
+    suspend fun narrowMemberGrants(orgId: Long, personId: Long): Int =
+        memberCall("narrow_member_grants", orgId, { put("person_id", personId) }) { count(it, "narrowed") }
+
+    /** Take [personId] out of [orgId]; their shares there go too unless [keepGrants]. */
+    suspend fun removeOrgMember(orgId: Long, personId: Long, keepGrants: Boolean): MemberRemoved =
+        memberCall("remove_member", orgId, {
+            put("person_id", personId)
+            if (keepGrants) put("keep_grants", true)
+        }) { json.decodeFromJsonElement(MemberRemoved.serializer(), it) }
+
+    private fun count(answer: JsonElement, key: String): Int =
+        ((answer as? JsonObject)?.get(key) as? JsonPrimitive)?.content?.toIntOrNull() ?: 0
+
+    private suspend fun <T> memberCall(
+        action: String,
+        orgId: Long,
+        more: JsonObjectBuilder.() -> Unit = {},
+        decode: (JsonElement) -> T,
+    ): T =
+        call(
+            "org_admin",
+            buildJsonObject {
+                put("action", action)
+                put("org_id", orgId)
+                more()
+            },
+            decode,
+        )
 
     // ---- the Work view (claude-fleet M14) ----
 

@@ -66,6 +66,8 @@ import dev.claudefleet.mobile.data.ProjectActions
 import dev.claudefleet.mobile.data.HubUsageActions
 import dev.claudefleet.mobile.data.CompanyActions
 import dev.claudefleet.mobile.data.HubCompanyActions
+import dev.claudefleet.mobile.data.HubMemberActions
+import dev.claudefleet.mobile.data.MemberActions
 import dev.claudefleet.mobile.data.UsageActions
 import dev.claudefleet.mobile.data.HubSessionDetailsActions
 import dev.claudefleet.mobile.data.HubWorkActions
@@ -120,6 +122,7 @@ import dev.claudefleet.mobile.ui.SessionTasksViewModel
 import dev.claudefleet.mobile.ui.TaskHandlers
 import dev.claudefleet.mobile.ui.TaskScreen
 import dev.claudefleet.mobile.ui.TaskViewModel
+import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.GroupRef
 import dev.claudefleet.mobile.ui.HostsScreen
 import dev.claudefleet.mobile.ui.OrbitFilesScreen
@@ -139,6 +142,9 @@ import dev.claudefleet.mobile.ui.OrbitUsageScreen
 import dev.claudefleet.mobile.ui.DECISIONS_PAGE
 import dev.claudefleet.mobile.ui.DecisionsHead
 import dev.claudefleet.mobile.ui.OrbitOrgsHandlers
+import dev.claudefleet.mobile.ui.MembersHandlers
+import dev.claudefleet.mobile.ui.MembersSheet
+import dev.claudefleet.mobile.ui.MembersViewModel
 import dev.claudefleet.mobile.ui.OrbitOrgsScreen
 import dev.claudefleet.mobile.ui.ProposedChangeCard
 import dev.claudefleet.mobile.ui.HostsViewModel
@@ -395,6 +401,7 @@ class AppContainer(
     val repoActions: RepoActions = HubRepoActions(session)
     val usageActions: UsageActions = HubUsageActions(session)
     val companyActions: CompanyActions = HubCompanyActions(session)
+    val memberActions: MemberActions = HubMemberActions(session)
     val hostActions: HostActions = HubHostActions(session)
     val projectActions: ProjectActions = HubProjectActions(session)
     val moveActions: MoveActions = HubMoveActions(session)
@@ -1230,6 +1237,8 @@ private fun FleetRoute(
                     // An org's detail is drawn inside this screen: back closes it first.
                     BackHandler(enabled = companyState.openId != null) { company.close() }
                     if (layout == PhoneLayout.New) {
+                        val members = remember(repository, scope) { MembersViewModel(repository, container.memberActions, scope, credentials.canWrite) }
+                        val membersState by members.state.collectAsState()
                         OrbitOrgsScreen(
                             state = companyState,
                             nowSeconds = epochSeconds(),
@@ -1240,8 +1249,23 @@ private fun FleetRoute(
                                 onDismissError = company::dismissError,
                                 onOpenSessions = { org -> sessions.showOrg(org); nav.select(Tab.Sessions) },
                                 onOpenHosts = { nav.openFromMore(Screen.Hosts) },
+                                onOpenMembers = { org: OrgDetail -> members.open(org); Unit }.takeIf { membersState.available },
                             ),
                         )
+                        if (membersState.open) {
+                            MembersSheet(
+                                state = membersState,
+                                nowSeconds = epochSeconds(),
+                                handlers = MembersHandlers(
+                                    onClose = { members.close(); company.refresh() },
+                                    onSetRole = { m, role -> members.setRole(m, role) },
+                                    onRemove = { members.askRemove(it) },
+                                    onConfirmRemove = { members.remove(it) },
+                                    onCancelRemove = members::cancelRemove,
+                                    onDismissError = members::dismissError,
+                                ),
+                            )
+                        }
                     } else {
                         CompanyScreen(
                             state = companyState,
