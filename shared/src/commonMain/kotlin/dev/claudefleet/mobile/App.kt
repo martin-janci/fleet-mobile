@@ -94,6 +94,10 @@ import dev.claudefleet.mobile.ui.FilesViewModel
 import dev.claudefleet.mobile.ui.rememberFileHandoff
 import dev.claudefleet.mobile.ui.MyWorkHandlers
 import dev.claudefleet.mobile.ui.MyWorkScreen
+import dev.claudefleet.mobile.ui.PhoneTaskHandlers
+import dev.claudefleet.mobile.ui.PhoneTaskScreen
+import dev.claudefleet.mobile.ui.PhoneReviewSheet
+import dev.claudefleet.mobile.ui.PhoneMyWorkScreen
 import dev.claudefleet.mobile.ui.MyWorkViewModel
 import dev.claudefleet.mobile.ui.ReviewHandlers
 import dev.claudefleet.mobile.ui.ReviewSheet
@@ -105,6 +109,10 @@ import dev.claudefleet.mobile.ui.TaskScreen
 import dev.claudefleet.mobile.ui.TaskViewModel
 import dev.claudefleet.mobile.model.GroupRef
 import dev.claudefleet.mobile.ui.HostsScreen
+import dev.claudefleet.mobile.ui.OrbitFilesScreen
+import dev.claudefleet.mobile.ui.OrbitHostsHandlers
+import dev.claudefleet.mobile.ui.OrbitHostsScreen
+import dev.claudefleet.mobile.ui.OrbitUsageScreen
 import dev.claudefleet.mobile.ui.HostsViewModel
 import dev.claudefleet.mobile.ui.MultiStartHandlers
 import dev.claudefleet.mobile.ui.ControlScreen
@@ -710,7 +718,7 @@ private fun FleetRoute(
     }
     val filesState by files.state.collectAsState()
     LaunchedEffect(filesState.available) { if (!filesState.available) nav.filesUnavailable() }
-    val hosts = remember(repository, scope) { HostsViewModel(repository, scope) }
+    val hosts = remember(repository, scope) { HostsViewModel(repository, scope, container.hostActions) }
     val settings = remember(container, scope) {
         SettingsViewModel(container.session, scope, container.appVersion, container.versionActions)
     }
@@ -1030,74 +1038,92 @@ private fun FleetRoute(
                         onDispose { myWork.detach() }
                     }
                     val reviewState by review.state.collectAsState()
-                    MyWorkScreen(
-                        state = workState,
-                        handlers = MyWorkHandlers(
-                            onOpenTask = nav::openTask,
-                            onRefresh = { myWork.refresh() },
-                            onReload = { myWork.reload() },
-                            onToggleSection = myWork::toggleSection,
-                            onLoadMore = { myWork.loadMore(it) },
-                            onToggleSearch = myWork::toggleSearch,
-                            onSetQuery = myWork::setQuery,
-                            onOpenFilters = { myWork.setFiltersOpen(true) },
-                            onCloseFilters = { myWork.setFiltersOpen(false) },
-                            onSetOrg = myWork::setOrg,
-                            onSetTracker = myWork::setTracker,
-                            onSetStatus = myWork::setStatus,
-                            onSetHas = myWork::setHas,
-                            onToggleMine = myWork::toggleMine,
-                            onToggleReview = myWork::toggleReview,
-                            onClearFilters = myWork::clearFilters,
-                            onClearFacet = myWork::clearFacet,
-                            onSetArchived = { myWork.setArchived(it) },
-                            onApplyView = myWork::applyView,
-                            onSaveView = { myWork.saveView(it) },
-                            onUpdateView = { myWork.updateView(it) },
-                            onDeleteView = { myWork.deleteView(it) },
-                            onOpenReview = if (reviewState.available) ({ review.open() }) else null,
-                            onOpenRules = if (workState.rulesAvailable) ({ myWork.openRules() }) else null,
-                            onCloseRules = myWork::closeRules,
-                            onDismissError = myWork::dismissError,
-                        ),
+                    val workHandlers = MyWorkHandlers(
+                        onOpenTask = nav::openTask,
+                        onRefresh = { myWork.refresh() },
+                        onReload = { myWork.reload() },
+                        onToggleSection = myWork::toggleSection,
+                        onLoadMore = { myWork.loadMore(it) },
+                        onToggleSearch = myWork::toggleSearch,
+                        onSetQuery = myWork::setQuery,
+                        onOpenFilters = { myWork.setFiltersOpen(true) },
+                        onCloseFilters = { myWork.setFiltersOpen(false) },
+                        onSetOrg = myWork::setOrg,
+                        onSetTracker = myWork::setTracker,
+                        onSetStatus = myWork::setStatus,
+                        onSetHas = myWork::setHas,
+                        onToggleMine = myWork::toggleMine,
+                        onToggleReview = myWork::toggleReview,
+                        onClearFilters = myWork::clearFilters,
+                        onClearFacet = myWork::clearFacet,
+                        onSetArchived = { myWork.setArchived(it) },
+                        onApplyView = myWork::applyView,
+                        onSaveView = { myWork.saveView(it) },
+                        onUpdateView = { myWork.updateView(it) },
+                        onDeleteView = { myWork.deleteView(it) },
+                        onOpenReview = if (reviewState.available) ({ review.open() }) else null,
+                        onOpenRules = if (workState.rulesAvailable) ({ myWork.openRules() }) else null,
+                        onCloseRules = myWork::closeRules,
+                        onDismissError = myWork::dismissError,
                     )
-                    if (reviewState.open) {
-                        ReviewSheet(
-                            state = reviewState,
-                            handlers = ReviewHandlers(
-                                onClose = review::close,
-                                onReload = { review.reload() },
-                                onLoadMore = { review.loadMore() },
-                                onConfirm = { review.confirm(it) },
-                                onReject = { review.reject(it) },
-                                onKeep = { review.keep(it) },
-                                onRemove = { review.remove(it) },
-                                onMakePrimary = { review.makePrimary(it) },
-                                onToggleChange = review::toggleChange,
-                                onChange = { item, alt -> review.change(item, alt) },
-                                onConfirmAll = { review.confirmAllShown() },
-                                onUndo = { review.undo() },
-                                onDismissUndo = review::dismissUndo,
-                                onDismissError = review::dismissError,
-                            ),
+                    // The New bar's Work (redesign 14.9): rows say what their
+                    // sessions are doing, and To review sits beside Mine.
+                    val workRows by repository.sessions.collectAsState()
+                    val workRowOf: (Long) -> dev.claudefleet.mobile.model.SessionRow? = { id -> workRows.firstOrNull { it.id == id } }
+                    if (layout == PhoneLayout.New) {
+                        val workStatus by repository.status.collectAsState()
+                        PhoneMyWorkScreen(
+                            state = workState,
+                            status = workStatus,
+                            nowSeconds = epochSeconds(),
+                            rowOf = workRowOf,
+                            handlers = workHandlers,
+                            reviewCount = if (reviewState.loaded) reviewState.total else workState.reviewCount,
+                            onStart = { nav.newSession(ticketKey = it) },
                         )
+                    } else {
+                        MyWorkScreen(state = workState, handlers = workHandlers)
+                    }
+                    if (reviewState.open) {
+                        val reviewHandlers = ReviewHandlers(
+                            onClose = review::close,
+                            onReload = { review.reload() },
+                            onLoadMore = { review.loadMore() },
+                            onConfirm = { review.confirm(it) },
+                            onReject = { review.reject(it) },
+                            onKeep = { review.keep(it) },
+                            onRemove = { review.remove(it) },
+                            onMakePrimary = { review.makePrimary(it) },
+                            onToggleChange = review::toggleChange,
+                            onChange = { item, alt -> review.change(item, alt) },
+                            onConfirmAll = { review.confirmAllShown() },
+                            onUndo = { review.undo() },
+                            onDismissUndo = review::dismissUndo,
+                            onDismissError = review::dismissError,
+                        )
+                        if (layout == PhoneLayout.New) {
+                            PhoneReviewSheet(state = reviewState, handlers = reviewHandlers, rowOf = workRowOf)
+                        } else {
+                            ReviewSheet(state = reviewState, handlers = reviewHandlers)
+                        }
                     }
                 }
                 Screen.Usage -> {
                     val usage = remember(repository, scope) { UsageViewModel(repository, container.usageActions, scope) }
                     LaunchedEffect(usage) { usage.load() }
                     val usageState by usage.state.collectAsState()
-                    UsageScreen(
-                        state = usageState,
-                        nowSeconds = epochSeconds(),
-                        handlers = UsageHandlers(
-                            onBack = { nav.back() },
-                            onRefresh = { usage.refresh() },
-                            onSelect = { usage.select(it) },
-                            onOpenSession = nav::open,
-                            onDismissError = usage::dismissError,
-                        ),
+                    val usageHandlers = UsageHandlers(
+                        onBack = { nav.back() },
+                        onRefresh = { usage.refresh() },
+                        onSelect = { usage.select(it) },
+                        onOpenSession = nav::open,
+                        onDismissError = usage::dismissError,
                     )
+                    if (layout == PhoneLayout.New) {
+                        OrbitUsageScreen(state = usageState, nowSeconds = epochSeconds(), handlers = usageHandlers)
+                    } else {
+                        UsageScreen(state = usageState, nowSeconds = epochSeconds(), handlers = usageHandlers)
+                    }
                 }
                 Screen.Company -> {
                     val company = remember(repository, scope) { CompanyViewModel(repository, container.companyActions, scope) }
@@ -1138,6 +1164,7 @@ private fun FleetRoute(
                         onOpenSession = nav::open,
                         onStartHere = { nav.newSession(ticketKey = it) },
                         onBack = { nav.back() },
+                        newLayout = layout == PhoneLayout.New,
                     )
                 }
                 Screen.Files -> {
@@ -1146,35 +1173,63 @@ private fun FleetRoute(
                         onDispose { files.detach() }
                     }
                     val status by repository.status.collectAsState()
-                    FilesScreen(
-                        state = filesState,
-                        status = status,
-                        handlers = FilesHandlers(
-                            onRefresh = { files.refresh() },
-                            onTap = { files.tap(it) },
-                            onCancelTransfer = files::cancelTransfer,
-                            onHandOff = { files.handOff(it) },
-                            onCloseOpened = files::closeOpened,
-                            onRemove = if (filesState.canRemove) files::askRemove else null,
-                            onConfirmRemove = { files.confirmRemove() },
-                            onCancelRemove = files::cancelRemove,
-                            onDismissError = files::dismissError,
-                            onDismissNotice = files::dismissNotice,
-                        ),
+                    val filesHandlers = FilesHandlers(
+                        onRefresh = { files.refresh() },
+                        onTap = { files.tap(it) },
+                        onCancelTransfer = files::cancelTransfer,
+                        onHandOff = { files.handOff(it) },
+                        onCloseOpened = files::closeOpened,
+                        onRemove = if (filesState.canRemove) files::askRemove else null,
+                        onConfirmRemove = { files.confirmRemove() },
+                        onCancelRemove = files::cancelRemove,
+                        onDismissError = files::dismissError,
+                        onDismissNotice = files::dismissNotice,
+                        onRetry = if (filesState.canRetry) ({ id: Long -> files.retry(id); Unit }) else null,
+                        onOpenSession = nav::open,
                     )
+                    if (layout == PhoneLayout.New) {
+                        val fileHosts by repository.hosts.collectAsState()
+                        val reachable = remember(fileHosts) { fileHosts.associate { it.alias to it.reachable } }
+                        OrbitFilesScreen(
+                            state = filesState,
+                            status = status,
+                            handlers = filesHandlers,
+                            // A host the hub does not list is not known to be gone.
+                            hostReachable = { alias -> reachable[alias] ?: true },
+                        )
+                    } else {
+                        FilesScreen(state = filesState, status = status, handlers = filesHandlers)
+                    }
                 }
                 Screen.Hosts -> {
                     val state by hosts.state.collectAsState()
                     val hostCaps by repository.capabilities.collectAsState()
                     val hostSheet by hostDetail.state.collectAsState()
-                    HostsScreen(
-                        state = state,
-                        onRefresh = { hosts.refresh() },
-                        onDismissError = hosts::dismissError,
-                        onOpenHost = { nav.showSessionsFor(it) },
-                        onHostDetails = { alias: String -> hostDetail.open(alias); Unit }
-                            .takeIf { hostCaps.probeHost || hostCaps.restoreSessions || hostCaps.discoverLost },
-                    )
+                    val onHostDetails = { alias: String -> hostDetail.open(alias); Unit }
+                        .takeIf { hostCaps.probeHost || hostCaps.restoreSessions || hostCaps.discoverLost }
+                    if (layout == PhoneLayout.New) {
+                        OrbitHostsScreen(
+                            state = state,
+                            nowSeconds = epochSeconds(),
+                            handlers = OrbitHostsHandlers(
+                                onRefresh = { hosts.refresh() },
+                                onDismissError = hosts::dismissError,
+                                onOpen = onHostDetails ?: { alias: String -> nav.showSessionsFor(alias); Unit },
+                                onCheck = { alias: String -> hosts.check(alias); Unit }.takeIf { hostCaps.probeHost },
+                                // The host's sheet runs the reboot plan's dry run and the lost-conversation scan on opening.
+                                onRecovery = { alias: String -> hostDetail.open(alias); Unit }
+                                    .takeIf { (credentials.canWrite && hostCaps.restoreSessions) || hostCaps.discoverLost },
+                            ),
+                        )
+                    } else {
+                        HostsScreen(
+                            state = state,
+                            onRefresh = { hosts.refresh() },
+                            onDismissError = hosts::dismissError,
+                            onOpenHost = { nav.showSessionsFor(it) },
+                            onHostDetails = onHostDetails,
+                        )
+                    }
                     if (hostSheet.alias != null) {
                         HostDetailSheet(
                             state = hostSheet,
@@ -1627,6 +1682,7 @@ private fun TaskRoute(
     onOpenSession: (Long) -> Unit,
     onStartHere: (String) -> Unit,
     onBack: () -> Unit,
+    newLayout: Boolean = false,
 ) {
     val scope = rememberWorkScope()
     val vm = remember(taskId, repository, scope) {
@@ -1646,24 +1702,37 @@ private fun TaskRoute(
     }
     val state by vm.state.collectAsState()
     val status by repository.status.collectAsState()
-    TaskScreen(
-        state = state,
-        status = status,
-        handlers = TaskHandlers(
-            onBack = onBack,
-            onRefresh = { vm.refresh() },
-            onOpenSession = vm::openSession,
-            onContinue = { vm.continueWork() },
-            onStartHere = vm::startHere,
-            onOpenPlace = vm::openPlace,
-            onClosePlace = vm::closePlace,
-            onPlace = { group, note -> vm.place(group, note) },
-            onClearPlacement = { vm.clearPlacement() },
-            onDismissError = vm::dismissError,
-            onSummarize = { vm.summarize(it) },
-            onDismissSummary = vm::dismissSummary,
-        ),
+    val handlers = TaskHandlers(
+        onBack = onBack,
+        onRefresh = { vm.refresh() },
+        onOpenSession = vm::openSession,
+        onContinue = { vm.continueWork() },
+        onStartHere = vm::startHere,
+        onOpenPlace = vm::openPlace,
+        onClosePlace = vm::closePlace,
+        onPlace = { group, note -> vm.place(group, note) },
+        onClearPlacement = { vm.clearPlacement() },
+        onDismissError = vm::dismissError,
+        onSummarize = { vm.summarize(it) },
+        onDismissSummary = vm::dismissSummary,
     )
+    if (newLayout) {
+        val rows by repository.sessions.collectAsState()
+        PhoneTaskScreen(
+            state = state,
+            status = status,
+            nowSeconds = epochSeconds(),
+            rowOf = { id -> rows.firstOrNull { it.id == id } },
+            handlers = PhoneTaskHandlers(
+                task = handlers,
+                onLink = { vm.confirmLink(it) },
+                onNotThis = { vm.rejectLink(it) },
+                onClearSummary = vm::clearSummary,
+            ),
+        )
+    } else {
+        TaskScreen(state = state, status = status, handlers = handlers)
+    }
 }
 
 @OptIn(ExperimentalComposeUiApi::class)

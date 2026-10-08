@@ -53,6 +53,10 @@ data class FilesHandlers(
     val onCancelRemove: () -> Unit,
     val onDismissError: () -> Unit,
     val onDismissNotice: () -> Unit,
+    /** Copy a failed file off its host again; null for a token or hub that may not (New layout only). */
+    val onRetry: ((Long) -> Unit)? = null,
+    /** Open the session a file came from (New layout only). */
+    val onOpenSession: ((Long) -> Unit)? = null,
 )
 
 /**

@@ -256,7 +256,7 @@ private fun kindWords(task: dev.claudefleet.mobile.model.WorkTask): String = whe
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PlaceSheet(state: TaskUiState, handlers: TaskHandlers) {
+internal fun PlaceSheet(state: TaskUiState, handlers: TaskHandlers) {
     var label by remember { mutableStateOf("") }
     var note by remember { mutableStateOf(state.placementNote) }
     val choices = state.knownGroups.filter { label.isBlank() || it.contains(label.trim(), ignoreCase = true) }

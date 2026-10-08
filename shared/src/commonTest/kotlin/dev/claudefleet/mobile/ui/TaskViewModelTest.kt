@@ -360,4 +360,67 @@ class TaskViewModelTest {
         runCurrent()
         assertEquals(null, vm.state.value.summary)
     }
+
+    /** New layout (14.9): each summary stays inline on its own card until Clear, and Regenerate replaces it. */
+    @Test
+    fun summaries_stay_on_their_card_until_cleared() = runTest {
+        val actions = FakeWorkActions().apply { taskAnswer = PAST_ONLY }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        val past = vm.state.value.past.first()
+
+        vm.summarize(past)
+        runCurrent()
+        assertEquals("It fixed the refund rounding.", vm.state.value.summaries[past.linkId]?.summary)
+
+        actions.summaryAnswer = actions.summaryAnswer.copy(summary = "Second draft.")
+        vm.summarize(past)
+        runCurrent()
+        assertEquals("Second draft.", vm.state.value.summaries[past.linkId]?.summary)
+
+        vm.clearSummary(past.linkId)
+        runCurrent()
+        assertNull(vm.state.value.summaries[past.linkId])
+    }
+
+    /**
+     * A suggested session is answered on the task (14.9): Link confirms under
+     * the link's version and never takes a primary from a session the phone
+     * cannot see; Not this rejects; each re-reads the task.
+     */
+    @Test
+    fun a_suggested_session_is_linked_or_turned_down_on_the_task() = runTest {
+        val actions = FakeWorkActions().apply { taskAnswer = DETAIL }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        assertTrue(vm.state.value.canDecide)
+        val suggested = vm.state.value.suggested.single()
+        val reads = actions.taskCalls
+
+        vm.confirmLink(suggested)
+        runCurrent()
+        assertEquals("confirm ${suggested.sessionId} ${suggested.linkId} primary=false v=${suggested.linkVersion}", actions.workArgs.last())
+        assertTrue(actions.taskCalls > reads, "the task is read again")
+
+        vm.rejectLink(suggested)
+        runCurrent()
+        assertEquals("reject ${suggested.sessionId} ${suggested.linkId} v=${suggested.linkVersion}", actions.workArgs.last())
+    }
+
+    @Test
+    fun linking_is_refused_offline_and_nothing_is_sent() = runTest {
+        val fleet = WorkFleet()
+        val actions = FakeWorkActions().apply { taskAnswer = DETAIL }
+        val vm = taskVm(fleet = fleet, actions = actions)
+        runCurrent()
+        val suggested = vm.state.value.suggested.single()
+        fleet.status.value = ConnectionStatus.Offline("gone")
+        runCurrent()
+        assertFalse(vm.state.value.canDecide)
+
+        assertNull(vm.confirmLink(suggested))
+        runCurrent()
+        assertTrue(actions.workArgs.none { it.startsWith("confirm") })
+        assertEquals(OFFLINE_WRITE, vm.state.value.error)
+    }
 }

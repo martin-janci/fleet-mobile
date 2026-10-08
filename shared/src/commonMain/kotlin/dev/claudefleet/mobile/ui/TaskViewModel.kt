@@ -84,6 +84,17 @@ data class TaskUiState(
     val summarizing: Long? = null,
     /** The last summary, until dismissed. */
     val summary: PastWorkSummary? = null,
+    /**
+     * Every summary written while this task is open, per link: the New
+     * layout draws each inline on its past session's card, marked Drafted,
+     * until Clear.
+     */
+    val summaries: Map<Long, PastWorkSummary> = emptyMap(),
+    /** A suggested session can be linked or turned down here (`confirm` and `reject`), not only in To review. */
+    val canDecide: Boolean = false,
+    /** The task's organisation by name and colour, for the New layout's chip. */
+    val orgName: String? = null,
+    val orgColor: String? = null,
 ) {
     val task get() = detail?.task
 }
@@ -142,6 +153,7 @@ class TaskViewModel(
         val gone: Boolean = false,
         val summarizing: Long? = null,
         val summary: PastWorkSummary? = null,
+        val summaries: Map<Long, PastWorkSummary> = emptyMap(),
     )
 
     private val local = MutableStateFlow(Local())
@@ -295,7 +307,7 @@ class TaskViewModel(
         return callScope.launch {
             try {
                 val summary = actions.summarize(key, link.linkId)
-                local.update { it.copy(summarizing = null, summary = summary) }
+                local.update { it.copy(summarizing = null, summary = summary, summaries = it.summaries + (link.linkId to summary)) }
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {
@@ -306,6 +318,49 @@ class TaskViewModel(
 
     fun dismissSummary() {
         local.update { it.copy(summary = null) }
+    }
+
+    /** Clear: the drafted summary leaves its card. The journal keeps it; Summarize writes a new one. */
+    fun clearSummary(linkId: Long) {
+        local.update { l -> l.copy(summaries = l.summaries - linkId, summary = l.summary?.takeIf { it.linkId != linkId }) }
+    }
+
+    /**
+     * **Link** on a suggested session: `confirm` under the link's version, so
+     * one decided on another device first is refused, not overwritten. It
+     * takes the session's primary only when the session has none (its row is
+     * here and carries no work); an unknown session never loses its primary.
+     */
+    fun confirmLink(link: WorkTaskLink): Job? {
+        val sessionId = link.sessionId ?: return null
+        val row = fleet.sessions.value.firstOrNull { it.id == sessionId }
+        val primary = row != null && row.work == null
+        return decide(CONFIRM) { actions.confirm(sessionId, link.linkId, primary = primary, expectedVersion = link.linkVersion) }
+    }
+
+    /** **Not this** on a suggested session: `reject` under the link's version. */
+    fun rejectLink(link: WorkTaskLink): Job? {
+        val sessionId = link.sessionId ?: return null
+        return decide(REJECT) { actions.reject(sessionId, link.linkId, expectedVersion = link.linkVersion) }
+    }
+
+    private fun decide(action: String, call: suspend () -> Unit): Job? {
+        if (local.value.busy) return null
+        if (!allowed(fleet.capabilities.value, fleet.status.value, action)) return null.also { refuseOffline(action) }
+        local.update { it.copy(busy = true, error = null, conflict = false) }
+        return callScope.launch {
+            try {
+                call()
+                if (scope.isActive) scope.launch { load() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                if (t is HubError.Tool && t.isUnknownAction()) fleet.actionMissing(WORK_LINK, action)
+                local.update { it.copy(error = friendlyWorkWrite(t), conflict = t.isConflict()) }
+            } finally {
+                local.update { it.copy(busy = false) }
+            }
+        }
     }
 
     fun dismissError() {
@@ -364,6 +419,10 @@ class TaskViewModel(
             canSummarize = key != null && allowed(caps, status, SUMMARIZE),
             summarizing = l.summarizing,
             summary = l.summary,
+            summaries = l.summaries,
+            canDecide = suggested.isNotEmpty() && allowed(caps, status, CONFIRM) && allowed(caps, status, REJECT),
+            orgName = task?.orgId?.let { orgs.name(it) },
+            orgColor = task?.orgId?.let { orgs.orgs[it]?.color },
         )
     }
 
@@ -391,5 +450,7 @@ class TaskViewModel(
         const val RESUME = "resume"
         const val START = "start"
         const val SUMMARIZE = "summarize"
+        const val CONFIRM = "confirm"
+        const val REJECT = "reject"
     }
 }
