@@ -187,6 +187,10 @@ class ToolsTheAppMayCallTest {
         // (the operator is the one caller it asks about); read with
         // `capture_session` and typed into with `send_prompt`.
         "new_shell_session",
+        // Work's Pull requests sheet (claude-fleet redesign 6.4 / 6.7):
+        // `prs { list }`, readonly and `Access::Client`; a row is served only
+        // to a token that may see the session that opened it.
+        "prs",
     )
 
     @Test

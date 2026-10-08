@@ -124,23 +124,31 @@ private fun countWords(word: StatusWord, n: Int): String = "$n ${word.label.lowe
  * them, then the tracker's own status. A task with no live session says what
  * it last had ("PR #118 · 1 past session") or "No session yet". Red is only
  * ever Failed; amber only Needs you.
+ *
+ * A blocked task (it waits on another task that is not done, claude-fleet
+ * 6.3) reads Needs you with its reason, "Blocked on FLEET-12", as every
+ * Blocked does on the phone; a live session's own word still leads, and the
+ * reason follows it. [labelOf] names a blocker from the loaded tasks.
  */
 data class TaskLine(val word: StatusWord?, val lead: String?, val line: String)
 
-internal fun taskLine(task: WorkTask, rowOf: (Long) -> SessionRow?): TaskLine {
+internal fun taskLine(task: WorkTask, rowOf: (Long) -> SessionRow?, labelOf: (String) -> String? = { null }): TaskLine {
     val live = task.sessions.filter { it.state == LinkState.Active }
     val words = live.mapNotNull { link -> linkWord(link, link.sessionId?.let(rowOf)) }
     val counts = BAND_ORDER.filterNotNull().mapNotNull { w -> words.count { it == w }.takeIf { it > 0 }?.let { w to it } }
+    val blocked = blockedLine(task, labelOf)
     val word = counts.firstOrNull()?.first
-        ?: if (task.needsYou) StatusWord.NEEDS_YOU else null
+        ?: if (task.needsYou || blocked != null) StatusWord.NEEDS_YOU else null
+    val quiet = counts.isEmpty() && !task.needsYou && task.counts.active == 0
     val lead = when {
         counts.isNotEmpty() -> counts.joinToString(" · ") { (w, n) -> countWords(w, n) }
         task.needsYou -> "Needs you"
         task.counts.active > 0 -> "${task.counts.active} active"
-        else -> null
+        else -> blocked
     }
     val rest = buildList {
-        if (lead == null) {
+        if (blocked != null && blocked != lead) add(blocked)
+        if (quiet) {
             val past = task.sessions.filter { it.state == LinkState.Ended }
             val pr = past.firstNotNullOfOrNull { it.prUrl?.takeIf { u -> u.isNotBlank() } }
             if (pr != null) add(prLabel(pr))
@@ -152,6 +160,24 @@ internal fun taskLine(task: WorkTask, rowOf: (Long) -> SessionRow?): TaskLine {
         if (task.trackerDown) add("tracker down")
     }
     return TaskLine(word, lead, rest.joinToString(" · "))
+}
+
+/**
+ * "Blocked on FLEET-12", "Blocked on FLEET-12 and 2 more", or null for a task
+ * that waits on nothing. A blocker the phone has not loaded (or may not see:
+ * the hub leaves those out of `blocked_by`) is counted, never named.
+ */
+internal fun blockedLine(task: WorkTask, labelOf: (String) -> String?): String? {
+    if (!task.blocked) return null
+    val n = task.blockedBy.size
+    val named = task.blockedBy.firstNotNullOfOrNull(labelOf)
+    return when {
+        named != null && n == 1 -> "Blocked on $named"
+        named != null -> "Blocked on $named and ${n - 1} more"
+        n > 1 -> "Blocked on $n tasks"
+        n == 1 -> "Blocked on another task"
+        else -> "Blocked"
+    }
 }
 
 /** Live sessions, across the loaded tasks, whose word is Needs you. */
@@ -226,6 +252,7 @@ fun PhoneMyWorkScreen(
     val o = Fleet.colors
     val tasks = remember(state.orgs) { state.orgs.flatMap { org -> org.groups.flatMap { it.tasks } } }
     val needYou = sessionsNeedingYou(tasks, rowOf)
+    val labels = remember(tasks) { tasks.associate { it.taskId to it.label } }
     val connection = rememberPhoneConnection(status)
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
@@ -275,6 +302,11 @@ fun PhoneMyWorkScreen(
                                 onClick = open,
                                 label = { Text(if (reviewCount > 0) "To review $reviewCount" else "To review") },
                             )
+                        }
+                    }
+                    handlers.onOpenPullRequests?.let { open ->
+                        item(key = "prs") {
+                            FilterChip(selected = false, onClick = open, label = { Text("Pull requests") })
                         }
                     }
                     item(key = "filters") {
@@ -328,6 +360,7 @@ fun PhoneMyWorkScreen(
                                 nowSeconds = nowSeconds,
                                 rowOf = rowOf,
                                 onClick = { handlers.onOpenTask(task.taskId) },
+                                labelOf = labels::get,
                                 onStart = onStart?.takeIf { task.counts.active == 0 && task.sessions.none { it.state == LinkState.Active } }
                                     ?.let { start -> task.key?.takeIf { it.isNotBlank() }?.let { key -> { start(key) } } },
                             )
@@ -381,8 +414,10 @@ internal fun PhoneTaskRow(
     rowOf: (Long) -> SessionRow?,
     onClick: () -> Unit,
     onStart: (() -> Unit)? = null,
+    /** A blocker's name ("FLEET-12") from the loaded tasks, for "Blocked on …". */
+    labelOf: (String) -> String? = { null },
 ) {
-    val line = taskLine(task, rowOf)
+    val line = taskLine(task, rowOf, labelOf)
     val chips = buildList {
         if (task.review) add("Suggested link")
         if (task.orgMixed) add("Two organisations")
@@ -594,6 +629,7 @@ fun PhoneTaskScreen(
                     }
                     if (task.unavailable) Text("The tracker no longer answers for this ticket.", color = o.statusFailed, fontSize = 13.sp)
                     if (task.trackerDown) Text("Its tracker is failing to sync. The sessions below are what fleet last knew.", color = o.fgMuted, fontSize = 13.sp)
+                    blockedLine(task, { null })?.let { Text("$it.", color = o.statusWaiting, fontSize = 13.sp) }
                     if (state.trackerControlled) {
                         Text("The tracker decides this group; placing it changes only fleet's view.", color = o.fgMuted, fontSize = 13.sp)
                     }

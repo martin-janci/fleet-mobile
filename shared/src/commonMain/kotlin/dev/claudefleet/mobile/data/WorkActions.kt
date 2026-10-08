@@ -25,6 +25,7 @@ import dev.claudefleet.mobile.model.TidyApplyResult
 import dev.claudefleet.mobile.model.TidyApplyItem
 import dev.claudefleet.mobile.model.ReopenedWork
 import dev.claudefleet.mobile.model.PastWorkSummary
+import dev.claudefleet.mobile.model.PullRequestList
 
 /**
  * The work-graph calls a screen may make — narrow for the same reason
@@ -168,6 +169,13 @@ interface WorkActions {
     suspend fun saveView(view: WorkViewDraft): WorkView
 
     suspend fun deleteView(viewId: Long)
+
+    /**
+     * Pull requests (`prs { list }`, claude-fleet redesign 6.4), newest first:
+     * readonly, and served only for sessions this token may see. [state] is
+     * a [dev.claudefleet.mobile.model.PrFilter]'s `wire`.
+     */
+    suspend fun pullRequests(state: String, limit: Int? = null): PullRequestList
 }
 
 /** [WorkActions] against the paired hub, through [AppSession.withClient]. */
@@ -262,4 +270,7 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
     override suspend fun saveView(view: WorkViewDraft): WorkView = session.withClient { it.saveWorkView(view) }
 
     override suspend fun deleteView(viewId: Long) = session.withClient { it.deleteWorkView(viewId) }
+
+    override suspend fun pullRequests(state: String, limit: Int?): PullRequestList =
+        session.withClient { it.listPullRequests(state, limit) }
 }

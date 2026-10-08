@@ -373,6 +373,14 @@ data class WorkTask(
      * An older hub does not send it.
      */
     val archived: Boolean = false,
+    /**
+     * It waits for work that is not done (a dependency edge) and is not done
+     * itself (claude-fleet redesign 6.3). An older hub never sends it, so a
+     * task there is simply never blocked.
+     */
+    val blocked: Boolean = false,
+    /** What it waits for (`item:<id>`), only the items this token may see. */
+    @SerialName("blocked_by") val blockedBy: List<String> = emptyList(),
 ) {
     /** The key, else the title, else the id. */
     val label: String get() = key?.takeIf { it.isNotBlank() } ?: title.ifBlank { taskId }

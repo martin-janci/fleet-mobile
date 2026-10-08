@@ -78,6 +78,14 @@ data class HubCapabilities(
     val downloads: Boolean get() = LIST_DOWNLOADS in tools
 
     /**
+     * Pull requests (claude-fleet redesign 6.4, contract revision 12): every
+     * PR a session's branch has had, kept past the session (`prs { list }`,
+     * readonly). What draws Work's Pull requests sheet; an older hub has no
+     * such tool, and the chip is simply not drawn.
+     */
+    val pullRequests: Boolean get() = has(PRS, PRS_LIST)
+
+    /**
      * This token may ask for a file (`send_file`) and forget one
      * (`remove_download`). Both are writes, which the hub does not list for a
      * readonly token; the UI checks `canWrite` as well.
@@ -187,6 +195,8 @@ data class HubCapabilities(
         const val LIST_PAGES = "list_pages"
         const val GET_SETTINGS = "get_settings"
         const val LIST_DOWNLOADS = "list_downloads"
+        const val PRS = "prs"
+        const val PRS_LIST = "list"
         const val SEND_FILE = "send_file"
         const val REMOVE_DOWNLOAD = "remove_download"
         const val REWIND_CONVERSATION = "rewind_conversation"
