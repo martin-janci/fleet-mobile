@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -68,7 +69,7 @@ internal fun prLine(pr: PullRequest, nowSeconds: Long, sessionLive: Boolean): St
  * GitHub; *Open session* opens the session that opened it while that session
  * is still on the fleet. Readonly: nothing here changes a PR.
  */
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun PhonePullRequestsSheet(
     state: PullRequestsUiState,
