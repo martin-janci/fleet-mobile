@@ -1,0 +1,211 @@
+package dev.claudefleet.mobile.ui
+
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.PrimaryScrollableTabRow
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.ui.theme.Fleet
+import dev.claudefleet.mobile.ui.theme.FleetIcons
+import dev.claudefleet.mobile.ui.theme.OrbitTokens
+
+/**
+ * One session's tabs on the New bar (redesign 14.4), the desktop's tabs on a
+ * phone: the conversation, the agent's own screen named after the agent, the
+ * worktree (which replaces the separate worktree screen) and Details (which
+ * replaces the Details sheet). Shell terminals are step 14.14's and join here
+ * then; on the Classic bar none of this is drawn.
+ */
+enum class SessionTab { Conversation, Agent, Files, Details }
+
+/**
+ * The agent tab's name: the agent's, never "Terminal". Every session is a
+ * Claude Code one until the hub says otherwise — the `agent` column rides hub
+ * contract 11 (desktop step 2.7), which this app does not speak yet, so the
+ * name is fixed here and becomes the row's own value with that bump.
+ */
+@Suppress("UNUSED_PARAMETER")
+fun agentName(row: SessionRow?): String = DEFAULT_AGENT_NAME
+
+/** What the phone calls the agent of a session whose hub does not say. */
+const val DEFAULT_AGENT_NAME: String = "Claude Code"
+
+/** The tab's words. */
+fun SessionTab.label(agent: String): String = when (this) {
+    SessionTab.Conversation -> "Conversation"
+    SessionTab.Agent -> agent
+    SessionTab.Files -> "Files"
+    SessionTab.Details -> "Details"
+}
+
+/**
+ * The tabs a session shows, in the desktop's order. Files only where the hub
+ * serves a worktree at all (`repo_changes`, `repo_log` or `repo_tree`): an
+ * empty tab that can only say "this hub has none" is a tab nobody needs.
+ */
+fun sessionTabs(hasWorktree: Boolean): List<SessionTab> =
+    SessionTab.entries.filter { it != SessionTab.Files || hasWorktree }
+
+/**
+ * What the session screen needs to draw its tabs: which one is showing, how to
+ * change it, and the panes of the tabs this screen does not draw itself
+ * (Files and Details, whose view models live in the route). Null on the
+ * Classic bar, where the screen is one conversation as before.
+ */
+class SessionTabsHost(
+    val tabs: List<SessionTab>,
+    val selected: SessionTab,
+    val agent: String,
+    val onSelect: (SessionTab) -> Unit,
+    val files: @Composable () -> Unit = {},
+    val details: @Composable () -> Unit = {},
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun SessionTabRow(host: SessionTabsHost) {
+    PrimaryScrollableTabRow(
+        selectedTabIndex = host.tabs.indexOf(host.selected).coerceAtLeast(0),
+        edgePadding = 8.dp,
+        containerColor = Fleet.colors.bgPane,
+        contentColor = Fleet.colors.fg,
+    ) {
+        for (tab in host.tabs) {
+            Tab(
+                selected = tab == host.selected,
+                onClick = { host.onSelect(tab) },
+                text = { Text(tab.label(host.agent), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                selectedContentColor = Fleet.colors.fg,
+                unselectedContentColor = Fleet.colors.fgMuted,
+            )
+        }
+    }
+}
+
+/**
+ * The agent tab: the agent's own screen, captured from its pane, newest line
+ * last. While a prompt waits it explains itself and offers the keys the pane
+ * understands, each saying what it does ("Enter · trust", "Esc · exit") — the
+ * Classic card's bare Enter and Esc chips moved here, with their meaning. The
+ * numbered answers stay on the question card in the conversation.
+ *
+ * Capturing is the view model's (`showTerminal`, re-captured on each session
+ * event while shown); this draws what it has and a refresh.
+ */
+@Composable
+internal fun AgentPane(
+    state: SessionUiState,
+    agent: String,
+    onCapture: () -> Unit,
+    onAnswer: (Answer) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val keys = state.card?.let { agentKeys(it, state.session?.stuckKind) }.orEmpty()
+    Column(modifier = modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "$agent's screen",
+                style = Fleet.type.textSm,
+                color = Fleet.colors.fgMuted,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = onCapture, enabled = state.connected) {
+                Icon(FleetIcons.Refresh, contentDescription = "Read the screen again")
+            }
+        }
+        val down = rememberScrollState()
+        val across = rememberScrollState()
+        val pane = state.terminal
+        LaunchedEffect(pane, down.maxValue) { down.scrollTo(down.maxValue) }
+        Surface(
+            color = Fleet.colors.bgSunk,
+            contentColor = Fleet.colors.fg,
+            shape = RoundedCornerShape(OrbitTokens.radius("radius-phone-card").dp),
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp),
+        ) {
+            Text(
+                text = pane ?: if (state.connected) "Reading the screen…" else "The hub is offline; the screen cannot be read.",
+                style = Fleet.type.code,
+                // A pane is fixed-width text: wrapping it breaks every box-drawn prompt.
+                softWrap = false,
+                modifier = Modifier.verticalScroll(down).horizontalScroll(across).padding(12.dp),
+            )
+        }
+        state.card?.let { card ->
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                (card.explain ?: card.headline).let {
+                    Text(it, style = Fleet.type.textMd, color = Fleet.colors.fg2)
+                }
+                if (!state.readOnly && keys.isNotEmpty()) {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        for (key in keys) {
+                            // One weight for every key: none is the default.
+                            OutlinedButton(
+                                onClick = { onAnswer(key.answer) },
+                                enabled = state.canAnswer,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            ) { Text(key.label) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** One key the agent tab offers on a waiting prompt, and what pressing it does. */
+data class AgentKey(val answer: Answer, val label: String)
+
+/**
+ * The card's raw keys, each with what it does on this prompt. A key's
+ * meaning depends on the prompt: Enter trusts on the trust prompt, but on a
+ * permission question it picks whichever answer is highlighted — so there it
+ * says exactly that rather than pretending to be "Yes".
+ */
+fun agentKeys(card: BlockedCard, stuckKind: String?): List<AgentKey> =
+    card.answers.mapNotNull { answer ->
+        when (answer) {
+            Answer.Enter -> AgentKey(answer, "Enter · ${enterMeaning(stuckKind)}")
+            Answer.Escape -> AgentKey(answer, "Esc · ${escapeMeaning(stuckKind)}")
+            else -> null
+        }
+    }
+
+internal fun enterMeaning(stuckKind: String?): String = when (stuckKind) {
+    "trust_prompt" -> "trust"
+    "press_enter" -> "continue"
+    else -> "the highlighted answer"
+}
+
+internal fun escapeMeaning(stuckKind: String?): String = when (stuckKind) {
+    "trust_prompt" -> "exit"
+    else -> "cancel"
+}

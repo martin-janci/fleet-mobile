@@ -3288,4 +3288,100 @@ class SessionViewModelTest {
         runCurrent()
         assertEquals("", again.state.value.draft)
     }
+
+    // --- answering in your own words (redesign 14.4) ---
+
+    private val ownWords = PendingInput(
+        "permission",
+        "Allow Bash?",
+        listOf(PendingOption(1, "Yes"), PendingOption(2, "Yes, and don't ask again"), PendingOption(3, "No, and tell Claude what to do differently")),
+    )
+
+    private fun TestScope.ownWordsVm(actions: FakeActions): SessionViewModel {
+        actions.probeAnswer = ActivityProbe(claudeStatus = "blocked", pendingInput = ownWords)
+        val fleet = FakeFleetState(listOf(blockedRow(ownWords)))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        return SessionViewModel(ID, fleet, actions, backgroundScope)
+    }
+
+    /**
+     * The words go out only after the question's own No: the digit of the
+     * "No, and tell Claude…" answer, never 1, and the draft as the next prompt
+     * once the agent has taken it.
+     */
+    @Test
+    fun answering_in_words_presses_the_no_then_sends_the_draft() = runTest {
+        val actions = FakeActions()
+        val vm = ownWordsVm(actions)
+        vm.load().join()
+        runCurrent()
+        assertTrue(vm.state.value.canAnswerInWords)
+        vm.onDraftChange("Run only the notify tests")
+        runCurrent()
+        assertTrue(vm.state.value.canSendWords)
+
+        vm.answerInWords().join()
+        runCurrent()
+
+        assertEquals(listOf("3"), actions.sentKeys, "the No, never an answer that allows")
+        assertEquals(listOf("Run only the notify tests"), actions.sentPrompts)
+        assertEquals("", vm.state.value.draft)
+    }
+
+    /** The agent never took the No: nothing is typed into a question still on screen, and the words stay. */
+    @Test
+    fun answering_in_words_keeps_the_words_when_the_agent_does_not_move() = runTest {
+        val actions = FakeActions()
+        actions.waitAnswer = WaitResult(status = "timeout")
+        val vm = ownWordsVm(actions)
+        vm.load().join()
+        vm.onDraftChange("Run only the notify tests")
+        runCurrent()
+
+        vm.answerInWords().join()
+        runCurrent()
+
+        assertEquals(listOf("3"), actions.sentKeys)
+        assertTrue(actions.sentPrompts.isEmpty())
+        assertEquals("Run only the notify tests", vm.state.value.draft)
+        assertTrue(vm.state.value.stillWaiting)
+    }
+
+    /** A question with no No has no own-words answer: Send stays dark and nothing is pressed. */
+    @Test
+    fun a_question_without_a_no_is_not_answered_in_words() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(listOf(blockedRow())).also { it.hubVersion.value = HUB_VERSION_DIGIT_KEYS }, actions, backgroundScope)
+        vm.load().join()
+        vm.onDraftChange("do something else")
+        runCurrent()
+
+        assertFalse(vm.state.value.canAnswerInWords)
+        vm.answerInWords().join()
+        runCurrent()
+
+        assertTrue(actions.sentKeys.isEmpty())
+        assertTrue(actions.sentPrompts.isEmpty())
+    }
+
+    /** The question on screen changed since the card was drawn: nothing goes out. */
+    @Test
+    fun answering_in_words_rechecks_the_question_first() = runTest {
+        val actions = FakeActions()
+        val vm = ownWordsVm(actions)
+        actions.probeAnswer = ActivityProbe(
+            claudeStatus = "blocked",
+            pendingInput = PendingInput("permission", "Delete the repo?", ownWords.options),
+        )
+        vm.load().join()
+        vm.onDraftChange("no")
+        runCurrent()
+
+        vm.answerInWords().join()
+        runCurrent()
+
+        assertTrue(actions.sentKeys.isEmpty())
+        assertTrue(actions.sentPrompts.isEmpty())
+        assertEquals("The question changed", vm.state.value.error?.title)
+    }
 }

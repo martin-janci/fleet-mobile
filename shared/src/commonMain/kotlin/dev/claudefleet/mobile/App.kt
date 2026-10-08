@@ -123,6 +123,14 @@ import dev.claudefleet.mobile.ui.QuickReplies
 import dev.claudefleet.mobile.ui.Screen
 import dev.claudefleet.mobile.ui.SessionDetailsHandlers
 import dev.claudefleet.mobile.ui.SessionDetailsSheet
+import dev.claudefleet.mobile.ui.SessionDetailsList
+import dev.claudefleet.mobile.ui.DetailsAction
+import dev.claudefleet.mobile.ui.SessionTab
+import dev.claudefleet.mobile.ui.SessionTabsHost
+import dev.claudefleet.mobile.ui.sessionTabs
+import dev.claudefleet.mobile.ui.agentName
+import dev.claudefleet.mobile.ui.appendToDraft
+import dev.claudefleet.mobile.ui.RepoBody
 import dev.claudefleet.mobile.ui.SessionDetailsViewModel
 import dev.claudefleet.mobile.ui.RepoHandlers
 import dev.claudefleet.mobile.ui.RepoScreen
@@ -907,6 +915,8 @@ private fun FleetRoute(
                         // The fleet's scope: a change to the session's tasks
                         // is not cancelled by leaving the session.
                         callScope = scope,
+                        // The New bar draws the session as tabs (redesign 14.4).
+                        newLayout = layout == PhoneLayout.New,
                     )
                 }
                 Screen.Work -> {
@@ -1432,6 +1442,7 @@ private fun TaskRoute(
     )
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun SessionRoute(
     sessionId: Long,
@@ -1443,6 +1454,7 @@ private fun SessionRoute(
     onOpenSession: (Long) -> Unit,
     onOpenRepo: (Long) -> Unit,
     callScope: CoroutineScope,
+    newLayout: Boolean = false,
 ) {
     val scope = rememberWorkScope()
     val vm = remember(sessionId, repository, scope) {
@@ -1523,6 +1535,50 @@ private fun SessionRoute(
         MoveViewModel(sessionId, repository, container.moveActions, scope, credentials.canWrite)
     }
     val move by moveVm.state.collectAsState()
+    // The New bar's tabs (redesign 14.4): the conversation, the agent's own
+    // screen, the worktree (instead of the worktree screen) and Details
+    // (instead of the sheet). Each reads when it is opened.
+    val hasWorktree = caps.repo || caps.repoLog || caps.repoFiles
+    var sessionTab by remember(sessionId) { mutableStateOf(SessionTab.Conversation) }
+    val repoVm = if (newLayout && hasWorktree) {
+        remember(sessionId, repository, scope) {
+            RepoViewModel(
+                sessionId = sessionId,
+                fleet = repository,
+                actions = container.repoActions,
+                downloads = container.downloadActions,
+                scope = scope,
+                canWrite = credentials.canWrite,
+            )
+        }
+    } else {
+        null
+    }
+    val repoFiles = repoVm?.state?.collectAsState()?.value
+    fun selectTab(next: SessionTab) {
+        val was = sessionTab
+        if (next == was) return
+        sessionTab = next
+        // The agent's pane is captured while its tab shows, and dropped after.
+        if (was == SessionTab.Agent) vm.hideTerminal()
+        when (next) {
+            SessionTab.Agent -> vm.showTerminal()
+            SessionTab.Files -> repoVm?.load()
+            SessionTab.Details -> detailsVm.open()
+            SessionTab.Conversation -> Unit
+        }
+    }
+    // Back closes an open diff, commit or file in the Files tab before it
+    // leaves the session; composed after `App`'s handler, so asked first.
+    val filesOpen = newLayout && sessionTab == SessionTab.Files && repoFiles?.views?.isNotEmpty() == true
+    BackHandler(enabled = filesOpen) { repoVm?.back() }
+    // A word for the composer from another tab ("Ask Claude Code to commit",
+    // a long-pressed diff line): added to the draft, never sent, and the
+    // conversation shown so the person sees it before they send it.
+    val askInConversation: (String) -> Unit = { text ->
+        vm.onDraftChange(appendToDraft(vm.state.value.draft, text))
+        selectTab(SessionTab.Conversation)
+    }
     // A tool row in an earlier conversation is looked up in that transcript.
     SideEffect { toolDetailsModel.claudeSessionId = state.viewing?.claudeSessionId }
     // Read once per visit: whether the hint is owed does not change under
@@ -1599,7 +1655,7 @@ private fun SessionRoute(
         onRetry = { anchor, prompt -> vm.retry(anchor, prompt) },
         // A fork is a new session: open it, with this one a Back away.
         onFork = { anchor, worktree -> vm.fork(anchor, worktree, onOpenSession) },
-        onOpenDetails = { detailsVm.open() },
+        onOpenDetails = { if (newLayout) selectTab(SessionTab.Details) else detailsVm.open() },
         onLoadOlder = { vm.loadOlder() },
         onViewConversation = { vm.view(it) },
         onBackToCurrent = vm::backToCurrent,
@@ -1612,9 +1668,62 @@ private fun SessionRoute(
         onMove = moveVm::open.takeIf { move.available },
         // A dismissed ghost has no screen left to show: back to where it was opened from.
         onDismissGhost = { vm.dismissGhost(onBack) },
-        onOpenRepo = { onOpenRepo(sessionId) }.takeIf { caps.repo || caps.repoLog || caps.repoFiles },
+        onOpenRepo = (if (newLayout) ({ selectTab(SessionTab.Files) }) else ({ onOpenRepo(sessionId) })).takeIf { hasWorktree },
         showFoldHint = foldHintOwed,
         onFoldHintShown = { container.hints.markShown(Hints.DOUBLE_TAP) },
+        onAnswerInWords = { vm.answerInWords() },
+        tabs = if (!newLayout) {
+            null
+        } else {
+            SessionTabsHost(
+                tabs = sessionTabs(hasWorktree),
+                selected = sessionTab,
+                agent = agentName(state.session),
+                onSelect = ::selectTab,
+                files = {
+                    if (repoVm != null && repoFiles != null) {
+                        RepoBody(
+                            state = repoFiles,
+                            handlers = RepoHandlers(
+                                onRefresh = { repoVm.refresh() },
+                                onSelect = { repoVm.select(it) },
+                                onQuery = repoVm::setQuery,
+                                onOpenDiff = { repoVm.openDiff(it) },
+                                onOpenCommit = { repoVm.openCommit(it) },
+                                onOpenCommitDiff = { hash, path -> repoVm.openCommitDiff(hash, path) },
+                                onOpenFile = { repoVm.openFile(it) },
+                                onMoreLog = { repoVm.moreLog() },
+                                onSendToDownloads = { repoVm.sendToDownloads(it) },
+                                onDismissError = repoVm::dismissError,
+                                onDismissNotice = repoVm::dismissNotice,
+                                onAsk = askInConversation.takeIf { !state.readOnly },
+                                onClose = { repoVm.back() },
+                            ),
+                        )
+                    }
+                },
+                details = {
+                    val rows by repository.sessions.collectAsState()
+                    SessionDetailsList(
+                        state = details,
+                        sessions = rows,
+                        handlers = SessionDetailsHandlers(
+                            onReload = { detailsVm.reload() },
+                            onToggle = detailsVm::toggle,
+                            onCancelTask = { detailsVm.cancel(it) },
+                            onOpenSession = onOpenSession,
+                            onDismissError = detailsVm::dismissError,
+                            onOpenRepo = { selectTab(SessionTab.Files) }.takeIf { hasWorktree },
+                        ),
+                        actions = listOfNotNull(
+                            DetailsAction("Move to host…", moveVm::open).takeIf { move.available && state.canManage },
+                            DetailsAction(if (tasks.count > 0) "Tasks ${tasks.count}" else "Tasks", tasksVm::openSheet).takeIf { tasks.available },
+                            work.chip?.key?.let { key -> DetailsAction("Ticket $key", workVm::openSheet) },
+                        ),
+                    )
+                },
+            )
+        },
     )
     if (move.open) {
         MoveSheet(
@@ -1632,7 +1741,8 @@ private fun SessionRoute(
             ),
         )
     }
-    if (details.open) {
+    // On the New bar Details is a tab, not a sheet.
+    if (details.open && !newLayout) {
         val rows by repository.sessions.collectAsState()
         SessionDetailsSheet(
             state = details,

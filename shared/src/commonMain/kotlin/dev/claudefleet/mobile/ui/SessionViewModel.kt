@@ -285,6 +285,18 @@ data class SessionUiState(
         get() = idle(sending, answering, busy) && !readOnly && connected && card != null
 
     /**
+     * Whether the question up now can be answered in the person's own words
+     * (redesign 14.4): it has a no-and-say-why answer ([declineOption]) and an
+     * answer could go out at all. The composer opens for it while the card is up.
+     */
+    val canAnswerInWords: Boolean
+        get() = canAnswer && card?.let(::declineOption) != null
+
+    /** Whether Send would answer in the person's own words right now: [canAnswerInWords] and words to send. */
+    val canSendWords: Boolean
+        get() = canAnswerInWords && session != null && draft.isNotBlank()
+
+    /**
      * Whether a quick-reply chip does anything — [canSend] without the
      * blank-draft term, since a chip's own text is never blank. The row
      * itself is hidden outright rather than merely dimmed while [card] is up
@@ -804,6 +816,48 @@ class SessionViewModel(
             val wait = actions.waitForTurn(sessionId, receipt.turnSeqBefore, timeoutS = ANSWER_WAIT_SECONDS)
             local.update { it.copy(answering = false, stillWaiting = wait.status != WAIT_SATISFIED) }
             requestRead(first = false)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(answering = false, error = friendly(t)) }
+        }
+    }
+
+    /**
+     * Answer the question up now in the person's own words — the draft —
+     * rather than with one of its buttons (redesign 14.4).
+     *
+     * Two steps, each as [answer] and [send] already make them: press the
+     * question's own no-and-say-why answer ([declineOption]) after re-reading
+     * the pane, wait for the agent to take it, then send the draft as the next
+     * prompt. Never an answer that allows: a question without a "No, …" answer
+     * is not answered this way at all. A wait that times out sends nothing and
+     * keeps the words in the box; the card says it is still waiting, and once
+     * it is gone Send sends them as an ordinary prompt.
+     */
+    fun answerInWords(): Job = scope.launch {
+        val current = local.value
+        if (current.draft.isBlank() || !canAnswerNow(current)) return@launch
+        val asked = row() ?: return@launch
+        val no = blockedCard(asked, fleet.hubVersion.value)?.let(::declineOption) ?: return@launch
+        local.update { it.copy(answering = true, stillWaiting = false, error = null) }
+        try {
+            val moved = dialogMoved(asked.pendingInput, asked.stuckKind, actions.activity(sessionId), no)
+            if (moved != null) {
+                local.update { it.copy(answering = false, error = moved) }
+                return@launch
+            }
+            val receipt = actions.sendKeys(sessionId, no.n.toString())
+            val wait = actions.waitForTurn(sessionId, receipt.turnSeqBefore, timeoutS = ANSWER_WAIT_SECONDS)
+            if (wait.status != WAIT_SATISFIED) {
+                local.update { it.copy(answering = false, stillWaiting = true) }
+                requestRead(first = false)
+                return@launch
+            }
+            local.update { it.copy(answering = false) }
+            // What is in the box now: the person may have edited it while the agent took the no.
+            val words = local.value.draft.ifBlank { current.draft }
+            deliver(words, clearDraft = true)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
