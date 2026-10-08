@@ -181,6 +181,13 @@ data class HubCapabilities(
      */
     val routines: Boolean get() = ROUTINES in tools
 
+    /**
+     * Debug devices (contract revision 10): the test phones on the fleet's
+     * hosts, claimed, booted and read from here. Not readonly on the hub, so
+     * a readonly token is not served it.
+     */
+    val debugDevices: Boolean get() = DEBUG_DEVICES in tools
+
     /** Fleet settings can be written as this device (`set_setting`); the hub still refuses an untrusted one. */
     val setSetting: Boolean get() = SET_SETTING in tools
 
@@ -255,6 +262,7 @@ data class HubCapabilities(
         const val DECIDE_SETTING_PROPOSALS = "decide_setting_proposals"
         const val ROUTINES = "routines"
         const val SET_SETTING = "set_setting"
+        const val DEBUG_DEVICES = "debug_devices"
 
         fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions, params = catalog.params)
     }
