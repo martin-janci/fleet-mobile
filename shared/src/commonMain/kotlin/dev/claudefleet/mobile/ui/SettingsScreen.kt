@@ -191,7 +191,7 @@ fun SettingsScreen(
  * Classic bar had is still there, under More or in the session.
  */
 @Composable
-private fun LayoutRow(layout: PhoneLayout, onSetLayout: (PhoneLayout) -> Unit) {
+internal fun LayoutRow(layout: PhoneLayout, onSetLayout: (PhoneLayout) -> Unit) {
     val on = layout == PhoneLayout.New
     Row(
         modifier = Modifier
