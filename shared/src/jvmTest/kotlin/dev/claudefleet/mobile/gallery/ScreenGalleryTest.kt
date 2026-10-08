@@ -1036,7 +1036,7 @@ internal object Fixtures {
     }
 
     val restorePlan: RestoreReport by lazy {j(
-        """{"plan":[{"cwd":"~/src/sales-twins-app","action":"resume","reason":"conversation found"},{"cwd":"~/src/sales-twins-api","action":"recreate","reason":"no conversation; fresh session in the same worktree"},{"cwd":"~/scratch","action":"skip","reason":"not a git worktree"}]}""",
+        """{"plan":[{"session_id":109,"tmux_name":"sales-twins","friendly_name":"Sales twins app","cwd":"~/src/sales-twins-app","action":"resume","reason":"conversation found"},{"session_id":104,"tmux_name":"sal-api","friendly_name":"Api tenant resolution","cwd":"~/src/sales-twins-api","action":"recreate","reason":"no conversation; fresh session in the same worktree"},{"session_id":111,"tmux_name":"scratch","cwd":"~/scratch","action":"skip","reason":"not a git worktree"}]}""",
     )
     }
 
@@ -1079,10 +1079,10 @@ internal object Fixtures {
 
     val orgs: List<OrgDetail> by lazy {j(
         """[{"id":1,"name":"Personal","color":"#6750A4","my_role":"owner","owns_hub":true,"session_count":7,"needs_you":2,"hosts":["mercury","hetzner-1","nas"],"trackers":[{"id":1,"name":"GitHub issues"}],
-          "devices":[{"name":"Pixel 9 Pro","mode":"full","trusted":true},{"name":"MacBook Pro","mode":"full","trusted":true}],"members":[{"name":"Martin","role":"owner"}],
+          "devices":[{"name":"Pixel 9 Pro","mode":"full","trusted":true},{"name":"MacBook Pro","mode":"full","trusted":true}],"members":[{"person_id":1,"name":"Martin","role":"owner"}],
           "spent_today_micros":17120000,"spent_week_micros":61420000,"spent_month_micros":210000000,"budget_daily_usd":40,"budget_monthly_usd":600},
          {"id":2,"name":"Sefcik & co","color":"#2E7D32","my_role":"member","session_count":3,"needs_you":1,"hosts":["oci-arm","nas"],"trackers":[{"id":2,"name":"Sefcik Jira"}],
-          "devices":[{"name":"Pixel 9 Pro","mode":"bound","trusted":false}],"members":[{"name":"František","role":"owner"},{"name":"Martin","role":"member"}],
+          "devices":[{"name":"Pixel 9 Pro","mode":"bound","trusted":false}],"members":[{"person_id":2,"name":"František","role":"owner"},{"person_id":1,"name":"Martin","role":"member"}],
           "spent_today_micros":0,"spent_week_micros":6110000,"budget_monthly_usd":150}]""",
     )
     }
