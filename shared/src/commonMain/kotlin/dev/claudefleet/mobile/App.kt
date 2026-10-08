@@ -113,6 +113,7 @@ import dev.claudefleet.mobile.ui.kit.BottomBarItem
 import dev.claudefleet.mobile.ui.kit.OrbitIcons
 import dev.claudefleet.mobile.ui.NewSessionScreen
 import dev.claudefleet.mobile.ui.NewSessionViewModel
+import dev.claudefleet.mobile.ui.WizardStep
 import dev.claudefleet.mobile.ui.PairScreen
 import dev.claudefleet.mobile.ui.PairViewModel
 import dev.claudefleet.mobile.ui.PairedHub
@@ -890,6 +891,7 @@ private fun FleetRoute(
                         callScope = scope,
                         onCreated = nav::created,
                         onBack = { nav.back() },
+                        wizard = layout == PhoneLayout.New,
                     )
                 }
                 is Screen.Session -> key(current.id) {
@@ -1301,6 +1303,8 @@ private fun newBarItem(tab: Tab): BottomBarItem = when (tab) {
     else -> BottomBarItem(tab.name, "More", OrbitIcons.More)
 }
 
+// The wizard's `BackHandler`; see the opt-in note on `FleetRoute`.
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun NewSessionRoute(
     initialHost: String?,
@@ -1312,6 +1316,7 @@ private fun NewSessionRoute(
     callScope: CoroutineScope,
     onCreated: (Long) -> Unit,
     onBack: () -> Unit,
+    wizard: Boolean = false,
 ) {
     val scope = rememberWorkScope()
     val vm = remember(repository, scope) {
@@ -1329,6 +1334,11 @@ private fun NewSessionRoute(
     }
     val state by vm.state.collectAsState()
     LaunchedEffect(vm, initialProject) { initialProject?.let(vm::selectProject) }
+    // The New layout's wizard step lives here so its back gesture is one of
+    // `App`'s handlers: on Project or Review it goes one step back; on Where
+    // (and while a start runs, which is safe to leave) `nav.back()` leaves.
+    var wizardStep by remember { mutableStateOf(WizardStep.Where) }
+    BackHandler(enabled = wizard && wizardStep.previous != null && !state.creating) { wizardStep.previous?.let { wizardStep = it } }
     val tools = remember(repository, scope) { ProjectToolsViewModel(repository, container.projectActions, scope, credentials.canWrite) }
     val toolsState by tools.state.collectAsState()
     LaunchedEffect(tools, state.host, state.projectId) { tools.loadWorktrees(state.host, state.projectId) }
@@ -1366,6 +1376,9 @@ private fun NewSessionRoute(
             onOpen = vm::openStarted,
             onDone = vm::dismissResult,
         ),
+        wizard = wizard,
+        wizardStep = wizardStep,
+        onWizardStep = { wizardStep = it },
     )
 }
 
