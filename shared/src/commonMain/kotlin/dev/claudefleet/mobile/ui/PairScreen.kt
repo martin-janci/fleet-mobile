@@ -170,6 +170,13 @@ fun PairScreen(
                 PairingProgress(state.contacting, onCancel)
             }
 
+            // The typed fields sit right under the banner that explains them,
+            // above the quiet options, so a link's address and code (and the
+            // error they drew) are on screen without scrolling.
+            if (state.manual) {
+                ManualFields(state, onAddressChange, onCodeChange, onSubmit)
+            }
+
             Spacer(Modifier.height(8.dp))
             // The quiet options: text buttons, full width, at touch height.
             QuietOption("Paste a pairing link", enabled = !state.pairing) {
@@ -180,10 +187,6 @@ fun PairScreen(
                     if (state.manual) "Hide the typed code" else "Enter the code by hand",
                     enabled = !state.pairing,
                 ) { onManualChange(!state.manual) }
-            }
-
-            if (state.manual) {
-                ManualFields(state, onAddressChange, onCodeChange, onSubmit)
             }
 
             Spacer(Modifier.height(12.dp))
