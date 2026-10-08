@@ -237,6 +237,9 @@ kotlin {
         // `fleet-hub` through the engine Android ships, not the mock one.
         jvmTest.dependencies {
             implementation(libs.ktor.client.okhttp)
+            // The screen gallery (`gallery/ScreenGalleryTest.kt`): Skia's native
+            // runtime, so `ImageComposeScene` can draw off-screen.
+            implementation("org.jetbrains.compose.desktop:desktop-jvm-linux-x64:1.12.0")
         }
 
         androidMain.dependencies {

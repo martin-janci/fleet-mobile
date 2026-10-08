@@ -1,0 +1,68 @@
+name: Screen gallery
+
+# Renders every screen with sample data (shared/src/jvmTest/.../gallery) and
+# commits the PNGs to gallery/ on this branch. Design input, not CI.
+on:
+  push:
+    branches: [claude/project-thread-cxnoug]
+    paths-ignore: ['gallery/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: ''
+
+      - name: Platform 37 and build-tools 37
+        run: sdkmanager --install "platforms;android-37.0" "build-tools;37.0.0"
+
+      # Roboto as the default sans-serif, so text looks like it does on Android.
+      - name: Fonts
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q fonts-roboto fonts-noto-color-emoji fonts-noto-core
+          mkdir -p ~/.config/fontconfig
+          cat > ~/.config/fontconfig/fonts.conf <<'XML'
+          <?xml version="1.0"?>
+          <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+          <fontconfig>
+            <alias><family>sans-serif</family><prefer><family>Roboto</family></prefer></alias>
+            <alias><family>monospace</family><prefer><family>Noto Sans Mono</family></prefer></alias>
+          </fontconfig>
+          XML
+          fc-cache -f
+          fc-match sans-serif
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Render
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          ./gradlew :shared:jvmTest --tests 'dev.claudefleet.mobile.gallery.ScreenGalleryTest' --stacktrace -Djava.awt.headless=true 2>&1 | tee render.log
+
+      - name: Commit the gallery
+        if: always()
+        run: |
+          rm -rf gallery && mkdir -p gallery
+          cp -r shared/build/screens/. gallery/ 2>/dev/null || true
+          cp render.log gallery/_gradle.log 2>/dev/null || true
+          cp -r shared/build/test-results gallery/_test-results 2>/dev/null || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add gallery
+          git commit -m "gallery: rendered screens for ${GITHUB_SHA::7}" || exit 0
+          git push
