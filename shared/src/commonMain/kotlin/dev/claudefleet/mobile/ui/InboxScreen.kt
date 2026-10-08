@@ -64,6 +64,8 @@ fun InboxScreen(
     top: @Composable () -> Unit = {},
     /** Where the tour's stops are (14.22); null records nothing. */
     anchors: TourAnchors? = null,
+    /** Account uuid → label, for a row's account and a paused row's line (step 4.10). */
+    accountNames: Map<String, String> = emptyMap(),
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
@@ -101,6 +103,7 @@ fun InboxScreen(
                         live = live,
                         showHost = true,
                         since = row.askedAt,
+                        accountName = row.accountUuid?.let(accountNames::get),
                         onClick = { onOpenSession(row.id) },
                     )
                 }

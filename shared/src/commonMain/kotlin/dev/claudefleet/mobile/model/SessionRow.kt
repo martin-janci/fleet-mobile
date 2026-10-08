@@ -85,6 +85,13 @@ data class SessionRow(
      */
     @SerialName("org_id") val orgId: Long? = null,
     /**
+     * The Claude account the session runs under (redesign step 4.10): the
+     * row's account chip and a paused row's "on <account>". Names come from
+     * `list_accounts`. In the phone view from claude-fleet's 4.10; an older
+     * hub leaves it out and the row shows no account.
+     */
+    @SerialName("account_uuid") val accountUuid: String? = null,
+    /**
      * A digest of the versions and ids of the session's live work links
      * (claude-fleet M14), omitted when 0. It moves whenever any of them
      * does — a *secondary* link added, ended or made primary included —

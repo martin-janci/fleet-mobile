@@ -124,4 +124,33 @@ class PhoneSessionsTest {
         assertEquals("Killed 1 session", bulkOutcomeTitle(BulkAction.Kill, 1))
         assertEquals("2 killed", bulkOutcomeLine(BulkAction.Kill, outcome.take(2)))
     }
+
+    /** Step 4.10: a Blocked row says why in the desktop's words, naming the account. */
+    @Test
+    fun a_blocked_row_names_its_account_on_line_two() {
+        val limited = row(status = "idle", attention = Attention("account_limit"))
+        assertEquals("Paused · limit on tech.silvester", waitsOn(limited, "tech.silvester"))
+        assertEquals("Paused · limit", waitsOn(limited))
+        val signedOut = row(status = "idle", attention = Attention("no_credentials"))
+        assertEquals("tech.silvester is signed out", waitsOn(signedOut, "tech.silvester"))
+        assertEquals("Signed out", waitsOn(signedOut))
+        assertEquals("hetzner-1 is down", waitsOn(row(host = "hetzner-1", attention = Attention("host_down"))))
+        assertNull(blockedLine(row(attention = Attention("waiting")), "tech.silvester"))
+    }
+
+    /** Step 4.10: the account takes a chip left over, unless line two already names it. */
+    @Test
+    fun the_account_takes_a_spare_chip_and_never_repeats_line_two() {
+        assertEquals(
+            listOf("PR #476 ✓", "tech.silvester"),
+            rowChips(row(pr = "https://github.com/o/r/pull/476", ci = "passing"), false, true, "tech.silvester").map { it.first },
+        )
+        assertEquals(
+            listOf("PR #476 ✓", "mercury"),
+            rowChips(row(pr = "https://github.com/o/r/pull/476", ci = "passing"), true, true, "tech.silvester").map { it.first },
+        )
+        val limited = row(attention = Attention("account_limit"))
+        assertEquals(emptyList(), rowChips(limited, false, true, "tech.silvester"))
+        assertEquals(listOf("tech.silvester"), rowChips(row(), false, true, "tech.silvester").map { it.first })
+    }
 }
