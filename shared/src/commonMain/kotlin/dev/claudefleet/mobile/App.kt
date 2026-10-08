@@ -1317,6 +1317,7 @@ private fun FleetRoute(
                         // Today is an Inbox view until Control grows its own.
                         onOpenToday = if (todayInbox.available) ({ today.open() }) else null,
                         anchors = tourAnchors,
+                        accountNames = inboxList.accountNames,
                         top = {
                             mismatch?.let { m -> HubVersionBanner(m, onUpdate = nav::openUpdate.takeIf { updateState.available != null }) }
                             updateState.available?.let { UpdateInboxLine(it, onOpen = nav::openUpdate) }

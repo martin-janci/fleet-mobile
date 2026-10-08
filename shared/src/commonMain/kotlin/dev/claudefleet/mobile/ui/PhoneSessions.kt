@@ -100,11 +100,25 @@ internal fun phoneLead(word: StatusWord?, live: Boolean): String? = when {
  * else its activity, else the reason in words. Never the host — a grouped
  * list says that in the heading, a flat one in a chip.
  */
-internal fun waitsOn(row: SessionRow): String =
+internal fun waitsOn(row: SessionRow, accountName: String? = null): String =
     row.pendingInput?.question?.trim()?.takeIf { it.isNotEmpty() }?.takeIf { row.needsAttention }
+        ?: blockedLine(row, accountName)
         ?: row.supportingLine
         ?: row.attentionReason?.let(::reasonLabel)
         ?: ""
+
+/**
+ * A Blocked row's line (redesign step 4.10), as the desktop words it:
+ * "Paused · limit on tech.silvester", "tech.silvester is signed out",
+ * "Host down". Null for any other row. The phone has no usage reading, so
+ * it cannot say which window or when it resets; the desktop row does.
+ */
+internal fun blockedLine(row: SessionRow, accountName: String?): String? = when (row.attention?.reason) {
+    "account_limit" -> accountName?.let { "Paused · limit on $it" } ?: "Paused · limit"
+    "no_credentials" -> accountName?.let { "$it is signed out" } ?: "Signed out"
+    "host_down" -> "${row.hostAlias.ifBlank { "Host" }} is down"
+    else -> null
+}
 
 /** "PR #476 ✓": the pull request and its CI in one chip, or "CI ✗" alone; null when neither. */
 internal fun prChip(row: SessionRow): Pair<String, StatusWord?>? {
@@ -175,15 +189,17 @@ fun PhoneSessionRow(
     selected: Boolean = false,
     onLongClick: (() -> Unit)? = null,
     divider: Boolean = true,
+    /** The label of the account the session runs under, from `list_accounts`; null shows none (step 4.10). */
+    accountName: String? = null,
 ) {
     val word = phoneWord(row)
-    val chipList = rowChips(row, showHost, showWork)
+    val chipList = rowChips(row, showHost, showWork, accountName)
     val chipRow: (@Composable RowScope.() -> Unit)? = if (chipList.isEmpty()) null else {
         { for ((text, tone) in chipList) OrbitChip(text, word = tone) }
     }
     PhoneRow(
         title = row.displayName,
-        line = waitsOn(row),
+        line = waitsOn(row, accountName),
         modifier = modifier,
         word = word,
         lead = phoneLead(word, live),
@@ -199,13 +215,22 @@ fun PhoneSessionRow(
 
 /**
  * A row's chips, two at most (PhoneRow): the pull request with its CI first,
- * then the host where no heading names it, else the ticket.
+ * then the host where no heading names it, else the ticket; the account
+ * (step 4.10) takes a place left over, unless the row's line already names it.
  */
-internal fun rowChips(row: SessionRow, showHost: Boolean, showWork: Boolean): List<Pair<String, StatusWord?>> {
+internal fun rowChips(
+    row: SessionRow,
+    showHost: Boolean,
+    showWork: Boolean,
+    accountName: String? = null,
+): List<Pair<String, StatusWord?>> {
     val pr = prChip(row)
     val work = row.work?.takeIf { showWork }?.let { it.label to null }
     val host = row.hostAlias.takeIf { showHost && it.isNotBlank() }?.let { it to null }
-    return if (host != null) listOfNotNull(pr ?: work, host) else listOfNotNull(work, pr)
+    val chips = if (host != null) listOfNotNull(pr ?: work, host) else listOfNotNull(work, pr)
+    val named = row.attention?.reason == "account_limit" || row.attention?.reason == "no_credentials"
+    val account = accountName?.takeIf { it.isNotBlank() && !named }?.let { it to null }
+    return if (account != null && chips.size < 2) chips + account else chips
 }
 
 /** The check box a row shows in its dot's place while rows are picked. */
@@ -318,6 +343,7 @@ fun SessionsTab(
                                     nowSeconds = state.nowSeconds,
                                     live = live,
                                     showHost = true,
+                                    accountName = row.accountUuid?.let(state.accountNames::get),
                                     onClick = { tap(row.id) },
                                     selecting = bulk.active,
                                     selected = row.id in bulk.selected,
@@ -345,6 +371,7 @@ fun SessionsTab(
                                         nowSeconds = state.nowSeconds,
                                         live = live,
                                         showWork = work == null,
+                                        accountName = row.accountUuid?.let(state.accountNames::get),
                                         onClick = { tap(row.id) },
                                         selecting = bulk.active,
                                         selected = row.id in bulk.selected,
@@ -639,6 +666,7 @@ private fun LazyListScope.searchSections(
                 nowSeconds = state.nowSeconds,
                 live = live,
                 showHost = true,
+                accountName = row.accountUuid?.let(state.accountNames::get),
                 onClick = { tap(row.id) },
                 selecting = bulk.active,
                 selected = row.id in bulk.selected,

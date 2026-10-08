@@ -208,6 +208,8 @@ data class SessionsUiState(
      * only when there are two or more; empty hides it.
      */
     val orgChoices: List<OrgInfo> = emptyList(),
+    /** Account uuid → label, for a row's account chip and a paused row's line (step 4.10). */
+    val accountNames: Map<String, String> = emptyMap(),
     /**
      * Org id → the org's colour (opaque ARGB) for the bar at a row's edge
      * (claude-fleet M10.5), filled only when [orgChoices] is: with one org or
@@ -338,6 +340,7 @@ class SessionsViewModel(
         val myWork: Set<Long>?,
         val tickets: Map<Long, Ticket>,
         val orgs: OrgDirectory = OrgDirectory.EMPTY,
+        val accountNames: Map<String, String> = emptyMap(),
     )
 
     private val local = MutableStateFlow(
@@ -420,8 +423,8 @@ class SessionsViewModel(
 
     val state: StateFlow<SessionsUiState> = combine(
         combine(fleet.sessions, fleet.hosts, fleet.projects, fleet.status, ::FleetSnapshot),
-        combine(fleet.capabilities, fleet.myWork, fleet.tickets, fleet.orgs) { caps, mine, cache, orgs ->
-            Work(caps.work, mine, cache.associateBy { it.id }, orgs)
+        combine(fleet.capabilities, fleet.myWork, fleet.tickets, fleet.orgs, fleet.accountNames) { caps, mine, cache, orgs, accounts ->
+            Work(caps.work, mine, cache.associateBy { it.id }, orgs, accounts)
         },
         local,
         now,
@@ -443,6 +446,7 @@ class SessionsViewModel(
                     fleet.myWork.value,
                     fleet.tickets.value.associateBy { it.id },
                     fleet.orgs.value,
+                    fleet.accountNames.value,
                 ),
                 local.value,
                 now.value,
@@ -873,6 +877,7 @@ class SessionsViewModel(
             staleFor = if (status is ConnectionStatus.Connected) null else l.liveAt?.let { relativeTime(it, nowSeconds) },
             myWorkAvailable = myWorkAvailable,
             orgChoices = choices,
+            accountNames = work.accountNames,
             orgColors = orgColors(choices),
             hostChoices = hostChoices(sessions, hosts),
             projectChoices = projectChoices(sessions, projects, filters.projectFilter),
