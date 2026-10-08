@@ -205,12 +205,11 @@ private val lightStatus: (StatusTone) -> FleetStatusColors = { orbitStatusColors
 
 /**
  * The app's theme: the Orbit Fleet tokens, dark or light by the system
- * setting, laid over Material 3 so existing screens follow them, plus the
+ * setting (or [dark], for previews that draw both), laid over Material 3 so existing screens follow them, plus the
  * status colours and the manual's type scale for the phone kit.
  */
 @Composable
-fun FleetTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
+fun FleetTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
     val orbit = if (dark) DarkOrbit else LightOrbit
     CompositionLocalProvider(
         LocalStatusColors provides if (dark) darkStatus else lightStatus,

@@ -89,6 +89,16 @@ jobs:
             shared/build/test-results/
           if-no-files-found: warn
 
+      # The phone kit drawn in both themes by `KitPreviewTest`: the previews a
+      # reviewer compares with the manual's BottomBar, PhoneRow and BottomSheet.
+      - name: Kit previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kit-previews
+          path: shared/build/kit-previews/
+          if-no-files-found: warn
+
   instrumentation:
     name: AndroidSecrets on an emulator
     runs-on: ubuntu-latest
