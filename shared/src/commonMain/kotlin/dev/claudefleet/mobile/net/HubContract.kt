@@ -2,7 +2,7 @@ package dev.claudefleet.mobile.net
 
 /**
  * The hub wire-contract revisions this build understands (up to claude-fleet
- * revision 9). A hub
+ * revision 10). A hub
  * outside the range is refused the way the desktop refuses it: the banner
  * says which side is behind, and no row event from that hub is applied.
  *
@@ -39,6 +39,11 @@ package dev.claudefleet.mobile.net
  * `SessionRow` gains `pending_form`. This app calls none of those yet and
  * `ignoreUnknownKeys` absorbs the new field, so a revision-9 hub is safe here;
  * the form card on the phone is its own change.
+ * Revision 10 added debug devices: the `debug_devices` tool (phones,
+ * emulators and simulators on the fleet's hosts) becomes a hub tool the
+ * desktop routes its Debug devices page to. This app calls no device tool
+ * yet and reads no new row shape, so a revision-10 hub is safe here; a
+ * device page on the phone is its own change.
  *
  * [MIN_HUB_CONTRACT] does NOT mirror the desktop's minimum. The desktop
  * raised its own to 3 because a pre-3 hub would silently misperform
@@ -49,7 +54,7 @@ package dev.claudefleet.mobile.net
  * upgraded: this is the phone's own floor, not a copy of the desktop's.
  */
 const val MIN_HUB_CONTRACT: Int = 0
-const val MAX_HUB_CONTRACT: Int = 9
+const val MAX_HUB_CONTRACT: Int = 10
 
 /**
  * What a `contract` field that cannot be read as a revision counts as.
