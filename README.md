@@ -346,6 +346,13 @@ costs one reconnect.
     **Tidy up…** — what the hub suggests retiring, by reason, each with the
     choices its rule allows and the suggested ones ticked (a kill asked
     first), and work that came back after it was done;
+  - a **Missions** sheet (⋮ → Missions, when the hub lists `work { missions }`):
+    each mission's progress and state; one mission's goal, the autonomy that
+    applies and why, what its workers spent, the cards waiting for a person
+    (**Apply** / **Dismiss**, a question answered in words) and the loop's
+    next steps, each with **Go**; **Pause** / **Resume** for one mission and
+    **Pause all** (asked first) for every one. Planning, grants and editing a
+    mission stay on the desktop;
   - **Summarize** on a task's past session: Claude's account of it, kept in
     the work's journal;
   - **Ask for a handover** on a linked session: Claude writes a handover note

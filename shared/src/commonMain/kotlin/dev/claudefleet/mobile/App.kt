@@ -60,6 +60,8 @@ import dev.claudefleet.mobile.data.HubCompanyActions
 import dev.claudefleet.mobile.data.UsageActions
 import dev.claudefleet.mobile.data.HubSessionDetailsActions
 import dev.claudefleet.mobile.data.HubWorkActions
+import dev.claudefleet.mobile.data.HubMissionActions
+import dev.claudefleet.mobile.data.MissionActions
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.SessionActions
@@ -122,6 +124,9 @@ import dev.claudefleet.mobile.ui.searchEverywhere
 import dev.claudefleet.mobile.ui.TidyHandlers
 import dev.claudefleet.mobile.ui.TidySheet
 import dev.claudefleet.mobile.ui.TidyViewModel
+import dev.claudefleet.mobile.ui.MissionsHandlers
+import dev.claudefleet.mobile.ui.MissionsSheet
+import dev.claudefleet.mobile.ui.MissionsViewModel
 import dev.claudefleet.mobile.ui.UsageHandlers
 import dev.claudefleet.mobile.ui.CompanyHandlers
 import dev.claudefleet.mobile.ui.CompanyScreen
@@ -258,6 +263,9 @@ class AppContainer(
 
     /** The work graph's calls, through the same `withClient` as every other. */
     val workActions: WorkActions = HubWorkActions(session)
+
+    /** Missions (claude-fleet orchestration), through the same `withClient`. */
+    val missionActions: MissionActions = HubMissionActions(session)
 
     /** The way into the hub's agent, through the same `withClient`. */
     val agentActions: AgentActions = HubAgentActions(session)
@@ -510,6 +518,8 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     }
     val tidy = remember(repository, scope) { TidyViewModel(repository, container.workActions, scope, credentials.canWrite) }
     val tidyState by tidy.state.collectAsState()
+    val missions = remember(repository, scope) { MissionsViewModel(repository, container.missionActions, scope, credentials.canWrite) }
+    val missionsState by missions.state.collectAsState()
     val today = remember(repository, scope) {
         TodayViewModel(
             fleet = repository,
@@ -702,6 +712,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                             onNewSession = if (credentials.canWrite) ({ nav.newSession() }) else null,
                             onOpenTickets = if (ticketsState.available) ({ tickets.open() }) else null,
                             onOpenToday = if (todayState.available) ({ today.open() }) else null,
+                            onOpenMissions = if (missionsState.available) ({ missions.open() }) else null,
                             onOpenAgent = if (agentState.available) ({ agent.open() }) else null,
                             onDismissAgentError = agent::dismissError,
                             onToggleSelect = bulk::toggle,
@@ -780,6 +791,22 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                                 onOpenSession = { id -> tidy.close(); nav.openFrom(id, SessionsSheet.Tidy) },
                                 onDismissReopened = { tidy.dismissReopened(it) },
                                 onDismissError = tidy::dismissError,
+                            ),
+                        )
+                    }
+                    if (missionsState.open) {
+                        MissionsSheet(
+                            state = missionsState,
+                            handlers = MissionsHandlers(
+                                onClose = missions::close,
+                                onRefresh = { missions.refresh() },
+                                onSelect = { missions.select(it) },
+                                onBack = missions::back,
+                                onStart = { missions.start(it) },
+                                onDecide = { card, ok, note -> missions.decide(card, ok, note) },
+                                onTogglePause = { missions.togglePause() },
+                                onPauseAll = { missions.pauseAll() },
+                                onDismissError = missions::dismissError,
                             ),
                         )
                     }
