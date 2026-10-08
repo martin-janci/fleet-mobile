@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -192,7 +193,8 @@ private fun dim(t: Float): Float {
 fun HexField(modifier: Modifier = Modifier, cell: Dp = 14.dp) {
     val accent = Fleet.colors.loaderAccent
     val clock = rememberLoaderClock(1_800)
-    Canvas(modifier.semantics { contentDescription = "Checking" }) {
+    // Clipped: the edge rows start half a cell outside, and must not spill onto whatever sits above.
+    Canvas(modifier.clipToBounds().semantics { contentDescription = "Checking" }) {
         val r = cell.toPx()
         val w = sqrt(3f) * r
         val rowStep = r * 1.5f + 1.5f
