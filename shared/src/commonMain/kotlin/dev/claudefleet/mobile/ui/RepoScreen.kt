@@ -543,7 +543,7 @@ private fun FilePane(path: String, content: FileContent?, state: RepoUiState, ha
     var source by remember(path) { mutableStateOf(false) }
     PathBar(path, subtitle = content?.size?.let { sizeLabel(it) }) {
         if (state.canSendFile) {
-            TextButton(onClick = { handlers.onSendToDownloads(path) }, enabled = !state.sending) { Text("Save to Downloads") }
+            TextButton(onClick = { handlers.onSendToDownloads(path) }, enabled = !state.sending) { Text("Send to Downloads") }
         }
     }
     if (content == null) return

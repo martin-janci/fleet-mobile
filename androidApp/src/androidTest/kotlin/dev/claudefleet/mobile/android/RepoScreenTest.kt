@@ -37,7 +37,9 @@ class RepoScreenTest {
             RepoHandlers(onOpenDiff = { opened += it }),
         )
         compose.onNodeWithText("History").assertExists()
-        compose.onNodeWithText("src/Main.kt").performClick()
+        // A row shows the file's name first and its folder under it.
+        compose.onNodeWithText("src").assertExists()
+        compose.onNodeWithText("Main.kt").performClick()
         assertEquals(listOf("src/Main.kt"), opened)
     }
 
