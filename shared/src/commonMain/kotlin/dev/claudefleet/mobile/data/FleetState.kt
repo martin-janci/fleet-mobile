@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.data
 
+import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
@@ -115,6 +116,13 @@ interface FleetState {
     val accountNames: StateFlow<Map<String, String>> get() = NoWork.accountNames
 
     /**
+     * Account uuid → its last usage reading, read when the hub lists
+     * `account_usage` and again on each `account_usage:updated`; empty
+     * otherwise. Says when a paused row's limit resets (step 4.10).
+     */
+    val accountUsage: StateFlow<Map<String, AccountUsageSnapshot>> get() = NoWork.accountUsage
+
+    /**
      * The connected trackers and the state each is in (`ok`, `auth_failed`,
      * `unreachable` …), read with *My work*; empty without the work graph or
      * after a failed read. What a ticket's screen says when its tracker is
@@ -168,6 +176,8 @@ private object NoWork {
     val myWork: StateFlow<Set<Long>?> = MutableStateFlow<Set<Long>?>(null).asStateFlow()
     val orgs: StateFlow<OrgDirectory> = MutableStateFlow(OrgDirectory.EMPTY).asStateFlow()
     val accountNames: StateFlow<Map<String, String>> = MutableStateFlow<Map<String, String>>(emptyMap()).asStateFlow()
+    val accountUsage: StateFlow<Map<String, AccountUsageSnapshot>> =
+        MutableStateFlow<Map<String, AccountUsageSnapshot>>(emptyMap()).asStateFlow()
     val trackers: StateFlow<List<TrackerRow>> = MutableStateFlow<List<TrackerRow>>(emptyList()).asStateFlow()
 }
 

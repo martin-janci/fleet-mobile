@@ -71,3 +71,48 @@ data class AccountRow(
 ) {
     val label: String get() = nickname?.takeIf { it.isNotBlank() } ?: displayName?.takeIf { it.isNotBlank() } ?: email ?: uuid.take(8)
 }
+
+/** One usage window of an account. `utilization` is percent USED, 0..100. */
+@Serializable
+data class UsageWindow(
+    val utilization: Double = 0.0,
+    /** Unix seconds; null when the hub does not know. */
+    @SerialName("resets_at") val resetsAt: Long? = null,
+)
+
+/** The windows an account's usage reading has; any may be absent. */
+@Serializable
+data class AccountUsageWindows(
+    @SerialName("five_hour") val fiveHour: UsageWindow? = null,
+    @SerialName("seven_day") val sevenDay: UsageWindow? = null,
+)
+
+/**
+ * The last usage reading of one account (`account_usage`, claude-fleet's
+ * `AccountUsageSnapshot`). Only what the paused row reads (redesign step
+ * 4.10); the rest of the hub's snapshot is ignored.
+ */
+@Serializable
+data class AccountUsageSnapshot(
+    @SerialName("account_uuid") val accountUuid: String,
+    /** The last good reading, kept even when [status] says the last try failed. */
+    val usage: AccountUsageWindows? = null,
+    val status: String? = null,
+)
+
+/** An account at a usage limit: which window, and when it resets. */
+data class AccountLimit(val weekly: Boolean, val resetsAt: Long?)
+
+/**
+ * The limit this account is at, at [now] (unix seconds), or null. The hub's
+ * own rule (`attention::Facts::from_fleet`): a window is at its limit when it
+ * is fully used and has not reset yet, and the weekly one wins, because it is
+ * the longer wait.
+ */
+fun AccountUsageSnapshot.limitAt(now: Long): AccountLimit? {
+    val u = usage ?: return null
+    fun UsageWindow.atLimit() = utilization >= 100.0 && (resetsAt == null || resetsAt > now)
+    u.sevenDay?.takeIf { it.atLimit() }?.let { return AccountLimit(weekly = true, resetsAt = it.resetsAt) }
+    u.fiveHour?.takeIf { it.atLimit() }?.let { return AccountLimit(weekly = false, resetsAt = it.resetsAt) }
+    return null
+}

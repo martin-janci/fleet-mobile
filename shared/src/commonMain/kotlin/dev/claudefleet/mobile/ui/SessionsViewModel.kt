@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.epochSeconds
+import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.Facet
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.OrgDirectory
@@ -210,6 +211,8 @@ data class SessionsUiState(
     val orgChoices: List<OrgInfo> = emptyList(),
     /** Account uuid → label, for a row's account chip and a paused row's line (step 4.10). */
     val accountNames: Map<String, String> = emptyMap(),
+    /** Account uuid → its usage reading, for when a paused row's limit resets (step 4.10). */
+    val accountUsage: Map<String, AccountUsageSnapshot> = emptyMap(),
     /**
      * Org id → the org's colour (opaque ARGB) for the bar at a row's edge
      * (claude-fleet M10.5), filled only when [orgChoices] is: with one org or
@@ -341,6 +344,7 @@ class SessionsViewModel(
         val tickets: Map<Long, Ticket>,
         val orgs: OrgDirectory = OrgDirectory.EMPTY,
         val accountNames: Map<String, String> = emptyMap(),
+        val accountUsage: Map<String, AccountUsageSnapshot> = emptyMap(),
     )
 
     private val local = MutableStateFlow(
@@ -423,8 +427,14 @@ class SessionsViewModel(
 
     val state: StateFlow<SessionsUiState> = combine(
         combine(fleet.sessions, fleet.hosts, fleet.projects, fleet.status, ::FleetSnapshot),
-        combine(fleet.capabilities, fleet.myWork, fleet.tickets, fleet.orgs, fleet.accountNames) { caps, mine, cache, orgs, accounts ->
-            Work(caps.work, mine, cache.associateBy { it.id }, orgs, accounts)
+        combine(
+            fleet.capabilities,
+            fleet.myWork,
+            fleet.tickets,
+            fleet.orgs,
+            combine(fleet.accountNames, fleet.accountUsage, ::Pair),
+        ) { caps, mine, cache, orgs, (accounts, usage) ->
+            Work(caps.work, mine, cache.associateBy { it.id }, orgs, accounts, usage)
         },
         local,
         now,
@@ -447,6 +457,7 @@ class SessionsViewModel(
                     fleet.tickets.value.associateBy { it.id },
                     fleet.orgs.value,
                     fleet.accountNames.value,
+                    fleet.accountUsage.value,
                 ),
                 local.value,
                 now.value,
@@ -878,6 +889,7 @@ class SessionsViewModel(
             myWorkAvailable = myWorkAvailable,
             orgChoices = choices,
             accountNames = work.accountNames,
+            accountUsage = work.accountUsage,
             orgColors = orgColors(choices),
             hostChoices = hostChoices(sessions, hosts),
             projectChoices = projectChoices(sessions, projects, filters.projectFilter),

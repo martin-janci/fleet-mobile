@@ -1395,6 +1395,7 @@ private fun FleetRoute(
                         onOpenToday = if (todayInbox.available) ({ today.open() }) else null,
                         anchors = tourAnchors,
                         accountNames = inboxList.accountNames,
+                        accountUsage = inboxList.accountUsage,
                         top = {
                             mismatch?.let { m -> HubVersionBanner(m, onUpdate = nav::openUpdate.takeIf { updateState.available != null }) }
                             updateState.available?.let { UpdateInboxLine(it, onOpen = nav::openUpdate) }
