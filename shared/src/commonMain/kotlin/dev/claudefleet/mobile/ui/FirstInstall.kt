@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -405,6 +406,8 @@ const val INSTALLING_TAG = "install.running"
  * how the hub reaches the machine. Cancel or Install agent; nothing happens
  * before the tap.
  */
+// The kit sheet's default `rememberModalBottomSheetState` is experimental at the call site (Kotlin/Native).
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InstallAgentSheet(state: AgentInstallUiState, handlers: AgentInstallHandlers) {
     val alias = state.alias ?: return
