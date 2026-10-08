@@ -43,7 +43,7 @@ data class ProjectToolsUiState(
 /**
  * The New session form's project tools — the desktop's Add project dialog
  * and its worktree list: clone a repository onto a host (a URL, or one `gh`
- * there can see), or make a new one (on GitHub too, which the hub asks to
+ * there can see), add a checkout already on the hub's own host, or make a new one (on GitHub too, which the hub asks to
  * have confirmed: [PendingCreate]); and the chosen project's worktrees on
  * the chosen host, each deletable when no session lives in it.
  */
@@ -92,6 +92,13 @@ class ProjectToolsViewModel(
 
     /** Clone [url] onto the host; [onAdded] is handed the project's id. */
     fun clone(url: String, onAdded: (Long) -> Unit): Job = add(onAdded, repoName(url)) { host -> actions.clone(host, url.trim()) }
+
+    /**
+     * Add the checkout at [path] as it stands (a folder already on the host,
+     * redesign 14.20). The hub adopts one on its own `local` host only, and
+     * says so for any other.
+     */
+    fun adopt(path: String, onAdded: (Long) -> Unit): Job = add(onAdded, folderName(path)) { host -> actions.adopt(host, path.trim()) }
 
     /**
      * A new repository [owner]/[repo] on the host — and on GitHub when

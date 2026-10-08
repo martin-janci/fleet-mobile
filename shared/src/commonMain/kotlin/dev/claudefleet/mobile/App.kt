@@ -1923,6 +1923,7 @@ private fun NewSessionRoute(
             onStep = { addStep = it },
             onChooseHost = tools::chooseHost,
             onClone = { url -> tools.clone(url, vm::selectProject) },
+            onAdopt = { path -> tools.adopt(path, vm::selectProject) },
             onCreate = { owner, repo, onGithub -> tools.create(owner, repo, onGithub, vm::selectProject) },
             onClose = tools::closeAdd,
             onDismissError = tools::dismissError,

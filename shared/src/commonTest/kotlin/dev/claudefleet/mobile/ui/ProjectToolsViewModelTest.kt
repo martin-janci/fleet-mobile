@@ -48,6 +48,10 @@ private class Projects : ProjectActions {
         gate?.await()
         return ProjectRow(id = 11, owner = "a", repo = "b")
     }
+    override suspend fun adopt(hostAlias: String, path: String): ProjectRow {
+        calls += "adopt $hostAlias $path"
+        return ProjectRow(id = 13, owner = "local", repo = "app")
+    }
     override suspend fun create(hostAlias: String, owner: String, repo: String, onGithub: Boolean, confirm: String?): ProjectRow {
         calls += "create $owner/$repo github=$onGithub confirm=$confirm"
         gate?.await()
@@ -88,6 +92,23 @@ class ProjectToolsViewModelTest {
         assertEquals(11L, added)
         assertNull(vm.state.value.addingOn)
         assertEquals(1, fleet.refreshes)
+    }
+
+    /** 14.20: a folder already on the host is added where it is, on the host the wizard chose. */
+    @Test
+    fun a_folder_is_adopted_on_the_chosen_host() = runTest {
+        val actions = Projects()
+        val vm = ProjectToolsViewModel(ProjFleet(ALL_PROJ), actions, backgroundScope, canWrite = true)
+        vm.openAdd("pine").join()
+        vm.chooseHost("local")
+        var added: Long? = null
+
+        vm.adopt(" /home/me/app ") { added = it }.join()
+        runCurrent()
+
+        assertEquals("adopt local /home/me/app", actions.calls.last())
+        assertEquals(13L, added)
+        assertNull(vm.state.value.addingOn)
     }
 
     @Test

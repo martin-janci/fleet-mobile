@@ -64,6 +64,24 @@ class AddProjectWizardTest {
         assertEquals("Creating the project", addingTitle(null, creating = true))
     }
 
+    /** 14.20: a folder already on the host — a whole path, added on the hub's own machine only. */
+    @Test
+    fun a_folder_is_a_whole_path_added_on_the_hubs_own_machine() {
+        assertEquals("Type the folder's path on the host.", sourceBlocker(ProjectSource.Folder(" ")))
+        assertEquals("Give the whole path, from /.", sourceBlocker(ProjectSource.Folder("projects/app")))
+        assertNull(sourceBlocker(ProjectSource.Folder("/home/me/app")))
+        assertEquals("Add", addActionLabel(ProjectSource.Folder("/home/me/app")))
+
+        assertNull(hostBlocker(ProjectSource.Folder("/home/me/app"), LOCAL_HOST))
+        assertEquals("A folder is added on local, the hub's own machine.", hostBlocker(ProjectSource.Folder("/home/me/app"), "pine"))
+        assertNull(hostBlocker(ProjectSource.Url("https://github.com/acme/app"), "pine"))
+
+        assertEquals("app", folderName("/home/me/app/"))
+        assertEquals("Add the folder /home/me/app", sourceSummary(ProjectSource.Folder(" /home/me/app")))
+        assertEquals(listOf("Check the folder is a git checkout", "Add to Projects"), addSteps(creating = false, onGithub = false, adopting = true))
+        assertEquals("Adding app", addingTitle("app", creating = false, adopting = true))
+    }
+
     @Test
     fun the_data_rain_is_the_manuals_sixteen_streaks_fading_at_both_ends() {
         assertEquals(16, RAIN.size)
