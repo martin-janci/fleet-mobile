@@ -124,7 +124,7 @@ class MorePlacesTest {
     fun version_drift_is_measured_against_the_newest_claude_on_the_fleet() {
         val hosts = listOf(line("a", claude = "2.0.40"), line("b", claude = "2.0.31 (Claude Code)"), line("c", claude = null), line("d", claude = "dev"))
         assertEquals(setOf("b"), behindHosts(hosts), "unknown and unparseable versions are never behind")
-        assertEquals(emptySet(), behindHosts(listOf(line("a"), line("b"))))
+        assertEquals(emptySet<String>(), behindHosts(listOf(line("a"), line("b"))))
     }
 
     @Test
@@ -143,7 +143,7 @@ class MorePlacesTest {
         runCurrent()
         assertEquals(listOf("oci-arm"), actions.probed)
         assertEquals(1, fleet.refreshes, "the re-list shows what the probe found")
-        assertEquals(emptySet(), vm.state.value.checking)
+        assertEquals(emptySet<String>(), vm.state.value.checking)
     }
 
     @Test

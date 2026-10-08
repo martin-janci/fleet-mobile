@@ -56,6 +56,8 @@ import dev.claudefleet.mobile.data.HostActions
 import dev.claudefleet.mobile.data.HubHostActions
 import dev.claudefleet.mobile.data.HubProjectActions
 import dev.claudefleet.mobile.data.HubMoveActions
+import dev.claudefleet.mobile.data.HubSessionExtrasActions
+import dev.claudefleet.mobile.data.SessionExtrasActions
 import dev.claudefleet.mobile.data.HubSessionActions
 import dev.claudefleet.mobile.data.MoveActions
 import dev.claudefleet.mobile.data.ProjectActions
@@ -173,6 +175,9 @@ import dev.claudefleet.mobile.ui.DetailsAction
 import dev.claudefleet.mobile.ui.SessionTab
 import dev.claudefleet.mobile.ui.SessionTabsHost
 import dev.claudefleet.mobile.ui.sessionTabs
+import dev.claudefleet.mobile.ui.SessionExtrasViewModel
+import dev.claudefleet.mobile.ui.TerminalsHandlers
+import dev.claudefleet.mobile.ui.TerminalsPane
 import dev.claudefleet.mobile.ui.agentName
 import dev.claudefleet.mobile.ui.appendToDraft
 import dev.claudefleet.mobile.ui.RepoBody
@@ -360,6 +365,9 @@ class AppContainer(
     val hostActions: HostActions = HubHostActions(session)
     val projectActions: ProjectActions = HubProjectActions(session)
     val moveActions: MoveActions = HubMoveActions(session)
+
+    /** A session's Terminals tab and its ⋮ Archive (redesign 14.14). */
+    val sessionExtrasActions: SessionExtrasActions = HubSessionExtrasActions(session)
 
     /** The hub's own version, for the Settings screen to show beside this app's. */
     val versionActions: VersionActions = HubVersionActions(session)
@@ -1863,6 +1871,11 @@ private fun SessionRoute(
         MoveViewModel(sessionId, repository, container.moveActions, scope, credentials.canWrite)
     }
     val move by moveVm.state.collectAsState()
+    // The shells beside the session and ⋮ Archive (redesign 14.14), New bar only.
+    val extrasVm = remember(sessionId, repository, scope) {
+        SessionExtrasViewModel(sessionId, repository, container.sessionExtrasActions, scope, credentials.canWrite)
+    }
+    val extras by extrasVm.state.collectAsState()
     // The New bar's tabs (redesign 14.4): the conversation, the agent's own
     // screen, the worktree (instead of the worktree screen) and Details
     // (instead of the sheet). Each reads when it is opened.
@@ -1893,6 +1906,8 @@ private fun SessionRoute(
             SessionTab.Agent -> vm.showTerminal()
             SessionTab.Files -> repoVm?.load()
             SessionTab.Details -> detailsVm.open()
+            // Its pane reads the shell while it is shown (`TerminalsPane`).
+            SessionTab.Terminals -> Unit
             SessionTab.Conversation -> Unit
         }
     }
@@ -2014,11 +2029,31 @@ private fun SessionRoute(
         onRetryNotSent = { vm.retryNotSent() },
         onEditNotSent = vm::editNotSent,
         onRetryLastTurn = { vm.retryLastTurn(it) },
+        // ⋮ Archive leaves the session: back to where it was opened from.
+        onArchive = { extrasVm.archive(onBack); Unit }.takeIf { newLayout && caps.archiveSession && credentials.canWrite },
+        notice = extras.archiveError.takeIf { newLayout },
+        onDismissNotice = extrasVm::dismissArchiveError,
         tabs = if (!newLayout) {
             null
         } else {
             SessionTabsHost(
-                tabs = sessionTabs(hasWorktree),
+                tabs = sessionTabs(hasWorktree, terminals = extras.canCreate || extras.terminals.isNotEmpty()),
+                terminalCount = extras.terminals.size,
+                terminals = {
+                    TerminalsPane(
+                        state = extras,
+                        handlers = TerminalsHandlers(
+                            onShow = extrasVm::show,
+                            onHide = extrasVm::hide,
+                            onSelect = extrasVm::select,
+                            onNew = { extrasVm.newTerminal() },
+                            onInput = extrasVm::setInput,
+                            onSubmit = { extrasVm.submit() },
+                            onKey = { extrasVm.press(it) },
+                            onDismissError = extrasVm::dismissError,
+                        ),
+                    )
+                },
                 selected = sessionTab,
                 agent = agentName(state.session),
                 onSelect = ::selectTab,
