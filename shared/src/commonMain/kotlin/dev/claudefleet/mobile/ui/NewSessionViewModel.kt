@@ -9,6 +9,7 @@ import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.MultiStart
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.StartSkip
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.net.HubCapabilities
@@ -16,6 +17,7 @@ import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK_LINK
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.existingSessionId
 import dev.claudefleet.mobile.net.isUnknownAction
+import dev.claudefleet.mobile.ui.theme.StatusTone
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -31,8 +33,18 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
-/** A machine the form can offer. An unreachable one is listed, greyed, and cannot be picked. */
-data class HostChoice(val alias: String, val reachable: Boolean)
+/**
+ * A machine the form can offer. An unreachable one is listed, greyed, and
+ * cannot be picked. The counts are its live load, from the fleet's own rows,
+ * so the person can choose by it (the wizard's Where step).
+ */
+data class HostChoice(
+    val alias: String,
+    val reachable: Boolean,
+    val needsYou: Int = 0,
+    val working: Int = 0,
+    val idle: Int = 0,
+)
 
 /** A project the form can offer, by the name a person recognises. */
 data class ProjectChoice(val id: Long, val label: String)
@@ -203,13 +215,13 @@ class NewSessionViewModel(
 
     val state: StateFlow<NewSessionUiState> =
         combine(
-            fleet.hosts,
+            combine(fleet.hosts, fleet.sessions, ::Pair),
             fleet.projects,
             fleet.status,
             local,
             combine(fleet.capabilities, fleet.tickets, fleet.orgs, ::WorkView),
-        ) { hosts, projects, status, l, work ->
-            assemble(hosts, projects, status, l, work)
+        ) { (hosts, sessions), projects, status, l, work ->
+            assemble(hosts, projects, status, l, work, sessions)
         }.stateIn(scope, SharingStarted.Eagerly, current())
 
     /** Pick a host. One the hub cannot reach is ignored — the row is greyed for that reason. */
@@ -436,6 +448,7 @@ class NewSessionViewModel(
             fleet.status.value,
             local.value,
             WorkView(fleet.capabilities.value, fleet.tickets.value, fleet.orgs.value),
+            fleet.sessions.value,
         )
 
     private fun assemble(
@@ -444,6 +457,7 @@ class NewSessionViewModel(
         status: ConnectionStatus,
         l: Local,
         work: WorkView,
+        sessions: List<SessionRow>,
     ): NewSessionUiState {
         val caps = work.caps
         // Hidden is the desktop's "do not show me this". The exception is the
@@ -516,7 +530,7 @@ class NewSessionViewModel(
             null
         }
         return NewSessionUiState(
-            hosts = offered.map { HostChoice(it.alias, it.reachable) },
+            hosts = offered.map { hostChoice(it, sessions) },
             host = host,
             projects = listed,
             projectQuery = l.projectQuery,
@@ -558,6 +572,20 @@ class NewSessionViewModel(
 }
 
 private const val START = "start"
+
+/** [host] with its load: the live sessions on it, by status word. A lost row is not load. */
+private fun hostChoice(host: HostRow, sessions: List<SessionRow>): HostChoice {
+    val tones = sessions
+        .filter { it.hostAlias == host.alias && it.lostAt == null }
+        .map { StatusTone.of(it.claudeStatus, it.stuckKind) }
+    return HostChoice(
+        alias = host.alias,
+        reachable = host.reachable,
+        needsYou = tones.count { it == StatusTone.BLOCKED },
+        working = tones.count { it == StatusTone.WORKING },
+        idle = tones.count { it == StatusTone.IDLE },
+    )
+}
 private const val PROJECT_IDS = "project_ids"
 
 private fun unnamedLabel(id: Long) = ProjectRow(id).label
