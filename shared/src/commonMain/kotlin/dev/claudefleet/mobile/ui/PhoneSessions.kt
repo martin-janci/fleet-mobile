@@ -58,6 +58,9 @@ import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.model.SessionFacetId
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.AccountLimit
+import dev.claudefleet.mobile.model.limitAt
+import dev.claudefleet.mobile.model.relativeWithin
 import dev.claudefleet.mobile.model.reasonLabel
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
@@ -100,9 +103,14 @@ internal fun phoneLead(word: StatusWord?, live: Boolean): String? = when {
  * else its activity, else the reason in words. Never the host — a grouped
  * list says that in the heading, a flat one in a chip.
  */
-internal fun waitsOn(row: SessionRow, accountName: String? = null): String =
+internal fun waitsOn(
+    row: SessionRow,
+    accountName: String? = null,
+    limit: AccountLimit? = null,
+    nowSeconds: Long = 0,
+): String =
     row.pendingInput?.question?.trim()?.takeIf { it.isNotEmpty() }?.takeIf { row.needsAttention }
-        ?: blockedLine(row, accountName)
+        ?: blockedLine(row, accountName, limit, nowSeconds)
         ?: row.supportingLine
         ?: row.attentionReason?.let(::reasonLabel)
         ?: ""
@@ -110,15 +118,30 @@ internal fun waitsOn(row: SessionRow, accountName: String? = null): String =
 /**
  * A Blocked row's line (redesign step 4.10), as the desktop words it:
  * "Paused · limit on tech.silvester", "tech.silvester is signed out",
- * "Host down". Null for any other row. The phone has no usage reading, so
- * it cannot say which window or when it resets; the desktop row does.
+ * "Host down". Null for any other row. With the account's usage reading
+ * ([limit], from `account_usage`) a paused row also says which window and
+ * when it resets: "Paused · weekly limit on tech.silvester · resets in 3 d".
  */
-internal fun blockedLine(row: SessionRow, accountName: String?): String? = when (row.attention?.reason) {
-    "account_limit" -> accountName?.let { "Paused · limit on $it" } ?: "Paused · limit"
+internal fun blockedLine(
+    row: SessionRow,
+    accountName: String?,
+    limit: AccountLimit? = null,
+    nowSeconds: Long = 0,
+): String? = when (row.attention?.reason) {
+    "account_limit" -> {
+        val what = if (limit?.weekly == true) "Paused · weekly limit" else "Paused · limit"
+        val on = accountName?.let { " on $it" } ?: ""
+        val resets = relativeWithin(limit?.resetsAt, nowSeconds)?.let { " · resets in $it" } ?: ""
+        "$what$on$resets"
+    }
     "no_credentials" -> accountName?.let { "$it is signed out" } ?: "Signed out"
     "host_down" -> "${row.hostAlias.ifBlank { "Host" }} is down"
     else -> null
 }
+
+/** The limit [row]'s account is at now, from the usage readings; null when none is known. */
+internal fun SessionsUiState.limitOf(row: SessionRow): AccountLimit? =
+    row.accountUuid?.let(accountUsage::get)?.limitAt(nowSeconds)
 
 /** "PR #476 ✓": the pull request and its CI in one chip, or "CI ✗" alone; null when neither. */
 internal fun prChip(row: SessionRow): Pair<String, StatusWord?>? {
@@ -191,6 +214,8 @@ fun PhoneSessionRow(
     divider: Boolean = true,
     /** The label of the account the session runs under, from `list_accounts`; null shows none (step 4.10). */
     accountName: String? = null,
+    /** The limit that account is at, from `account_usage`; null when none is known. */
+    limit: AccountLimit? = null,
 ) {
     val word = phoneWord(row)
     val chipList = rowChips(row, showHost, showWork, accountName)
@@ -199,7 +224,7 @@ fun PhoneSessionRow(
     }
     PhoneRow(
         title = row.displayName,
-        line = waitsOn(row, accountName),
+        line = waitsOn(row, accountName, limit, nowSeconds),
         modifier = modifier,
         word = word,
         lead = phoneLead(word, live),
@@ -344,6 +369,7 @@ fun SessionsTab(
                                     live = live,
                                     showHost = true,
                                     accountName = row.accountUuid?.let(state.accountNames::get),
+                                    limit = state.limitOf(row),
                                     onClick = { tap(row.id) },
                                     selecting = bulk.active,
                                     selected = row.id in bulk.selected,
@@ -372,6 +398,7 @@ fun SessionsTab(
                                         live = live,
                                         showWork = work == null,
                                         accountName = row.accountUuid?.let(state.accountNames::get),
+                                        limit = state.limitOf(row),
                                         onClick = { tap(row.id) },
                                         selecting = bulk.active,
                                         selected = row.id in bulk.selected,
@@ -667,6 +694,7 @@ private fun LazyListScope.searchSections(
                 live = live,
                 showHost = true,
                 accountName = row.accountUuid?.let(state.accountNames::get),
+                limit = state.limitOf(row),
                 onClick = { tap(row.id) },
                 selecting = bulk.active,
                 selected = row.id in bulk.selected,

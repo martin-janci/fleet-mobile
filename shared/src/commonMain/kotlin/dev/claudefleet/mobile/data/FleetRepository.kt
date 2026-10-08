@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.ui.explain
+import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
@@ -165,6 +166,9 @@ class FleetRepository(
     private val _accountNames = MutableStateFlow<Map<String, String>>(emptyMap())
     override val accountNames: StateFlow<Map<String, String>> = _accountNames.asStateFlow()
 
+    private val _accountUsage = MutableStateFlow<Map<String, AccountUsageSnapshot>>(emptyMap())
+    override val accountUsage: StateFlow<Map<String, AccountUsageSnapshot>> = _accountUsage.asStateFlow()
+
     private val _trackers = MutableStateFlow<List<TrackerRow>>(emptyList())
     override val trackers: StateFlow<List<TrackerRow>> = _trackers.asStateFlow()
 
@@ -213,6 +217,7 @@ class FleetRepository(
         running?.cancel()
         discovery?.cancel()
         myWorkRead?.cancel()
+        usageRead?.cancel()
         _status.value = ConnectionStatus.Offline(STOPPED)
     }
 
@@ -364,6 +369,7 @@ class FleetRepository(
                                 _myWork.value = null
                                 _orgs.value = OrgDirectory.EMPTY
                                 _accountNames.value = emptyMap()
+                                _accountUsage.value = emptyMap()
                                 _trackers.value = emptyList()
                                 _status.value = ConnectionStatus.Refused(refusal)
                                 return@collect
@@ -411,6 +417,7 @@ class FleetRepository(
                             // exists only to say "re-read". An unknown kind
                             // stays a no-op for the snapshot either way.
                             if (event.isWorkFrame()) _workChanges.tryEmit(++workTicks)
+                            if (event.isAccountUsageFrame()) readAccountUsageSoon()
                             event.downloadId()?.let { _downloadChanges.tryEmit(it) }
                         }
                     }
@@ -468,6 +475,7 @@ class FleetRepository(
             myWorkRead?.cancel()
             _orgs.value = readOrgs(caps)
             _accountNames.value = readAccountNames(caps)
+            _accountUsage.value = readAccountUsage(caps)
             if (!caps.work) _trackers.value = emptyList()
             _myWork.value = if (caps.work) readMyWork() else null
         }
@@ -502,6 +510,30 @@ class FleetRepository(
             OrgDirectory.EMPTY
         } catch (_: Throwable) {
             OrgDirectory.EMPTY
+        }
+    }
+
+    /** An `account_usage` read in flight; a newer frame replaces it. */
+    private var usageRead: Job? = null
+
+    private fun readAccountUsageSoon() {
+        usageRead?.cancel()
+        usageRead = scope.launch { _accountUsage.value = readAccountUsage(_capabilities.value) }
+    }
+
+    /**
+     * Every account's last usage reading by uuid, when the hub lists
+     * `account_usage`; empty otherwise and on a failed read, which leaves a
+     * paused row without its reset time rather than saying anything.
+     */
+    private suspend fun readAccountUsage(caps: HubCapabilities): Map<String, AccountUsageSnapshot> {
+        if (!caps.accountUsage) return emptyMap()
+        return try {
+            client.accountUsage().associateBy { it.accountUuid }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            emptyMap()
         }
     }
 

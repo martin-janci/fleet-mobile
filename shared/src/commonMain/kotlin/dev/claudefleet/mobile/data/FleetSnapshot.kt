@@ -44,14 +44,16 @@ val SNAPSHOT_EVENT_KINDS: List<String> = listOf("session", "host", "project", "w
 /**
  * Kinds that change nothing in the snapshot and are subscribed to only as a
  * signal to re-read: `download` (`download:changed { id }`, claude-fleet
- * file downloads) tells the Files tab to ask `list_downloads` again. A hub
+ * file downloads) tells the Files tab to ask `list_downloads` again;
+ * `account_usage` (`account_usage:updated`) re-reads the accounts' usage,
+ * because `?fields=` projects its payload to the row fields. A hub
  * that does not know the kind ignores it in `?kinds=`.
  *
  * Kept apart from [SNAPSHOT_EVENT_KINDS] so that list still means "what the
  * snapshot applies" — `FleetSnapshotTest` holds every entry of it to changing
  * the snapshot, which a signal never does.
  */
-val SIGNAL_EVENT_KINDS: List<String> = listOf("download")
+val SIGNAL_EVENT_KINDS: List<String> = listOf("download", "account_usage")
 
 /** Everything the stream asks the hub for with `?kinds=`. */
 val STREAM_EVENT_KINDS: List<String> = SNAPSHOT_EVENT_KINDS + SIGNAL_EVENT_KINDS
@@ -148,6 +150,9 @@ fun HubEvent.Row.sessionId(): Long? = when {
  * the one the snapshot itself ignores — [applying] leaves it a no-op.
  */
 fun HubEvent.Row.isWorkFrame(): Boolean = name.startsWith("work:")
+
+/** An `account_usage:*` frame: an account's usage reading changed. */
+fun HubEvent.Row.isAccountUsageFrame(): Boolean = name.startsWith("account_usage:")
 
 /** The download a `download:changed` frame names, or null for any other frame. */
 fun HubEvent.Row.downloadId(): Long? =

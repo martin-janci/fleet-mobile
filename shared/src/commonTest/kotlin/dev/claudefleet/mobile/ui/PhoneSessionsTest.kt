@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.model.AccountLimit
 import dev.claudefleet.mobile.model.Attention
 import dev.claudefleet.mobile.model.PendingInput
 import dev.claudefleet.mobile.model.SessionRow
@@ -152,5 +153,20 @@ class PhoneSessionsTest {
         val limited = row(attention = Attention("account_limit"))
         assertEquals(emptyList(), rowChips(limited, false, true, "tech.silvester"))
         assertEquals(listOf("tech.silvester"), rowChips(row(), false, true, "tech.silvester").map { it.first })
+    }
+
+    /** Step 4.10: with the account's usage reading, a paused row says which window and when it resets. */
+    @Test
+    fun a_paused_row_says_when_its_limit_resets() {
+        val limited = row(status = "idle", attention = Attention("account_limit"))
+        assertEquals(
+            "Paused · limit on tech.silvester · resets in 2 h",
+            waitsOn(limited, "tech.silvester", AccountLimit(weekly = false, resetsAt = 1_000 + 7_200), 1_000),
+        )
+        assertEquals(
+            "Paused · weekly limit · resets in 3 d",
+            waitsOn(limited, null, AccountLimit(weekly = true, resetsAt = 1_000 + 3 * 86_400), 1_000),
+        )
+        assertEquals("Paused · weekly limit on x", waitsOn(limited, "x", AccountLimit(weekly = true, resetsAt = null), 1_000))
     }
 }
