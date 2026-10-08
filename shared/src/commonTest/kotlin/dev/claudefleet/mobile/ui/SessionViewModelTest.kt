@@ -3338,6 +3338,25 @@ class SessionViewModelTest {
         assertEquals("", again.state.value.draft)
     }
 
+    @Test
+    fun a_draft_filled_from_outside_reaches_an_open_box_after_what_is_typed() = runTest {
+        val drafts = DraftMemory()
+        val vm = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope, drafts = drafts)
+        vm.onDraftChange("first")
+        runCurrent()
+
+        // A lesson's prompt (redesign 14.22): into the box, never sent.
+        drafts.fill(ID, "What needs me?")
+        runCurrent()
+        assertEquals("first\n\nWhat needs me?", vm.state.value.draft)
+
+        // Another session's fill leaves this box alone.
+        drafts.fill(ID + 1, "elsewhere")
+        runCurrent()
+        assertEquals("first\n\nWhat needs me?", vm.state.value.draft)
+        assertEquals("elsewhere", drafts.recall(ID + 1))
+    }
+
     // --- answering in your own words (redesign 14.4) ---
 
     private val ownWords = PendingInput(

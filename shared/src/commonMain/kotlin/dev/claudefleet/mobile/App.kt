@@ -761,6 +761,7 @@ private fun FleetRoute(
             actions = container.agentActions,
             scope = scope,
             canWrite = credentials.canWrite,
+            drafts = container.drafts,
             onOpenSession = { nav.open(it) },
         )
     }
@@ -1670,12 +1671,16 @@ private fun FleetRoute(
                 }
             }
             help.lesson?.let { (lesson, step) ->
+                val lessonAgent by agent.state.collectAsState()
                 LessonBar(
                     lesson = lesson,
                     step = step,
                     onNext = helpSettings::nextStep,
                     onEnd = helpSettings::endLesson,
                     modifier = Modifier.align(Alignment.BottomCenter),
+                    // On the New bar a Control step's prompts open the coordinator
+                    // with the prompt in its composer; nothing is sent (14.22).
+                    onPrompt = if (layout == PhoneLayout.New && lessonAgent.available) ({ prompt: String -> agent.open(fill = prompt); Unit }) else null,
                 )
             }
             whatsNew?.let { news ->

@@ -545,6 +545,10 @@ class SessionViewModel(
         scope.launch {
             local.map { it.draft }.distinctUntilChanged().collect { drafts.keep(sessionId, it) }
         }
+        // A draft filled from outside the box while it is open (a lesson's prompt).
+        scope.launch {
+            drafts.filled.filter { it == sessionId }.collect { local.update { l -> l.copy(draft = drafts.recall(sessionId)) } }
+        }
         // Ticks `now` every 30s — the same period [SessionsViewModel] uses for
         // the fleet list — so the strip's "2 min" / "idle since 2 h" wording
         // advances without a per-second recomposition on a screen a person

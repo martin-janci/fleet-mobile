@@ -75,6 +75,25 @@ class AgentViewModelTest {
     }
 
     @Test
+    fun a_lesson_prompt_lands_in_the_agents_composer_after_what_is_typed() = runTest {
+        val drafts = DraftMemory()
+        val opened = mutableListOf<Long>()
+        val vm = AgentViewModel(WorkFleet(caps = withAgent), FakeAgent(), backgroundScope, canWrite = true, drafts = drafts) { opened += it }
+        runCurrent()
+
+        vm.open(fill = "What needs me?")!!.join()
+        assertEquals("What needs me?", drafts.recall(42))
+        assertEquals(listOf(42L), opened)
+
+        vm.open(fill = "What did I ship today?")!!.join()
+        assertEquals("What needs me?\n\nWhat did I ship today?", drafts.recall(42))
+
+        // Opening without a prompt leaves the draft alone.
+        vm.open()!!.join()
+        assertEquals("What needs me?\n\nWhat did I ship today?", drafts.recall(42))
+    }
+
+    @Test
     fun a_refusal_is_said_and_can_be_dismissed() = runTest {
         val actions = FakeAgent().apply {
             answer = CompletableDeferred<SessionRow>().also { it.completeExceptionally(HubError.Tool("E_MCP_OFF", "the control API is off")) }
