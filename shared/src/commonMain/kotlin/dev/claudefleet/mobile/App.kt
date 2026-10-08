@@ -5,6 +5,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -94,7 +95,21 @@ import dev.claudefleet.mobile.model.GroupRef
 import dev.claudefleet.mobile.ui.HostsScreen
 import dev.claudefleet.mobile.ui.HostsViewModel
 import dev.claudefleet.mobile.ui.MultiStartHandlers
+import dev.claudefleet.mobile.ui.ControlScreen
+import dev.claudefleet.mobile.ui.components.ErrorBanner
+import dev.claudefleet.mobile.ui.InboxScreen
+import dev.claudefleet.mobile.ui.MoreEntry
+import dev.claudefleet.mobile.ui.MoreScreen
 import dev.claudefleet.mobile.ui.Navigator
+import dev.claudefleet.mobile.ui.PhoneLayout
+import dev.claudefleet.mobile.ui.hostsLine
+import dev.claudefleet.mobile.ui.inboxRows
+import dev.claudefleet.mobile.ui.loadPhoneLayout
+import dev.claudefleet.mobile.ui.savePhoneLayout
+import dev.claudefleet.mobile.ui.kit.BottomBar
+import dev.claudefleet.mobile.ui.kit.BottomBarBadge
+import dev.claudefleet.mobile.ui.kit.BottomBarItem
+import dev.claudefleet.mobile.ui.kit.OrbitIcons
 import dev.claudefleet.mobile.ui.NewSessionScreen
 import dev.claudefleet.mobile.ui.NewSessionViewModel
 import dev.claudefleet.mobile.ui.PairScreen
@@ -133,7 +148,6 @@ import dev.claudefleet.mobile.ui.CompanyScreen
 import dev.claudefleet.mobile.ui.CompanyViewModel
 import dev.claudefleet.mobile.ui.UsageScreen
 import dev.claudefleet.mobile.ui.UsageViewModel
-import dev.claudefleet.mobile.ui.isPushed
 import dev.claudefleet.mobile.ui.SessionViewModel
 import dev.claudefleet.mobile.ui.SessionWorkHandlers
 import dev.claudefleet.mobile.ui.SessionWorkViewModel
@@ -488,8 +502,11 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
         }
     }
 
-    val nav = remember(credentials) { Navigator() }
+    // The phone's layout switch (redesign 14.2): Classic until someone picks
+    // New in Settings, read once per pairing and written on every change.
+    val nav = remember(credentials) { Navigator(loadPhoneLayout(container.prefs)) }
     val screen by nav.screen.collectAsState()
+    val layout by nav.layout.collectAsState()
     // A tapped "needs you" notification: open its session.
     val openRequest by container.openSession.collectAsState()
     LaunchedEffect(openRequest) { if (openRequest != null) container.consumeOpenSession()?.let(nav::open) }
@@ -507,7 +524,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
     // app handles back, and on a tab it does not, which lets Android close the
     // app and iOS do whatever it does with an unclaimed swipe. That is why the
     // return value still does not need reading here.
-    BackHandler(enabled = isPushed(screen)) { nav.back() }
+    BackHandler(enabled = nav.isPushed(screen)) { nav.back() }
 
     val sessions = remember(repository, scope) { SessionsViewModel(repository, scope, prefs = container.prefs) }
     val bulk = remember(repository, scope) { BulkViewModel(repository, container.sessionActions, scope, credentials.canWrite) }
@@ -615,11 +632,23 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                 enter = expandVertically(expandFrom = Alignment.Top),
                 exit = shrinkVertically(shrinkTowards = Alignment.Top),
             ) {
-                NavigationBar {
-                    val attention by sessions.state.collectAsState()
+                val attention by sessions.state.collectAsState()
+                if (layout == PhoneLayout.New) {
+                    // The Orbit Fleet bar: one badge, the Needs you count, on
+                    // Inbox. Work's To review count stays on the Work screen.
+                    val items = PhoneLayout.New.tabs
+                        .filter { it != Tab.Work || workState.available }
+                        .map { newBarItem(it) }
+                    BottomBar(
+                        items = items,
+                        selected = tab.name,
+                        onSelect = { key -> nav.select(Tab.valueOf(key)) },
+                        badge = BottomBarBadge(Tab.Inbox.name, attention.attentionCount),
+                    )
+                } else NavigationBar {
                     // Work only when the hub serves `work { tree }`, Files only
                     // when it keeps downloads.
-                    val shown = Tab.entries.filter {
+                    val shown = PhoneLayout.Classic.tabs.filter {
                         (it != Tab.Work || workState.available) && (it != Tab.Files || filesState.available)
                     }
                     for (entry in shown) {
@@ -632,7 +661,7 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                                     Tab.Work -> FleetIcons.Work
                                     Tab.Files -> FleetIcons.Files
                                     Tab.Hosts -> FleetIcons.Hosts
-                                    Tab.Settings -> FleetIcons.Settings
+                                    else -> FleetIcons.Settings
                                 }
                                 if (entry == Tab.Sessions && attention.attentionCount > 0) {
                                     BadgedBox(badge = { Badge { Text("${attention.attentionCount}") } }) {
@@ -722,7 +751,8 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                             onOpenTickets = if (ticketsState.available) ({ tickets.open() }) else null,
                             onOpenToday = if (todayState.available) ({ today.open() }) else null,
                             onOpenMissions = if (missionsState.available) ({ missions.open() }) else null,
-                            onOpenAgent = if (agentState.available) ({ agent.open() }) else null,
+                            // On the New bar Control replaces the agent button.
+                            onOpenAgent = if (agentState.available && layout == PhoneLayout.Classic) ({ agent.open() }) else null,
                             onDismissAgentError = agent::dismissError,
                             onToggleSelect = bulk::toggle,
                             onClearSelection = bulk::clear,
@@ -770,52 +800,6 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                                     sessions.clearFacet(id)
                                     if (id == SessionFacetId.HOST) nav.clearHostFilter()
                                 },
-                            ),
-                        )
-                    }
-                    if (todayState.open) {
-                        TodaySheet(
-                            state = todayState,
-                            handlers = TodayHandlers(
-                                onClose = today::close,
-                                onRefresh = { today.refresh() },
-                                onOpenSession = today::openSession,
-                                onDismissError = today::dismissError,
-                                onToggleSection = today::toggleSection,
-                                onSetHost = today::setHost,
-                                onToggleTicketsOnly = today::toggleTicketsOnly,
-                                onClearFilters = today::clearFilters,
-                                onOpenTidy = { today.close(); tidy.open(); Unit }.takeIf { tidyState.available },
-                            ),
-                        )
-                    }
-                    if (tidyState.open) {
-                        TidySheet(
-                            state = tidyState,
-                            handlers = TidyHandlers(
-                                onClose = tidy::close,
-                                onToggle = tidy::toggle,
-                                onChoose = tidy::choose,
-                                onApply = { tidy.apply() },
-                                onOpenSession = { id -> tidy.close(); nav.openFrom(id, SessionsSheet.Tidy) },
-                                onDismissReopened = { tidy.dismissReopened(it) },
-                                onDismissError = tidy::dismissError,
-                            ),
-                        )
-                    }
-                    if (missionsState.open) {
-                        MissionsSheet(
-                            state = missionsState,
-                            handlers = MissionsHandlers(
-                                onClose = missions::close,
-                                onRefresh = { missions.refresh() },
-                                onSelect = { missions.select(it) },
-                                onBack = missions::back,
-                                onStart = { missions.start(it) },
-                                onDecide = { card, ok, note -> missions.decide(card, ok, note) },
-                                onTogglePause = { missions.togglePause() },
-                                onPauseAll = { missions.pauseAll() },
-                                onDismissError = missions::dismissError,
                             ),
                         )
                     }
@@ -1046,6 +1030,67 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         )
                     }
                 }
+                Screen.Inbox -> {
+                    val all by repository.sessions.collectAsState()
+                    val rows = remember(all) { inboxRows(all) }
+                    val todayInbox by today.state.collectAsState()
+                    InboxScreen(
+                        rows = rows,
+                        running = all.count { it.claudeStatus == "working" },
+                        nowSeconds = epochSeconds(),
+                        onOpenSession = nav::open,
+                        // Today is an Inbox view until Control grows its own.
+                        onOpenToday = if (todayInbox.available) ({ today.open() }) else null,
+                    )
+                }
+                Screen.Control -> {
+                    val agentState by agent.state.collectAsState()
+                    val attention by sessions.state.collectAsState()
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        ErrorBanner(agentState.error, onDismiss = agent::dismissError)
+                        ControlScreen(
+                            subtitle = "${attention.attentionCount} need you",
+                            entries = buildList {
+                                add(
+                                    MoreEntry(
+                                        title = "Chat with Control",
+                                        line = when {
+                                            !agentState.available -> "The hub does not offer the coordinator to this device"
+                                            agentState.waking -> "Waking the coordinator…"
+                                            else -> "The fleet's coordinator, the same one as on the desktop"
+                                        },
+                                        onOpen = { agent.open() },
+                                    ),
+                                )
+                                if (missionsState.available) {
+                                    add(MoreEntry("Missions", "${missionsState.missions.size} missions · Pause all inside") { missions.open() })
+                                }
+                            },
+                        )
+                    }
+                }
+                Screen.More -> {
+                    val hostRows by repository.hosts.collectAsState()
+                    MoreScreen(
+                        entries = buildList {
+                            add(MoreEntry("Hosts", hostsLine(hostRows)) { nav.openFromMore(Screen.Hosts) })
+                            if (settingsCaps.usage || settingsCaps.accounts) {
+                                add(MoreEntry("Accounts and usage", "Quotas, and estimated spend by host and day") { nav.openUsage() })
+                            }
+                            if (missionsState.available) {
+                                add(MoreEntry("Automation", "Missions, and Pause all") { missions.open() })
+                            }
+                            if (filesState.available) {
+                                val line = if (filesState.loaded) "${filesState.files.size} files" else "Files sessions sent to the hub"
+                                add(MoreEntry("Files", line) { nav.openFromMore(Screen.Files) })
+                            }
+                            if (orgDirectory.orgs.isNotEmpty()) {
+                                add(MoreEntry("Organisations", orgDirectory.orgs.values.joinToString(" · ") { it.name }) { nav.openCompany() })
+                            }
+                            add(MoreEntry("Settings", "This phone, the hub, fleet settings") { nav.openFromMore(Screen.Settings) })
+                        },
+                    )
+                }
                 Screen.Settings -> {
                     val state by settings.state.collectAsState()
                     val fleet by fleetSettings.state.collectAsState()
@@ -1065,6 +1110,11 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                         onOpenUsage = nav::openUsage.takeIf { settingsCaps.usage || settingsCaps.accounts },
                         onOpenCompany = nav::openCompany.takeIf { orgDirectory.orgs.isNotEmpty() },
                         notifier = container.notifier,
+                        layout = layout,
+                        onSetLayout = { chosen ->
+                            savePhoneLayout(container.prefs, chosen)
+                            nav.setLayout(chosen)
+                        },
                         fleetSettings = {
                             if (settingsCaps.fleetSettings) {
                                 FleetSettingsSection(
@@ -1085,8 +1135,66 @@ private fun FleetRoute(container: AppContainer, credentials: Credentials) {
                     )
                 }
             }
+            // Today (with its Tidy) and Missions open from Inbox, Control and More on the New bar
+            // as well as from the Sessions header, so they are drawn over any tab.
+            val todayOverlay by today.state.collectAsState()
+            if (todayOverlay.open) {
+                TodaySheet(
+                    state = todayOverlay,
+                    handlers = TodayHandlers(
+                        onClose = today::close,
+                        onRefresh = { today.refresh() },
+                        onOpenSession = today::openSession,
+                        onDismissError = today::dismissError,
+                        onToggleSection = today::toggleSection,
+                        onSetHost = today::setHost,
+                        onToggleTicketsOnly = today::toggleTicketsOnly,
+                        onClearFilters = today::clearFilters,
+                        onOpenTidy = { today.close(); tidy.open(); Unit }.takeIf { tidyState.available },
+                    ),
+                )
+            }
+            if (tidyState.open) {
+                TidySheet(
+                    state = tidyState,
+                    handlers = TidyHandlers(
+                        onClose = tidy::close,
+                        onToggle = tidy::toggle,
+                        onChoose = tidy::choose,
+                        onApply = { tidy.apply() },
+                        onOpenSession = { id -> tidy.close(); nav.openFrom(id, SessionsSheet.Tidy) },
+                        onDismissReopened = { tidy.dismissReopened(it) },
+                        onDismissError = tidy::dismissError,
+                    ),
+                )
+            }
+            if (missionsState.open) {
+                MissionsSheet(
+                    state = missionsState,
+                    handlers = MissionsHandlers(
+                        onClose = missions::close,
+                        onRefresh = { missions.refresh() },
+                        onSelect = { missions.select(it) },
+                        onBack = missions::back,
+                        onStart = { missions.start(it) },
+                        onDecide = { card, ok, note -> missions.decide(card, ok, note) },
+                        onTogglePause = { missions.togglePause() },
+                        onPauseAll = { missions.pauseAll() },
+                        onDismissError = missions::dismissError,
+                    ),
+                )
+            }
         }
     }
+}
+
+/** A destination on the New bar, keyed by its [Tab] name so `Navigator.select` can take it back. */
+private fun newBarItem(tab: Tab): BottomBarItem = when (tab) {
+    Tab.Inbox -> BottomBarItem(tab.name, "Inbox", OrbitIcons.Inbox)
+    Tab.Sessions -> BottomBarItem(tab.name, "Sessions", OrbitIcons.Sessions)
+    Tab.Control -> BottomBarItem(tab.name, "Control", OrbitIcons.Control)
+    Tab.Work -> BottomBarItem(tab.name, "Work", OrbitIcons.Work)
+    else -> BottomBarItem(tab.name, "More", OrbitIcons.More)
 }
 
 @Composable
