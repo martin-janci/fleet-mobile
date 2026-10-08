@@ -48,6 +48,7 @@ import dev.claudefleet.mobile.ui.components.DangerTextButton
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.theme.Fleet
+import dev.claudefleet.mobile.update.UpdateMode
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
 
@@ -61,6 +62,8 @@ data class OrbitSettingsInput(
     val fleet: FleetSettingsUiState?,
     val theme: ThemeChoice,
     val notifyKinds: NotifyKinds,
+    /** The app's own updates (14.18); null where the platform updates elsewhere (iOS: TestFlight). */
+    val updateMode: UpdateMode? = null,
 )
 
 /** Every tap the New layout's Settings reports. */
@@ -70,6 +73,7 @@ class OrbitSettingsHandlers(
     val onOpenPage: (String) -> Unit = {},
     val onSetTheme: (ThemeChoice) -> Unit = {},
     val onSetNotify: (NotifyKind, Boolean) -> Unit = { _, _ -> },
+    val onSetUpdateMode: (UpdateMode) -> Unit = {},
     val onForget: () -> Unit = {},
     val onDismissError: () -> Unit = {},
     /** The Usage screen; null where the hub reports neither usage nor accounts. */
@@ -106,6 +110,8 @@ fun OrbitSettingsScreen(
     notifier: BackgroundNotifier = NoBackgroundNotifier,
     /** Extra rows at the foot of the home page (the layout switch, 14.2). */
     homeExtras: @Composable ColumnScope.() -> Unit = {},
+    /** Under This phone, after the rest: Help (14.22). */
+    thisPhoneExtras: @Composable ColumnScope.() -> Unit = {},
 ) {
     val o = Fleet.colors
     Column(modifier = modifier.fillMaxSize().background(o.bg)) {
@@ -133,7 +139,10 @@ fun OrbitSettingsScreen(
             }
             when (place) {
                 SettingsPlace.Home -> SettingsHome(input, handlers, homeExtras)
-                SettingsPlace.ThisPhone -> ThisPhone(input, handlers, notifier)
+                SettingsPlace.ThisPhone -> {
+                    ThisPhone(input, handlers, notifier)
+                    thisPhoneExtras()
+                }
                 is SettingsPlace.Group -> SettingsGroupPage(place.group, input, handlers)
             }
         }
@@ -171,7 +180,7 @@ private fun ColumnScope.SettingsHome(
 
     SectionLabel("Settings")
     val groups = input.fleet?.pages?.let(::groupPages).orEmpty()
-    SettingsRow("This phone", "Notifications, theme", onClick = { handlers.onOpen(SettingsPlace.ThisPhone) })
+    SettingsRow("This phone", if (input.updateMode != null) "Notifications, theme, updates" else "Notifications, theme", onClick = { handlers.onOpen(SettingsPlace.ThisPhone) })
     for (group in SettingsGroup.entries) {
         // General holds the hub's details and Organisations the Company
         // screen, so those two are there even when the hub serves no pages.
@@ -236,6 +245,18 @@ private fun ColumnScope.ThisPhone(input: OrbitSettingsInput, handlers: OrbitSett
 
     SectionLabel("Theme")
     ThemePicker(input.theme, handlers.onSetTheme)
+
+    input.updateMode?.let { mode ->
+        SectionLabel("Updates")
+        // Offered, never forced: there is no "install on my own" to pick.
+        SwitchRow(
+            title = "Tell me when an update is ready",
+            line = "A card in More. It never installs on its own.",
+            on = mode == UpdateMode.TELL,
+            enabled = true,
+            onChange = { handlers.onSetUpdateMode(if (it) UpdateMode.TELL else UpdateMode.OFF) },
+        )
+    }
 
     Spacer(Modifier.height(16.dp))
     Text(

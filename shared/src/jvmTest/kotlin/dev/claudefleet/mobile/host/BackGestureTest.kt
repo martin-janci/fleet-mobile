@@ -96,7 +96,9 @@ class TheBackGestureReachesTheNavigatorTest {
      * open over its list, and composed after `App`'s, so back closes the org
      * before it leaves the screen. The New session wizard's (redesign 14.6)
      * is enabled only on its Project or Review step, so back goes one step
-     * back; on Where it is off and `nav.back()` leaves the form.
+     * back; on Where it is off and `nav.back()` leaves the form. The
+     * practice fleet's (redesign 14.22) is enabled only while a sample
+     * session is open, so back returns to the sample list before it leaves.
      */
     @Test
     fun there_is_exactly_one() {
@@ -109,6 +111,7 @@ class TheBackGestureReachesTheNavigatorTest {
             listOf(
                 "nav.isPushed(screen)",
                 "companyState.openId != null",
+                "practiceState.open != null",
                 "fleetPageOpen || place != SettingsPlace.Home",
                 "fleetPageOpen",
                 "wizard && wizardStep.previous != null && !state.creating",

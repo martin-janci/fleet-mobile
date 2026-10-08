@@ -214,9 +214,12 @@ class TheAndroidManifestTest {
                 "android.permission.FOREGROUND_SERVICE",
                 "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
                 "android.permission.POST_NOTIFICATIONS",
+                // The app's own update (14.18): handed to Android's installer,
+                // which asks the person to confirm. See `AndroidAppInstaller`.
+                "android.permission.REQUEST_INSTALL_PACKAGES",
             ),
             asked,
-            "the network; the camera to scan a QR; notifications the person turned on — nothing else",
+            "the network; the camera to scan a QR; notifications the person turned on; installing its own update — nothing else",
         )
     }
 

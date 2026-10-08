@@ -28,15 +28,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.ui.theme.Fleet
 import kotlinx.coroutines.delay
-
-/** The manual's `loader-delay`: a wait shorter than this shows nothing. */
-const val LOADER_DELAY_MS: Long = 400
 
 /**
  * The Orbit mark on the manual's 108-unit grid: slate tile, the orbit, the hub
@@ -87,12 +85,14 @@ fun OrbitMark(modifier: Modifier = Modifier, size: Dp = 32.dp, drawn: Float = 1f
  * the Orbit draws as you pull, then Chase").
  *
  * While a refresh runs the Chase shows only once it has taken
- * [LOADER_DELAY_MS]: a fetch that answers at once flashes nothing. The pull
+ * `loader-delay` ([OrbitMotion.loaderDelayMs]): a fetch that answers at once flashes nothing. The pull
  * itself is not a loader, it is the gesture's own feedback, so it draws from
  * the first pixel.
  *
- * [reducedMotion] turns the Chase into the manual's `loader-reduced` fade:
- * the platform's animation scale is read by the caller (redesign 10.11).
+ * [reducedMotion] turns the Chase into the manual's `loader-reduced` fade.
+ * It follows the kit's rule unless a caller says otherwise: Android's
+ * animator scale at 0 ("Remove animations"), iOS's Reduce Motion, or This
+ * phone's override (redesign 10.11).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -100,7 +100,7 @@ fun OrbitPullToRefresh(
     isRefreshing: Boolean,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
-    reducedMotion: Boolean = false,
+    reducedMotion: Boolean = dev.claudefleet.mobile.ui.kit.reducedMotion(),
     content: @Composable BoxScope.() -> Unit,
 ) {
     val state = rememberPullToRefreshState()
@@ -108,7 +108,7 @@ fun OrbitPullToRefresh(
     LaunchedEffect(isRefreshing) {
         late = false
         if (isRefreshing) {
-            delay(LOADER_DELAY_MS)
+            delay(OrbitMotion.loaderDelayMs)
             late = true
         }
     }
@@ -135,25 +135,34 @@ fun OrbitPullToRefresh(
     )
 }
 
-/** The Chase loader: the amber host looks for the hub, 1.2 s a turn; a fade with reduced motion. */
+/** What a running Chase is drawn as, for tests: the turn, or its reduced-motion fade. */
+internal const val CHASE_TAG = "orbit-chase"
+internal const val CHASE_REDUCED_TAG = "orbit-chase-reduced"
+
+/**
+ * The Chase loader: the amber host looks for the hub, 1.2 s a turn. With
+ * reduced motion nothing turns; the still mark fades over `loader-reduced`,
+ * as every loader in the kit does ([rememberLoaderClock]).
+ */
 @Composable
 private fun Chase(reducedMotion: Boolean) {
-    val loop = rememberInfiniteTransition(label = "chase")
     if (reducedMotion) {
+        val loop = rememberInfiniteTransition(label = "chase")
         val alpha by loop.animateFloat(
             initialValue = 1f,
-            targetValue = 0.4f,
-            animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Reverse),
+            targetValue = 0.55f,
+            animationSpec = infiniteRepeatable(tween((OrbitMotion.reducedFadeMs / 2).toInt(), easing = LinearEasing), RepeatMode.Reverse),
             label = "chase-fade",
         )
-        OrbitMark(modifier = Modifier.alpha(alpha), size = 32.dp)
+        OrbitMark(modifier = Modifier.alpha(alpha).testTag(CHASE_REDUCED_TAG), size = 32.dp)
     } else {
+        val loop = rememberInfiniteTransition(label = "chase")
         val turn by loop.animateFloat(
             initialValue = 0f,
             targetValue = 1f,
             animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing)),
             label = "chase-turn",
         )
-        OrbitMark(size = 32.dp, chase = turn)
+        OrbitMark(modifier = Modifier.testTag(CHASE_TAG), size = 32.dp, chase = turn)
     }
 }

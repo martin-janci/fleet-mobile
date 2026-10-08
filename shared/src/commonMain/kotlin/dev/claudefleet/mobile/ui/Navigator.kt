@@ -63,6 +63,18 @@ sealed interface Screen {
 
     /** New layout only: Hosts, accounts and usage, automation, Files, organisations and Settings. */
     data object More : Screen
+
+    /** The phone app's own update (redesign 14.18): download, signature, install. Pushed over More, Inbox or Settings. */
+    data object Update : Screen
+
+    /** More › Learn (redesign 14.22): the practice fleet, lessons and guides. */
+    data object Learn : Screen
+
+    /** The practice fleet: sample sessions on this phone that never reach the hub. */
+    data object Practice : Screen
+
+    /** One of the hub's approved guides, step by step, with Undo per change. */
+    data class Guide(val pageId: String) : Screen
 }
 
 /**
@@ -188,6 +200,20 @@ class Navigator(layout: PhoneLayout = PhoneLayout.Classic) {
 
     /** Open the Usage screen over whatever is showing (Settings); back returns there. */
     fun openUsage() = move { s -> if (s.screen == Screen.Usage) s else s.pushing(s.screen).going(Screen.Usage) }
+
+    /** Open the Updating screen over whatever is showing (More, Inbox, Settings); back returns there. */
+    fun openUpdate() = move { s -> if (s.screen == Screen.Update) s else s.pushing(s.screen).going(Screen.Update) }
+
+    /** Open Learn over whatever is showing (More); back returns there. */
+    fun openLearn() = move { s -> if (s.screen == Screen.Learn) s else s.pushing(s.screen).going(Screen.Learn) }
+
+    /** Open the practice fleet over whatever is showing (Learn, the help picker, Settings). */
+    fun openPractice() = move { s -> if (s.screen == Screen.Practice) s else s.pushing(s.screen).going(Screen.Practice) }
+
+    /** Open one guide over Learn. */
+    fun openGuide(pageId: String) = move { s ->
+        if (s.screen == Screen.Guide(pageId)) s else s.pushing(s.screen).going(Screen.Guide(pageId))
+    }
 
     /** Open the Company screen over whatever is showing (Settings); back returns there. */
     fun openCompany() = move { s -> if (s.screen == Screen.Company) s else s.pushing(s.screen).going(Screen.Company) }
@@ -404,7 +430,8 @@ class Navigator(layout: PhoneLayout = PhoneLayout.Classic) {
  */
 internal fun isPushedOn(screen: Screen, layout: PhoneLayout): Boolean =
     screen is Screen.Session || screen is Screen.NewSession || screen is Screen.Task || screen is Screen.Repo ||
-        screen == Screen.Usage || screen == Screen.Company ||
+        screen == Screen.Usage || screen == Screen.Company || screen == Screen.Update ||
+        screen == Screen.Learn || screen == Screen.Practice || screen is Screen.Guide ||
         (layout == PhoneLayout.New && (screen == Screen.Hosts || screen == Screen.Files || screen == Screen.Settings))
 
 private fun rootOf(tab: Tab): Screen = when (tab) {
@@ -421,7 +448,8 @@ private fun rootOf(tab: Tab): Screen = when (tab) {
 /** The tab a screen lights, or null for one that belongs to whichever it was opened from. */
 private fun tabOf(screen: Screen, layout: PhoneLayout): Tab? = when (screen) {
     is Screen.Sessions -> Tab.Sessions
-    is Screen.Session, is Screen.NewSession, is Screen.Repo, Screen.Usage, Screen.Company -> null
+    is Screen.Session, is Screen.NewSession, is Screen.Repo, Screen.Usage, Screen.Company, Screen.Update,
+    Screen.Learn, Screen.Practice, is Screen.Guide -> null
     Screen.Work, is Screen.Task -> Tab.Work
     Screen.Files -> if (layout == PhoneLayout.New) null else Tab.Files
     Screen.Hosts -> if (layout == PhoneLayout.New) null else Tab.Hosts

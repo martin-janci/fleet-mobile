@@ -74,6 +74,12 @@ import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.data.SessionDetailsActions
 import dev.claudefleet.mobile.data.HubVersionActions
+import dev.claudefleet.mobile.update.AppInstaller
+import dev.claudefleet.mobile.update.GitHubReleases
+import dev.claudefleet.mobile.update.ReleaseSource
+import dev.claudefleet.mobile.update.UpdateViewModel
+import dev.claudefleet.mobile.update.hubMismatch
+import dev.claudefleet.mobile.update.takeWhatsNew
 import dev.claudefleet.mobile.data.VersionActions
 import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.net.HubEventStream
@@ -104,6 +110,29 @@ import dev.claudefleet.mobile.ui.MultiStartHandlers
 import dev.claudefleet.mobile.ui.ControlScreen
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.InboxScreen
+import dev.claudefleet.mobile.ui.help.GuideScreen
+import dev.claudefleet.mobile.ui.help.HelpPicker
+import dev.claudefleet.mobile.ui.help.HelpSettings
+import dev.claudefleet.mobile.ui.help.HelpSettingsSection
+import dev.claudefleet.mobile.ui.help.LESSONS
+import dev.claudefleet.mobile.ui.help.LearnScreen
+import dev.claudefleet.mobile.ui.help.LessonBar
+import dev.claudefleet.mobile.ui.help.LessonPlace
+import dev.claudefleet.mobile.ui.help.PracticeFleet
+import dev.claudefleet.mobile.ui.help.PracticeScreen
+import dev.claudefleet.mobile.ui.help.Tip
+import dev.claudefleet.mobile.ui.help.TipFor
+import dev.claudefleet.mobile.ui.help.TourAnchor
+import dev.claudefleet.mobile.ui.help.TourAnchors
+import dev.claudefleet.mobile.ui.help.TourOverlay
+import dev.claudefleet.mobile.ui.help.guidePages
+import dev.claudefleet.mobile.ui.help.tourAnchor
+import dev.claudefleet.mobile.ui.HubVersionBanner
+import dev.claudefleet.mobile.ui.UpdateCard
+import dev.claudefleet.mobile.ui.UpdateHandlers
+import dev.claudefleet.mobile.ui.UpdateInboxLine
+import dev.claudefleet.mobile.ui.UpdateScreen
+import dev.claudefleet.mobile.ui.WhatsNewScreen
 import dev.claudefleet.mobile.ui.MoreEntry
 import dev.claudefleet.mobile.ui.MoreScreen
 import dev.claudefleet.mobile.ui.Navigator
@@ -243,6 +272,12 @@ class AppContainer(
     val autoPairFromLink: Boolean = false,
     /** Notifications while the app is away — Android's foreground service, or nothing. */
     val notifier: BackgroundNotifier = NoBackgroundNotifier,
+    /**
+     * The app's own updates (redesign 14.18): Android downloads and installs
+     * the signed APK from GitHub releases; null where the app is updated
+     * elsewhere (iOS, through TestFlight), and then no update card shows.
+     */
+    val installer: AppInstaller? = null,
 ) {
     /**
      * A session a notification asked to open, until the paired screens take
@@ -323,6 +358,9 @@ class AppContainer(
 
     /** The hub's own version, for the Settings screen to show beside this app's. */
     val versionActions: VersionActions = HubVersionActions(session)
+
+    /** Where a newer release of this app is found: fleet-mobile's GitHub releases. */
+    val releases: ReleaseSource = GitHubReleases(this.http)
 
     /** The New session form's one call, through the same 401 rule. */
     val newSessionActions: NewSessionActions = HubNewSessionActions(session)
@@ -676,6 +714,39 @@ private fun FleetRoute(
     val settings = remember(container, scope) {
         SettingsViewModel(container.session, scope, container.appVersion, container.versionActions)
     }
+    // The app's own update (redesign 14.18): looked for once per pairing,
+    // offered on More and in the Inbox, never installed without a tap.
+    val updates = remember(container, scope) {
+        UpdateViewModel(container.releases, container.installer, container.prefs, container.appVersion, scope)
+    }
+    LaunchedEffect(updates) { updates.check() }
+    // Back from Android's "install unknown apps" page: Install works now.
+    LifecycleStartEffect(updates) {
+        updates.recheckPermission()
+        onStopOrDispose { }
+    }
+    val updateState by updates.state.collectAsState()
+    // Once, on the first launch after an update: the wordmark and what changed.
+    var whatsNew by remember(container) { mutableStateOf(takeWhatsNew(container.prefs, container.appVersion)) }
+    // Help (redesign 14.22): the mode picked after pairing, tips, the tour,
+    // lessons. On this phone only; nothing in it reaches the hub.
+    val helpSettings = remember(container) { HelpSettings(container.prefs) }
+    val help by helpSettings.state.collectAsState()
+    val practice = remember(container) { PracticeFleet() }
+    val practiceState by practice.state.collectAsState()
+    val tourAnchors = remember(credentials) { TourAnchors() }
+    // A lesson step only says where to look: going there is the one thing it does.
+    val lessonPlace = help.lesson?.let { (lesson, step) -> lesson.steps.getOrNull(step)?.place }
+    LaunchedEffect(lessonPlace) {
+        when (lessonPlace) {
+            null -> Unit
+            LessonPlace.Practice -> nav.openPractice()
+            LessonPlace.Inbox -> nav.select(if (layout == PhoneLayout.New) Tab.Inbox else Tab.Sessions)
+            LessonPlace.Sessions -> nav.select(Tab.Sessions)
+            LessonPlace.Control -> nav.select(if (layout == PhoneLayout.New) Tab.Control else Tab.Sessions)
+            LessonPlace.Settings -> nav.openFromMore(Screen.Settings)
+        }
+    }
     // The fleet's settings (claude-fleet declarative pages P6): offered when
     // the hub serves this token the page specs and the settings, read again
     // on every connection that does.
@@ -707,6 +778,7 @@ private fun FleetRoute(
                         .filter { it != Tab.Work || workState.available }
                         .map { newBarItem(it) }
                     BottomBar(
+                        modifier = Modifier.tourAnchor(tourAnchors, TourAnchor.Bar),
                         items = items,
                         selected = tab.name,
                         onSelect = { key -> nav.select(Tab.valueOf(key)) },
@@ -1124,6 +1196,12 @@ private fun FleetRoute(
                     val rows = remember(all) { inboxRows(all) }
                     val todayInbox by today.state.collectAsState()
                     val inboxList by sessions.state.collectAsState()
+                    // The hub's version, read again on every connection: an owner
+                    // can upgrade it under a running app.
+                    val connected = inboxList.status is ConnectionStatus.Connected
+                    var hubVersion by remember { mutableStateOf<String?>(null) }
+                    LaunchedEffect(connected) { if (connected) hubVersion = container.versionActions.hubVersion() }
+                    val mismatch = remember(hubVersion) { hubMismatch(container.appVersion, hubVersion) }
                     InboxScreen(
                         rows = rows,
                         running = all.count { it.claudeStatus == "working" },
@@ -1134,6 +1212,12 @@ private fun FleetRoute(
                         onOpenSession = nav::open,
                         // Today is an Inbox view until Control grows its own.
                         onOpenToday = if (todayInbox.available) ({ today.open() }) else null,
+                        anchors = tourAnchors,
+                        top = {
+                            mismatch?.let { m -> HubVersionBanner(m, onUpdate = nav::openUpdate.takeIf { updateState.available != null }) }
+                            updateState.available?.let { UpdateInboxLine(it, onOpen = nav::openUpdate) }
+                            TipFor(Tip.INBOX, help, helpSettings)
+                        },
                     )
                 }
                 Screen.Control -> {
@@ -1141,6 +1225,7 @@ private fun FleetRoute(
                     val attention by sessions.state.collectAsState()
                     Column(modifier = Modifier.fillMaxSize()) {
                         ErrorBanner(agentState.error, onDismiss = agent::dismissError)
+                        TipFor(Tip.CONTROL, help, helpSettings)
                         ControlScreen(
                             subtitle = "${attention.attentionCount} need you",
                             entries = buildList {
@@ -1165,6 +1250,7 @@ private fun FleetRoute(
                 Screen.More -> {
                     val hostRows by repository.hosts.collectAsState()
                     MoreScreen(
+                        top = { updateState.available?.let { UpdateCard(it, container.appVersion, onOpen = nav::openUpdate) } },
                         entries = buildList {
                             add(MoreEntry("Hosts", hostsLine(hostRows)) { nav.openFromMore(Screen.Hosts) })
                             if (settingsCaps.usage || settingsCaps.accounts) {
@@ -1180,10 +1266,68 @@ private fun FleetRoute(
                             if (orgDirectory.orgs.isNotEmpty()) {
                                 add(MoreEntry("Organisations", orgDirectory.orgs.values.joinToString(" · ") { it.name }) { nav.openCompany() })
                             }
+                            add(
+                                MoreEntry(
+                                    "Learn",
+                                    "${help.lessonsDone.count { id -> LESSONS.any { it.id == id } }} of ${LESSONS.size} lessons · practice fleet",
+                                ) { nav.openLearn() },
+                            )
                             add(MoreEntry("Settings", "This phone, the hub, fleet settings") { nav.openFromMore(Screen.Settings) })
                         },
                     )
                 }
+                Screen.Learn -> {
+                    val fleet by fleetSettings.state.collectAsState()
+                    LearnScreen(
+                        help = help,
+                        guides = if (settingsCaps.fleetSettings) guidePages(fleet.pages) else emptyList(),
+                        onBack = { nav.back() },
+                        onPractice = { practice.reset(); nav.openPractice() },
+                        onLesson = helpSettings::startLesson,
+                        onGuide = nav::openGuide,
+                        tip = { TipFor(Tip.LEARN, help, helpSettings) },
+                    )
+                }
+                Screen.Practice -> {
+                    // Back closes the sample session first, then leaves the practice fleet.
+                    BackHandler(enabled = practiceState.open != null) { practice.back() }
+                    PracticeScreen(
+                        practice = practice,
+                        state = practiceState,
+                        onLeave = { nav.back() },
+                        tip = { TipFor(Tip.QUESTION, help, helpSettings) },
+                    )
+                }
+                is Screen.Guide -> {
+                    val fleet by fleetSettings.state.collectAsState()
+                    val page = fleet.pages.firstOrNull { it.id == current.pageId }
+                    if (page == null) {
+                        LaunchedEffect(current) { nav.back() }
+                    } else {
+                        GuideScreen(
+                            page = page,
+                            state = fleet,
+                            onBack = { nav.back() },
+                            onSet = fleetSettings::set,
+                            onRefuse = fleetSettings::refuse,
+                            onDecide = { id, apply -> fleetSettings.decide(id, apply) },
+                            onConfirm = fleetSettings::confirm,
+                            onCancelConfirm = fleetSettings::cancelConfirm,
+                        )
+                    }
+                }
+                Screen.Update -> UpdateScreen(
+                    state = updateState,
+                    appVersion = container.appVersion,
+                    handlers = UpdateHandlers(
+                        onBack = { nav.back() },
+                        onDownload = updates::download,
+                        onPause = updates::pause,
+                        onCancel = updates::cancel,
+                        onInstall = updates::install,
+                        onRetry = updates::reset,
+                    ),
+                )
                 Screen.Settings -> {
                     val state by settings.state.collectAsState()
                     val fleet by fleetSettings.state.collectAsState()
@@ -1233,6 +1377,7 @@ private fun FleetRoute(
                                 fleet = fleet.takeIf { settingsCaps.fleetSettings },
                                 theme = theme,
                                 notifyKinds = notifyKinds,
+                                updateMode = updateState.mode.takeIf { updateState.supported },
                             ),
                             handlers = OrbitSettingsHandlers(
                                 onOpen = settings::open,
@@ -1240,6 +1385,7 @@ private fun FleetRoute(
                                 onOpenPage = fleetSettings::open,
                                 onSetTheme = container.phone::setTheme,
                                 onSetNotify = container.phone::setNotify,
+                                onSetUpdateMode = updates::setMode,
                                 onForget = { settings.forget() },
                                 onDismissError = settings::dismissError,
                                 onOpenUsage = onOpenUsage,
@@ -1249,25 +1395,54 @@ private fun FleetRoute(
                             fleetPage = fleetSection,
                             notifier = container.notifier,
                             homeExtras = { LayoutRow(layout, onSetLayout) },
+                            thisPhoneExtras = {
+                                HelpSettingsSection(
+                                    help = help,
+                                    settings = helpSettings,
+                                    tourAvailable = layout == PhoneLayout.New,
+                                    onTour = { helpSettings.startTour(); nav.select(Tab.Inbox) },
+                                    onPractice = { practice.reset(); nav.openPractice() },
+                                )
+                            },
                         )
                     } else {
                         // A fleet settings page is drawn inside the Settings tab:
                         // back closes the page, not the app.
                         BackHandler(enabled = fleetPageOpen) { fleetSettings.back() }
-                        SettingsScreen(
-                            state = state,
-                            onForget = { settings.forget() },
-                            onDismissError = settings::dismissError,
-                            fleetPageOpen = fleetPageOpen,
-                            onOpenUsage = onOpenUsage,
-                            onOpenCompany = onOpenCompany,
-                            notifier = container.notifier,
-                            layout = layout,
-                            onSetLayout = onSetLayout,
-                            fleetSettings = fleetSection,
-                        )
+                        // Classic has no More: Update ready sits at the top of Settings.
+                        Column(Modifier.fillMaxSize()) {
+                            updateState.available?.let { UpdateCard(it, container.appVersion, onOpen = nav::openUpdate) }
+                            SettingsScreen(
+                                state = state,
+                                onForget = { settings.forget() },
+                                onDismissError = settings::dismissError,
+                                fleetPageOpen = fleetPageOpen,
+                                onOpenUsage = onOpenUsage,
+                                onOpenCompany = onOpenCompany,
+                                notifier = container.notifier,
+                                layout = layout,
+                                onSetLayout = onSetLayout,
+                                fleetSettings = fleetSection,
+                            )
+                        }
                     }
                 }
+            }
+            help.lesson?.let { (lesson, step) ->
+                LessonBar(
+                    lesson = lesson,
+                    step = step,
+                    onNext = helpSettings::nextStep,
+                    onEnd = helpSettings::endLesson,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+            }
+            whatsNew?.let { news ->
+                WhatsNewScreen(
+                    whatsNew = news,
+                    backLabel = if (layout == PhoneLayout.New) "Back to Inbox" else "Back to Sessions",
+                    onBack = { whatsNew = null },
+                )
             }
             // Today (with its Tidy) and Missions open from Inbox, Control and More on the New bar
             // as well as from the Sessions header, so they are drawn over any tab.
@@ -1323,6 +1498,22 @@ private fun FleetRoute(
                 )
             }
         }
+    }
+    // The tour runs on the real Inbox, over the bar as well, and stops for nothing else.
+    val stop = help.tourStop
+    if (stop != null && screen == Screen.Inbox && !fleetCheck) {
+        TourOverlay(stop, tourAnchors, onNext = helpSettings::nextStop, onSkip = helpSettings::skipTour)
+    }
+    // Once, after pairing and the fleet check: how much help.
+    if (help.mode == null && !fleetCheck && whatsNew == null) {
+        HelpPicker(
+            onPick = { mode -> helpSettings.pick(mode, tourHere = layout == PhoneLayout.New && screen == Screen.Inbox) },
+            onPracticeFirst = { mode ->
+                helpSettings.pick(mode, tourHere = false)
+                practice.reset()
+                nav.openPractice()
+            },
+        )
     }
     // Over the whole fleet, in App's Box: the first connection after a pair.
     if (fleetCheck) {

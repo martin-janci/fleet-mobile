@@ -193,7 +193,7 @@ private fun PageBody(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FieldRow(
+internal fun FieldRow(
     state: FleetSettingsUiState,
     d: SettingDescriptor,
     hint: String?,

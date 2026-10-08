@@ -32,6 +32,15 @@
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
     <!--
+      The app's own update (redesign 14.18, MobileUpdate): the signed release
+      APK from GitHub, checked against the installed app's signing key and
+      handed to Android's installer, which asks the person to confirm every
+      time. Android also asks, once, before letting the app install at all.
+      Nothing installs without those taps. See `AndroidAppInstaller`.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!--
       The credential must not leave the device it was issued to, and cannot
       survive being restored onto another one anyway: the Keystore master key
       that decrypts `EncryptedSharedPreferences` is not restorable with the file.
@@ -129,6 +138,10 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+        <!-- The install session's status: opens Android's confirm screen. Not exported. -->
+        <receiver
+            android:name=".UpdateInstallReceiver"
+            android:exported="false" />
         <service
             android:name=".NeedsYouService"
             android:exported="false"
