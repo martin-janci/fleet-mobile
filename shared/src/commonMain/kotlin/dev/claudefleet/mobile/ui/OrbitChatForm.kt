@@ -1,12 +1,14 @@
 package dev.claudefleet.mobile.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -45,6 +47,8 @@ import dev.claudefleet.mobile.model.visibleFields
 import dev.claudefleet.mobile.ui.components.FieldView
 import dev.claudefleet.mobile.ui.components.Note
 import dev.claudefleet.mobile.ui.components.parseNumber
+import dev.claudefleet.mobile.ui.kit.Atom
+import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
 import kotlinx.serialization.json.JsonElement
@@ -56,8 +60,7 @@ import kotlinx.serialization.json.JsonElement
  * sheet, anything longer (or anything holding a secret) the whole screen,
  * one step at a time with "Step x of y" and Back. Once decided it folds to
  * one line: answered, declined with the note, or expired with Ask again.
- * The Building state (a skeleton while Control writes the form) waits on the
- * hub streaming form specs (10.12).
+ * While the form is read it shows Building: the Atom over a skeleton.
  */
 
 /** How much of the screen a form takes. */
@@ -111,6 +114,7 @@ fun formOutcomeLine(form: FormView): String {
 }
 
 internal const val FORM_OPEN = "form-open"
+internal const val FORM_BUILDING = "form-building"
 internal const val FORM_PAGE = "form-page"
 internal const val FORM_NEXT = "form-next"
 internal const val FORM_BACK = "form-back"
@@ -148,8 +152,11 @@ internal fun OrbitChatFormCard(
         Column(Modifier.verticalScroll(rememberScrollState()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when {
                 form == null -> {
-                    Text(pending.title.ifBlank { "A form" }, style = Fleet.type.textMd, color = o.fg)
-                    if (s.loading) Note("Reading the form…")
+                    if (s.loading) {
+                        FormBuilding(pending.title, sessionName)
+                    } else {
+                        Text(pending.title.ifBlank { "A form" }, style = Fleet.type.textMd, color = o.fg)
+                    }
                 }
                 !s.pending -> {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -210,6 +217,37 @@ internal fun OrbitChatFormCard(
                 }
             }
             s.error?.let { Text(it, style = Fleet.type.textSm, color = o.danger) }
+        }
+    }
+}
+
+/**
+ * Building: the Atom and the title while the form is read, over a skeleton
+ * of fields, as the desktop's `ChatForm` draws a spec still being written
+ * (10.12). The phone gets the spec whole from `ask { get }`, so this is the
+ * wait for that read rather than a stream.
+ */
+@Composable
+private fun FormBuilding(title: String, from: String) {
+    val o = Fleet.colors
+    // A quick read draws the title alone; the loader only once the wait is long enough to see.
+    if (!rememberLoaderVisible(true)) {
+        Text(title.ifBlank { "A form" }, style = Fleet.type.textMd, color = o.fg)
+        return
+    }
+    Column(modifier = Modifier.testTag(FORM_BUILDING), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Atom()
+            Text("Building a form · from $from", style = Fleet.type.textSm, color = o.fgMuted)
+        }
+        if (title.isNotBlank()) Text(title, style = Fleet.type.textMd, color = o.fg)
+        for (w in listOf(0.3f, 1f, 0.3f, 1f)) {
+            Spacer(
+                Modifier
+                    .fillMaxWidth(w)
+                    .height(if (w < 1f) 10.dp else 22.dp)
+                    .background(o.fgMuted.copy(alpha = 0.14f), RoundedCornerShape(4.dp)),
+            )
         }
     }
 }

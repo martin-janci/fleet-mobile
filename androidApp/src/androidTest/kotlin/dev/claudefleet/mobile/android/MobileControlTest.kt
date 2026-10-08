@@ -1,6 +1,8 @@
 package dev.claudefleet.mobile.android
 
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -173,6 +175,23 @@ class MobileControlTest {
         }
         assertEquals(1, forms.answered.size)
         assertEquals(4, forms.answered.single().size)
+    }
+
+    @Test
+    fun a_form_still_being_read_shows_building_with_the_atom() {
+        val never = object : ChatFormActions {
+            override suspend fun get(formId: String): FormView = kotlinx.coroutines.awaitCancellation()
+            override suspend fun answer(formId: String, values: Map<String, JsonElement>) = error("not answered")
+            override suspend fun decline(formId: String, note: String?) = error("not declined")
+        }
+        compose.setContent {
+            FleetTheme { ChatFormCard(PendingForm("f", "Deploy"), "Control", never, canAnswer = true, orbit = true) }
+        }
+        compose.onNodeWithText("Deploy").assertExists()
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodesWithText("Building a form · from Control").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithContentDescription("Building").assertExists()
     }
 
     @Test
