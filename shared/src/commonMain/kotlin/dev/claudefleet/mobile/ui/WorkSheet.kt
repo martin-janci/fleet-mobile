@@ -66,7 +66,6 @@ data class SessionWorkHandlers(
 fun WorkTicketSheet(state: SessionWorkUiState, handlers: SessionWorkHandlers) {
     if (state.chip == null) return
     val current = state.work
-    val suggestion = state.suggestion
     var renaming by remember { mutableStateOf(false) }
     if (renaming && current != null) {
         WorkTitleDialog(
@@ -79,45 +78,58 @@ fun WorkTicketSheet(state: SessionWorkUiState, handlers: SessionWorkHandlers) {
         )
     }
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (current != null) {
-                WorkHeading(current, MaterialTheme.typography.titleMedium)
-                ErrorBanner(state.error, onDismiss = handlers.onDismissError)
-                WorkDetails(current, "Why: " + workWhy(current), state.workTrouble)
-                // The ticket's card (M10.5): read-only, with Copy, never Send.
-                state.card?.let { TicketCardBody(it) }
-                OpenTicketButton(current)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (state.canClear) OutlinedButton(onClick = handlers.onClear, enabled = !state.busy) { Text("Clear") }
-                    if (state.canHandover) {
-                        OutlinedButton(onClick = handlers.onHandover, enabled = !state.busy) { Text("Ask for a handover") }
-                    }
-                    if (state.canRenameWork) {
-                        OutlinedButton(onClick = { renaming = true }, enabled = !state.busy) { Text("Rename") }
-                    }
+        WorkTicketBody(state, handlers, onRename = { renaming = true })
+    }
+}
+
+/**
+ * The ticket block of [WorkTicketSheet]: the ticket, why, its card and the
+ * decisions. Also the head of the New layout's one ticket sheet
+ * ([PhoneTicketSheet]), with the session's tasks under it.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun WorkTicketBody(state: SessionWorkUiState, handlers: SessionWorkHandlers, onRename: () -> Unit) {
+    val current = state.work
+    val suggestion = state.suggestion
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (current != null) {
+            WorkHeading(current, MaterialTheme.typography.titleMedium)
+            ErrorBanner(state.error, onDismiss = handlers.onDismissError)
+            WorkDetails(current, "Why: " + workWhy(current), state.workTrouble)
+            // The ticket's card (M10.5): read-only, with Copy, never Send.
+            state.card?.let { TicketCardBody(it) }
+            OpenTicketButton(current)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (state.canClear) OutlinedButton(onClick = handlers.onClear, enabled = !state.busy) { Text("Clear") }
+                if (state.canHandover) {
+                    OutlinedButton(onClick = handlers.onHandover, enabled = !state.busy) { Text("Ask for a handover") }
                 }
-                state.handover?.let {
-                    Text(it.sentence, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (state.canRenameWork) {
+                    OutlinedButton(onClick = onRename, enabled = !state.busy) { Text("Rename") }
                 }
-                suggestion?.let {
-                    HorizontalDivider()
-                    Text("Also suggested", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
-                    WorkHeading(it.work, MaterialTheme.typography.titleSmall)
-                    WorkDetails(it.work, "Why suggested: " + it.why, it.trouble)
-                    OpenTicketButton(it.work)
-                    SuggestionDecisions(it, state.busy, handlers)
-                }
-            } else if (suggestion != null) {
-                WorkHeading(suggestion.work, MaterialTheme.typography.titleMedium)
-                ErrorBanner(state.error, onDismiss = handlers.onDismissError)
-                WorkDetails(suggestion.work, "Suggested: " + suggestion.why, suggestion.trouble)
-                state.card?.let { TicketCardBody(it) }
-                OpenTicketButton(suggestion.work)
-                SuggestionDecisions(suggestion, state.busy, handlers)
             }
+            state.handover?.let {
+                Text(it.sentence, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            suggestion?.let {
+                HorizontalDivider()
+                Text("Also suggested", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
+                WorkHeading(it.work, MaterialTheme.typography.titleSmall)
+                WorkDetails(it.work, "Why suggested: " + it.why, it.trouble)
+                OpenTicketButton(it.work)
+                SuggestionDecisions(it, state.busy, handlers)
+            }
+        } else if (suggestion != null) {
+            WorkHeading(suggestion.work, MaterialTheme.typography.titleMedium)
+            ErrorBanner(state.error, onDismiss = handlers.onDismissError)
+            WorkDetails(suggestion.work, "Suggested: " + suggestion.why, suggestion.trouble)
+            state.card?.let { TicketCardBody(it) }
+            OpenTicketButton(suggestion.work)
+            SuggestionDecisions(suggestion, state.busy, handlers)
         }
     }
 }
