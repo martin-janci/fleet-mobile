@@ -73,6 +73,8 @@ fun FleetSettingsSection(
     onCancelConfirm: () -> Unit,
     onHistory: (String) -> Unit = {},
     onCloseHistory: () -> Unit = {},
+    /** Drawn above an open page's fields, by page id: Decisions (Jev) opens with who opted in (14.17). */
+    pageHead: @Composable (String) -> Unit = {},
 ) {
     state.history?.let { (key, rows) -> SettingHistoryDialog(state.descriptors[key]?.label ?: key, rows, onCloseHistory) }
     if (state.loading && !state.loaded) {
@@ -82,7 +84,7 @@ fun FleetSettingsSection(
     if (page == null) {
         PageList(state, clientName, onOpen)
     } else {
-        PageBody(state, page, onBack, onOpen, onSet, onRefuse, onDecide, onHistory)
+        PageBody(state, page, onBack, onOpen, onSet, onRefuse, onDecide, onHistory, head = { pageHead(page.id) })
     }
     state.confirm?.let { c ->
         AlertDialog(
@@ -142,6 +144,7 @@ private fun PageBody(
     onRefuse: (String, String) -> Unit,
     onDecide: (Long, Boolean) -> Unit,
     onHistory: (String) -> Unit,
+    head: @Composable () -> Unit = {},
 ) {
     TextButton(onClick = onBack, modifier = Modifier.padding(horizontal = 8.dp)) { Text("‹ Fleet settings") }
     Text(page.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
@@ -153,6 +156,7 @@ private fun PageBody(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
         )
     }
+    head()
     if (page.layout == "review_apply") {
         Review(state, onDecide)
         return
@@ -228,7 +232,7 @@ internal fun FieldRow(
         }
         if (editable && d.kind.type == "choice") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (o in d.kind.options) {
+                for (o in d.offeredOptions()) {
                     FilterChip(
                         selected = value == o,
                         enabled = !busy,

@@ -113,6 +113,11 @@ import dev.claudefleet.mobile.ui.OrbitFilesScreen
 import dev.claudefleet.mobile.ui.OrbitHostsHandlers
 import dev.claudefleet.mobile.ui.OrbitHostsScreen
 import dev.claudefleet.mobile.ui.OrbitUsageScreen
+import dev.claudefleet.mobile.ui.DECISIONS_PAGE
+import dev.claudefleet.mobile.ui.DecisionsHead
+import dev.claudefleet.mobile.ui.OrbitOrgsHandlers
+import dev.claudefleet.mobile.ui.OrbitOrgsScreen
+import dev.claudefleet.mobile.ui.ProposedChangeCard
 import dev.claudefleet.mobile.ui.HostsViewModel
 import dev.claudefleet.mobile.ui.MultiStartHandlers
 import dev.claudefleet.mobile.ui.ControlScreen
@@ -1131,16 +1136,31 @@ private fun FleetRoute(
                     val companyState by company.state.collectAsState()
                     // An org's detail is drawn inside this screen: back closes it first.
                     BackHandler(enabled = companyState.openId != null) { company.close() }
-                    CompanyScreen(
-                        state = companyState,
-                        nowSeconds = epochSeconds(),
-                        handlers = CompanyHandlers(
-                            onBack = { if (!company.close()) nav.back() },
-                            onRefresh = { company.refresh() },
-                            onOpen = company::open,
-                            onDismissError = company::dismissError,
-                        ),
-                    )
+                    if (layout == PhoneLayout.New) {
+                        OrbitOrgsScreen(
+                            state = companyState,
+                            nowSeconds = epochSeconds(),
+                            handlers = OrbitOrgsHandlers(
+                                onBack = { if (!company.close()) nav.back() },
+                                onRefresh = { company.refresh() },
+                                onOpen = company::open,
+                                onDismissError = company::dismissError,
+                                onOpenSessions = { org -> sessions.showOrg(org); nav.select(Tab.Sessions) },
+                                onOpenHosts = { nav.openFromMore(Screen.Hosts) },
+                            ),
+                        )
+                    } else {
+                        CompanyScreen(
+                            state = companyState,
+                            nowSeconds = epochSeconds(),
+                            handlers = CompanyHandlers(
+                                onBack = { if (!company.close()) nav.back() },
+                                onRefresh = { company.refresh() },
+                                onOpen = company::open,
+                                onDismissError = company::dismissError,
+                            ),
+                        )
+                    }
                 }
                 is Screen.Repo -> key(current.sessionId) {
                     RepoRoute(
@@ -1271,6 +1291,18 @@ private fun FleetRoute(
                         top = {
                             mismatch?.let { m -> HubVersionBanner(m, onUpdate = nav::openUpdate.takeIf { updateState.available != null }) }
                             updateState.available?.let { UpdateInboxLine(it, onOpen = nav::openUpdate) }
+                            // A change an agent proposed for the hub is an Inbox item, not a row 14 deep in Settings (14.17).
+                            val proposed by fleetSettings.state.collectAsState()
+                            for (p in proposed.proposals) {
+                                ProposedChangeCard(
+                                    p = p,
+                                    descriptor = proposed.descriptors[p.key],
+                                    canDecide = proposed.canWrite,
+                                    busy = "#${p.id}" in proposed.busy,
+                                    nowSeconds = inboxList.nowSeconds,
+                                    onDecide = { id, apply -> fleetSettings.decide(id, apply) },
+                                )
+                            }
                             TipFor(Tip.INBOX, help, helpSettings)
                         },
                     )
@@ -1406,6 +1438,15 @@ private fun FleetRoute(
                                 onCancelConfirm = fleetSettings::cancelConfirm,
                                 onHistory = { fleetSettings.showHistory(it) },
                                 onCloseHistory = fleetSettings::closeHistory,
+                                pageHead = { pageId ->
+                                    // Decisions (Jev) opens with who opted in and what Jev may do (14.17).
+                                    if (layout == PhoneLayout.New && pageId == DECISIONS_PAGE) {
+                                        val jevOrgs = remember(repository, scope) { CompanyViewModel(repository, container.companyActions, scope) }
+                                        LaunchedEffect(jevOrgs) { jevOrgs.load() }
+                                        val orgsState by jevOrgs.state.collectAsState()
+                                        DecisionsHead(orgsState.orgs)
+                                    }
+                                },
                             )
                         }
                     }
