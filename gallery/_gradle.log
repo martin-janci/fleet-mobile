@@ -245,10 +245,10 @@ w: file:///home/runner/work/fleet-mobile/fleet-mobile/shared/src/commonTest/kotl
 > Task :shared:compileJvmTestJava NO-SOURCE
 > Task :shared:jvmTestClasses
 > Task :shared:jvmTest
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_3-1791473970467.json
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_3-1791474157942.json
 
 [Incubating] Problems report is available at: file:///home/runner/work/fleet-mobile/fleet-mobile/build/reports/problems/problems-report.html
 
-BUILD SUCCESSFUL in 1m 15s
+BUILD SUCCESSFUL in 4m 39s
 13 actionable tasks: 13 executed
 Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.7.1/userguide/configuration_cache_enabling.html

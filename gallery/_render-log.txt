@@ -4,12 +4,97 @@ ok   03-pair-pairing
 ok   04-pair-error
 ok   05-pair-signed-out-reason
 ok   06-paired-confirmation
-FAIL group sessions: java.lang.ExceptionInInitializerError
-FAIL group session: java.lang.NoClassDefFoundError: Could not initialize class dev.claudefleet.mobile.gallery.Fixtures
-FAIL group work: java.lang.NoClassDefFoundError: Could not initialize class dev.claudefleet.mobile.gallery.Fixtures
-FAIL group files: java.lang.NoClassDefFoundError: Could not initialize class dev.claudefleet.mobile.gallery.Fixtures
-FAIL group hosts: java.lang.NoClassDefFoundError: Could not initialize class dev.claudefleet.mobile.gallery.Fixtures
-FAIL group settings: java.lang.NoClassDefFoundError: Could not initialize class dev.claudefleet.mobile.gallery.Fixtures
-FAIL group newSession: java.lang.NoClassDefFoundError: Could not initialize class dev.claudefleet.mobile.gallery.Fixtures
-FAIL group repo: java.lang.NoClassDefFoundError: Could not initialize class dev.claudefleet.mobile.gallery.Fixtures
-FAIL group sheets: java.lang.NoClassDefFoundError: Could not initialize class dev.claudefleet.mobile.gallery.Fixtures
+ok   10-sessions-list
+ok   11-sessions-list-long
+ok   12-sessions-needs-you-filter
+ok   13-sessions-by-urgency
+ok   14-sessions-by-work
+ok   15-sessions-search
+ok   16-sessions-bulk-select
+ok   17-sessions-offline-stale
+ok   18-sessions-reconnecting
+ok   19-sessions-empty
+ok   20-sessions-error-banner
+ok   21-sessions-filters-sheet
+ok   30-session-conversation
+ok   31-session-conversation-long
+ok   32-session-draft
+ok   33-session-sending
+ok   34-session-blocked-permission
+ok   35-session-stuck-trust-prompt
+ok   36-session-terminal
+ok   37-session-offline-readonly
+ok   38-session-loading
+ok   39-session-empty-new
+ok   40-session-error
+ok   41-session-failed
+ok   42-session-repair-report
+ok   43-session-work-sheet
+ok   44-session-work-suggestion-sheet
+ok   45-session-tasks-sheet
+ok   50-work-my-work
+ok   51-work-my-work-long
+ok   52-work-search
+ok   53-work-filters
+ok   54-work-rules
+ok   55-work-empty
+ok   56-work-offline-stale
+ok   57-task-detail
+ok   58-task-detail-long
+ok   59-task-place-dialog
+ok   60-task-past-summary
+ok   70-files-list
+ok   71-files-transfer
+ok   72-files-opened
+ok   73-files-confirm-remove
+ok   74-files-empty
+ok   80-hosts-list
+ok   81-hosts-empty
+ok   82-host-detail-sheet
+FAIL 83-host-detail-recovery: MissingFieldException: Field 'session_id' is required for type with serial name 'dev.claudefleet.mobile.model.RestorePlanEntry', but it was missing at path: $.plan[0]
+  cause: MissingFieldException: Field 'session_id' is required for type with serial name 'dev.claudefleet.mobile.model.RestorePlanEntry', but it was missing at path: $.plan[0]
+  cause: MissingFieldException: Field 'session_id' is required for type with serial name 'dev.claudefleet.mobile.model.RestorePlanEntry', but it was missing
+ok   90-settings
+ok   91-settings-long
+ok   92-fleet-settings-page-1-settings
+ok   92-fleet-settings-page-2-settings-automation
+ok   92-fleet-settings-page-3-settings-limits
+ok   92-fleet-settings-page-4-settings-projects
+ok   92-fleet-settings-page-5-settings-work
+ok   92-fleet-settings-page-6-settings-decisions
+ok   93-settings-forget-error
+ok   94-usage
+ok   95-usage-long
+FAIL 96-company-list: MissingFieldException: Field 'person_id' is required for type with serial name 'dev.claudefleet.mobile.model.OrgMember', but it was missing at path: $[0].members[0]
+  cause: MissingFieldException: Field 'person_id' is required for type with serial name 'dev.claudefleet.mobile.model.OrgMember', but it was missing at path: $[0].members[0]
+  cause: MissingFieldException: Field 'person_id' is required for type with serial name 'dev.claudefleet.mobile.model.OrgMember', but it was missing
+FAIL 97-company-org: MissingFieldException: Field 'person_id' is required for type with serial name 'dev.claudefleet.mobile.model.OrgMember', but it was missing at path: $[0].members[0]
+  cause: MissingFieldException: Field 'person_id' is required for type with serial name 'dev.claudefleet.mobile.model.OrgMember', but it was missing at path: $[0].members[0]
+  cause: MissingFieldException: Field 'person_id' is required for type with serial name 'dev.claudefleet.mobile.model.OrgMember', but it was missing
+ok   100-new-session-pick-host
+ok   101-new-session-pick-project
+ok   102-new-session-worktree
+ok   103-new-session-from-ticket-multi
+ok   104-new-session-invalid-branch
+ok   105-new-session-creating
+ok   106-multistart-confirm-sheet
+ok   107-multistart-result-sheet
+ok   110-repo-changes
+ok   111-repo-history
+ok   112-repo-files
+ok   113-repo-diff
+ok   114-repo-commit
+ok   115-repo-file
+ok   120-today-sheet
+ok   121-today-sheet-filtered
+ok   122-tidy-sheet
+ok   123-tidy-results
+ok   124-tickets-sheet
+ok   125-ticket-detail
+ok   126-tickets-filters
+ok   127-missions-sheet
+ok   128-mission-detail
+ok   129-review-sheet
+ok   130-session-details-sheet
+ok   131-move-sheet
+ok   132-bulk-outcome-dialog
