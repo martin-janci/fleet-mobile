@@ -3384,4 +3384,103 @@ class SessionViewModelTest {
         assertTrue(actions.sentPrompts.isEmpty())
         assertEquals("The question changed", vm.state.value.error?.title)
     }
+
+    // --- recovery on the New bar (redesign 14.5) ---
+
+    @Test
+    fun on_the_new_bar_a_refused_prompt_stays_in_the_conversation_and_the_box_is_free() = runTest {
+        val actions = FakeActions()
+        actions.sendFails = HubError.Tool("E_BUSY", "the session is mid-turn")
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, keepNotSent = true)
+        vm.onDraftChange("Run the full suite")
+
+        vm.send().join()
+        runCurrent()
+
+        assertEquals("Run the full suite", vm.state.value.notSent?.text)
+        assertEquals("E_BUSY: the session is mid-turn", vm.state.value.notSent?.why?.details)
+        assertEquals("", vm.state.value.draft, "the words are kept in the conversation, not put back in the box")
+        assertNull(vm.state.value.error, "no banner on top of the kept prompt")
+        assertFalse(vm.state.value.sending)
+    }
+
+    @Test
+    fun retry_sends_the_kept_words_again_and_leaves_the_box_alone() = runTest {
+        val actions = FakeActions()
+        actions.sendFails = HubError.Tool("E_BUSY", "mid-turn")
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, keepNotSent = true)
+        vm.onDraftChange("first")
+        vm.send().join()
+        runCurrent()
+        vm.onDraftChange("something new")
+        actions.sendFails = null
+
+        vm.retryNotSent().join()
+        runCurrent()
+
+        assertEquals(listOf("first", "first"), actions.sentPrompts)
+        assertNull(vm.state.value.notSent)
+        assertEquals("something new", vm.state.value.draft)
+    }
+
+    @Test
+    fun a_second_refusal_keeps_the_words_again() = runTest {
+        val actions = FakeActions()
+        actions.sendFails = HubError.Tool("E_BUSY", "mid-turn")
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, keepNotSent = true)
+        vm.onDraftChange("first")
+        vm.send().join()
+        runCurrent()
+
+        vm.retryNotSent().join()
+        runCurrent()
+
+        assertEquals("first", vm.state.value.notSent?.text)
+    }
+
+    @Test
+    fun edit_puts_the_kept_words_back_after_what_is_typed_and_sends_nothing() = runTest {
+        val actions = FakeActions()
+        actions.sendFails = HubError.Tool("E_BUSY", "mid-turn")
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, keepNotSent = true)
+        vm.onDraftChange("first")
+        vm.send().join()
+        runCurrent()
+        vm.onDraftChange("typed meanwhile")
+
+        vm.editNotSent()
+        runCurrent()
+
+        assertNull(vm.state.value.notSent)
+        assertEquals("typed meanwhile\n\nfirst", vm.state.value.draft)
+        assertEquals(listOf("first"), actions.sentPrompts)
+    }
+
+    @Test
+    fun the_classic_bar_still_puts_a_refused_prompt_back_in_the_box() = runTest {
+        val actions = FakeActions()
+        actions.sendFails = HubError.Tool("E_BUSY", "mid-turn")
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.onDraftChange("ship it")
+        vm.send().join()
+        runCurrent()
+        assertNull(vm.state.value.notSent)
+        assertEquals("ship it", vm.state.value.draft)
+    }
+
+    @Test
+    fun retry_the_last_turn_sends_that_prompt_again_through_the_one_write_path() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(listOf(row(status = "failed"))), actions, backgroundScope, keepNotSent = true)
+        vm.onDraftChange("half-written")
+        runCurrent()
+
+        vm.retryLastTurn("Run the suite and fix what breaks.").join()
+        runCurrent()
+
+        assertEquals(listOf("Run the suite and fix what breaks."), actions.sentPrompts)
+        assertEquals("half-written", vm.state.value.draft)
+        vm.retryLastTurn("  ").join()
+        assertEquals(1, actions.sentPrompts.size, "a blank prompt is never sent")
+    }
 }

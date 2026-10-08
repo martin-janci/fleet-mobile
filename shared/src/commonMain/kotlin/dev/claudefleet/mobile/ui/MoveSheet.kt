@@ -5,6 +5,10 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.RadioButton
+import dev.claudefleet.mobile.model.HostRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -51,7 +55,7 @@ data class MoveHandlers(
 /** Move to host: where, what the move carries (a dry run), how, and Move — asked first. */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun MoveSheet(state: MoveUiState, handlers: MoveHandlers, nowSeconds: Long) {
+fun MoveSheet(state: MoveUiState, handlers: MoveHandlers, nowSeconds: Long, orbit: Boolean = false) {
     var confirming by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).verticalScroll(rememberScrollState())) {
@@ -72,6 +76,10 @@ fun MoveSheet(state: MoveUiState, handlers: MoveHandlers, nowSeconds: Long) {
                     )
                     TextButton(onClick = handlers.onCancelWait, enabled = !state.busy) { Text("Cancel the wait") }
                 }
+            }
+            if (orbit) {
+                OrbitMoveBody(state, handlers, onMove = { confirming = true })
+                return@Column
             }
             Text("To", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
             if (state.targets.isEmpty()) {
@@ -142,5 +150,83 @@ private fun Toggle(title: String, help: String, on: Boolean, onChange: (Boolean)
             Text(help, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Switch(checked = on, onCheckedChange = null)
+    }
+}
+
+/** One host's facts for the New bar's Move sheet: how it is reached and what runs there. */
+internal fun moveHostFacts(host: HostRow, running: Int): String = buildList {
+    if (host.transport == "agent") add("agent")
+    add("$running running")
+}.joinToString(" · ")
+
+/** Why an offline host is listed but cannot be picked. */
+internal const val MOVE_OFFLINE = "Signal lost · cannot move there now"
+
+/** The New bar's Move button: it names the missing choice until a host is picked. */
+internal fun moveButtonLabel(target: String?, whenIdle: Boolean): String = when {
+    target == null -> "Choose a host"
+    whenIdle -> "Move when idle"
+    else -> "Move"
+}
+
+/**
+ * Move on the New bar (redesign 14.5, MobileRecovery): every shown host as
+ * a row with its facts and nothing pre-selected; an offline host listed with
+ * why it cannot be picked; what the move would carry once a host is picked;
+ * and a button that names the missing choice. Host choice by numbers is not
+ * a decision for Jev, so the sheet shows facts and proposes nothing.
+ */
+@Composable
+private fun OrbitMoveBody(state: MoveUiState, handlers: MoveHandlers, onMove: () -> Unit) {
+    Spacer(Modifier.height(8.dp))
+    if (state.targets.isEmpty() && state.offline.isEmpty()) {
+        Text("No other host.", style = MaterialTheme.typography.bodySmall)
+    }
+    for (h in state.targets) {
+        HostOption(
+            alias = h.alias,
+            facts = moveHostFacts(h, state.running[h.alias] ?: 0),
+            selected = h.alias == state.target,
+            enabled = !state.busy && state.waiting == null,
+            onClick = { handlers.onTarget(h.alias) },
+        )
+    }
+    for (h in state.offline) {
+        HostOption(alias = h.alias, facts = MOVE_OFFLINE, selected = false, enabled = false, onClick = {})
+    }
+    state.preview?.let { PreviewLines(it) }
+    Toggle("Keep the source running", "Leave this session as it is once the moved one is up.", state.keepSource, handlers.onKeepSource)
+    Toggle("Wait until it is idle", "Let the current turn end, then move.", state.whenIdle, handlers.onWhenIdle)
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextButton(onClick = handlers.onClose) { Text("Cancel") }
+        Spacer(Modifier.weight(1f))
+        Button(
+            onClick = onMove,
+            enabled = state.target != null && !state.busy && state.waiting == null,
+        ) { Text(moveButtonLabel(state.target, state.whenIdle)) }
+    }
+    Spacer(Modifier.height(16.dp))
+}
+
+@Composable
+private fun HostOption(alias: String, facts: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null, enabled = enabled)
+        Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
+            val tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+            Text(alias, style = MaterialTheme.typography.bodyLarge, color = tint)
+            Text(facts, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }

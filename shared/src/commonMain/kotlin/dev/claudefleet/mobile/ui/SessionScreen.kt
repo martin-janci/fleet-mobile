@@ -71,6 +71,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Checkbox
@@ -282,8 +283,17 @@ fun SessionScreen(
     tabs: SessionTabsHost? = null,
     /** Answer the question up now with the draft ([SessionViewModel.answerInWords]); New bar only. */
     onAnswerInWords: () -> Unit = {},
+    /**
+     * Recovery on the New bar (redesign 14.5): send a kept "Not sent" prompt
+     * again, put it back in the box, and send a failed session's last prompt
+     * again. The defaults do nothing.
+     */
+    onRetryNotSent: () -> Unit = {},
+    onEditNotSent: () -> Unit = {},
+    onRetryLastTurn: (String) -> Unit = {},
 ) {
-    state.repair?.let { RepairReportDialog(it, onDismissRepair) }
+    // On the New bar the result sits in the conversation instead (RepairResultCard).
+    if (tabs == null) state.repair?.let { RepairReportDialog(it, onDismissRepair) }
     val turns = state.conversation.turns
     val truncated = state.conversation.truncated
     // Newest first, under a `reverseLayout` list: item 0 is the newest turn
@@ -741,6 +751,55 @@ fun SessionScreen(
                 )
             }
 
+            // Recovery on the New bar (redesign 14.5): at the foot of the
+            // conversation, where the next step is taken — never behind ⋮.
+            val failed = if (tabs != null && state.card == null && state.viewing == null) {
+                failedSession(state.session, state.conversation.turns)
+            } else {
+                null
+            }
+            if (tabs != null) {
+                state.repair?.let { report ->
+                    RepairResultCard(
+                        report = report,
+                        agent = tabs.agent,
+                        onShowChanges = { tabs.onSelect(SessionTab.Files) }.takeIf { SessionTab.Files in tabs.tabs },
+                        onAskToCommit = {
+                            onDraftChange(appendToDraft(state.draft, ASK_TO_COMMIT))
+                            immersive = false
+                            stopReading()
+                            focusPrompt = true
+                        }.takeIf { SessionTab.Files in tabs.tabs && !state.readOnly && state.session != null },
+                        onDone = onDismissRepair,
+                        modifier = Modifier.heightIn(max = cardMax),
+                    )
+                }
+                failed?.let { f ->
+                    FailedSessionCard(
+                        failed = f,
+                        canWrite = state.canSendQuick,
+                        onRetry = f.retryPrompt?.let { prompt -> { scrollToNewest(); onRetryLastTurn(prompt) } }.takeIf { !state.readOnly },
+                        onRepair = onRepair.takeIf { state.canRepair },
+                        onDetails = { tabs.onSelect(SessionTab.Details) },
+                        modifier = Modifier.heightIn(max = cardMax),
+                    )
+                }
+                state.notSent?.let { n ->
+                    NotSentCard(
+                        notSent = n,
+                        canRetry = state.canSendQuick && state.card == null,
+                        onRetry = { scrollToNewest(); onRetryNotSent() },
+                        onEdit = {
+                            onEditNotSent()
+                            immersive = false
+                            stopReading()
+                            focusPrompt = true
+                        },
+                        modifier = Modifier.heightIn(max = cardMax),
+                    )
+                }
+            }
+
             // Between the conversation and the composer: a person who opened this
             // screen because the agent is waiting should not have to scroll to
             // answer it, and the card sits where the answer goes.
@@ -811,7 +870,14 @@ fun SessionScreen(
                                 // the card itself takes over the space for: while it is up
                                 // (the answer goes there instead) and on a readonly device (no
                                 // chip may offer a write it cannot make) — spec 1.1.
-                                if (state.card == null && !state.readOnly) {
+                                if (failed != null && tabs != null && !state.readOnly) {
+                                    // A failed session's chips fit the failure (MobileRecovery).
+                                    FailedQuickReplies(
+                                        enabled = state.canSendQuick,
+                                        onRetry = failed.retryPrompt?.let { prompt -> { scrollToNewest(); onRetryLastTurn(prompt) } },
+                                        onShowError = { tabs.onSelect(SessionTab.Agent) },
+                                    )
+                                } else if (state.card == null && !state.readOnly) {
                                     QuickRepliesRow(
                                         chips = quickReplies,
                                         draft = state.draft,
@@ -848,6 +914,8 @@ fun SessionScreen(
                                     wordsMode = tabs != null && !state.readOnly && state.card?.let(::declineOption) != null,
                                     agent = tabs?.agent,
                                     onAnswerInWords = { scrollToNewest(); onAnswerInWords() },
+                                    // The New bar names what Send does while Claude works: Queue.
+                                    queueLabel = tabs != null && state.session?.claudeStatus == "working",
                                 )
                             }
                             // The pill a folded footer leaves. A tap is someone
@@ -2412,6 +2480,8 @@ private fun PromptBox(
     onAnswerInWords: () -> Unit = {},
     /** The agent tab's name on the New bar, where the terminal is that tab; null on the Classic bar. */
     agent: String? = null,
+    /** New bar while Claude works: Send is a "Queue" button, since the message waits its turn. */
+    queueLabel: Boolean = false,
 ) {
     val haptics = LocalHapticFeedback.current
     var showHistory by remember { mutableStateOf(false) }
@@ -2525,6 +2595,15 @@ private fun PromptBox(
                     modifier = Modifier.padding(bottom = 4.dp).size(48.dp),
                 ) {
                     Text("■", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { contentDescription = "Stop the agent" })
+                }
+            } else if (queueLabel && !wordsMode) {
+                Button(
+                    onClick = { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); onSend() },
+                    enabled = state.canSend,
+                    modifier = Modifier.padding(bottom = 4.dp).heightIn(min = 48.dp),
+                ) {
+                    if (state.sending) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    else Text(sendLabel(working = true))
                 }
             } else {
                 FilledIconButton(
@@ -2992,5 +3071,18 @@ private fun FindBar(
             }
             IconButton(onClick = onClose) { Icon(FleetIcons.Close, contentDescription = "Close find") }
         }
+    }
+}
+
+/** The chips a failed session shows in place of the quick replies: Retry (the last turn) and Show the error (the agent tab). */
+@Composable
+private fun FailedQuickReplies(enabled: Boolean, onRetry: (() -> Unit)?, onShowError: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        val (retry, show) = FAILED_QUICK_REPLIES
+        if (onRetry != null) SuggestionChip(onClick = onRetry, enabled = enabled, label = { Text(retry) })
+        SuggestionChip(onClick = onShowError, label = { Text(show) })
     }
 }

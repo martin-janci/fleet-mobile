@@ -114,4 +114,42 @@ class MoveViewModelTest {
         val moved = assertIs<MoveOutcome.Moved>(read("""{"kind":"moved","source_killed":true,"warnings":["w"],"target":{"id":9,"tmux_name":"s","host_alias":"oak"}}"""))
         assertEquals(9L, moved.target.id)
     }
+
+    // --- the New bar (redesign 14.5) ---
+
+    @Test
+    fun an_offline_host_is_listed_with_why_and_cannot_be_picked() = runTest {
+        val moves = Moves()
+        val vm = MoveViewModel(3, MoveFleet(MOVE), moves, backgroundScope, canWrite = true)
+        runCurrent()
+        assertEquals(listOf("down"), vm.state.value.offline.map { it.alias }, "shown, unreachable, not the source")
+
+        vm.selectTarget("down").join()
+        runCurrent()
+
+        assertNull(vm.state.value.target)
+        assertEquals(emptyList(), moves.calls, "no dry run against a host the hub cannot reach")
+    }
+
+    @Test
+    fun each_option_counts_what_runs_there() = runTest {
+        val vm = MoveViewModel(3, MoveFleet(MOVE), Moves(), backgroundScope, canWrite = true)
+        runCurrent()
+        assertEquals(1, vm.state.value.running["pine"])
+        assertNull(vm.state.value.running["oak"])
+    }
+
+    @Test
+    fun the_new_bar_opens_with_no_host_chosen() = runTest {
+        val vm = MoveViewModel(3, MoveFleet(MOVE), Moves(), backgroundScope, canWrite = true)
+        vm.open(fresh = true)
+        runCurrent()
+        assertNull(vm.state.value.target, "nothing pre-selected")
+        vm.selectTarget("oak").join()
+        vm.close()
+        vm.open(fresh = true)
+        runCurrent()
+        assertNull(vm.state.value.target, "an earlier pick is not carried into the next Move")
+        assertNull(vm.state.value.preview)
+    }
 }
