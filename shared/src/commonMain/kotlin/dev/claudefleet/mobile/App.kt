@@ -103,6 +103,10 @@ import dev.claudefleet.mobile.ui.TaskScreen
 import dev.claudefleet.mobile.ui.TaskViewModel
 import dev.claudefleet.mobile.model.GroupRef
 import dev.claudefleet.mobile.ui.HostsScreen
+import dev.claudefleet.mobile.ui.OrbitFilesScreen
+import dev.claudefleet.mobile.ui.OrbitHostsHandlers
+import dev.claudefleet.mobile.ui.OrbitHostsScreen
+import dev.claudefleet.mobile.ui.OrbitUsageScreen
 import dev.claudefleet.mobile.ui.HostsViewModel
 import dev.claudefleet.mobile.ui.MultiStartHandlers
 import dev.claudefleet.mobile.ui.ControlScreen
@@ -702,7 +706,7 @@ private fun FleetRoute(
     }
     val filesState by files.state.collectAsState()
     LaunchedEffect(filesState.available) { if (!filesState.available) nav.filesUnavailable() }
-    val hosts = remember(repository, scope) { HostsViewModel(repository, scope) }
+    val hosts = remember(repository, scope) { HostsViewModel(repository, scope, container.hostActions) }
     val settings = remember(container, scope) {
         SettingsViewModel(container.session, scope, container.appVersion, container.versionActions)
     }
@@ -1079,17 +1083,18 @@ private fun FleetRoute(
                     val usage = remember(repository, scope) { UsageViewModel(repository, container.usageActions, scope) }
                     LaunchedEffect(usage) { usage.load() }
                     val usageState by usage.state.collectAsState()
-                    UsageScreen(
-                        state = usageState,
-                        nowSeconds = epochSeconds(),
-                        handlers = UsageHandlers(
-                            onBack = { nav.back() },
-                            onRefresh = { usage.refresh() },
-                            onSelect = { usage.select(it) },
-                            onOpenSession = nav::open,
-                            onDismissError = usage::dismissError,
-                        ),
+                    val usageHandlers = UsageHandlers(
+                        onBack = { nav.back() },
+                        onRefresh = { usage.refresh() },
+                        onSelect = { usage.select(it) },
+                        onOpenSession = nav::open,
+                        onDismissError = usage::dismissError,
                     )
+                    if (layout == PhoneLayout.New) {
+                        OrbitUsageScreen(state = usageState, nowSeconds = epochSeconds(), handlers = usageHandlers)
+                    } else {
+                        UsageScreen(state = usageState, nowSeconds = epochSeconds(), handlers = usageHandlers)
+                    }
                 }
                 Screen.Company -> {
                     val company = remember(repository, scope) { CompanyViewModel(repository, container.companyActions, scope) }
@@ -1138,35 +1143,63 @@ private fun FleetRoute(
                         onDispose { files.detach() }
                     }
                     val status by repository.status.collectAsState()
-                    FilesScreen(
-                        state = filesState,
-                        status = status,
-                        handlers = FilesHandlers(
-                            onRefresh = { files.refresh() },
-                            onTap = { files.tap(it) },
-                            onCancelTransfer = files::cancelTransfer,
-                            onHandOff = { files.handOff(it) },
-                            onCloseOpened = files::closeOpened,
-                            onRemove = if (filesState.canRemove) files::askRemove else null,
-                            onConfirmRemove = { files.confirmRemove() },
-                            onCancelRemove = files::cancelRemove,
-                            onDismissError = files::dismissError,
-                            onDismissNotice = files::dismissNotice,
-                        ),
+                    val filesHandlers = FilesHandlers(
+                        onRefresh = { files.refresh() },
+                        onTap = { files.tap(it) },
+                        onCancelTransfer = files::cancelTransfer,
+                        onHandOff = { files.handOff(it) },
+                        onCloseOpened = files::closeOpened,
+                        onRemove = if (filesState.canRemove) files::askRemove else null,
+                        onConfirmRemove = { files.confirmRemove() },
+                        onCancelRemove = files::cancelRemove,
+                        onDismissError = files::dismissError,
+                        onDismissNotice = files::dismissNotice,
+                        onRetry = if (filesState.canRetry) ({ id: Long -> files.retry(id); Unit }) else null,
+                        onOpenSession = nav::open,
                     )
+                    if (layout == PhoneLayout.New) {
+                        val fileHosts by repository.hosts.collectAsState()
+                        val reachable = remember(fileHosts) { fileHosts.associate { it.alias to it.reachable } }
+                        OrbitFilesScreen(
+                            state = filesState,
+                            status = status,
+                            handlers = filesHandlers,
+                            // A host the hub does not list is not known to be gone.
+                            hostReachable = { alias -> reachable[alias] ?: true },
+                        )
+                    } else {
+                        FilesScreen(state = filesState, status = status, handlers = filesHandlers)
+                    }
                 }
                 Screen.Hosts -> {
                     val state by hosts.state.collectAsState()
                     val hostCaps by repository.capabilities.collectAsState()
                     val hostSheet by hostDetail.state.collectAsState()
-                    HostsScreen(
-                        state = state,
-                        onRefresh = { hosts.refresh() },
-                        onDismissError = hosts::dismissError,
-                        onOpenHost = { nav.showSessionsFor(it) },
-                        onHostDetails = { alias: String -> hostDetail.open(alias); Unit }
-                            .takeIf { hostCaps.probeHost || hostCaps.restoreSessions || hostCaps.discoverLost },
-                    )
+                    val onHostDetails = { alias: String -> hostDetail.open(alias); Unit }
+                        .takeIf { hostCaps.probeHost || hostCaps.restoreSessions || hostCaps.discoverLost }
+                    if (layout == PhoneLayout.New) {
+                        OrbitHostsScreen(
+                            state = state,
+                            nowSeconds = epochSeconds(),
+                            handlers = OrbitHostsHandlers(
+                                onRefresh = { hosts.refresh() },
+                                onDismissError = hosts::dismissError,
+                                onOpen = onHostDetails ?: { alias: String -> nav.showSessionsFor(alias); Unit },
+                                onCheck = { alias: String -> hosts.check(alias); Unit }.takeIf { hostCaps.probeHost },
+                                // The host's sheet runs the reboot plan's dry run and the lost-conversation scan on opening.
+                                onRecovery = { alias: String -> hostDetail.open(alias); Unit }
+                                    .takeIf { (credentials.canWrite && hostCaps.restoreSessions) || hostCaps.discoverLost },
+                            ),
+                        )
+                    } else {
+                        HostsScreen(
+                            state = state,
+                            onRefresh = { hosts.refresh() },
+                            onDismissError = hosts::dismissError,
+                            onOpenHost = { nav.showSessionsFor(it) },
+                            onHostDetails = onHostDetails,
+                        )
+                    }
                     if (hostSheet.alias != null) {
                         HostDetailSheet(
                             state = hostSheet,

@@ -330,4 +330,50 @@ class FilesViewModelTest {
         runCurrent()
         assertNull(files.state.value.error)
     }
+
+    /** MobileMore: a failed copy offers Retry, which asks the hub for the same path and note again. */
+    @Test
+    fun retry_sends_the_same_path_again_for_a_token_that_may() = runTest {
+        val actions = FakeDownloads().apply { rows = listOf(download(3, Download.FAILED).copy(error = "host went away", note = "coverage")) }
+        val files = vm(FilesFleet(ALL), actions, backgroundScope)
+        files.attach()
+        runCurrent()
+        assertTrue(files.state.value.canRetry)
+
+        files.retry(3)
+        runCurrent()
+        assertEquals(listOf(Triple(12L, "/p/f3.pdf", "coverage")), actions.sent)
+    }
+
+    @Test
+    fun retry_is_not_offered_to_a_readonly_token_or_for_a_ready_file() = runTest {
+        val actions = FakeDownloads().apply { rows = listOf(download(3, Download.FAILED), download(4)) }
+        val readonly = vm(FilesFleet(ALL), actions, backgroundScope, canWrite = false)
+        readonly.attach()
+        runCurrent()
+        assertFalse(readonly.state.value.canRetry)
+        assertNull(readonly.retry(3))
+
+        val full = vm(FilesFleet(ALL), actions, backgroundScope)
+        full.attach()
+        runCurrent()
+        assertNull(full.retry(4), "a ready file has nothing to retry")
+        val noSend = vm(FilesFleet(READ_ONLY), actions, backgroundScope)
+        noSend.attach()
+        runCurrent()
+        assertNull(noSend.retry(3), "a hub without send_file")
+        assertTrue(actions.sent.isEmpty())
+    }
+
+    @Test
+    fun a_row_carries_its_host_and_session_for_the_new_layout() = runTest {
+        val actions = FakeDownloads().apply { rows = listOf(download(1)) }
+        val files = vm(FilesFleet(ALL), actions, backgroundScope)
+        files.attach()
+        runCurrent()
+        val line = files.state.value.files.single()
+        assertEquals("gpu-1", line.host)
+        assertEquals(12L, line.sessionId)
+        assertEquals("report", line.sessionName)
+    }
 }

@@ -1,9 +1,11 @@
 package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.data.HostActions
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.ui.kit.StatusWord
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -30,6 +32,9 @@ data class HostLine(
     val transport: String,
     /** When the hub last reached it: what an unreachable row says it has been gone since. */
     val lastPingedAt: Long? = null,
+    /** Of [sessions], how many need a person, and how many are working: the New layout's line. */
+    val needsYou: Int = 0,
+    val working: Int = 0,
 )
 
 data class HostsUiState(
@@ -37,6 +42,8 @@ data class HostsUiState(
     val status: ConnectionStatus = ConnectionStatus.Offline("not connected yet"),
     val refreshing: Boolean = false,
     val error: Friendly? = null,
+    /** Hosts a Try again or Check now is probing right now. */
+    val checking: Set<String> = emptySet(),
 ) {
     val isEmpty: Boolean get() = hosts.isEmpty()
 
@@ -65,8 +72,14 @@ data class HostsUiState(
 class HostsViewModel(
     private val fleet: FleetState,
     private val scope: CoroutineScope,
+    /** Try again and Check now on a row (New layout); null leaves the screen read-only. */
+    private val actions: HostActions? = null,
 ) {
-    private data class Local(val refreshing: Boolean = false, val error: Friendly? = null)
+    private data class Local(
+        val refreshing: Boolean = false,
+        val error: Friendly? = null,
+        val checking: Set<String> = emptySet(),
+    )
 
     private val local = MutableStateFlow(Local())
 
@@ -88,21 +101,46 @@ class HostsViewModel(
      * Re-list. The rows stay put if it fails; the last picture is still the best one.
      *
      * Its three `update {}` calls each construct a fresh `Local(...)` rather
-     * than `it.copy(...)`: `refresh()` is the only writer for the whole span
-     * between its first update and its last, so there is nothing in `it` worth
-     * preserving. [dismissError] is the one read-modify-write in this class,
-     * because it can land in the middle of that span and must not clobber
-     * whichever of these three just ran.
+     * than `it.copy(...)`: `refresh()` owns the refreshing flag and the error
+     * for the whole span between its first update and its last. Only
+     * `checking` is carried over, because [check] runs alongside and owns it.
+     * [dismissError] and [check] are read-modify-writes, because they can land
+     * in the middle of that span and must not clobber whichever of these
+     * three just ran.
      */
     fun refresh(): Job = scope.launch {
-        local.update { Local(refreshing = true) }
+        local.update { Local(refreshing = true, checking = it.checking) }
         try {
             fleet.refresh()
-            local.update { Local() }
+            local.update { Local(checking = it.checking) }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { Local(error = friendly(t)) }
+            local.update { Local(error = friendly(t), checking = it.checking) }
+        }
+    }
+
+    /**
+     * Probe one host now: Try again on a lost host, Check now on one never
+     * checked. A read on the host's side (`probe_host`), so it needs no write
+     * token; the row says Checking… until the answer, then the re-list shows
+     * what the probe found.
+     */
+    fun check(alias: String): Job? {
+        val probe = actions ?: return null
+        if (!fleet.capabilities.value.probeHost || alias in local.value.checking) return null
+        return scope.launch {
+            local.update { it.copy(checking = it.checking + alias, error = null) }
+            try {
+                probe.probe(alias)
+                fleet.refresh()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                local.update { it.copy(error = friendly(t)) }
+            } finally {
+                local.update { it.copy(checking = it.checking - alias) }
+            }
         }
     }
 
@@ -113,6 +151,7 @@ class HostsViewModel(
         l: Local,
     ): HostsUiState {
         val counts = sessions.groupingBy { it.hostAlias }.eachCount()
+        val words = sessions.groupBy { it.hostAlias }.mapValues { (_, rows) -> rows.map { phoneWord(it) } }
         return HostsUiState(
             hosts = hosts.sortedWith(BY_ALIAS).map { host ->
                 HostLine(
@@ -124,11 +163,14 @@ class HostsViewModel(
                     hidden = host.hidden,
                     transport = host.transport,
                     lastPingedAt = host.lastPingedAt,
+                    needsYou = words[host.alias]?.count { it == StatusWord.NEEDS_YOU } ?: 0,
+                    working = words[host.alias]?.count { it == StatusWord.WORKING } ?: 0,
                 )
             },
             status = status,
             refreshing = l.refreshing,
             error = l.error,
+            checking = l.checking,
         )
     }
 }
