@@ -188,6 +188,14 @@ data class HubCapabilities(
      */
     val debugDevices: Boolean get() = DEBUG_DEVICES in tools
 
+    /**
+     * Org administration (`org_admin`, company administration phase D): the
+     * Company screen lists an org's members and changes their roles. Not
+     * readonly on the hub, and the hub refuses anyone who does not
+     * administer that org; the phone offers it only to an org's admins.
+     */
+    val orgAdmin: Boolean get() = ORG_ADMIN in tools
+
     /** Fleet settings can be written as this device (`set_setting`); the hub still refuses an untrusted one. */
     val setSetting: Boolean get() = SET_SETTING in tools
 
@@ -263,6 +271,7 @@ data class HubCapabilities(
         const val ROUTINES = "routines"
         const val SET_SETTING = "set_setting"
         const val DEBUG_DEVICES = "debug_devices"
+        const val ORG_ADMIN = "org_admin"
 
         fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions, params = catalog.params)
     }

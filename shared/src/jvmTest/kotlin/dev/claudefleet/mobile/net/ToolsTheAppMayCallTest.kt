@@ -207,6 +207,10 @@ class ToolsTheAppMayCallTest {
         // Debug devices (redesign 11.10): the test phones on the hosts.
         // `Access::Client`, not readonly, so a readonly token is not served it.
         "debug_devices",
+        // Org members (redesign 11.10, member actions on Company): list,
+        // change a role, remove. `Access::Device`, not readonly; the hub
+        // answers an org's own admins and refuses anyone else.
+        "org_admin",
     )
 
     @Test
