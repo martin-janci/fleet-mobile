@@ -228,7 +228,7 @@ class NeedsYouCheckTest {
         val c = needsYouContent(NeedsYouAlert(42, "hub client", "Waiting for you · pine", "asks: deploy?"))
         assertEquals("needs-you-42", c.id)
         assertEquals("needs_you", c.thread)
-        assertEquals("hub client", c.title)
+        assertEquals("hub client needs you", c.title)
         assertEquals("Waiting for you · pine\nasks: deploy?", c.body)
         assertEquals(42L, c.sessionId)
         assertTrue(c.id.startsWith(NEEDS_YOU_ID_PREFIX))

@@ -17,6 +17,8 @@ import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.notify.BackgroundNotifier
 import dev.claudefleet.mobile.notify.NeedsYouAlert
 import dev.claudefleet.mobile.notify.NeedsYouResolved
+import dev.claudefleet.mobile.notify.NotifyActionKind
+import dev.claudefleet.mobile.notify.needsYouContent
 import dev.claudefleet.mobile.notify.decodeSeen
 import dev.claudefleet.mobile.notify.encodeSeen
 import dev.claudefleet.mobile.notify.needsYouEvents
@@ -54,6 +56,11 @@ class NeedsYouService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         channels(this)
+        // "Later" on a notification: put it away. The session keeps waiting
+        // and stays in the Inbox; nothing is answered.
+        if (intent?.action == ACTION_LATER) {
+            intent.getLongExtra(EXTRA_SESSION_ID, -1L).takeIf { it >= 0 }?.let(::withdraw)
+        }
         ServiceCompat.startForeground(
             this,
             ONGOING_ID,
@@ -134,7 +141,13 @@ class NeedsYouService : Service() {
         m.notify(SUMMARY_ID, n)
     }
 
+    /**
+     * One "needs you" notification (redesign 14.8): the question, Answer (or
+     * Open) and Later — never an action that answers. The lock screen shows
+     * only the session and why until the phone is unlocked.
+     */
     private fun post(alert: NeedsYouAlert) {
+        val c = needsYouContent(alert)
         val open = Intent(this, MainActivity::class.java)
             .putExtra(EXTRA_SESSION_ID, alert.sessionId)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -144,22 +157,42 @@ class NeedsYouService : Service() {
             open,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val n = NotificationCompat.Builder(this, ALERTS)
+        val later = PendingIntent.getForegroundService(
+            this,
+            alert.sessionId.toInt(),
+            Intent(this, NeedsYouService::class.java).setAction(ACTION_LATER).putExtra(EXTRA_SESSION_ID, alert.sessionId),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val locked = NotificationCompat.Builder(this, ALERTS)
             .setSmallIcon(R.drawable.ic_notify)
-            .setContentTitle(alert.title)
-            .setContentText(alert.text)
-            // What it is doing, when there is a line for it: the question is
-            // half of whether to pick the phone up.
-            .setStyle(NotificationCompat.BigTextStyle().bigText(listOfNotNull(alert.text, alert.detail).joinToString("\n")))
+            .setContentTitle(c.publicTitle)
+            .setContentText(c.publicBody)
+            .build()
+        val builder = NotificationCompat.Builder(this, ALERTS)
+            .setSmallIcon(R.drawable.ic_notify)
+            .setContentTitle(c.title)
+            .setContentText(alert.question ?: alert.text)
+            // The question first, then why and where, then what it is doing:
+            // the question is half of whether to pick the phone up.
+            .setStyle(NotificationCompat.BigTextStyle().bigText(c.body))
             .setGroup(GROUP)
             .setContentIntent(tap)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .build()
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(locked)
+        for (action in c.actions) {
+            val intent = when (action.kind) {
+                NotifyActionKind.Open -> tap
+                NotifyActionKind.Later -> later
+            }
+            builder.addAction(0, action.label, intent)
+        }
+        val n = builder.build()
         // One per session: a session that needs you again replaces its own.
         manager(this).notify(alertId(alert.sessionId), n)
-        shown[alert.sessionId] = "${alert.title} — ${alert.text}"
+        shown[alert.sessionId] = "${c.title} — ${alert.text}"
         summarize()
     }
 
@@ -184,6 +217,8 @@ class NeedsYouService : Service() {
 
     companion object {
         const val EXTRA_SESSION_ID = "dev.claudefleet.mobile.SESSION_ID"
+        /** The service's own intent for a notification's Later. */
+        const val ACTION_LATER = "dev.claudefleet.mobile.NEEDS_YOU_LATER"
         private const val WATCHING = "watching"
         private const val ALERTS = "needs_you"
         private const val ONGOING_ID = 1

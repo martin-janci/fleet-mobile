@@ -3,6 +3,11 @@ package dev.claudefleet.mobile.notify
 import platform.Foundation.NSNumber
 import platform.Foundation.numberWithLongLong
 import platform.UserNotifications.UNMutableNotificationContent
+import platform.UserNotifications.UNNotificationAction
+import platform.UserNotifications.UNNotificationActionOptionForeground
+import platform.UserNotifications.UNNotificationActionOptionNone
+import platform.UserNotifications.UNNotificationCategory
+import platform.UserNotifications.UNNotificationCategoryOptionNone
 import platform.UserNotifications.UNNotification
 import platform.UserNotifications.UNNotificationRequest
 import platform.UserNotifications.UNNotificationSound
@@ -22,14 +27,36 @@ class IosAlertPoster : AlertPoster {
 
     override fun post(alert: NeedsYouAlert) {
         val c = needsYouContent(alert)
+        registerCategories()
         val content = UNMutableNotificationContent().apply {
             setTitle(c.title)
             setBody(c.body)
             setThreadIdentifier(c.thread)
+            setCategoryIdentifier(c.category)
             setUserInfo(mapOf<Any?, Any?>(NEEDS_YOU_SESSION_KEY to NSNumber.numberWithLongLong(c.sessionId)))
             setSound(UNNotificationSound.defaultSound)
         }
         center.addNotificationRequest(UNNotificationRequest.requestWithIdentifier(c.id, content, null), withCompletionHandler = null)
+    }
+
+    /**
+     * The category's buttons (redesign 14.8): Answer (or Open) brings the app
+     * up at the question; Later only puts the notification away. Neither runs
+     * without the app, and neither answers — iOS has no Approve here.
+     * Every category at once, since a registration replaces the last.
+     */
+    private fun registerCategories() {
+        val categories = needsYouCategories().map { (id, buttons) ->
+            val actions = buttons.map { a ->
+                UNNotificationAction.actionWithIdentifier(
+                    a.id,
+                    a.label,
+                    if (a.kind == NotifyActionKind.Open) UNNotificationActionOptionForeground else UNNotificationActionOptionNone,
+                )
+            }
+            UNNotificationCategory.categoryWithIdentifier(id, actions, emptyList<String>(), UNNotificationCategoryOptionNone)
+        }
+        center.setNotificationCategories(categories.toSet())
     }
 
     override fun withdraw(sessionId: Long) {
