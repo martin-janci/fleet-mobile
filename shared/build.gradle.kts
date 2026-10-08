@@ -238,6 +238,9 @@ kotlin {
         // `fleet-hub` through the engine Android ships, not the mock one.
         jvmTest.dependencies {
             implementation(libs.ktor.client.okhttp)
+            // Skia's native runtime for this machine, so `KitPreviewTest` can
+            // draw the phone kit off-screen with `ImageComposeScene`.
+            implementation(compose.desktop.currentOs)
         }
 
         androidMain.dependencies {
