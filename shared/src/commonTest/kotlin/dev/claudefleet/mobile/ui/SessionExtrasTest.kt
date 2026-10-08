@@ -266,3 +266,59 @@ class SessionExtrasTest {
         assertEquals(listOf(OrbitItem.CopyAttach, OrbitItem.Details), items)
     }
 }
+
+/** Two shells side by side in landscape (redesign 14.21, MobileFullscreen). */
+class SplitTerminalsTest {
+
+    @Test
+    fun the_shell_beside_is_the_one_picked_before_or_the_first_other() {
+        val shells = listOf(shell(9, "a"), shell(10, "b"), shell(11, "c"))
+        assertEquals(10L, pairedOf(shells, 9, null))
+        assertEquals(11L, pairedOf(shells, 9, 11))
+        assertEquals(10L, pairedOf(shells, 9, 9), "never the selected one twice")
+        assertEquals(9L, pairedOf(shells, 10, 42), "one that is gone is replaced")
+        assertNull(pairedOf(shells.take(1), 9, null))
+    }
+
+    @Test
+    fun a_split_reads_both_shells() = runTest {
+        val fleet = ExtrasFleet(listOf(PARENT, shell(9, "hosts-polish-sh1"), shell(10, "hosts-polish-sh2")), SHELLS)
+        val extras = Extras(fleet)
+        val vm = SessionExtrasViewModel(7, fleet, extras, backgroundScope, canWrite = true)
+        runCurrent()
+        assertNull(vm.state.value.paired, "one column until the pane says it is wide")
+
+        vm.setSplit(true)
+        runCurrent()
+
+        assertEquals(9L, vm.state.value.selected)
+        assertEquals(10L, vm.state.value.paired)
+        assertTrue("capture 9" in extras.calls && "capture 10" in extras.calls)
+        assertEquals("$ ", vm.state.value.pairedScreen)
+
+        vm.setSplit(false)
+        runCurrent()
+        assertNull(vm.state.value.paired)
+    }
+
+    @Test
+    fun tapping_the_other_pane_types_there_and_keeps_both_on_screen() = runTest {
+        val fleet = ExtrasFleet(
+            listOf(PARENT, shell(9, "hosts-polish-sh1"), shell(10, "hosts-polish-sh2"), shell(11, "hosts-polish-sh3")),
+            SHELLS,
+        )
+        val extras = Extras(fleet)
+        val vm = SessionExtrasViewModel(7, fleet, extras, backgroundScope, canWrite = true)
+        vm.setSplit(true)
+        runCurrent()
+
+        vm.select(10)
+        runCurrent()
+        assertEquals(10L, vm.state.value.selected)
+        assertEquals(9L, vm.state.value.paired)
+
+        vm.setInput("ls")
+        vm.submit().join()
+        assertTrue("type 10 ls" in extras.calls)
+    }
+}

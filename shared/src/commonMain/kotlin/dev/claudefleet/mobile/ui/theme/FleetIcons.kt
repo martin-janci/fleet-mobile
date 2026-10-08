@@ -509,6 +509,26 @@ object FleetIcons {
         }
     }
 
+    /** Four corners pointing out: the whole screen for this (redesign 14.21). */
+    val Expand: ImageVector by lazy {
+        strokeIcon("Expand") {
+            moveTo(4f, 9f); lineTo(4f, 4f); lineTo(9f, 4f)
+            moveTo(15f, 4f); lineTo(20f, 4f); lineTo(20f, 9f)
+            moveTo(20f, 15f); lineTo(20f, 20f); lineTo(15f, 20f)
+            moveTo(9f, 20f); lineTo(4f, 20f); lineTo(4f, 15f)
+        }
+    }
+
+    /** Four corners pointing in: back from the whole screen. */
+    val Collapse: ImageVector by lazy {
+        strokeIcon("Collapse") {
+            moveTo(9f, 4f); lineTo(9f, 9f); lineTo(4f, 9f)
+            moveTo(15f, 4f); lineTo(15f, 9f); lineTo(20f, 9f)
+            moveTo(20f, 15f); lineTo(15f, 15f); lineTo(15f, 20f)
+            moveTo(4f, 15f); lineTo(9f, 15f); lineTo(9f, 20f)
+        }
+    }
+
     private fun strokeIcon(
         name: String,
         block: androidx.compose.ui.graphics.vector.PathBuilder.() -> Unit,

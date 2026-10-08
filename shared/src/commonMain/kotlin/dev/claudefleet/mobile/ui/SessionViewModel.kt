@@ -983,6 +983,30 @@ class SessionViewModel(
     }
 
     /**
+     * One key of the full-screen agent's bar (redesign 14.21) pressed in the
+     * pane while nothing is asked: Escape, Tab, Enter or C-c, nothing else.
+     * Guarded as [pressEnter] is — never into a question, whose keys go
+     * through [answer] — and the pane is read again after it, since a key
+     * such as Tab changes the screen without a turn the hub would announce.
+     */
+    fun pressKey(key: String): Job = scope.launch {
+        val current = local.value
+        if (key !in PANE_KEYS || !canWriteNow(current) || row() == null || blockedNow()) return@launch
+        local.update { it.copy(sending = true, error = null) }
+        try {
+            actions.sendKeys(sessionId, key)
+            local.update { it.copy(sending = false) }
+            delay(AFTER_KEY_MS)
+            if (local.value.terminalShown) captureTerminal()
+            requestRead(first = false)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(sending = false, error = friendly(t)) }
+        }
+    }
+
+    /**
      * The guarded hub write [send], [sendCommand] and [sendQuick] all make,
      * and the refetch that follows it — the one write path, per the task-6
      * ruling that added [sendQuick] rather than a second send.
@@ -1692,6 +1716,12 @@ internal val SESSION_EVENT_DEBOUNCE = 500.milliseconds
  * when the REPL never moves at all.
  */
 internal const val ANSWER_WAIT_SECONDS: Int = 30
+
+/** The keys [SessionViewModel.pressKey] presses in an agent's pane; the hub's own key list less the digits. */
+internal val PANE_KEYS: Set<String> = setOf("Escape", "Tab", "Enter", "C-c")
+
+/** How long after a key the pane is read again: long enough for the agent to redraw. */
+internal const val AFTER_KEY_MS: Long = 300L
 
 /**
  * Why this answer must not be pressed, or null when it may: the fresh [probe]

@@ -1,6 +1,10 @@
 package dev.claudefleet.mobile.ui
 
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -82,6 +86,11 @@ fun nextShellName(parent: SessionRow, terminals: List<SessionRow>): String {
     return "${parent.tmuxName}-sh$n"
 }
 
+/** The shell shown beside [selected] in landscape: the one picked before if still there, else the first other one. */
+fun pairedOf(terminals: List<SessionRow>, selected: Long?, paired: Long?): Long? =
+    paired?.takeIf { id -> id != selected && terminals.any { it.id == id } }
+        ?: terminals.firstOrNull { it.id != selected }?.id
+
 /** A terminal's chip: "shell · 2", numbered as the tab lists them. */
 fun terminalLabel(index: Int): String = "shell · ${index + 1}"
 
@@ -115,6 +124,9 @@ data class TerminalsUiState(
     val selected: Long? = null,
     /** The selected shell's screen, newest line last; null until read. */
     val screen: String? = null,
+    /** In landscape, the shell beside the selected one (redesign 14.21); null in one column or with one shell. */
+    val paired: Long? = null,
+    val pairedScreen: String? = null,
     val input: String = "",
     val creating: Boolean = false,
     val error: Friendly? = null,
@@ -146,6 +158,9 @@ class SessionExtrasViewModel(
         val creating: Boolean = false,
         val error: Friendly? = null,
         val archiveError: Friendly? = null,
+        /** Two shells side by side (landscape); [paired] is the other one shown. */
+        val split: Boolean = false,
+        val paired: Long? = null,
     )
 
     private val local = MutableStateFlow(Local())
@@ -155,6 +170,7 @@ class SessionExtrasViewModel(
         val parent = rows.firstOrNull { it.id == sessionId }
         val terminals = terminalsOf(parent, rows)
         val selected = l.selected?.takeIf { id -> terminals.any { it.id == id } } ?: terminals.firstOrNull()?.id
+        val paired = if (l.split) pairedOf(terminals, selected, l.paired) else null
         TerminalsUiState(
             canCreate = canWrite && caps.shellSessions && parent?.projectId != null,
             canType = canWrite,
@@ -162,6 +178,8 @@ class SessionExtrasViewModel(
             terminals = terminals,
             selected = selected,
             screen = selected?.let { l.screens[it] },
+            paired = paired,
+            pairedScreen = paired?.let { l.screens[it] },
             input = l.input,
             creating = l.creating,
             error = l.error,
@@ -194,8 +212,24 @@ class SessionExtrasViewModel(
     }
 
     fun select(id: Long) {
-        local.update { it.copy(selected = id, historyAt = null) }
+        val was = current()
+        val pairedWas = pairedNow()
+        // Tapping the other pane of a split swaps the two: both stay on screen.
+        local.update { it.copy(selected = id, historyAt = null, paired = if (id == pairedWas) was else it.paired) }
         scope.launch { capture() }
+    }
+
+    /** Landscape with two shells or more: read the one beside the selected one as well. */
+    fun setSplit(on: Boolean) {
+        if (local.value.split == on) return
+        local.update { it.copy(split = on) }
+        if (on) scope.launch { capture() }
+    }
+
+    private fun pairedNow(): Long? {
+        if (!local.value.split) return null
+        val rows = fleet.sessions.value
+        return pairedOf(terminalsOf(rows.firstOrNull { it.id == sessionId }, rows), current(), local.value.paired)
     }
 
     /** + New: a shell in this session's worktree, selected once the hub has made it. */
@@ -288,14 +322,15 @@ class SessionExtrasViewModel(
     }
 
     private suspend fun capture() {
-        val id = current() ?: return
-        try {
-            val text = actions.capture(id, CAPTURE_LINES)
-            local.update { it.copy(screens = it.screens + (id to text)) }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (_: Throwable) {
-            // A missed read is retried by the next tick; the screen keeps its last capture.
+        for (id in listOfNotNull(current(), pairedNow())) {
+            try {
+                val text = actions.capture(id, CAPTURE_LINES)
+                local.update { it.copy(screens = it.screens + (id to text)) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                // A missed read is retried by the next tick; the screen keeps its last capture.
+            }
         }
     }
 
@@ -321,6 +356,47 @@ const val TERMINALS_NEW_TAG = "terminals.new"
 const val TERMINALS_INPUT_TAG = "terminals.input"
 const val TERMINALS_SCREEN_TAG = "terminals.screen"
 const val TERMINALS_EMPTY_TAG = "terminals.empty"
+const val TERMINALS_SPLIT_TAG = "terminals.split."
+
+/** One shell's screen, newest line last; in a split, with its name and an outline on the one being typed into. */
+@Composable
+private fun ShellScreen(
+    screen: String?,
+    connected: Boolean,
+    label: String?,
+    active: Boolean,
+    onTap: () -> Unit,
+    modifier: Modifier,
+) {
+    val down = rememberScrollState()
+    val across = rememberScrollState()
+    LaunchedEffect(screen, down.maxValue) { down.scrollTo(down.maxValue) }
+    Surface(
+        color = Fleet.colors.bgSunk,
+        contentColor = Fleet.colors.fg,
+        shape = RoundedCornerShape(OrbitTokens.radius("radius-phone-card").dp),
+        border = if (label != null && active) BorderStroke(1.dp, Fleet.colors.accent) else null,
+        modifier = modifier.then(if (label != null) Modifier.clickable(onClick = onTap) else Modifier),
+    ) {
+        Column {
+            if (label != null) {
+                Text(
+                    label,
+                    style = Fleet.type.textSm,
+                    color = if (active) Fleet.colors.fg else Fleet.colors.fgMuted,
+                    modifier = Modifier.padding(start = 12.dp, top = 6.dp),
+                )
+            }
+            Text(
+                text = screen ?: if (connected) "Reading the shell…" else "The hub is offline; the shell cannot be read.",
+                style = Fleet.type.code,
+                softWrap = false,
+                modifier = Modifier.verticalScroll(down).horizontalScroll(across).padding(12.dp)
+                    .then(if (active) Modifier.testTag(TERMINALS_SCREEN_TAG) else Modifier),
+            )
+        }
+    }
+}
 
 class TerminalsHandlers(
     val onShow: () -> Unit = {},
@@ -331,6 +407,8 @@ class TerminalsHandlers(
     val onSubmit: () -> Unit = {},
     val onKey: (TerminalKey) -> Unit = {},
     val onDismissError: () -> Unit = {},
+    /** The pane went side by side (landscape, two shells or more) or back. */
+    val onSplit: (Boolean) -> Unit = {},
 )
 
 /** The Terminals tab: a chip per shell and + New, the selected shell's screen, the key bar and the line. */
@@ -377,27 +455,44 @@ fun TerminalsPane(state: TerminalsUiState, handlers: TerminalsHandlers, modifier
                 )
             }
         } else {
-            TerminalScreen(state, handlers)
+            BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                val split = twoPaneWide(maxWidth.value, maxHeight.value) && state.terminals.size >= 2
+                LaunchedEffect(split) { handlers.onSplit(split) }
+                Column(modifier = Modifier.fillMaxSize()) { TerminalScreen(state, handlers, split) }
+            }
         }
     }
 }
 
 @Composable
-private fun ColumnScope.TerminalScreen(state: TerminalsUiState, handlers: TerminalsHandlers) {
-    val down = rememberScrollState()
-    val across = rememberScrollState()
-    LaunchedEffect(state.screen, down.maxValue) { down.scrollTo(down.maxValue) }
-    Surface(
-        color = Fleet.colors.bgSunk,
-        contentColor = Fleet.colors.fg,
-        shape = RoundedCornerShape(OrbitTokens.radius("radius-phone-card").dp),
-        modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp),
-    ) {
-        Text(
-            text = state.screen ?: if (state.connected) "Reading the shell…" else "The hub is offline; the shell cannot be read.",
-            style = Fleet.type.code,
-            softWrap = false,
-            modifier = Modifier.verticalScroll(down).horizontalScroll(across).padding(12.dp).testTag(TERMINALS_SCREEN_TAG),
+private fun ColumnScope.TerminalScreen(state: TerminalsUiState, handlers: TerminalsHandlers, split: Boolean = false) {
+    val paired = state.paired
+    if (split && paired != null) {
+        // Two shells side by side; a tap on one is where the keys and the line go.
+        Row(modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val first = state.terminals.indexOfFirst { it.id == state.selected }
+            val second = state.terminals.indexOfFirst { it.id == paired }
+            // In the tab's own order, so a tap that swaps them does not move them.
+            val panes = listOf(Triple(state.selected, state.screen, first), Triple(paired, state.pairedScreen, second)).sortedBy { it.third }
+            for ((id, screen, index) in panes) {
+                ShellScreen(
+                    screen = screen,
+                    connected = state.connected,
+                    label = terminalLabel(index),
+                    active = id == state.selected,
+                    onTap = { if (id != null && id != state.selected) handlers.onSelect(id) },
+                    modifier = Modifier.weight(1f).fillMaxHeight().testTag(TERMINALS_SPLIT_TAG + index),
+                )
+            }
+        }
+    } else {
+        ShellScreen(
+            screen = state.screen,
+            connected = state.connected,
+            label = null,
+            active = true,
+            onTap = {},
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp),
         )
     }
     if (state.canType) {

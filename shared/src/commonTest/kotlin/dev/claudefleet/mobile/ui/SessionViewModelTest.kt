@@ -3265,6 +3265,55 @@ class SessionViewModelTest {
     }
 
     @Test
+    fun the_full_screen_key_bar_presses_its_keys_and_reads_the_pane_again() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.showTerminal().join()
+        val before = actions.captures
+
+        vm.pressKey("Tab").join()
+        vm.pressKey("C-c").join()
+        runCurrent()
+
+        assertEquals(listOf("Tab", "C-c"), actions.sentKeys)
+        assertEquals(before + 2, actions.captures, "a key that redraws the pane is read back after it")
+    }
+
+    @Test
+    fun the_full_screen_key_bar_presses_nothing_the_hub_has_no_key_for() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.pressKey("Up").join()
+        vm.pressKey("1").join()
+        runCurrent()
+        assertTrue(actions.sentKeys.isEmpty(), "digits answer through the card; arrows are not hub keys")
+    }
+
+    @Test
+    fun the_full_screen_key_bar_never_presses_into_a_question() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+
+        vm.pressKey("Escape").join()
+        vm.pressKey("Tab").join()
+        runCurrent()
+
+        assertTrue(actions.sentKeys.isEmpty(), "a question's keys go through its card, which re-reads the pane first")
+    }
+
+    @Test
+    fun the_full_screen_key_bar_makes_no_call_for_a_readonly_credential() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, canSendPrompts = false)
+        vm.pressKey("Tab").join()
+        runCurrent()
+        assertTrue(actions.sentKeys.isEmpty())
+    }
+
+    @Test
     fun an_unsent_draft_is_there_again_on_the_next_visit() = runTest {
         val drafts = DraftMemory()
         val first = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope, drafts = drafts)
