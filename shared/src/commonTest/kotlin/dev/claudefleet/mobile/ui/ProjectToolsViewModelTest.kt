@@ -11,6 +11,7 @@ import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.WorktreeRow
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runCurrent
@@ -21,6 +22,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 private class ProjFleet(tools: Set<String>) : FleetState {
     var refreshes = 0
@@ -40,12 +42,15 @@ private class ProjFleet(tools: Set<String>) : FleetState {
 private class Projects : ProjectActions {
     val calls = mutableListOf<String>()
     var worktrees = HostWorktrees(hostAlias = "pine", projectId = 1, cloned = true, worktrees = listOf(WorktreeRow(id = 7, name = "feat-x", branch = "feat/x")))
+    var gate: CompletableDeferred<Unit>? = null
     override suspend fun clone(hostAlias: String, url: String): ProjectRow {
         calls += "clone $hostAlias $url"
+        gate?.await()
         return ProjectRow(id = 11, owner = "a", repo = "b")
     }
     override suspend fun create(hostAlias: String, owner: String, repo: String, onGithub: Boolean, confirm: String?): ProjectRow {
         calls += "create $owner/$repo github=$onGithub confirm=$confirm"
+        gate?.await()
         if (onGithub && confirm == null) {
             throw HubError.Tool("E_CONFIRM_REQUIRED", "creating $owner/$repo on GitHub needs confirmation", buildJsonObject { put("confirm", JsonPrimitive("tok")) })
         }
@@ -128,5 +133,72 @@ class ProjectToolsViewModelTest {
         vm.deleteWorktree(7).join()
         runCurrent()
         assertEquals(listOf("worktrees pine 1"), actions.calls)
+    }
+
+    // ── The New layout's Add a project wizard (redesign 14.20) ──
+
+    @Test
+    fun the_where_step_moves_the_add_to_another_host_and_keeps_the_repositories() = runTest {
+        val actions = Projects()
+        val vm = ProjectToolsViewModel(ProjFleet(ALL_PROJ), actions, backgroundScope, canWrite = true)
+        vm.openAdd("pine").join()
+        runCurrent()
+
+        vm.chooseHost("oak")
+        runCurrent()
+        assertEquals("oak", vm.state.value.addingOn)
+        assertEquals(listOf("acme/app"), vm.state.value.repos?.map { it.nameWithOwner })
+
+        vm.clone("https://github.com/acme/app") {}.join()
+        assertEquals("clone oak https://github.com/acme/app", actions.calls.last())
+    }
+
+    @Test
+    fun a_running_clone_says_what_and_where_and_keeps_going_once_left() = runTest {
+        val actions = Projects().apply { gate = CompletableDeferred() }
+        val vm = ProjectToolsViewModel(ProjFleet(ALL_PROJ), actions, backgroundScope, canWrite = true)
+        vm.openAdd("pine").join()
+        var added: Long? = null
+
+        vm.clone("git@github.com:acme/papaya-pos.git") { added = it }
+        runCurrent()
+        assertTrue(vm.state.value.adding)
+        assertEquals("papaya-pos", vm.state.value.addingWhat)
+        assertEquals("pine", vm.state.value.addingWhere)
+
+        vm.chooseHost("oak")
+        vm.closeAdd()
+        runCurrent()
+        assertNull(vm.state.value.addingOn, "Continue in the background closes the wizard")
+        assertTrue(vm.state.value.adding, "and the clone keeps running")
+
+        actions.gate!!.complete(Unit)
+        runCurrent()
+        assertEquals(11L, added, "the project is picked once it lands")
+        assertFalse(vm.state.value.adding)
+        assertNull(vm.state.value.addingWhat)
+        assertEquals("clone pine git@github.com:acme/papaya-pos.git", actions.calls.last())
+    }
+
+    @Test
+    fun a_github_ask_reopens_the_add_it_belongs_to_even_once_left() = runTest {
+        val actions = Projects().apply { gate = CompletableDeferred() }
+        val vm = ProjectToolsViewModel(ProjFleet(ALL_PROJ), actions, backgroundScope, canWrite = true)
+        vm.openAdd("pine").join()
+        vm.create("acme", "new-app", onGithub = true) {}
+        runCurrent()
+        vm.closeAdd()
+        actions.gate!!.complete(Unit)
+        runCurrent()
+        assertEquals("pine", vm.state.value.addingOn)
+        assertEquals(PendingCreate("acme", "new-app", "tok"), vm.state.value.pendingCreate)
+    }
+
+    @Test
+    fun a_clone_url_names_its_repository() {
+        assertEquals("papaya-pos", repoName("https://github.com/martin-janci/papaya-pos"))
+        assertEquals("papaya-pos", repoName("https://github.com/martin-janci/papaya-pos/"))
+        assertEquals("papaya-pos", repoName("git@github.com:martin-janci/papaya-pos.git"))
+        assertNull(repoName("  "))
     }
 }

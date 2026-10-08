@@ -366,3 +366,61 @@ fun DotWave(modifier: Modifier = Modifier, columns: Int = 7, rows: Int = 2, dot:
         }
     }
 }
+
+/**
+ * One streak of the Data rain, from the manual's markup (16 streaks, 12 px
+ * apart): its height in px, how many times it falls in [RAIN_PERIOD_MS], where
+ * in its fall it starts, and its opacity. The manual's 1.15–2.53 s falls are
+ * rounded to whole laps of the period so the loop has no seam.
+ */
+internal class RainStreak(val height: Float, val laps: Int, val start: Float, val alpha: Float)
+
+internal const val RAIN_PERIOD_MS = 5_000
+
+internal val RAIN = listOf(
+    RainStreak(19f, 4, 0.03f, 0.49f), RainStreak(21f, 4, 0.81f, 0.67f), RainStreak(38f, 2, 0.27f, 1.00f), RainStreak(39f, 2, 0.81f, 0.79f),
+    RainStreak(47f, 3, 0.97f, 0.80f), RainStreak(41f, 3, 0.02f, 0.67f), RainStreak(23f, 4, 0.72f, 0.61f), RainStreak(25f, 2, 0.44f, 0.86f),
+    RainStreak(37f, 3, 0.18f, 0.66f), RainStreak(48f, 4, 0.80f, 0.72f), RainStreak(38f, 3, 0.64f, 0.94f), RainStreak(44f, 4, 0.76f, 0.78f),
+    RainStreak(42f, 3, 0.96f, 0.44f), RainStreak(34f, 2, 0.81f, 0.44f), RainStreak(41f, 2, 0.73f, 0.97f), RainStreak(34f, 2, 0.26f, 0.81f),
+)
+
+/**
+ * The Data rain: a steady stream with no promise of an end, for a download or
+ * an import whose size is not known (a clone the hub answers only once it is
+ * done). The real counts, when there are any, go under it in words.
+ */
+@Composable
+fun DataRain(modifier: Modifier = Modifier, width: Dp = 196.dp, height: Dp = 150.dp) {
+    val o = Fleet.colors
+    val clock = rememberLoaderClock(RAIN_PERIOD_MS)
+    Canvas(
+        modifier
+            .size(width = width, height = height)
+            .clipToBounds()
+            .semantics { contentDescription = "Receiving" },
+    ) {
+        val u = size.width / 196f
+        RAIN.forEachIndexed { i, s ->
+            val through = if (clock.reduced) 0.45f else (clock.phase * s.laps + s.start) % 1f
+            val top = (-60f + 230f * through) * u
+            val h = s.height * u
+            val alpha = s.alpha * rainEdge((top + h / 2f) / size.height) * clock.alpha
+            if (alpha > 0f) {
+                drawRoundRect(
+                    brush = Brush.verticalGradient(listOf(o.accent.copy(alpha = 0f), o.accent, o.brandLight), startY = top, endY = top + h),
+                    topLeft = Offset((4f + 12f * i) * u, top),
+                    size = Size(2f * u, h),
+                    cornerRadius = CornerRadius(2f * u),
+                    alpha = alpha,
+                )
+            }
+        }
+    }
+}
+
+/** How much of a streak shows at [mid] (0 top, 1 bottom): the manual's mask, clear above 25 % and below 70 %. */
+internal fun rainEdge(mid: Float): Float = when {
+    mid < 0.25f -> (mid / 0.25f).coerceIn(0f, 1f)
+    mid > 0.7f -> ((1f - mid) / 0.3f).coerceIn(0f, 1f)
+    else -> 1f
+}

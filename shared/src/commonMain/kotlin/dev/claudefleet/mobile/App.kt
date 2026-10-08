@@ -87,6 +87,8 @@ import dev.claudefleet.mobile.net.withHubTimeouts
 import dev.claudefleet.mobile.store.Credentials
 import dev.claudefleet.mobile.store.Prefs
 import dev.claudefleet.mobile.store.Secrets
+import dev.claudefleet.mobile.ui.AddProjectHandlers
+import dev.claudefleet.mobile.ui.AddProjectStep
 import dev.claudefleet.mobile.ui.AgentViewModel
 import dev.claudefleet.mobile.ui.FilesHandlers
 import dev.claudefleet.mobile.ui.FilesScreen
@@ -1708,6 +1710,13 @@ private fun NewSessionRoute(
     val tools = remember(repository, scope) { ProjectToolsViewModel(repository, container.projectActions, scope, credentials.canWrite) }
     val toolsState by tools.state.collectAsState()
     LaunchedEffect(tools, state.host, state.projectId) { tools.loadWorktrees(state.host, state.projectId) }
+    // Add a project's own steps (redesign 14.20), over the wizard: back on
+    // Where goes to Source, on Source closes it, and while a clone runs it
+    // leaves the clone running in the background.
+    var addStep by remember { mutableStateOf(AddProjectStep.Source) }
+    BackHandler(enabled = wizard && toolsState.addingOn != null) {
+        if (!toolsState.adding && addStep == AddProjectStep.Where) addStep = AddProjectStep.Source else tools.closeAdd()
+    }
     NewSessionScreen(
         state = state,
         onBack = onBack,
@@ -1725,7 +1734,10 @@ private fun NewSessionRoute(
         onStartBackground = { name, prompt -> vm.startBackground(name, prompt) { onBack() } },
         tools = toolsState,
         toolHandlers = ProjectToolsHandlers(
-            onOpenAdd = { tools.openAdd(it) },
+            onOpenAdd = {
+                addStep = AddProjectStep.Source
+                tools.openAdd(it)
+            },
             onCloseAdd = tools::closeAdd,
             onClone = { url -> tools.clone(url, vm::selectProject) },
             onCreate = { owner, repo, onGithub -> tools.create(owner, repo, onGithub, vm::selectProject) },
@@ -1745,6 +1757,15 @@ private fun NewSessionRoute(
         wizard = wizard,
         wizardStep = wizardStep,
         onWizardStep = { wizardStep = it },
+        addStep = addStep,
+        addHandlers = AddProjectHandlers(
+            onStep = { addStep = it },
+            onChooseHost = tools::chooseHost,
+            onClone = { url -> tools.clone(url, vm::selectProject) },
+            onCreate = { owner, repo, onGithub -> tools.create(owner, repo, onGithub, vm::selectProject) },
+            onClose = tools::closeAdd,
+            onDismissError = tools::dismissError,
+        ),
     )
 }
 
