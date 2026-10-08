@@ -57,7 +57,9 @@ class TheBackGestureReachesTheNavigatorTest {
     /**
      * Enabled on the screens pushed over a tab — a session, the New session
      * form, a task (the Work view's detail), a session's worktree — and
-     * nowhere else: the navigator's own contract, `isPushed`, read directly
+     * nowhere else: the navigator's own contract, `nav.isPushed` (which knows
+     * the layout: Hosts, Files and Settings are pushed over More on the New
+     * bar), read directly
      * rather than spelled out again here where it could drift from it.
      *
      * On a tab the handler must be *disabled* rather than enabled-and-ignoring:
@@ -70,9 +72,9 @@ class TheBackGestureReachesTheNavigatorTest {
         val call = Regex("""BackHandler\(enabled = ([^)]+\)?)\)""").find(app)
             ?: fail("BackHandler is not called with an explicit `enabled`")
 
-        assertEquals("isPushed(screen)", call.groupValues[1].trim())
+        assertEquals("nav.isPushed(screen)", call.groupValues[1].trim())
         assertTrue(
-            Regex("""BackHandler\(enabled = isPushed\(screen\)\)\s*\{\s*nav\.back\(\)\s*\}""").containsMatchIn(app),
+            Regex("""BackHandler\(enabled = nav\.isPushed\(screen\)\)\s*\{\s*nav\.back\(\)\s*\}""").containsMatchIn(app),
             "the handler must call nav.back() and nothing else",
         )
     }
@@ -97,7 +99,7 @@ class TheBackGestureReachesTheNavigatorTest {
         val app = Repo.shipped.single { it.name == "App.kt" }.readText()
         val enables = Regex("""BackHandler\(enabled = ([^)]+\)?)\)""").findAll(app).map { it.groupValues[1].trim() }.toList()
         assertEquals(
-            listOf("isPushed(screen)", "companyState.openId != null", "settingsCaps.fleetSettings && fleet.openPage != null", "state.views.isNotEmpty()"),
+            listOf("nav.isPushed(screen)", "companyState.openId != null", "settingsCaps.fleetSettings && fleet.openPage != null", "state.views.isNotEmpty()"),
             enables,
         )
     }

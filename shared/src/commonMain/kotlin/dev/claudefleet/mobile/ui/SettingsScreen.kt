@@ -71,6 +71,9 @@ fun SettingsScreen(
     onOpenCompany: (() -> Unit)? = null,
     /** Notifications while the app is away; [NoBackgroundNotifier] draws nothing. */
     notifier: BackgroundNotifier = NoBackgroundNotifier,
+    /** The bottom bar this phone draws (redesign 14.2); null hides the switch. */
+    layout: PhoneLayout? = null,
+    onSetLayout: (PhoneLayout) -> Unit = {},
 ) {
     // The header and the error stay put; only the fields scroll. The header
     // used to live inside the scrolling column and left with the content.
@@ -104,6 +107,8 @@ fun SettingsScreen(
             Field("Hub version", state.hubVersion)
 
             if (notifier.supported) NotifyRow(notifier)
+
+            if (layout != null) LayoutRow(layout, onSetLayout)
 
             onOpenUsage?.let { open ->
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -177,6 +182,33 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(24.dp))
         }
+    }
+}
+
+/**
+ * Classic or New navigation, like the desktop's layout switch. New is the
+ * Orbit Fleet bar (Inbox, Sessions, Control, Work, More); everything the
+ * Classic bar had is still there, under More or in the session.
+ */
+@Composable
+private fun LayoutRow(layout: PhoneLayout, onSetLayout: (PhoneLayout) -> Unit) {
+    val on = layout == PhoneLayout.New
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(value = on, role = Role.Switch, onValueChange = { onSetLayout(if (it) PhoneLayout.New else PhoneLayout.Classic) })
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("New navigation", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "Inbox, Sessions, Control, Work and More. Hosts, Files and Settings move under More.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = on, onCheckedChange = null)
     }
 }
 
