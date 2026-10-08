@@ -190,6 +190,11 @@ data class SessionUiState(
     val pending: String? = null,
     /** [error] came from a send — drawn by the composer, where the thumb is, not under the header. */
     val errorFromSend: Boolean = false,
+    /**
+     * A prompt the hub did not take, kept in the conversation with Retry and
+     * Edit (redesign 14.5, New bar only); the box is left free meanwhile.
+     */
+    val notSent: NotSent? = null,
 ) {
     /** A working agent can be stopped (Escape) — Send's place while there is nothing to send. */
     val canStop: Boolean
@@ -370,6 +375,12 @@ class SessionViewModel(
     private val clock: () -> Long = { epochSeconds() },
     val quickReplies: QuickReplies = QuickReplies(EphemeralPrefs, EphemeralQuickReplies),
     private val drafts: DraftMemory = DraftMemory(),
+    /**
+     * The New bar (redesign 14.5): a prompt the hub refuses stays in the
+     * conversation as [SessionUiState.notSent] instead of going back into the
+     * box. False keeps the Classic rule — the words return to the box.
+     */
+    private val keepNotSent: Boolean = false,
 ) {
     /**
      * The screen state this class owns, as opposed to what the fleet owns.
@@ -427,6 +438,7 @@ class SessionViewModel(
          * lands by the box.
          */
         val sendError: Friendly? = null,
+        val notSent: NotSent? = null,
     )
 
     private val local = MutableStateFlow(Local(draft = drafts.recall(sessionId)))
@@ -985,7 +997,7 @@ class SessionViewModel(
      * this is a history of what was composed, not of every prompt this screen
      * ever sent.
      */
-    private suspend fun deliver(text: String, clearDraft: Boolean) {
+    private suspend fun deliver(text: String, clearDraft: Boolean, keep: Boolean = keepNotSent && clearDraft) {
         // Out of the box at once and shown as pending: the box is free and the
         // prompt is visibly on its way, rather than both frozen until the hub
         // answers. A failure puts it back.
@@ -1008,6 +1020,11 @@ class SessionViewModel(
             throw e
         } catch (t: Throwable) {
             val failure = friendly(t)
+            if (keep) {
+                // The New bar: kept in the conversation, marked, with Retry and Edit.
+                local.update { it.copy(sending = false, pending = null, notSent = NotSent(text, failure)) }
+                return
+            }
             local.update {
                 it.copy(
                     sending = false,
@@ -1019,6 +1036,38 @@ class SessionViewModel(
                 )
             }
         }
+    }
+
+    /**
+     * Send the prompt the hub did not take again (redesign 14.5). Guarded like
+     * a chip — the box may hold something else meanwhile, and that stays. A
+     * second refusal keeps the words in the conversation again.
+     */
+    fun retryNotSent(): Job = scope.launch {
+        val current = local.value
+        val unsent = current.notSent ?: return@launch
+        if (!canWriteNow(current) || row() == null || blockedNow()) return@launch
+        local.update { it.copy(notSent = null) }
+        deliver(unsent.text, clearDraft = false, keep = true)
+    }
+
+    /** Put the prompt the hub did not take back into the box, after what is typed, to edit it; nothing is sent. */
+    fun editNotSent() {
+        local.update { l ->
+            val unsent = l.notSent ?: return@update l
+            l.copy(notSent = null, draft = appendToDraft(l.draft, unsent.text))
+        }
+    }
+
+    /**
+     * "Retry the last turn" on a failed session (redesign 14.5): send its last
+     * prompt again as a new one, through the one write path. Nothing is
+     * rewound; a refusal is kept as [SessionUiState.notSent] on the New bar.
+     */
+    fun retryLastTurn(prompt: String): Job = scope.launch {
+        val current = local.value
+        if (prompt.isBlank() || !canWriteNow(current) || row() == null || blockedNow()) return@launch
+        deliver(prompt, clearDraft = false, keep = keepNotSent)
     }
 
     /**
@@ -1577,6 +1626,7 @@ class SessionViewModel(
         repair = l.repair,
         pending = l.pending,
         errorFromSend = l.error != null && l.error === l.sendError,
+        notSent = l.notSent,
     )
 }
 

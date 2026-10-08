@@ -1463,7 +1463,7 @@ private fun SessionRoute(
     newLayout: Boolean = false,
 ) {
     val scope = rememberWorkScope()
-    val vm = remember(sessionId, repository, scope) {
+    val vm = remember(sessionId, repository, scope, newLayout) {
         SessionViewModel(
             sessionId = sessionId,
             fleet = repository,
@@ -1477,6 +1477,8 @@ private fun SessionRoute(
             // `AppContainer.quickReplies`.
             quickReplies = container.quickReplies,
             drafts = container.drafts,
+            // The New bar keeps a refused prompt in the conversation (redesign 14.5).
+            keepNotSent = newLayout,
         )
     }
     val workVm = remember(sessionId, repository, scope) {
@@ -1676,13 +1678,17 @@ private fun SessionRoute(
         onDismissRepair = vm::dismissRepair,
         onPressEnter = { vm.pressEnter() },
         onStop = { vm.interrupt() },
-        onMove = moveVm::open.takeIf { move.available },
+        // The New bar opens Move with no host chosen (redesign 14.5).
+        onMove = { moveVm.open(fresh = newLayout) }.takeIf { move.available },
         // A dismissed ghost has no screen left to show: back to where it was opened from.
         onDismissGhost = { vm.dismissGhost(onBack) },
         onOpenRepo = (if (newLayout) ({ selectTab(SessionTab.Files) }) else ({ onOpenRepo(sessionId) })).takeIf { hasWorktree },
         showFoldHint = foldHintOwed,
         onFoldHintShown = { container.hints.markShown(Hints.DOUBLE_TAP) },
         onAnswerInWords = { vm.answerInWords() },
+        onRetryNotSent = { vm.retryNotSent() },
+        onEditNotSent = vm::editNotSent,
+        onRetryLastTurn = { vm.retryLastTurn(it) },
         tabs = if (!newLayout) {
             null
         } else {
@@ -1727,7 +1733,7 @@ private fun SessionRoute(
                             onOpenRepo = { selectTab(SessionTab.Files) }.takeIf { hasWorktree },
                         ),
                         actions = listOfNotNull(
-                            DetailsAction("Move to host…", moveVm::open).takeIf { move.available && state.canManage },
+                            DetailsAction("Move to host…", { moveVm.open(fresh = true) }).takeIf { move.available && state.canManage },
                             DetailsAction(if (tasks.count > 0) "Tasks ${tasks.count}" else "Tasks", tasksVm::openSheet).takeIf { tasks.available },
                             work.chip?.key?.let { key -> DetailsAction("Ticket $key", workVm::openSheet) },
                         ),
@@ -1740,6 +1746,7 @@ private fun SessionRoute(
         MoveSheet(
             state = move,
             nowSeconds = epochSeconds(),
+            orbit = newLayout,
             handlers = MoveHandlers(
                 onClose = moveVm::close,
                 onTarget = { moveVm.selectTarget(it) },

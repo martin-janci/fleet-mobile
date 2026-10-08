@@ -21,6 +21,13 @@ data class MoveUiState(
     val open: Boolean = false,
     /** Hosts it could go to: reachable, shown, not the one it is on. */
     val targets: List<HostRow> = emptyList(),
+    /**
+     * Shown hosts it cannot go to now because the hub cannot reach them
+     * (redesign 14.5): listed, disabled, with why — not silently missing.
+     */
+    val offline: List<HostRow> = emptyList(),
+    /** Live sessions per host alias, for each option's facts. */
+    val running: Map<String, Int> = emptyMap(),
     val target: String? = null,
     val keepSource: Boolean = false,
     val whenIdle: Boolean = false,
@@ -65,6 +72,9 @@ class MoveViewModel(
             available = canWrite && caps.moveSession,
             open = l.open,
             targets = hosts.filter { it.reachable && !it.hidden && it.alias != from },
+            offline = hosts.filter { !it.reachable && !it.hidden && it.alias != from },
+            running = rows.filter { it.lostAt == null && it.status != "ghost" && it.status != "stopped" }
+                .groupingBy { it.hostAlias }.eachCount(),
             target = l.target,
             keepSource = l.keepSource,
             whenIdle = l.whenIdle,
@@ -76,8 +86,14 @@ class MoveViewModel(
         )
     }.stateIn(scope, SharingStarted.Eagerly, MoveUiState())
 
-    fun open() {
-        local.update { it.copy(open = true, error = null) }
+    /**
+     * Open the sheet. [fresh] (the New bar, redesign 14.5) forgets an earlier
+     * pick, so it always opens with no host chosen.
+     */
+    fun open(fresh: Boolean = false) {
+        local.update {
+            if (fresh && it.waiting == null) it.copy(open = true, error = null, target = null, preview = null) else it.copy(open = true, error = null)
+        }
     }
 
     fun close() {
@@ -85,6 +101,9 @@ class MoveViewModel(
     }
 
     fun selectTarget(alias: String): Job {
+        // Only a host it could go to now: an offline one is listed, never picked.
+        // Read from the live hosts: `state` trails them by a dispatch.
+        if (fleet.hosts.value.any { it.alias == alias && !it.reachable }) return Job().apply { complete() }
         local.update { it.copy(target = alias, preview = null, error = null) }
         return preview()
     }
