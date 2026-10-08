@@ -56,6 +56,18 @@ class SessionWorkspaceTest {
     }
 
     @Test
+    fun the_new_bar_shows_the_loading_state_only_on_the_first_read() {
+        assertTrue(showsConversationLoading(newBar = true, loading = true, loaded = false, turns = 0))
+        // Classic keeps its list.
+        assertFalse(showsConversationLoading(newBar = false, loading = true, loaded = false, turns = 0))
+        // Answered: the turns, or the empty conversation, take over.
+        assertFalse(showsConversationLoading(newBar = true, loading = false, loaded = true, turns = 0))
+        assertFalse(showsConversationLoading(newBar = true, loading = true, loaded = false, turns = 3))
+        // A read that failed is not loading: nothing spins forever.
+        assertFalse(showsConversationLoading(newBar = true, loading = false, loaded = false, turns = 0))
+    }
+
+    @Test
     fun tabs_follow_the_desktop_order_and_files_needs_a_worktree() {
         assertEquals(
             listOf(SessionTab.Conversation, SessionTab.Agent, SessionTab.Files, SessionTab.Details),

@@ -148,6 +148,9 @@ import dev.claudefleet.mobile.ui.components.StatusStrip
 import dev.claudefleet.mobile.ui.components.WorkChip
 import dev.claudefleet.mobile.ui.components.contextIsTight
 import dev.claudefleet.mobile.ui.components.statusStripText
+import dev.claudefleet.mobile.ui.kit.ConversationLoading
+import dev.claudefleet.mobile.ui.kit.HubBanner
+import dev.claudefleet.mobile.ui.kit.rememberPhoneConnection
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.data.ConnectionStatus
@@ -650,7 +653,14 @@ fun SessionScreen(
                     onScope = { findScope = it },
                 )
             }
-            ConnectionBanner(status, state.hubReachable)
+            // The New bar draws the hub's state as the other tabs do (14.12),
+            // except where the hub answers and only the stream is down: that
+            // is not "not answering", and the old banner says what is true.
+            if (tabs != null && state.hubReachable != true) {
+                HubBanner(rememberPhoneConnection(status), onRetry = onRefresh)
+            } else {
+                ConnectionBanner(status, state.hubReachable)
+            }
             // A send's failure is drawn by the composer, where the thumb is.
             if (!state.errorFromSend) ErrorBanner(state.error, onDismiss = onDismissError)
             ErrorBanner(notice, onDismiss = onDismissNotice)
@@ -699,6 +709,8 @@ fun SessionScreen(
             ) {
                 if (state.loaded && turns.isEmpty()) {
                     EmptyConversation(state, onRetry = onRefresh)
+                } else if (showsConversationLoading(newBar = tabs != null, loading = state.loading, loaded = state.loaded, turns = turns.size)) {
+                    ConversationLoading(waiting = true)
                 } else {
                     // Tagged so a device test can address this list rather than
                     // guessing which of the screen's scrollable nodes it meant.
@@ -2620,6 +2632,14 @@ private fun EarlierConversationBanner(viewing: ConversationSummary, nowSeconds: 
         }
     }
 }
+
+/**
+ * Whether the New bar draws the conversation's loading state (MobileStates:
+ * Loading a session) in place of the list: only on the first read, before it
+ * has answered and while nothing is on screen. Classic keeps its list.
+ */
+internal fun showsConversationLoading(newBar: Boolean, loading: Boolean, loaded: Boolean, turns: Int): Boolean =
+    newBar && loading && !loaded && turns == 0
 
 /** "clear · 12 turns · 3 h" — how it started, how long it ran, how long ago. */
 internal fun conversationCaption(c: ConversationSummary, nowSeconds: Long): String =

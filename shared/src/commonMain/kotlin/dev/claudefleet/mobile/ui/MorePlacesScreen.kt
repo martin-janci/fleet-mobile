@@ -44,17 +44,18 @@ import dev.claudefleet.mobile.model.AccountRow
 import dev.claudefleet.mobile.model.UsageReport
 import dev.claudefleet.mobile.model.relativeAgo
 import dev.claudefleet.mobile.model.relativeTime
-import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.components.formatUsd
+import dev.claudefleet.mobile.ui.kit.HubBanner
 import dev.claudefleet.mobile.ui.kit.OrbitChip
 import dev.claudefleet.mobile.ui.kit.OrbitPullToRefresh
 import dev.claudefleet.mobile.ui.kit.PhoneRow
 import dev.claudefleet.mobile.ui.kit.ProgressRing
 import dev.claudefleet.mobile.ui.kit.StatusWord
 import dev.claudefleet.mobile.ui.kit.megabytes
+import dev.claudefleet.mobile.ui.kit.rememberPhoneConnection
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
@@ -160,7 +161,7 @@ fun OrbitHostsScreen(
     val behind = remember(state.hosts) { behindHosts(state.hosts) }
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(title = "Hosts", subtitle = state.hosts.takeIf { it.isNotEmpty() }?.let(::hostsHeadline))
-        ConnectionBanner(state.status)
+        HubBanner(rememberPhoneConnection(state.status), onRetry = handlers.onRefresh)
         ErrorBanner(state.error, onDismiss = handlers.onDismissError)
         OrbitPullToRefresh(isRefreshing = state.refreshing, onRefresh = handlers.onRefresh, modifier = Modifier.fillMaxSize()) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -389,7 +390,7 @@ fun OrbitFilesScreen(
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(title = "Files", subtitle = filesHeadline(state))
-        ConnectionBanner(status)
+        HubBanner(rememberPhoneConnection(status), onRetry = handlers.onRefresh)
         ErrorBanner(state.error, onDismiss = handlers.onDismissError)
         state.notice?.let { notice ->
             Row(
