@@ -52,6 +52,14 @@ data class SessionFiltersHandlers(
     val onClearAll: () -> Unit = {},
     /** One group back to *Any* (its facet cleared) — the State, Status and Organisation groups' reset. */
     val onClearFacet: (SessionFacetId) -> Unit = {},
+    /**
+     * The New layout's "Filters and grouping" (MobileNav): how the list is
+     * grouped, first in the sheet. Null on Classic, whose list keeps its own
+     * Group chip.
+     */
+    val onSetGroupMode: ((GroupMode) -> Unit)? = null,
+    /** The New layout's *Needs you only*, which Classic keeps as a chip on the list. Null hides it. */
+    val onToggleNeedsAttention: (() -> Unit)? = null,
 )
 
 /**
@@ -85,7 +93,7 @@ fun SessionFiltersSheet(state: SessionsUiState, handlers: SessionFiltersHandlers
                 modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Filters", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).semantics { heading() })
+                Text(if (handlers.onSetGroupMode != null) "Filters and grouping" else "Filters", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).semantics { heading() })
                 // Enabled while anything the sheet can clear is on — showing
                 // archived sessions included, which *Clear all* hides again.
                 TextButton(onClick = handlers.onClearAll, enabled = filters.any || (state.workAvailable && filters.showArchived)) { Text("Clear all") }
@@ -97,6 +105,30 @@ fun SessionFiltersSheet(state: SessionsUiState, handlers: SessionFiltersHandlers
                     .verticalScroll(rememberScrollState())
                     .padding(bottom = 8.dp),
             ) {
+                handlers.onSetGroupMode?.let { setGroupMode ->
+                    FilterGroup("Group by") {
+                        ChipFlow {
+                            for (mode in newGroupModes(state.workAvailable)) {
+                                ChoiceChip(
+                                    groupModeLabel(mode).replaceFirstChar { it.uppercaseChar() },
+                                    state.groupMode == mode,
+                                    { setGroupMode(mode) },
+                                )
+                            }
+                        }
+                    }
+                }
+                handlers.onToggleNeedsAttention?.let { toggle ->
+                    FilterGroup("Needs you") {
+                        SwitchRow(
+                            label = "Only sessions that need you",
+                            help = "The Inbox tab lists them all, oldest ask first",
+                            checked = filters.needsAttentionOnly,
+                            onToggle = toggle,
+                        )
+                    }
+                }
+
                 FilterGroup("Last active") {
                     // The direction first: it is what the windows under it
                     // mean, and reading "8 hours" before knowing which side of

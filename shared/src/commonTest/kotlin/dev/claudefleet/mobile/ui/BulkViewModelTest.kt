@@ -182,4 +182,49 @@ class BulkViewModelTest {
         vm.dismissOutcome()
         assertNull(vm.state.value.outcome)
     }
+
+    /** Redesign 14.3: Retry for one session repeats the last action there only. */
+    @Test
+    fun retry_one_repeats_the_last_action_for_that_session_only() = runTest {
+        val calls = BulkCalls()
+        calls.failing += setOf(1L, 2L)
+        val vm = BulkViewModel(BulkFleet(ROWS), calls, backgroundScope, canWrite = true)
+        vm.toggle(1)
+        vm.toggle(2)
+        vm.send("rebase").join()
+        runCurrent()
+        assertEquals(BulkAction.Send("rebase"), vm.state.value.action)
+        assertEquals(setOf(1L, 2L), vm.state.value.retryable.map { it.sessionId }.toSet())
+
+        calls.failing.clear()
+        vm.retry(2).join()
+        runCurrent()
+
+        assertEquals(listOf(2L to "rebase"), calls.sent)
+        val outcome = vm.state.value.outcome!!
+        assertEquals(listOf(1L, 2L), outcome.map { it.sessionId }, "the outcome keeps every line, in order")
+        assertTrue(outcome.single { it.sessionId == 2L }.ok)
+        assertFalse(outcome.single { it.sessionId == 1L }.ok)
+        assertEquals(setOf(1L), vm.state.value.selected)
+    }
+
+    @Test
+    fun retry_all_reaches_every_failure_and_never_a_skip() = runTest {
+        val calls = BulkCalls()
+        calls.failing += 1L
+        val vm = BulkViewModel(BulkFleet(ROWS), calls, backgroundScope, canWrite = true)
+        listOf(1L, 2L, 3L).forEach(vm::toggle)
+        vm.kill().join()
+        runCurrent()
+        assertEquals(listOf(2L), calls.killed)
+        assertEquals(listOf(1L), vm.state.value.retryable.map { it.sessionId }, "the controller's skip is not retryable")
+
+        calls.failing.clear()
+        vm.retryFailed().join()
+        runCurrent()
+
+        assertEquals(listOf(2L, 1L), calls.killed)
+        assertTrue(vm.state.value.retryable.isEmpty())
+        assertFalse(vm.state.value.outcome!!.single { it.sessionId == 3L }.ok, "the skip is still reported")
+    }
 }

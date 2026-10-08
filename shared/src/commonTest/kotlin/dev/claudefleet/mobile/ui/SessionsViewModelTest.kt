@@ -1764,3 +1764,75 @@ class CollapsingAHostTest {
         assertNotNull(vm.state.value.staleFor)
     }
 }
+
+/**
+ * Redesign 14.3: the New layout's "Group: host" and its filters sheet. The
+ * step's check is that grouping and filters survive a restart — a fresh view
+ * model on the same store is what a restart is.
+ */
+class NewSessionsTabTest {
+
+    @Test
+    fun the_host_view_puts_sessions_straight_under_their_host_most_recent_first() = runTest {
+        val fleet = FakeFleet(
+            rows = listOf(
+                session(1, host = "box", project = 1, lastActivityAt = 10),
+                session(2, host = "box", project = 2, lastActivityAt = 30),
+                session(3, host = "pine", project = 1, lastActivityAt = 20),
+            ),
+        )
+        val vm = SessionsViewModel(fleet, backgroundScope)
+
+        vm.setGroupMode(GroupMode.HOST)
+        runCurrent()
+
+        val groups = vm.state.value.groups
+        assertEquals(listOf("box", "pine"), groups.map { it.alias })
+        assertEquals(1, groups[0].projects.size, "no project headings under a host")
+        assertEquals("", groups[0].projects.single().label)
+        assertEquals(listOf(2L, 1L), groups[0].projects.single().sessions.map { it.id })
+        assertEquals(3, vm.state.value.shown)
+    }
+
+    @Test
+    fun grouping_and_filters_survive_a_restart() = runTest {
+        val prefs = FakePrefs()
+        SessionsViewModel(FakeFleet(listOf(session(1))), backgroundScope, prefs = prefs).apply {
+            setGroupMode(GroupMode.HOST)
+            toggleStatus(StatusFilter.WORKING)
+            setWindow(TimeWindow.H8)
+            toggleNeedsAttentionOnly()
+        }
+
+        val reopened = SessionsViewModel(FakeFleet(listOf(session(1))), backgroundScope, prefs = prefs)
+        runCurrent()
+        val state = reopened.state.value
+        assertEquals(GroupMode.HOST, state.groupMode)
+        assertEquals(setOf(StatusFilter.WORKING), state.filters.statuses)
+        assertEquals(TimeWindow.H8, state.filters.window)
+        assertTrue(state.filters.needsAttentionOnly)
+    }
+
+    /** Classic's Group chip keeps its three views; the host view is New's, chosen in the sheet. */
+    @Test
+    fun the_classic_cycle_never_lands_on_the_host_view_and_leaves_it_cleanly() = runTest {
+        val vm = SessionsViewModel(FakeFleet(listOf(session(1))), backgroundScope)
+        repeat(4) {
+            vm.cycleGroupMode(workAvailable = false)
+            runCurrent()
+            assertTrue(vm.state.value.groupMode != GroupMode.HOST)
+        }
+        vm.setGroupMode(GroupMode.HOST)
+        vm.cycleGroupMode(workAvailable = false)
+        runCurrent()
+        assertTrue(vm.state.value.groupMode in setOf(GroupMode.PROJECT, GroupMode.URGENCY))
+    }
+
+    @Test
+    fun the_new_sheet_offers_state_host_project_and_work_only_with_the_work_graph() {
+        assertEquals(listOf(GroupMode.URGENCY, GroupMode.HOST, GroupMode.PROJECT), newGroupModes(workAvailable = false))
+        assertEquals(GroupMode.WORK, newGroupModes(workAvailable = true).last())
+        assertEquals("state", groupModeLabel(GroupMode.URGENCY))
+        assertEquals("host", groupModeLabel(GroupMode.HOST))
+    }
+}

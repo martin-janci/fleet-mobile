@@ -319,7 +319,7 @@ fun SessionsScreen(
                     for (project in if (host.collapsed) emptyList() else host.projects) {
                         item(key = "${host.alias}-${project.id}") {
                             val work = project.work
-                            if (work != null) WorkHeader(work, project.attentionCount, project.orgLabel) else ProjectHeader(project.label)
+                            if (work != null) WorkHeader(work, project.attentionCount, project.orgLabel) else if (project.label.isNotEmpty()) ProjectHeader(project.label)
                         }
                         items(project.sessions, key = { it.id }) { row ->
                             SessionRowItem(
@@ -577,7 +577,7 @@ private fun FilterRow(
  * purpose, not a note about the view.
  */
 @Composable
-private fun HiddenAttentionBanner(count: Int, onClearAll: () -> Unit) {
+internal fun HiddenAttentionBanner(count: Int, onClearAll: () -> Unit) {
     if (count <= 0) return
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -829,7 +829,7 @@ private fun SessionRowItem(
  * start a session rather than what to clear.
  */
 @Composable
-private fun EmptyFleet(
+internal fun EmptyFleet(
     state: SessionsUiState,
     /** Null for a readonly pairing, which can only point elsewhere. */
     onNewSession: (() -> Unit)?,

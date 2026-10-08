@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.backhandler.BackHandler
 import androidx.lifecycle.compose.LifecycleStartEffect
+import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.AgentActions
 import dev.claudefleet.mobile.data.AppSession
 import dev.claudefleet.mobile.data.AuthState
@@ -158,6 +159,8 @@ import dev.claudefleet.mobile.ui.SessionFiltersSheet
 import dev.claudefleet.mobile.model.SessionFacetId
 import dev.claudefleet.mobile.ui.SessionsHandlers
 import dev.claudefleet.mobile.ui.SessionsScreen
+import dev.claudefleet.mobile.ui.SessionsTab
+import dev.claudefleet.mobile.ui.BulkHandlers
 import dev.claudefleet.mobile.ui.SessionsSheet
 import dev.claudefleet.mobile.ui.DraftMemory
 import dev.claudefleet.mobile.ui.SessionsViewModel
@@ -737,56 +740,72 @@ private fun FleetRoute(
                     val hits = remember(state.filters.query, searchHosts, searchProjects, ticketsState.available) {
                         searchEverywhere(state.filters.query, searchHosts, searchProjects, ticketsState.available)
                     }
-                    SessionsScreen(
-                        state = state,
-                        agent = agentState,
-                        bulk = bulkState,
-                        hits = hits,
-                        handlers = SessionsHandlers(
-                            onOpenSession = nav::open,
-                            onToggleNeedsAttention = sessions::toggleNeedsAttentionOnly,
-                            onRefresh = { sessions.refresh() },
-                            onDismissError = sessions::dismissError,
-                            onCycleGroupMode = { sessions.cycleGroupMode(state.workAvailable) },
-                            onToggleSearch = sessions::toggleSearch,
-                            onSetQuery = sessions::setQuery,
-                            onOpenFilters = { sessions.setFiltersOpen(true) },
-                            onToggleHost = sessions::toggleHost,
-                            // Both, in this order, and this is the only place
-                            // that knows to: `clearFilters` deliberately leaves
-                            // the host alone because `Screen.Sessions.hostAlias`
-                            // owns it (see `onSetHost` below), so a *clear all*
-                            // that called only the view model would leave the
-                            // one filter a person most often wants gone.
-                            onClearAll = {
-                                sessions.clearFilters()
-                                nav.clearHostFilter()
-                            },
-                            onClearFacet = { id ->
-                                sessions.clearFacet(id)
-                                if (id == SessionFacetId.HOST) nav.clearHostFilter()
-                            },
-                            onSetShowArchived = sessions::setShowArchived,
-                            // `new_session` is not a readonly tool: a readonly
-                            // pairing is not offered a form the hub would refuse.
-                            onNewSession = if (credentials.canWrite) ({ nav.newSession() }) else null,
-                            onOpenTickets = if (ticketsState.available) ({ tickets.open() }) else null,
-                            onOpenToday = if (todayState.available) ({ today.open() }) else null,
-                            onOpenMissions = if (missionsState.available) ({ missions.open() }) else null,
-                            // On the New bar Control replaces the agent button.
-                            onOpenAgent = if (agentState.available && layout == PhoneLayout.Classic) ({ agent.open() }) else null,
-                            onDismissAgentError = agent::dismissError,
-                            onToggleSelect = bulk::toggle,
-                            onClearSelection = bulk::clear,
-                            onStartSelect = bulk::start,
-                            onBulkSend = { bulk.send(it) },
-                            onBulkKill = { bulk.kill() },
-                            onDismissBulkOutcome = bulk::dismissOutcome,
-                            onSearchHost = { nav.showSessionsFor(it) },
-                            onSearchProject = { nav.newSessionIn(it) },
-                            onSearchTicket = { q -> tickets.open(); tickets.onQuery(q); tickets.search() },
-                        ),
+                    val sessionsHandlers = SessionsHandlers(
+                        onOpenSession = nav::open,
+                        onToggleNeedsAttention = sessions::toggleNeedsAttentionOnly,
+                        onRefresh = { sessions.refresh() },
+                        onDismissError = sessions::dismissError,
+                        onCycleGroupMode = { sessions.cycleGroupMode(state.workAvailable) },
+                        onToggleSearch = sessions::toggleSearch,
+                        onSetQuery = sessions::setQuery,
+                        onOpenFilters = { sessions.setFiltersOpen(true) },
+                        onToggleHost = sessions::toggleHost,
+                        // Both, in this order, and this is the only place
+                        // that knows to: `clearFilters` deliberately leaves
+                        // the host alone because `Screen.Sessions.hostAlias`
+                        // owns it (see `onSetHost` below), so a *clear all*
+                        // that called only the view model would leave the
+                        // one filter a person most often wants gone.
+                        onClearAll = {
+                            sessions.clearFilters()
+                            nav.clearHostFilter()
+                        },
+                        onClearFacet = { id ->
+                            sessions.clearFacet(id)
+                            if (id == SessionFacetId.HOST) nav.clearHostFilter()
+                        },
+                        onSetShowArchived = sessions::setShowArchived,
+                        // `new_session` is not a readonly tool: a readonly
+                        // pairing is not offered a form the hub would refuse.
+                        onNewSession = if (credentials.canWrite) ({ nav.newSession() }) else null,
+                        onOpenTickets = if (ticketsState.available) ({ tickets.open() }) else null,
+                        onOpenToday = if (todayState.available) ({ today.open() }) else null,
+                        onOpenMissions = if (missionsState.available) ({ missions.open() }) else null,
+                        // On the New bar Control replaces the agent button.
+                        onOpenAgent = if (agentState.available && layout == PhoneLayout.Classic) ({ agent.open() }) else null,
+                        onDismissAgentError = agent::dismissError,
+                        onToggleSelect = bulk::toggle,
+                        onClearSelection = bulk::clear,
+                        onStartSelect = bulk::start,
+                        onBulkSend = { bulk.send(it) },
+                        onBulkKill = { bulk.kill() },
+                        onDismissBulkOutcome = bulk::dismissOutcome,
+                        onSearchHost = { nav.showSessionsFor(it) },
+                        onSearchProject = { nav.newSessionIn(it) },
+                        onSearchTicket = { q -> tickets.open(); tickets.onQuery(q); tickets.search() },
                     )
+                    // The New bar's Sessions tab (redesign 14.3); Classic keeps its list.
+                    if (layout == PhoneLayout.New) {
+                        SessionsTab(
+                            state = state,
+                            handlers = sessionsHandlers,
+                            bulk = bulkState,
+                            hits = hits,
+                            bulkHandlers = BulkHandlers(
+                                onSelectAll = bulk::selectAll,
+                                onRetry = { bulk.retry(it) },
+                                onRetryAll = { bulk.retryFailed() },
+                            ),
+                        )
+                    } else {
+                        SessionsScreen(
+                            state = state,
+                            agent = agentState,
+                            bulk = bulkState,
+                            hits = hits,
+                            handlers = sessionsHandlers,
+                        )
+                    }
                     if (state.filtersOpen) {
                         SessionFiltersSheet(
                             state = state,
@@ -822,6 +841,9 @@ private fun FleetRoute(
                                     sessions.clearFacet(id)
                                     if (id == SessionFacetId.HOST) nav.clearHostFilter()
                                 },
+                                // New: "Filters and grouping" in one sheet.
+                                onSetGroupMode = if (layout == PhoneLayout.New) sessions::setGroupMode else null,
+                                onToggleNeedsAttention = if (layout == PhoneLayout.New) sessions::toggleNeedsAttentionOnly else null,
                             ),
                         )
                     }
@@ -1056,10 +1078,14 @@ private fun FleetRoute(
                     val all by repository.sessions.collectAsState()
                     val rows = remember(all) { inboxRows(all) }
                     val todayInbox by today.state.collectAsState()
+                    val inboxList by sessions.state.collectAsState()
                     InboxScreen(
                         rows = rows,
                         running = all.count { it.claudeStatus == "working" },
-                        nowSeconds = epochSeconds(),
+                        nowSeconds = inboxList.nowSeconds,
+                        live = inboxList.status is ConnectionStatus.Connected,
+                        refreshing = inboxList.refreshing,
+                        onRefresh = { sessions.refresh() },
                         onOpenSession = nav::open,
                         // Today is an Inbox view until Control grows its own.
                         onOpenToday = if (todayInbox.available) ({ today.open() }) else null,
@@ -1201,6 +1227,7 @@ private fun FleetRoute(
             // Today (with its Tidy) and Missions open from Inbox, Control and More on the New bar
             // as well as from the Sessions header, so they are drawn over any tab.
             val todayOverlay by today.state.collectAsState()
+            val todaySessions by repository.sessions.collectAsState()
             if (todayOverlay.open) {
                 TodaySheet(
                     state = todayOverlay,
@@ -1215,6 +1242,9 @@ private fun FleetRoute(
                         onClearFilters = today::clearFilters,
                         onOpenTidy = { today.close(); tidy.open(); Unit }.takeIf { tidyState.available },
                     ),
+                    // New: Waiting on me is the Inbox's own list, so the counts agree.
+                    waitingNow = if (layout == PhoneLayout.New) inboxRows(todaySessions) else null,
+                    nowSeconds = epochSeconds(),
                 )
             }
             if (tidyState.open) {

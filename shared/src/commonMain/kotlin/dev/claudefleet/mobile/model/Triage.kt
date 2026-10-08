@@ -125,6 +125,14 @@ private fun SessionRow.bucketSince(bucket: TriageBucket): Long? = when (bucket) 
 }
 
 /**
+ * When this row started waiting on a person — what the Inbox sorts by and
+ * counts its age from ("Needs you sorted by when it asked"). The same stamp
+ * the triage score ages a row by, so the two orders never disagree about how
+ * long a row has waited; null when nothing is known.
+ */
+val SessionRow.askedAt: Long? get() = bucketSince(triageBucket())
+
+/**
  * Sort weight, higher = more urgent: the bucket dominates and the age only
  * breaks ties within it, which is what the cap guarantees.
  *
