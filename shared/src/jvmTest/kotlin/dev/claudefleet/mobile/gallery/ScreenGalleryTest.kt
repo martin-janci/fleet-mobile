@@ -68,7 +68,7 @@ class ScreenGalleryTest {
             }
         } catch (t: Throwable) {
             log.appendLine("FAIL $name: ${t::class.simpleName}: ${t.message}")
-            log.appendLine(t.stackTraceToString().lines().take(12).joinToString("\n"))
+            var c: Throwable? = t; while (c != null) { log.appendLine("  cause: ${c::class.simpleName}: ${c.message?.take(600)}"); c = c.cause }
         }
     }
 
@@ -116,7 +116,7 @@ class ScreenGalleryTest {
             try {
                 group()
             } catch (t: Throwable) {
-                log.appendLine("FAIL group ${group.name}: $t")
+                log.appendLine("FAIL group ${group.name}: $t"); var c: Throwable? = t.cause; while (c != null) { log.appendLine("  cause: ${c::class.simpleName}: ${c.message?.take(600)}"); c = c.cause }
             }
         }
         File(out, "_render-log.txt").writeText(log.toString())
@@ -845,7 +845,7 @@ internal object Fixtures {
 
     internal inline fun <reified T> j(s: String): T = json.decodeFromString(s)
 
-    val hosts: List<HostRow> = j(
+    val hosts: List<HostRow> by lazy {j(
         """[
         {"alias":"mercury","reachable":true,"claude_version":"2.1.4","tmux_version":"3.5a","last_pinged_at":${ago(1)}},
         {"alias":"hetzner-1","reachable":true,"claude_version":"2.0.31","tmux_version":"3.4","last_pinged_at":${ago(2)}},
@@ -853,27 +853,30 @@ internal object Fixtures {
         {"alias":"oci-arm","reachable":false,"claude_version":"2.1.2","tmux_version":"3.4","last_pinged_at":${ago(190)}}
         ]""",
     )
+    }
 
-    val hostLines = listOf(
+    val hostLines by lazy {listOf(
         HostLine("mercury", true, "2.1.4", "3.5a", 5, false, "ssh", ago(1)),
         HostLine("hetzner-1", true, "2.0.31", "3.4", 3, false, "ssh", ago(2)),
         HostLine("nas", true, "2.1.4", "3.3a", 1, false, "agent", ago(3)),
         HostLine("oci-arm", false, "2.1.2", "3.4", 2, false, "ssh", ago(190)),
         HostLine("old-laptop", true, null, null, 0, true, "ssh", null),
     )
+    }
 
-    val projects = listOf(
+    val projects by lazy {listOf(
         ProjectRow(id = 1, owner = "martin-janci", repo = "claude-fleet"),
         ProjectRow(id = 2, owner = "martin-janci", repo = "fleet-mobile"),
         ProjectRow(id = 3, owner = "martin-janci", repo = "property-management"),
         ProjectRow(id = 4, owner = "FrantisekSefcik", repo = "sales-twins-app"),
     )
+    }
 
     private const val WORK_142 = """{"link_id":11,"item_id":142,"key":"FLEET-142","title":"Hosts screen: show last ping and transport","source":"tracker","url":"https://github.com/martin-janci/claude-fleet/issues/142","state":"active","status_category":"in_progress","status_name":"In Progress","org_id":1}"""
     private const val WORK_150 = """{"link_id":12,"item_id":150,"key":"FLEET-150","title":"Quiet hours for needs-you notifications","source":"tracker","state":"active","status_category":"todo","status_name":"To Do","org_id":1}"""
     private const val WORK_SAL = """{"link_id":13,"item_id":519,"key":"SAL-519","title":"Verify email language defaulting","source":"tracker","state":"active","status_category":"in_progress","status_name":"In Review","org_id":2}"""
 
-    val sessions: List<SessionRow> = j(
+    val sessions: List<SessionRow> by lazy {j(
         """[
         {"id":101,"tmux_name":"hosts-polish","friendly_name":"Hosts screen polish","host_alias":"mercury","project_id":2,"status":"running","claude_status":"working","current_activity":"Running ./gradlew :shared:jvmTest","context_pct":41.0,"created_at":${ago(180)},"last_activity_at":${ago(0)},"branch":"claude/hosts-polish","usage_cost_micros":2310000,"usage_model":"claude-opus","work":$WORK_142,"org_id":1,"tags":["mobile"]},
         {"id":102,"tmux_name":"quiet-hours","friendly_name":"Quiet hours","host_alias":"mercury","project_id":1,"status":"running","claude_status":"blocked","current_activity":"Waiting for permission","pending_input":{"kind":"permission","question":"Allow Bash: cargo fleet-test -- notify::quiet?","options":[{"n":1,"label":"Yes","selected":true},{"n":2,"label":"Yes, and don't ask again for cargo fleet-test"},{"n":3,"label":"No, tell Claude what to do differently"}]},"needs_attention":{"reason":"waiting","since":${ago(7)}},"context_pct":63.0,"created_at":${ago(300)},"last_activity_at":${ago(7)},"branch":"claude/quiet-hours","work":$WORK_150,"org_id":1},
@@ -887,23 +890,27 @@ internal object Fixtures {
         {"id":110,"tmux_name":"shell-1","host_alias":"mercury","status":"running","kind":"external","created_at":${ago(60)},"last_activity_at":${ago(30)}}
         ]""",
     )
+    }
 
-    val suggestedWork: WorkSummary = j(WORK_150.replace("\"state\":\"active\"", "\"state\":\"suggested\",\"strength\":\"strong\",\"rule\":\"branch\""))
+    val suggestedWork: WorkSummary by lazy {j(WORK_150.replace("\"state\":\"active\"", "\"state\":\"suggested\",\"strength\":\"strong\",\"rule\":\"branch\""))
+    }
 
-    val card: TicketCard = j(
+    val card: TicketCard by lazy {j(
         """{"key":"FLEET-142","title":"Hosts screen: show last ping and transport","url":"https://github.com/martin-janci/claude-fleet/issues/142","cached":true,
         "acceptance":["Each host row shows when it was last pinged","Agent-transport hosts are labelled","Unreachable hosts sort last"],
         "excerpt":"The phone's Hosts tab shows reachable/unreachable only. Add the last ping time and the transport so a host on the agent is recognisable."}""",
     )
+    }
 
-    val quickReplies = listOf(
+    val quickReplies by lazy {listOf(
         QuickReply("Continue", "continue"),
         QuickReply("Run tests", "Run the tests and fix what fails."),
         QuickReply("Commit & push", "Commit and push."),
         QuickReply("Open PR", "Open a draft PR."),
     )
+    }
 
-    val conversation: Conversation = j(
+    val conversation: Conversation by lazy {j(
         """{"context":{"tokens":82000,"window":200000,"pct":41.0},"turns":[
         {"prompt":"The Hosts tab should show when each host was last pinged and whether it's on the agent. See FLEET-142.","at":"2026-10-08T14:20:00Z","ended_at":"2026-10-08T14:31:00Z","items":[
           {"kind":"text","text":"I'll look at how the Hosts screen builds its rows first."},
@@ -922,8 +929,9 @@ internal object Fixtures {
         ]}
         ]}""",
     )
+    }
 
-    val blockedConversation: Conversation = j(
+    val blockedConversation: Conversation by lazy {j(
         """{"turns":[
         {"prompt":"Add quiet hours to needs-you notifications: nothing between 22:00 and 07:00 unless it's been waiting over an hour.","at":"2026-10-08T14:30:00Z","items":[
           {"kind":"text","text":"I'll add a `quiet_hours` setting and check it where notifications are sent."},
@@ -931,16 +939,18 @@ internal object Fixtures {
           {"kind":"tool","name":"Bash","summary":"Bash(cargo fleet-test -- notify::quiet)","target":"cargo fleet-test -- notify::quiet","id":"tu_2","done":false}
         ]}]}""",
     )
+    }
 
-    val failedConversation: Conversation = j(
+    val failedConversation: Conversation by lazy {j(
         """{"turns":[
         {"prompt":"Resolve the tenant from the subdomain before auth runs.","at":"2026-10-08T13:00:00Z","items":[
           {"kind":"tool","name":"Bash","summary":"Bash(npm test)","target":"npm test","error":true,"id":"tu_1"},
           {"kind":"text","text":"API Error: 529 Overloaded. The request could not be completed."}
         ]}]}""",
     )
+    }
 
-    val terminal = """
+    val terminal by lazy {"""
 ╭───────────────────────────────────────────────╮
 │ ✻ Welcome to Claude Code!                     │
 │   cwd: ~/src/fleet-mobile                     │
@@ -961,8 +971,9 @@ internal object Fixtures {
 
 ✻ Running… (42s · ↓ 1.2k tokens · esc to interrupt)
 """.trimIndent()
+    }
 
-    val links: List<WorkTaskLink> = j(
+    val links: List<WorkTaskLink> by lazy {j(
         """[
         {"link_id":11,"state":"active","primary":true,"session_id":101,"name":"Hosts screen polish","host":"mercury","source":"tracker","claude_status":"working","branch":"claude/hosts-polish","task":{"task_id":"item:142","key":"FLEET-142","title":"Hosts screen: show last ping and transport","kind":"tracker","status_category":"in_progress","status_name":"In Progress","org_id":1,"tracker_name":"GitHub issues"}},
         {"link_id":14,"state":"active","session_id":106,"name":"Background review","host":"mercury","source":"manual","claude_status":"working","task":{"task_id":"item:142","key":"FLEET-142","title":"Hosts screen: show last ping and transport","kind":"tracker"}},
@@ -971,11 +982,12 @@ internal object Fixtures {
         {"link_id":8,"state":"ended","name":"hosts-spike","host":"mercury","source":"manual","ended_at":${ago(9000)},"end_reason":"merged","archived":true,"task":{"task_id":"item:142","key":"FLEET-142","title":"Hosts screen: show last ping and transport","kind":"tracker"}}
         ]""",
     )
+    }
 
     private fun task(id: Long, key: String, title: String, status: String, cat: String, group: String, org: Long, mine: Boolean, sessions: String = "[]", active: Int = 0, review: Boolean = false) =
         """{"task_id":"item:$id","item_id":$id,"key":"$key","title":"$title","kind":"tracker","provider":"github","status_name":"$status","status_category":"$cat","mine":$mine,"assignees":${if (mine) "[\"martin-janci\"]" else "[]"},"group":{"id":"label:$group","label":"$group","source":"rule"},"counts":{"active":$active,"ended":1,"suggested":0},"review":$review,"org_id":$org,"needs_you":${active > 0 && review},"last_activity_at":${ago(id % 300)},"sessions":$sessions}"""
 
-    private val workTasks: List<WorkTask> = j(
+    private val workTasks: List<WorkTask> by lazy {j(
         "[" + listOf(
             task(142, "FLEET-142", "Hosts screen: show last ping and transport", "In Progress", "in_progress", "Mobile", 1, true, """[{"link_id":11,"state":"active","primary":true,"session_id":101,"name":"Hosts screen polish","host":"mercury","claude_status":"working"}]""", 2),
             task(150, "FLEET-150", "Quiet hours for needs-you notifications", "To Do", "todo", "Mobile", 1, true, """[{"link_id":12,"state":"active","session_id":102,"name":"Quiet hours","host":"mercury","claude_status":"blocked","needs_you":true}]""", 1, true),
@@ -986,10 +998,11 @@ internal object Fixtures {
             task(522, "SAL-522", "Tenant resolution from subdomain", "In Progress", "in_progress", "Sales twins", 2, true, """[{"link_id":17,"state":"active","session_id":104,"name":"Api tenant resolution","host":"oci-arm","claude_status":"failed","needs_you":true}]""", 1, true),
         ).joinToString(",") + "]",
     )
+    }
 
     private fun groupRef(label: String): GroupRef = j("""{"id":"label:$label","label":"$label","source":"rule"}""")
 
-    val workOrgs = listOf(
+    val workOrgs by lazy {listOf(
         WorkOrgSection(
             key = "org:1", orgId = 1, name = "Personal", color = "#6750A4", count = 5,
             groups = listOf(
@@ -1002,26 +1015,30 @@ internal object Fixtures {
             groups = listOf(WorkGroupSection("org:2/Sales twins", 2, groupRef("Sales twins"), 2, tasks = workTasks.filter { it.group.label == "Sales twins" })),
         ),
     )
+    }
 
-    val taskDetail: TaskDetail = j(
+    val taskDetail: TaskDetail by lazy {j(
         """{"task":${task(142, "FLEET-142", "Hosts screen: show last ping and transport", "In Progress", "in_progress", "Mobile", 1, true, "[]", 2)},
         "aliases":["#142"],
         "description":"The phone's Hosts tab shows reachable/unreachable only.\n\n**Acceptance**\n- Each host row shows when it was last pinged\n- Agent-transport hosts are labelled\n- Unreachable hosts sort last",
         "placement":{"group":"Mobile","note":"by rule","version":1},
         "last_outcome":{"at":${ago(4000)},"name":"hosts-first-pass","host":"hetzner-1","branch":"claude/hosts-first-pass","summary":"First pass merged as #101; ping time deferred.","pr_url":"https://github.com/martin-janci/claude-fleet/pull/101"}}""",
     )
+    }
 
-    val files = listOf(
+    val files by lazy {listOf(
         FileLine(1, "coverage-report.html", "412 KB", "mercury · Hosts screen polish", "3 min ago", FileState.Ready, note = "Coverage after the hosts change", fromAgent = true),
         FileLine(2, "screens.zip", "18.4 MB", "mercury · Orbit tokens", "1 h ago", FileState.Ready),
         FileLine(3, "release-0.9.4.apk", "31 MB", "hetzner-1 · release", "just now", FileState.Fetching),
         FileLine(4, "tenant-trace.log", "96 KB", "oci-arm · Api tenant resolution", "2 h ago", FileState.Failed, error = "The host went offline mid-transfer"),
         FileLine(5, "invoice-2026-09.pdf", "220 KB", "nas · verify email lang", "yesterday", FileState.Ready),
     )
+    }
 
-    val restorePlan: RestoreReport = j(
+    val restorePlan: RestoreReport by lazy {j(
         """{"plan":[{"cwd":"~/src/sales-twins-app","action":"resume","reason":"conversation found"},{"cwd":"~/src/sales-twins-api","action":"recreate","reason":"no conversation; fresh session in the same worktree"},{"cwd":"~/scratch","action":"skip","reason":"not a git worktree"}]}""",
     )
+    }
 
     @Serializable
     private data class Registry(val pages: List<Page>, val descriptors: List<SettingDescriptor>)
@@ -1039,7 +1056,7 @@ internal object Fixtures {
         )
     }
 
-    val usage: UsageReport = j(
+    val usage: UsageReport by lazy {j(
         """{"since":${NOW - 7 * 86400},"total":{"input_tokens":4100000,"output_tokens":910000,"cache_write_tokens":2200000,"cache_read_tokens":38000000,"cost_micros":61420000},
         "by_host":{"mercury":{"cost_micros":34100000,"input_tokens":2000000},"hetzner-1":{"cost_micros":15800000,"input_tokens":1200000},"nas":{"cost_micros":6020000},"oci-arm":{"cost_micros":5500000}},
         "by_day":[
@@ -1052,13 +1069,15 @@ internal object Fixtures {
           {"session_id":104,"host_alias":"oci-arm","tmux_name":"sal-api","friendly_name":"Api tenant resolution","model":"claude-sonnet","cost_micros":5500000},
           {"session_id":107,"host_alias":"nas","tmux_name":"verify-email","model":"claude-haiku","cost_micros":610000}]}""",
     )
+    }
 
-    val accounts: List<AccountRow> = j(
+    val accounts: List<AccountRow> by lazy {j(
         """[{"uuid":"a1b2c3d4-0000","email":"martin@example.com","display_name":"Martin","organization_name":"Personal","seat_tier":"max","last_seen_at":${ago(1)},"nickname":"Personal Max"},
         {"uuid":"e5f6a7b8-0000","email":"martin@sefcik.example","organization_name":"Sefcik & co","seat_tier":"team","last_seen_at":${ago(300)},"has_extra_usage":true}]""",
     )
+    }
 
-    val orgs: List<OrgDetail> = j(
+    val orgs: List<OrgDetail> by lazy {j(
         """[{"id":1,"name":"Personal","color":"#6750A4","my_role":"owner","owns_hub":true,"session_count":7,"needs_you":2,"hosts":["mercury","hetzner-1","nas"],"trackers":[{"id":1,"name":"GitHub issues"}],
           "devices":[{"name":"Pixel 9 Pro","mode":"full","trusted":true},{"name":"MacBook Pro","mode":"full","trusted":true}],"members":[{"name":"Martin","role":"owner"}],
           "spent_today_micros":17120000,"spent_week_micros":61420000,"spent_month_micros":210000000,"budget_daily_usd":40,"budget_monthly_usd":600},
@@ -1066,31 +1085,35 @@ internal object Fixtures {
           "devices":[{"name":"Pixel 9 Pro","mode":"bound","trusted":false}],"members":[{"name":"František","role":"owner"},{"name":"Martin","role":"member"}],
           "spent_today_micros":0,"spent_week_micros":6110000,"budget_monthly_usd":150}]""",
     )
+    }
 
-    val changes: List<ChangedFile> = j(
+    val changes: List<ChangedFile> by lazy {j(
         """[{"path":"shared/src/commonMain/kotlin/dev/claudefleet/mobile/ui/HostsScreen.kt","status":"M","staged":false},
         {"path":"shared/src/commonMain/kotlin/dev/claudefleet/mobile/ui/HostsViewModel.kt","status":"M","staged":true},
         {"path":"shared/src/commonTest/kotlin/dev/claudefleet/mobile/ui/HostsViewModelTest.kt","status":"M","staged":false},
         {"path":"shared/src/commonMain/kotlin/dev/claudefleet/mobile/ui/components/PingLabel.kt","status":"A","staged":false},
         {"path":"docs/hosts.md","status":"D","staged":false}]""",
     )
+    }
 
-    val commits: List<Commit> = j(
+    val commits: List<Commit> by lazy {j(
         """[{"hash":"9f3c2a17e0b4","shortHash":"9f3c2a1","short_hash":"9f3c2a1","author":"Claude","date":"2026-10-08T14:31:00Z","subject":"feat(hosts): show last ping and agent transport","refs":[{"name":"HEAD","kind":"head"},{"name":"claude/hosts-polish","kind":"branch"}]},
         {"hash":"6c1d8e0a2f55","shortHash":"6c1d8e0","short_hash":"6c1d8e0","author":"Martin Janči","date":"2026-10-08T09:12:00Z","subject":"Merge pull request #112 from martin-janci/claude/project-thread-jux1s4","refs":[{"name":"origin/main","kind":"remote"}]},
         {"hash":"6860d90aa1c2","shortHash":"6860d90","short_hash":"6860d90","author":"Claude","date":"2026-10-08T08:55:00Z","subject":"feat: Orbit Fleet name and launcher icon"},
         {"hash":"f3ba4fa0c9d1","shortHash":"f3ba4fa","short_hash":"f3ba4fa","author":"Martin Janči","date":"2026-10-07T21:40:00Z","subject":"Merge pull request #111 from martin-janci/claude/chat-rich-ui-blocks-on2kup"},
         {"hash":"1a2b3c4d5e6f","shortHash":"1a2b3c4","short_hash":"1a2b3c4","author":"Claude","date":"2026-10-07T20:02:00Z","subject":"feat(chat): rich UI blocks in replies"}]""",
     )
+    }
 
-    val tree: RepoTree = RepoTree(
+    val tree: RepoTree by lazy {RepoTree(
         entries = listOf(
             "README.md", "build.gradle.kts", "settings.gradle.kts", "androidApp/", "iosApp/", "shared/", "shared/build.gradle.kts",
             "shared/src/", "docs/", "docs/2026-09-18-fleet-mobile-design.md", "scripts/", "skills/",
         ),
     )
+    }
 
-    val diff: FileDiff = FileDiff(
+    val diff: FileDiff by lazy {FileDiff(
         path = "shared/src/commonMain/kotlin/dev/claudefleet/mobile/ui/HostsScreen.kt",
         diff = """@@ -88,12 +88,17 @@ private fun HostRow(line: HostLine, now: Long) {
          Column(modifier = Modifier.weight(1f)) {
@@ -1108,8 +1131,9 @@ internal object Fixtures {
      }
  }""",
     )
+    }
 
-    val commitDetail = CommitDetail(
+    val commitDetail by lazy {CommitDetail(
         hash = "9f3c2a17e0b4",
         subject = "feat(hosts): show last ping and agent transport",
         body = "Each host row shows when it was last pinged, and hosts on the agent are labelled.\nUnreachable hosts sort last.\n\nFixes FLEET-142.",
@@ -1117,12 +1141,14 @@ internal object Fixtures {
         date = "2026-10-08T14:31:00Z",
         files = changes.take(4),
     )
+    }
 
-    val fileContent = FileContent(
+    val fileContent by lazy {FileContent(
         path = "README.md",
         content = "# fleet-mobile\n\nThe phone client for claude-fleet: Android and iOS from one Compose Multiplatform codebase.\n\n## Build\n\n```bash\n./gradlew build\n```\n\n## Pairing\n\nOpen *Settings → Phones* on the desktop and scan the QR code.\n",
         size = 412,
     )
+    }
 
     val todayView: TodayView by lazy {
         val today: Today = j(
@@ -1140,11 +1166,12 @@ internal object Fixtures {
         scopeToday(today, null) { null }
     }
 
-    val tidy: List<TidyCandidate> = j(
+    val tidy: List<TidyCandidate> by lazy {j(
         """[{"session_id":201,"host_alias":"hetzner-1","tmux_name":"hosts-first-pass","kind":"merged","reason":"PR #101 merged 2 days ago","secondary":["clean worktree","no unpushed commits"],"action":"safe_kill","since":${ago(2900)},"label":"hosts-first-pass","key":"FLEET-142","branch":"claude/hosts-first-pass","pr_url":"https://github.com/martin-janci/claude-fleet/pull/101"},
         {"session_id":202,"host_alias":"nas","tmux_name":"verify-email","kind":"idle","reason":"Idle for 10 h; ticket In Review","secondary":["2 uncommitted files"],"action":"archive","since":${ago(600)},"label":"verify email lang defaulting","key":"SAL-519","idle_secs":36000},
         {"session_id":203,"host_alias":"oci-arm","tmux_name":"sales-twins","kind":"done","reason":"Ticket closed upstream","action":"safe_kill","since":${ago(3000)},"label":"Sales twins app","item_status":"Done"}]""",
     )
+    }
 
     val ticketSections: List<TicketSection> by lazy {
         val tickets: List<Ticket> = j(
@@ -1161,13 +1188,14 @@ internal object Fixtures {
         )
     }
 
-    val missions: List<Mission> = j(
+    val missions: List<Mission> by lazy {j(
         """[{"id":1,"name":"Orbit redesign rollout","goal":"Ship the Orbit Fleet tokens and new navigation to desktop and phone","mode":"finite","state":"running","level":2,"total":14,"done":5},
         {"id":2,"name":"Nightly dependency bumps","goal":"Keep every repo's dependencies current","mode":"standing","state":"paused","level":1,"total":0,"done":0},
         {"id":3,"name":"SAL tenant hardening","goal":"Tenant isolation across the sales twins API","mode":"finite","state":"draft","level":0,"total":6,"done":0}]""",
     )
+    }
 
-    val missionDetail: MissionDetail = j(
+    val missionDetail: MissionDetail by lazy {j(
         """{"mission":{"id":1,"name":"Orbit redesign rollout","goal":"Ship the Orbit Fleet tokens and new navigation to desktop and phone","mode":"finite","state":"running","level":2,"total":14,"done":5},
         "items":[{"id":151,"key":"FLEET-151","title":"Orbit Fleet: apply redesign tokens to the phone","status_category":"todo"},{"id":152,"key":"FLEET-152","title":"Desktop rail and inspector layout","status_category":"in_progress"}],
         "phase":"build","graph":{"nodes":[{"item_id":151,"state":"ready","wave":1},{"item_id":152,"state":"running","wave":1}]},
@@ -1175,14 +1203,16 @@ internal object Fixtures {
           "cards":[{"id":1,"source":"planner","kind":"approve_spend","state":"open","note":"Starting FLEET-151 on mercury will cost about $4"}],
           "autonomy":{"asked":3,"ceiling":2,"effective":2,"why":"Level 3 needs a grant from the desktop","enabled":true},"cost_micros":18400000}}""",
     )
+    }
 
-    val review: List<ReviewItem> = j(
+    val review: List<ReviewItem> by lazy {j(
         """[{"review_id":"r1","kind":"suggestion","session_id":103,"session_name":"Hub client split","host":"hetzner-1","link_id":15,"task":{"task_id":"item:142","key":"FLEET-142","title":"Hosts screen: show last ping and transport"},"why":["Same repository","Branch mentions hosts"],"strength":"medium","rule":"repo","alternatives":[{"link_id":16,"task_id":"item:118","key":"FLEET-118","title":"Split HubClient into read and write halves"}]},
         {"review_id":"r2","kind":"cross_org","session_id":107,"session_name":"verify email lang","host":"nas","link_id":13,"task":{"task_id":"item:519","key":"SAL-519","title":"Verify email language defaulting"},"why":["The session runs on a Personal host but the ticket is Sefcik & co's"]},
         {"review_id":"r3","kind":"no_primary","session_id":101,"session_name":"Hosts screen polish","host":"mercury","link_id":11,"task":{"task_id":"item:142","key":"FLEET-142","title":"Hosts screen: show last ping and transport"},"why":["Two active tasks and neither is primary"],"preselected":true}]""",
     )
+    }
 
-    val events: List<SessionEvent> = j(
+    val events: List<SessionEvent> by lazy {j(
         """[{"id":1,"at":${ago(180)},"kind":"created","detail":"on mercury in ~/src/fleet-mobile"},
         {"id":2,"at":${ago(170)},"kind":"prompt_sent","detail":"The Hosts tab should show when each host was last pinged"},
         {"id":3,"at":${ago(159)},"kind":"turn_done","detail":"6 tools · 11 min"},
@@ -1193,9 +1223,12 @@ internal object Fixtures {
         {"id":8,"at":${ago(59)},"kind":"keys_sent","detail":"Enter"},
         {"id":9,"at":${ago(4)},"kind":"message_sent","detail":"Started background review 7f3a2c"}]""",
     )
+    }
 
-    val movePreview: MovePreview = j(
+    val movePreview: MovePreview by lazy {j(
         """{"branch":"claude/hosts-polish","dirty":[{"path":"shared/src/commonMain/kotlin/dev/claudefleet/mobile/ui/HostsScreen.kt","bytes":14200},{"path":"shared/src/commonTest/kotlin/dev/claudefleet/mobile/ui/HostsViewModelTest.kt","bytes":6100},{"path":"local.properties","bytes":120,"reason":"git-ignored, small"}],
         "target":{"state":"behind","head":"6c1d8e0"},"unknowns":["Whether hetzner-1 has the Android SDK"]}""",
     )
+    }
+
 }
