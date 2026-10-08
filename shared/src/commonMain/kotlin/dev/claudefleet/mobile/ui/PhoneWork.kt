@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -812,7 +813,7 @@ private fun PastCard(link: WorkTaskLink, state: TaskUiState, handlers: PhoneTask
  * and names how many ordinary suggestions it links. Each card says what its
  * session is doing.
  */
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun PhoneReviewSheet(state: ReviewUiState, handlers: ReviewHandlers, rowOf: (Long) -> SessionRow?) {
     val o = Fleet.colors
