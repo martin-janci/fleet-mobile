@@ -38,7 +38,8 @@ class SessionWorkspaceTest {
         assertEquals("Claude Code", agentName(row()))
         assertEquals("Claude Code", agentName(null))
         assertEquals("Claude Code", SessionTab.Agent.label(agentName(row())))
-        assertTrue(SessionTab.entries.none { it.label(agentName(null)).contains("Terminal") })
+        // The shells' own tab (14.14) is the one that says Terminals; the agent's never does.
+        assertTrue(SessionTab.entries.filter { it != SessionTab.Terminals }.none { it.label(agentName(null)).contains("Terminal") })
     }
 
     @Test
@@ -50,6 +51,10 @@ class SessionWorkspaceTest {
         assertEquals(
             listOf(SessionTab.Conversation, SessionTab.Agent, SessionTab.Details),
             sessionTabs(hasWorktree = false),
+        )
+        assertEquals(
+            listOf(SessionTab.Conversation, SessionTab.Agent, SessionTab.Terminals, SessionTab.Files, SessionTab.Details),
+            sessionTabs(hasWorktree = true, terminals = true),
         )
     }
 

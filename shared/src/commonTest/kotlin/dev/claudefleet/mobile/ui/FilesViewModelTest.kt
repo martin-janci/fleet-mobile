@@ -342,7 +342,7 @@ class FilesViewModelTest {
 
         files.retry(3)
         runCurrent()
-        assertEquals(listOf(Triple(12L, "/p/f3.pdf", "coverage")), actions.sent)
+        assertEquals(listOf(Triple<Long, String, String?>(12L, "/p/f3.pdf", "coverage")), actions.sent.toList())
     }
 
     @Test
