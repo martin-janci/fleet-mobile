@@ -17,6 +17,9 @@ import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.askedAt
 import dev.claudefleet.mobile.ui.components.ScreenHeader
+import dev.claudefleet.mobile.ui.help.TourAnchor
+import dev.claudefleet.mobile.ui.help.TourAnchors
+import dev.claudefleet.mobile.ui.help.tourAnchor
 import dev.claudefleet.mobile.ui.kit.OrbitPullToRefresh
 import dev.claudefleet.mobile.ui.kit.StatusWord
 import dev.claudefleet.mobile.ui.theme.Fleet
@@ -59,12 +62,17 @@ fun InboxScreen(
     onRefresh: () -> Unit = {},
     /** Above the list: the hub-version banner and the Update ready line (14.18), when there are any. */
     top: @Composable () -> Unit = {},
+    /** Where the tour's stops are (14.22); null records nothing. */
+    anchors: TourAnchors? = null,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
             title = "Inbox",
             subtitle = inboxSubtitle(rows.size, running),
-            actions = { onOpenToday?.let { TextButton(onClick = it) { Text("Today") } } },
+            modifier = Modifier.tourAnchor(anchors, TourAnchor.Header),
+            actions = {
+                onOpenToday?.let { TextButton(onClick = it, modifier = Modifier.tourAnchor(anchors, TourAnchor.Today)) { Text("Today") } }
+            },
         )
         top()
         OrbitPullToRefresh(isRefreshing = refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
@@ -87,6 +95,7 @@ fun InboxScreen(
                 }
                 items(rows, key = { it.id }) { row ->
                     PhoneSessionRow(
+                        modifier = if (row.id == rows.first().id) Modifier.tourAnchor(anchors, TourAnchor.FirstRow) else Modifier,
                         row = row,
                         nowSeconds = nowSeconds,
                         live = live,

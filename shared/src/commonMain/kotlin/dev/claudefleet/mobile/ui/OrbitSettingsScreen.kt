@@ -110,6 +110,8 @@ fun OrbitSettingsScreen(
     notifier: BackgroundNotifier = NoBackgroundNotifier,
     /** Extra rows at the foot of the home page (the layout switch, 14.2). */
     homeExtras: @Composable ColumnScope.() -> Unit = {},
+    /** Under This phone, after the rest: Help (14.22). */
+    thisPhoneExtras: @Composable ColumnScope.() -> Unit = {},
 ) {
     val o = Fleet.colors
     Column(modifier = modifier.fillMaxSize().background(o.bg)) {
@@ -137,7 +139,10 @@ fun OrbitSettingsScreen(
             }
             when (place) {
                 SettingsPlace.Home -> SettingsHome(input, handlers, homeExtras)
-                SettingsPlace.ThisPhone -> ThisPhone(input, handlers, notifier)
+                SettingsPlace.ThisPhone -> {
+                    ThisPhone(input, handlers, notifier)
+                    thisPhoneExtras()
+                }
                 is SettingsPlace.Group -> SettingsGroupPage(place.group, input, handlers)
             }
         }
