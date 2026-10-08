@@ -38,6 +38,11 @@ data class FileLine(
     val note: String? = null,
     /** Claude sent it (rather than a person picking it). */
     val fromAgent: Boolean = false,
+    /** The host it comes off: what a failed row checks before it says Signal lost. */
+    val host: String = "",
+    /** The session that sent it, while its row exists: the New layout links to it. */
+    val sessionId: Long? = null,
+    val sessionName: String? = null,
 )
 
 enum class FileState { Fetching, Ready, Failed, Other }
@@ -60,6 +65,8 @@ data class FilesUiState(
     val refreshing: Boolean = false,
     /** This token may forget a file: `full` and the hub lists `remove_download`. */
     val canRemove: Boolean = false,
+    /** This token may ask the hub to copy a failed file again: `full` and the hub lists `send_file`. */
+    val canRetry: Boolean = false,
     /** "1.2 GB of 2 GB" — the hub's budget, when it said. */
     val usage: String? = null,
     val transfer: Transfer? = null,
@@ -118,11 +125,11 @@ class FilesViewModel(
 
     val state: StateFlow<FilesUiState> =
         combine(fleet.capabilities, fleet.clockSkewSeconds, local) { caps, skew, l ->
-            assemble(caps.downloads, canWrite && caps.removeDownload, skew, l)
+            assemble(caps.downloads, canWrite && caps.removeDownload, canWrite && caps.sendFile, skew, l)
         }.stateIn(
             scope,
             SharingStarted.Eagerly,
-            assemble(fleet.capabilities.value.downloads, false, 0, local.value),
+            assemble(fleet.capabilities.value.downloads, false, false, 0, local.value),
         )
 
     private var follow: Job? = null
@@ -267,6 +274,28 @@ class FilesViewModel(
         }
     }
 
+    /**
+     * Ask the hub to copy a failed file off its host again (MobileMore: "Retry
+     * when the host is back"). The same `send_file` the desktop's viewer
+     * makes, for the same path and note; the new row replaces the failed one
+     * on the next read. Only for a session row that still exists.
+     */
+    fun retry(id: Long): Job? {
+        val row = local.value.rows.firstOrNull { it.id == id } ?: return null
+        val sessionId = row.sessionId ?: return null
+        if (!row.isFailed || !canWrite || !fleet.capabilities.value.sendFile) return null
+        return scope.launch {
+            try {
+                actions.send(sessionId, row.path, row.note)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                local.update { it.copy(error = friendly(t)) }
+            }
+            reload()
+        }
+    }
+
     /** Read live, not off [state]: a write gate must not lag the hub's answer by a recomposition. */
     private fun mayRemove(): Boolean = canWrite && fleet.capabilities.value.removeDownload
 
@@ -278,7 +307,7 @@ class FilesViewModel(
         local.update { it.copy(notice = null) }
     }
 
-    private fun assemble(available: Boolean, canRemove: Boolean, skew: Long, l: Local): FilesUiState {
+    private fun assemble(available: Boolean, canRemove: Boolean, canRetry: Boolean, skew: Long, l: Local): FilesUiState {
         val now = clock() + skew
         return FilesUiState(
             available = available,
@@ -286,6 +315,7 @@ class FilesViewModel(
             loaded = l.loaded,
             refreshing = l.refreshing,
             canRemove = canRemove,
+            canRetry = canRetry,
             usage = l.maxTotalBytes?.takeIf { it > 0 }?.let { "${humanBytes(l.totalBytes)} of ${humanBytes(it)} on the hub" },
             transfer = l.transfer,
             opened = l.opened,
@@ -323,6 +353,9 @@ internal fun Download.toLine(now: Long): FileLine = FileLine(
     error = error?.takeIf { isFailed && it.isNotBlank() },
     note = note?.takeIf { it.isNotBlank() },
     fromAgent = source == "agent",
+    host = hostAlias,
+    sessionId = sessionId,
+    sessionName = sessionName,
 )
 
 /** A fetch's failure in words: a vanished file is not "this session is gone". */
