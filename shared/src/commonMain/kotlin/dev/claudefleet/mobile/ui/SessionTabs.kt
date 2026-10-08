@@ -93,20 +93,30 @@ class SessionTabsHost(
     val terminals: @Composable () -> Unit = {},
     /** How many shells run beside the session, for the tab's label. */
     val terminalCount: Int = 0,
+    /**
+     * The Files pane has a diff open: in landscape it takes the whole width,
+     * side by side (redesign 14.21), rather than half of it.
+     */
+    val sideWhole: Boolean = false,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun SessionTabRow(host: SessionTabsHost) {
+internal fun SessionTabRow(
+    host: SessionTabsHost,
+    /** The tabs drawn: all of them, or in landscape's right-hand pane all but the conversation. */
+    shown: List<SessionTab> = host.tabs,
+    selected: SessionTab = host.selected,
+) {
     PrimaryScrollableTabRow(
-        selectedTabIndex = host.tabs.indexOf(host.selected).coerceAtLeast(0),
+        selectedTabIndex = shown.indexOf(selected).coerceAtLeast(0),
         edgePadding = 8.dp,
         containerColor = Fleet.colors.bgPane,
         contentColor = Fleet.colors.fg,
     ) {
-        for (tab in host.tabs) {
+        for (tab in shown) {
             Tab(
-                selected = tab == host.selected,
+                selected = tab == selected,
                 onClick = { host.onSelect(tab) },
                 text = {
                     val words = if (tab == SessionTab.Terminals) terminalsTabLabel(host.terminalCount) else tab.label(host.agent)
@@ -136,6 +146,8 @@ internal fun AgentPane(
     onCapture: () -> Unit,
     onAnswer: (Answer) -> Unit,
     modifier: Modifier = Modifier,
+    /** ⤢: the agent's screen edge to edge with a key bar (redesign 14.21); null draws no button. */
+    onFullScreen: (() -> Unit)? = null,
 ) {
     val keys = state.card?.let { agentKeys(it, state.session?.stuckKind) }.orEmpty()
     Column(modifier = modifier.fillMaxSize()) {
@@ -151,6 +163,9 @@ internal fun AgentPane(
             )
             IconButton(onClick = onCapture, enabled = state.connected) {
                 Icon(FleetIcons.Refresh, contentDescription = "Read the screen again")
+            }
+            if (onFullScreen != null) {
+                IconButton(onClick = onFullScreen) { Icon(FleetIcons.Expand, contentDescription = "$agent full screen") }
             }
         }
         val down = rememberScrollState()

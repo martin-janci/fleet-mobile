@@ -99,6 +99,9 @@ class TheBackGestureReachesTheNavigatorTest {
      * back; on Where it is off and `nav.back()` leaves the form. The
      * practice fleet's (redesign 14.22) is enabled only while a sample
      * session is open, so back returns to the sample list before it leaves.
+     * A session's full screen (redesign 14.21) is enabled only while the
+     * conversation or the agent's screen has the whole phone, and composed
+     * after the Files tab's, so back leaves full screen first.
      */
     @Test
     fun there_is_exactly_one() {
@@ -116,6 +119,7 @@ class TheBackGestureReachesTheNavigatorTest {
                 "fleetPageOpen",
                 "wizard && wizardStep.previous != null && !state.creating",
                 "filesOpen",
+                "full != SessionFull.None",
                 "state.views.isNotEmpty()",
             ),
             enables,

@@ -1,6 +1,11 @@
 package dev.claudefleet.mobile.ui
 
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.platform.testTag
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.heightIn
@@ -124,7 +129,13 @@ fun RepoScreen(state: RepoUiState, handlers: RepoHandlers, modifier: Modifier = 
  * the session's header above it instead of a header of its own.
  */
 @Composable
-fun RepoBody(state: RepoUiState, handlers: RepoHandlers, modifier: Modifier = Modifier) {
+fun RepoBody(
+    state: RepoUiState,
+    handlers: RepoHandlers,
+    modifier: Modifier = Modifier,
+    /** A diff may go side by side where it is wide enough (New bar, redesign 14.21); the worktree screen keeps one column. */
+    split: Boolean = false,
+) {
     Column(modifier = modifier.fillMaxSize()) {
         if (state.tabs.size > 1 && state.top == null) {
             PrimaryTabRow(selectedTabIndex = state.tabs.indexOf(state.tab).coerceAtLeast(0)) {
@@ -161,8 +172,8 @@ fun RepoBody(state: RepoUiState, handlers: RepoHandlers, modifier: Modifier = Mo
         ErrorBanner(state.error, onDismiss = handlers.onDismissError)
         state.notice?.let { Notice(it, handlers.onDismissNotice) }
         when (val top = state.top) {
-            is RepoView.Diff -> DiffPane(top.path, top.diff, handlers, openFile = { handlers.onOpenFile(top.path) })
-            is RepoView.CommitDiff -> DiffPane(top.path, top.diff, handlers, openFile = null)
+            is RepoView.Diff -> DiffPane(top.path, top.diff, handlers, openFile = { handlers.onOpenFile(top.path) }, split = split)
+            is RepoView.CommitDiff -> DiffPane(top.path, top.diff, handlers, openFile = null, split = split)
             is RepoView.CommitView -> CommitPane(top.hash, top.detail, handlers)
             is RepoView.File -> FilePane(top.path, top.content, state, handlers)
             null -> when {
@@ -460,7 +471,17 @@ private fun PathBar(path: String, subtitle: String? = null, actions: @Composable
 }
 
 @Composable
-private fun DiffPane(path: String, diff: FileDiff?, handlers: RepoHandlers, openFile: (() -> Unit)?) {
+private fun DiffPane(path: String, diff: FileDiff?, handlers: RepoHandlers, openFile: (() -> Unit)?, split: Boolean = false) {
+    if (split) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            if (twoPaneWide(maxWidth.value, maxHeight.value)) {
+                Column(modifier = Modifier.fillMaxSize()) { SplitDiffPane(path, diff, handlers, openFile) }
+            } else {
+                Column(modifier = Modifier.fillMaxSize()) { DiffPane(path, diff, handlers, openFile) }
+            }
+        }
+        return
+    }
     val lines = remember(diff) { diff?.diff?.takeIf { it.isNotBlank() && !diff.binary }?.let(::diffLines).orEmpty() }
     val hunks = remember(lines) { hunkStarts(lines) }
     val listState = rememberLazyListState()
@@ -495,6 +516,108 @@ private fun DiffPane(path: String, diff: FileDiff?, handlers: RepoHandlers, open
         }
     }
 }
+
+/**
+ * A diff side by side (redesign 14.21): the old file on the left, the new on
+ * the right, each with its own line numbers, a hunk header across both, and
+ * the hunk arrows at the top right. Lines wrap rather than scroll sideways,
+ * so the two halves stay row for row.
+ */
+@Composable
+private fun SplitDiffPane(path: String, diff: FileDiff?, handlers: RepoHandlers, openFile: (() -> Unit)?) {
+    val rows = remember(diff) { diff?.diff?.takeIf { it.isNotBlank() && !diff.binary }?.let { splitDiffRows(diffLines(it)) }.orEmpty() }
+    val hunks = remember(rows) { splitHunkStarts(rows) }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val at by remember(hunks) { derivedStateOf { hunks.indexOfLast { it <= listState.firstVisibleItemIndex }.coerceAtLeast(0) } }
+    PathBar(path, subtitle = if (hunks.size > 1) "hunk ${at + 1} of ${hunks.size} · split" else "split") {
+        if (hunks.size > 1) {
+            TextButton(onClick = { scope.launch { listState.animateScrollToItem(hunks[at - 1]) } }, enabled = at > 0) { Text("‹") }
+            TextButton(onClick = { scope.launch { listState.animateScrollToItem(hunks[at + 1]) } }, enabled = at < hunks.size - 1) { Text("›") }
+        }
+        if (openFile != null) TextButton(onClick = openFile) { Text("Open file") }
+    }
+    if (diff == null) return
+    when {
+        diff.binary -> Quiet("A binary file — no diff to show.")
+        diff.diff.isBlank() -> Quiet("No difference.")
+        else -> {
+            val gutter = (rows.maxOfOrNull { maxOf(it.old?.old ?: 0, it.new?.new ?: 0) } ?: 0).toString().length.coerceAtLeast(2)
+            val onLongPress = handlers.onAsk?.let { ask -> { line: CodeLine -> ask(askAboutLine(path, line)) } }
+            LazyColumn(state = listState, modifier = Modifier.fillMaxSize().testTag(SPLIT_DIFF_TAG)) {
+                itemsIndexed(rows) { _, row ->
+                    val across = row.across
+                    if (across != null) {
+                        val hunk = across.kind == LineKind.Hunk
+                        Surface(
+                            color = if (hunk) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
+                            contentColor = if (hunk) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                across.text,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 1.dp),
+                            )
+                        }
+                    } else {
+                        Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                            SplitCell(row.old, row.old?.old, gutter, onLongPress, Modifier.weight(1f))
+                            VerticalDivider()
+                            SplitCell(row.new, row.new?.new, gutter, onLongPress, Modifier.weight(1f))
+                        }
+                    }
+                }
+                if (diff.truncated) item { Quiet("Cut short by the hub — the rest is not shown.") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SplitCell(line: CodeLine?, number: Int?, gutter: Int, onLongPress: ((CodeLine) -> Unit)?, modifier: Modifier) {
+    val diff = diffColors()
+    val bg = when (line?.kind) {
+        LineKind.Added -> diff.addedBg
+        LineKind.Removed -> diff.removedBg
+        null -> MaterialTheme.colorScheme.surfaceContainerLow
+        else -> Color.Transparent
+    }
+    Surface(
+        color = bg,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        modifier = modifier.fillMaxHeight().then(
+            if (line != null && onLongPress != null) {
+                Modifier.combinedClickable(onClick = {}, onLongClick = { onLongPress(line) }, onLongClickLabel = "Ask about this line")
+            } else {
+                Modifier
+            },
+        ),
+    ) {
+        Row {
+            Text(
+                number?.toString().orEmpty().padStart(gutter),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                softWrap = false,
+                modifier = Modifier.padding(start = 4.dp, end = 6.dp, top = 1.dp, bottom = 1.dp),
+            )
+            Text(
+                // The +/- of the unified line is the side it sits on here.
+                line?.let { l -> if (l.kind == LineKind.Plain) l.text.removePrefix(" ") else l.text.drop(1) }.orEmpty().ifEmpty { " " },
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(end = 4.dp, top = 1.dp, bottom = 1.dp),
+            )
+        }
+    }
+}
+
+const val SPLIT_DIFF_TAG = "repo.diff.split"
 
 /** What a long-pressed diff line puts in the composer. */
 internal fun askAboutLine(path: String, line: CodeLine): String {

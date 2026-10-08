@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.material3.VerticalDivider
 import dev.claudefleet.mobile.ui.components.withFind
 import dev.claudefleet.mobile.ui.components.LocalFindQuery
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -299,6 +300,19 @@ fun SessionScreen(
     /** One more thing that went wrong, drawn with the screen's other banners (Archive's refusal). */
     notice: Friendly? = null,
     onDismissNotice: () -> Unit = {},
+    /**
+     * A key pressed in the agent's pane from its full-screen key bar
+     * (redesign 14.21): Escape, Tab, Enter or C-c, while nothing is asked
+     * ([SessionViewModel.pressKey]). The default does nothing.
+     */
+    onPaneKey: (String) -> Unit = {},
+    /**
+     * What takes the whole screen on the New bar (redesign 14.21): nothing,
+     * the conversation without its header, or the agent's own screen. Kept by
+     * the route, whose Back handler leaves it; the defaults never go there.
+     */
+    full: SessionFull = SessionFull.None,
+    onFull: (SessionFull) -> Unit = {},
 ) {
     // On the New bar the result sits in the conversation instead (RepairResultCard).
     if (tabs == null) state.repair?.let { RepairReportDialog(it, onDismissRepair) }
@@ -356,6 +370,10 @@ fun SessionScreen(
     val windowHeightDp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp().value }
     val short = startsImmersive(windowHeightDp)
     var immersive by remember(short) { mutableStateOf(short) }
+    // The New bar's full screen (redesign 14.21): the conversation without its
+    // header (⤢), or the agent's own screen edge to edge with a key bar.
+    val fullScreen = tabs != null && full == SessionFull.Conversation
+    val agentFull = tabs != null && full == SessionFull.Agent
     var promptFocused by remember { mutableStateOf(false) }
     var focusPrompt by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
@@ -530,8 +548,38 @@ fun SessionScreen(
     // Measured for the blocked card's cap (see [CARD_MAX_FRACTION]).
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val cardMax = maxHeight * CARD_MAX_FRACTION
-        Column(modifier = Modifier.fillMaxSize()) {
-            AnimatedContent(
+        // Landscape on the New bar (redesign 14.21): the conversation on the
+        // left, one of the session's other tabs on the right.
+        val wide = tabs != null && twoPaneWide(maxWidth.value, maxHeight.value)
+        // The tab that was open in portrait, put back when the phone is turned upright again.
+        var uprightTab by remember { mutableStateOf<SessionTab?>(null) }
+        var wasWide by remember { mutableStateOf(false) }
+        if (tabs != null) {
+            // Keyed on the tab too: the conversation is the left pane, so a
+            // switch to it (a notification, "ask in the conversation") leaves
+            // the right pane on a tab of its own rather than on nothing.
+            LaunchedEffect(wide, tabs.selected) {
+                if (wide) {
+                    if (!wasWide) {
+                        uprightTab = tabs.selected
+                        wasWide = true
+                    }
+                    sideTabFor(tabs.selected, tabs.tabs).let { if (it != tabs.selected) tabs.onSelect(it) }
+                } else if (wasWide) {
+                    wasWide = false
+                    uprightTab?.let { if (it != tabs.selected && it in tabs.tabs) tabs.onSelect(it) }
+                    uprightTab = null
+                }
+            }
+        }
+        val side = tabs?.let { sideTabFor(it.selected, it.tabs) }
+        // An open diff in landscape takes the whole width, side by side.
+        val sideWhole = wide && tabs?.sideWhole == true && side == SessionTab.Files
+        HideSystemBars(hidden = tabs != null && (wide || fullScreen || agentFull))
+        Row(modifier = Modifier.fillMaxSize()) {
+        // Kept composed while a diff has the width, so the conversation comes back where it was.
+        Column(modifier = (if (sideWhole) Modifier.width(0.dp) else Modifier.weight(1f)).fillMaxHeight()) {
+            if (!fullScreen) AnimatedContent(
                 targetState = header,
                 transitionSpec = { chromeTransition() },
                 label = "session header",
@@ -563,6 +611,7 @@ fun SessionScreen(
                         onRepair = onRepair,
                         onFind = { findOpen = !findOpen; if (!findOpen) { findQuery = ""; findScope = FindScope.Everything } },
                         onMove = onMove,
+                        onFullScreen = { onFull(SessionFull.Conversation) }.takeIf { tabs != null },
                         orbit = tabs?.let {
                             OrbitMenu(
                                 onArchive = onArchive,
@@ -612,8 +661,8 @@ fun SessionScreen(
             if (tasks.sheetOpen) SessionTasksSheet(tasks, tasksHandlers)
             // The New bar's tabs: under the header, and still there when a
             // read-back folds it, so another tab is never more than a tap away.
-            tabs?.let { SessionTabRow(it) }
-            val pane = tabs?.selected?.takeIf { it != SessionTab.Conversation }
+            if (!wide && !fullScreen) tabs?.let { SessionTabRow(it) }
+            val pane = tabs?.selected?.takeIf { it != SessionTab.Conversation && !wide }
             if (tabs != null && pane != null) {
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     when (pane) {
@@ -622,6 +671,7 @@ fun SessionScreen(
                             agent = tabs.agent,
                             onCapture = onShowTerminal,
                             onAnswer = onAnswer,
+                            onFullScreen = { onFull(SessionFull.Agent) },
                         )
                         SessionTab.Terminals -> tabs.terminals()
                         SessionTab.Files -> tabs.files()
@@ -960,8 +1010,80 @@ fun SessionScreen(
             }
             }
         }
+        if (wide && tabs != null && side != null) {
+            if (!sideWhole) VerticalDivider(color = Fleet.colors.border)
+            SidePane(
+                tabs = tabs,
+                side = side,
+                state = state,
+                onShowTerminal = onShowTerminal,
+                onAnswer = onAnswer,
+                onAgentFull = { onFull(SessionFull.Agent) },
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+            )
+        }
+        }
+        // Portrait full screen's way back, where the header was.
+        if (fullScreen && !agentFull) {
+            IconButton(
+                onClick = { onFull(SessionFull.None) },
+                modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
+            ) { Icon(FleetIcons.Collapse, contentDescription = "Leave full screen") }
+        }
+        if (agentFull && tabs != null) {
+            AgentFullscreen(
+                state = state,
+                agent = tabs.agent,
+                onPress = { press ->
+                    when (press) {
+                        is AgentPress.Card -> onAnswer(press.answer)
+                        is AgentPress.Key -> onPaneKey(press.key)
+                    }
+                },
+                onSendLine = onSendCommand,
+                onCapture = onShowTerminal,
+                onExit = { onFull(SessionFull.None) },
+            )
+        }
     }
 }
+
+/**
+ * The right-hand pane of a session in landscape (redesign 14.21): the
+ * session's tabs but the conversation, which is the left pane, and the one
+ * chosen. The bottom bar is not drawn on a session in any orientation.
+ */
+@Composable
+private fun SidePane(
+    tabs: SessionTabsHost,
+    side: SessionTab,
+    state: SessionUiState,
+    onShowTerminal: () -> Unit,
+    onAnswer: (Answer) -> Unit,
+    onAgentFull: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.testTag(SIDE_PANE_TAG)) {
+        SessionTabRow(tabs, shown = sideTabs(tabs.tabs), selected = side)
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            when (side) {
+                SessionTab.Agent -> AgentPane(
+                    state = state,
+                    agent = tabs.agent,
+                    onCapture = onShowTerminal,
+                    onAnswer = onAnswer,
+                    onFullScreen = onAgentFull,
+                )
+                SessionTab.Terminals -> tabs.terminals()
+                SessionTab.Files -> tabs.files()
+                SessionTab.Details -> tabs.details()
+                SessionTab.Conversation -> Unit
+            }
+        }
+    }
+}
+
+const val SIDE_PANE_TAG = "session.side"
 
 /**
  * The turns, newest first ([newestFirst]), each keyed by its identity rather
@@ -1171,6 +1293,8 @@ private fun SessionBar(
     onFind: () -> Unit,
     onMove: (() -> Unit)?,
     orbit: OrbitMenu? = null,
+    /** ⤢: the conversation full screen; New bar only. */
+    onFullScreen: (() -> Unit)? = null,
 ) {
     val busy = state.loading || state.refreshing
     var pickingConversation by remember { mutableStateOf(false) }
@@ -1210,6 +1334,7 @@ private fun SessionBar(
         },
         actions = {
             IconButton(onClick = onFind) { Icon(FleetIcons.Search, contentDescription = "Find in conversation") }
+            if (onFullScreen != null) IconButton(onClick = onFullScreen) { Icon(FleetIcons.Expand, contentDescription = "Full screen") }
             IconButton(onClick = onRefresh, enabled = !busy) {
                 Icon(
                     FleetIcons.Refresh,

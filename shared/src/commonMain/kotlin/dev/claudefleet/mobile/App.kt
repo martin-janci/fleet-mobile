@@ -176,6 +176,7 @@ import dev.claudefleet.mobile.ui.TerminalsPane
 import dev.claudefleet.mobile.ui.agentName
 import dev.claudefleet.mobile.ui.appendToDraft
 import dev.claudefleet.mobile.ui.RepoBody
+import dev.claudefleet.mobile.ui.RepoView
 import dev.claudefleet.mobile.ui.SessionDetailsViewModel
 import dev.claudefleet.mobile.ui.RepoHandlers
 import dev.claudefleet.mobile.ui.RepoScreen
@@ -189,6 +190,7 @@ import dev.claudefleet.mobile.ui.ProjectToolsViewModel
 import dev.claudefleet.mobile.ui.MoveHandlers
 import dev.claudefleet.mobile.ui.MoveSheet
 import dev.claudefleet.mobile.ui.MoveViewModel
+import dev.claudefleet.mobile.ui.SessionFull
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.searchEverywhere
 import dev.claudefleet.mobile.ui.TidyHandlers
@@ -1879,6 +1881,9 @@ private fun SessionRoute(
     // leaves the session; composed after `App`'s handler, so asked first.
     val filesOpen = newLayout && sessionTab == SessionTab.Files && repoFiles?.views?.isNotEmpty() == true
     BackHandler(enabled = filesOpen) { repoVm?.back() }
+    // Full screen (redesign 14.21): composed after the Files tab's, so Back leaves it first.
+    var full by remember(sessionId) { mutableStateOf(SessionFull.None) }
+    BackHandler(enabled = full != SessionFull.None) { full = SessionFull.None }
     // A word for the composer from another tab ("Ask Claude Code to commit",
     // a long-pressed diff line): added to the draft, never sent, and the
     // conversation shown so the person sees it before they send it.
@@ -1992,12 +1997,16 @@ private fun SessionRoute(
         onArchive = { extrasVm.archive(onBack); Unit }.takeIf { newLayout && caps.archiveSession && credentials.canWrite },
         notice = extras.archiveError.takeIf { newLayout },
         onDismissNotice = extrasVm::dismissArchiveError,
+        onPaneKey = { vm.pressKey(it) },
+        full = full,
+        onFull = { full = it },
         tabs = if (!newLayout) {
             null
         } else {
             SessionTabsHost(
                 tabs = sessionTabs(hasWorktree, terminals = extras.canCreate || extras.terminals.isNotEmpty()),
                 terminalCount = extras.terminals.size,
+                sideWhole = repoFiles?.top.let { it is RepoView.Diff || it is RepoView.CommitDiff },
                 terminals = {
                     TerminalsPane(
                         state = extras,
@@ -2010,6 +2019,7 @@ private fun SessionRoute(
                             onSubmit = { extrasVm.submit() },
                             onKey = { extrasVm.press(it) },
                             onDismissError = extrasVm::dismissError,
+                            onSplit = extrasVm::setSplit,
                         ),
                     )
                 },
@@ -2035,6 +2045,7 @@ private fun SessionRoute(
                                 onAsk = askInConversation.takeIf { !state.readOnly },
                                 onClose = { repoVm.back() },
                             ),
+                            split = true,
                         )
                     }
                 },
