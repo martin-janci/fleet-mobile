@@ -1,0 +1,15 @@
+ok   01-pair-empty
+ok   02-pair-filled
+ok   03-pair-pairing
+ok   04-pair-error
+ok   05-pair-signed-out-reason
+ok   06-paired-confirmation
+FAIL group sessions: java.lang.ExceptionInInitializerError
+FAIL group session: java.lang.NoClassDefFoundError: Could not initialize class dev.claudefleet.mobile.gallery.Fixtures
+FAIL group work: java.lang.NoClassDefFoundError: Could not initialize class dev.claudefleet.mobile.gallery.Fixtures
+FAIL group files: java.lang.NoClassDefFoundError: Could not initialize class dev.claudefleet.mobile.gallery.Fixtures
+FAIL group hosts: java.lang.NoClassDefFoundError: Could not initialize class dev.claudefleet.mobile.gallery.Fixtures
+FAIL group settings: java.lang.NoClassDefFoundError: Could not initialize class dev.claudefleet.mobile.gallery.Fixtures
+FAIL group newSession: java.lang.NoClassDefFoundError: Could not initialize class dev.claudefleet.mobile.gallery.Fixtures
+FAIL group repo: java.lang.NoClassDefFoundError: Could not initialize class dev.claudefleet.mobile.gallery.Fixtures
+FAIL group sheets: java.lang.NoClassDefFoundError: Could not initialize class dev.claudefleet.mobile.gallery.Fixtures
