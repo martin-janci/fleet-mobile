@@ -583,6 +583,36 @@ class HubClient(
             json.decodeFromJsonElement(SessionRow.serializer(), it)
         }
 
+    /**
+     * A plain shell beside a session (`new_shell_session`): an interactive
+     * login shell in the same project and worktree, no agent. Read with
+     * [capture], typed into with [sendPrompt] and [sendKeys].
+     */
+    suspend fun newShellSession(hostAlias: String, projectId: Long, worktreeId: Long?, name: String): SessionRow =
+        call(
+            "new_shell_session",
+            buildJsonObject {
+                put("host_alias", hostAlias)
+                put("project_id", projectId)
+                put("name", name)
+                worktreeId?.let { put("worktree_id", it) }
+            },
+        ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
+
+    /**
+     * Archive a session (`work_link { action: archive }`): its work links are
+     * stamped archived, so it leaves the work board; opening it again from
+     * the desktop un-archives it.
+     */
+    suspend fun archiveSession(sessionId: Long): Unit =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "archive")
+                put("session_id", sessionId)
+            },
+        ) { }
+
     /** Delete a ghost's row for good (`dismiss_ghost_session`). */
     suspend fun dismissGhost(sessionId: Long): Unit =
         call("dismiss_ghost_session", buildJsonObject { put("session_id", sessionId) }) { }
@@ -1787,6 +1817,7 @@ class HubClient(
             "usage_report",
             "delete_worktree",
             "move_session",
+            "new_shell_session",
         )
 
         /**

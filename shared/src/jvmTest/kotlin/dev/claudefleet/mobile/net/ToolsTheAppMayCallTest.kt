@@ -182,6 +182,11 @@ class ToolsTheAppMayCallTest {
         // (a desktop may have to approve it: `E_CONFIRM_REQUIRED`). Offered
         // only to a token that may write.
         "move_session",
+        // A session's Terminals tab (redesign 14.14): a plain shell in the
+        // session's worktree. A write, `Access::Client`, not `confirm: true`
+        // (the operator is the one caller it asks about); read with
+        // `capture_session` and typed into with `send_prompt`.
+        "new_shell_session",
         // Work's Pull requests sheet (claude-fleet redesign 6.4 / 6.7):
         // `prs { list }`, readonly and `Access::Client`; a row is served only
         // to a token that may see the session that opened it.
