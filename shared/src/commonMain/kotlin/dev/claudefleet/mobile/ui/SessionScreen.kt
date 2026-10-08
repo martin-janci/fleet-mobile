@@ -132,6 +132,8 @@ import dev.claudefleet.mobile.ui.components.CompactChip
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.MarkdownText
+import dev.claudefleet.mobile.ui.components.LocalComposerFill
+import dev.claudefleet.mobile.ui.components.RichText
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.components.StatusStrip
 import dev.claudefleet.mobile.ui.components.WorkChip
@@ -576,6 +578,13 @@ fun SessionScreen(
                     CompositionLocalProvider(
                         LocalToolDetails provides toolDetails,
                         LocalFindQuery provides if (findOpen) findQuery else "",
+                        // A reply's cards (RichCards.kt) act by filling the
+                        // composer, after what is typed, never by sending.
+                        LocalComposerFill provides if (!state.readOnly && state.session != null) {
+                            { text: String -> onDraftChange(appendToDraft(state.draft, text)) }
+                        } else {
+                            null
+                        },
                     ) {
                         LazyColumn(
                             state = listState,
@@ -1884,7 +1893,9 @@ private fun Item(item: ConvItem) {
         // WebView, nothing that fetches a remote image.
         // A step above the prompt bubble and the tool rows: the agent's words
         // are what the screen is read for.
-        is ConvItem.Text -> MarkdownText(
+        // A task report or a fleet-ui block in it is drawn as a card
+        // (RichCards.kt); everything else is that same Markdown.
+        is ConvItem.Text -> RichText(
             text = item.text,
             style = MaterialTheme.typography.bodyLarge,
             modifier = Modifier.padding(vertical = 4.dp),
@@ -2455,6 +2466,13 @@ private fun PromptBox(
             onDismiss = { showHistory = false },
         )
     }
+}
+
+/** [text] after what is already typed, a blank line between, as the
+ *  desktop's `insertIntoComposer` puts it. */
+internal fun appendToDraft(draft: String, text: String): String {
+    val prev = draft.trimEnd()
+    return if (prev.isEmpty()) text else "$prev\n\n$text"
 }
 
 /** What was actually sent, most recent first — picking one loads it into the draft, unsent. */
