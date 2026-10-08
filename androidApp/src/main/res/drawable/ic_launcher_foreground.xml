@@ -1,32 +1,44 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The launcher glyph: a shell prompt.
+  The launcher glyph: Orbit Fleet's mark. A hub, one orbit and three hosts on
+  it; the amber host is the one waiting on you.
 
   An adaptive icon's foreground is 108x108dp of which only the middle 66x66 is
   guaranteed to be visible — every launcher masks the rest to its own shape, and
-  some of them animate the two layers apart. So the mark sits inside x,y 30..78,
-  which survives a circle, a squircle and a teardrop alike.
+  some of them animate the two layers apart. So the mark stays within 33 units of
+  the centre (orbit radius 24 plus a host's 7.5), which survives a circle, a
+  squircle and a teardrop alike.
 
   Drawn rather than drawn-over-a-bitmap: a vector is a few hundred bytes, scales
   to every density without five PNGs, and doubles as the API 33 monochrome layer
-  where the system takes the silhouette and tints it itself.
+  where the system takes the silhouette (alpha included) and tints it itself.
+
+  scripts/render-ios-icon.swift draws the same shapes for iOS; change both.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- The orbit, at half strength so the hub and hosts lead. -->
     <path
-        android:pathData="M34,40 L50,54 L34,68"
+        android:pathData="M30,54 A24,24 0 1,1 78,54 A24,24 0 1,1 30,54 Z"
         android:fillColor="#00000000"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="7"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round" />
+        android:strokeColor="#FFF2F4F7"
+        android:strokeAlpha="0.5"
+        android:strokeWidth="5" />
+    <!-- The hub, r 10. -->
     <path
-        android:pathData="M56,68 L74,68"
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="7"
-        android:strokeLineCap="round" />
+        android:pathData="M44,54 A10,10 0 1,1 64,54 A10,10 0 1,1 44,54 Z"
+        android:fillColor="#FFF2F4F7" />
+    <!-- Hosts, r 7.5, at -90, 30 and 150 degrees on the orbit. -->
+    <path
+        android:pathData="M46.5,30 A7.5,7.5 0 1,1 61.5,30 A7.5,7.5 0 1,1 46.5,30 Z"
+        android:fillColor="#FFF2F4F7" />
+    <path
+        android:pathData="M67.28,66 A7.5,7.5 0 1,1 82.28,66 A7.5,7.5 0 1,1 67.28,66 Z"
+        android:fillColor="#FFD29B4A" />
+    <path
+        android:pathData="M25.72,66 A7.5,7.5 0 1,1 40.72,66 A7.5,7.5 0 1,1 25.72,66 Z"
+        android:fillColor="#FFF2F4F7" />
 </vector>
