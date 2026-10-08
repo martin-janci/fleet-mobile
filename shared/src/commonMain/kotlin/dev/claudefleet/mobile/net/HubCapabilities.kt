@@ -133,6 +133,21 @@ data class HubCapabilities(
     /** Cancelling a task — a write, not listed for a readonly token. */
     val cancelTask: Boolean get() = CANCEL_TASK in tools
 
+    /**
+     * Chat forms (`ask`, contract revision 9): a session's waiting form can be
+     * read, answered and declined here. Not a readonly tool, so the hub does
+     * not list it for a readonly token, which then only sees that one waits.
+     */
+    val ask: Boolean get() = ASK in tools
+
+    /**
+     * A settings card's proposal can be read (`setting_proposals`), and
+     * decided where the hub lists `decide_setting_proposals` and says this
+     * device may write (`can_write`).
+     */
+    val settingProposals: Boolean get() = SETTING_PROPOSALS in tools
+    val decideSettingProposals: Boolean get() = DECIDE_SETTING_PROPOSALS in tools
+
     /** Reply actions — Rewind here, Retry, Fork here (`rewind_conversation`, a write). */
     val rewind: Boolean get() = REWIND_CONVERSATION in tools
 
@@ -197,6 +212,9 @@ data class HubCapabilities(
         const val RELATED_SESSIONS = "related_sessions"
         const val LIST_TASKS = "list_tasks"
         const val CANCEL_TASK = "cancel_task"
+        const val ASK = "ask"
+        const val SETTING_PROPOSALS = "setting_proposals"
+        const val DECIDE_SETTING_PROPOSALS = "decide_setting_proposals"
 
         fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions, params = catalog.params)
     }

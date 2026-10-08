@@ -34,6 +34,11 @@ data class SessionRow(
     @SerialName("current_activity") val currentActivity: String? = null,
     /** The hub's structured reading of a blocked prompt; null when there is none. */
     @SerialName("pending_input") val pendingInput: PendingInput? = null,
+    /**
+     * The chat form the session's agent waits on (`ask`, contract revision
+     * 9); null when none, and from an older hub. See `model/ChatForms.kt`.
+     */
+    @SerialName("pending_form") val pendingForm: PendingForm? = null,
     @SerialName("context_pct") val contextPct: Double? = null,
     @SerialName("created_at") val createdAt: Long? = null,
     @SerialName("last_activity_at") val lastActivityAt: Long? = null,
@@ -113,7 +118,7 @@ data class SessionRow(
         get() = attention?.reason ?: when {
             // Running outside fleet: read-only here, so never a person's job.
             kind == "external" -> null
-            claudeStatus == "blocked" -> "waiting"
+            claudeStatus == "blocked" || pendingForm != null -> "waiting"
             stuckKind != null -> "stuck"
             claudeStatus == "failed" -> "failed"
             safeKillState == "failed" || safeKillState == "requested" ||

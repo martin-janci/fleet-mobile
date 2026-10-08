@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.net
 
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.AccountRow
+import dev.claudefleet.mobile.model.FormView
 import dev.claudefleet.mobile.model.RepoTree
 import dev.claudefleet.mobile.model.FileDiff
 import dev.claudefleet.mobile.model.FileContent
@@ -766,6 +767,37 @@ class HubClient(
                 put("reject", json.encodeToJsonElement(ListSerializer(Long.serializer()), reject))
             },
         ) { json.decodeFromJsonElement(SettingsDecided.serializer(), it) }
+
+    // ---- chat forms (claude-fleet contract revision 9, `ask`) ----
+
+    /** One form: its spec, why the agent asks, and its state. */
+    suspend fun askGet(formId: String): FormView =
+        call("ask", buildJsonObject { put("get", formId) }) { json.decodeFromJsonElement(FormView.serializer(), it) }
+
+    /**
+     * Answer [formId] with [values], field name to value; the hub checks them
+     * against the form and refuses with `E_INVALID` naming each field's
+     * problem. A secret's value goes to a file on the session's host, never
+     * into the transcript.
+     */
+    suspend fun askAnswer(formId: String, values: Map<String, JsonElement>): FormView =
+        call(
+            "ask",
+            buildJsonObject {
+                put("answer", formId)
+                put("values", JsonObject(values))
+            },
+        ) { json.decodeFromJsonElement(FormView.serializer(), it) }
+
+    /** Decline [formId], with an optional [note] the agent reads. */
+    suspend fun askDecline(formId: String, note: String?): FormView =
+        call(
+            "ask",
+            buildJsonObject {
+                put("decline", formId)
+                if (!note.isNullOrBlank()) put("note", note)
+            },
+        ) { json.decodeFromJsonElement(FormView.serializer(), it) }
 
     /** Set the session's friendly display name. */
     suspend fun rename(sessionId: Long, friendlyName: String): Unit =
@@ -1745,7 +1777,12 @@ class HubClient(
          * may clone a large repository. [HUB_LONG_POLL_TIMEOUT_MS] is half a
          * minute above that, for the same reason as [HUB_LIFECYCLE_TIMEOUT_MS].
          */
-        val LONG_POLL_TOOLS = setOf("add_project")
+        val LONG_POLL_TOOLS = setOf(
+            "add_project",
+            // `ask` is the hub's `Deadline::LongPoll` too: an answer that
+            // carries a secret is written to the session's host over SSH.
+            "ask",
+        )
         const val UNKNOWN_CODE = "E_UNKNOWN"
     }
 }

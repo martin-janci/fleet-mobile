@@ -117,6 +117,11 @@ class ToolsTheAppMayCallTest {
         // token that may write. Its confirmation gate binds the operator
         // only (`rewind_conversation` is not `confirm: true`).
         "rewind_conversation",
+        // Chat forms (contract revision 9): read, answer and decline the form
+        // a session's agent waits on. `Access::Client`; the tool itself
+        // refuses a host token, and answering needs drive on the session.
+        // Not readonly, so a readonly token is never shown it.
+        "ask",
         // A session's Details sheet: the timeline, the sessions sharing its
         // worktree and the fleet tasks — all readonly, `Access::Client`.
         // `cancel_task` is the one write (`confirm: true` on the hub, which

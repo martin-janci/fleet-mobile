@@ -133,6 +133,11 @@ import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.MarkdownText
 import dev.claudefleet.mobile.ui.components.LocalComposerFill
+import dev.claudefleet.mobile.ui.components.ChatHost
+import dev.claudefleet.mobile.ui.components.LocalChatHost
+import dev.claudefleet.mobile.model.PendingForm
+import dev.claudefleet.mobile.model.progressBoard
+import dev.claudefleet.mobile.data.ChatFormActions
 import dev.claudefleet.mobile.ui.components.RichText
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.components.StatusStrip
@@ -227,6 +232,13 @@ fun SessionScreen(
      */
     toolDetails: ToolDetailsHost = ToolDetailsHost.None,
     /**
+     * What a reply's settings card may call (step 10.8); the default calls
+     * nothing, and the card says where to review the change instead.
+     */
+    chat: ChatHost = ChatHost.None,
+    /** A waiting chat form's calls (`ask`); null where the hub does not list it for this device. */
+    chatForms: ChatFormActions? = null,
+    /**
      * Whether the once-only "double-tap for the whole screen" hint is still
      * owed ([Hints.DOUBLE_TAP]); [onFoldHintShown] is told the moment it goes
      * up. The default shows nothing — tests and previews.
@@ -281,6 +293,14 @@ fun SessionScreen(
     // once it has loaded" step, which is what used to draw the oldest turns
     // first and then visibly jump. See [newestFirst].
     val rows = remember(turns) { newestFirst(turns) }
+    // `progress` cards of one id find each other across the conversation (RichCards.kt).
+    val progress = remember(turns) {
+        progressBoard(turns.flatMap { t -> t.items.mapNotNull { (it as? ConvItem.Text)?.text } })
+    }
+    // The form the row last carried, for a line saying how it ended once it drops it.
+    var closedForm by remember(sessionId) { mutableStateOf<PendingForm?>(null) }
+    val liveForm = state.session?.pendingForm
+    LaunchedEffect(liveForm) { if (liveForm != null) closedForm = liveForm }
     val newestKey = rows.firstOrNull()?.key
     val lastItem = rows.size - 1 + if (truncated) 1 else 0
     // One state for the life of this screen — not keyed on the turns, so a
@@ -603,6 +623,7 @@ fun SessionScreen(
                     // checks it has to run on a device — see `ConversationScrollTest`.
                     CompositionLocalProvider(
                         LocalToolDetails provides toolDetails,
+                        LocalChatHost provides chat.copyWith(progress = progress, nowSeconds = state.nowSeconds),
                         LocalFindQuery provides if (findOpen) findQuery else "",
                         // A reply's cards (RichCards.kt) act by filling the
                         // composer, after what is typed, never by sending.
@@ -703,6 +724,21 @@ fun SessionScreen(
                         }
                     }
                 }
+            }
+
+            // A chat form the agent waits on (`ask`), where the answer goes;
+            // once the row drops it, how it ended, until dismissed.
+            val formShown = state.session?.pendingForm ?: closedForm
+            if (formShown != null && state.viewing == null && (state.session?.pendingForm != null || chatForms != null)) {
+                ChatFormCard(
+                    pending = formShown,
+                    sessionName = state.session?.displayName ?: "The session",
+                    actions = chatForms,
+                    canAnswer = !state.readOnly && state.connected,
+                    open = state.session?.pendingForm != null,
+                    onDismiss = { closedForm = null },
+                    modifier = Modifier.heightIn(max = cardMax),
+                )
             }
 
             // Between the conversation and the composer: a person who opened this

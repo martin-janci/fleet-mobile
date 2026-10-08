@@ -53,7 +53,19 @@ data class TaskReport(
 )
 
 val UI_TONES = listOf("info", "tip", "success", "warning", "danger")
-val UI_KINDS = listOf("report", "steps", "guide", "callout", "facts", "choices", "form")
+val UI_KINDS = listOf("report", "steps", "guide", "callout", "facts", "choices", "form", "progress", "results", "error", "setting")
+
+val PROGRESS_STATES = listOf("running", "waiting", "done", "failed")
+val PROGRESS_STEP_STATES = listOf("pending", "running", "done", "failed", "skipped")
+
+/** A value's type in a results card: the desktop's page column types, drawn by [formatResultCell]. */
+val RESULT_TYPES = listOf("text", "int", "tokens", "usd_micros", "day", "time")
+val RESULT_CHARTS = listOf("line", "bar", "sparkline")
+val RESULT_ITEM_TYPES = listOf("stat", "chart", "table")
+
+/** A progress `id`, an error `code` and a guide's `page`: a key, never prose. */
+private val KEY_RE = Regex("^[A-Za-z0-9_.:-]+$")
+private const val KEY_MAX = 64
 
 data class UiStep(val title: String, val body: String?, val code: String?, val lang: String?)
 data class UiSection(val title: String, val body: String)
@@ -79,14 +91,45 @@ data class ReplyStep(val title: String, val intro: String?, val whenCond: JsonEl
 
 data class ReplyForm(val title: String, val intro: String?, val submit: String?, val steps: List<ReplyStep>)
 
+data class ProgressStep(val title: String, val state: String)
+
+/** One axis of a chart, or one column of a table: its label and, optionally, its type. */
+data class ResultAxis(val label: String, val ty: String? = null)
+
+sealed class ResultItem {
+    /** [value] is a number ([Double]) or text. */
+    data class Stat(val label: String, val value: Any, val ty: String?, val hint: String?) : ResultItem()
+    /** Each point's x is text or a number ([Double]). */
+    data class Chart(val chart: String, val title: String, val x: ResultAxis, val y: ResultAxis, val points: List<Pair<Any, Double>>) : ResultItem()
+    /** A cell is text, a number, a bool or null, as the block wrote it. */
+    data class Table(val title: String?, val columns: List<ResultAxis>, val rows: List<List<JsonElement>>) : ResultItem()
+}
+
 sealed class UiBlock {
     data class Report(val title: String?, val report: TaskReport) : UiBlock()
     data class Steps(val title: String, val intro: String?, val steps: List<UiStep>) : UiBlock()
     data class Guide(val title: String, val intro: String?, val sections: List<UiSection>) : UiBlock()
+    /** A guide fleet already has, by its page id (step 10.4): Settings › Guides draws it. */
+    data class GuidePage(val page: String) : UiBlock()
     data class Callout(val tone: String, val title: String?, val body: String) : UiBlock()
     data class Facts(val title: String?, val items: List<Pair<String, String>>) : UiBlock()
     data class Choices(val title: String?, val question: String?, val options: List<UiChoice>) : UiBlock()
     data class Form(val form: ReplyForm) : UiBlock()
+    /** A long job's state. Blocks with the same [id] in one conversation are one card ([progressBoard]). */
+    data class Progress(
+        val id: String,
+        val title: String,
+        val state: String,
+        val done: Long?,
+        val total: Long?,
+        val unit: String?,
+        val steps: List<ProgressStep>?,
+        val note: String?,
+    ) : UiBlock()
+    data class Results(val title: String?, val summary: String?, val items: List<ResultItem>) : UiBlock()
+    data class Error(val code: String, val title: String, val body: String?, val detail: String?, val next: List<UiChoice>) : UiBlock()
+    /** A settings change an agent proposed; the card reads the key and values from the proposal, never from here. */
+    data class Setting(val proposal: Long, val note: String?) : UiBlock()
 }
 
 sealed class RichSegment {
@@ -363,9 +406,130 @@ private fun number(o: JsonObject, key: String, p: Problems, where: String): Doub
     return d
 }
 
+/** A whole number of at least [min], as the desktop's `num`; absent is null. */
+private fun whole(o: JsonObject, key: String, p: Problems, where: String, min: Long): Long? {
+    val v = o[key]
+    if (v == null || v is JsonNull) return null
+    val d = (v as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull
+    if (d == null || !d.isFinite()) {
+        p.add(where, "`$key` must be a number")
+        return null
+    }
+    if (d != kotlin.math.floor(d)) {
+        p.add(where, "`$key` must be a whole number")
+    } else if (d < min) {
+        p.add(where, "`$key` must be at least $min")
+    }
+    return d.toLong()
+}
+
+private fun oneOf(o: JsonObject, key: String, p: Problems, where: String, allowed: List<String>, fallback: String? = null): String? {
+    val raw = o[key]?.takeIf { it !is JsonNull }
+    if (raw == null && fallback == null) {
+        p.add(where, "`$key` is required")
+        return null
+    }
+    val v = if (raw == null) fallback else raw.stringOrNull()
+    if (v == null || v !in allowed) {
+        p.add(where, "`$key` must be one of ${allowed.joinToString(", ")}")
+        return null
+    }
+    return v
+}
+
+private fun key(o: JsonObject, name: String, p: Problems, where: String): String {
+    val v = str(o, name, p, where, KEY_MAX, required = true) ?: ""
+    if (v.isNotEmpty() && !KEY_RE.matches(v)) p.add(where, "`$name` must be letters, digits and . _ : -")
+    return v
+}
+
+private fun optArr(o: JsonObject, k: String, p: Problems, where: String, min: Int, max: Int): List<JsonElement>? =
+    if (o[k] == null || o[k] is JsonNull) null else arr(o, k, p, where, min, max)
+
+private fun axis(v: JsonElement?, p: Problems, where: String): ResultAxis {
+    if (v !is JsonObject) {
+        p.add(where, "must be an object")
+        return ResultAxis("")
+    }
+    val ty = if (v["ty"] == null || v["ty"] is JsonNull) null else oneOf(v, "ty", p, where, RESULT_TYPES)
+    return ResultAxis(str(v, "label", p, where, 80, required = true) ?: "", ty)
+}
+
+/** A JSON number, finite; text, a bool and null are not. */
+private fun finiteNumber(e: JsonElement?): Double? =
+    (e as? JsonPrimitive)?.takeIf { !it.isString && it !is JsonNull }?.doubleOrNull?.takeIf { it.isFinite() }
+
+private fun isCell(c: JsonElement): Boolean =
+    c is JsonNull || (c is JsonPrimitive && (c.isString || c.booleanOrNull != null || finiteNumber(c) != null))
+
+private fun choice(o: JsonObject, p: Problems, at: String) = UiChoice(
+    label = str(o, "label", p, at, 80, required = true) ?: "",
+    prompt = str(o, "prompt", p, at, 4000, required = true) ?: "",
+    hint = str(o, "hint", p, at, 200),
+)
+
+private fun resultItem(o: JsonObject, p: Problems, at: String): ResultItem? = when (o["type"].stringOrNull()) {
+    "stat" -> {
+        val label = str(o, "label", p, at, 80, required = true) ?: ""
+        val v = o["value"]
+        val n = finiteNumber(v)
+        val text = v.stringOrNull()
+        val value: Any = when {
+            n != null -> n
+            text != null && codePoints(text) <= 80 -> text
+            else -> {
+                p.add(at, "`value` must be a number or text of at most 80 characters")
+                ""
+            }
+        }
+        val ty = if (o["ty"] == null || o["ty"] is JsonNull) null else oneOf(o, "ty", p, at, RESULT_TYPES)
+        ResultItem.Stat(label, value, ty, str(o, "hint", p, at, 200))
+    }
+    "chart" -> {
+        val chart = oneOf(o, "chart", p, at, RESULT_CHARTS) ?: "bar"
+        val title = str(o, "title", p, at, 120, required = true) ?: ""
+        val x = axis(o["x"], p, "$at › x")
+        val y = axis(o["y"], p, "$at › y")
+        val points = arr(o, "points", p, at, 1, 200).mapIndexedNotNull { k, pt ->
+            val pair = (pt as? JsonArray)?.takeIf { it.size == 2 }
+            val px: Any? = pair?.get(0)?.let { it.stringOrNull() ?: finiteNumber(it) }
+            val py = pair?.get(1)?.let(::finiteNumber)
+            if (px == null || py == null) {
+                p.add("$at › point ${k + 1}", "must be [x, number]")
+                null
+            } else {
+                px to py
+            }
+        }
+        ResultItem.Chart(chart, title, x, y, points)
+    }
+    "table" -> {
+        val title = str(o, "title", p, at, 120)
+        val columns = arr(o, "columns", p, at, 1, 12).mapIndexed { k, c -> axis(c, p, "$at › column ${k + 1}") }
+        val rows = arr(o, "rows", p, at, 0, 200).mapIndexedNotNull { k, r ->
+            val rat = "$at › row ${k + 1}"
+            if (r !is JsonArray) {
+                p.add(rat, "must be a list")
+                null
+            } else {
+                if (r.size != columns.size) p.add(rat, "has ${r.size} cells for ${columns.size} columns")
+                r.forEachIndexed { j, c -> if (!isCell(c)) p.add(rat, "cell ${j + 1} must be text, a number, a bool or null") }
+                r.toList()
+            }
+        }
+        ResultItem.Table(title, columns, rows)
+    }
+    else -> {
+        p.add(at, "`type` must be one of ${RESULT_ITEM_TYPES.joinToString(", ")}")
+        null
+    }
+}
+
 /** Enough of fleet.form/1 to draw it safely; a secret is refused, its answer
- *  would land in the transcript. Mirrors `checkForm` in rich_blocks.ts. */
-private fun checkForm(v: JsonElement?, p: Problems): ReplyForm? {
+ *  would land in the transcript. Mirrors `checkForm` in rich_blocks.ts.
+ *  [ask]: a form an agent's `ask` opened ([readAskForm]), which may hold a
+ *  secret, since its answers go to the hub and never into the transcript. */
+private fun checkForm(v: JsonElement?, p: Problems, ask: Boolean = false): ReplyForm? {
     val where = "form"
     if (v !is JsonObject) {
         p.add(where, "must be a fleet.form/1 object")
@@ -392,7 +556,9 @@ private fun checkForm(v: JsonElement?, p: Problems): ReplyForm? {
             val help = str(f, "help", p, fat, 500)
             val placeholder = str(f, "placeholder", p, fat, 200)
             val type = f["type"].stringOrNull()
-            if (type == "secret") {
+            if (type == "secret" && ask) {
+                // The hub writes it to a file on the session's host.
+            } else if (type == "secret") {
                 p.add(fat, "a secret field is only for `ask`: its answer would land in the transcript")
             } else if (type == null || type !in FIELD_TYPES_SHOWN) {
                 p.add(fat, "type ${f["type"] ?: "undefined"} is not a field type")
@@ -466,7 +632,9 @@ fun checkUiBlock(raw: String): UiCheck {
             }
             UiBlock.Steps(title, intro, steps)
         }
-        "guide" -> {
+        "guide" -> if (v["page"] != null && v["page"] !is JsonNull) {
+            UiBlock.GuidePage(key(v, "page", p, ""))
+        } else {
             val title = str(v, "title", p, "", 120, required = true) ?: ""
             val intro = str(v, "intro", p, "", 2000)
             val sections = each(arr(v, "sections", p, "", 1, 20), p, "section") { s, at ->
@@ -495,16 +663,44 @@ fun checkUiBlock(raw: String): UiCheck {
             UiBlock.Facts(str(v, "title", p, "", 120), items)
         }
         "choices" -> {
-            val options = each(arr(v, "options", p, "", 1, 8), p, "option") { o, at ->
-                UiChoice(
-                    label = str(o, "label", p, at, 80, required = true) ?: "",
-                    prompt = str(o, "prompt", p, at, 4000, required = true) ?: "",
-                    hint = str(o, "hint", p, at, 200),
-                )
-            }
+            val options = each(arr(v, "options", p, "", 1, 8), p, "option") { o, at -> choice(o, p, at) }
             UiBlock.Choices(str(v, "title", p, "", 120), str(v, "question", p, "", 500), options)
         }
-        else -> checkForm(v["form"], p)?.let { UiBlock.Form(it) }
+        "form" -> checkForm(v["form"], p)?.let { UiBlock.Form(it) }
+        "progress" -> {
+            val id = key(v, "id", p, "")
+            val title = str(v, "title", p, "", 120, required = true) ?: ""
+            val state = oneOf(v, "state", p, "", PROGRESS_STATES, "running") ?: "running"
+            val done = whole(v, "done", p, "", 0)
+            val total = whole(v, "total", p, "", 1)
+            if (done != null && total != null && done > total) p.add("", "`done` is more than `total`")
+            val steps = optArr(v, "steps", p, "", 1, 20)?.let { list ->
+                each(list, p, "step") { s, at ->
+                    ProgressStep(
+                        str(s, "title", p, at, 200, required = true) ?: "",
+                        oneOf(s, "state", p, at, PROGRESS_STEP_STATES, "pending") ?: "pending",
+                    )
+                }
+            }
+            UiBlock.Progress(id, title, state, done, total, str(v, "unit", p, "", 20), steps, str(v, "note", p, "", 2000))
+        }
+        "results" -> {
+            val title = str(v, "title", p, "", 120)
+            val summary = str(v, "summary", p, "", 2000)
+            val items = each(arr(v, "items", p, "", 1, 12), p, "item") { o, at -> resultItem(o, p, at) }.filterNotNull()
+            UiBlock.Results(title, summary, items)
+        }
+        "error" -> {
+            val code = key(v, "code", p, "")
+            val title = str(v, "title", p, "", 120, required = true) ?: ""
+            val next = each(optArr(v, "next", p, "", 1, 4) ?: emptyList(), p, "next") { o, at -> choice(o, p, at) }
+            UiBlock.Error(code, title, str(v, "body", p, "", 4000), str(v, "detail", p, "", 8000), next)
+        }
+        else -> {
+            var proposal: Long? = null
+            if (v["proposal"] == null || v["proposal"] is JsonNull) p.add("", "`proposal` is required") else proposal = whole(v, "proposal", p, "", 1)
+            UiBlock.Setting(proposal ?: 0, str(v, "note", p, "", 500))
+        }
     }
     return if (p.list.isEmpty() && block != null) UiCheck.Ok(block) else UiCheck.Bad(p.list.ifEmpty { listOf("is not a block") })
 }
@@ -592,4 +788,112 @@ fun fenced(lang: String, raw: String): String {
     }
     val bar = "`".repeat(longest + 1)
     return "$bar$lang\n$raw\n$bar"
+}
+
+/**
+ * The form an agent's `ask` opened, from the spec `ask { get }` answered. The
+ * hub checked it in full before it stored it (`pages/forms.rs`), so this is
+ * only the phone's reading of it; null when the phone cannot draw it.
+ */
+fun readAskForm(spec: JsonElement?): ReplyForm? = checkForm(spec, Problems(), ask = true)
+
+// ── Progress that updates in place ─────────────────────────────────────────
+
+/**
+ * The `progress` blocks of one conversation by id, in document order, each
+ * with the fence text it came from. An agent reports a long job by writing a
+ * block with the same id again as the job moves on: the first card of an id
+ * shows the newest state, and the later ones draw as one line pointing up
+ * (the desktop's `rich/progress_board.ts`).
+ */
+class ProgressBoard(private val byId: Map<String, List<Pair<String, UiBlock.Progress>>>) {
+    /** Whether the card drawn from [raw] is its id's first, the one that shows the newest state. */
+    fun home(id: String, raw: String): Boolean = byId[id]?.firstOrNull()?.first?.let { it == raw } ?: true
+
+    /** What the first card of [id] shows: the newest block of it. */
+    fun newest(id: String): UiBlock.Progress? = byId[id]?.lastOrNull()?.second
+
+    /** How many blocks came after the first. */
+    fun updates(id: String): Int = ((byId[id]?.size ?: 1) - 1).coerceAtLeast(0)
+
+    companion object {
+        val EMPTY = ProgressBoard(emptyMap())
+    }
+}
+
+/** The board of [texts], an assistant's texts in document order (oldest first). */
+fun progressBoard(texts: List<String>): ProgressBoard {
+    val out = linkedMapOf<String, MutableList<Pair<String, UiBlock.Progress>>>()
+    for (t in texts) {
+        if ("progress" !in t) continue
+        for (seg in splitRich(t)) {
+            val b = (seg as? RichSegment.Ui)?.block as? UiBlock.Progress ?: continue
+            out.getOrPut(b.id) { mutableListOf() } += seg.raw to b
+        }
+    }
+    return ProgressBoard(out)
+}
+
+// ── Results ────────────────────────────────────────────────────────────────
+
+/**
+ * A number as a results card draws it: the desktop's `formatCell` for the
+ * page column types. [now] is unix seconds, for a `time` value.
+ */
+fun formatResultCell(ty: String, v: JsonElement?, now: Long): String {
+    if (ty == "time" && (v == null || v is JsonNull)) return "never"
+    if (v == null || v is JsonNull) return "—"
+    val prim = v as? JsonPrimitive ?: return v.toString()
+    val n = if (prim.isString) prim.content.toDoubleOrNull() else prim.doubleOrNull
+    if (ty == "time" && n != null) {
+        val d = maxOf(0L, now - n.toLong())
+        return when {
+            d < 60 -> "just now"
+            d < 3600 -> "${d / 60} min ago"
+            d < 86_400 -> "${d / 3600} h ago"
+            else -> "${d / 86_400} d ago"
+        }
+    }
+    return when {
+        ty == "usd_micros" && n != null -> {
+            val usd = n / 1_000_000
+            "$" + if (usd >= 100) fixed(usd, 0) else fixed(usd, 2)
+        }
+        ty == "tokens" && n != null -> when {
+            n >= 1_000_000 -> fixed(n / 1_000_000, 1) + "M"
+            n >= 1_000 -> fixed(n / 1_000, 1) + "k"
+            else -> plain(n)
+        }
+        ty == "int" && n != null -> grouped(n)
+        prim.isString -> prim.content
+        prim.booleanOrNull != null -> prim.content
+        n != null -> plain(n)
+        else -> prim.content
+    }
+}
+
+/** [d] with [places] decimals, rounded half away from zero, as `toFixed` reads for these sizes. */
+private fun fixed(d: Double, places: Int): String {
+    var scale = 1L
+    repeat(places) { scale *= 10 }
+    val r = kotlin.math.round(kotlin.math.abs(d) * scale).toLong()
+    val sign = if (d < 0 && r != 0L) "-" else ""
+    val whole = r / scale
+    if (places == 0) return "$sign$whole"
+    return "$sign$whole." + (r % scale).toString().padStart(places, '0')
+}
+
+/** A whole number plainly, a fraction as JavaScript's `String(n)` would. */
+private fun plain(d: Double): String =
+    if (d == kotlin.math.floor(d) && kotlin.math.abs(d) < 1e15) d.toLong().toString() else d.toString()
+
+/** `toLocaleString('en-US')`: thousands with commas, at most three decimals. */
+private fun grouped(d: Double): String {
+    val neg = d < 0
+    val a = kotlin.math.abs(d)
+    val s = fixed(a, 3).trimEnd('0').trimEnd('.')
+    val whole = s.substringBefore('.')
+    val frac = s.substringAfter('.', "")
+    val withCommas = whole.reversed().chunked(3).joinToString(",").reversed()
+    return (if (neg) "-" else "") + withCommas + if (frac.isNotEmpty()) ".$frac" else ""
 }
