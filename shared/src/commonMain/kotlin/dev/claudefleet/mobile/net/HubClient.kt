@@ -33,6 +33,9 @@ import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.TidyReport
 import dev.claudefleet.mobile.model.Mission
+import dev.claudefleet.mobile.model.Routine
+import dev.claudefleet.mobile.model.RoutineDetail
+import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.MissionCard
 import dev.claudefleet.mobile.model.MissionDetail
 import dev.claudefleet.mobile.model.StartOutcome
@@ -1125,6 +1128,50 @@ class HubClient(
         call("work_link", buildJsonObject { put("action", "missions_pause_all") }) {
             json.decodeFromJsonElement(ListSerializer(Long.serializer()), it)
         }
+
+    // ---- routines (claude-fleet redesign 8.5) ----
+    //
+    // `routines` is a write tool on the hub, so it is not listed for a
+    // readonly token, and none of these is called unless `tools/list` names
+    // it (`HubCapabilities.routines`). Its `action` is a free string.
+
+    /** Every routine this person may see. */
+    suspend fun routines(): List<Routine> =
+        call("routines", buildJsonObject { put("action", "list") }) {
+            json.decodeFromJsonElement(ListSerializer(Routine.serializer()), it)
+        }
+
+    /** One routine with its last runs (newest first) and whether this person may change it. */
+    suspend fun routine(routineId: Long): RoutineDetail =
+        call(
+            "routines",
+            buildJsonObject {
+                put("action", "get")
+                put("routine_id", routineId)
+            },
+        ) { json.decodeFromJsonElement(RoutineDetail.serializer(), it) }
+
+    /** A routine's runs, newest first, at most [limit]. */
+    suspend fun routineRuns(routineId: Long, limit: Int? = null): List<RoutineRun> =
+        call(
+            "routines",
+            buildJsonObject {
+                put("action", "runs")
+                put("routine_id", routineId)
+                limit?.let { put("limit", it) }
+            },
+        ) { json.decodeFromJsonElement(ListSerializer(RoutineRun.serializer()), it) }
+
+    /** Turn a routine on or off; answers the routine as it now stands. */
+    suspend fun setRoutineEnabled(routineId: Long, enabled: Boolean): Routine =
+        call(
+            "routines",
+            buildJsonObject {
+                put("action", "set_enabled")
+                put("routine_id", routineId)
+                put("enabled", enabled)
+            },
+        ) { json.decodeFromJsonElement(Routine.serializer(), it) }
 
     // ---- the Work view (claude-fleet M14) ----
 

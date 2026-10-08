@@ -174,6 +174,16 @@ data class HubCapabilities(
     /** Reply actions — Rewind here, Retry, Fork here (`rewind_conversation`, a write). */
     val rewind: Boolean get() = REWIND_CONVERSATION in tools
 
+    /**
+     * Routines (claude-fleet redesign 8.5): the list, a routine's runs, and
+     * its on/off switch. A write tool, so a readonly token is not served it.
+     * Its `action` is a free string, so the tool's presence is the gate.
+     */
+    val routines: Boolean get() = ROUTINES in tools
+
+    /** Fleet settings can be written as this device (`set_setting`); the hub still refuses an untrusted one. */
+    val setSetting: Boolean get() = SET_SETTING in tools
+
     fun has(tool: String, action: String): Boolean =
         tool in tools &&
             actions[tool]?.contains(action) != false &&
@@ -243,6 +253,8 @@ data class HubCapabilities(
         const val ASK = "ask"
         const val SETTING_PROPOSALS = "setting_proposals"
         const val DECIDE_SETTING_PROPOSALS = "decide_setting_proposals"
+        const val ROUTINES = "routines"
+        const val SET_SETTING = "set_setting"
 
         fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions, params = catalog.params)
     }

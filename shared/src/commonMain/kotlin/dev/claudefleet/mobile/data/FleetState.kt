@@ -107,6 +107,14 @@ interface FleetState {
     val orgs: StateFlow<OrgDirectory> get() = NoWork.orgs
 
     /**
+     * Account uuid → its label (nickname, name or email), read once per
+     * connection when the hub lists `list_accounts`; empty otherwise and on a
+     * failed read. What a row's account chip and a paused row's line name
+     * (redesign step 4.10).
+     */
+    val accountNames: StateFlow<Map<String, String>> get() = NoWork.accountNames
+
+    /**
      * The connected trackers and the state each is in (`ok`, `auth_failed`,
      * `unreachable` …), read with *My work*; empty without the work graph or
      * after a failed read. What a ticket's screen says when its tracker is
@@ -159,6 +167,7 @@ private object NoWork {
     val tickets: StateFlow<List<Ticket>> = MutableStateFlow<List<Ticket>>(emptyList()).asStateFlow()
     val myWork: StateFlow<Set<Long>?> = MutableStateFlow<Set<Long>?>(null).asStateFlow()
     val orgs: StateFlow<OrgDirectory> = MutableStateFlow(OrgDirectory.EMPTY).asStateFlow()
+    val accountNames: StateFlow<Map<String, String>> = MutableStateFlow<Map<String, String>>(emptyMap()).asStateFlow()
     val trackers: StateFlow<List<TrackerRow>> = MutableStateFlow<List<TrackerRow>>(emptyList()).asStateFlow()
 }
 

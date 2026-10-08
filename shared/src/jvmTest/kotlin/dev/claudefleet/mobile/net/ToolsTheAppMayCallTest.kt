@@ -200,6 +200,10 @@ class ToolsTheAppMayCallTest {
         // be offered it is the hub's call, not the phone's.
         "install_agent",
         "agent_installs",
+        // Automation (redesign 8.9): routines, their runs and their switch.
+        // `Access::Client`, not readonly, so the hub does not list it for a
+        // readonly token; never a per-host token's (`NOT_FOR_HOST_TOKENS`).
+        "routines",
     )
 
     @Test

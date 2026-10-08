@@ -162,6 +162,9 @@ class FleetRepository(
     private val _orgs = MutableStateFlow(OrgDirectory.EMPTY)
     override val orgs: StateFlow<OrgDirectory> = _orgs.asStateFlow()
 
+    private val _accountNames = MutableStateFlow<Map<String, String>>(emptyMap())
+    override val accountNames: StateFlow<Map<String, String>> = _accountNames.asStateFlow()
+
     private val _trackers = MutableStateFlow<List<TrackerRow>>(emptyList())
     override val trackers: StateFlow<List<TrackerRow>> = _trackers.asStateFlow()
 
@@ -360,6 +363,7 @@ class FleetRepository(
                                 _capabilities.value = HubCapabilities()
                                 _myWork.value = null
                                 _orgs.value = OrgDirectory.EMPTY
+                                _accountNames.value = emptyMap()
                                 _trackers.value = emptyList()
                                 _status.value = ConnectionStatus.Refused(refusal)
                                 return@collect
@@ -463,6 +467,7 @@ class FleetRepository(
             _capabilities.value = caps
             myWorkRead?.cancel()
             _orgs.value = readOrgs(caps)
+            _accountNames.value = readAccountNames(caps)
             if (!caps.work) _trackers.value = emptyList()
             _myWork.value = if (caps.work) readMyWork() else null
         }
@@ -497,6 +502,22 @@ class FleetRepository(
             OrgDirectory.EMPTY
         } catch (_: Throwable) {
             OrgDirectory.EMPTY
+        }
+    }
+
+    /**
+     * Account labels by uuid, when the hub lists `list_accounts`; empty
+     * otherwise and on a failed read, which leaves rows without an account
+     * chip rather than saying anything.
+     */
+    private suspend fun readAccountNames(caps: HubCapabilities): Map<String, String> {
+        if (!caps.accounts) return emptyMap()
+        return try {
+            client.listAccounts().associate { it.uuid to it.label }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            emptyMap()
         }
     }
 

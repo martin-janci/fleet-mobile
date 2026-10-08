@@ -161,4 +161,14 @@ class SessionRowTest {
         assertEquals("BILLING MIGRATION", WorkSummary(title = "billing migration").groupKey)
         assertNull(WorkSummary().groupKey)
     }
+
+    @Test
+    fun a_row_reads_its_account_and_an_older_hub_leaves_it_null() {
+        val withAccount = json.decodeFromString(
+            SessionRow.serializer(),
+            """{"id":1,"tmux_name":"s","account_uuid":"acc-1"}""",
+        )
+        assertEquals("acc-1", withAccount.accountUuid)
+        assertNull(json.decodeFromString(SessionRow.serializer(), """{"id":1}""").accountUuid)
+    }
 }

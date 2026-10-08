@@ -71,6 +71,8 @@ import dev.claudefleet.mobile.data.HubSessionDetailsActions
 import dev.claudefleet.mobile.data.HubWorkActions
 import dev.claudefleet.mobile.data.HubMissionActions
 import dev.claudefleet.mobile.data.MissionActions
+import dev.claudefleet.mobile.data.HubRoutineActions
+import dev.claudefleet.mobile.data.RoutineActions
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.SessionActions
@@ -89,6 +91,8 @@ import dev.claudefleet.mobile.net.withHubTimeouts
 import dev.claudefleet.mobile.store.Credentials
 import dev.claudefleet.mobile.store.Prefs
 import dev.claudefleet.mobile.store.Secrets
+import dev.claudefleet.mobile.ui.AddProjectHandlers
+import dev.claudefleet.mobile.ui.AddProjectStep
 import dev.claudefleet.mobile.ui.AgentViewModel
 import dev.claudefleet.mobile.ui.FilesHandlers
 import dev.claudefleet.mobile.ui.FilesScreen
@@ -220,6 +224,10 @@ import dev.claudefleet.mobile.ui.TidySheet
 import dev.claudefleet.mobile.ui.TidyViewModel
 import dev.claudefleet.mobile.ui.MissionsHandlers
 import dev.claudefleet.mobile.ui.MissionsSheet
+import dev.claudefleet.mobile.ui.AutomationHandlers
+import dev.claudefleet.mobile.ui.AutomationSheet
+import dev.claudefleet.mobile.ui.AutomationViewModel
+import dev.claudefleet.mobile.ui.automationLine
 import dev.claudefleet.mobile.ui.MissionsViewModel
 import dev.claudefleet.mobile.ui.UsageHandlers
 import dev.claudefleet.mobile.ui.CompanyHandlers
@@ -405,6 +413,9 @@ class AppContainer(
 
     /** Missions (claude-fleet orchestration), through the same `withClient`. */
     val missionActions: MissionActions = HubMissionActions(session)
+
+    /** Routines and Pause all (redesign 8.9), through the same `withClient`. */
+    val routineActions: RoutineActions = HubRoutineActions(session)
 
     /** The way into the hub's agent, through the same `withClient`. */
     val agentActions: AgentActions = HubAgentActions(session)
@@ -711,6 +722,8 @@ private fun FleetRoute(
     val tidyState by tidy.state.collectAsState()
     val missions = remember(repository, scope) { MissionsViewModel(repository, container.missionActions, scope, credentials.canWrite) }
     val missionsState by missions.state.collectAsState()
+    val automation = remember(repository, scope) { AutomationViewModel(repository, container.routineActions, scope, credentials.canWrite) }
+    val automationState by automation.state.collectAsState()
     val today = remember(repository, scope) {
         TodayViewModel(
             fleet = repository,
@@ -1370,6 +1383,7 @@ private fun FleetRoute(
                         // Today is an Inbox view until Control grows its own.
                         onOpenToday = if (todayInbox.available) ({ today.open() }) else null,
                         anchors = tourAnchors,
+                        accountNames = inboxList.accountNames,
                         top = {
                             mismatch?.let { m -> HubVersionBanner(m, onUpdate = nav::openUpdate.takeIf { updateState.available != null }) }
                             updateState.available?.let { UpdateInboxLine(it, onOpen = nav::openUpdate) }
@@ -1418,6 +1432,7 @@ private fun FleetRoute(
                 }
                 Screen.More -> {
                     val hostRows by repository.hosts.collectAsState()
+                    LaunchedEffect(automationState.available) { if (automationState.available) automation.refresh() }
                     MoreScreen(
                         top = { updateState.available?.let { UpdateCard(it, container.appVersion, onOpen = nav::openUpdate) } },
                         entries = buildList {
@@ -1425,7 +1440,10 @@ private fun FleetRoute(
                             if (settingsCaps.usage || settingsCaps.accounts) {
                                 add(MoreEntry("Accounts and usage", "Quotas, and estimated spend by host and day") { nav.openUsage() })
                             }
-                            if (missionsState.available) {
+                            if (automationState.available) {
+                                // Routines, their runs and Pause all (8.9); Missions open from inside.
+                                add(MoreEntry("Automation", automationLine(automationState.routines, automationState.paused)) { automation.open() })
+                            } else if (missionsState.available) {
                                 add(MoreEntry("Automation", "Missions, and Pause all") { missions.open() })
                             }
                             if (filesState.available) {
@@ -1665,6 +1683,23 @@ private fun FleetRoute(
                     TidySheet(state = tidyState, handlers = tidyHandlers)
                 }
             }
+            if (automationState.open) {
+                AutomationSheet(
+                    state = automationState,
+                    nowSeconds = epochSeconds(),
+                    handlers = AutomationHandlers(
+                        onClose = automation::close,
+                        onTab = automation::show,
+                        onSelect = { automation.select(it) },
+                        onBack = automation::back,
+                        onToggle = { automation.toggle(it) },
+                        onSetPaused = { automation.setPaused(it) },
+                        onOpenSession = { id -> automation.close(); nav.open(id) },
+                        onOpenMissions = if (missionsState.available) ({ automation.close(); missions.open() }) else null,
+                        onDismissError = automation::dismissError,
+                    ),
+                )
+            }
             if (missionsState.open) {
                 MissionsSheet(
                     state = missionsState,
@@ -1760,6 +1795,13 @@ private fun NewSessionRoute(
     val tools = remember(repository, scope) { ProjectToolsViewModel(repository, container.projectActions, scope, credentials.canWrite) }
     val toolsState by tools.state.collectAsState()
     LaunchedEffect(tools, state.host, state.projectId) { tools.loadWorktrees(state.host, state.projectId) }
+    // Add a project's own steps (redesign 14.20), over the wizard: back on
+    // Where goes to Source, on Source closes it, and while a clone runs it
+    // leaves the clone running in the background.
+    var addStep by remember { mutableStateOf(AddProjectStep.Source) }
+    BackHandler(enabled = wizard && toolsState.addingOn != null) {
+        if (!toolsState.adding && addStep == AddProjectStep.Where) addStep = AddProjectStep.Source else tools.closeAdd()
+    }
     NewSessionScreen(
         state = state,
         onBack = onBack,
@@ -1777,7 +1819,10 @@ private fun NewSessionRoute(
         onStartBackground = { name, prompt -> vm.startBackground(name, prompt) { onBack() } },
         tools = toolsState,
         toolHandlers = ProjectToolsHandlers(
-            onOpenAdd = { tools.openAdd(it) },
+            onOpenAdd = {
+                addStep = AddProjectStep.Source
+                tools.openAdd(it)
+            },
             onCloseAdd = tools::closeAdd,
             onClone = { url -> tools.clone(url, vm::selectProject) },
             onCreate = { owner, repo, onGithub -> tools.create(owner, repo, onGithub, vm::selectProject) },
@@ -1797,6 +1842,15 @@ private fun NewSessionRoute(
         wizard = wizard,
         wizardStep = wizardStep,
         onWizardStep = { wizardStep = it },
+        addStep = addStep,
+        addHandlers = AddProjectHandlers(
+            onStep = { addStep = it },
+            onChooseHost = tools::chooseHost,
+            onClone = { url -> tools.clone(url, vm::selectProject) },
+            onCreate = { owner, repo, onGithub -> tools.create(owner, repo, onGithub, vm::selectProject) },
+            onClose = tools::closeAdd,
+            onDismissError = tools::dismissError,
+        ),
     )
 }
 
