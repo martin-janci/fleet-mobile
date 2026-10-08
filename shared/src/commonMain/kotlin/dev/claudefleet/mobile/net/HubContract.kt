@@ -36,9 +36,9 @@ package dev.claudefleet.mobile.net
  * Revision 9 added chat forms: the `ask` tool (an agent opens a form in its
  * session's chat; a person answers it) becomes a hub tool the desktop routes
  * `list_forms` / `get_form` / `answer_form` / `decline_form` to, and
- * `SessionRow` gains `pending_form`. This app calls none of those yet and
- * `ignoreUnknownKeys` absorbs the new field, so a revision-9 hub is safe here;
- * the form card on the phone is its own change.
+ * `SessionRow` gains `pending_form`. The phone answers those forms since
+ * redesign step 10.8 (`ask { get | answer | decline }`, gated on `tools/list`
+ * naming `ask`, so an older hub simply shows no form card).
  * Revision 10 added debug devices: the `debug_devices` tool (phones,
  * emulators and simulators on the fleet's hosts) becomes a hub tool the
  * desktop routes its Debug devices page to. This app calls no device tool

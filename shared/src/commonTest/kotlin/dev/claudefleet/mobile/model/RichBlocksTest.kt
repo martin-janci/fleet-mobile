@@ -144,7 +144,7 @@ class RichBlocksTest {
 
     @Test
     fun what_is_wrong_is_named_and_where() {
-        assertEquals(UiCheck.Bad(listOf("`kind` must be one of report, steps, guide, callout, facts, choices, form")), check("\"kind\": \"chart\""))
+        assertEquals(UiCheck.Bad(listOf("`kind` must be one of report, steps, guide, callout, facts, choices, form, progress, results, error, setting")), check("\"kind\": \"chart\""))
         assertEquals(UiCheck.Bad(listOf("`spec` must be \"fleet.ui/1\"")), checkUiBlock("{\"spec\": \"fleet.ui/2\", \"kind\": \"callout\", \"body\": \"x\"}"))
         assertEquals(UiCheck.Bad(listOf("`tone` must be one of info, tip, success, warning, danger")), check("\"kind\": \"callout\", \"tone\": \"loud\", \"body\": \"x\""))
         assertEquals(UiCheck.Bad(listOf("option 1: `prompt` is required")), check("\"kind\": \"choices\", \"options\": [{\"label\": \"A\"}]"))

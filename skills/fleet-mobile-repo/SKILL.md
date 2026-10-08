@@ -206,6 +206,23 @@ fresh store (claude-fleet's `src/lib/pages/registry.generated.json`, pages and
 descriptors); copy it again when the hub's pages change — `FleetSettingsTest`
 fails on a field that names no setting.
 
+## Chat cards and chat forms (claude-fleet redesign step 10.8)
+
+`model/RichBlocks.kt` ports `src/lib/rich_blocks.ts`: every fleet.ui/1 kind
+the desktop draws, with its problem strings word for word.
+`model/ChatBlockExamples.kt` is a copy of claude-fleet's
+`docs/chat-block-examples/blocks.json`, the cases the desktop's and the hub's
+checkers both run, and `ChatBlockKindsTest` runs every one; copy it again when
+a case is added there and change the Kotlin until it passes. Progress blocks
+of one id are one card (`progressBoard`, the desktop's `progress_board.ts`).
+
+A `setting` card reads its proposal from `setting_proposals` and decides it
+through `decide_setting_proposals`, gated like Settings › Review. A waiting
+chat form (`SessionRow.pending_form`) is answered with `ask { get | answer |
+decline }`, gated on `tools/list` naming `ask`; a secret field is drawn only
+there, never in a reply form. The phone does not draw guide pages: a `guide`
+block with `page` names the guide and sends the person to the desktop.
+
 ## How Compose surfaces to XCUITest on iOS
 
 Measured on an iOS 18.5 simulator (there is no other way to know it from here):

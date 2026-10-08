@@ -39,6 +39,9 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.AgentActions
 import dev.claudefleet.mobile.data.AppSession
 import dev.claudefleet.mobile.data.AuthState
+import dev.claudefleet.mobile.ui.components.ChatHost
+import dev.claudefleet.mobile.data.ChatFormActions
+import dev.claudefleet.mobile.data.HubChatFormActions
 import dev.claudefleet.mobile.data.DownloadActions
 import dev.claudefleet.mobile.data.HubDownloadActions
 import dev.claudefleet.mobile.data.FleetRepository
@@ -319,6 +322,9 @@ class AppContainer(
 
     /** The fleet's settings pages' calls (claude-fleet declarative pages P6). */
     val fleetSettingsActions: FleetSettingsActions = HubFleetSettingsActions(session)
+
+    /** A session's chat form (`ask`): read, answer, decline. */
+    val chatFormActions: ChatFormActions = HubChatFormActions(session)
 
     /** The Files tab's calls (claude-fleet file downloads), through the same `withClient`. */
     val downloadActions: DownloadActions = HubDownloadActions(session)
@@ -1582,6 +1588,11 @@ private fun SessionRoute(
             states = toolDetailStates,
             request = toolDetailsModel::request,
         ),
+        chat = ChatHost(
+            settings = container.fleetSettingsActions.takeIf { caps.settingProposals },
+            mayDecideSettings = credentials.canWrite && caps.decideSettingProposals,
+        ),
+        chatForms = container.chatFormActions.takeIf { caps.ask },
         onRewind = { anchor -> vm.rewind(anchor) },
         onRetry = { anchor, prompt -> vm.retry(anchor, prompt) },
         // A fork is a new session: open it, with this one a Back away.
