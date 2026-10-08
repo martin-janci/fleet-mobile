@@ -88,6 +88,8 @@ fun NewSessionScreen(
     onSelectWorktree: (Long?) -> Unit = {},
     /** The New navigation's three-step wizard ([NewSessionWizard]) instead of the long form. */
     wizard: Boolean = false,
+    wizardStep: WizardStep = WizardStep.Where,
+    onWizardStep: (WizardStep) -> Unit = {},
 ) {
     if (wizard) {
         NewSessionWizard(
@@ -107,6 +109,8 @@ fun NewSessionScreen(
             tools = tools,
             toolHandlers = toolHandlers,
             onSelectWorktree = onSelectWorktree,
+            step = wizardStep,
+            onStep = onWizardStep,
             modifier = modifier,
         )
         return

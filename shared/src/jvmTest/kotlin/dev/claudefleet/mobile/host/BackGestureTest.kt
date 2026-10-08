@@ -89,7 +89,9 @@ class TheBackGestureReachesTheNavigatorTest {
      * closes what is open before `nav.back()` leaves the screen. The Company
      * screen's is the same shape: enabled only while one org's overview is
      * open over its list, and composed after `App`'s, so back closes the org
-     * before it leaves the screen.
+     * before it leaves the screen. The New session wizard's (redesign 14.6)
+     * is enabled only on its Project or Review step, so back goes one step
+     * back; on Where it is off and `nav.back()` leaves the form.
      */
     @Test
     fun there_is_exactly_one() {
@@ -99,7 +101,9 @@ class TheBackGestureReachesTheNavigatorTest {
         val app = Repo.shipped.single { it.name == "App.kt" }.readText()
         val enables = Regex("""BackHandler\(enabled = ([^)]+\)?)\)""").findAll(app).map { it.groupValues[1].trim() }.toList()
         assertEquals(
-            listOf("nav.isPushed(screen)", "companyState.openId != null", "settingsCaps.fleetSettings && fleet.openPage != null", "state.views.isNotEmpty()"),
+            listOf("nav.isPushed(screen)", "companyState.openId != null", "settingsCaps.fleetSettings && fleet.openPage != null",
+                "wizard && wizardStep.previous != null && !state.creating", "state.views.isNotEmpty()",
+            ),
             enables,
         )
     }

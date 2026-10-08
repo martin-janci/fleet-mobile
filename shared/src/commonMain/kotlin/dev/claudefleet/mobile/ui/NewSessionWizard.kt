@@ -39,9 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -73,7 +71,6 @@ import dev.claudefleet.mobile.ui.theme.OrbitTokens
  * first) holds here unchanged. The step is the only thing the wizard adds,
  * and it is screen state: going back a step keeps everything filled in.
  */
-@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 internal fun NewSessionWizard(
     state: NewSessionUiState,
@@ -92,9 +89,15 @@ internal fun NewSessionWizard(
     tools: ProjectToolsUiState,
     toolHandlers: ProjectToolsHandlers,
     onSelectWorktree: (Long?) -> Unit,
+    /**
+     * The step on screen, held by the route: `App` owns every back handler
+     * (`BackGestureTest`), and a back gesture on Project or Review goes one
+     * step back rather than leaving the form.
+     */
+    step: WizardStep,
+    onStep: (WizardStep) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var step by remember { mutableStateOf(WizardStep.Where) }
     // A background agent shows the same Starting panel, without the
     // project's steps: it has none of them.
     var background by remember { mutableStateOf(false) }
@@ -124,16 +127,12 @@ internal fun NewSessionWizard(
     }
 
     val previous = step.previous
-    // A step back is a step back, not the end of the form; leaving mid-start
-    // is safe (the call runs in the fleet's scope), so Back then leaves.
-    BackHandler(enabled = previous != null && !state.creating) { step = previous ?: step }
-
     Column(modifier = modifier.fillMaxSize().background(Fleet.colors.bg)) {
         ScreenHeader(
             title = state.ticketKey?.let { "Start $it" } ?: "New session",
             subtitle = stepHeading(step, state),
             navigation = {
-                IconButton(onClick = { if (previous != null && !state.creating) step = previous else onBack() }) {
+                IconButton(onClick = { if (previous != null && !state.creating) onStep(previous) else onBack() }) {
                     Icon(FleetIcons.ArrowBack, contentDescription = "Back")
                 }
             },
@@ -147,7 +146,7 @@ internal fun NewSessionWizard(
             WizardBody(
                 step = step,
                 state = state,
-                onStep = { step = it },
+                onStep = onStep,
                 onBack = onBack,
                 onSelectHost = onSelectHost,
                 onProjectQuery = onProjectQuery,
@@ -220,7 +219,7 @@ private fun ColumnScope.WizardBody(
 }
 
 /** The wizard's three steps, in order. */
-internal enum class WizardStep(val title: String) {
+enum class WizardStep(val title: String) {
     Where("Where"),
     Project("Project"),
     Review("Review");
