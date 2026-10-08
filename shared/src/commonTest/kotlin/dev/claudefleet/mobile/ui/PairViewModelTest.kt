@@ -33,6 +33,7 @@ private const val PAIR_URL = "$HUB/pair#ABCD1234"
 private class FakeAuth : AuthActions {
     override val state = MutableStateFlow<AuthState>(AuthState.Unpaired)
     override val unpairReason = MutableStateFlow<String?>(null)
+    override var lastHub: String? = null
 
     /** Every `(scanned, base)` this was asked to redeem, in order. */
     val pairs = mutableListOf<Pair<String, String?>>()
@@ -829,5 +830,158 @@ class PairLinkTest {
         runCurrent()
 
         assertFalse(vm.state.value.scanning)
+    }
+
+    // -----------------------------------------------------------------------
+    // Redesign 14.11: QR first, the typed path one tap away
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun the_typed_fields_start_folded_where_the_camera_can_be_used() = runTest {
+        val vm = PairViewModel(FakeAuth(), backgroundScope, cameraAvailable = true)
+        assertFalse(vm.state.value.manual, "scanning is the main path")
+
+        vm.setManual(true)
+        assertTrue(vm.state.value.manual)
+        vm.setManual(false)
+        assertFalse(vm.state.value.manual)
+    }
+
+    /** No camera: the typed path is the only one, so it is open and stays open. */
+    @Test
+    fun without_a_camera_the_typed_fields_are_open_and_cannot_be_folded() = runTest {
+        val vm = PairViewModel(FakeAuth(), backgroundScope, cameraAvailable = false)
+        assertTrue(vm.state.value.manual)
+
+        vm.setManual(false)
+
+        assertTrue(vm.state.value.manual)
+    }
+
+    @Test
+    fun a_refused_camera_opens_the_fields_its_message_points_at() = runTest {
+        val vm = PairViewModel(FakeAuth(), backgroundScope, cameraAvailable = true)
+        vm.setScanning(true)
+
+        vm.onScannerUnavailable("the camera permission was refused. Type the 8-character code instead.")
+
+        assertTrue(vm.state.value.manual)
+        assertFalse(vm.state.value.scanning)
+    }
+
+    /** Re-pairing after a forget or a 401 keeps the hub address, with the fields open on it. */
+    @Test
+    fun a_re_pair_keeps_the_hub_address_and_says_why() = runTest {
+        val auth = FakeAuth().apply {
+            lastHub = HUB
+            unpairReason.value = dev.claudefleet.mobile.data.FORGOTTEN_CREDENTIAL_REASON
+        }
+        val vm = PairViewModel(auth, backgroundScope, cameraAvailable = true)
+
+        assertEquals(HUB, vm.state.value.address)
+        assertTrue(vm.state.value.manual)
+        assertTrue(vm.state.value.reasonIsForget)
+
+        vm.onCodeChange("ABCD1234")
+        vm.submit()
+        runCurrent()
+
+        assertEquals(listOf<Pair<String, String?>>("ABCD1234" to HUB), auth.pairs, "a bare code goes to the kept address")
+        assertNotNull(vm.state.value.paired)
+    }
+
+    @Test
+    fun a_401_reason_is_not_read_as_a_forget() = runTest {
+        val auth = FakeAuth().apply { lastHub = HUB; unpairReason.value = REVOKED_CREDENTIAL_REASON }
+        val vm = PairViewModel(auth, backgroundScope, cameraAvailable = true)
+
+        assertFalse(vm.state.value.reasonIsForget)
+    }
+
+    /** Paste fills the fields and stops, like a link: the clipboard gets no more say than a link does. */
+    @Test
+    fun paste_fills_the_fields_and_never_pairs_by_itself() = runTest {
+        val auth = FakeAuth()
+        val vm = PairViewModel(auth, backgroundScope, cameraAvailable = true)
+
+        vm.paste("  $PAIR_URL\n")
+        runCurrent()
+
+        assertEquals(HUB, vm.state.value.address)
+        assertEquals("ABCD1234", vm.state.value.code)
+        assertTrue(vm.state.value.manual, "what it filled in is on screen to be checked")
+        assertTrue(auth.pairs.isEmpty())
+        assertNull(vm.state.value.error)
+    }
+
+    @Test
+    fun paste_takes_a_claudefleet_link_too() = runTest {
+        val vm = PairViewModel(FakeAuth(), backgroundScope, cameraAvailable = true)
+
+        vm.paste("claudefleet:$PAIR_URL")
+
+        assertEquals("ABCD1234", vm.state.value.code)
+        assertEquals(HUB, vm.state.value.address)
+    }
+
+    @Test
+    fun an_empty_clipboard_or_a_stranger_says_so() = runTest {
+        val vm = PairViewModel(FakeAuth(), backgroundScope, cameraAvailable = true)
+
+        vm.paste(null)
+        assertEquals(NOTHING_TO_PASTE, vm.state.value.error)
+
+        vm.paste("https://example.com/not-a-pairing-link")
+        assertNotNull(vm.state.value.error)
+        assertEquals("", vm.state.value.code)
+    }
+
+    /** A pair in flight names its hub and can be stopped; the fields keep what was typed. */
+    @Test
+    fun a_pair_in_flight_says_where_and_can_be_cancelled() = runTest {
+        val auth = FakeAuth().apply { gate = CompletableDeferred() }
+        val vm = PairViewModel(auth, backgroundScope, cameraAvailable = true)
+        vm.onAddressChange("$HUB/")
+        vm.onCodeChange("ABCD1234")
+
+        vm.submit()
+        runCurrent()
+        assertTrue(vm.state.value.pairing)
+        assertEquals("hub.example.com", vm.state.value.contacting)
+
+        vm.cancel()
+        runCurrent()
+
+        assertFalse(vm.state.value.pairing)
+        assertNull(vm.state.value.contacting)
+        assertNull(vm.state.value.paired)
+        assertEquals("ABCD1234", vm.state.value.code)
+        assertTrue(vm.state.value.canSubmit, "and the button is back")
+    }
+
+    /** After a cancel the camera may act on the same QR again: that attempt decided nothing. */
+    @Test
+    fun a_cancelled_scan_can_be_scanned_again() = runTest {
+        val auth = FakeAuth().apply { gate = CompletableDeferred() }
+        val vm = PairViewModel(auth, backgroundScope, cameraAvailable = true)
+        vm.setScanning(true)
+        vm.onScanned(PAIR_URL)
+        runCurrent()
+        vm.cancel()
+        runCurrent()
+
+        auth.gate = null
+        vm.onScanned(PAIR_URL)
+        runCurrent()
+
+        assertEquals(2, auth.pairs.size)
+        assertNotNull(vm.state.value.paired)
+    }
+
+    @Test
+    fun hub_labels_drop_the_scheme_and_slash() {
+        assertEquals("fleet.janci.dev", hubLabel("https://fleet.janci.dev/"))
+        assertEquals("10.0.0.2:7878", hubLabel("http://10.0.0.2:7878"))
+        assertEquals("", hubLabel(""))
     }
 }

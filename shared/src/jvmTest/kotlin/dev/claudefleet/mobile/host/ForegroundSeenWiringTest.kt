@@ -24,7 +24,7 @@ class ForegroundSeenWiringTest {
 
     @Test
     fun settings_shows_the_platforms_note_and_refreshes_it_on_resume() {
-        val row = settings.substringAfter("private fun NotifyRow(").substringBefore("\n}\n")
+        val row = settings.substringAfter("fun NotifyRow(").substringBefore("\n}\n")
         assertTrue("notifier.note.collectAsState()" in row)
         assertTrue("LifecycleResumeEffect(notifier)" in row && "notifier.refreshNote()" in row)
         assertTrue("note ?:" in row, "a null note keeps the existing line")

@@ -366,4 +366,24 @@ class SettingsViewModelTest {
         assertNull(secrets.read())
         assertIs<AuthState.Unpaired>(session.state.value)
     }
+
+    /** The New layout's Settings (redesign 14.11): back walks out of a group to the home, then hands back to the caller. */
+    @Test
+    fun back_goes_from_a_group_to_the_home_then_lets_the_caller_go_on() = runTest {
+        val (session, _) = paired()
+        session.restore()
+        val vm = SettingsViewModel(session, backgroundScope, appVersion = VERSION)
+
+        assertEquals(SettingsPlace.Home, vm.place.value)
+        assertFalse(vm.back(), "on the home, back is the caller's")
+
+        vm.open(SettingsPlace.Group(SettingsGroup.WORK))
+        assertEquals(SettingsPlace.Group(SettingsGroup.WORK), vm.place.value)
+        assertTrue(vm.back())
+        assertEquals(SettingsPlace.Home, vm.place.value)
+
+        vm.open(SettingsPlace.ThisPhone)
+        assertTrue(vm.back())
+        assertFalse(vm.back())
+    }
 }

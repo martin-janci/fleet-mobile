@@ -83,7 +83,9 @@ class TheBackGestureReachesTheNavigatorTest {
      * One file, and one handler per question. Two that answered the same
      * question would fight over the gesture in an order nobody picked. The
      * Settings tab's closes an open fleet settings page (drawn inside the
-     * tab, so not a pushed screen). The worktree screen's answers another:
+     * tab, so not a pushed screen); on the New layout the Orbit settings
+     * (redesign 14.11) has its own in the other branch of the same `if`,
+     * which also closes an open group, so only one of the two is ever composed. The worktree screen's answers another:
      * enabled only while a diff, commit or file is open over its tab, and
      * composed inside the screen — after `App`'s — so it is asked first and
      * closes what is open before `nav.back()` leaves the screen. The Company
@@ -99,7 +101,7 @@ class TheBackGestureReachesTheNavigatorTest {
         val app = Repo.shipped.single { it.name == "App.kt" }.readText()
         val enables = Regex("""BackHandler\(enabled = ([^)]+\)?)\)""").findAll(app).map { it.groupValues[1].trim() }.toList()
         assertEquals(
-            listOf("nav.isPushed(screen)", "companyState.openId != null", "settingsCaps.fleetSettings && fleet.openPage != null", "state.views.isNotEmpty()"),
+            listOf("nav.isPushed(screen)", "companyState.openId != null", "fleetPageOpen || place != SettingsPlace.Home", "fleetPageOpen", "state.views.isNotEmpty()"),
             enables,
         )
     }
