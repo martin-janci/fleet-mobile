@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
@@ -88,7 +89,7 @@ class PhoneStatesUiTest {
                 content = {
                     FleetTheme(dark = dark) {
                         CompositionLocalProvider(LocalReducedMotion provides reduced) {
-                            Column(Modifier.fillMaxSize().background(Fleet.colors.bg)) { content() }
+                            Column(Modifier.fillMaxSize().background(Fleet.colors.bg).padding(vertical = 16.dp)) { content() }
                         }
                     }
                 },
