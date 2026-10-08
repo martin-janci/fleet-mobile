@@ -106,6 +106,7 @@ fun FleetSnapshot.applying(event: HubEvent.Row): FleetSnapshot = when (event.nam
     "session:created", "session:updated" -> upsertSession(event.payload)
     "session:killed" -> removeSession(event.payload)
     "host:added", "host:probed" -> upsertHost(event.payload)
+    "host:pinged" -> firstPing(event.payload)
     "host:removed" -> removeHost(event.payload)
     "project:updated" -> upsertProject(event.payload)
     "work:item" -> upsertTicket(event.payload)
@@ -224,6 +225,22 @@ private fun FleetSnapshot.removeSession(payload: JsonElement): FleetSnapshot {
 private fun FleetSnapshot.upsertHost(payload: JsonElement): FleetSnapshot {
     val incoming = decode(HostRow.serializer(), payload) ?: return this
     return copy(hosts = hosts.upserted(incoming) { it.alias == incoming.alias })
+}
+
+/**
+ * `host:pinged` (`{alias, last_pinged_at, reachable, …}`) is what the hub
+ * sends when a probe moved only the stamp, once per host per pass. Only a
+ * host's first one changes anything drawn: until then the host has never
+ * been probed ("not probed yet", and what the first import still reads), and
+ * a probe of an unreachable host with no versions sends nothing else. Every
+ * later one is a no-op, so a quiet fleet does not redraw each pass.
+ */
+private fun FleetSnapshot.firstPing(payload: JsonElement): FleetSnapshot {
+    val alias = payload.text("alias") ?: return this
+    val at = payload.number("last_pinged_at") ?: return this
+    val i = hosts.indexOfFirst { it.alias == alias && it.lastPingedAt == null }
+    if (i < 0) return this
+    return copy(hosts = hosts.toMutableList().also { it[i] = it[i].copy(lastPingedAt = at) })
 }
 
 private fun FleetSnapshot.removeHost(payload: JsonElement): FleetSnapshot {

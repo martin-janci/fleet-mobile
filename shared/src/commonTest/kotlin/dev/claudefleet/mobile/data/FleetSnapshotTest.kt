@@ -532,6 +532,22 @@ class FleetSnapshotTest {
         }
     }
 
+    /**
+     * `host:pinged` is what a probe sends when only the stamp moved, every
+     * pass. The first one for a host never probed is news (it is no longer
+     * "not probed yet"); every later one changes nothing drawn.
+     */
+    @Test
+    fun only_a_hosts_first_ping_changes_the_snapshot() {
+        val fresh = FleetSnapshot(hosts = listOf(HostRow(alias = "box")))
+        val pinged = fresh.applying(row("host:pinged", """{"alias":"box","last_pinged_at":1758153600,"reachable":false}"""))
+        assertEquals(1758153600L, pinged.hosts.single().lastPingedAt)
+
+        assertSame(pinged, pinged.applying(row("host:pinged", """{"alias":"box","last_pinged_at":1758153700,"reachable":false}""")))
+        assertSame(fresh, fresh.applying(row("host:pinged", """{"alias":"other","last_pinged_at":1758153600}""")))
+        assertSame(fresh, fresh.applying(row("host:pinged", """{"alias":"box"}""")))
+    }
+
     // ---- the work graph (M8) ----
 
     @Test

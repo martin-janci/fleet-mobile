@@ -265,7 +265,9 @@ import dev.claudefleet.mobile.ui.SessionsViewModel
 import dev.claudefleet.mobile.ui.FleetSettingsSection
 import dev.claudefleet.mobile.ui.FleetSettingsViewModel
 import dev.claudefleet.mobile.ui.SettingsScreen
+import dev.claudefleet.mobile.ui.FirstImport
 import dev.claudefleet.mobile.ui.FleetCheck
+import dev.claudefleet.mobile.ui.firstImportProgress
 import dev.claudefleet.mobile.ui.hubLabel
 import dev.claudefleet.mobile.ui.kit.FullscreenWait
 import dev.claudefleet.mobile.ui.OrbitSettingsScreen
@@ -698,6 +700,8 @@ private fun FleetRoute(
     val openRequest by container.openSession.collectAsState()
     LaunchedEffect(openRequest) { if (openRequest != null) container.consumeOpenSession()?.let(nav::open) }
     val tab by nav.tab.collectAsState()
+    // The first import after a pair (14.12): set as the fleet check ends, on the New bar only.
+    var importing by remember(credentials) { mutableStateOf(false) }
 
     // `Navigator.back()` returns false on a tab specifically so the
     // platform can have the gesture instead, `NavigatorTest` pins that, and a
@@ -1774,11 +1778,11 @@ private fun FleetRoute(
     }
     // The tour runs on the real Inbox, over the bar as well, and stops for nothing else.
     val stop = help.tourStop
-    if (stop != null && screen == Screen.Inbox && !fleetCheck) {
+    if (stop != null && screen == Screen.Inbox && !fleetCheck && !importing) {
         TourOverlay(stop, tourAnchors, onNext = helpSettings::nextStop, onSkip = helpSettings::skipTour)
     }
     // Once, after pairing and the fleet check: how much help.
-    if (help.mode == null && !fleetCheck && whatsNew == null) {
+    if (help.mode == null && !fleetCheck && !importing && whatsNew == null) {
         HelpPicker(
             onPick = { mode -> helpSettings.pick(mode, tourHere = layout == PhoneLayout.New && screen == Screen.Inbox) },
             onPracticeFirst = { mode ->
@@ -1791,13 +1795,26 @@ private fun FleetRoute(
     // Over the whole fleet, in App's Box: the first connection after a pair.
     if (fleetCheck) {
         val status by repository.status.collectAsState()
+        val checkHosts by repository.hosts.collectAsState()
         FleetCheck(
             status = status,
             hub = hubLabel(credentials.hub),
             clientName = credentials.name,
             exitLabel = if (layout == PhoneLayout.New) FullscreenWait.FleetCheck.exitLabel else "Skip, open Sessions",
-            onDone = onFleetCheckDone,
+            onDone = {
+                // The New bar follows a connected check with the first import
+                // while the hub still has hosts it never read.
+                importing = layout == PhoneLayout.New && status is ConnectionStatus.Connected &&
+                    firstImportProgress(checkHosts) != null
+                onFleetCheckDone()
+            },
         )
+    }
+    // Then, once after a pair, the Galaxy while the hub reads the fleet for the first time.
+    if (importing && !fleetCheck) {
+        val importHosts by repository.hosts.collectAsState()
+        val importSessions by repository.sessions.collectAsState()
+        FirstImport(hosts = importHosts, sessions = importSessions.size, onDone = { importing = false })
     }
 }
 

@@ -5,8 +5,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetRepository
+import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.ui.kit.FullscreenLoader
 import dev.claudefleet.mobile.ui.kit.FullscreenWait
+import dev.claudefleet.mobile.ui.kit.LoaderProgress
 import dev.claudefleet.mobile.ui.kit.LoaderStep
 import dev.claudefleet.mobile.ui.kit.StepState
 
@@ -60,6 +62,57 @@ internal fun FleetCheck(
         exitLabel = exitLabel,
         steps = fleetCheckSteps(status, hub, clientName),
         note = (status as? ConnectionStatus.Reconnecting)?.reason?.replaceFirstChar { it.uppercaseChar() },
+        onExit = onDone,
+        modifier = modifier,
+    )
+}
+
+/**
+ * How far the hub has got reading the fleet for the first time: of the hosts
+ * it lists (hidden ones aside), how many it has probed once. A host never
+ * probed has no `last_pinged_at`, and its sessions are not in the list yet.
+ * Null when there is nothing left to read, so a hub that has run for a while
+ * never shows the Galaxy at all.
+ */
+internal fun firstImportProgress(hosts: List<HostRow>): LoaderProgress? {
+    val shown = hosts.filterNot { it.hidden }
+    val read = shown.count { it.lastPingedAt != null }
+    return if (read == shown.size) null else LoaderProgress(read, shown.size, "hosts read")
+}
+
+/** What the Galaxy says it is doing: the real count of hosts, and that it happens once. */
+internal fun firstImportMeta(hosts: Int, sessions: Int): String {
+    val found = if (hosts == 1) "1 host and is reading it" else "$hosts hosts and is reading them"
+    val so = when (sessions) {
+        0 -> ""
+        1 -> " 1 session so far."
+        else -> " $sessions sessions so far."
+    }
+    return "The hub found $found for the first time.$so This happens once."
+}
+
+/**
+ * After the fleet check, the first import (redesign 14.12 and 14.19,
+ * MobileFullscreenLoaders): the Galaxy while the hub still reads hosts it has
+ * never probed, with the real count under it. It ends itself when
+ * [firstImportProgress] has nothing left, and "Continue in the background"
+ * ends it at once.
+ */
+@Composable
+internal fun FirstImport(
+    hosts: List<HostRow>,
+    sessions: Int,
+    onDone: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val progress = firstImportProgress(hosts)
+    LaunchedEffect(progress == null) { if (progress == null) onDone() }
+    if (progress == null) return
+    FullscreenLoader(
+        wait = FullscreenWait.FirstImport,
+        title = "Building your fleet",
+        meta = firstImportMeta(progress.total, sessions),
+        progress = progress,
         onExit = onDone,
         modifier = modifier,
     )
