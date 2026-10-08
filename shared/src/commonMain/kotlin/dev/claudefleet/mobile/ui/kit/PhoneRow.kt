@@ -48,6 +48,8 @@ fun PhoneRow(
     leadColor: Color = word?.color(Fleet.colors) ?: Fleet.colors.fgMuted,
     selected: Boolean = false,
     divider: Boolean = true,
+    /** False for a menu row (More, Control), which has no state to show. */
+    dot: Boolean = true,
     onClick: (() -> Unit)? = null,
     chips: (@Composable RowScope.() -> Unit)? = null,
 ) {
@@ -65,7 +67,7 @@ fun PhoneRow(
                 .padding(horizontal = OrbitTokens.spacing("phone-gutter").dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            OrbitDot(word, modifier = Modifier.padding(top = 6.dp))
+            if (dot) OrbitDot(word, modifier = Modifier.padding(top = 6.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
@@ -84,7 +86,7 @@ fun PhoneRow(
                     buildAnnotatedString {
                         if (lead != null) {
                             withStyle(SpanStyle(color = leadColor)) { append(lead) }
-                            if (line.isNotEmpty()) append(if (word != null && lead == word.label) ": " else " · ")
+                            if (line.isNotEmpty()) append(if (word != null) ": " else " · ")
                         }
                         append(line)
                     },
