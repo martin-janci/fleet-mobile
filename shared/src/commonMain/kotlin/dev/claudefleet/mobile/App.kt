@@ -71,6 +71,8 @@ import dev.claudefleet.mobile.data.HubMissionActions
 import dev.claudefleet.mobile.data.MissionActions
 import dev.claudefleet.mobile.data.HubRoutineActions
 import dev.claudefleet.mobile.data.RoutineActions
+import dev.claudefleet.mobile.data.DeviceActions
+import dev.claudefleet.mobile.data.HubDeviceActions
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.SessionActions
@@ -216,6 +218,10 @@ import dev.claudefleet.mobile.ui.AutomationHandlers
 import dev.claudefleet.mobile.ui.AutomationSheet
 import dev.claudefleet.mobile.ui.AutomationViewModel
 import dev.claudefleet.mobile.ui.automationLine
+import dev.claudefleet.mobile.ui.DebugDevicesHandlers
+import dev.claudefleet.mobile.ui.DebugDevicesSheet
+import dev.claudefleet.mobile.ui.DebugDevicesViewModel
+import dev.claudefleet.mobile.ui.devicesLine
 import dev.claudefleet.mobile.ui.MissionsViewModel
 import dev.claudefleet.mobile.ui.UsageHandlers
 import dev.claudefleet.mobile.ui.CompanyHandlers
@@ -401,6 +407,9 @@ class AppContainer(
 
     /** Routines and Pause all (redesign 8.9), through the same `withClient`. */
     val routineActions: RoutineActions = HubRoutineActions(session)
+
+    /** Debug devices (redesign 11.10), through the same `withClient`. */
+    val deviceActions: DeviceActions = HubDeviceActions(session)
 
     /** The way into the hub's agent, through the same `withClient`. */
     val agentActions: AgentActions = HubAgentActions(session)
@@ -684,6 +693,8 @@ private fun FleetRoute(
     val missionsState by missions.state.collectAsState()
     val automation = remember(repository, scope) { AutomationViewModel(repository, container.routineActions, scope, credentials.canWrite) }
     val automationState by automation.state.collectAsState()
+    val debugDevices = remember(repository, scope) { DebugDevicesViewModel(repository, container.deviceActions, scope, credentials.canWrite) }
+    val debugDevicesState by debugDevices.state.collectAsState()
     val today = remember(repository, scope) {
         TodayViewModel(
             fleet = repository,
@@ -1380,6 +1391,7 @@ private fun FleetRoute(
                 Screen.More -> {
                     val hostRows by repository.hosts.collectAsState()
                     LaunchedEffect(automationState.available) { if (automationState.available) automation.refresh() }
+                    LaunchedEffect(debugDevicesState.available) { if (debugDevicesState.available) debugDevices.refresh() }
                     MoreScreen(
                         top = { updateState.available?.let { UpdateCard(it, container.appVersion, onOpen = nav::openUpdate) } },
                         entries = buildList {
@@ -1392,6 +1404,10 @@ private fun FleetRoute(
                                 add(MoreEntry("Automation", automationLine(automationState.routines, automationState.paused)) { automation.open() })
                             } else if (missionsState.available) {
                                 add(MoreEntry("Automation", "Missions, and Pause all") { missions.open() })
+                            }
+                            if (debugDevicesState.available) {
+                                // Test phones on the hosts (11.10), not the people's own devices.
+                                add(MoreEntry("Debug devices", devicesLine(debugDevicesState.devices)) { debugDevices.open() })
                             }
                             if (filesState.available) {
                                 val line = if (filesState.loaded) "${filesState.files.size} files" else "Files sessions sent to the hub"
@@ -1644,6 +1660,19 @@ private fun FleetRoute(
                         onOpenSession = { id -> automation.close(); nav.open(id) },
                         onOpenMissions = if (missionsState.available) ({ automation.close(); missions.open() }) else null,
                         onDismissError = automation::dismissError,
+                    ),
+                )
+            }
+            if (debugDevicesState.open) {
+                DebugDevicesSheet(
+                    state = debugDevicesState,
+                    nowSeconds = epochSeconds(),
+                    handlers = DebugDevicesHandlers(
+                        onClose = debugDevices::close,
+                        onScan = { debugDevices.scan() },
+                        onPress = { d, move -> debugDevices.press(d, move) },
+                        onCloseLogs = debugDevices::closeLogs,
+                        onDismissError = debugDevices::dismissError,
                     ),
                 )
             }

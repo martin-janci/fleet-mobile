@@ -33,6 +33,9 @@ import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.TidyReport
 import dev.claudefleet.mobile.model.Mission
 import dev.claudefleet.mobile.model.Routine
+import dev.claudefleet.mobile.model.DebugDevice
+import dev.claudefleet.mobile.model.DebugDeviceList
+import dev.claudefleet.mobile.model.DeviceOutput
 import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.MissionCard
@@ -1158,6 +1161,72 @@ class HubClient(
             },
         ) { json.decodeFromJsonElement(Routine.serializer(), it) }
 
+    // ---- debug devices (claude-fleet contract revision 10) ----
+    //
+    // `debug_devices` is not readonly on the hub, so a readonly token is not
+    // served it, and nothing here is called unless `tools/list` names it
+    // (`HubCapabilities.debugDevices`). `device` takes the row's id.
+
+    /** The test phones this person may see, and each host's last scan; [refresh] rescans hosts not scanned lately. */
+    suspend fun debugDevices(refresh: Boolean = false): DebugDeviceList =
+        call(
+            "debug_devices",
+            buildJsonObject {
+                put("action", "list")
+                if (refresh) put("refresh", true)
+            },
+        ) { json.decodeFromJsonElement(DebugDeviceList.serializer(), it) }
+
+    /** Scan every host for attached and running devices now. What it found comes back through [debugDevices]. */
+    suspend fun scanDebugDevices() {
+        call("debug_devices", buildJsonObject { put("action", "scan") }) { it }
+    }
+
+    /** Hold [deviceId] for this device (`client:<name>`) so sessions keep off it. */
+    suspend fun claimDebugDevice(deviceId: Long, note: String? = null): DebugDevice =
+        deviceCall("claim", deviceId) { note?.let { put("note", it) } }
+
+    /** Let go of [deviceId], whoever held it; a person may release any claim. */
+    suspend fun releaseDebugDevice(deviceId: Long): DebugDevice = deviceCall("release", deviceId)
+
+    /** Shut down an emulator or simulator. */
+    suspend fun shutdownDebugDevice(deviceId: Long): DebugDevice = deviceCall("shutdown", deviceId)
+
+    /** Start a stopped emulator or simulator; answers the hub's word for its state. */
+    suspend fun bootDebugDevice(deviceId: Long): String =
+        call(
+            "debug_devices",
+            buildJsonObject {
+                put("action", "boot")
+                put("device", deviceId.toString())
+            },
+        ) { (it as? JsonObject)?.get("state")?.let { s -> (s as? JsonPrimitive)?.content } ?: "" }
+
+    /** The device's last [lines] log lines. */
+    suspend fun debugDeviceLogs(deviceId: Long, lines: Int): DeviceOutput =
+        call(
+            "debug_devices",
+            buildJsonObject {
+                put("action", "logs")
+                put("device", deviceId.toString())
+                put("lines", lines)
+            },
+        ) { json.decodeFromJsonElement(DeviceOutput.serializer(), it) }
+
+    private suspend fun deviceCall(
+        action: String,
+        deviceId: Long,
+        more: JsonObjectBuilder.() -> Unit = {},
+    ): DebugDevice =
+        call(
+            "debug_devices",
+            buildJsonObject {
+                put("action", action)
+                put("device", deviceId.toString())
+                more()
+            },
+        ) { json.decodeFromJsonElement(DebugDevice.serializer(), it) }
+
     // ---- the Work view (claude-fleet M14) ----
 
     /**
@@ -1865,6 +1934,9 @@ class HubClient(
             "delete_worktree",
             "move_session",
             "new_shell_session",
+            // Routines (redesign 8.9): `Deadline::Lifecycle` on the hub,
+            // because `run_now` starts a session.
+            "routines",
         )
 
         /**
@@ -1877,6 +1949,9 @@ class HubClient(
             // `ask` is the hub's `Deadline::LongPoll` too: an answer that
             // carries a secret is written to the session's host over SSH.
             "ask",
+            // Debug devices: `Deadline::LongPoll` on the hub. A scan, a boot
+            // or a log read runs over SSH on the device's host.
+            "debug_devices",
         )
         const val UNKNOWN_CODE = "E_UNKNOWN"
     }

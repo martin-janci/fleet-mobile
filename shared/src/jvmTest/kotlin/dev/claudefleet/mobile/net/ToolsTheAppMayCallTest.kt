@@ -195,6 +195,9 @@ class ToolsTheAppMayCallTest {
         // `Access::Client`, not readonly, so the hub does not list it for a
         // readonly token; never a per-host token's (`NOT_FOR_HOST_TOKENS`).
         "routines",
+        // Debug devices (redesign 11.10): the test phones on the hosts.
+        // `Access::Client`, not readonly, so a readonly token is not served it.
+        "debug_devices",
     )
 
     @Test
