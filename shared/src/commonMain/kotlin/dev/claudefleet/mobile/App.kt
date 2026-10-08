@@ -1467,7 +1467,7 @@ private fun FleetRoute(
                             sessions = attention.total,
                             missions = missionsState.missions.size.takeIf { missionsState.available },
                             onSessions = { nav.select(Tab.Sessions) },
-                            onMissions = { missions.open() }.takeIf { missionsState.available },
+                            onMissions = { missions.open(); Unit }.takeIf { missionsState.available },
                         )
                     }
                     val sessionId = controlState.sessionId

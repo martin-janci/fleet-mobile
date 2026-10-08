@@ -390,9 +390,3 @@ class ControlChrome(
     val header: @Composable () -> Unit,
     val aboveComposer: @Composable () -> Unit,
 )
-
-/** What the Control tab puts on the conversation: its header, and what goes above the composer. */
-class ControlChrome(
-    val header: @Composable () -> Unit,
-    val aboveComposer: @Composable () -> Unit,
-)
