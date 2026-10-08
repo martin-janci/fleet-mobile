@@ -532,9 +532,10 @@ class FleetRepository(
         _tickets.value = snapshot.tickets
     }
 
-    private companion object {
+    internal companion object {
+        /** The status before [start]: offline, but not for any reason the person needs to read. */
         const val NOT_STARTED = "not connected yet"
-        const val STREAM_CLOSED = "the hub closed the stream"
+        private const val STREAM_CLOSED = "the hub closed the stream"
     }
 }
 

@@ -57,7 +57,9 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.StatusCategory
+import dev.claudefleet.mobile.model.askedAt
 import dev.claudefleet.mobile.model.TodayGroup
 import dev.claudefleet.mobile.model.TodaySection
 import dev.claudefleet.mobile.model.TodaySession
@@ -113,7 +115,17 @@ data class TodayHandlers(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TodaySheet(state: TodayUiState, handlers: TodayHandlers) {
+fun TodaySheet(
+    state: TodayUiState,
+    handlers: TodayHandlers,
+    /**
+     * The New layout (redesign 14.3, MobileSessionsTools): *Waiting on me*
+     * is the live fleet's needs-you rows, the Inbox's own list, so the two
+     * counts can never disagree. Null on Classic, which keeps the hub's digest.
+     */
+    waitingNow: List<SessionRow>? = null,
+    nowSeconds: Long = 0,
+) {
     val clipboard = LocalClipboardManager.current
     val share = rememberShareText()
     // Keyed on the text: "Copied" is about this standup, and a re-read that
@@ -126,13 +138,18 @@ fun TodaySheet(state: TodayUiState, handlers: TodayHandlers) {
         containerColor = MaterialTheme.colorScheme.surface,
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            TodayHeader(state, handlers)
+            val f = state.filters
+            val waitingLive = waitingNow
+                ?.filter { f.host == null || it.hostAlias == f.host }
+                ?.filter { !f.ticketsOnly || it.work != null }
+                ?.takeIf { f.sections.isEmpty() || TodaySection.Waiting in f.sections }
+            TodayHeader(state, handlers, needYou = waitingNow?.size)
             // Reserved whether or not it is loading, so a re-read does not
             // shift the list under a thumb about to tap it.
             Box(Modifier.fillMaxWidth().height(4.dp)) {
                 if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
-            if (state.loaded && !state.view.isEmpty) TodayFilterRow(state, handlers)
+            if (state.loaded && !state.view.isEmpty) TodayFilterRow(state, handlers, waitingCount = waitingNow?.size)
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
             val v = state.shown
             LazyColumn(
@@ -146,7 +163,24 @@ fun TodaySheet(state: TodayUiState, handlers: TodayHandlers) {
                         EmptyNote("Nothing today matches these filters.", action = "Clear filters", onAction = handlers.onClearFilters)
                     }
                 }
-                groupSection(TodaySection.Waiting, v.waiting, handlers)
+                if (waitingNow == null) {
+                    groupSection(TodaySection.Waiting, v.waiting, handlers)
+                } else if (!waitingLive.isNullOrEmpty()) {
+                    item(key = "section-waiting-live") {
+                        SectionCard(TodaySection.Waiting, waitingLive.size) {
+                            waitingLive.forEachIndexed { i, row ->
+                                PhoneSessionRow(
+                                    row = row,
+                                    nowSeconds = nowSeconds,
+                                    showHost = true,
+                                    since = row.askedAt,
+                                    divider = i < waitingLive.lastIndex,
+                                    onClick = { handlers.onOpenSession(row.id) },
+                                )
+                            }
+                        }
+                    }
+                }
                 groupSection(TodaySection.InProgress, v.inProgress, handlers)
                 if (v.shipped.isNotEmpty()) {
                     item(key = "section-shipped") {
@@ -187,7 +221,7 @@ fun TodaySheet(state: TodayUiState, handlers: TodayHandlers) {
 
 /** "Today", a line of what it holds, and Refresh — the only action that is not about the text. */
 @Composable
-private fun TodayHeader(state: TodayUiState, handlers: TodayHandlers) {
+private fun TodayHeader(state: TodayUiState, handlers: TodayHandlers, needYou: Int? = null) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -201,7 +235,7 @@ private fun TodayHeader(state: TodayUiState, handlers: TodayHandlers) {
             )
             if (state.loaded) {
                 Text(
-                    todaySummary(state.view),
+                    todaySummary(state.view, needYou),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -218,9 +252,9 @@ private fun TodayHeader(state: TodayUiState, handlers: TodayHandlers) {
  * the whole digest rather than the filtered slice — a filter narrows the
  * list, it does not make the day quieter.
  */
-internal fun todaySummary(v: TodayView): String {
+internal fun todaySummary(v: TodayView, liveNeedYou: Int? = null): String {
     val sessions = v.sessions
-    val needYou = sessions.count { it.attention != null }
+    val needYou = liveNeedYou ?: sessions.count { it.attention != null }
     return buildList {
         add("Since midnight")
         add(if (sessions.size == 1) "1 session" else "${sessions.size} sessions")
@@ -236,7 +270,7 @@ internal fun todaySummary(v: TodayView): String {
  * is on. One line that scrolls sideways, like the Sessions filter strip.
  */
 @Composable
-private fun TodayFilterRow(state: TodayUiState, handlers: TodayHandlers) {
+private fun TodayFilterRow(state: TodayUiState, handlers: TodayHandlers, waitingCount: Int? = null) {
     val f = state.filters
     Row(verticalAlignment = Alignment.CenterVertically) {
         LazyRow(
@@ -245,7 +279,7 @@ private fun TodayFilterRow(state: TodayUiState, handlers: TodayHandlers) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             for (s in TodaySection.entries) {
-                val n = state.sectionCounts[s] ?: 0
+                val n = (if (s == TodaySection.Waiting) waitingCount else null) ?: state.sectionCounts[s] ?: 0
                 val on = s in f.sections
                 if (n == 0 && !on) continue
                 item(key = "section-${s.name}") {

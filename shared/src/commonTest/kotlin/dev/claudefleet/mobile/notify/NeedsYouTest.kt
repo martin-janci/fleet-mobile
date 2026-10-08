@@ -23,7 +23,7 @@ class NeedsYouTest {
     @Test
     fun a_session_that_comes_to_need_you_is_news_once() {
         val (first, seen) = needsYouAlerts(mapOf(1L to null), listOf(row(1, "waiting")))
-        assertEquals(listOf(NeedsYouAlert(1, "session 1", "Waiting for you · pine")), first)
+        assertEquals(listOf(NeedsYouAlert(1, "session 1", "Waiting for you · pine", reason = "waiting")), first)
 
         val (again, _) = needsYouAlerts(seen, listOf(row(1, "waiting")))
         assertTrue(again.isEmpty(), "still waiting is not news")

@@ -1,7 +1,9 @@
 package dev.claudefleet.mobile.ui.kit
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -52,13 +54,23 @@ fun PhoneRow(
     dot: Boolean = true,
     onClick: (() -> Unit)? = null,
     chips: (@Composable RowScope.() -> Unit)? = null,
+    /** A long press: starts bulk select on a session row. Needs [onClick]. */
+    onLongClick: (() -> Unit)? = null,
+    /** Drawn in the dot's place: the check box while rows are being picked. */
+    leading: (@Composable () -> Unit)? = null,
 ) {
     val o = Fleet.colors
     Column(
         modifier = modifier
             .fillMaxWidth()
             .then(if (selected) Modifier.background(o.accentSoft) else Modifier)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+            .then(
+                when {
+                    onClick != null && onLongClick != null -> Modifier.longPressable(onClick, onLongClick)
+                    onClick != null -> Modifier.clickable(onClick = onClick)
+                    else -> Modifier
+                },
+            ),
     ) {
         Row(
             modifier = Modifier
@@ -67,7 +79,7 @@ fun PhoneRow(
                 .padding(horizontal = OrbitTokens.spacing("phone-gutter").dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (dot) OrbitDot(word, modifier = Modifier.padding(top = 6.dp))
+            if (leading != null) leading() else if (dot) OrbitDot(word, modifier = Modifier.padding(top = 6.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
@@ -109,6 +121,10 @@ fun PhoneRow(
         if (divider) HorizontalDivider(color = o.border)
     }
 }
+
+@OptIn(ExperimentalFoundationApi::class)
+private fun Modifier.longPressable(onClick: () -> Unit, onLongClick: () -> Unit): Modifier =
+    combinedClickable(onClick = onClick, onLongClick = onLongClick, onLongClickLabel = "Select")
 
 /**
  * The neutral chip a row carries (host, PR, project), or a status chip when
