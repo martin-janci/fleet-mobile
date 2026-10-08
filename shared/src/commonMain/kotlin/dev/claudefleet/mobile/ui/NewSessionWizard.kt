@@ -97,13 +97,15 @@ internal fun NewSessionWizard(
     step: WizardStep,
     onStep: (WizardStep) -> Unit,
     modifier: Modifier = Modifier,
+    /** Add a project's step (redesign 14.20), held by the route for the same reason as [step]. */
+    addStep: AddProjectStep = AddProjectStep.Source,
+    addHandlers: AddProjectHandlers = AddProjectHandlers(),
 ) {
     // A background agent shows the same Starting panel, without the
     // project's steps: it has none of them.
     var background by remember { mutableStateOf(false) }
     LaunchedEffect(state.creating) { if (!state.creating) background = false }
 
-    if (tools.addingOn != null) AddProjectSheet(tools, toolHandlers)
     tools.pendingCreate?.let { p ->
         AlertDialog(
             onDismissRequest = toolHandlers.onCancelCreate,
@@ -112,6 +114,19 @@ internal fun NewSessionWizard(
             confirmButton = { TextButton(onClick = toolHandlers.onConfirmCreate) { Text("Create") } },
             dismissButton = { TextButton(onClick = toolHandlers.onCancelCreate) { Text("Cancel") } },
         )
+    }
+    // Add a project is a wizard of its own, over this one: Source, Where,
+    // then the clone. Leaving it while a clone runs comes back here.
+    if (tools.addingOn != null) {
+        AddProjectWizard(
+            tools = tools,
+            step = addStep,
+            hosts = state.hosts,
+            projects = state.projects.map { it.label },
+            handlers = addHandlers,
+            modifier = modifier,
+        )
+        return
     }
     var askingBackground by remember { mutableStateOf(false) }
     if (askingBackground) {
@@ -366,7 +381,10 @@ private fun ProjectStep(
         }
         val host = s.host
         if (tools.canAdd && host != null && s.ticketKey == null) item(key = "add-project") {
-            TextButton(onClick = { toolHandlers.onOpenAdd(host) }, enabled = editable) { Text("Add a project on $host…") }
+            TextButton(onClick = { toolHandlers.onOpenAdd(host) }, enabled = editable && !tools.adding) { Text("Add a project on $host…") }
+            if (tools.adding) {
+                StepHint("Adding ${tools.addingWhat ?: "a project"} on ${tools.addingWhere ?: host}. It is picked here once the hub is done.")
+            }
         }
 
         // Starting work names the worktree after the ticket on the hub, and
@@ -604,7 +622,7 @@ private fun StartingPanel(s: NewSessionUiState, background: Boolean, onLeave: ()
 }
 
 @Composable
-private fun WizardFooter(
+internal fun WizardFooter(
     caption: String?,
     backLabel: String,
     onBackTap: () -> Unit,
@@ -645,7 +663,7 @@ private fun WizardFooter(
 }
 
 @Composable
-private fun StepLabel(text: String) {
+internal fun StepLabel(text: String) {
     Text(
         text,
         color = Fleet.colors.fgMuted,
@@ -656,10 +674,10 @@ private fun StepLabel(text: String) {
 }
 
 @Composable
-private fun StepHint(text: String) {
+internal fun StepHint(text: String) {
     Text(text, color = Fleet.colors.fgMuted, style = Fleet.type.textSm, modifier = Modifier.padding(vertical = 6.dp))
 }
 
 @Composable
-private fun gutterPadding() =
+internal fun gutterPadding() =
     androidx.compose.foundation.layout.PaddingValues(horizontal = OrbitTokens.spacing("phone-gutter").dp, vertical = 4.dp)

@@ -90,6 +90,9 @@ fun NewSessionScreen(
     wizard: Boolean = false,
     wizardStep: WizardStep = WizardStep.Where,
     onWizardStep: (WizardStep) -> Unit = {},
+    /** The wizard's Add a project (redesign 14.20); Classic keeps [AddProjectSheet]. */
+    addStep: AddProjectStep = AddProjectStep.Source,
+    addHandlers: AddProjectHandlers = AddProjectHandlers(),
 ) {
     if (wizard) {
         NewSessionWizard(
@@ -112,6 +115,8 @@ fun NewSessionScreen(
             step = wizardStep,
             onStep = onWizardStep,
             modifier = modifier,
+            addStep = addStep,
+            addHandlers = addHandlers,
         )
         return
     }
