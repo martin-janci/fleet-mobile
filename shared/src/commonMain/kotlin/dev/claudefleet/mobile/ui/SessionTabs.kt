@@ -41,13 +41,23 @@ import dev.claudefleet.mobile.ui.theme.OrbitTokens
 enum class SessionTab { Conversation, Agent, Terminals, Files, Details }
 
 /**
- * The agent tab's name: the agent's, never "Terminal". Every session is a
- * Claude Code one until the hub says otherwise — the `agent` column rides hub
- * contract 11 (desktop step 2.7), which this app does not speak yet, so the
- * name is fixed here and becomes the row's own value with that bump.
+ * The agent tab's name: the agent's, never "Terminal". The row's `agent`
+ * (hub contract 11) in the desktop's words (`AGENT_LABELS` in claude-fleet's
+ * `row_groups.ts`); a hub too old to send it runs only Claude Code, and an
+ * agent this build has no name for is shown as the hub spells it.
  */
-@Suppress("UNUSED_PARAMETER")
-fun agentName(row: SessionRow?): String = DEFAULT_AGENT_NAME
+fun agentName(row: SessionRow?): String {
+    val agent = row?.agent?.takeIf { it.isNotBlank() } ?: return DEFAULT_AGENT_NAME
+    return AGENT_NAMES[agent] ?: agent
+}
+
+/** The desktop's agent names, by the hub's `agent` value. */
+private val AGENT_NAMES: Map<String, String> = mapOf(
+    "claude" to DEFAULT_AGENT_NAME,
+    "codex" to "Codex",
+    "agy" to "Agy",
+    "shell" to "Shell",
+)
 
 /** What the phone calls the agent of a session whose hub does not say. */
 const val DEFAULT_AGENT_NAME: String = "Claude Code"

@@ -43,6 +43,19 @@ class SessionWorkspaceTest {
     }
 
     @Test
+    fun the_agent_tab_takes_the_hubs_agent_and_an_older_hub_means_claude_code() {
+        assertEquals("Claude Code", agentName(row().copy(agent = "claude")))
+        assertEquals("Codex", agentName(row().copy(agent = "codex")))
+        assertEquals("Agy", agentName(row().copy(agent = "agy")))
+        assertEquals("Shell", agentName(row().copy(agent = "shell")))
+        // A hub older than contract 11 sends no agent; a blank one says nothing either.
+        assertEquals("Claude Code", agentName(row().copy(agent = null)))
+        assertEquals("Claude Code", agentName(row().copy(agent = " ")))
+        // An agent this build has no name for is shown as the hub spells it.
+        assertEquals("aider", agentName(row().copy(agent = "aider")))
+    }
+
+    @Test
     fun tabs_follow_the_desktop_order_and_files_needs_a_worktree() {
         assertEquals(
             listOf(SessionTab.Conversation, SessionTab.Agent, SessionTab.Files, SessionTab.Details),
