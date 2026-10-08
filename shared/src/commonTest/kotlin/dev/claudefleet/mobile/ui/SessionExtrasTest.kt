@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.advanceTimeBy
-import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -138,8 +137,9 @@ class SessionExtrasTest {
         runCurrent()
 
         vm.setInput("git status -sb")
-        vm.submit()
-        advanceUntilIdle()
+        // Joined, not `advanceUntilIdle`: that stops once only `backgroundScope` work is left.
+        vm.submit().join()
+        runCurrent()
         assertTrue("type 9 git status -sb" in extras.calls)
         assertEquals("", vm.state.value.input)
 
@@ -151,8 +151,7 @@ class SessionExtrasTest {
         assertEquals("", vm.state.value.input)
 
         // An empty line is a bare Enter.
-        vm.submit()
-        advanceUntilIdle()
+        vm.submit().join()
         assertTrue("press 9 Enter" in extras.calls)
     }
 
@@ -163,10 +162,8 @@ class SessionExtrasTest {
         val vm = SessionExtrasViewModel(7, fleet, extras, backgroundScope, canWrite = true)
         runCurrent()
 
-        for (key in listOf(TerminalKey.Esc, TerminalKey.Tab, TerminalKey.CtrlC)) vm.press(key)
-        vm.press(TerminalKey.Pipe)
-        vm.press(TerminalKey.Tilde)
-        advanceUntilIdle()
+        for (key in listOf(TerminalKey.Esc, TerminalKey.Tab, TerminalKey.CtrlC, TerminalKey.Pipe, TerminalKey.Tilde)) vm.press(key).join()
+        runCurrent()
 
         assertEquals(listOf("press 9 Escape", "press 9 Tab", "press 9 C-c"), extras.calls.filter { it.startsWith("press") })
         assertEquals("|~", vm.state.value.input)

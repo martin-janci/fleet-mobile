@@ -5,6 +5,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.model.SessionRow
@@ -180,7 +181,8 @@ class MobileSessionExtrasTest {
         compose.onNodeWithText("host, branch, model, timeline").assertExists()
         compose.onNodeWithText("asks first").assertExists()
 
-        compose.onNodeWithText("Archive").performClick()
+        // Near the bottom of a long menu: scrolled to before the tap, on a short screen too.
+        compose.onNodeWithText("Archive").performScrollTo().performClick()
         compose.waitForIdle()
         assertEquals(1, archived)
     }
