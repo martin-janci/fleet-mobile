@@ -249,7 +249,7 @@ private fun GroupTitle(text: String) {
  */
 @Composable
 private fun FileRow(status: String?, path: String, sub: String? = null, onClick: () -> Unit) {
-    val (name, folder) = splitPath(path)
+    val (name, folder) = nameAndFolder(path)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -278,7 +278,7 @@ private fun FileRow(status: String?, path: String, sub: String? = null, onClick:
 }
 
 /** A path as its name and the folder it is in: `a/b/c.kt` → (`c.kt`, `a/b`); a folder keeps its slash. */
-internal fun splitPath(path: String): Pair<String, String> {
+internal fun nameAndFolder(path: String): Pair<String, String> {
     val trimmed = path.trimEnd('/')
     val cut = trimmed.lastIndexOf('/')
     val slash = if (path.endsWith('/')) "/" else ""
@@ -379,7 +379,7 @@ internal fun folderListing(entries: List<String>, dir: String): List<TreeEntry> 
             val name = rest.substring(0, slash)
             TreeEntry(name, "$dir$name/", folder = true)
         }
-        seen.putIfAbsent(entryHere.path, entryHere)
+        if (entryHere.path !in seen) seen[entryHere.path] = entryHere
     }
     return seen.values.sortedWith(compareBy<TreeEntry>({ !it.folder }, { it.name.lowercase() }))
 }
@@ -408,7 +408,7 @@ private fun FilesList(state: RepoUiState, handlers: RepoHandlers) {
             } else {
                 if (dir.isNotEmpty()) {
                     item(key = "up") {
-                        val parent = splitPath(dir).second.let { if (it.isEmpty()) "" else "$it/" }
+                        val parent = nameAndFolder(dir).second.let { if (it.isEmpty()) "" else "$it/" }
                         Text(
                             "‹ ${dir.trimEnd('/')}",
                             style = MaterialTheme.typography.labelLarge,
@@ -446,7 +446,7 @@ private fun FilesList(state: RepoUiState, handlers: RepoHandlers) {
 
 @Composable
 private fun PathBar(path: String, subtitle: String? = null, actions: @Composable () -> Unit = {}) {
-    val (name, folder) = splitPath(path)
+    val (name, folder) = nameAndFolder(path)
     Row(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f)) {
             Text(name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)

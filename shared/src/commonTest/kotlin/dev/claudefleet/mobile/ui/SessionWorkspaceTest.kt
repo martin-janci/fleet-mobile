@@ -138,9 +138,9 @@ class SessionWorkspaceTest {
 
     @Test
     fun a_path_shows_its_name_first() {
-        assertEquals("HostsViewModelTest.kt" to "shared/src/jvmTest/kotlin/ui", splitPath("shared/src/jvmTest/kotlin/ui/HostsViewModelTest.kt"))
-        assertEquals("README.md" to "", splitPath("README.md"))
-        assertEquals("shared/" to "", splitPath("shared/"))
+        assertEquals("HostsViewModelTest.kt" to "shared/src/jvmTest/kotlin/ui", nameAndFolder("shared/src/jvmTest/kotlin/ui/HostsViewModelTest.kt"))
+        assertEquals("README.md" to "", nameAndFolder("README.md"))
+        assertEquals("shared/" to "", nameAndFolder("shared/"))
     }
 
     @Test

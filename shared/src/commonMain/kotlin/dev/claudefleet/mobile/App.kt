@@ -1316,6 +1316,7 @@ private fun TaskRoute(
     )
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun SessionRoute(
     sessionId: Long,
