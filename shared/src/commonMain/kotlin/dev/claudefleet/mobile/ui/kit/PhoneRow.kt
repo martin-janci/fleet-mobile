@@ -48,6 +48,8 @@ fun PhoneRow(
     age: String? = null,
     lead: String? = word?.label,
     leadColor: Color = word?.color(Fleet.colors) ?: Fleet.colors.fgMuted,
+    /** Between [lead] and [line]: a colon after a status word, else a dot. A task row's counts take a dot. */
+    separator: String = if (word != null) ": " else " · ",
     selected: Boolean = false,
     divider: Boolean = true,
     /** False for a menu row (More, Control), which has no state to show. */
@@ -98,7 +100,7 @@ fun PhoneRow(
                     buildAnnotatedString {
                         if (lead != null) {
                             withStyle(SpanStyle(color = leadColor)) { append(lead) }
-                            if (line.isNotEmpty()) append(if (word != null) ": " else " · ")
+                            if (line.isNotEmpty()) append(separator)
                         }
                         append(line)
                     },

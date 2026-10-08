@@ -400,7 +400,12 @@ internal fun emptyWorkSentence(facets: String): String = "No tasks match $facets
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun WorkFiltersSheet(state: MyWorkUiState, handlers: MyWorkHandlers) {
+internal fun WorkFiltersSheet(
+    state: MyWorkUiState,
+    handlers: MyWorkHandlers,
+    /** The New layout keeps *Assigned to me* and *To review* in the sheet: its screen has one Mine chip and To review opens the cards. */
+    quickToggles: Boolean = false,
+) {
     var naming by remember { mutableStateOf(false) }
     val f = state.filters
     ModalBottomSheet(onDismissRequest = handlers.onCloseFilters) {
@@ -411,6 +416,14 @@ private fun WorkFiltersSheet(state: MyWorkUiState, handlers: MyWorkHandlers) {
             ) {
                 Text("Filters", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                 TextButton(onClick = handlers.onClearFilters, enabled = !f.isEmpty || state.showArchived) { Text("Clear all") }
+            }
+            if (quickToggles) {
+                FilterGroup("Show") {
+                    ChipFlow {
+                        ChoiceChip("Assigned to me", f.mine == true, handlers.onToggleMine)
+                        ChoiceChip("Has something to review", f.review == true, handlers.onToggleReview)
+                    }
+                }
             }
             if (state.filterOrgs.isNotEmpty() || f.org != null) {
                 FilterGroup("Organisation") {
@@ -494,7 +507,7 @@ private fun WorkFiltersSheet(state: MyWorkUiState, handlers: MyWorkHandlers) {
 /** Placement rules, read-only: they are made and changed on the desktop. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RulesSheet(rules: List<WorkRule>, onClose: () -> Unit) {
+internal fun RulesSheet(rules: List<WorkRule>, onClose: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onClose) {
         Column(modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Placement rules", style = MaterialTheme.typography.titleLarge)
