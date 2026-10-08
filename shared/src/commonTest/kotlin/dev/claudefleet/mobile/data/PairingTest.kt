@@ -538,30 +538,36 @@ class AppSessionTest {
         assertNull(app.unpairReason.value)
     }
 
-    /** Forgetting on purpose, from Settings, is not the hub's doing and must say nothing. */
+    /**
+     * Forgetting on purpose, from Settings, is not the hub's doing: the Pair
+     * screen says the person's own act back to them (redesign 14.11), never
+     * the 401's words, and keeps the hub's address for pairing again.
+     */
     @Test
-    fun a_user_initiated_forget_carries_no_reason() = runTest {
+    fun a_user_initiated_forget_says_so_and_keeps_the_address() = runTest {
         val secrets = FakeSecrets(Credentials(BASE, "tok-secret-value", "phone", "full"))
         val (app, _, _) = session(secrets) { pairOk() to HttpStatusCode.OK }
         app.restore()
 
         app.forget()
 
-        assertNull(app.unpairReason.value)
+        assertEquals(FORGOTTEN_CREDENTIAL_REASON, app.unpairReason.value)
+        assertEquals(BASE, app.lastHub)
+        assertFalse(app.unpairReason.value.orEmpty().contains("tok-secret-value"))
     }
 
     /** A leftover reason from an earlier revoke must not survive a deliberate forget. */
     @Test
-    fun forget_clears_a_reason_a_401_had_left_behind() = runTest {
+    fun forget_replaces_a_reason_a_401_had_left_behind() = runTest {
         val secrets = FakeSecrets(Credentials(BASE, "tok-secret-value", "phone", "full"))
         val (app, _, _) = session(secrets) { "" to HttpStatusCode.Unauthorized }
         app.restore()
         assertFailsWith<HubError.Unauthorized> { app.withClient { it.listSessions() } }
-        assertNotNull(app.unpairReason.value)
+        assertEquals(REVOKED_CREDENTIAL_REASON, app.unpairReason.value)
 
         app.forget()
 
-        assertNull(app.unpairReason.value)
+        assertEquals(FORGOTTEN_CREDENTIAL_REASON, app.unpairReason.value)
     }
 
     @Test

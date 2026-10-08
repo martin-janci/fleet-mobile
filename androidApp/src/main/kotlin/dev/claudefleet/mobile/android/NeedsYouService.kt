@@ -20,6 +20,7 @@ import dev.claudefleet.mobile.notify.NeedsYouResolved
 import dev.claudefleet.mobile.notify.decodeSeen
 import dev.claudefleet.mobile.notify.encodeSeen
 import dev.claudefleet.mobile.notify.needsYouEvents
+import dev.claudefleet.mobile.notify.notifyKinds
 import dev.claudefleet.mobile.store.AndroidPrefs
 import dev.claudefleet.mobile.store.AndroidSecrets
 import io.ktor.client.HttpClient
@@ -90,7 +91,9 @@ class NeedsYouService : Service() {
             .collect { event ->
                 when (event) {
                     // On screen, the app already shows it: no second word for it.
-                    is NeedsYouAlert -> if (!AppVisibility.foreground) post(event)
+                    // A kind turned off on This phone is not posted; read
+                    // each time, so a switch flipped in the app counts now.
+                    is NeedsYouAlert -> if (!AppVisibility.foreground && container.prefs.notifyKinds().allows(event.reason)) post(event)
                     // Answered here or elsewhere: it no longer needs saying.
                     is NeedsYouResolved -> withdraw(event.sessionId)
                 }

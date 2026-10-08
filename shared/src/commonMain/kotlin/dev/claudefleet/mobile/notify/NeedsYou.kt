@@ -12,8 +12,18 @@ import kotlinx.coroutines.flow.flow
 /** What a look at the fleet tells the notifier: a session to announce, or one to stop announcing. */
 sealed interface NeedsYouEvent
 
-/** One "a session needs you" notification: which session, its two lines, and what it is doing. */
-data class NeedsYouAlert(val sessionId: Long, val title: String, val text: String, val detail: String? = null) : NeedsYouEvent
+/**
+ * One "a session needs you" notification: which session, its two lines, and
+ * what it is doing. [reason] is the hub's attention reason, which decides the
+ * notification's kind ([notifyKindOf]) for This phone's switches.
+ */
+data class NeedsYouAlert(
+    val sessionId: Long,
+    val title: String,
+    val text: String,
+    val detail: String? = null,
+    val reason: String? = null,
+) : NeedsYouEvent
 
 /** A session that needed you no longer does — answered here or elsewhere: its notification goes. */
 data class NeedsYouResolved(val sessionId: Long) : NeedsYouEvent
@@ -33,7 +43,7 @@ fun needsYouAlerts(seen: Map<Long, String?>, rows: List<SessionRow>): Pair<List<
     val alerts = rows.mapNotNull { row ->
         val reason = row.attentionReason ?: return@mapNotNull null
         if (seen[row.id] == reason) return@mapNotNull null
-        NeedsYouAlert(row.id, row.displayName, "${reasonWords(reason)} · ${row.hostAlias}", row.supportingLine)
+        NeedsYouAlert(row.id, row.displayName, "${reasonWords(reason)} · ${row.hostAlias}", row.supportingLine, reason)
     }
     return alerts to now
 }

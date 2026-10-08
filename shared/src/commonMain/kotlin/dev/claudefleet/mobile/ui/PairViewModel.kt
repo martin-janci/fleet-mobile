@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.AuthActions
+import dev.claudefleet.mobile.data.FORGOTTEN_CREDENTIAL_REASON
 import dev.claudefleet.mobile.data.NotAPairingCode
 import dev.claudefleet.mobile.data.PairTarget
 import dev.claudefleet.mobile.data.pairLinkPayload
@@ -44,9 +45,24 @@ data class PairUiState(
      * carries none. See [AuthActions.unpairReason].
      */
     val reason: String? = null,
+    /**
+     * Whether the typed address and code are open (redesign 14.11). Scanning
+     * is the main path, so they start folded behind "Enter the code by hand",
+     * except where the camera cannot be the path: no camera in this build, or
+     * a re-pair whose hub address is already filled in.
+     */
+    val manual: Boolean = false,
+    /** The hub a pair in flight is talking to, for "Contacting …"; null when none is. */
+    val contacting: String? = null,
 ) {
     /** Whether the manual-entry button does anything. */
     val canSubmit: Boolean get() = !pairing && paired == null && code.isNotBlank()
+
+    /**
+     * [reason] is the phone's own forget rather than the hub's refusal: the
+     * banner then says what the person did, in the info tone, not an error.
+     */
+    val reasonIsForget: Boolean get() = reason == FORGOTTEN_CREDENTIAL_REASON
 }
 
 /**
@@ -100,12 +116,17 @@ class PairViewModel(
     // is already "show it once" — and it means `dismissReason` can clear the
     // local copy without the flow it came from racing straight back in.
     private val _state = MutableStateFlow(
-        PairUiState(
-            cameraAvailable = cameraAvailable,
-            reason = auth.unpairReason.value,
-            // Signed out by a 401: the address it was paired with stays filled in.
-            address = auth.unpairReason.value?.let { auth.lastHub }.orEmpty(),
-        ),
+        run {
+            // Signed out by a 401, or forgotten here: the address it was
+            // paired with stays filled in, and the typed fields open on it.
+            val keptHub = auth.unpairReason.value?.let { auth.lastHub }.orEmpty()
+            PairUiState(
+                cameraAvailable = cameraAvailable,
+                reason = auth.unpairReason.value,
+                address = keptHub,
+                manual = !cameraAvailable || keptHub.isNotBlank(),
+            )
+        },
     )
     val state: StateFlow<PairUiState> = _state.asStateFlow()
 
@@ -115,6 +136,9 @@ class PairViewModel(
      * QR can be tried again deliberately.
      */
     private var lastScan: String? = null
+
+    /** The pair in flight, so [cancel] can stop it. */
+    private var inFlight: Job? = null
 
     fun onAddressChange(text: String) {
         _state.update { it.copy(address = text) }
@@ -148,7 +172,8 @@ class PairViewModel(
      * goes on the screen.
      */
     fun onScannerUnavailable(reason: String) {
-        _state.update { it.copy(scanning = false, error = reason) }
+        // The sentence says to type the code, so the fields it points at open.
+        _state.update { it.copy(scanning = false, error = reason, manual = true) }
     }
 
     /** One decoded QR. Called per frame; see the class comment. */
@@ -173,6 +198,53 @@ class PairViewModel(
         if (text == lastScan) return
         lastScan = text
         redeem(text)
+    }
+
+    /** Open (or fold) the typed address and code under the camera. */
+    fun setManual(open: Boolean) {
+        _state.update { it.copy(manual = open || !it.cameraAvailable) }
+    }
+
+    /**
+     * Stop a pair that is taking too long. The code may already be spent on
+     * the hub, so nothing is retried; the fields keep what was typed, and the
+     * camera may act on the same QR again, since this attempt decided nothing.
+     */
+    fun cancel() {
+        val job = inFlight ?: return
+        inFlight = null
+        job.cancel()
+        lastScan = null
+        _state.update { it.copy(pairing = false, contacting = null) }
+    }
+
+    /**
+     * "Paste a pairing link": the clipboard's text, a pair URL, a
+     * `claudefleet:` link or a bare code. Like an incoming link it fills the
+     * fields and stops; the person taps Pair. A clipboard is something any app
+     * can write, so it gets no more say than a link does.
+     */
+    fun paste(text: String?) {
+        val raw = text?.trim().orEmpty()
+        if (raw.isEmpty()) {
+            _state.update { it.copy(error = NOTHING_TO_PASTE) }
+            return
+        }
+        val target = try {
+            PairTarget.require(pairLinkPayload(raw) ?: raw)
+        } catch (e: NotAPairingCode) {
+            _state.update { it.copy(error = explain(e)) }
+            return
+        }
+        _state.update {
+            it.copy(
+                address = target.base ?: it.address,
+                code = target.code,
+                error = null,
+                scanning = false,
+                manual = true,
+            )
+        }
     }
 
     /** The manual-entry button. Deliberately bypasses the per-frame dedupe. */
@@ -215,6 +287,8 @@ class PairViewModel(
                 code = target.code,
                 error = null,
                 scanning = false,
+                // What it filled in is on screen to be checked before Pair.
+                manual = true,
             )
         }
         return if (autoSubmit) submit() else null
@@ -262,7 +336,8 @@ class PairViewModel(
         // already settled on `update {}` for exactly this reason — see
         // `SessionViewModel.local`, whose KDoc states the rule, and the same
         // change already made to `HostsViewModel`.
-        _state.update { it.copy(pairing = true, error = null, reason = null) }
+        val contacting = hubLabel(target.base ?: typed.orEmpty())
+        _state.update { it.copy(pairing = true, error = null, reason = null, contacting = contacting) }
         auth.clearUnpairReason()
         return scope.launch {
             try {
@@ -272,6 +347,7 @@ class PairViewModel(
                 val credentials = auth.pair(input, typed)
                 _state.update { it.copy(
                     pairing = false,
+                    contacting = null,
                     code = "",
                     paired = PairedHub(credentials.hub, credentials.name, credentials.mode),
                 ) }
@@ -287,8 +363,18 @@ class PairViewModel(
                 // or expired code needs a new QR, and a 429 needs less traffic,
                 // not thirty attempts a second more. Retrying is a deliberate
                 // act — a fresh QR, or the button.
-                _state.update { it.copy(pairing = false, error = explainPair(t)) }
+                _state.update { it.copy(pairing = false, contacting = null, error = explainPair(t)) }
             }
+        }.also { job ->
+            inFlight = job
+            job.invokeOnCompletion { if (inFlight === job) inFlight = null }
         }
     }
 }
+
+/** What Paste says when the clipboard holds nothing. */
+internal const val NOTHING_TO_PASTE = "There is no pairing link on the clipboard. Copy the link the desktop shows, then paste."
+
+/** A hub address as a person reads it: the host, without the scheme or a trailing slash. */
+internal fun hubLabel(base: String): String =
+    base.trim().substringAfter("://").trimEnd('/').ifEmpty { base.trim() }

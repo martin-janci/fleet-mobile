@@ -203,7 +203,7 @@ private fun Field(label: String, value: String) {
  * person's to turn on, and the system's leave is asked for right then.
  */
 @Composable
-private fun NotifyRow(notifier: BackgroundNotifier) {
+internal fun NotifyRow(notifier: BackgroundNotifier) {
     val on by notifier.enabled.collectAsState()
     var refused by remember { mutableStateOf(false) }
     val ask = rememberNotificationPermission()

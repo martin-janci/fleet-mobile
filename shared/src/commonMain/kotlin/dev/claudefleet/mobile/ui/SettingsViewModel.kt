@@ -10,6 +10,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -129,6 +130,26 @@ class SettingsViewModel(
 
     fun dismissError() {
         local.update { it.copy(error = null) }
+    }
+
+    private val _place = MutableStateFlow<SettingsPlace>(SettingsPlace.Home)
+
+    /**
+     * Which of the New layout's Settings pages is up (redesign 14.11): its
+     * home, This phone, or one group. Kept here, beside the screen's other
+     * state, so leaving Settings and coming back lands where the person was.
+     */
+    val place: StateFlow<SettingsPlace> = _place.asStateFlow()
+
+    fun open(place: SettingsPlace) {
+        _place.value = place
+    }
+
+    /** Back one level inside Settings; false when already on its home, so the caller's back goes on. */
+    fun back(): Boolean {
+        if (_place.value == SettingsPlace.Home) return false
+        _place.value = SettingsPlace.Home
+        return true
     }
 
     /**

@@ -161,6 +161,8 @@ import dev.claudefleet.mobile.ui.TodayViewModel
 import dev.claudefleet.mobile.ui.scan.qrScannerSupported
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.FleetTheme
+import dev.claudefleet.mobile.ui.PhoneSettings
+import androidx.compose.foundation.isSystemInDarkTheme
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -287,6 +289,9 @@ class AppContainer(
     val drafts: DraftMemory = DraftMemory()
     val hints: Hints = Hints(prefs)
 
+    /** This phone's own settings: notification kinds and the theme (redesign 14.11). */
+    val phone: PhoneSettings = PhoneSettings(prefs)
+
     /** The fleet's settings pages' calls (claude-fleet declarative pages P6). */
     val fleetSettingsActions: FleetSettingsActions = HubFleetSettingsActions(session)
 
@@ -325,7 +330,8 @@ class AppContainer(
  */
 @Composable
 fun App(container: AppContainer) {
-    FleetTheme {
+    val theme by container.phone.theme.collectAsState()
+    FleetTheme(dark = theme.isDark(isSystemInDarkTheme())) {
         Surface(modifier = Modifier.fillMaxSize()) {
             // Every screen is inset once, here, rather than each one insetting
             // itself. An app targeting SDK 35 is drawn edge to edge by the
@@ -362,7 +368,7 @@ fun App(container: AppContainer) {
                     is AuthState.Paired -> {
                         val paired = justPaired
                         if (paired != null) {
-                            PairedScreen(paired, onContinue = { justPaired = null })
+                            PairedScreen(paired, onContinue = { justPaired = null }, notifier = container.notifier)
                         } else {
                             FleetRoute(container, state.credentials)
                         }
@@ -435,6 +441,9 @@ private fun PairRoute(container: AppContainer, onPaired: (PairedHub) -> Unit) {
         onScannerUnavailable = vm::onScannerUnavailable,
         onDismissError = vm::dismissError,
         onDismissReason = vm::dismissReason,
+        onManualChange = vm::setManual,
+        onPaste = vm::paste,
+        onCancel = vm::cancel,
     )
 }
 
