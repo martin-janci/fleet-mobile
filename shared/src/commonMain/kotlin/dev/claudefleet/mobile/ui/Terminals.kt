@@ -4,6 +4,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -408,6 +409,8 @@ private fun ColumnScope.TerminalScreen(state: TerminalsUiState, handlers: Termin
                 OutlinedButton(
                     onClick = { handlers.onKey(key) },
                     enabled = state.connected || key.key == null,
+                    // Narrow keys, so the whole bar fits a phone's width.
+                    contentPadding = PaddingValues(horizontal = 8.dp),
                     modifier = Modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp).widthIn(min = 44.dp),
                 ) { Text(key.label, style = Fleet.type.code) }
             }
