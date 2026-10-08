@@ -21,6 +21,14 @@ internal const val REVOKED_CREDENTIAL_REASON =
     "the hub no longer accepts this device's credential. Pair again to carry on."
 
 /**
+ * Why the Pair screen is up after Settings' *Forget this hub* (redesign 14.11):
+ * the person's own act, said back to them with the one fact that matters when
+ * a phone is lost. Shown in the info tone, not as an error.
+ */
+internal const val FORGOTTEN_CREDENTIAL_REASON =
+    "you forgot this hub on this phone. Its token stays good on the hub until the operator cancels it there."
+
+/**
  * The hub issued a credential and this device could not keep it.
  *
  * A [SecretsUnavailable], so `explain()` shows its message and so it keeps that
@@ -153,13 +161,18 @@ class AppSession(
      * Drop the credential. Does not cancel it; see the class comment.
      *
      * User-initiated — Settings' *Forget this hub* is the one caller — so any
-     * [unpairReason] a 401 left standing is cleared rather than carried: this
+     * [unpairReason] a 401 left standing is replaced rather than carried: this
      * flip was not the hub's doing, and the Pair screen must not explain itself
-     * with the wrong reason.
+     * with the wrong reason. It says [FORGOTTEN_CREDENTIAL_REASON] instead and
+     * keeps the hub's address ([lastHub]), so pairing again with the same hub
+     * is a scan or a code, not a retyped URL (redesign 14.11). Set only once
+     * the store has cleared: a refused clear stays paired and explains nothing.
      */
     override suspend fun forget() {
+        val hub = (_state.value as? AuthState.Paired)?.credentials?.hub
         secrets.clear()
-        _unpairReason.value = null
+        _lastHub = hub
+        _unpairReason.value = FORGOTTEN_CREDENTIAL_REASON
         _state.value = AuthState.Unpaired
     }
 

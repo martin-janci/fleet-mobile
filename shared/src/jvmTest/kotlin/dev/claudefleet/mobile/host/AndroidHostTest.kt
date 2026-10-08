@@ -58,7 +58,12 @@ class TheCameraIsAskedForOnlyWhenTheScannerOpensTest {
         assertEquals(emptyList(), offenders, "a permission launcher outside the scanner")
     }
 
-    /** The notifications launcher asks for notifications alone, and only the Settings toggle calls it. */
+    /**
+     * The notifications launcher asks for notifications alone, and only two
+     * places call it, each at a moment the person chose: the Settings toggle,
+     * and the Paired screen's "Allow notifications" after pairing (redesign
+     * 14.11), which says why before it asks and offers "Not now".
+     */
     @Test
     fun the_notifications_permission_is_asked_for_only_by_the_settings_toggle() {
         val launcher = Repo.shipped.single { it.name == "NotificationPermission.android.kt" }.readText()
@@ -67,7 +72,7 @@ class TheCameraIsAskedForOnlyWhenTheScannerOpensTest {
         val callers = Repo.shipped.filter { Regex("""rememberNotificationPermission\(\)""").containsMatchIn(it.readText()) }
             .map { it.name }
             .filterNot { it.startsWith("NotificationPermission.") }
-        assertEquals(listOf("SettingsScreen.kt"), callers, "asked when the person turns notifications on, and nowhere else")
+        assertEquals(listOf("PairScreen.kt", "SettingsScreen.kt"), callers.sorted(), "asked when the person turns notifications on, and nowhere else")
     }
 
     /**

@@ -128,6 +128,22 @@ class NeedsYouCheckTest {
         assertEquals(listOf(1L), poster.posted, "still waiting is not news the second time")
     }
 
+    /** This phone's switches (redesign 14.11): a kind turned off is not posted, and is still remembered as seen. */
+    @Test
+    fun a_kind_turned_off_on_this_phone_is_not_posted() = realTime {
+        val hub = Hub().apply { reply = { sse(okResult(rows(1L to "waiting", 2L to "failed"))) to HttpStatusCode.OK } }
+        val prefs = FakePrefs().apply {
+            writeSeen(mapOf(1L to null, 2L to null))
+            writeNotifyKinds(NotifyKinds().with(NotifyKind.FAILED, on = false))
+        }
+        val poster = RecordingPoster()
+
+        check(hub, prefs = prefs, poster = poster).once()
+
+        assertEquals(listOf(1L), poster.posted, "the failed session is quiet, the waiting one is not")
+        assertEquals(mapOf(1L to "waiting", 2L to "failed"), prefs.readSeen(), "turning Failed back on replays nothing")
+    }
+
     @Test
     fun a_session_that_stops_needing_you_or_goes_away_is_withdrawn() = realTime {
         val hub = Hub().apply { reply = { sse(okResult(rows(1L to null))) to HttpStatusCode.OK } }
