@@ -8,7 +8,6 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
 import dev.claudefleet.mobile.model.AgentInstall
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.ui.AgentInstallHandlers
@@ -59,8 +58,8 @@ class MobileInstallTest {
         }
         compose.onNodeWithText("fleet-hub serve").assertExists()
         compose.onNodeWithText("Come back and scan").assertExists()
-        compose.onNodeWithText("Send these steps").performScrollTo().performClick()
-        compose.onNodeWithText("I have a code, pair now").performScrollTo().performClick()
+        compose.onNodeWithText("Send these steps").performClick()
+        compose.onNodeWithText("I have a code, pair now").performClick()
         compose.waitForIdle()
         assertEquals(listOf(NO_HUB_STEPS_TEXT), shared)
         assertEquals(true, paired)
