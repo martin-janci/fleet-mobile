@@ -37,6 +37,7 @@ import androidx.compose.ui.backhandler.BackHandler
 import androidx.lifecycle.compose.LifecycleStartEffect
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.AgentActions
+import dev.claudefleet.mobile.data.ControlActions
 import dev.claudefleet.mobile.data.AppSession
 import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.ui.components.ChatHost
@@ -46,6 +47,7 @@ import dev.claudefleet.mobile.data.DownloadActions
 import dev.claudefleet.mobile.data.HubDownloadActions
 import dev.claudefleet.mobile.data.FleetRepository
 import dev.claudefleet.mobile.data.HubAgentActions
+import dev.claudefleet.mobile.data.HubControlActions
 import dev.claudefleet.mobile.data.HubNewSessionActions
 import dev.claudefleet.mobile.data.FleetSettingsActions
 import dev.claudefleet.mobile.data.HubFleetSettingsActions
@@ -98,6 +100,12 @@ import dev.claudefleet.mobile.store.Secrets
 import dev.claudefleet.mobile.ui.AddProjectHandlers
 import dev.claudefleet.mobile.ui.AddProjectStep
 import dev.claudefleet.mobile.ui.AgentViewModel
+import dev.claudefleet.mobile.ui.ConfirmCards
+import dev.claudefleet.mobile.ui.ControlChrome
+import dev.claudefleet.mobile.ui.ControlHeader
+import dev.claudefleet.mobile.ui.ControlViewModel
+import dev.claudefleet.mobile.ui.ControlViews
+import dev.claudefleet.mobile.ui.ControlWaiting
 import dev.claudefleet.mobile.ui.FilesHandlers
 import dev.claudefleet.mobile.ui.FilesScreen
 import dev.claudefleet.mobile.ui.FilesViewModel
@@ -149,7 +157,6 @@ import dev.claudefleet.mobile.ui.OrbitOrgsScreen
 import dev.claudefleet.mobile.ui.ProposedChangeCard
 import dev.claudefleet.mobile.ui.HostsViewModel
 import dev.claudefleet.mobile.ui.MultiStartHandlers
-import dev.claudefleet.mobile.ui.ControlScreen
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.InboxScreen
 import dev.claudefleet.mobile.ui.help.GuideScreen
@@ -435,6 +442,9 @@ class AppContainer(
 
     /** The way into the hub's agent, through the same `withClient`. */
     val agentActions: AgentActions = HubAgentActions(session)
+
+    /** Control's status and the confirms it waits on (redesign 9.8), through the same `withClient`. */
+    val controlActions: ControlActions = HubControlActions(session)
 
     /**
      * The chip row and the draft history — one instance for the whole app,
@@ -750,6 +760,9 @@ private fun FleetRoute(
             orgFilter = sessions.orgFilter,
             onOpenSession = { nav.openFrom(it, SessionsSheet.Today) },
         )
+    }
+    val control = remember(repository, scope) {
+        ControlViewModel(repository, container.controlActions, container.agentActions, scope, credentials.canWrite)
     }
     val agent = remember(repository, scope) {
         AgentViewModel(
@@ -1440,29 +1453,54 @@ private fun FleetRoute(
                     )
                 }
                 Screen.Control -> {
-                    val agentState by agent.state.collectAsState()
+                    // The Control tab is Control's conversation (redesign 9.8,
+                    // 14.7). New bar only: the Classic bar has no Control tab.
+                    val controlState by control.state.collectAsState()
                     val attention by sessions.state.collectAsState()
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        ErrorBanner(agentState.error, onDismiss = agent::dismissError)
-                        TipFor(Tip.CONTROL, help, helpSettings)
-                        ControlScreen(
-                            subtitle = "${attention.attentionCount} need you",
-                            entries = buildList {
-                                add(
-                                    MoreEntry(
-                                        title = "Chat with Control",
-                                        line = when {
-                                            !agentState.available -> "The hub does not offer the coordinator to this device"
-                                            agentState.waking -> "Waking the coordinator…"
-                                            else -> "The fleet's coordinator, the same one as on the desktop"
-                                        },
-                                        onOpen = { agent.open() },
-                                    ),
-                                )
-                                if (missionsState.available) {
-                                    add(MoreEntry("Missions", "${missionsState.missions.size} missions · Pause all inside") { missions.open() })
-                                }
-                            },
+                    DisposableEffect(control) {
+                        control.attach()
+                        onDispose { control.detach() }
+                    }
+                    val subtitle = "${attention.attentionCount} need you"
+                    val views: @Composable () -> Unit = {
+                        ControlViews(
+                            sessions = attention.total,
+                            missions = missionsState.missions.size.takeIf { missionsState.available },
+                            onSessions = { nav.select(Tab.Sessions) },
+                            onMissions = { missions.open(); Unit }.takeIf { missionsState.available },
+                        )
+                    }
+                    val sessionId = controlState.sessionId
+                    if (sessionId != null) {
+                        key(sessionId) {
+                            SessionRoute(
+                                sessionId = sessionId,
+                                container = container,
+                                repository = repository,
+                                credentials = credentials,
+                                onBack = { nav.back() },
+                                onOpenTask = nav::openTask,
+                                onOpenSession = nav::open,
+                                onOpenRepo = nav::openRepo,
+                                callScope = scope,
+                                control = ControlChrome(
+                                    header = {
+                                        ControlHeader(subtitle, views)
+                                        ErrorBanner(controlState.error, onDismiss = control::dismissError)
+                                    },
+                                    aboveComposer = { ConfirmCards(controlState) { nonce, ok -> control.answer(nonce, ok) } },
+                                ),
+                            )
+                        }
+                    } else {
+                        ControlWaiting(
+                            state = controlState,
+                            subtitle = subtitle,
+                            views = views,
+                            onWake = { control.wake() },
+                            onAnswer = { nonce, ok -> control.answer(nonce, ok) },
+                            onDismissError = control::dismissError,
+                            below = { TipFor(Tip.CONTROL, help, helpSettings) },
                         )
                     }
                 }
@@ -1985,6 +2023,8 @@ private fun SessionRoute(
     onOpenRepo: (Long) -> Unit,
     callScope: CoroutineScope,
     newLayout: Boolean = false,
+    /** Control's header and confirms in place of the session's own bar (redesign 9.8). */
+    control: ControlChrome? = null,
 ) {
     val scope = rememberWorkScope()
     val vm = remember(sessionId, repository, scope, newLayout) {
@@ -2235,6 +2275,7 @@ private fun SessionRoute(
         onPaneKey = { vm.pressKey(it) },
         full = full,
         onFull = { full = it },
+        control = control,
         tabs = if (!newLayout) {
             null
         } else {
