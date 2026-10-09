@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.model.LOW_BELOW_PCT
 import dev.claudefleet.mobile.model.AccountUsageWindows as AccountLimits
 import dev.claudefleet.mobile.model.AccountRow
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
@@ -317,8 +318,12 @@ internal fun limitFigure(w: LimitWindow, nowSeconds: Long): String {
 /** A window whose reset time has passed since it was read. */
 internal fun hasReset(w: LimitWindow, nowSeconds: Long): Boolean = w.resetsAt?.let { it <= nowSeconds } ?: false
 
-/** A window close to its limit: its meter turns to the failed colour and says so in words too. */
-internal fun nearLimit(w: LimitWindow, nowSeconds: Long): Boolean = !hasReset(w, nowSeconds) && w.utilization >= 90.0
+/**
+ * A window close to its limit, the desktop's "low" (under [LOW_BELOW_PCT]
+ * left): its meter turns to the failed colour and says so in words too.
+ */
+internal fun nearLimit(w: LimitWindow, nowSeconds: Long): Boolean =
+    !hasReset(w, nowSeconds) && 100.0 - w.utilization < LOW_BELOW_PCT
 
 /**
  * What a read that did not come back says, in words, and how old the meters
