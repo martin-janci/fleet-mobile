@@ -20,6 +20,12 @@ class FleetCheckTest {
     }
 
     @Test
+    fun a_hub_that_never_answers_ends_it_after_the_last_try() {
+        assertTrue(fleetCheckOver(ConnectionStatus.Reconnecting(FLEET_CHECK_TRIES, "the hub did not answer")))
+        assertTrue(fleetCheckOver(ConnectionStatus.Reconnecting(FLEET_CHECK_TRIES + 5, null)))
+    }
+
+    @Test
     fun a_connection_or_a_settled_failure_ends_it() {
         assertTrue(fleetCheckOver(ConnectionStatus.Connected("0.9.4")))
         assertTrue(fleetCheckOver(ConnectionStatus.Refused("this hub speaks contract 9")))

@@ -27,6 +27,8 @@ enum class UsageWindow(val label: String, val seconds: Long) {
 
 data class UsageUiState(
     val available: Boolean = false,
+    /** The hub has said what it serves; before that nothing reads as "not offered" (r13 P20). */
+    val capsKnown: Boolean = false,
     val accountsAvailable: Boolean = false,
     val window: UsageWindow = UsageWindow.Week,
     val report: UsageReport? = null,
@@ -64,6 +66,7 @@ class UsageViewModel(
     val state: StateFlow<UsageUiState> = combine(local, fleet.capabilities, fleet.accountUsage) { l, caps, limits ->
         UsageUiState(
             available = caps.usage,
+            capsKnown = caps.known,
             accountsAvailable = caps.accounts,
             window = l.window,
             report = l.report,

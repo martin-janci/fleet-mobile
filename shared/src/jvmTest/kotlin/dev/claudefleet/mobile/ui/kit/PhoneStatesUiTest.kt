@@ -257,11 +257,6 @@ class PhoneStatesUiTest {
             HubBanner(PhoneConnection.Refused("This hub speaks contract 9; the app needs 10 or newer."))
         }
         shot("state-reconnecting-panel", heightDp = 420) { ReconnectingPanel("fleet.janci.dev", onShowLastKnown = {}) }
-        shot("state-pull-to-refresh", heightDp = 220) {
-            PullOrbit(progress = 0.55f, refreshing = false)
-            PullOrbit(progress = 1f, refreshing = false)
-            PullOrbit(progress = 1f, refreshing = true)
-        }
         shot("state-conversation-loading", heightDp = 360) { ConversationLoading(waiting = true) }
     }
 

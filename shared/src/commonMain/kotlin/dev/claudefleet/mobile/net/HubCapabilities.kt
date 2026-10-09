@@ -42,6 +42,12 @@ data class HubCapabilities(
     val params: Map<String, Set<String>> = emptyMap(),
 ) {
     val work: Boolean get() = WORK in tools
+
+    /**
+     * Whether the hub has said what it serves yet. Until it has, every flag
+     * reads false, so a screen must not say "this hub does not …" (r13 P20).
+     */
+    val known: Boolean get() = tools.isNotEmpty()
     val workLink: Boolean get() = WORK_LINK in tools
 
     /** The hub's agent (`ensure_operator`) — the desktop's ✦, on the phone. */

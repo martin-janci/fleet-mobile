@@ -37,9 +37,11 @@ import kotlinx.coroutines.delay
 @Composable
 fun PulseSequence(modifier: Modifier = Modifier, size: Dp = 72.dp) {
     val o = Fleet.colors
+    // Reduced motion holds the still pose: the satellites at rest (review r11).
+    val reduced = reducedMotion()
     val time by rememberInfiniteTransition(label = "pulse").animateFloat(
         initialValue = 0f,
-        targetValue = PULSE_MS,
+        targetValue = if (reduced) 0f else PULSE_MS,
         animationSpec = infiniteRepeatable(tween(PULSE_MS.toInt(), easing = LinearEasing), RepeatMode.Restart),
         label = "pulse-time",
     )

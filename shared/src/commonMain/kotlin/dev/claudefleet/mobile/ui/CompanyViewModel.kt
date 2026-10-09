@@ -18,6 +18,8 @@ import kotlinx.coroutines.launch
 
 data class CompanyUiState(
     val available: Boolean = false,
+    /** The hub has said what it serves; before that nothing reads as "not offered" (r13 P20). */
+    val capsKnown: Boolean = false,
     val orgs: List<OrgDetail> = emptyList(),
     /** The org whose detail is open, by id; null shows the list. */
     val openId: Long? = null,
@@ -57,6 +59,7 @@ class CompanyViewModel(
     val state: StateFlow<CompanyUiState> = combine(local, fleet.capabilities) { l, caps ->
         CompanyUiState(
             available = caps.has(HubCapabilities.WORK, ORGS),
+            capsKnown = caps.known,
             orgs = l.orgs,
             openId = l.openId,
             loading = l.loading,
