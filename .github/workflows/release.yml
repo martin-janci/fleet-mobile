@@ -185,7 +185,10 @@ jobs:
           "$apksigner_bin" verify --print-certs "$apk" | tee certs.txt
           # The signing certificate's sha256, for the hub's decision: a phone
           # refuses an APK not signed with exactly this certificate.
-          signer=$(sed -n 's/^Signer #1 certificate SHA-256 digest: *\([0-9a-f]\{64\}\)$/\1/p' certs.txt | head -1)
+          # apksigner names the signer `Signer #1` when the APK carries a v1
+          # (JAR) signature and `V2 Signer` / `V3 Signer` when it carries
+          # only the newer schemes (minSdk >= 24), as our release APK does.
+          signer=$(sed -nE 's/^(Signer #1|V[0-9]+ Signer:) certificate SHA-256 digest: *([0-9a-f]{64})$/\2/p' certs.txt | head -1)
           if [[ -z "$signer" ]]; then
             echo "::error::apksigner printed no SHA-256 digest for the signer" >&2
             exit 1
