@@ -32,6 +32,23 @@ class PhoneSettingsTest {
         assertEquals(ThemeChoice.SYSTEM, PhoneSettings(prefs).theme.value)
     }
 
+    /** r11: Motion follows the system until one is picked, survives a restart, and maps to LocalReducedMotion. */
+    @Test
+    fun motion_follows_the_system_until_one_is_picked_and_survives_a_restart() {
+        val prefs = FakePrefs()
+        val first = PhoneSettings(prefs)
+        assertEquals(MotionChoice.SYSTEM, first.motion.value)
+        assertEquals(null, MotionChoice.SYSTEM.reduced)
+        assertEquals(false, MotionChoice.FULL.reduced)
+        assertEquals(true, MotionChoice.REDUCED.reduced)
+
+        first.setMotion(MotionChoice.REDUCED)
+        assertEquals(MotionChoice.REDUCED, PhoneSettings(prefs).motion.value, "read back from the device's store")
+
+        prefs.putStringList("phone.motion", listOf("wobbly"))
+        assertEquals(MotionChoice.SYSTEM, PhoneSettings(prefs).motion.value)
+    }
+
     /** 14.11: the lock is kept on the device; turning it on counts as this run's unlock, a new start asks again. */
     @Test
     fun the_lock_survives_a_restart_and_is_asked_again_there() {

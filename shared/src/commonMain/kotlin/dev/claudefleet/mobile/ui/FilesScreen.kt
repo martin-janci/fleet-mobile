@@ -210,7 +210,7 @@ private fun FileLineItem(file: FileLine, busy: Boolean, onTap: () -> Unit, onRem
             }
             when (file.state) {
                 FileState.Failed -> Text(
-                    "failed" + (file.error?.let { ": $it" } ?: ""),
+                    classicFailedLine(file),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                     maxLines = 3,

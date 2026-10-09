@@ -745,9 +745,46 @@ fun visibleFields(form: ReplyForm, values: Map<String, JsonElement>): List<Pair<
     return out
 }
 
-/** Each field's default, as the desktop's wizard starts from. */
+/**
+ * Each field's default, as the desktop's wizard starts from, less what AI
+ * never decides (review r09 B17, R15): a required bool is a consent box and
+ * starts unticked, and a bool, choice or multi-choice option that approves,
+ * allows or does something hard to undo ([riskyChoice]) is not pre-picked,
+ * whatever default the agent wrote. A person ticks those.
+ */
 fun formDefaults(form: ReplyForm): Map<String, JsonElement> =
-    form.steps.flatMap { it.fields }.mapNotNull { f -> f.value?.takeIf { it !is JsonNull }?.let { f.name to it } }.toMap()
+    form.steps.flatMap { it.fields }.mapNotNull { f ->
+        f.value?.takeIf { it !is JsonNull }?.let { agentDefault(f, it) }?.let { f.name to it }
+    }.toMap()
+
+/** The words that make an option one AI never pre-picks: the desktop's
+ *  `RISKY_WORDS` (src/lib/quick_answer.ts, J5), which the hub's
+ *  `decide/quick_answer.rs` keeps too. */
+internal val RISKY_WORDS = listOf(
+    "push", "force", "delete", "remove", "drop", "destroy", "wipe", "reset", "overwrite", "rm", "kill",
+    "deploy", "publish", "release", "merge", "rebase", "revert", "truncate", "purge", "production", "prod",
+    "allow", "always", "bypass", "permission", "permissions", "sudo", "approve",
+)
+
+private val RISKY = Regex("""\b(?:${RISKY_WORDS.joinToString("|")})\b|don'?t ask again""", RegexOption.IGNORE_CASE)
+
+/** An option AI never picks for a person: a push, a permission, an approval, a step hard to undo. The desktop's `risky`. */
+fun riskyChoice(label: String): Boolean = RISKY.containsMatchIn(label)
+
+/** [v], the agent's default for [f], unless it would decide something for the person. */
+private fun agentDefault(f: ReplyField, v: JsonElement): JsonElement? {
+    fun risky(value: String): Boolean = riskyChoice(value) || f.options.any { it.first == value && riskyChoice(it.second) }
+    return when (f.type) {
+        "bool" -> v.takeUnless { (it as? JsonPrimitive)?.booleanOrNull == true && (f.required || riskyChoice(f.label)) }
+        "select" -> v.takeUnless { it is JsonPrimitive && it.isString && risky(it.content) }
+        "multiselect" -> if (v is JsonArray) {
+            JsonArray(v.filterNot { it is JsonPrimitive && it.isString && risky(it.content) }).takeIf { it.isNotEmpty() }
+        } else {
+            v
+        }
+        else -> v
+    }
+}
 
 /** Whether a shown field still needs an answer before the form can be sent. */
 fun fieldMissing(f: ReplyField, v: JsonElement?): Boolean {

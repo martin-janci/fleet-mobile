@@ -74,6 +74,8 @@ data class OrbitSettingsInput(
     val updateMode: UpdateMode? = null,
     /** This phone's fingerprint lock is on (14.11). */
     val lock: Boolean = false,
+    /** How much the app moves (review r11). */
+    val motion: MotionChoice = MotionChoice.SYSTEM,
 )
 
 /** Every tap the New layout's Settings reports. */
@@ -82,6 +84,7 @@ class OrbitSettingsHandlers(
     val onBack: () -> Unit = {},
     val onOpenPage: (String) -> Unit = {},
     val onSetTheme: (ThemeChoice) -> Unit = {},
+    val onSetMotion: (MotionChoice) -> Unit = {},
     val onSetNotify: (NotifyKind, Boolean) -> Unit = { _, _ -> },
     val onSetUpdateMode: (UpdateMode) -> Unit = {},
     /** The fingerprint lock's switch; null where the phone cannot ask for one, and the row is not drawn. */
@@ -291,6 +294,10 @@ private fun ColumnScope.ThisPhone(input: OrbitSettingsInput, handlers: OrbitSett
     SectionLabel("Theme")
     ThemePicker(input.theme, handlers.onSetTheme)
 
+    // The desktop's Settings → Appearance → Motion (review r11).
+    SectionLabel("Motion")
+    ChoicePicker(MotionChoice.entries, input.motion, { it.label }, handlers.onSetMotion)
+
     handlers.onSetLock?.let { onSetLock ->
         SectionLabel("Security")
         // The switch asks for the fingerprint before it moves, either way.
@@ -434,7 +441,12 @@ private fun SwitchRow(title: String, line: String, on: Boolean, enabled: Boolean
 
 /** Dark, Light, System as one segmented control; dark first, as the manual is. */
 @Composable
-private fun ThemePicker(current: ThemeChoice, onPick: (ThemeChoice) -> Unit) {
+private fun ThemePicker(current: ThemeChoice, onPick: (ThemeChoice) -> Unit) =
+    ChoicePicker(ThemeChoice.entries, current, { it.label }, onPick)
+
+/** A few choices as one segmented control: Theme's and Motion's. */
+@Composable
+private fun <T> ChoicePicker(entries: List<T>, current: T, label: (T) -> String, onPick: (T) -> Unit) {
     val o = Fleet.colors
     val gutter = OrbitTokens.spacing("phone-gutter").dp
     val shape = RoundedCornerShape(OrbitTokens.radius("radius-md").dp)
@@ -442,10 +454,10 @@ private fun ThemePicker(current: ThemeChoice, onPick: (ThemeChoice) -> Unit) {
         modifier = Modifier.fillMaxWidth().padding(horizontal = gutter, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        for (choice in ThemeChoice.entries) {
+        for (choice in entries) {
             val selected = choice == current
             Text(
-                choice.label,
+                label(choice),
                 style = Fleet.type.textMd,
                 color = if (selected) o.fg else o.fg2,
                 modifier = Modifier.weight(1f)

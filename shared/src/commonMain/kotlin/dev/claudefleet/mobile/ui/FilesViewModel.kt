@@ -382,6 +382,12 @@ internal fun fileFailure(raw: String?, host: String): String {
     }
 }
 
+/**
+ * The Classic Files row's failure line: the same plain sentence as the New
+ * layout's (#182), never the hub's raw `error` (review r13).
+ */
+internal fun classicFailedLine(file: FileLine): String = "Failed: " + fileFailure(file.error, file.host)
+
 /** A fetch's failure in words: a vanished file is not "this session is gone". */
 private fun fetchFailure(t: Throwable): Friendly = when {
     t is HubError.Tool && t.code == DOWNLOAD_GONE ->

@@ -195,6 +195,35 @@ class RichBlocksTest {
         assertEquals("Answers to the form \"Deploy\":\n\n```json\n{\n  \"env\": \"stg\"\n}\n```", formAnswerPrompt(form, values))
     }
 
+    /** r09 B17 (AI never decides): the agent's default never ticks a consent box or pre-picks an approval. */
+    @Test
+    fun an_agents_default_never_ticks_consent_or_picks_an_approval() {
+        val form = assertIs<UiBlock.Form>(
+            assertIs<UiCheck.Ok>(
+                check(
+                    """"kind": "form", "form": {"spec": "fleet.form/1", "title": "Ship it", "steps": [
+                      {"title": "Go", "fields": [
+                        {"name": "consent", "type": "bool", "label": "I have read the plan", "required": true, "value": true},
+                        {"name": "approve", "type": "bool", "label": "Approve the migration", "value": true},
+                        {"name": "notes", "type": "bool", "label": "Add release notes later", "value": false},
+                        {"name": "verbose", "type": "bool", "label": "Verbose log", "value": true},
+                        {"name": "env", "type": "select", "label": "Env", "options": [["stg", "Staging"], ["prod", "Production"]], "value": "prod"},
+                        {"name": "next", "type": "select", "label": "Then", "options": [["a", "Approve and merge"], ["b", "Wait"]], "value": "a"},
+                        {"name": "size", "type": "select", "label": "Size", "options": [["s", "Small"], ["l", "Large"]], "value": "l"},
+                        {"name": "steps", "type": "multiselect", "label": "Steps", "options": [["lint", "Lint"], ["push", "Push"]], "value": ["lint", "push"]},
+                        {"name": "only", "type": "multiselect", "label": "Only", "options": [["x", "Delete branch"], ["y", "Keep"]], "value": ["x"]}]}]}""",
+                ),
+            ).block,
+        ).form
+        val defaults = formDefaults(form)
+        assertEquals(setOf("notes", "verbose", "size", "steps"), defaults.keys)
+        assertEquals(JsonPrimitive(false), defaults["notes"])
+        assertEquals(JsonPrimitive("l"), defaults["size"])
+        assertEquals(buildJsonArray { add(JsonPrimitive("lint")) }, defaults["steps"])
+        assertTrue(riskyChoice("Yes, and don't ask again"))
+        assertTrue(!riskyChoice("Staging"))
+    }
+
     @Test
     fun fenced_picks_a_fence_no_backtick_run_inside_can_close() {
         assertEquals("`````json\na ```` b\n`````", fenced("json", "a ```` b"))

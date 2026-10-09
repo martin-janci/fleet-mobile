@@ -209,6 +209,14 @@ class MorePlacesTest {
     }
 
     @Test
+    fun the_classic_files_row_does_not_show_the_hubs_raw_error() {
+        val raw = "reading /var/log/x on oci-arm stopped at 0 of 8192 bytes"
+        val line = classicFailedLine(file(FileState.Failed, error = raw))
+        assertEquals("Failed: The hub couldn't copy it off oci-arm.", line)
+        assertFalse(raw in line)
+    }
+
+    @Test
     fun a_transfer_shows_its_real_size_not_a_spinner_word() {
         val transfer = Transfer(id = 1, name = "release.apk", received = 12_400_000, total = 31_000_000)
         assertNull(fileLead(file(FileState.Ready), transferring = true, hostReachable = { true }))
@@ -240,8 +248,10 @@ class MorePlacesTest {
     fun a_meter_says_how_much_is_used_and_when_it_starts_over() {
         val now = 1_000_000L
         assertEquals("62% used · resets in 2 h", limitFigure(LimitWindow(62.4, resetsAt = now + 2 * 3_600), now))
-        assertTrue(nearLimit(LimitWindow(90.0), now))
-        assertFalse(nearLimit(LimitWindow(89.9), now))
+        // The desktop's "low": under 20% left (review r05).
+        assertTrue(nearLimit(LimitWindow(85.0), now))
+        assertTrue(nearLimit(LimitWindow(80.5), now))
+        assertFalse(nearLimit(LimitWindow(80.0), now), "exactly 20% left is caution, not low")
     }
 
     /** Review r05 M1: a reading from before its window's reset is not shown as current. */
