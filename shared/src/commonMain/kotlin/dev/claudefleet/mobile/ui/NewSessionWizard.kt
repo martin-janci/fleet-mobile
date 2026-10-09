@@ -55,6 +55,7 @@ import dev.claudefleet.mobile.ui.kit.HubBanner
 import dev.claudefleet.mobile.ui.kit.pastLoaderDelay
 import dev.claudefleet.mobile.ui.kit.PulseSequence
 import dev.claudefleet.mobile.ui.kit.SheetOption
+import dev.claudefleet.mobile.ui.kit.StepBars
 import dev.claudefleet.mobile.ui.kit.rememberPhoneConnection
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.FleetIcons
@@ -153,6 +154,7 @@ internal fun NewSessionWizard(
                 }
             },
         )
+        StepBars(step = step.number, total = WizardStep.entries.size)
         HubBanner(rememberPhoneConnection(state.status))
         ErrorBanner(state.error, onDismiss = onDismissError)
 

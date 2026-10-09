@@ -40,3 +40,13 @@ internal class SystemBarsHold {
         if (holders == 0) listener?.invoke(false)
     }
 }
+
+/**
+ * The phone's own bar icons follow the app's theme, not the system's: dark
+ * icons on the Light theme, light icons on the Dark one. On Android
+ * `enableEdgeToEdge()` picks them once, from the system night mode at
+ * `onCreate`, so a person who set the app to Dark on a Light phone got dark
+ * clock and battery on a dark background. Re-applied whenever [dark] changes.
+ */
+@Composable
+internal expect fun SystemBarsAppearance(dark: Boolean)

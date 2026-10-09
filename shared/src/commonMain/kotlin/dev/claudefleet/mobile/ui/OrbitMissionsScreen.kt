@@ -162,7 +162,7 @@ fun OrbitMissionsScreen(
                     )
                 }
             }
-            group("Running", groups.running, nowSeconds, handlers.onOpen)
+            group("Working", groups.running, nowSeconds, handlers.onOpen)
             group("Paused", groups.paused, nowSeconds, handlers.onOpen)
             group("Drafts", groups.drafts, nowSeconds, handlers.onOpen)
             group("Done this week", groups.doneThisWeek, nowSeconds, handlers.onOpen)

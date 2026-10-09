@@ -20,13 +20,16 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
@@ -83,6 +86,15 @@ private class FakeHub(
     var orgsJson: String = "[]"
     var orgsCalls = 0
         private set
+    var accountsJson: String = "[]"
+    var accountsCalls = 0
+        private set
+    var usageJson: String = "[]"
+    var usageCalls = 0
+        private set
+
+    /** Makes `account_usage` and `list_accounts` answer 502. */
+    var failAccounts = false
 
     /** Makes `list_hosts` answer 401, so a refresh fails after its first call. */
     var failHosts = false
@@ -111,6 +123,8 @@ private class FakeHub(
                 val payload = when {
                     "\"trackers\"" in body -> trackersJson
                     "\"orgs\"" in body -> { orgsCalls += 1; orgsJson }
+                    "\"account_usage\"" in body -> { usageCalls += 1; usageJson }
+                    "\"list_accounts\"" in body -> { accountsCalls += 1; accountsJson }
                     "\"tickets\"" in body -> { mineCalls += 1; mineJson }
                     "list_sessions" in body -> {
                         sessionCalls += 1
@@ -125,7 +139,9 @@ private class FakeHub(
                     "list_projects" in body -> { projectCalls += 1; projectsJson }
                     else -> "[]"
                 }
-                if (failHosts && "list_hosts" in body) {
+                if (failAccounts && ("\"account_usage\"" in body || "\"list_accounts\"" in body)) {
+                    respond("upstream is down", HttpStatusCode.BadGateway)
+                } else if (failHosts && "list_hosts" in body) {
                     respond("", HttpStatusCode.Unauthorized)
                 } else if (failSessions && "list_sessions" in body) {
                     respond("upstream is down", HttpStatusCode.BadGateway)
@@ -1433,6 +1449,97 @@ class FleetRepositoryTest {
         assertEquals(listOf(ALL_DOWNLOADS_CHANGED, 7L), seen, "the resync, then the one frame that names an id")
         assertEquals(listOf(1L), repository.sessions.value.map { it.id })
         collector.cancel()
+        repository.stop()
+    }
+
+    // ---- Review r05: the account reads (names, usage) stay current ----
+
+    private fun accountsHub() = FakeHub(sessionsJson = sessionRows(1)).apply {
+        toolsJson = """[{"name":"list_sessions"},{"name":"list_accounts"},{"name":"account_usage"}]"""
+        accountsJson = """[{"uuid":"u1","email":"me@home.io","nickname":"Home"}]"""
+        usageJson = """[{"account_uuid":"u1","usage":{"seven_day":{"utilization":100.0,"resets_at":9999999999}},"status":"ok"}]"""
+    }
+
+    /** M2: a `lagged` gap may have dropped the frame that lifted a limit. */
+    @Test
+    fun a_lagged_frame_re_reads_the_accounts_usage_and_names() = runTest {
+        val hub = accountsHub()
+        val lagged = CompletableDeferred<Unit>()
+        val stream = FakeStream { attempt ->
+            if (attempt > 1) awaitCancellation()
+            emit(READY)
+            lagged.await()
+            emit(HubEvent.Lagged(5))
+            awaitCancellation()
+        }
+        val repository = repo(hub, stream, backgroundScope)
+
+        repository.start()
+        repository.accountUsage.first { "u1" in it }
+        hub.usageJson = """[{"account_uuid":"u1","usage":{"seven_day":{"utilization":3.0,"resets_at":9999999999}},"status":"ok"}]"""
+        hub.accountsJson = """[{"uuid":"u1","email":"me@home.io","nickname":"Work"}]"""
+        lagged.complete(Unit)
+
+        repository.accountUsage.first { it["u1"]?.usage?.sevenDay?.utilization == 3.0 }
+        repository.accountNames.first { it["u1"] == "Work" }
+        repository.stop()
+    }
+
+    /** M3: a nickname set on the desktop reaches the phone's chips without a reconnect. */
+    @Test
+    fun an_account_frame_re_reads_the_account_names() = runTest {
+        val hub = accountsHub()
+        val renamed = CompletableDeferred<Unit>()
+        val stream = FakeStream { attempt ->
+            if (attempt > 1) awaitCancellation()
+            emit(READY)
+            renamed.await()
+            emit(rowEvent("account:upserted", """{"uuid":"u1"}"""))
+            awaitCancellation()
+        }
+        val repository = repo(hub, stream, backgroundScope)
+
+        repository.start()
+        repository.accountNames.first { it["u1"] == "Home" }
+        hub.accountsJson = """[{"uuid":"u1","email":"me@home.io","nickname":"Work"}]"""
+        renamed.complete(Unit)
+
+        repository.accountNames.first { it["u1"] == "Work" }
+        assertEquals(listOf(1L), repository.sessions.value.map { it.id }, "an account frame is not a session row")
+        repository.stop()
+    }
+
+    /** M5: a blip keeps the last answer, as `my_grants` does, rather than dropping a paused row's reset. */
+    @Test
+    fun a_failed_account_read_keeps_the_last_answer() = runTest {
+        val hub = accountsHub()
+        val blip = CompletableDeferred<Unit>()
+        val stream = FakeStream { attempt ->
+            if (attempt > 1) awaitCancellation()
+            emit(READY)
+            blip.await()
+            emit(rowEvent("account_usage:updated", """{"account_uuid":"u1"}"""))
+            emit(rowEvent("account:upserted", """{"uuid":"u1"}"""))
+            awaitCancellation()
+        }
+        val repository = repo(hub, stream, backgroundScope)
+
+        repository.start()
+        repository.accountUsage.first { "u1" in it }
+        repository.accountNames.first { "u1" in it }
+        val usageBefore = hub.usageCalls
+        val namesBefore = hub.accountsCalls
+        hub.failAccounts = true
+        blip.complete(Unit)
+        // The reads run on the mock engine's real dispatcher, so wait in real
+        // time: until both were asked, then long enough for the failure to land.
+        withContext(Dispatchers.Default) {
+            while (hub.usageCalls == usageBefore || hub.accountsCalls == namesBefore) delay(10)
+            delay(300)
+        }
+
+        assertEquals(100.0, repository.accountUsage.value["u1"]?.usage?.sevenDay?.utilization)
+        assertEquals("Home", repository.accountNames.value["u1"])
         repository.stop()
     }
 }

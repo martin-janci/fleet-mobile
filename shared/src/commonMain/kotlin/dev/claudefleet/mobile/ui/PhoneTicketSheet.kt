@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -21,7 +20,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.ui.components.ErrorBanner
-import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
+import dev.claudefleet.mobile.ui.kit.InlineLoading
 
 /** The New layout's one ticket sheet is up while either half of it was opened. */
 internal fun ticketSheetOpen(work: SessionWorkUiState, tasks: SessionTasksUiState): Boolean =
@@ -69,7 +68,7 @@ fun PhoneTicketSheet(
             if (work.chip == null) {
                 Text("Ticket and tasks", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp).semantics { heading() })
             }
-            if (rememberLoaderVisible(tasks.loading || tasks.busy)) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            InlineLoading(waiting = tasks.loading || tasks.busy)
             val crossOrg = tasks.crossOrg
             if (crossOrg != null) {
                 CrossOrgPanel(crossOrg, tasks, tasksHandlers)

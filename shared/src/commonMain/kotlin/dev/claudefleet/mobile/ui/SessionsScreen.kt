@@ -37,13 +37,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -89,16 +87,21 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.semantics.semantics
+import dev.claudefleet.mobile.ui.kit.Comet
+import dev.claudefleet.mobile.ui.kit.MarkMotion
+import dev.claudefleet.mobile.ui.kit.OrbitMarkLoader
+import dev.claudefleet.mobile.ui.kit.OrbitPullToRefresh
+import dev.claudefleet.mobile.ui.kit.ProgressRing
+import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
+import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.kit.DotWave
 import dev.claudefleet.mobile.ui.kit.LocalHubReconnect
 import dev.claudefleet.mobile.ui.kit.PhoneConnection
 import dev.claudefleet.mobile.ui.kit.ReconnectingPanel
-import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 import dev.claudefleet.mobile.ui.kit.rememberPhoneConnection
 import androidx.compose.ui.text.style.TextAlign
 
@@ -248,10 +251,10 @@ fun SessionsScreen(
         // `LazyColumn` at that. It used to return early, so the one screen a
         // person would most want to pull on — no sessions yet, is the hub
         // really up? — was the one screen that did not respond to the
-        // gesture. `PullToRefreshBox` needs a scrollable child to receive the
+        // gesture. `OrbitPullToRefresh` needs a scrollable child to receive the
         // drag, which a bare `Box` is not, so the message rides as a single
         // item filling the viewport.
-        PullToRefreshBox(
+        OrbitPullToRefresh(
             isRefreshing = state.refreshing,
             onRefresh = handlers.onRefresh,
             modifier = Modifier.fillMaxSize(),
@@ -373,7 +376,7 @@ fun SessionsScreen(
                                 contentDescription = if (agent.waking) "Agent waking" else "Open the fleet agent"
                             },
                         ) {
-                            if (agent.waking) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            if (rememberLoaderVisible(agent.waking)) Comet(size = 16.dp)
                             else Text("✦", style = MaterialTheme.typography.titleMedium)
                         }
                     }
@@ -766,15 +769,14 @@ private fun SessionRowItem(
                 Text(row.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val pct = row.contextPct
                 if (pct != null) {
-                    LinearProgressIndicator(
-                        progress = { (pct / 100.0).toFloat().coerceIn(0f, 1f) },
-                        // Padding FIRST. `Modifier` applies left to right, so
-                        // `.height(2.dp).padding(top = 2.dp)` sized the bar to
-                        // 2 dp and then spent both of them on padding: a
-                        // context meter that measured to zero and drew
-                        // nothing. Padding first pads a 2 dp bar instead.
-                        modifier = Modifier.padding(top = 2.dp).width(60.dp).height(2.dp),
-                        color = if (pct >= 80) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                    // The context meter as the kit's ring (manual: a known
+                    // fraction is a Progress ring), small enough for the row.
+                    // Padding FIRST: `Modifier` applies left to right.
+                    ProgressRing(
+                        fraction = (pct / 100.0).toFloat().coerceIn(0f, 1f),
+                        modifier = Modifier.padding(top = 2.dp),
+                        size = 14.dp,
+                        color = if (pct >= 80) Fleet.colors.statusWaiting else Fleet.colors.accent,
                     )
                 }
             }
@@ -992,7 +994,7 @@ private fun SelectionBar(bulk: BulkUiState, handlers: SessionsHandlers) {
         ) {
             IconButton(onClick = handlers.onClearSelection) { Icon(FleetIcons.Close, contentDescription = "Clear selection") }
             Text(if (bulk.selected.isEmpty()) "Tap sessions to pick" else "${bulk.selected.size} selected", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            if (bulk.running) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            if (rememberLoaderVisible(bulk.running)) Comet(size = 16.dp)
             TextButton(onClick = { sending = true }, enabled = !bulk.running && bulk.selected.isNotEmpty()) { Text("Send") }
             DangerTextButton(onClick = { killing = true }, enabled = !bulk.running && bulk.killable > 0) { Text("Kill") }
         }

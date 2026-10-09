@@ -169,6 +169,24 @@ class ControlChatTest {
     }
 
     @Test
+    fun an_offline_or_stopped_hub_is_not_polled_until_it_is_back() = runTest {
+        val fake = FakeControl(OperatorStatus(ready = true, session = SessionRow(id = 5)))
+        val fleet = ControlFleet(CONTROL_TOOLS)
+        fleet.status.value = ConnectionStatus.Offline("stopped")
+        val vm = ControlViewModel(fleet, fake, fake, backgroundScope, canWrite = true, pollMs = 100)
+        vm.attach()
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(0, fake.confirmReads)
+
+        fleet.status.value = ConnectionStatus.Connected("0.9.3")
+        advanceTimeBy(101)
+        runCurrent()
+        assertTrue(fake.confirmReads >= 1)
+        vm.detach()
+    }
+
+    @Test
     fun an_answer_goes_on_the_tap_and_takes_its_card_away() = runTest {
         val fake = FakeControl(OperatorStatus(ready = true, session = SessionRow(id = 5)))
         val vm = ControlViewModel(ControlFleet(CONTROL_TOOLS), fake, fake, backgroundScope, canWrite = true)

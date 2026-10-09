@@ -17,6 +17,7 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -76,13 +77,17 @@ private class MemSecrets(
 internal class RecordingPoster : AlertPoster {
     val posted = mutableListOf<Long>()
     val withdrawn = mutableListOf<Long>()
+    val routines = mutableListOf<Long>()
     override fun post(alert: NeedsYouAlert) { posted += alert.sessionId }
+    override fun postRoutine(alert: RoutineFailedAlert) { routines += alert.runId }
     override fun withdraw(sessionId: Long) { withdrawn += sessionId }
 }
 
 private class Hub {
     var requests = 0
     var reply: suspend () -> Pair<String, HttpStatusCode> = { sse(okResult("[]")) to HttpStatusCode.OK }
+    /** The answer to `routines { failing }`; null: the same as every other call. */
+    var failing: String? = null
 }
 
 private fun check(
@@ -94,7 +99,9 @@ private fun check(
 ): NeedsYouCheck {
     val engine = MockEngine {
         hub.requests++
-        val (body, status) = hub.reply()
+        val text = (it.body as? TextContent)?.text.orEmpty()
+        val routines = hub.failing?.takeIf { "\"failing\"" in text }
+        val (body, status) = routines?.let { sse(okResult(it)) to HttpStatusCode.OK } ?: hub.reply()
         val type = if (body.startsWith("event:")) "text/event-stream" else "application/json"
         respond(body, status, headersOf(HttpHeaders.ContentType, type))
     }
@@ -286,5 +293,26 @@ class KeepSeenWhileOpenTest {
         assertEquals(emptyList(), poster.posted, "on screen, the list already says it")
         assertEquals(listOf(1L), poster.withdrawn)
         assertEquals(mapOf(1L to null), prefs.readSeen())
+    }
+
+    /** The matrix's Routine failed row (review r19, R19-5): a failed run after the last look is posted once. */
+    @Test
+    fun a_routine_run_that_failed_since_the_last_look_is_posted() = realTime {
+        val run = """{"routine":{"id":7,"name":"Nightly deps"},"run":{"id":%d,"routine_id":7,"state":"failed"}}"""
+        val hub = Hub().apply {
+            reply = { sse(okResult(rows(1L to null))) to HttpStatusCode.OK }
+            failing = "[${run.replace("%d", "41")}]"
+        }
+        val prefs = FakePrefs().apply { writeSeen(mapOf(1L to null)) }
+        val poster = RecordingPoster()
+        val c = check(hub, prefs = prefs, poster = poster)
+
+        c.once()
+        assertEquals(emptyList(), poster.routines, "the first look at routines is the baseline")
+        hub.failing = "[${run.replace("%d", "42")}]"
+        c.once()
+        c.once()
+
+        assertEquals(listOf(42L), poster.routines)
     }
 }

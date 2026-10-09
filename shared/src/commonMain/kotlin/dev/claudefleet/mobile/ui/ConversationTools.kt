@@ -23,9 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -61,6 +59,8 @@ import dev.claudefleet.mobile.ui.components.MarkdownText
 import dev.claudefleet.mobile.ui.theme.DiffColors
 import dev.claudefleet.mobile.ui.theme.diffColors
 import dev.claudefleet.mobile.ui.theme.FleetIcons
+import dev.claudefleet.mobile.ui.kit.Comet
+import dev.claudefleet.mobile.ui.kit.InlineLoading
 import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 
 /*
@@ -161,11 +161,7 @@ internal fun ToolCallRow(tool: ConvItem.Tool, modifier: Modifier = Modifier) {
         ) {
             Box(Modifier.size(ICON), contentAlignment = Alignment.Center) {
                 when {
-                    !tool.done && LocalToolsLive.current -> CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = colors.primary,
-                    )
+                    !tool.done && LocalToolsLive.current -> if (rememberLoaderVisible(true)) Comet(size = 16.dp)
                     tool.error -> Icon(FleetIcons.Failed, contentDescription = "failed", tint = colors.error, modifier = Modifier.size(ICON))
                     else -> Icon(iconFor(line.kind), contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(ICON))
                 }
@@ -231,7 +227,7 @@ internal fun ToolGroupRow(run: ItemRun.Tools, modifier: Modifier = Modifier) {
         ) {
             Box(Modifier.size(ICON), contentAlignment = Alignment.Center) {
                 if (running) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = colors.primary)
+                    if (rememberLoaderVisible(true)) Comet(size = 16.dp)
                 } else {
                     Icon(FleetIcons.Layers, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(ICON))
                 }
@@ -337,7 +333,7 @@ private fun ToolDetailCard(tool: ConvItem.Tool, kind: ToolKind, load: ToolDetail
 /** The detail's read, drawn only once it has taken `loader-delay` (14.12). */
 @Composable
 private fun DetailLoading() {
-    if (rememberLoaderVisible(true)) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 8.dp))
+    InlineLoading(waiting = true, modifier = Modifier.padding(vertical = 8.dp))
 }
 
 @Composable

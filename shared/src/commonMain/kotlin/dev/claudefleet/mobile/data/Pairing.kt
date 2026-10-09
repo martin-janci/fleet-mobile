@@ -55,7 +55,7 @@ data class PairTarget(val base: String?, val code: String) {
          */
         fun require(input: String): PairTarget = parse(input)
             ?: throw NotAPairingCode(
-                "that is not a claude-fleet pairing code. Scan the QR that " +
+                "that is not an Orbit Fleet pairing code. Scan the QR that " +
                     "`fleet-hub pair` shows, or type the 8-character code beneath it.",
             )
 

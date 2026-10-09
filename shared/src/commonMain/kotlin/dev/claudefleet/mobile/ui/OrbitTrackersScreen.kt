@@ -36,12 +36,13 @@ import dev.claudefleet.mobile.model.TrackerAdminRow
 import dev.claudefleet.mobile.model.relativeAgo
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
-import dev.claudefleet.mobile.ui.kit.Atom
 import dev.claudefleet.mobile.ui.kit.BottomSheet
 import dev.claudefleet.mobile.ui.kit.DotWave
 import dev.claudefleet.mobile.ui.kit.PhoneRow
 import dev.claudefleet.mobile.ui.kit.SheetAction
 import dev.claudefleet.mobile.ui.kit.SheetOption
+import dev.claudefleet.mobile.ui.kit.Sonar
+import dev.claudefleet.mobile.ui.kit.StepBars
 import dev.claudefleet.mobile.ui.kit.StatusWord
 import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 import dev.claudefleet.mobile.ui.theme.Fleet
@@ -80,7 +81,11 @@ data class TrackerWizardHandlers(
     val onNext: () -> Unit = {},
     val onConnect: () -> Unit = {},
     val onBack: () -> Unit = {},
+    /** Close, asking first when something was typed. */
     val onClose: () -> Unit = {},
+    val onKeepEditing: () -> Unit = {},
+    /** Close without asking: Discard on the ask. */
+    val onDiscard: () -> Unit = {},
 )
 
 /** A tracker's state as a row's word: the colour and the word together. */
@@ -212,6 +217,7 @@ private fun TrackerWizardScreen(
                 IconButton(onClick = handlers.onBack, enabled = w.working == null) { Icon(FleetIcons.ArrowBack, contentDescription = "Back") }
             },
         )
+        StepBars(step = w.step.ordinal + 1, total = TrackerStep.entries.size)
         ErrorBanner(error, onDismiss = onDismissError)
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             when (w.step) {
@@ -228,13 +234,14 @@ private fun TrackerWizardScreen(
                 else -> blocker
             },
             backLabel = if (site || w.created != null) "Cancel" else "Back",
-            onBackTap = { if (site) handlers.onClose() else handlers.onBack() },
+            onBackTap = { if (site || w.created != null) handlers.onClose() else handlers.onBack() },
             primaryLabel = if (site) "Next" else "Connect",
             primaryEnabled = blocker == null && w.working == null,
             onPrimary = if (site) handlers.onNext else handlers.onConnect,
             editable = w.working == null,
         )
     }
+    if (w.askingClose) DiscardSheet(onKeep = handlers.onKeepEditing, onDiscard = handlers.onDiscard)
 }
 
 @Composable
@@ -338,8 +345,8 @@ private fun ColumnScope.ConnectProgressBody(w: TrackerWizard) {
     val work = w.working
     if (work != null) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            // The loader beside the line, once the wait passes loader-delay; never full-screen in a wizard.
-            if (rememberLoaderVisible(true)) Atom()
+            // Sonar beside the line (the board), once the wait passes loader-delay; never full-screen in a wizard.
+            if (rememberLoaderVisible(true)) Sonar(size = 28.dp)
             Text(connectingLine(work, w.provider), color = o.fg2, style = Fleet.type.textMd)
         }
     }

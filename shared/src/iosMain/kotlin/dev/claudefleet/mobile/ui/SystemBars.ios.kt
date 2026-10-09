@@ -20,3 +20,11 @@ internal actual fun HideSystemBars(hidden: Boolean) {
 
 /** The one hold for the process; touched only from the main thread, where Compose and SwiftUI both run. */
 internal val iosSystemBars = SystemBarsHold()
+
+/**
+ * On iOS the status bar's style belongs to the hosting view controller, as its
+ * visibility does ([HideSystemBars]); the SwiftUI host follows the system
+ * appearance. Nothing for Compose to set here.
+ */
+@Composable
+internal actual fun SystemBarsAppearance(dark: Boolean) = Unit

@@ -30,7 +30,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -39,7 +38,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +63,8 @@ import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.components.WorkStatusDot
 import dev.claudefleet.mobile.ui.theme.FleetIcons
+import dev.claudefleet.mobile.ui.kit.InlineLoading
+import dev.claudefleet.mobile.ui.kit.OrbitPullToRefresh
 
 /** Everything the My work tab reports. */
 data class MyWorkHandlers(
@@ -194,9 +194,9 @@ fun MyWorkScreen(
         state.stale?.let { StaleNotice(it) }
         ErrorBanner(state.error, onDismiss = handlers.onDismissError, onRetry = handlers.onRefresh.takeIf { !state.loaded && !state.conflict })
         if (state.error != null && state.conflict) ReloadRow(handlers.onReload)
-        if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        InlineLoading(waiting = state.loading)
 
-        PullToRefreshBox(
+        OrbitPullToRefresh(
             isRefreshing = false,
             onRefresh = handlers.onRefresh,
             modifier = Modifier.fillMaxSize(),
@@ -360,7 +360,7 @@ private fun LoadMoreRow(group: WorkGroupSection, connected: Boolean, onClick: ()
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
         group.error?.let { Text(it.body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         if (group.loadingMore) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            InlineLoading(waiting = true)
         } else if (group.hasMore) {
             TextButton(onClick = onClick, enabled = connected) {
                 Text("Load more (${group.tasks.size} of ${group.count})")

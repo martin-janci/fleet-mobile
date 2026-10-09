@@ -299,15 +299,24 @@ internal fun limitRows(usage: AccountLimits): List<Pair<String, LimitWindow>> = 
     usage.sevenDaySonnet?.let { "Weekly Sonnet" to it },
 )
 
-/** "62% used · resets in 2 h"; the figure always beside the bar, never the colour alone. */
+/**
+ * "62% used · resets in 2 h"; the figure always beside the bar, never the
+ * colour alone. A window past its reset says so instead of its old figure
+ * (the desktop's `freshness` calls it expired): the reading is from before
+ * the reset, and the next one has not come in.
+ */
 internal fun limitFigure(w: LimitWindow, nowSeconds: Long): String {
+    if (hasReset(w, nowSeconds)) return "Reset · not re-read yet"
     val pct = "${kotlin.math.round(w.utilization.coerceIn(0.0, 100.0)).toInt()}% used"
-    val resets = relativeWithin(w.resetsAt?.takeIf { it > nowSeconds }, nowSeconds)?.let { "resets in $it" }
+    val resets = relativeWithin(w.resetsAt, nowSeconds)?.let { "resets in $it" }
     return listOfNotNull(pct, resets).joinToString(" · ")
 }
 
+/** A window whose reset time has passed since it was read. */
+internal fun hasReset(w: LimitWindow, nowSeconds: Long): Boolean = w.resetsAt?.let { it <= nowSeconds } ?: false
+
 /** A window close to its limit: its meter turns to the failed colour and says so in words too. */
-internal fun nearLimit(w: LimitWindow): Boolean = w.utilization >= 90.0
+internal fun nearLimit(w: LimitWindow, nowSeconds: Long): Boolean = !hasReset(w, nowSeconds) && w.utilization >= 90.0
 
 /**
  * What a read that did not come back says, in words, and how old the meters
@@ -319,7 +328,9 @@ internal fun limitsNote(snap: AccountUsageSnapshot?, nowSeconds: Long): String? 
         "ok" -> return null
         "never_fetched" -> "Not read yet"
         "no_credentials" -> "No Claude login on its host"
-        "access_token_expired", "login_expired" -> "Its login expired; sign in again on the host"
+        // The hub refreshes an expired access token by itself (attention.rs).
+        "access_token_expired" -> "Refreshing its login"
+        "login_expired" -> "Its login expired; sign in again on the host"
         "token_rejected" -> "Claude refused its login; sign in again on the host"
         "rate_limited" -> "Claude asked to wait before reading again"
         "host_unsupported" -> "Its host cannot read limits"
@@ -335,7 +346,8 @@ private fun AccountLimitsBlock(snap: AccountUsageSnapshot?, nowSeconds: Long) {
     val o = Fleet.colors
     Column(modifier = Modifier.fillMaxWidth().padding(start = gutter(), end = gutter(), bottom = 10.dp)) {
         for ((name, w) in snap?.usage?.let(::limitRows).orEmpty()) {
-            val near = nearLimit(w)
+            val near = nearLimit(w, nowSeconds)
+            val used = if (hasReset(w, nowSeconds)) 0.0 else w.utilization
             Row(modifier = Modifier.padding(top = 6.dp)) {
                 Text(name, color = o.fg, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.weight(1f))
                 Text(
@@ -347,7 +359,7 @@ private fun AccountLimitsBlock(snap: AccountUsageSnapshot?, nowSeconds: Long) {
             }
             Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(4.dp).background(o.track, RoundedCornerShape(2.dp))) {
                 Box(
-                    Modifier.fillMaxWidth((w.utilization / 100.0).toFloat().coerceIn(0f, 1f)).fillMaxHeight()
+                    Modifier.fillMaxWidth((used / 100.0).toFloat().coerceIn(0f, 1f)).fillMaxHeight()
                         .background(if (near) o.statusFailed else o.accent, RoundedCornerShape(2.dp)),
                 )
             }

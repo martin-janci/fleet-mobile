@@ -471,3 +471,9 @@ private fun tabOf(screen: Screen, layout: PhoneLayout): Tab? = when (screen) {
     Screen.Control -> Tab.Control
     Screen.More -> Tab.More
 }
+
+/** Open session [id] from outside the app (a notification): every sheet drawn over the screens closes first. */
+internal fun openOverSheets(id: Long, closers: List<() -> Unit>, open: (Long) -> Unit) {
+    closers.forEach { it() }
+    open(id)
+}

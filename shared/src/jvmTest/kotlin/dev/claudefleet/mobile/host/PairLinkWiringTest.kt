@@ -23,6 +23,9 @@ class PairLinkWiringTest {
     private val activity: String by lazy {
         Repo.file("androidApp/src/main/kotlin/dev/claudefleet/mobile/android/MainActivity.kt").readText()
     }
+    private val application: String by lazy {
+        Repo.file("androidApp/src/main/kotlin/dev/claudefleet/mobile/android/FleetApplication.kt").readText()
+    }
     private val contentView: String by lazy { Repo.file("iosApp/iosApp/ContentView.swift").readText() }
 
     @Test
@@ -77,7 +80,7 @@ class PairLinkWiringTest {
     @Test
     fun android_ties_auto_pairing_to_the_build_type() {
         assertTrue(
-            "autoPairFromLink = BuildConfig.DEBUG" in activity,
+            "autoPairFromLink = BuildConfig.DEBUG" in application,
             "a release build must fill the fields and wait for a tap",
         )
     }

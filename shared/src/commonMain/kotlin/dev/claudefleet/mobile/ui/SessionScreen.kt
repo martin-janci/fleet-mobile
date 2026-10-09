@@ -79,7 +79,6 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
@@ -88,7 +87,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.InputChipDefaults
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SuggestionChip
@@ -163,6 +161,9 @@ import kotlin.time.Duration.Companion.milliseconds
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.IconButtonDefaults
+import dev.claudefleet.mobile.ui.kit.Comet
+import dev.claudefleet.mobile.ui.kit.InlineLoading
+import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 
 /** The conversation list, for the device test that checks it follows new output. */
 const val CONVERSATION_LIST: String = "conversation-list"
@@ -1706,7 +1707,7 @@ private fun SessionOverflowMenu(
             }
             if (state.canDismissGhost) {
                 DropdownMenuItem(
-                    text = { Text("Dismiss ghost") },
+                    text = { Text("Dismiss lost session") },
                     enabled = actionable,
                     onClick = { expanded = false; showDismissGhostConfirm = true },
                 )
@@ -1724,7 +1725,7 @@ private fun SessionOverflowMenu(
         if (manage) {
             HorizontalDivider()
             DropdownMenuItem(
-                text = { Text("Retire safely") },
+                text = { Text("Safe remove") },
                 enabled = actionable,
                 onClick = { expanded = false; showSafeKillConfirm = true },
             )
@@ -1801,7 +1802,7 @@ private fun SessionOverflowMenu(
     if (showDismissGhostConfirm) {
         AlertDialog(
             onDismissRequest = { showDismissGhostConfirm = false },
-            title = { Text("Dismiss this ghost?") },
+            title = { Text("Dismiss this lost session?") },
             text = { Text("Its row is deleted for good. Its conversation stays on the host, and can still be found from the host's sheet.") },
             confirmButton = { TextButton(onClick = { showDismissGhostConfirm = false; onDismissGhost() }) { Text("Dismiss") } },
             dismissButton = { TextButton(onClick = { showDismissGhostConfirm = false }) { Text("Cancel") } },
@@ -2117,7 +2118,7 @@ private fun ReplyMenu(turn: ConvTurn, chronological: Int, host: ReplyHost) {
     var open by remember { mutableStateOf(false) }
     var asking by remember { mutableStateOf<ReplyAsk?>(null) }
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-        IconButton(onClick = { open = true }, modifier = Modifier.size(32.dp)) {
+        IconButton(onClick = { open = true }) {
             Icon(FleetIcons.MoreVert, contentDescription = "Reply actions", modifier = Modifier.size(18.dp))
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -2509,7 +2510,7 @@ private fun NotificationBlock(item: ConvItem.Notification, report: String) {
 
 /** The status a notification's block names under its title; null when the title says it all. */
 internal fun notificationStatusWord(status: String?): String? = when (status) {
-    "completed" -> "Completed"
+    "completed" -> "Done"
     "failed" -> "Failed"
     "stopped" -> "Stopped"
     "killed" -> "Killed"
@@ -2667,7 +2668,7 @@ private fun EarlierConversationBanner(viewing: ConversationSummary, nowSeconds: 
                 )
                 TextButton(onClick = onBack) { Text("Back to current") }
             }
-            if (loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            InlineLoading(waiting = loading)
         }
     }
 }
@@ -2877,7 +2878,8 @@ private fun PromptBox(
                     enabled = state.canSend,
                     modifier = Modifier.padding(bottom = 4.dp).heightIn(min = 48.dp),
                 ) {
-                    if (state.sending) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    // The label stays until the send has taken `loader-delay`.
+                    if (rememberLoaderVisible(state.sending)) Comet(size = 16.dp)
                     else Text(sendLabel(working = true))
                 }
             } else {
@@ -2889,7 +2891,7 @@ private fun PromptBox(
                     enabled = if (wordsMode) state.canSendWords else state.canSend,
                     modifier = Modifier.padding(bottom = 4.dp).size(48.dp),
                 ) {
-                    if (state.sending) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    if (rememberLoaderVisible(state.sending)) Comet(size = 16.dp)
                     else Icon(FleetIcons.Send, contentDescription = "Send")
                 }
             }

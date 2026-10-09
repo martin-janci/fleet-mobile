@@ -21,7 +21,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -37,6 +36,8 @@ import dev.claudefleet.mobile.ui.Answer
 import dev.claudefleet.mobile.ui.BlockedCard
 import dev.claudefleet.mobile.ui.theme.LocalStatusColors
 import dev.claudefleet.mobile.ui.theme.StatusTone
+import dev.claudefleet.mobile.ui.kit.Comet
+import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 
 /**
  * The card a blocked or stuck session gets, above the composer.
@@ -111,13 +112,9 @@ fun BlockedCardView(
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 )
-                if (answering) {
+                if (rememberLoaderVisible(answering)) {
                     Spacer(Modifier.width(8.dp))
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = colors.onContainer,
-                    )
+                    Comet(size = 16.dp)
                 }
             }
             asking?.let { tool ->

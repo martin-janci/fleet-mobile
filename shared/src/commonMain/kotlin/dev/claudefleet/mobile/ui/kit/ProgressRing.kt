@@ -10,9 +10,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -53,6 +55,38 @@ fun ProgressRing(
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(label, color = o.fg, fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold)
             if (detail != null) Text(detail, color = o.fgMuted, fontSize = 12.sp, lineHeight = 16.sp)
+        }
+    }
+}
+
+/**
+ * The small Progress ring: the same track and accent arc, without the amount
+ * inside, for a row or a sheet that already says what is moving. Replaces a
+ * determinate `LinearProgressIndicator` (manual: download/sync of known size
+ * uses a Progress ring). Read out as "N percent".
+ */
+@Composable
+fun ProgressRing(
+    fraction: Float,
+    modifier: Modifier = Modifier,
+    size: Dp = 28.dp,
+    color: Color = Fleet.colors.accent,
+) {
+    val o = Fleet.colors
+    val f = fraction.coerceIn(0f, 1f)
+    val percent = (f * 100).toInt()
+    Canvas(
+        modifier.size(size).semantics {
+            progressBarRangeInfo = ProgressBarRangeInfo(f, 0f..1f)
+            contentDescription = "$percent percent"
+        },
+    ) {
+        val w = (this.size.minDimension * 0.12f).coerceAtLeast(2f)
+        val inset = w / 2
+        val arc = Size(this.size.width - w, this.size.height - w)
+        drawArc(o.track, 0f, 360f, useCenter = false, topLeft = Offset(inset, inset), size = arc, style = Stroke(w))
+        if (f > 0f) {
+            drawArc(color, -90f, 360f * f, useCenter = false, topLeft = Offset(inset, inset), size = arc, style = Stroke(w, cap = StrokeCap.Round))
         }
     }
 }

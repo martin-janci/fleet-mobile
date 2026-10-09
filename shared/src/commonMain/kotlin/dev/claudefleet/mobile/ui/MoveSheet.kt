@@ -24,7 +24,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Switch
@@ -41,7 +40,7 @@ import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.MovePreview
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.components.ErrorBanner
-import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
+import dev.claudefleet.mobile.ui.kit.InlineLoading
 
 data class MoveHandlers(
     val onClose: () -> Unit = {},
@@ -60,13 +59,13 @@ fun MoveSheet(state: MoveUiState, handlers: MoveHandlers, nowSeconds: Long, orbi
     var confirming by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).verticalScroll(rememberScrollState())) {
-            Text("Move to another host", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+            Text("Move to host", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
             Text(
                 "Its uncommitted and unpushed work, small git-ignored files, its Claude conversation and memory go with it.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (rememberLoaderVisible(state.busy)) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
+            InlineLoading(waiting = state.busy, modifier = Modifier.padding(vertical = 4.dp))
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
             state.waiting?.let { w ->
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {

@@ -43,6 +43,8 @@ data class TrackerWizard(
     val working: TrackerWork? = null,
     /** Why the last Connect did not end connected, in words. */
     val failure: String? = null,
+    /** Close was asked for with something typed: the sheet that asks first. */
+    val askingClose: Boolean = false,
 ) {
     val provider: String? get() = created?.provider ?: chosenProvider ?: inferTrackerProvider(siteUrl)
 
@@ -148,9 +150,18 @@ class TrackersViewModel(
         if (w.working != null) return
         when {
             w.step == TrackerStep.SignIn && w.created == null -> local.update { it.copy(wizard = w.copy(step = TrackerStep.Site, secret = "")) }
-            else -> closeWizard()
+            else -> requestClose()
         }
     }
+
+    /** Close, asking first when something was typed (the wizard rules). */
+    fun requestClose() {
+        val w = local.value.wizard ?: return
+        if (w.working != null) return
+        if (trackerTyped(w)) local.update { it.copy(wizard = w.copy(askingClose = true)) } else closeWizard()
+    }
+
+    fun keepEditing() = setWizard { it.copy(askingClose = false) }
 
     fun closeWizard() {
         val w = local.value.wizard ?: return

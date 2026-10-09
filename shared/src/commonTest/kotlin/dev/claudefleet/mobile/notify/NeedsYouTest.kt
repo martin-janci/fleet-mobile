@@ -150,6 +150,24 @@ class NeedsYouTest {
     }
 
     @Test
+    fun the_memory_is_written_only_when_a_reason_moves() = runTest {
+        val fleet = Fleet()
+        fleet.status.value = ConnectionStatus.Connected("0.9.3")
+        var writes = 0
+        backgroundScope.launch { needsYouEvents(fleet) { writes++ }.collect {} }
+        fleet.sessions.value = listOf(row(1, "waiting"), row(2))
+        runCurrent()
+        val first = writes
+        // A frame that changes something other than a notify reason: a rename.
+        fleet.sessions.value = listOf(row(1, "waiting").copy(tmuxName = "renamed"), row(2))
+        runCurrent()
+        assertEquals(first, writes, "no reason moved, so nothing is persisted")
+        fleet.sessions.value = listOf(row(1), row(2, "waiting"))
+        runCurrent()
+        assertEquals(first + 1, writes)
+    }
+
+    @Test
     fun the_memory_survives_a_round_trip_through_a_key_value_store() {
         val seen = mapOf(1L to "waiting", 2L to null, 3L to "ci_failing")
         assertEquals(seen, decodeSeen(encodeSeen(seen)))

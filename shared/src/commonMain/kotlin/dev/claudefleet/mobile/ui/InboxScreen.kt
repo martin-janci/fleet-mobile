@@ -1,15 +1,24 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -68,6 +77,25 @@ internal fun inboxWord(row: SessionRow): StatusWord =
         else -> StatusWord.NEEDS_YOU
     }
 
+/** The Inbox's three views (boards MobileNav, MobileTutorials): Needs you, Running, Done today. */
+enum class InboxView(val label: String) { NeedsYou("Needs you"), Running("Running"), DoneToday("Done today") }
+
+/** Running: the sessions working now, most recently active first. */
+fun runningRows(sessions: List<SessionRow>): List<SessionRow> =
+    sessions.filter { it.claudeStatus == "working" && it.stuckKind.isNullOrBlank() }
+        .sortedWith(compareByDescending<SessionRow, Long?>(nullsLast()) { it.lastActivityAt }.thenBy { it.id })
+
+/**
+ * Done today: the sessions whose turn finished since [midnight] (local), the
+ * newest first. A turn that ended with a question or a failure is under
+ * Needs you instead; a working session is Running.
+ */
+fun doneTodayRows(sessions: List<SessionRow>, midnight: Long): List<SessionRow> =
+    sessions.filter { r ->
+        !r.needsAttention && r.stuckKind.isNullOrBlank() && (r.lastActivityAt ?: 0) >= midnight &&
+            StatusWord.of(StatusTone.of(r.claudeStatus, r.stuckKind)).let { it == StatusWord.DONE || it == StatusWord.IDLE }
+    }.sortedWith(compareByDescending<SessionRow, Long?>(nullsLast()) { it.lastActivityAt }.thenBy { it.id })
+
 /** "4 need you · 6 running": the Inbox header's line. */
 internal fun inboxSubtitle(needYou: Int, running: Int): String = "$needYou need${if (needYou == 1) "s" else ""} you · $running running"
 
@@ -106,7 +134,12 @@ fun InboxScreen(
     accountUsage: Map<String, AccountUsageSnapshot> = emptyMap(),
     /** Sessions shared with this person (redesign 11.10), drawn under *Needs you*. */
     shared: List<SharedRow> = emptyList(),
+    /** The Running view's rows ([runningRows]); empty leaves the view switch out. */
+    runningList: List<SessionRow> = emptyList(),
+    /** The Done today view's rows ([doneTodayRows]). */
+    doneTodayList: List<SessionRow> = emptyList(),
 ) {
+    var view by rememberSaveable { mutableStateOf(InboxView.NeedsYou) }
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
             title = "Inbox",
@@ -117,7 +150,47 @@ fun InboxScreen(
             },
         )
         top()
-        OrbitPullToRefresh(isRefreshing = refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
+        ) {
+            for (v in InboxView.entries) {
+                val n = when (v) {
+                    InboxView.NeedsYou -> rows.size
+                    InboxView.Running -> runningList.size
+                    InboxView.DoneToday -> doneTodayList.size
+                }
+                FilterChip(selected = v == view, onClick = { view = v }, label = { Text("${v.label} $n") })
+            }
+        }
+        if (view != InboxView.NeedsYou) {
+            val list = if (view == InboxView.Running) runningList else doneTodayList
+            OrbitPullToRefresh(isRefreshing = refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    if (list.isEmpty()) {
+                        item(key = "empty-${view.name}") {
+                            Box(modifier = Modifier.fillParentMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    if (view == InboxView.Running) "Nothing is running." else "Nothing finished today yet.",
+                                    color = Fleet.colors.fgMuted,
+                                    fontSize = 15.sp,
+                                )
+                            }
+                        }
+                    }
+                    items(list, key = { "${view.name}-${it.id}" }) { row ->
+                        PhoneSessionRow(
+                            row = row,
+                            nowSeconds = nowSeconds,
+                            live = live,
+                            showHost = true,
+                            accountName = row.accountUuid?.let(accountNames::get),
+                            onClick = { onOpenSession(row.id) },
+                        )
+                    }
+                }
+            }
+        } else OrbitPullToRefresh(isRefreshing = refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 if (rows.isEmpty() && shared.isEmpty()) {
                     item(key = "empty") {

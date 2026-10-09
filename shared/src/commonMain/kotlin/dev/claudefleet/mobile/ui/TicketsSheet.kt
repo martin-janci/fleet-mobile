@@ -25,7 +25,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -56,6 +55,7 @@ import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.TicketCardBody
 import dev.claudefleet.mobile.ui.components.WorkStatusDot
 import dev.claudefleet.mobile.ui.theme.FleetIcons
+import dev.claudefleet.mobile.ui.kit.InlineLoading
 
 /** Everything the Tickets sheet reports. */
 data class TicketsHandlers(
@@ -145,7 +145,7 @@ fun TicketsSheet(
                 modifier = Modifier.padding(bottom = 4.dp),
             )
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
-            if (state.loading || state.busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            InlineLoading(waiting = state.loading || state.busy)
             LazyColumn(modifier = Modifier.fillMaxWidth()) {
                 state.found?.let { found ->
                     item(key = "found") { SectionTitle("Found") }

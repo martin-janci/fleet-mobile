@@ -206,6 +206,9 @@ import dev.claudefleet.mobile.ui.Navigator
 import dev.claudefleet.mobile.ui.PhoneLayout
 import dev.claudefleet.mobile.ui.hostsLine
 import dev.claudefleet.mobile.ui.inboxRows
+import dev.claudefleet.mobile.ui.runningRows
+import dev.claudefleet.mobile.ui.doneTodayRows
+import dev.claudefleet.mobile.model.localMidnight
 import dev.claudefleet.mobile.ui.sharedRows
 import dev.claudefleet.mobile.ui.loadPhoneLayout
 import dev.claudefleet.mobile.ui.savePhoneLayout
@@ -217,6 +220,8 @@ import dev.claudefleet.mobile.ui.kit.rememberPhoneConnection
 import dev.claudefleet.mobile.ui.kit.HubBanner
 import dev.claudefleet.mobile.ui.kit.LocalHubReconnect
 import dev.claudefleet.mobile.ui.NewSessionScreen
+import dev.claudefleet.mobile.ui.DiscardSheet
+import dev.claudefleet.mobile.ui.newSessionTyped
 import dev.claudefleet.mobile.ui.NewSessionViewModel
 import dev.claudefleet.mobile.ui.WizardStep
 import dev.claudefleet.mobile.ui.PairScreen
@@ -311,6 +316,7 @@ import dev.claudefleet.mobile.ui.OrbitSettingsHandlers
 import dev.claudefleet.mobile.ui.SettingsPlace
 import dev.claudefleet.mobile.ui.LayoutRow
 import dev.claudefleet.mobile.ui.SettingsViewModel
+import dev.claudefleet.mobile.ui.SystemBarsAppearance
 import dev.claudefleet.mobile.ui.Tab
 import dev.claudefleet.mobile.ui.TicketsHandlers
 import dev.claudefleet.mobile.ui.TicketsSheet
@@ -493,8 +499,8 @@ class AppContainer(
      */
     val quickReplies: QuickReplies = QuickReplies(prefs, HubQuickReplyActions(session))
 
-    /** Unsent text per session, across visits to it. */
-    val drafts: DraftMemory = DraftMemory()
+    /** Unsent text per session, across visits to it and across a killed process. */
+    val drafts: DraftMemory = DraftMemory(prefs)
     val hints: Hints = Hints(prefs)
 
     /** This phone's own settings: notification kinds and the theme (redesign 14.11). */
@@ -542,7 +548,10 @@ class AppContainer(
 @Composable
 fun App(container: AppContainer) {
     val theme by container.phone.theme.collectAsState()
-    FleetTheme(dark = theme.isDark(isSystemInDarkTheme())) {
+    val dark = theme.isDark(isSystemInDarkTheme())
+    FleetTheme(dark = dark) {
+        // The phone's clock and battery in the app's colours, not the system's.
+        SystemBarsAppearance(dark = dark)
         Surface(modifier = Modifier.fillMaxSize()) {
             // Every screen is inset once, here, rather than each one insetting
             // itself. An app targeting SDK 35 is drawn edge to edge by the
@@ -630,7 +639,7 @@ fun App(container: AppContainer) {
 @Composable
 private fun Splash() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("claude-fleet", style = MaterialTheme.typography.titleLarge)
+        Text("Orbit Fleet", style = MaterialTheme.typography.titleLarge)
     }
 }
 
@@ -746,9 +755,6 @@ private fun FleetRoute(
     val nav = remember(credentials) { Navigator(loadPhoneLayout(container.prefs)) }
     val screen by nav.screen.collectAsState()
     val layout by nav.layout.collectAsState()
-    // A tapped "needs you" notification: open its session.
-    val openRequest by container.openSession.collectAsState()
-    LaunchedEffect(openRequest) { if (openRequest != null) container.consumeOpenSession()?.let(nav::open) }
     val tab by nav.tab.collectAsState()
     // The first import after a pair (14.12): set as the fleet check ends, on the New bar only.
     var importing by remember(credentials) { mutableStateOf(false) }
@@ -846,6 +852,24 @@ private fun FleetRoute(
     val pullRequests = remember(repository, scope) {
         PullRequestsViewModel(fleet = repository, actions = container.workActions, scope = scope)
     }
+    // A tapped "needs you" notification: open its session over nothing. A
+    // sheet left open (Today, Tidy, …) would sit on top of the question the
+    // tap was for, as the in-app paths already know (review r09 F5).
+    val openRequest by container.openSession.collectAsState()
+    LaunchedEffect(openRequest) {
+        if (openRequest != null) {
+            container.consumeOpenSession()?.let { id ->
+                openOverSheets(
+                    id,
+                    closers = listOf(
+                        { today.close() }, { tidy.close() }, { tickets.close() }, { missions.close() },
+                        { automation.close() }, { debugDevices.close() }, { pullRequests.close() },
+                    ),
+                    open = nav::open,
+                )
+            }
+        }
+    }
     val workState by myWork.state.collectAsState()
     // The hub stopped serving the Work view (or a reconnect found an older
     // hub): the tab leaves the bar, and the app leaves the tab.
@@ -936,6 +960,10 @@ private fun FleetRoute(
             ) {
                 val attention by sessions.state.collectAsState()
                 if (layout == PhoneLayout.New) {
+                    val barRows by repository.sessions.collectAsState()
+                    val barAccess by repository.access.collectAsState()
+                    // The Inbox's own rows, so the badge, the Inbox and Today agree (review r09 B1).
+                    val needYou = remember(barRows, barAccess) { inboxRows(barRows, barAccess).size }
                     // The Orbit Fleet bar: one badge, the Needs you count, on
                     // Inbox. Work's To review count stays on the Work screen.
                     val items = PhoneLayout.New.tabs
@@ -946,7 +974,7 @@ private fun FleetRoute(
                         items = items,
                         selected = tab.name,
                         onSelect = { key -> nav.select(Tab.valueOf(key)) },
-                        badge = BottomBarBadge(Tab.Inbox.name, attention.attentionCount),
+                        badge = BottomBarBadge(Tab.Inbox.name, needYou),
                     )
                 } else NavigationBar {
                     // Work only when the hub serves `work { tree }`, Files only
@@ -1482,16 +1510,19 @@ private fun FleetRoute(
                     val shared = remember(all, access) { sharedRows(all, access) }
                     val todayInbox by today.state.collectAsState()
                     val inboxList by sessions.state.collectAsState()
-                    // The hub's version, read again on every connection: an owner
-                    // can upgrade it under a running app.
-                    val connected = inboxList.status is ConnectionStatus.Connected
-                    var hubVersion by remember { mutableStateOf<String?>(null) }
-                    LaunchedEffect(connected) { if (connected) hubVersion = container.versionActions.hubVersion() }
+                    // The hub's version from its last `ready`: every reconnect
+                    // names it, so an owner's upgrade under a running app shows
+                    // without a fleet_health call each time Inbox opens (review r16).
+                    val hubVersion by repository.hubVersion.collectAsState()
                     val mismatch = remember(hubVersion) { hubMismatch(container.appVersion, hubVersion) }
                     val inboxConnection = rememberPhoneConnection(inboxList.status)
                     InboxScreen(
                         rows = rows,
                         running = all.count { it.claudeStatus == "working" },
+                        runningList = remember(all) { runningRows(all) },
+                        doneTodayList = remember(all, inboxList.nowSeconds / 60) {
+                            doneTodayRows(all, localMidnight(inboxList.nowSeconds, utcOffsetSeconds(inboxList.nowSeconds)))
+                        },
                         nowSeconds = inboxList.nowSeconds,
                         live = inboxList.status is ConnectionStatus.Connected,
                         connection = inboxConnection,
@@ -1531,11 +1562,15 @@ private fun FleetRoute(
                     // 14.7). New bar only: the Classic bar has no Control tab.
                     val controlState by control.state.collectAsState()
                     val attention by sessions.state.collectAsState()
-                    DisposableEffect(control) {
+                    // The lifecycle, not the composition: a pocketed phone on
+                    // this tab must not poll every 4 s (review r16).
+                    LifecycleStartEffect(control) {
                         control.attach()
-                        onDispose { control.detach() }
+                        onStopOrDispose { control.detach() }
                     }
-                    val subtitle = "${attention.attentionCount} need you"
+                    val controlRows by repository.sessions.collectAsState()
+                    val controlAccess by repository.access.collectAsState()
+                    val subtitle = "${remember(controlRows, controlAccess) { inboxRows(controlRows, controlAccess).size }} need you"
                     val views: @Composable () -> Unit = {
                         ControlViews(
                             sessions = attention.total,
@@ -1679,7 +1714,9 @@ private fun FleetRoute(
                                 onNext = trackers::next,
                                 onConnect = { trackers.connect() },
                                 onBack = trackers::back,
-                                onClose = trackers::closeWizard,
+                                onClose = trackers::requestClose,
+                                onKeepEditing = trackers::keepEditing,
+                                onDiscard = trackers::closeWizard,
                             ),
                         ),
                     )
@@ -1871,6 +1908,7 @@ private fun FleetRoute(
             // as well as from the Sessions header, so they are drawn over any tab.
             val todayOverlay by today.state.collectAsState()
             val todaySessions by repository.sessions.collectAsState()
+            val todayAccess by repository.access.collectAsState()
             if (todayOverlay.open) {
                 TodaySheet(
                     state = todayOverlay,
@@ -1886,7 +1924,7 @@ private fun FleetRoute(
                         onOpenTidy = { today.close(); tidy.open(); Unit }.takeIf { tidyState.available },
                     ),
                     // New: Waiting on me is the Inbox's own list, so the counts agree.
-                    waitingNow = if (layout == PhoneLayout.New) inboxRows(todaySessions) else null,
+                    waitingNow = if (layout == PhoneLayout.New) inboxRows(todaySessions, todayAccess) else null,
                     nowSeconds = epochSeconds(),
                 )
             }
@@ -2060,6 +2098,10 @@ private fun NewSessionRoute(
     // (and while a start runs, which is safe to leave) `nav.back()` leaves.
     var wizardStep by remember { mutableStateOf(WizardStep.Where) }
     BackHandler(enabled = wizard && wizardStep.previous != null && !state.creating) { wizardStep.previous?.let { wizardStep = it } }
+    // Leaving from the first step asks first when something was typed (review r09 B5).
+    var askDiscard by remember { mutableStateOf(false) }
+    BackHandler(enabled = wizard && wizardStep.previous == null && !state.creating && newSessionTyped(state)) { askDiscard = true }
+    val leave: () -> Unit = { if (wizard && !state.creating && newSessionTyped(state)) askDiscard = true else onBack() }
     val tools = remember(repository, scope) { ProjectToolsViewModel(repository, container.projectActions, scope, credentials.canWrite) }
     val toolsState by tools.state.collectAsState()
     LaunchedEffect(tools, state.host, state.projectId) { tools.loadWorktrees(state.host, state.projectId) }
@@ -2067,12 +2109,15 @@ private fun NewSessionRoute(
     // Where goes to Source, on Source closes it, and while a clone runs it
     // leaves the clone running in the background.
     var addStep by remember { mutableStateOf(AddProjectStep.Source) }
+    var addTyped by remember { mutableStateOf(false) }
+    var askDiscardAdd by remember { mutableStateOf(false) }
+    val closeAdd: () -> Unit = { if (!toolsState.adding && addTyped) askDiscardAdd = true else tools.closeAdd() }
     BackHandler(enabled = wizard && toolsState.addingOn != null) {
-        if (!toolsState.adding && addStep == AddProjectStep.Where) addStep = AddProjectStep.Source else tools.closeAdd()
+        if (!toolsState.adding && addStep == AddProjectStep.Where) addStep = AddProjectStep.Source else closeAdd()
     }
     NewSessionScreen(
         state = state,
-        onBack = onBack,
+        onBack = leave,
         onSelectHost = vm::selectHost,
         onProjectQuery = vm::onProjectQuery,
         onSelectProject = vm::selectProject,
@@ -2117,10 +2162,17 @@ private fun NewSessionRoute(
             onClone = { url -> tools.clone(url, vm::selectProject) },
             onAdopt = { path -> tools.adopt(path, vm::selectProject) },
             onCreate = { owner, repo, onGithub -> tools.create(owner, repo, onGithub, vm::selectProject) },
-            onClose = tools::closeAdd,
+            onClose = closeAdd,
             onDismissError = tools::dismissError,
+            onTyped = { addTyped = it },
         ),
     )
+    if (askDiscard) {
+        DiscardSheet(onKeep = { askDiscard = false }, onDiscard = { askDiscard = false; onBack() })
+    }
+    if (askDiscardAdd) {
+        DiscardSheet(onKeep = { askDiscardAdd = false }, onDiscard = { askDiscardAdd = false; addTyped = false; tools.closeAdd() })
+    }
 }
 
 @Composable

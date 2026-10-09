@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,7 +23,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -58,6 +58,7 @@ import dev.claudefleet.mobile.ui.scan.QrScannerView
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
 import kotlinx.coroutines.delay
+import dev.claudefleet.mobile.ui.kit.Comet
 
 /**
  * Pairing, QR first (redesign 14.11, board MobileSettings › Pairing): the
@@ -260,6 +261,10 @@ private fun PairingProgress(contacting: String?, onCancel: () -> Unit) {
     }
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (late) {
+                Comet(size = 16.dp)
+                Spacer(Modifier.width(8.dp))
+            }
             Text(
                 text = contacting?.let { "Contacting $it…" } ?: "Pairing…",
                 style = Fleet.type.textMd,
@@ -267,13 +272,6 @@ private fun PairingProgress(contacting: String?, onCancel: () -> Unit) {
                 modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
             )
             TextButton(onClick = onCancel) { Text("Cancel") }
-        }
-        if (late) {
-            LinearProgressIndicator(
-                modifier = Modifier.fillMaxWidth(),
-                color = o.loaderAccent,
-                trackColor = o.track,
-            )
         }
     }
 }

@@ -266,7 +266,7 @@ fun runWord(run: RoutineRun): StatusWord? = when (run.state) {
 
 /** What a run came to: its own reason when it has one ("Reviewed 4 PRs"), else its state. */
 fun runTitle(run: RoutineRun): String = run.reason?.takeIf { it.isNotBlank() } ?: when (run.state) {
-    "running" -> "Running"
+    "running" -> "Working"
     "done" -> "Done"
     "failed" -> "Failed"
     "skipped" -> "Skipped"
