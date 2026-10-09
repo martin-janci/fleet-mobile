@@ -556,7 +556,7 @@ private fun HostHeading(host: HostGroup, onClick: () -> Unit) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 40.dp)
+                .heightIn(min = OrbitTokens.spacing("touch-min").dp)
                 .clickable(onClick = onClick)
                 .padding(horizontal = OrbitTokens.spacing("phone-gutter").dp)
                 .semantics { heading() },

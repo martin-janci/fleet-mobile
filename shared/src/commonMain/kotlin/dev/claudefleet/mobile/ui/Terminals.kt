@@ -33,6 +33,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
@@ -112,6 +114,19 @@ enum class TerminalKey(val label: String, val key: String? = null, val insert: S
     CtrlC("⌃C", key = "C-c"),
     Pipe("|", insert = "|"),
     Tilde("~", insert = "~"),
+    ;
+
+    /** What TalkBack says for the cap: a glyph alone is read by its Unicode name (review r11). */
+    val spoken: String
+        get() = when (this) {
+            Esc -> "Escape"
+            Tab -> "Tab"
+            Up -> "Previous line"
+            Down -> "Next line"
+            CtrlC -> "Control C"
+            Pipe -> "Pipe"
+            Tilde -> "Tilde"
+        }
 }
 
 data class TerminalsUiState(
@@ -510,7 +525,7 @@ private fun ColumnScope.TerminalScreen(state: TerminalsUiState, handlers: Termin
                     // Narrow keys, so the whole bar fits a phone's width.
                     contentPadding = PaddingValues(horizontal = 8.dp),
                     modifier = Modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp).widthIn(min = 44.dp),
-                ) { Text(key.label, style = Fleet.type.code) }
+                ) { Text(key.label, style = Fleet.type.code, modifier = Modifier.clearAndSetSemantics { contentDescription = key.spoken }) }
             }
         }
         Row(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {

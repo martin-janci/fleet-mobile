@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.ui
 
 import androidx.compose.material3.VerticalDivider
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import dev.claudefleet.mobile.ui.components.withFind
 import dev.claudefleet.mobile.ui.components.LocalFindQuery
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -3028,7 +3029,7 @@ private fun QuickRepliesRow(
                 SuggestionChip(
                     onClick = { onAdd(QuickReply.of(draft)) },
                     enabled = draft.isNotBlank(),
-                    label = { Text("+") },
+                    label = { Text("+", modifier = Modifier.clearAndSetSemantics { contentDescription = "Save as a quick reply" }) },
                 )
             }
             item {
@@ -3181,10 +3182,10 @@ private fun ManageQuickRepliesDialog(
                             )
                         }
                         IconButton(onClick = { onMove(chip, -1) }, enabled = i > 0) {
-                            Text("↑")
+                            Text("↑", modifier = Modifier.clearAndSetSemantics { contentDescription = "Move ${chip.label.ifBlank { chip.text }} up" })
                         }
                         IconButton(onClick = { onMove(chip, 1) }, enabled = i < chips.lastIndex) {
-                            Text("↓")
+                            Text("↓", modifier = Modifier.clearAndSetSemantics { contentDescription = "Move ${chip.label.ifBlank { chip.text }} down" })
                         }
                         DangerTextButton(onClick = { onRemove(chip) }) {
                             Text("Remove")

@@ -495,7 +495,7 @@ private fun PhoneGroupHeader(title: String, count: Int, collapsed: Boolean, onCl
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 36.dp)
+            .heightIn(min = OrbitTokens.spacing("touch-min").dp)
             .clickable(onClick = onClick)
             .padding(start = 34.dp, end = OrbitTokens.spacing("phone-gutter").dp)
             .semantics { contentDescription = "$title, $count tasks, ${if (collapsed) "folded" else "open"}" },

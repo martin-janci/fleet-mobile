@@ -77,9 +77,9 @@ class MobileSessionExtrasTest {
         compose.onNodeWithText("shell · 2").assertExists()
         compose.onNodeWithText("## claude/hosts-polish", substring = true).assertExists()
         compose.onNodeWithTag(TERMINALS_NEW_TAG).performClick()
-        compose.onNodeWithText("Esc").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Escape").performScrollTo().performClick()
         // The bar scrolls sideways on a narrow screen: brought into view before the tap.
-        compose.onNodeWithText("⌃C").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Control C").performScrollTo().performClick()
         compose.onNodeWithTag(TERMINALS_INPUT_TAG).performTextInput("ls")
         compose.waitForIdle()
 

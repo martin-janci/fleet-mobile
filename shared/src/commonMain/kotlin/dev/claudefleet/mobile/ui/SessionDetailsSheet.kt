@@ -217,7 +217,7 @@ private fun Fact(label: String, value: String, onClick: (() -> Unit)? = null, li
 @Composable
 private fun SectionTitle(text: String) {
     HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
-    Text(text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 24.dp, top = 12.dp, bottom = 4.dp))
+    Text(text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 24.dp, top = 12.dp, bottom = 4.dp).semantics { heading() })
 }
 
 @Composable

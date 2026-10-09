@@ -37,6 +37,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -464,7 +466,7 @@ private fun SectionLabel(text: String) {
         text.uppercase(),
         style = Fleet.type.text2xs,
         color = Fleet.colors.fgMuted,
-        modifier = Modifier.padding(start = OrbitTokens.spacing("phone-gutter").dp, end = 16.dp, top = 20.dp, bottom = 6.dp),
+        modifier = Modifier.padding(start = OrbitTokens.spacing("phone-gutter").dp, end = 16.dp, top = 20.dp, bottom = 6.dp).semantics { heading() },
     )
 }
 

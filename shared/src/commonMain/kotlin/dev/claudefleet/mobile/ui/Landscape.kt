@@ -32,6 +32,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
@@ -115,7 +117,16 @@ sealed interface AgentPress {
 }
 
 /** One key of the bar: its cap and what it does, or null where it would do nothing safe right now (drawn dimmed). */
-data class AgentBarKey(val label: String, val press: AgentPress?)
+data class AgentBarKey(val label: String, val press: AgentPress?) {
+    /** What TalkBack says for the cap: a glyph alone is read by its Unicode name (review r11). */
+    val spoken: String
+        get() = when (label) {
+            "Esc" -> "Escape"
+            "⏎" -> "Enter"
+            "⌃C" -> "Control C"
+            else -> label
+        }
+}
 
 /**
  * The full-screen agent's key bar, always the same caps in the same places:
@@ -229,13 +240,13 @@ internal fun AgentFullscreen(
                                 .heightIn(min = OrbitTokens.spacing("touch-min").dp)
                                 .widthIn(min = 44.dp)
                                 .testTag(AGENT_FULLSCREEN_KEY_TAG + key.label),
-                        ) { Text(key.label, style = Fleet.type.code) }
+                        ) { Text(key.label, style = Fleet.type.code, modifier = Modifier.clearAndSetSemantics { contentDescription = key.spoken }) }
                     }
                     OutlinedButton(
                         onClick = { typing = !typing },
                         contentPadding = PaddingValues(horizontal = 8.dp),
                         modifier = Modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp).widthIn(min = 44.dp),
-                    ) { Text("⌨", style = Fleet.type.code) }
+                    ) { Text("⌨", style = Fleet.type.code, modifier = Modifier.clearAndSetSemantics { contentDescription = if (typing) "Hide the keyboard" else "Type a line" }) }
                 }
                 if (typing) {
                     val send = {
