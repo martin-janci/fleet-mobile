@@ -6,7 +6,15 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.heightIn
 import dev.claudefleet.mobile.ui.theme.statusLabel
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.shape.RoundedCornerShape
+import dev.claudefleet.mobile.model.AccountUsageSnapshot
+import dev.claudefleet.mobile.model.AccountUsageWindows
+import dev.claudefleet.mobile.model.UsageWindow
+import dev.claudefleet.mobile.ui.theme.Fleet
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -87,6 +95,10 @@ fun SessionDetailsList(
     sessions: List<SessionRow>,
     actions: List<DetailsAction> = emptyList(),
     modifier: Modifier = Modifier,
+    /** The label of the account the session runs under (`list_accounts`); null when unknown. */
+    accountName: String? = null,
+    /** That account's last usage reading (`account_usage`), for its 5h and week meters; null when unread. */
+    accountUsage: AccountUsageSnapshot? = null,
 ) {
     val row = state.session
     LazyColumn(modifier = modifier.fillMaxWidth()) {
@@ -112,6 +124,9 @@ fun SessionDetailsList(
         }
         if (row != null) {
             item { Facts(row, state.nowSeconds, sessions, handlers.onOpenSession) }
+            if (row.accountUuid != null && (accountName != null || accountUsage != null)) {
+                item { AccountFacts(accountName, accountUsage, state.nowSeconds) }
+            }
         }
         if (actions.isNotEmpty()) {
             item {
@@ -185,6 +200,55 @@ private fun Facts(row: SessionRow, now: Long, sessions: List<SessionRow>, onOpen
             Fact("Started from", name, onClick = { onOpenSession(parent) })
         }
         row.lastPrompt?.takeIf { it.isNotBlank() }?.let { Fact("Last prompt", it, lines = 3) }
+    }
+}
+
+/** The windows the Details tab's Account row meters (SessionDetails board): the 5-hour and the weekly one. */
+internal fun accountMeters(usage: AccountUsageWindows?): List<Pair<String, UsageWindow>> = listOfNotNull(
+    usage?.fiveHour?.let { "5h" to it },
+    usage?.sevenDay?.let { "Week" to it },
+)
+
+/**
+ * The account the session runs under, and how much of its 5-hour and weekly
+ * limits is used — the figure always beside the bar ([limitFigure]), and a
+ * window near its limit says so in words as well as in colour.
+ */
+@Composable
+private fun AccountFacts(name: String?, usage: AccountUsageSnapshot?, now: Long) {
+    val o = Fleet.colors
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+        Fact("Account", name ?: "This session's account")
+        for ((label, w) in accountMeters(usage?.usage)) {
+            val near = nearLimit(w, now)
+            val used = if (hasReset(w, now)) 0.0 else w.utilization
+            Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.widthIn(min = 112.dp),
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        (if (near) "Near the limit · " else "") + limitFigure(w, now),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (near) o.statusFailed else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(4.dp).background(o.track, RoundedCornerShape(2.dp))) {
+                        Box(
+                            Modifier.fillMaxWidth((used / 100.0).toFloat().coerceIn(0f, 1f)).fillMaxHeight()
+                                .background(if (near) o.statusFailed else o.accent, RoundedCornerShape(2.dp)),
+                        )
+                    }
+                }
+            }
+        }
+        if (usage != null) {
+            limitsNote(usage, now)?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 4.dp))
+            }
+        }
     }
 }
 

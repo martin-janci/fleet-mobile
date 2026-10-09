@@ -246,6 +246,8 @@ import dev.claudefleet.mobile.ui.SessionDetailsSheet
 import dev.claudefleet.mobile.ui.SessionDetailsList
 import dev.claudefleet.mobile.ui.DetailsAction
 import dev.claudefleet.mobile.ui.KillConfirmDialog
+import dev.claudefleet.mobile.ui.ForkDialog
+import dev.claudefleet.mobile.ui.forkWorktreeName
 import dev.claudefleet.mobile.ui.ReviewDialog
 import dev.claudefleet.mobile.ui.SessionIntent
 import dev.claudefleet.mobile.ui.SessionTab
@@ -2695,9 +2697,14 @@ private fun SessionRoute(
                 },
                 details = {
                     val rows by repository.sessions.collectAsState()
+                    val accountNames by repository.accountNames.collectAsState()
+                    val accountUsage by repository.accountUsage.collectAsState()
+                    val accountUuid = details.session?.accountUuid
                     SessionDetailsList(
                         state = details,
                         sessions = rows,
+                        accountName = accountUuid?.let(accountNames::get),
+                        accountUsage = accountUuid?.let(accountUsage::get),
                         handlers = SessionDetailsHandlers(
                             onReload = { detailsVm.reload() },
                             onToggle = detailsVm::toggle,
@@ -2713,6 +2720,8 @@ private fun SessionRoute(
                             work.chip?.key?.let { key -> DetailsAction("Ticket $key", workVm::openSheet) },
                             // r09 B18: the board's Review, Archive and Force kill, as in ⋮.
                             DetailsAction("Review…", { detailsAsk = DetailsAsk.Review }).takeIf { state.canReview && state.connected },
+                            // The whole conversation, as Fork here does under a reply (SessionDetails board).
+                            DetailsAction("Fork…", { detailsAsk = DetailsAsk.Fork }).takeIf { state.canRewind && state.connected },
                             DetailsAction("Archive", { extrasVm.archive(onBack); Unit }).takeIf { caps.archiveSession && credentials.canWrite },
                             DetailsAction("Force kill…", { detailsAsk = DetailsAsk.Kill }).takeIf { state.canManage && state.canKill && state.connected },
                         ),
@@ -2727,6 +2736,13 @@ private fun SessionRoute(
             onDismiss = { detailsAsk = null },
         )
         DetailsAsk.Kill -> KillConfirmDialog(onConfirm = { detailsAsk = null; vm.kill() }, onDismiss = { detailsAsk = null })
+        DetailsAsk.Fork -> ForkDialog(
+            suggested = forkWorktreeName(state.session?.displayName ?: "session"),
+            onConfirm = { worktree -> detailsAsk = null; vm.fork(null, worktree, onOpenSession) },
+            onDismiss = { detailsAsk = null },
+            title = "Fork this session",
+            body = "A new session starts on this whole conversation. This session is left as it is.",
+        )
         null -> Unit
     }
     if (shareState.open) {
@@ -2831,4 +2847,4 @@ private fun RepoRoute(
 }
 
 /** What the Details tab's buttons put up over the session (r09 B18). */
-private enum class DetailsAsk { Review, Kill }
+private enum class DetailsAsk { Review, Kill, Fork }

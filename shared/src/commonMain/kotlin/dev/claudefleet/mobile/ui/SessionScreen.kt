@@ -2212,16 +2212,23 @@ private fun ConfirmRewind(title: String, body: String, confirm: String, onConfir
  * the tree this session is working in; unticked, it shares that worktree.
  */
 @Composable
-private fun ForkDialog(suggested: String, onConfirm: (String?) -> Unit, onDismiss: () -> Unit) {
+internal fun ForkDialog(
+    suggested: String,
+    onConfirm: (String?) -> Unit,
+    onDismiss: () -> Unit,
+    /** "Fork here" under a reply; the Details tab's Fork takes the whole conversation. */
+    title: String = "Fork here",
+    body: String = "A new session starts on this conversation up to here. This session is left as it is.",
+) {
     var ownTree by remember { mutableStateOf(true) }
     var name by remember { mutableStateOf(suggested) }
     val slug = branchSlug(name)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Fork here") },
+        title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("A new session starts on this conversation up to here. This session is left as it is.")
+                Text(body)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.toggleable(value = ownTree, role = Role.Checkbox) { ownTree = it },
