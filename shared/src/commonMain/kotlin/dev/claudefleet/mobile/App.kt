@@ -307,6 +307,7 @@ import dev.claudefleet.mobile.ui.OrbitSettingsHandlers
 import dev.claudefleet.mobile.ui.SettingsPlace
 import dev.claudefleet.mobile.ui.LayoutRow
 import dev.claudefleet.mobile.ui.SettingsViewModel
+import dev.claudefleet.mobile.ui.SystemBarsAppearance
 import dev.claudefleet.mobile.ui.Tab
 import dev.claudefleet.mobile.ui.TicketsHandlers
 import dev.claudefleet.mobile.ui.TicketsSheet
@@ -489,8 +490,8 @@ class AppContainer(
      */
     val quickReplies: QuickReplies = QuickReplies(prefs, HubQuickReplyActions(session))
 
-    /** Unsent text per session, across visits to it. */
-    val drafts: DraftMemory = DraftMemory()
+    /** Unsent text per session, across visits to it and across a killed process. */
+    val drafts: DraftMemory = DraftMemory(prefs)
     val hints: Hints = Hints(prefs)
 
     /** This phone's own settings: notification kinds and the theme (redesign 14.11). */
@@ -538,7 +539,10 @@ class AppContainer(
 @Composable
 fun App(container: AppContainer) {
     val theme by container.phone.theme.collectAsState()
-    FleetTheme(dark = theme.isDark(isSystemInDarkTheme())) {
+    val dark = theme.isDark(isSystemInDarkTheme())
+    FleetTheme(dark = dark) {
+        // The phone's clock and battery in the app's colours, not the system's.
+        SystemBarsAppearance(dark = dark)
         Surface(modifier = Modifier.fillMaxSize()) {
             // Every screen is inset once, here, rather than each one insetting
             // itself. An app targeting SDK 35 is drawn edge to edge by the
@@ -1519,9 +1523,12 @@ private fun FleetRoute(
                     // 14.7). New bar only: the Classic bar has no Control tab.
                     val controlState by control.state.collectAsState()
                     val attention by sessions.state.collectAsState()
-                    DisposableEffect(control) {
+                    // Followed while the app is on screen, not while it sits in
+                    // the background with its composition kept (see the stream's
+                    // LifecycleStartEffect above): the loop polls every few seconds.
+                    LifecycleStartEffect(control) {
                         control.attach()
-                        onDispose { control.detach() }
+                        onStopOrDispose { control.detach() }
                     }
                     val subtitle = "${attention.attentionCount} need you"
                     val views: @Composable () -> Unit = {

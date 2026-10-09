@@ -29,7 +29,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,6 +36,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleStartEffect
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.SessionExtrasActions
@@ -415,9 +415,12 @@ class TerminalsHandlers(
 @Composable
 fun TerminalsPane(state: TerminalsUiState, handlers: TerminalsHandlers, modifier: Modifier = Modifier) {
     // Read while shown, and not after: the poll is the tab's, not the session's.
-    DisposableEffect(Unit) {
+    // And only while the app is on screen: a backgrounded Android activity
+    // keeps its composition, so an effect tied only to it went on capturing
+    // the shell every two seconds from a phone in a pocket.
+    LifecycleStartEffect(Unit) {
         handlers.onShow()
-        onDispose { handlers.onHide() }
+        onStopOrDispose { handlers.onHide() }
     }
     Column(modifier = modifier.fillMaxSize()) {
         Row(
