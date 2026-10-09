@@ -141,6 +141,10 @@ class NeedsYouService : Service() {
      */
     private fun summarize() {
         val m = manager(this)
+        // An alert the person tapped (auto-cancel) or swiped away left
+        // without telling [shown]: count only what is still showing.
+        val showing = m.activeNotifications.map { it.id }.toSet()
+        shown.keys.retainAll { alertId(it) in showing }
         if (shown.size < 2) {
             m.cancel(SUMMARY_ID)
             return
