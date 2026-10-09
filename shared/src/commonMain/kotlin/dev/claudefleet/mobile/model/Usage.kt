@@ -69,7 +69,13 @@ data class AccountRow(
     val nickname: String? = null,
     @SerialName("has_extra_usage") val hasExtraUsage: Boolean = false,
 ) {
-    val label: String get() = nickname?.takeIf { it.isNotBlank() } ?: displayName?.takeIf { it.isNotBlank() } ?: email ?: uuid.take(8)
+    /**
+     * The desktop's rule (`accountLabel` in claude-fleet's `src/lib/accounts.ts`):
+     * the nickname, else the email, else the uuid's first 8 characters. Not
+     * the display name: two accounts of one person share it, and the chip
+     * and "limit on X" must tell them apart.
+     */
+    val label: String get() = nickname?.trim()?.ifEmpty { null } ?: email?.trim()?.ifEmpty { null } ?: uuid.take(8)
 }
 
 /** One usage window of an account. `utilization` is percent USED, 0..100. */

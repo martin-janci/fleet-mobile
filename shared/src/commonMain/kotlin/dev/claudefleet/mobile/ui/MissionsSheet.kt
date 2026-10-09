@@ -14,7 +14,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -47,6 +46,7 @@ import dev.claudefleet.mobile.model.pauseMove
 import dev.claudefleet.mobile.model.summary
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import dev.claudefleet.mobile.ui.components.ErrorBanner
+import dev.claudefleet.mobile.ui.kit.InlineLoading
 
 data class MissionsHandlers(
     val onClose: () -> Unit = {},
@@ -90,9 +90,7 @@ fun MissionsSheet(state: MissionsUiState, handlers: MissionsHandlers, orbit: Boo
                 )
                 TextButton(onClick = handlers.onRefresh, enabled = !state.loading) { Text("Refresh") }
             }
-            if (state.loading || state.busy != null) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp))
-            }
+            InlineLoading(waiting = state.loading || state.busy != null, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
             Outcome(state)
             if (detail == null) MissionList(state, handlers) { confirmPauseAll = true } else MissionBody(detail, state, handlers)

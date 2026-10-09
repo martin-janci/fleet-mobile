@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -56,6 +55,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.PaddingValues
+import dev.claudefleet.mobile.ui.kit.InlineLoading
 
 /**
  * The fleet's settings, drawn from the hub's own page specs (claude-fleet
@@ -84,9 +84,7 @@ fun FleetSettingsSection(
     pageHead: @Composable (String) -> Unit = {},
 ) {
     state.history?.let { (key, rows) -> SettingHistoryDialog(state.descriptors[key]?.label ?: key, rows, onCloseHistory) }
-    if (state.loading && !state.loaded) {
-        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
-    }
+    InlineLoading(waiting = state.loading && !state.loaded, modifier = Modifier.padding(horizontal = 16.dp))
     val page = state.page
     if (page == null) {
         PageList(state, clientName, onOpen)
@@ -455,7 +453,7 @@ private fun SettingHistoryDialog(label: String, rows: List<SettingWrite>?, onDis
         text = {
             Column(modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
                 when {
-                    rows == null -> LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    rows == null -> InlineLoading(waiting = true)
                     rows.isEmpty() -> Text("Never changed: it has its default.", style = MaterialTheme.typography.bodySmall)
                     else -> for (w in rows) {
                         Text(

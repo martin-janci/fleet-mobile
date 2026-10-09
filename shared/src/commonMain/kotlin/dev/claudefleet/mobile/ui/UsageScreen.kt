@@ -19,7 +19,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,6 +34,7 @@ import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.components.formatUsd
 import dev.claudefleet.mobile.ui.theme.FleetIcons
+import dev.claudefleet.mobile.ui.kit.InlineLoading
 
 data class UsageHandlers(
     val onBack: () -> Unit = {},
@@ -60,7 +60,7 @@ fun UsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: Long, 
                 IconButton(onClick = handlers.onRefresh, enabled = !state.loading) { Icon(FleetIcons.Refresh, contentDescription = "Refresh") }
             },
         )
-        if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        InlineLoading(waiting = state.loading)
         ErrorBanner(state.error, onDismiss = handlers.onDismissError)
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             if (state.available) {
