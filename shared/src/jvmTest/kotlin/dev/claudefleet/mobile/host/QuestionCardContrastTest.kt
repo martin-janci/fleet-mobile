@@ -8,6 +8,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.fail
 
 /**
  * Every colour the question card writes text in holds 4.5:1 on the card's
@@ -33,8 +34,24 @@ class QuestionCardContrastTest {
         return max(la, lb) / min(la, lb)
     }
 
-    private fun token(o: OrbitColors, name: String): Color =
-        OrbitColors::class.java.getMethod("get" + name.replaceFirstChar { it.uppercase() }).invoke(o) as Color
+    /**
+     * The colour tokens by their Kotlin name. Spelled out because `Color` is a
+     * value class, so reflection sees only mangled getters; a colour the card
+     * starts using that is missing here fails the test by name.
+     */
+    private fun token(o: OrbitColors, name: String): Color = when (name) {
+        "fg" -> o.fg
+        "fg2" -> o.fg2
+        "fgMuted" -> o.fgMuted
+        "accent" -> o.accent
+        "code" -> o.code
+        "statusWaiting" -> o.statusWaiting
+        "statusFailed" -> o.statusFailed
+        "danger" -> o.danger
+        "waitingSoft" -> o.waitingSoft
+        "failedSoft" -> o.failedSoft
+        else -> fail("QuestionCardContrastTest does not know the colour token `$name`; add it to `token`")
+    }
 
     @Test
     fun every_text_colour_on_the_card_reads_on_its_tint() {
