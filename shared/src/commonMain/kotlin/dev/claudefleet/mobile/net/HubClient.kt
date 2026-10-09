@@ -10,6 +10,8 @@ import dev.claudefleet.mobile.model.FileContent
 import dev.claudefleet.mobile.model.CommitDetail
 import dev.claudefleet.mobile.model.Commit
 import dev.claudefleet.mobile.model.AgentInstall
+import dev.claudefleet.mobile.model.ConfirmRequest
+import dev.claudefleet.mobile.model.OperatorStatus
 import dev.claudefleet.mobile.model.ChangedFile
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.ConversationSummary
@@ -112,6 +114,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -918,6 +921,24 @@ class HubClient(
      */
     suspend fun ensureOperator(): SessionRow =
         call("ensure_operator") { json.decodeFromJsonElement(SessionRow.serializer(), it) }
+
+    /** Whether Control can take a message, without waking it (`operator_status`, readonly). */
+    suspend fun operatorStatus(): OperatorStatus =
+        call("operator_status") { json.decodeFromJsonElement(OperatorStatus.serializer(), it) }
+
+    /** The calls waiting on a person's yes, oldest first (`mcp_confirms`, redesign 9.2). */
+    suspend fun mcpConfirms(): List<ConfirmRequest> =
+        call("mcp_confirms") { json.decodeFromJsonElement(ListSerializer(ConfirmRequest.serializer()), it) }
+
+    /** Approve or deny one waiting call; false when it was already answered or has expired. */
+    suspend fun answerMcpConfirm(nonce: String, approved: Boolean): Boolean =
+        call(
+            "answer_mcp_confirm",
+            buildJsonObject {
+                put("nonce", nonce)
+                put("approved", approved)
+            },
+        ) { (it as? JsonPrimitive)?.booleanOrNull ?: false }
 
     // ---- the work graph: `work` reads, `work_link` decides ----
     //

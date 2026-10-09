@@ -316,6 +316,12 @@ fun SessionScreen(
      */
     full: SessionFull = SessionFull.None,
     onFull: (SessionFull) -> Unit = {},
+    /**
+     * The conversation as the Control tab (redesign 9.8): Control's header
+     * in place of the session's bar, and its confirms above the composer.
+     * Null for every other session.
+     */
+    control: ControlChrome? = null,
 ) {
     // On the New bar the result sits in the conversation instead (RepairResultCard).
     if (tabs == null) state.repair?.let { RepairReportDialog(it, onDismissRepair) }
@@ -586,7 +592,9 @@ fun SessionScreen(
         Row(modifier = Modifier.fillMaxSize()) {
         // Kept composed while a diff has the width, so the conversation comes back where it was.
         Column(modifier = (if (sideWhole) Modifier.width(0.dp) else Modifier.weight(1f)).fillMaxHeight()) {
-            if (!fullScreen) AnimatedContent(
+            if (!fullScreen && control != null) {
+                control.header()
+            } else if (!fullScreen) AnimatedContent(
                 targetState = header,
                 transitionSpec = { chromeTransition() },
                 label = "session header",
@@ -845,8 +853,14 @@ fun SessionScreen(
                     open = state.session?.pendingForm != null,
                     onDismiss = { closedForm = null },
                     modifier = Modifier.heightIn(max = cardMax),
+                    orbit = tabs != null || control != null,
+                    onAskAgain = {
+                        onSendQuick("The form \"${formShown.title}\" expired before I answered it. Please ask it again.")
+                        closedForm = null
+                    }.takeIf { !state.readOnly && state.connected },
                 )
             }
+            control?.aboveComposer?.invoke()
 
             // Recovery on the New bar (redesign 14.5): at the foot of the
             // conversation, where the next step is taken — never behind ⋮.
