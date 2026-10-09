@@ -30,9 +30,12 @@ package dev.claudefleet.mobile.net
  * Files tab). Left at 6, it would refuse every hub that has the feature.
  * Revision 8 made multi-user M1's sharing tools (`session_share`,
  * `session_unshare`, `session_narrow`, `session_access`, `my_grants`) hub
- * tools; this app calls none of them, and M1's new `SessionRow` fields
- * (`owner_person_id`, `visibility`) are additive, so a revision-8 hub is
- * safe here. Left at 7, it refused the 0.4.8 hub as "too old" (2026-10-05).
+ * tools, and M1's new `SessionRow` fields (`owner_person_id`, `visibility`)
+ * are additive, so a revision-8 hub is safe here. Left at 7, it refused the
+ * 0.4.8 hub as "too old" (2026-10-05). The phone calls all five since
+ * redesign 11.10 (share and watch), each gated on `tools/list` naming it;
+ * the Answer level they take from revision 15 is offered only by a hub
+ * whose `ready` names 15 or later (`HUB_CONTRACT_ANSWER_LEVEL`).
  * Revision 9 added chat forms: the `ask` tool (an agent opens a form in its
  * session's chat; a person answers it) becomes a hub tool the desktop routes
  * `list_forms` / `get_form` / `answer_form` / `decline_form` to, and

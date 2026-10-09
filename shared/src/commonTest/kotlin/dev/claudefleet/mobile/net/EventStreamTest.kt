@@ -168,8 +168,9 @@ class EventStreamTest {
         assertEquals("/events", request.url.encodedPath)
         // The four the snapshot applies, then the re-read signals: `download`
         // for the Files tab (`download:changed`, ids only) and
-        // `account_usage` for the accounts' limits (`account_usage:updated`).
-        assertEquals("session,host,project,work,download,account_usage", request.url.parameters["kinds"])
+        // `account_usage` for the accounts' limits (`account_usage:updated`),
+        // and `grant` for what is shared with this person (`grant:changed`).
+        assertEquals("session,host,project,work,download,account_usage,grant", request.url.parameters["kinds"])
 
         // And only the payload keys it decodes. Not spelled out here: the set
         // is derived from the row serializers, so a literal would be a second

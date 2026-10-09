@@ -211,6 +211,19 @@ data class HubCapabilities(
      */
     val orgAdmin: Boolean get() = ORG_ADMIN in tools
 
+    /**
+     * Who this device's person is and what is shared with them (`my_grants`,
+     * contract revision 8): what tells a shared session from one's own, so
+     * its screen can say what the share allows. Readonly on the hub.
+     */
+    val myGrants: Boolean get() = MY_GRANTS in tools
+
+    /**
+     * The owner's share sheet (redesign 11.10): who holds a grant, share,
+     * narrow and revoke. All four are served together; none is readonly.
+     */
+    val share: Boolean get() = SHARE_TOOLS.all { it in tools }
+
     /** Fleet settings can be written as this device (`set_setting`); the hub still refuses an untrusted one. */
     val setSetting: Boolean get() = SET_SETTING in tools
 
@@ -292,6 +305,8 @@ data class HubCapabilities(
         const val SET_SETTING = "set_setting"
         const val DEBUG_DEVICES = "debug_devices"
         const val ORG_ADMIN = "org_admin"
+        const val MY_GRANTS = "my_grants"
+        val SHARE_TOOLS = listOf("session_access", "session_share", "session_narrow", "session_unshare")
 
         fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions, params = catalog.params)
     }

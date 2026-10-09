@@ -20,6 +20,13 @@ sealed interface Answer {
     data object Escape : Answer
     data object Interrupt : Answer
     data class Text(val text: String) : Answer
+
+    /**
+     * Pressed as one of the keys an Answer share may press (an option's
+     * digit, Enter, Escape) rather than typed or interrupting: what tells an
+     * answer a person shared at answer may give from one that needs drive.
+     */
+    val isKey: Boolean get() = this is Option || this == Enter || this == Escape
 }
 
 /**

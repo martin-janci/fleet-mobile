@@ -14,6 +14,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.claudefleet.mobile.model.GrantLevel
+import dev.claudefleet.mobile.model.MyAccess
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.limitAt
@@ -37,9 +39,25 @@ import dev.claudefleet.mobile.ui.theme.StatusTone
  * the nearest the phone has), so the one waiting longest is on top, then by
  * id so the list does not reshuffle on every event frame.
  */
-fun inboxRows(sessions: List<SessionRow>): List<SessionRow> =
-    sessions.filter { it.needsAttention }
+fun inboxRows(sessions: List<SessionRow>, access: MyAccess = MyAccess.UNKNOWN): List<SessionRow> =
+    sessions.filter { it.needsAttention && access.levelFor(it) == null }
         .sortedWith(compareBy<SessionRow, Long?>(nullsLast()) { it.askedAt }.thenBy { it.id })
+
+/** One session someone else shared with this person, and at what level (redesign 11.10, the Watch board). */
+data class SharedRow(val row: SessionRow, val level: String)
+
+/**
+ * The Inbox's *Shared with me* section: every session shared with this
+ * person, most recently active first. Its questions are its owner's, so it
+ * sits here rather than under *Needs you*; [inboxRows] leaves it out.
+ */
+fun sharedRows(sessions: List<SessionRow>, access: MyAccess): List<SharedRow> =
+    sessions.mapNotNull { row -> access.levelFor(row)?.let { SharedRow(row, it) } }
+        .sortedWith(compareByDescending<SharedRow, Long?>(nullsFirst()) { it.row.lastActivityAt }.thenBy { it.row.id })
+
+/** "Answer · waiting for its owner": a shared row's line under its name. */
+internal fun sharedLine(s: SharedRow): String =
+    GrantLevel.word(s.level) + if (s.row.needsAttention) " · waiting for its owner" else ""
 
 /** The word a needs-you row leads with: Failed for stuck and failed, else Needs you. */
 internal fun inboxWord(row: SessionRow): StatusWord =
@@ -70,6 +88,8 @@ fun InboxScreen(
     accountNames: Map<String, String> = emptyMap(),
     /** Account uuid → usage reading, for when a paused row's limit resets (step 4.10). */
     accountUsage: Map<String, AccountUsageSnapshot> = emptyMap(),
+    /** Sessions shared with this person (redesign 11.10), drawn under *Needs you*. */
+    shared: List<SharedRow> = emptyList(),
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
@@ -83,13 +103,13 @@ fun InboxScreen(
         top()
         OrbitPullToRefresh(isRefreshing = refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                if (rows.isEmpty()) {
+                if (rows.isEmpty() && shared.isEmpty()) {
                     item(key = "empty") {
                         Box(modifier = Modifier.fillParentMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                             Text("Nothing needs you.", color = Fleet.colors.fgMuted, fontSize = 15.sp)
                         }
                     }
-                } else {
+                } else if (rows.isNotEmpty()) {
                     item(key = "heading") {
                         Text(
                             "Needs you · oldest first",
@@ -111,6 +131,34 @@ fun InboxScreen(
                         limit = row.accountUuid?.let(accountUsage::get)?.limitAt(nowSeconds),
                         onClick = { onOpenSession(row.id) },
                     )
+                }
+                if (shared.isNotEmpty()) {
+                    item(key = "shared-heading") {
+                        Text(
+                            "Shared with me · ${shared.size}",
+                            color = Fleet.colors.fgMuted,
+                            fontSize = 13.sp,
+                            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
+                        )
+                    }
+                    items(shared, key = { "shared-${it.row.id}" }) { s ->
+                        Column {
+                            PhoneSessionRow(
+                                row = s.row,
+                                nowSeconds = nowSeconds,
+                                live = live,
+                                showHost = true,
+                                accountName = s.row.accountUuid?.let(accountNames::get),
+                                onClick = { onOpenSession(s.row.id) },
+                            )
+                            Text(
+                                sharedLine(s),
+                                color = Fleet.colors.fg2,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
+                            )
+                        }
+                    }
                 }
             }
         }

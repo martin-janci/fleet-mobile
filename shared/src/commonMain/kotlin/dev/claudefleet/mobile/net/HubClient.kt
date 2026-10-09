@@ -1,5 +1,8 @@
 package dev.claudefleet.mobile.net
 
+import dev.claudefleet.mobile.model.MyGrants
+import dev.claudefleet.mobile.model.SessionGrant
+import dev.claudefleet.mobile.model.ShareTo
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.AccountRow
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
@@ -1283,6 +1286,46 @@ class HubClient(
             },
         ) { json.decodeFromJsonElement(DebugDevice.serializer(), it) }
 
+    // ---- sharing (claude-fleet multi-user M1, Orbit Fleet 11.7; redesign 11.10) ----
+    //
+    // `my_grants` is any person's own; the other four are the owner's, and
+    // the hub refuses them to anyone else (`Reach::Own`). A grant is
+    // addressed by name, the way the hub's tools take it.
+
+    /** Who this device's person is, and every live grant to them. */
+    suspend fun myGrants(): MyGrants = call("my_grants") { json.decodeFromJsonElement(MyGrants.serializer(), it) }
+
+    /** Who holds a live grant on [sessionId] (owner only: it names other people). */
+    suspend fun sessionAccess(sessionId: Long): List<SessionGrant> =
+        call("session_access", buildJsonObject { put("session_id", sessionId) }) {
+            json.decodeFromJsonElement(ListSerializer(SessionGrant.serializer()), it)
+        }
+
+    /** Share [sessionId] with [to] at [level] (`watch`, `answer` or `drive`). */
+    suspend fun shareSession(sessionId: Long, to: ShareTo, level: String) {
+        call("session_share", grantArgs(sessionId, to) { put("level", level) }) { it }
+    }
+
+    /** Take [to]'s grant on [sessionId] back. */
+    suspend fun unshareSession(sessionId: Long, to: ShareTo) {
+        call("session_unshare", grantArgs(sessionId, to)) { it }
+    }
+
+    /** Lower [to]'s grant on [sessionId] to watch; nothing raises one. */
+    suspend fun narrowShare(sessionId: Long, to: ShareTo) {
+        call("session_narrow", grantArgs(sessionId, to)) { it }
+    }
+
+    private fun grantArgs(sessionId: Long, to: ShareTo, more: JsonObjectBuilder.() -> Unit = {}): JsonObject =
+        buildJsonObject {
+            put("session_id", sessionId)
+            when (to) {
+                is ShareTo.Person -> put("person", to.name)
+                is ShareTo.Org -> put("org", to.name)
+            }
+            more()
+        }
+
     // ---- org members (claude-fleet `org_admin`, company administration phase D) ----
     //
     // Only the member actions: the hub answers an org's admins (or the hub
@@ -1300,11 +1343,11 @@ class HubClient(
             put("role", role)
         }) { json.decodeFromJsonElement(ListSerializer(OrgMemberRow.serializer()), it) }
 
-    /** How many of [orgId]'s sessions are shared with [personId], to watch and to drive. */
+    /** How many of [orgId]'s sessions are shared with [personId], to watch, to answer and to drive. */
     suspend fun memberGrants(orgId: Long, personId: Long): MemberGrants =
         memberCall("member_grants", orgId, { put("person_id", personId) }) { json.decodeFromJsonElement(MemberGrants.serializer(), it) }
 
-    /** Turn [personId]'s drive shares on [orgId]'s sessions into watch shares; answers how many. */
+    /** Turn [personId]'s answer and drive shares on [orgId]'s sessions into watch shares; answers how many. */
     suspend fun narrowMemberGrants(orgId: Long, personId: Long): Int =
         memberCall("narrow_member_grants", orgId, { put("person_id", personId) }) { count(it, "narrowed") }
 

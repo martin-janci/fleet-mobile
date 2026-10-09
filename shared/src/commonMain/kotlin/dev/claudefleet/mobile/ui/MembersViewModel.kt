@@ -151,7 +151,7 @@ class MembersViewModel(
         val member = ask.member
         local.update { it.copy(removing = null, busy = member.personId, error = null, notice = null) }
         try {
-            if (shares == KeepShares.Narrow && ask.grants.drive > 0) actions.narrow(org, member.personId)
+            if (shares == KeepShares.Narrow && ask.grants.aboveWatch > 0) actions.narrow(org, member.personId)
             val removed = actions.remove(org, member.personId, keepGrants = shares != KeepShares.Revoke)
             val members = actions.members(org)
             local.update {
@@ -204,13 +204,18 @@ fun memberLine(m: OrgMemberRow, nowSeconds: Long): String = listOfNotNull(
 fun removeQuestion(org: String, grants: MemberGrants): String? {
     if (grants.total == 0) return null
     val sessions = if (grants.total == 1) "1 session of $org is" else "${grants.total} sessions of $org are"
-    return "$sessions shared with them (${grants.drive} to drive, ${grants.watch} to watch). What happens to those shares?"
+    val levels = listOfNotNull(
+        "${grants.drive} to drive",
+        "${grants.answer} to answer".takeIf { grants.answer > 0 },
+        "${grants.watch} to watch",
+    ).joinToString(", ")
+    return "$sessions shared with them ($levels). What happens to those shares?"
 }
 
-/** The choices a remove offers: narrowing means something only when some share drives. */
+/** The choices a remove offers: narrowing means something only when some share is above watch. */
 fun keepChoices(grants: MemberGrants): List<KeepShares> = when {
     grants.total == 0 -> emptyList()
-    grants.drive == 0 -> listOf(KeepShares.Revoke, KeepShares.Keep)
+    grants.aboveWatch == 0 -> listOf(KeepShares.Revoke, KeepShares.Keep)
     else -> KeepShares.entries.toList()
 }
 
