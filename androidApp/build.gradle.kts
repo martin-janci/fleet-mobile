@@ -19,6 +19,11 @@ android {
         // defaults are what a plain local build still gets.
         versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 1
         versionName = findProperty("versionName") as String? ?: "0.1.0"
+        // The commit a release was built from (`-PgitSha=`, set by
+        // release.yml), for `X-Fleet-Client`'s `build` part. A local build
+        // says "unknown", which the header leaves out.
+        val gitSha = (findProperty("gitSha") as String?)?.take(12)?.filter { it.isLetterOrDigit() } ?: "unknown"
+        buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
         // The instrumentation tests below need a runner. Declared here rather
         // than in a `testOptions` block because this is the only one.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

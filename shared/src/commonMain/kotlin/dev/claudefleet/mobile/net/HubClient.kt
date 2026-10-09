@@ -1936,6 +1936,7 @@ class HubClient(
     ): FetchedFile = try {
         http.prepareGet("$base/downloads/$id") {
             if (token != null) header(HttpHeaders.Authorization, "Bearer $token")
+            FleetClient.header?.let { header(CLIENT_HEADER, it) }
             timeout {
                 requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
                 socketTimeoutMillis = HUB_CALL_TIMEOUT_MS
@@ -1988,6 +1989,21 @@ class HubClient(
      */
     private var framedOnly: Boolean = false
 
+    /**
+     * `POST /update/check` (claude-fleet update design §6): what this app
+     * should install, as the hub decides it, with [request] as the body. The
+     * update wire is outside the contract gate, so this answers while the hub
+     * refuses this build for a contract skew — exactly when the phone most
+     * needs to learn what to install. Null from a hub too old to have the
+     * route (404).
+     */
+    suspend fun updateCheck(request: String): String? {
+        val (status, text) = send("$base/update/check", request, authenticated = true)
+        if (status == 404) return null
+        throwForStatus(status, text, base, token)
+        return text
+    }
+
     /** `/mcp` for a long poll, a lifecycle call or a hub with no JSON mount; `/mcp/json` otherwise. */
     private fun mountFor(framed: Boolean): String =
         if (framedOnly || framed) "$base/mcp" else "$base/mcp/json"
@@ -2010,6 +2026,7 @@ class HubClient(
             if (authenticated && token != null) {
                 header(HttpHeaders.Authorization, "Bearer $token")
             }
+            FleetClient.header?.let { header(CLIENT_HEADER, it) }
             setBody(body)
         }
         response.status.value to response.textWithin(MAX_RESPONSE_BYTES)

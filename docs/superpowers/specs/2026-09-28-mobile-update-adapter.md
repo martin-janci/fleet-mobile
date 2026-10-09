@@ -1,7 +1,37 @@
 # Mobile update adapter — design
 
 **Date:** 2026-09-28
-**Status:** design, nothing built.
+**Status:** built (2026-10-09), with the deviations below.
+
+### What was built, and where it differs
+
+- `X-Fleet-Client` is set once (`net/ClientHeader.kt`, `FleetClient.header`,
+  from `AppContainer`'s `clientPlatform`) and added by `HubClient.send`,
+  `HubClient.downloadFile` and `HubEventStream` — the hub's requests only,
+  never GitHub's. Not in an `HttpClient` factory: the same client fetches
+  GitHub releases.
+- `HubClient.updateCheck` posts `/update/check`; `update/HubReleases.kt`
+  turns the decision into the existing update card (`ReleaseInfo` gains
+  `signerSha256`, `required`, `reason`). The download, the sha256 check and
+  the installer are the ones that already existed (redesign 14.18).
+- **GitHub stays as a fallback** for a hub too old to have `/update/check`
+  (404) and for a build that cannot describe itself (a local `dev` build).
+  Any other failure shows no card. This keeps phones paired to an older hub
+  updating as they do today; F2 holds for every hub that can decide.
+- The phone does **not** verify the minisign signature itself: it checks
+  the APK's sha256 against the decision and its signing certificate against
+  both the manifest's `signer_sha256` and the installed app's. The hub
+  verified the signed channel and amendment the decision rests on.
+- `update:decision` (kind `update`, a signal) re-checks two seconds later.
+  There is no `next_check_secs` timer and no `/update/report`: the check
+  itself and the header record what the phone runs.
+- `update_required` shows on the card ("Update required: …" and the hub's
+  reason), not as a full screen; `client_too_new` keeps today's hub-older
+  sentence.
+- `release.yml` publishes `fleet-mobile-<v>.apk`, `androidApp-release.apk`
+  (for phones reading GitHub) and `SHA256SUMS`, builds with `-PgitSha`, and
+  sends claude-fleet `repository_dispatch` `android-release` with
+  `FLEET_DISPATCH_TOKEN` (skipped with a notice when the secret is unset).
 **Scope:** the phone's part of the fleet-wide update design. The design
 itself lives in claude-fleet,
 `docs/superpowers/specs/2026-09-28-update-channel-design.md`. Read that

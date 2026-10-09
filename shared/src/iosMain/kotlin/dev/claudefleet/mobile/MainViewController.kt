@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.notify.IosAlertPoster
 import dev.claudefleet.mobile.notify.IosBackgroundNotifier
 import dev.claudefleet.mobile.notify.NeedsYouCheck
 import dev.claudefleet.mobile.notify.submitNeedsYouRefresh
+import dev.claudefleet.mobile.net.ClientPlatform
 import dev.claudefleet.mobile.store.IosPrefs
 import dev.claudefleet.mobile.store.KeychainSecrets
 import dev.claudefleet.mobile.ui.iosSystemBars
@@ -114,6 +115,9 @@ private val iosContainer: AppContainer by lazy {
         // of. A release build fills the Pair screen's fields and waits.
         autoPairFromLink = Platform.isDebugBinary,
         notifier = iosNotifier,
+        // `X-Fleet-Client` and `/update/check`: iOS has no side-load, so the
+        // hub's decision is only shown (its artifact is `notify`).
+        clientPlatform = ClientPlatform("ios", "aarch64"),
     )
 }
 

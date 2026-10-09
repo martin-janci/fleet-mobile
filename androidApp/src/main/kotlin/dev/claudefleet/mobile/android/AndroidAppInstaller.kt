@@ -114,6 +114,13 @@ class AndroidAppInstaller(private val context: Context) : AppInstaller {
             return@withContext SignatureCheck.Refused("The download says it is ${archive.versionName}, not ${release.version}.")
         }
         val theirs = signers(archive)
+        // From the hub's decision, which carries the signed release
+        // manifest's signer: the APK must be signed with that certificate as
+        // well as the installed app's own.
+        val named = release.signerSha256?.lowercase()
+        if (named != null && named !in theirs.keys) {
+            return@withContext SignatureCheck.Refused("It is not signed with the key its release names.")
+        }
         val mine = signers(installedInfo(pm))
         val shared = theirs.keys.intersect(mine.keys)
         if (theirs.isEmpty() || shared.isEmpty()) {

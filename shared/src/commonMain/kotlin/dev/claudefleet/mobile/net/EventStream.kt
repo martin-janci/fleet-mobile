@@ -411,6 +411,7 @@ class HubEventStream(
             http.prepareGet(url) {
                 header(HttpHeaders.Accept, ContentType.Text.EventStream.toString())
                 if (token != null) header(HttpHeaders.Authorization, "Bearer $token")
+                FleetClient.header?.let { header(CLIENT_HEADER, it) }
                 if (lastEventId != null) header("Last-Event-ID", lastEventId)
                 // A live stream has no natural end, so the request itself gets
                 // no deadline — the client-wide default from `withHubTimeouts()`

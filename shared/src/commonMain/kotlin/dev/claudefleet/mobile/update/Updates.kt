@@ -139,7 +139,7 @@ class UpdateViewModel(
                 _state.update { it.copy(phase = UpdatePhase.Checking) }
                 val expected = release.sha256
                 val check = if (expected != null && !expected.equals(got.sha256, ignoreCase = true)) {
-                    SignatureCheck.Refused("The download does not match the checksum GitHub published for it.")
+                    SignatureCheck.Refused("The download does not match the checksum its release published.")
                 } else {
                     installer.checkSignature(release)
                 }
