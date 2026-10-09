@@ -457,11 +457,11 @@ internal fun fileLead(file: FileLine, transferring: Boolean, hostReachable: (Str
     else -> null
 }
 
-/** Line two of a file row: size, host and note; a failure's reason; a transfer's real amount. */
+/** Line two of a file row: size, host and note; a failure in a plain sentence; a transfer's real amount. */
 internal fun fileLine(file: FileLine, transfer: Transfer?, hostReachable: (String) -> Boolean): String = when {
     transfer != null -> listOf(megabytes(transfer.received, transfer.total ?: 0), file.host).filter { it.isNotBlank() }.joinToString(" · ")
     file.state == FileState.Failed && file.host.isNotBlank() && !hostReachable(file.host) -> "${file.host} is offline"
-    file.state == FileState.Failed -> file.error ?: file.host
+    file.state == FileState.Failed -> fileFailure(file.error, file.host)
     else -> listOfNotNull(file.size, file.host.takeIf { it.isNotBlank() }, file.note).joinToString(" · ")
 }
 

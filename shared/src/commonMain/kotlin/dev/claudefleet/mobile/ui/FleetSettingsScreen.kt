@@ -88,7 +88,9 @@ fun FleetSettingsSection(
     onRetry: () -> Unit = {},
     onDismissError: () -> Unit = {},
 ) {
-    state.history?.let { (key, rows) -> SettingHistoryDialog(state.descriptors[key]?.label ?: key, rows, onCloseHistory) }
+    state.history?.let { (key, rows) ->
+        SettingHistoryDialog(state.descriptors[key]?.label ?: key, rows, state.historyError, onCloseHistory, onRetry = { onHistory(key) })
+    }
     InlineLoading(waiting = state.loading && !state.loaded, modifier = Modifier.padding(horizontal = 16.dp))
     ErrorBanner(state.loadError, onDismiss = onDismissError, onRetry = onRetry)
     val page = state.page
@@ -452,13 +454,21 @@ private fun Review(state: FleetSettingsUiState, onDecide: (Long, Boolean) -> Uni
 
 /** One setting's writes, newest first: when, who, from what to what, and the proposal it applied. */
 @Composable
-private fun SettingHistoryDialog(label: String, rows: List<SettingWrite>?, onDismiss: () -> Unit) {
+private fun SettingHistoryDialog(
+    label: String,
+    rows: List<SettingWrite>?,
+    error: Friendly?,
+    onDismiss: () -> Unit,
+    onRetry: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("History · $label") },
         text = {
             Column(modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
                 when {
+                    // A failed read says so, in the dialog it was asked from, with Retry.
+                    error != null -> ErrorBanner(error, onRetry = onRetry)
                     rows == null -> InlineLoading(waiting = true)
                     rows.isEmpty() -> Text("Never changed: it has its default.", style = MaterialTheme.typography.bodySmall)
                     else -> for (w in rows) {

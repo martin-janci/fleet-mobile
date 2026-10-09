@@ -191,7 +191,21 @@ class MorePlacesTest {
         assertEquals("Signal lost", fileLead(file(FileState.Failed), transferring = false, hostReachable = gone))
         assertEquals("oci-arm is offline", fileLine(file(FileState.Failed), null, gone))
         assertEquals("Failed", fileLead(file(FileState.Failed, error = "permission denied"), transferring = false, hostReachable = back))
-        assertEquals("permission denied", fileLine(file(FileState.Failed, error = "permission denied"), null, back))
+        // A plain sentence, not the hub's own words (those stay on FileLine.error).
+        assertEquals("The hub couldn't copy it off oci-arm.", fileLine(file(FileState.Failed, error = "permission denied"), null, back))
+    }
+
+    @Test
+    fun a_failed_copy_says_why_in_a_plain_sentence() {
+        assertEquals("Too large for the hub to keep.", fileFailure("the file is 3.1 GB — the limit per file is 2 GB", "gpu-1"))
+        assertEquals("The hub has no room left for it.", fileFailure("the file is 3.1 GB — the space left for downloads is 1 GB", "gpu-1"))
+        assertEquals(
+            "The file changed while it was copied.",
+            fileFailure("reading /var/log/x on gpu-1 stopped at 4096 of 8192 bytes (did the file change?)", "gpu-1"),
+        )
+        assertEquals("The file changed while it was copied.", fileFailure("/var/log/x gave 10 bytes, expected 12", "gpu-1"))
+        assertEquals("The hub couldn't copy it off gpu-1.", fileFailure("reading /var/log/x on gpu-1 stopped at 0 of 8192 bytes", "gpu-1"))
+        assertEquals("The hub couldn't copy it.", fileFailure(null, ""))
     }
 
     @Test

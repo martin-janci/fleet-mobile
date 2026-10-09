@@ -84,6 +84,7 @@ import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
 import dev.claudefleet.mobile.ui.theme.StatusTone
 import dev.claudefleet.mobile.ui.kit.LoadFailed
+import dev.claudefleet.mobile.ui.kit.loadFailedTitle
 
 // ── Words a task row says (MobileWork) ──
 
@@ -372,7 +373,11 @@ fun PhoneMyWorkScreen(
                         if (group.hasMore || group.error != null || group.loadingMore) {
                             item(key = "more-${group.key}") {
                                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                                    group.error?.let { Text(it.body, color = o.statusFailed, fontSize = 13.sp) }
+                                    // Titled like the list's own failed load, with the plain sentence under it; Show more retries.
+                                    group.error?.let {
+                                        Text(loadFailedTitle("more tasks"), color = o.fg, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold)
+                                        Text(it.body, color = o.fgMuted, fontSize = 13.sp, lineHeight = 18.sp)
+                                    }
                                     if (group.loadingMore) {
                                         if (rememberLoaderVisible(true)) DotWave()
                                     } else if (group.hasMore) {

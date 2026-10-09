@@ -53,6 +53,8 @@ data class FleetSettingsUiState(
     val historyAvailable: Boolean = false,
     /** The setting whose history is open, and its writes (null while they load). */
     val history: Pair<String, List<SettingWrite>?>? = null,
+    /** The open history could not be read: the dialog stays open and says so. */
+    val historyError: Friendly? = null,
 ) {
     val page: Page? get() = pages.firstOrNull { it.id == openPage }
 
@@ -97,19 +99,21 @@ class FleetSettingsViewModel(
     /** One setting's writes, newest first, in a dialog until [closeHistory]. */
     fun showHistory(key: String): Job = scope.launch {
         if (!_state.value.historyAvailable) return@launch
-        _state.update { it.copy(history = key to null) }
+        _state.update { it.copy(history = key to null, historyError = null) }
         try {
             val rows = actions.history(key)
             _state.update { if (it.history?.first == key) it.copy(history = key to rows) else it }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            _state.update { it.copy(history = null, error = friendly(t).body) }
+            // Kept open with the failure in it: closing the dialog and
+            // storing a sentence nothing draws read as "no history at all".
+            _state.update { if (it.history?.first == key) it.copy(historyError = friendly(t)) else it }
         }
     }
 
     fun closeHistory() {
-        _state.update { it.copy(history = null) }
+        _state.update { it.copy(history = null, historyError = null) }
     }
 
     /** Whether the hub serves `setting_history` — learned with its tool list, after this is made. */

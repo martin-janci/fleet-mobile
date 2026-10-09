@@ -327,6 +327,9 @@ fun listBody(loaded: Boolean, failed: Boolean, empty: Boolean): ListBody = when 
     else -> ListBody.Loading
 }
 
+/** A failed load's title (MobileStates): "Couldn't load [what]", for a whole list and a "Show more" alike. */
+fun loadFailedTitle(what: String): String = "Couldn't load $what"
+
 /**
  * A list whose read failed (MobileStates: a failed load): "Couldn't load
  * [what]", the plain sentence, and Retry, which runs the read again. The
@@ -339,7 +342,7 @@ fun LoadFailed(what: String, body: String?, onRetry: () -> Unit, modifier: Modif
         modifier = modifier.fillMaxWidth().padding(horizontal = OrbitTokens.spacing("phone-gutter").dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("Couldn't load $what", color = o.fg, fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold)
+        Text(loadFailedTitle(what), color = o.fg, fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold)
         if (body != null) Text(body, color = o.fgMuted, fontSize = 14.sp, lineHeight = 20.sp)
         QuietButton("Retry", onRetry)
     }
