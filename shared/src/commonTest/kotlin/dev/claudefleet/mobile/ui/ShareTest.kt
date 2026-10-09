@@ -144,11 +144,11 @@ class ShareTest {
     }
 
     @Test
-    fun answer_is_offered_only_by_a_contract_15_hub() = runTest {
+    fun answer_is_offered_only_by_a_contract_13_hub() = runTest {
         assertEquals(listOf("watch", "drive"), shareLevels(null))
-        assertEquals(listOf("watch", "drive"), shareLevels(14))
-        assertEquals(listOf("watch", "answer", "drive"), shareLevels(15))
-        val vm = share(contract = 15)
+        assertEquals(listOf("watch", "drive"), shareLevels(12))
+        assertEquals(listOf("watch", "answer", "drive"), shareLevels(13))
+        val vm = share(contract = 13)
         vm.open(MINE.id)
         runCurrent()
         assertEquals(GrantLevel.ALL, vm.state.value.levels)

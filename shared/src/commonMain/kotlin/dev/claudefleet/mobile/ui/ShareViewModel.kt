@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** The first contract revision whose sharing tools take the Answer level (Orbit Fleet 11.7). */
-const val HUB_CONTRACT_ANSWER_LEVEL: Int = 15
+const val HUB_CONTRACT_ANSWER_LEVEL: Int = 13
 
 /** Whether the share draft is for a person or an org (its members as of now). */
 enum class ShareKind { Person, Org }
@@ -35,7 +35,7 @@ data class ShareUiState(
     val kind: ShareKind = ShareKind.Person,
     val recipient: String = "",
     val level: String = GrantLevel.WATCH,
-    /** What a share may be made at against this hub: Answer only from revision 15. */
+    /** What a share may be made at against this hub: Answer only from revision 13. */
     val levels: List<String> = listOf(GrantLevel.WATCH, GrantLevel.DRIVE),
     /** The recipient key a Revoke is one tap from (two steps, as on the desktop). */
     val confirming: ShareTo? = null,
@@ -179,7 +179,7 @@ class ShareViewModel(
     }
 }
 
-/** The levels a share may be made at against a hub at [contract]: Answer needs revision 15. */
+/** The levels a share may be made at against a hub at [contract]: Answer needs revision 13. */
 fun shareLevels(contract: Int?): List<String> =
     if (contract != null && contract >= HUB_CONTRACT_ANSWER_LEVEL) GrantLevel.ALL else listOf(GrantLevel.WATCH, GrantLevel.DRIVE)
 

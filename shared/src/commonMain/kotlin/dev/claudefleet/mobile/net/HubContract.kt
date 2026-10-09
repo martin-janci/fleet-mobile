@@ -34,8 +34,8 @@ package dev.claudefleet.mobile.net
  * are additive, so a revision-8 hub is safe here. Left at 7, it refused the
  * 0.4.8 hub as "too old" (2026-10-05). The phone calls all five since
  * redesign 11.10 (share and watch), each gated on `tools/list` naming it;
- * the Answer level they take from revision 15 is offered only by a hub
- * whose `ready` names 15 or later (`HUB_CONTRACT_ANSWER_LEVEL`).
+ * the Answer level they take from revision 13 is offered only by a hub
+ * whose `ready` names 13 or later (`HUB_CONTRACT_ANSWER_LEVEL`).
  * Revision 9 added chat forms: the `ask` tool (an agent opens a form in its
  * session's chat; a person answers it) becomes a hub tool the desktop routes
  * `list_forms` / `get_form` / `answer_form` / `decline_form` to, and
@@ -57,7 +57,10 @@ package dev.claudefleet.mobile.net
  * Revision 12 adds tools only (the prompt queue, branch and range diffs,
  * presence, peer linking, the MCP confirm pair, routines, agent installs)
  * and the row shapes they answer; nothing this app already reads changed
- * meaning, so a revision-12 hub is safe here.
+ * meaning, so a revision-12 hub is safe here. Revision 13 adds
+ * control_route, library, lost_target, place_transcript, start_rules, the
+ * Answer grant level, and the owner's trusted phone reaching add_host,
+ * install_agent and tracker work_admin; nothing renamed, so it is safe too.
  *
  * [MIN_HUB_CONTRACT] does NOT mirror the desktop's minimum. The desktop
  * raised its own to 3 because a pre-3 hub would silently misperform
@@ -68,7 +71,7 @@ package dev.claudefleet.mobile.net
  * upgraded: this is the phone's own floor, not a copy of the desktop's.
  */
 const val MIN_HUB_CONTRACT: Int = 0
-const val MAX_HUB_CONTRACT: Int = 12
+const val MAX_HUB_CONTRACT: Int = 13
 
 /**
  * What a `contract` field that cannot be read as a revision counts as.
