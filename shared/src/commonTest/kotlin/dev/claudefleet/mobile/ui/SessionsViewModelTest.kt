@@ -757,6 +757,35 @@ class NeedsAttentionToggleTest {
         assertEquals(listOf("Acme", "Side"), vm.state.value.orgChoices.map { it.name })
     }
 
+    /** r09 B7: Group by org — orgs alphabetically, No org last, each by project; only across two orgs or more. */
+    @Test
+    fun the_org_view_groups_by_org_and_falls_back_with_one_org() = runTest {
+        val rows = listOf(
+            session(1, project = 1).copy(orgId = 2),
+            session(2, host = "pine", project = 1).copy(orgId = 1),
+            session(3, project = null),
+            session(4, project = 2).copy(orgId = 1),
+        )
+        val groups = groupSessions(rows, emptyList(), emptyList(), byOrg = twoOrgs::name)
+        assertEquals(listOf("Acme", "Side", NO_ORG), groups.map { it.alias })
+        assertEquals(listOf(listOf(2L), listOf(4L)), groups.first().projects.map { p -> p.sessions.map { it.id } }, "Acme: by project, across hosts")
+        assertNull(groups.first().reachable, "an org heading is no host")
+
+        val fleet = workFleet(rows)
+        fleet.orgs.value = twoOrgs
+        val vm = SessionsViewModel(fleet, backgroundScope)
+        vm.setGroupMode(GroupMode.ORG)
+        runCurrent()
+        assertEquals(GroupMode.ORG, vm.state.value.groupMode)
+        assertEquals(listOf("Acme", "Side", NO_ORG), vm.state.value.groups.map { it.alias })
+        assertEquals(GroupMode.ORG, newGroupModes(workAvailable = true, orgs = true).last())
+        assertFalse(GroupMode.ORG in newGroupModes(workAvailable = true))
+
+        fleet.sessions.value = listOf(session(1).copy(orgId = 1))
+        runCurrent()
+        assertEquals(GroupMode.PROJECT, vm.state.value.groupMode, "one org is nothing to group by")
+    }
+
     /** M10.5: a row's org colour bar, only while the list shows two or more orgs, and only a colour that parses. */
     @Test
     fun org_colours_are_given_only_beside_the_org_chips() = runTest {

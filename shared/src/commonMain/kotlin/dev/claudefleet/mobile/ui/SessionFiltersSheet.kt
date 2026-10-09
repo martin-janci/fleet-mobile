@@ -108,7 +108,7 @@ fun SessionFiltersSheet(state: SessionsUiState, handlers: SessionFiltersHandlers
                 handlers.onSetGroupMode?.let { setGroupMode ->
                     FilterGroup("Group by") {
                         ChipFlow {
-                            for (mode in newGroupModes(state.workAvailable)) {
+                            for (mode in newGroupModes(state.workAvailable, orgs = state.orgChoices.isNotEmpty())) {
                                 ChoiceChip(
                                     groupModeLabel(mode).replaceFirstChar { it.uppercaseChar() },
                                     state.groupMode == mode,
