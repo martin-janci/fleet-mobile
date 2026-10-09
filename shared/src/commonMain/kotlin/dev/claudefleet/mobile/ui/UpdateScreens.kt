@@ -86,7 +86,8 @@ fun UpdateCard(release: ReleaseInfo, appVersion: String, onOpen: () -> Unit, mod
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("Orbit Fleet ${release.version} is ready", color = o.fg, fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold)
+        Text(updateTitle(release), color = o.fg, fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold)
+        release.reason?.let { Text(it, color = if (release.required) o.danger else o.fgMuted, fontSize = 13.sp, lineHeight = 18.sp) }
         Text(updateMeta(release, appVersion), color = o.fgMuted, fontSize = 13.sp, lineHeight = 18.sp)
         for (note in release.notes.take(3)) {
             Text("· $note", color = o.fg2, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 2)
@@ -103,6 +104,14 @@ fun UpdateCard(release: ReleaseInfo, appVersion: String, onOpen: () -> Unit, mod
         }
     }
 }
+
+/**
+ * The card's first line. A hub that requires the update (this build is
+ * withdrawn, below a minimum, or past a mandatory deadline) says so; the
+ * phone still only offers, and the person installs.
+ */
+internal fun updateTitle(release: ReleaseInfo): String =
+    if (release.required) "Update required: Orbit Fleet ${release.version}" else "Orbit Fleet ${release.version} is ready"
 
 /** The one Inbox line for an update: it does not need you, so it is not a Needs you row. */
 @Composable

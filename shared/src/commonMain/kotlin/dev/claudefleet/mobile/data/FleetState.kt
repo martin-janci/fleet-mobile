@@ -170,6 +170,13 @@ interface FleetState {
     val downloadChanges: Flow<Long> get() = emptyFlow()
 
     /**
+     * One per `update:decision` frame: the hub's update decision for some
+     * client moved, so the phone asks `/update/check` again rather than
+     * waiting. Hot and lossy like [sessionChanges].
+     */
+    val updateDecisions: Flow<Unit> get() = emptyFlow()
+
+    /**
      * Who this device's person is and what is shared with them, read with
      * `my_grants` when the hub lists it, again on every `grant:changed`
      * frame, and per connection; [MyAccess.UNKNOWN] otherwise, which gates

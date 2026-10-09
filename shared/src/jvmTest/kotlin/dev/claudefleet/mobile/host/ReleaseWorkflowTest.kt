@@ -445,6 +445,44 @@ class ReleaseWorkflowTest {
         }
     }
 
+    /**
+     * The update channel (claude-fleet update design S8) points at a
+     * versioned `fleet-mobile-<v>.apk` with a SHA256SUMS; installed phones
+     * that still look on GitHub find `androidApp-release.apk`, so both ship.
+     */
+    @Test
+    fun the_versioned_apk_its_sums_and_the_old_name_are_all_published() {
+        val publish = stepAt("Publish the release")
+        assertTrue("fleet-mobile-\$VERSION_NAME.apk" in publish, "the versioned APK is published")
+        assertTrue("androidApp-release.apk" in publish, "the old asset name stays for phones that read GitHub")
+        assertTrue("SHA256SUMS" in publish, "the sums are published")
+        assertTrue("-PgitSha=\"\$GITHUB_SHA\"" in stepAt("Build the signed release APK"), "the build names its commit")
+    }
+
+    /**
+     * The dispatch to claude-fleet carries what its amendment signs, reads its
+     * token through env: only, and stands down without it rather than failing
+     * a release that is already published. Its APK URL must be the shape
+     * claude-fleet's `android-amendment.yml` accepts.
+     */
+    @Test
+    fun claude_fleet_is_told_what_was_published_and_only_with_its_own_token() {
+        val step = stepAt("Tell claude-fleet")
+        assertTrue("FLEET_DISPATCH_TOKEN: \${{ secrets.FLEET_DISPATCH_TOKEN }}" in step, "the token arrives through env:")
+        val body = step.substringAfter("run: |")
+        assertFalse("secrets." in body, "no secret is interpolated into the run body")
+        assertTrue(body.indexOf("exit 0") in 0 until body.indexOf("gh api"), "no token: a notice and success, before any call")
+        for (field in listOf("version", "apk_url", "sha256", "size", "version_code", "signer_sha256", "contract_min", "contract_max")) {
+            assertTrue("client_payload[$field]=" in step, "the payload carries $field")
+        }
+        assertTrue("event_type=android-release" in step)
+        assertTrue(
+            "https://github.com/\$REPO/releases/download/v\$VERSION_NAME/fleet-mobile-\$VERSION_NAME.apk" in step,
+            "the APK URL is the versioned asset on this release",
+        )
+        assertTrue(release.indexOf("- name: Tell claude-fleet") > release.indexOf("gh release create"), "told only after publishing")
+    }
+
     private fun usesPins(text: String): Map<String, String> =
         Regex("""uses:\s*([\w./-]+)@(\S+)""").findAll(text)
             .associate { it.groupValues[1] to it.groupValues[2] }

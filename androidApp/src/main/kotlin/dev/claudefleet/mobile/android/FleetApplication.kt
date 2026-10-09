@@ -1,7 +1,9 @@
 package dev.claudefleet.mobile.android
 
 import android.app.Application
+import android.os.Build
 import dev.claudefleet.mobile.AppContainer
+import dev.claudefleet.mobile.net.ClientPlatform
 import dev.claudefleet.mobile.store.AndroidPrefs
 import dev.claudefleet.mobile.store.AndroidSecrets
 import io.ktor.client.HttpClient
@@ -36,6 +38,16 @@ class FleetApplication : Application() {
             // has its own application id, so the signature check refuses a
             // release on it and says why.
             installer = AndroidAppInstaller(this),
+            clientPlatform = ClientPlatform("android", androidArch(), BuildConfig.GIT_SHA),
         )
     }
+}
+
+/** The primary ABI in the hub's words (`aarch64`, `x86_64`, `armv7`, `x86`). */
+internal fun androidArch(): String = when (val abi = Build.SUPPORTED_ABIS.firstOrNull().orEmpty()) {
+    "arm64-v8a" -> "aarch64"
+    "armeabi-v7a" -> "armv7"
+    "x86_64" -> "x86_64"
+    "x86" -> "x86"
+    else -> abi.ifBlank { "unknown" }.replace(Regex("[^A-Za-z0-9_.+-]"), "-")
 }

@@ -200,6 +200,10 @@ class FleetRepository(
     private val _downloadChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val downloadChanges: Flow<Long> = _downloadChanges.asSharedFlow()
 
+    // Lossy and buffered like `_sessionChanges`: a hint to re-check, never the fact.
+    private val _updateDecisions = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val updateDecisions: Flow<Unit> = _updateDecisions.asSharedFlow()
+
     override fun actionMissing(tool: String, action: String) {
         _capabilities.update { it.forgetting(tool, action) }
     }
@@ -461,6 +465,7 @@ class FleetRepository(
                             if (event.isAccountUsageFrame()) readAccountUsageSoon()
                             if (event.isAccountFrame()) readAccountsSoon()
                             if (event.isGrantFrame()) readGrantsSoon()
+                            if (event.isUpdateDecisionFrame()) _updateDecisions.tryEmit(Unit)
                             event.downloadId()?.let { _downloadChanges.tryEmit(it) }
                         }
                     }

@@ -94,6 +94,10 @@ import dev.claudefleet.mobile.data.HubVersionActions
 import dev.claudefleet.mobile.update.AppInstaller
 import dev.claudefleet.mobile.update.GitHubReleases
 import dev.claudefleet.mobile.update.ReleaseSource
+import dev.claudefleet.mobile.update.HubReleases
+import dev.claudefleet.mobile.net.ClientPlatform
+import dev.claudefleet.mobile.net.FleetClient
+import dev.claudefleet.mobile.net.clientHeaderValue
 import dev.claudefleet.mobile.update.UpdateViewModel
 import dev.claudefleet.mobile.update.hubMismatch
 import dev.claudefleet.mobile.update.takeWhatsNew
@@ -341,6 +345,8 @@ import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -382,7 +388,17 @@ class AppContainer(
      * elsewhere (iOS, through TestFlight), and then no update card shows.
      */
     val installer: AppInstaller? = null,
+    /**
+     * What this build is, for `X-Fleet-Client` and `/update/check`
+     * (claude-fleet update design S8); null where the platform does not say,
+     * and then the hub learns nothing and GitHub releases are asked instead.
+     */
+    clientPlatform: ClientPlatform? = null,
 ) {
+    init {
+        clientPlatform?.let { p -> clientHeaderValue(p, appVersion)?.let { FleetClient.header = it } }
+    }
+
     /**
      * A session a notification asked to open, until the paired screens take
      * it — held for the same reason [pairLink] is: the tap can start the app
@@ -476,8 +492,17 @@ class AppContainer(
     /** The hub's own version, for the Settings screen to show beside this app's. */
     val versionActions: VersionActions = HubVersionActions(session)
 
-    /** Where a newer release of this app is found: fleet-mobile's GitHub releases. */
-    val releases: ReleaseSource = GitHubReleases(this.http)
+    /**
+     * Where a newer release of this app is found: the paired hub's decision
+     * (`/update/check`), and fleet-mobile's GitHub releases only for a hub too
+     * old to decide.
+     */
+    val releases: ReleaseSource = HubReleases(
+        platform = clientPlatform,
+        appVersion = appVersion,
+        check = { body -> session.withClient { it.updateCheck(body) } },
+        fallback = GitHubReleases(this.http),
+    )
 
     /** The New session form's one call, through the same 401 rule. */
     val newSessionActions: NewSessionActions = HubNewSessionActions(session)
@@ -931,6 +956,14 @@ private fun FleetRoute(
         UpdateViewModel(container.releases, container.installer, container.prefs, container.appVersion, scope)
     }
     LaunchedEffect(updates) { updates.check() }
+    // The hub says an update decision moved (`update:decision`): ask again,
+    // a moment later, so a burst of frames is one check.
+    LaunchedEffect(updates, repository) {
+        repository.updateDecisions.collectLatest {
+            delay(2_000)
+            updates.check()
+        }
+    }
     // Back from Android's "install unknown apps" page: Install works now.
     LifecycleStartEffect(updates) {
         updates.recheckPermission()
