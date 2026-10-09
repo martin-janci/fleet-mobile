@@ -111,7 +111,40 @@ data class SessionRow(
      * the column sends none, and every session it runs is Claude Code.
      */
     val agent: String? = null,
+    /**
+     * Who or what started the session (hub contract 11, migration 124):
+     * `person`, `operator`, `mission`, `background`, `token` or `routine`;
+     * absent for a row fleet did not start (found on a host by reconcile) and
+     * from an older hub. [originRef] is what it points at, as text (a person,
+     * session or mission id). The desktop draws no origin chip yet, so
+     * neither does the phone; the field is read for parity and the tests.
+     */
+    val origin: String? = null,
+    @SerialName("origin_ref") val originRef: String? = null,
+    /**
+     * When a person last looked at the session (contract 11, migration 125),
+     * unix seconds: `touch_session_viewed`. A turn that ended after it is
+     * unread ([isUnread]). Absent for a row nobody has opened since fleet
+     * found it, and from an older hub.
+     */
+    @SerialName("last_viewed_at") val lastViewedAt: Long? = null,
+    /** The credential profile the session runs under; absent for the host's own login (accounts, step 4.4). */
+    @SerialName("claude_profile") val claudeProfile: String? = null,
 ) {
+    /**
+     * A turn ended after the session was last viewed — or, for a session fleet
+     * started and nobody has opened yet, after it started. The desktop's
+     * `isUnread` (`attention.ts`, redesign 2.3): a row reconcile found has
+     * neither stamp and is never unread; a turn that ends in the second it is
+     * viewed counts as seen.
+     */
+    val isUnread: Boolean
+        get() {
+            val seen = lastViewedAt ?: startedAt ?: return false
+            val stop = lastStopAt ?: return false
+            return stop > seen
+        }
+
     val isBackground: Boolean get() = tmuxName.startsWith("bg:")
 
     /** The agent's own label; for a background agent its prompt; else the tmux name. */

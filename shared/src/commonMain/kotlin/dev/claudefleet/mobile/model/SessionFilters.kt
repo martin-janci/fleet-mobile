@@ -38,7 +38,8 @@ enum class TimeDirection(val label: String) {
 }
 
 /**
- * One value of a session's state, as the filter sheet offers it.
+ * One value of a session's state, as the filter sheet offers it, in the
+ * manual's six status words (a reason after " · " where two values share one).
  *
  * [STUCK] is not a `claude_status` — it is `stuck_kind` being set at all — and
  * it is offered beside the statuses because that is how a person thinks of it.
@@ -48,12 +49,12 @@ enum class TimeDirection(val label: String) {
 @Serializable
 enum class StatusFilter(val label: String, val wire: String?) {
     WORKING("Working", "working"),
-    BLOCKED("Waiting for you", "blocked"),
-    STUCK("Stuck", null),
+    BLOCKED("Needs you", "blocked"),
+    STUCK("Failed · stuck", null),
     FAILED("Failed", "failed"),
     COMPLETED("Done", "completed"),
     IDLE("Idle", "idle"),
-    STOPPED("Stopped", "stopped"),
+    STOPPED("Idle · stopped", "stopped"),
 }
 
 /**

@@ -367,7 +367,7 @@ class SessionFiltersTest {
                 "Host: box",
                 "Idle beyond 24 hours",
                 "Search: “hub”",
-                "State: Waiting for you/Failed",
+                "State: Needs you/Failed",
                 "Background agents hidden",
             ),
             named,
@@ -378,7 +378,7 @@ class SessionFiltersTest {
     @Test
     fun the_summary_names_statuses_in_the_sheets_order() {
         val f = SessionFilters(statuses = setOf(StatusFilter.STOPPED, StatusFilter.WORKING, StatusFilter.STUCK))
-        assertEquals(listOf("State: Working/Stuck/Stopped"), sessionFacets(f).map { it.label })
+        assertEquals(listOf("State: Working/Failed · stuck/Idle · stopped"), sessionFacets(f).map { it.label })
     }
 
     // ---- the desktop's work filters and the project --------------------------

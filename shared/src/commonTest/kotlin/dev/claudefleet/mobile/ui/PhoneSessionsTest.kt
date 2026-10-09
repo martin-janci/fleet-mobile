@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.model.PendingInput
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.ui.kit.StatusWord
+import dev.claudefleet.mobile.ui.theme.StatusTone
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -56,6 +57,20 @@ class PhoneSessionsTest {
         assertNull(phoneWord(row(status = null)))
     }
 
+    /** Redesign 2.7 / 4.10: Paused for an account at its limit; Done for a finished turn nobody read. */
+    @Test
+    fun a_limited_row_is_paused_and_an_unread_turn_is_done() {
+        val limited = row(status = "idle", attention = Attention("account_limit"))
+        assertEquals(StatusWord.PAUSED, phoneWord(limited))
+        assertEquals(StatusTone.PAUSED, StatusTone.of(limited))
+        assertEquals(StatusWord.PAUSED, StatusWord.of(StatusTone.PAUSED))
+        assertEquals(StatusWord.PAUSED, phoneWord(row(status = "failed", attention = Attention("account_limit"))), "a turn that failed at the limit reads as the limit")
+        assertNull(phoneLead(StatusWord.PAUSED, live = true), "its line already opens with Paused")
+        val unread = row(status = "idle").copy(startedAt = 10, lastStopAt = 90, lastViewedAt = 50)
+        assertEquals(StatusWord.DONE, phoneWord(unread))
+        assertEquals(StatusWord.IDLE, phoneWord(unread.copy(lastViewedAt = 95)), "seen: Idle again")
+    }
+
     @Test
     fun line_two_leads_with_waiting_for_you_and_says_what_it_waits_on() {
         assertEquals("Waiting for you", phoneLead(StatusWord.NEEDS_YOU, live = true))
@@ -66,7 +81,7 @@ class PhoneSessionsTest {
         assertEquals("offline", staleLine("offline", null))
         val asked = row(status = "blocked", pending = PendingInput(kind = "permission", question = "Allow cargo fleet-test?"))
         assertEquals("Allow cargo fleet-test?", waitsOn(asked))
-        assertEquals("Waiting for you", waitsOn(row(status = "blocked")))
+        assertEquals("Needs you", waitsOn(row(status = "blocked")))
         assertEquals("", waitsOn(row(status = "idle")))
     }
 

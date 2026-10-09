@@ -12,13 +12,19 @@ package dev.claudefleet.mobile.model
  * contract 11) come only from the hub's stamped reason: they read fleet facts
  * (a host's reachability, an account's usage) the phone never receives.
  *
- * Two buckets are reachable and stay empty here, as they do on the desktop:
- * [DONE_UNREAD] needs a `last_viewed_at` the hub does not yet stamp, and
- * [IDLE_LONG] only fills when a caller passes a non-zero idle threshold.
+ * [DONE_UNREAD] reads [SessionRow.lastViewedAt] (contract 11), which the
+ * hub stamps through `touch_session_viewed` while a session is on screen,
+ * on the desktop and on this phone. [IDLE_LONG] only fills when a caller
+ * passes a non-zero idle threshold.
+ *
+ * The labels are the manual's status words — Needs you, Working, Failed,
+ * Done, Paused, Idle — where a bucket is a status, with its reason after
+ * " · " where the word alone would hide it ("Failed · stuck"); the Blocked
+ * buckets keep their reason ("Host down", "Signed out").
  */
 enum class TriageBucket(val label: String) {
-    WAITING("Waiting for you"),
-    STUCK("Stuck"),
+    WAITING("Needs you"),
+    STUCK("Failed · stuck"),
     HOST_DOWN("Host down"),
     ACCOUNT_LIMIT("Paused · limit"),
     NO_CREDENTIALS("Signed out"),
@@ -27,9 +33,9 @@ enum class TriageBucket(val label: String) {
     CONTEXT_FULL("Context full"),
     STALE_WORKING("Stalled"),
     CI_FAILING("CI failing"),
-    DONE_UNREAD("Done, unread"),
-    LIFECYCLE("Needs a decision"),
-    IDLE_LONG("Idle a long time"),
+    DONE_UNREAD("Done · unread"),
+    LIFECYCLE("Paused"),
+    IDLE_LONG("Idle · a long time"),
     WORKING("Working"),
     IDLE("Idle"),
     ;
@@ -78,7 +84,7 @@ fun SessionRow.triageBucket(idleSeconds: Long = 0, now: Long = 0): TriageBucket 
     val live = status != "ghost" && lostAt == null
     if (live && (contextPct ?: 0.0) >= CONTEXT_RED_PCT) return TriageBucket.CONTEXT_FULL
     if (ciStatus == "failing" && claudeStatus in IDLE_STATUSES) return TriageBucket.CI_FAILING
-    // `done_unread` needs `last_viewed_at`, which no hub stamps yet.
+    if (isDoneUnread) return TriageBucket.DONE_UNREAD
     if (isLifecycleBroken) return TriageBucket.LIFECYCLE
     if (isIdleLong(idleSeconds, now)) return TriageBucket.IDLE_LONG
     if (claudeStatus == "working") return TriageBucket.WORKING
@@ -100,6 +106,7 @@ private fun bucketOfReason(reason: String): TriageBucket? = when (reason) {
     "stale_working" -> TriageBucket.STALE_WORKING
     "ci_failing" -> TriageBucket.CI_FAILING
     "lifecycle" -> TriageBucket.LIFECYCLE
+    "done_unread" -> TriageBucket.DONE_UNREAD
     else -> null
 }
 
@@ -110,6 +117,10 @@ private fun bucketOfReason(reason: String): TriageBucket? = when (reason) {
  */
 fun reasonLabel(reason: String): String =
     bucketOfReason(reason)?.label ?: reason.replace('_', ' ').trim().replaceFirstChar { it.uppercaseChar() }
+
+/** Done and unread: the last turn finished (the session is idle) on a live row nobody has looked at since. */
+private val SessionRow.isDoneUnread: Boolean
+    get() = status != "ghost" && lostAt == null && claudeStatus in IDLE_STATUSES && isUnread
 
 private val SessionRow.isLifecycleBroken: Boolean
     get() = safeKillState == "failed" || safeKillState == "requested" || status == "ghost" || lostAt != null
