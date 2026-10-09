@@ -61,6 +61,10 @@ package dev.claudefleet.mobile.net
  * control_route, library, lost_target, place_transcript, start_rules, the
  * Answer grant level, and the owner's trusted phone reaching add_host,
  * install_agent and tracker work_admin; nothing renamed, so it is safe too.
+ * Revision 14 adds check_account_headroom, pr_shepherd, routines' `failing`
+ * action, new_bg_session's project / agent / read-only / stop-after
+ * arguments, a listed mission's spend and budget and a plan's run estimate;
+ * all additive, so it is safe too.
  *
  * [MIN_HUB_CONTRACT] does NOT mirror the desktop's minimum. The desktop
  * raised its own to 3 because a pre-3 hub would silently misperform
@@ -71,7 +75,7 @@ package dev.claudefleet.mobile.net
  * upgraded: this is the phone's own floor, not a copy of the desktop's.
  */
 const val MIN_HUB_CONTRACT: Int = 0
-const val MAX_HUB_CONTRACT: Int = 13
+const val MAX_HUB_CONTRACT: Int = 14
 
 /**
  * What a `contract` field that cannot be read as a revision counts as.
