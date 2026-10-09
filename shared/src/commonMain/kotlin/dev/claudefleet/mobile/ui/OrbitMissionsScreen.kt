@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.model.Mission
+import dev.claudefleet.mobile.model.dollars
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
@@ -104,6 +105,20 @@ internal fun missionLine(m: Mission): String = when (m.state) {
     "draft" -> "Draft · plan it in Control"
     else -> m.state
 }
+
+/**
+ * What a mission spent, against its live grant's budget when one sets it
+ * (contract 14): "$1.20 of $5.00", or "$1.20 spent". Null from an older hub
+ * and for a mission that has spent nothing and has no budget.
+ */
+internal fun missionSpend(m: Mission): String? {
+    val cost = m.costMicros ?: return null
+    m.budgetMicros?.let { return "${dollars(cost)} of ${dollars(it)}" }
+    return if (cost > 0) "${dollars(cost)} spent" else null
+}
+
+/** A row's second line with its spend. */
+internal fun missionRowLine(m: Mission): String = listOfNotNull(missionLine(m), missionSpend(m)).joinToString(" · ")
 
 /** What Pause all says it stops, before it stops it. */
 internal fun pauseAllMeta(running: Int): String =
@@ -191,7 +206,7 @@ fun OrbitMissionsScreen(
             },
         ) {
             for (m in groups.running) {
-                PhoneRow(title = m.name.ifBlank { "Mission ${m.id}" }, line = missionLine(m), word = missionWord(m), divider = false)
+                PhoneRow(title = m.name.ifBlank { "Mission ${m.id}" }, line = missionRowLine(m), word = missionWord(m), divider = false)
             }
             Text("Resume from here or from Control; nothing is lost.", color = o.fgMuted, fontSize = 13.sp)
         }
@@ -209,7 +224,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.group(
     items(missions, key = { "m-$title-${it.id}" }) { m ->
         PhoneRow(
             title = m.name.ifBlank { "Mission ${m.id}" },
-            line = missionLine(m),
+            line = missionRowLine(m),
             word = missionWord(m),
             age = relativeTime(m.updatedAt.takeIf { it > 0 }, nowSeconds),
             onClick = { onOpen(m.id) },

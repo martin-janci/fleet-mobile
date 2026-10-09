@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.BackgroundOptions
 import dev.claudefleet.mobile.model.NewBgSessionResult
 
 /**
@@ -35,12 +36,19 @@ interface NewSessionActions {
 
     /** A supervised headless (background) Claude session on [hostAlias], started on [prompt] (`new_bg_session`). */
     suspend fun newBackground(hostAlias: String, name: String, prompt: String): NewBgSessionResult
+
+    /** The same with contract 14's [options]; a fake that does not care drops them. */
+    suspend fun newBackground(hostAlias: String, name: String, prompt: String, options: BackgroundOptions): NewBgSessionResult =
+        newBackground(hostAlias, name, prompt)
 }
 
 /** [NewSessionActions] against the paired hub, through [AppSession.withClient]. */
 class HubNewSessionActions(private val session: AppSession) : NewSessionActions {
     override suspend fun newBackground(hostAlias: String, name: String, prompt: String): NewBgSessionResult =
         session.withClient { it.newBgSession(hostAlias, name, prompt) }
+
+    override suspend fun newBackground(hostAlias: String, name: String, prompt: String, options: BackgroundOptions): NewBgSessionResult =
+        session.withClient { it.newBgSession(hostAlias, name, prompt, options) }
 
     override suspend fun newSession(request: NewSessionRequest): SessionRow =
         session.withClient {

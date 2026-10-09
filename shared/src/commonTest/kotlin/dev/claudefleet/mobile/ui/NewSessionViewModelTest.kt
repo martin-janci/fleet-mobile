@@ -28,6 +28,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import dev.claudefleet.mobile.model.BackgroundOptions
 import dev.claudefleet.mobile.model.NewBgSessionResult
 
 private class FakeFleetForNew(
@@ -65,6 +66,13 @@ private class FakeCreate : NewSessionActions {
     override suspend fun newBackground(hostAlias: String, name: String, prompt: String): NewBgSessionResult {
         backgrounds += Triple(hostAlias, name, prompt)
         return NewBgSessionResult(claudeSessionId = "c", session = backgroundRow)
+    }
+
+    val withOptions = mutableListOf<BackgroundOptions>()
+
+    override suspend fun newBackground(hostAlias: String, name: String, prompt: String, options: BackgroundOptions): NewBgSessionResult {
+        withOptions += options
+        return newBackground(hostAlias, name, prompt)
     }
 }
 
@@ -621,6 +629,31 @@ class NewSessionViewModelTest {
 
         assertEquals(listOf(Triple("pine", "tidy the docs", "tidy the docs")), actions.backgrounds)
         assertEquals(listOf(90L), opened)
+    }
+
+    /** Contract 14 (redesign 14.16): the limits go to a hub that takes them, in the project picked. */
+    @Test
+    fun a_background_agent_takes_its_limits_and_the_picked_project_where_the_hub_does() = runTest {
+        val actions = FakeCreate()
+        val fleet = FakeFleetForNew(listOf(PINE), listOf(REPO))
+        val vm = vm(fleet, actions, backgroundScope, initialHost = "pine")
+        runCurrent()
+        assertFalse(vm.state.value.backgroundOptions, "an older hub: no limits offered")
+        vm.startBackground("", "tidy", BackgroundOptions(readOnly = true)) {}?.join()
+        assertTrue(actions.withOptions.isEmpty(), "an older hub gets the call it knew")
+
+        fleet.capabilities.value = HubCapabilities(
+            tools = setOf(HubCapabilities.NEW_BG_SESSION),
+            params = mapOf(HubCapabilities.NEW_BG_SESSION to setOf("project_id", "read_only", "stop_after_secs", "stop_after_usd")),
+        )
+        vm.selectProject(REPO.id)
+        runCurrent()
+        assertTrue(vm.state.value.backgroundOptions)
+        vm.startBackground("", "tidy", BackgroundOptions(readOnly = true, stopAfterSecs = 3_600, stopAfterUsd = 5.0)) {}?.join()
+        assertEquals(
+            listOf(BackgroundOptions(projectId = REPO.id, readOnly = true, stopAfterSecs = 3_600, stopAfterUsd = 5.0)),
+            actions.withOptions,
+        )
     }
 
     @Test

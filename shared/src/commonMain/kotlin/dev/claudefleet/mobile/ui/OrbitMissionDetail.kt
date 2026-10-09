@@ -37,6 +37,7 @@ import dev.claudefleet.mobile.model.autonomyLabel
 import dev.claudefleet.mobile.model.dollars
 import dev.claudefleet.mobile.model.key
 import dev.claudefleet.mobile.model.pauseMove
+import dev.claudefleet.mobile.model.runEstimateLine
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.kit.Comet
 import dev.claudefleet.mobile.ui.kit.StatusWord
@@ -218,7 +219,8 @@ fun OrbitMissionDetail(detail: MissionDetail, state: MissionsUiState, handlers: 
                 item(key = "spent") {
                     val a = plan.autonomy
                     Text(
-                        "Autonomy ${a.effective}: ${autonomyLabel(a.effective)} · spent ${dollars(plan.costMicros)}",
+                        "Autonomy ${a.effective}: ${autonomyLabel(a.effective)} · spent ${dollars(plan.costMicros)}" +
+                            (plan.runEstimate?.let { "\n" + runEstimateLine(it) } ?: ""),
                         color = o.fgMuted,
                         fontSize = 13.sp,
                         modifier = Modifier.padding(horizontal = gutter, vertical = 6.dp),
