@@ -202,6 +202,7 @@ import dev.claudefleet.mobile.ui.WhatsNewScreen
 import dev.claudefleet.mobile.ui.MoreEntry
 import dev.claudefleet.mobile.ui.MoreScreen
 import dev.claudefleet.mobile.ui.Navigator
+import dev.claudefleet.mobile.ui.openOverSheets
 import dev.claudefleet.mobile.ui.PhoneLayout
 import dev.claudefleet.mobile.ui.hostsLine
 import dev.claudefleet.mobile.ui.inboxRows
