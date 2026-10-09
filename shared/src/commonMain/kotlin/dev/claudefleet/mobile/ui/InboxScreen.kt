@@ -77,8 +77,12 @@ internal fun inboxWord(row: SessionRow): StatusWord =
         else -> StatusWord.NEEDS_YOU
     }
 
-/** The Inbox's three views (boards MobileNav, MobileTutorials): Needs you, Running, Done today. */
-enum class InboxView(val label: String) { NeedsYou("Needs you"), Running("Running"), DoneToday("Done today") }
+/**
+ * The Inbox's three views (boards MobileNav, MobileTutorials): Needs you,
+ * Working, Done today. The boards say Running; the manual's six status words
+ * say Working (review r14 CopyRulesTest).
+ */
+enum class InboxView(val label: String) { NeedsYou("Needs you"), Running("Working"), DoneToday("Done today") }
 
 /** Running: the sessions working now, most recently active first. */
 fun runningRows(sessions: List<SessionRow>): List<SessionRow> =
