@@ -65,14 +65,20 @@ data class MissionsHandlers(
  * Missions as a sheet: the list with Pause all, and one mission's next steps
  * (Go), its cards (Apply / Dismiss, a question answered in words) and the
  * autonomy that applies, with Pause or Resume. Pause all asks first.
+ * With [orbit] (the New layout) one mission is drawn by [OrbitMissionDetail].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MissionsSheet(state: MissionsUiState, handlers: MissionsHandlers) {
+fun MissionsSheet(state: MissionsUiState, handlers: MissionsHandlers, orbit: Boolean = false) {
     var confirmPauseAll by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
+        val detail = state.detail
+        // The New layout draws one mission as the MobileControl board's panel.
+        if (orbit && detail != null) {
+            OrbitMissionDetail(detail, state, handlers)
+            return@ModalBottomSheet
+        }
         Column(modifier = Modifier.fillMaxWidth()) {
-            val detail = state.detail
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (detail != null) TextButton(onClick = handlers.onBack) { Text("‹ Missions") }
                 Text(
@@ -104,7 +110,7 @@ fun MissionsSheet(state: MissionsUiState, handlers: MissionsHandlers) {
 }
 
 @Composable
-private fun Outcome(state: MissionsUiState) {
+internal fun Outcome(state: MissionsUiState) {
     val text = state.results?.let { results ->
         if (results.isEmpty()) {
             "Nothing to take now."
@@ -228,7 +234,7 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
-private fun StepRow(s: MissionStep, item: String?, enabled: Boolean, handlers: MissionsHandlers) {
+internal fun StepRow(s: MissionStep, item: String?, enabled: Boolean, handlers: MissionsHandlers) {
     Row(modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f)) {
             Text(s.line(), style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -240,7 +246,7 @@ private fun StepRow(s: MissionStep, item: String?, enabled: Boolean, handlers: M
 }
 
 @Composable
-private fun CardRow(c: MissionCard, state: MissionsUiState, mayChange: Boolean, handlers: MissionsHandlers) {
+internal fun CardRow(c: MissionCard, state: MissionsUiState, mayChange: Boolean, handlers: MissionsHandlers) {
     var answer by remember(c.id) { mutableStateOf("") }
     val enabled = state.canDecide && mayChange && state.busy == null
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 6.dp)) {

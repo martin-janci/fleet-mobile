@@ -456,3 +456,26 @@ fun Atom(modifier: Modifier = Modifier, size: Dp = 20.dp) {
         }
     }
 }
+
+/**
+ * The Comet: a head on a small orbit trailing a fading tail, for work that
+ * is running (a mission's step, a tool call). The one particle loader small
+ * enough for a row. With reduced motion the head holds still.
+ */
+@Composable
+fun Comet(modifier: Modifier = Modifier, size: Dp = 16.dp) {
+    val head = Fleet.colors.cometHead
+    val tail = Fleet.colors.accent
+    val clock = rememberLoaderClock(1_400)
+    Canvas(modifier.size(size).semantics { contentDescription = "Running" }) {
+        val c = Offset(this.size.width / 2f, this.size.height / 2f)
+        val r = this.size.width * 0.36f
+        val dot = this.size.width * 0.1f
+        for (i in 6 downTo 1) {
+            val a = (clock.phase - i * 0.035f) * 2f * PI.toFloat()
+            drawCircle(tail, dot * (1f - i / 8f), Offset(c.x + r * cos(a), c.y + r * sin(a)), alpha = clock.alpha * (1f - i / 7f) * 0.7f)
+        }
+        val a = clock.phase * 2f * PI.toFloat()
+        drawCircle(head, dot, Offset(c.x + r * cos(a), c.y + r * sin(a)), alpha = clock.alpha)
+    }
+}
