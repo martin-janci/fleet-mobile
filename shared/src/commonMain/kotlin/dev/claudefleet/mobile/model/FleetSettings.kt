@@ -58,6 +58,9 @@ data class Section(
     val intro: String? = null,
     val collapsible: Boolean = false,
     val advanced: Boolean = false,
+    /** Choice-set fields over the same options, drawn as one grid: a row per
+     *  option, a column per field (claude-fleet 11.9, the notifications matrix). */
+    val matrix: Boolean = false,
     @SerialName("when") val condition: Condition? = null,
     /** Tagged by `type`; read through [PageItem.of]. */
     val items: List<JsonObject> = emptyList(),
@@ -162,7 +165,16 @@ data class Danger(val level: String = "none", val message: String? = null) {
 
 /** Kinds the phone edits. A map, an id list or a price table: on a desktop. */
 val SettingDescriptor.editableOnPhone: Boolean
-    get() = kind.type in setOf("bool", "secs", "int", "choice", "text")
+    get() = kind.type in setOf("bool", "secs", "int", "choice", "text", "choice_set", "time_range")
+
+/** The options a choice-set value holds. */
+fun choiceSetOf(value: String): Set<String> = value.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+
+/** A choice-set value with [option] ticked or not, in the setting's own option order, as the hub stores it. */
+fun SettingDescriptor.withChoice(value: String, option: String, on: Boolean): String {
+    val held = choiceSetOf(value).let { if (on) it + option else it - option }
+    return kind.options.filter { it in held }.joinToString(",")
+}
 
 private val SECS_PER: Map<String, Long> = mapOf("seconds" to 1, "minutes" to 60, "hours" to 3600, "days" to 86_400)
 
@@ -225,11 +237,12 @@ fun SettingDescriptor.rangeText(): String {
 /** A value in words, as a person reads it: On / Off, an option's label, a
  *  number in its unit, "(empty)". The desktop's `valueInWords`. */
 fun SettingDescriptor.inWords(value: String): String {
-    if (value.isEmpty()) return "(empty)"
+    if (value.isEmpty()) return if (kind.type == "time_range") "None" else "(empty)"
     return when (kind.type) {
         "bool" -> if (value == "true") "On" else "Off"
         "choice" -> optionLabel(value)
         "choice_set" -> value.split(',').joinToString(", ") { optionLabel(it.trim()) }
+        "time_range" -> value.replace("-", "–")
         "secs", "int" -> toDisplay(value) + if (unitWord.isNotEmpty()) " $unitWord" else ""
         else -> value
     }

@@ -36,7 +36,14 @@ import dev.claudefleet.mobile.model.Page
 import dev.claudefleet.mobile.model.PageItem
 import dev.claudefleet.mobile.model.SettingDescriptor
 import dev.claudefleet.mobile.model.SettingProposal
+import dev.claudefleet.mobile.model.choiceSetOf
 import dev.claudefleet.mobile.model.fromDisplay
+import dev.claudefleet.mobile.model.withChoice
+import dev.claudefleet.mobile.notify.parseQuietHours
+import androidx.compose.material3.Checkbox
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import dev.claudefleet.mobile.model.holds
 import dev.claudefleet.mobile.model.inWords
 import dev.claudefleet.mobile.model.rangeText
@@ -170,6 +177,11 @@ private fun PageBody(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp),
         )
+        val grid = if (section.matrix) matrixColumns(state, section.items.map { PageItem.of(it) }) else null
+        if (grid != null) {
+            MatrixGrid(state, grid, onSet)
+            continue
+        }
         for (raw in section.items) {
             when (val item = PageItem.of(raw)) {
                 is PageItem.Field -> {
@@ -224,8 +236,8 @@ internal fun FieldRow(
             Text(d.label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
             if (isSwitch) {
                 Switch(checked = value == "true", enabled = !busy, onCheckedChange = null)
-            } else if (!editable || d.kind.type != "choice") {
-                if (!editable || d.kind.type !in setOf("secs", "int", "text")) {
+            } else if (!editable || d.kind.type !in setOf("choice", "choice_set")) {
+                if (!editable || d.kind.type !in TYPED) {
                     Text(d.inWords(value), style = MaterialTheme.typography.bodyMedium)
                 }
             }
@@ -242,7 +254,20 @@ internal fun FieldRow(
                 }
             }
         }
-        if (editable && d.kind.type in setOf("secs", "int", "text")) {
+        if (editable && d.kind.type == "choice_set") {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val held = choiceSetOf(value)
+                for (o in d.kind.options) {
+                    FilterChip(
+                        selected = o in held,
+                        enabled = !busy,
+                        onClick = { onSet(d.key, d.withChoice(value, o, o !in held)) },
+                        label = { Text(d.optionLabel(o)) },
+                    )
+                }
+            }
+        }
+        if (editable && d.kind.type in TYPED) {
             ValueField(d, value, busy, onSet, onRefuse)
         }
         val range = d.rangeText()
@@ -266,6 +291,56 @@ internal fun FieldRow(
     }
 }
 
+/** The kinds typed into a field and sent on Save. */
+private val TYPED = setOf("secs", "int", "text", "time_range")
+
+/**
+ * A matrix section's columns: its fields when every one is a choice-set
+ * setting this hub described, over the same options, and the condition of
+ * each holds; else null, and the section is drawn as plain rows.
+ */
+internal fun matrixColumns(state: FleetSettingsUiState, items: List<PageItem>): List<SettingDescriptor>? {
+    val fields = items.filterIsInstance<PageItem.Field>()
+    if (fields.size < 2 || fields.size != items.size) return null
+    val ds = fields.map { f -> state.descriptors[f.key]?.takeIf { it.kind.type == "choice_set" && f.condition.holds(state.values) } ?: return null }
+    return ds.takeIf { d -> d.all { it.kind.options == d.first().kind.options } }
+}
+
+/** The matrix: a row per option, a column per field, a box where the field holds the option. */
+@Composable
+private fun MatrixGrid(state: FleetSettingsUiState, columns: List<SettingDescriptor>, onSet: (String, String) -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Spacer(Modifier.weight(1f))
+            for (c in columns) {
+                Text(c.label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(MATRIX_CELL), textAlign = TextAlign.Center)
+            }
+        }
+        for (o in columns.first().kind.options) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(columns.first().optionLabel(o), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                for (c in columns) {
+                    val value = state.values[c.key] ?: c.value
+                    val on = o in choiceSetOf(value)
+                    val enabled = state.editable(c.key) && c.key !in state.busy
+                    Checkbox(
+                        checked = on,
+                        enabled = enabled,
+                        onCheckedChange = { onSet(c.key, c.withChoice(value, o, it)) },
+                        modifier = Modifier.width(MATRIX_CELL).semantics { contentDescription = "${c.label}: ${c.optionLabel(o)}" },
+                    )
+                }
+            }
+        }
+        for (c in columns) state.fieldErrors[c.key]?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        if (state.canWrite && columns.none { state.editable(it.key) }) {
+            Text("Change it on a desktop.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+private val MATRIX_CELL = 68.dp
+
 /** A number or a short text, sent on Save: a field that wrote on every
  *  keystroke would send every half-typed value to the hub. */
 @Composable
@@ -276,7 +351,8 @@ private fun ValueField(
     onSet: (String, String) -> Unit,
     onRefuse: (String, String) -> Unit,
 ) {
-    val shown = if (d.kind.type == "text") value else d.toDisplay(value)
+    val asText = d.kind.type == "text" || d.kind.type == "time_range"
+    val shown = if (asText) value else d.toDisplay(value)
     var draft by remember(d.key, shown) { mutableStateOf(shown) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
@@ -284,14 +360,22 @@ private fun ValueField(
             onValueChange = { draft = it },
             singleLine = true,
             enabled = !busy,
-            suffix = if (d.unitWord.isNotEmpty() && d.kind.type != "text") ({ Text(d.unitWord) }) else null,
+            suffix = if (d.unitWord.isNotEmpty() && !asText) ({ Text(d.unitWord) }) else null,
+            placeholder = if (d.kind.type == "time_range") ({ Text("22:00-07:30") }) else null,
             modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(8.dp))
         OutlinedButton(
             enabled = !busy && draft != shown,
             onClick = {
-                if (d.kind.type == "text") {
+                if (d.kind.type == "time_range") {
+                    val t = draft.trim()
+                    if (t.isEmpty() || parseQuietHours(t) != null) {
+                        onSet(d.key, t)
+                    } else {
+                        onRefuse(d.key, "${d.label}: a range like 22:00-07:30, or empty for none")
+                    }
+                } else if (d.kind.type == "text") {
                     onSet(d.key, draft.trim())
                 } else {
                     d.fromDisplay(draft).fold(

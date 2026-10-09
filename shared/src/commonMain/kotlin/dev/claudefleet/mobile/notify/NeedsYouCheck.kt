@@ -67,10 +67,10 @@ class NeedsYouCheck(
         val before = prefs.readSeen()
         val (alerts, after) = needsYouAlerts(before.orEmpty(), rows)
         if (before != null) {
-            // The kinds This phone turned off are still remembered as seen,
-            // so turning one back on does not replay what was skipped.
-            val kinds = prefs.notifyKinds()
-            alerts.filter { kinds.allows(it.reason) }.forEach(poster::post)
+            // The kinds This phone turned off, and those the fleet's matrix or
+            // quiet hours hold back, are still remembered as seen, so turning
+            // one back on (or quiet hours ending) does not replay them.
+            alerts.filter { prefs.notifyAllows(it.reason) }.forEach(poster::post)
             before.filter { (id, reason) -> reason != null && after[id] == null }.keys.forEach(poster::withdraw)
         }
         prefs.writeSeen(after)
