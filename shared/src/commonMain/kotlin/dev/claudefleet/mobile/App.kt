@@ -224,6 +224,7 @@ import dev.claudefleet.mobile.ui.kit.OrbitIcons
 import dev.claudefleet.mobile.ui.kit.rememberPhoneConnection
 import dev.claudefleet.mobile.ui.kit.HubBanner
 import dev.claudefleet.mobile.ui.kit.LocalHubReconnect
+import dev.claudefleet.mobile.ui.kit.LocalReducedMotion
 import dev.claudefleet.mobile.ui.NewSessionScreen
 import dev.claudefleet.mobile.ui.DiscardSheet
 import dev.claudefleet.mobile.ui.newSessionTyped
@@ -563,6 +564,9 @@ class AppContainer(
 fun App(container: AppContainer) {
     val theme by container.phone.theme.collectAsState()
     val dark = theme.isDark(isSystemInDarkTheme())
+    // This phone's Motion choice (review r11); System leaves the OS setting in charge.
+    val motion by container.phone.motion.collectAsState()
+    CompositionLocalProvider(LocalReducedMotion provides motion.reduced) {
     FleetTheme(dark = dark) {
         // The phone's clock and battery in the app's colours, not the system's.
         SystemBarsAppearance(dark = dark)
@@ -654,6 +658,7 @@ fun App(container: AppContainer) {
                 }
             }
         }
+    }
     }
 }
 
@@ -1855,6 +1860,7 @@ private fun FleetRoute(
                         // open page first, then the group, then leaves Settings.
                         val place by settings.place.collectAsState()
                         val theme by container.phone.theme.collectAsState()
+                        val motion by container.phone.motion.collectAsState()
                         val notifyKinds by container.phone.notifyKinds.collectAsState()
                         val lockOn by container.phone.lock.collectAsState()
                         val gate = rememberBiometricGate()
@@ -1870,12 +1876,14 @@ private fun FleetRoute(
                                 notifyKinds = notifyKinds,
                                 updateMode = updateState.mode.takeIf { updateState.supported },
                                 lock = lockOn,
+                                motion = motion,
                             ),
                             handlers = OrbitSettingsHandlers(
                                 onOpen = settings::open,
                                 onBack = { if (!fleetSettings.back()) settings.back() },
                                 onOpenPage = fleetSettings::open,
                                 onSetTheme = container.phone::setTheme,
+                                onSetMotion = container.phone::setMotion,
                                 onSetNotify = container.phone::setNotify,
                                 onSetUpdateMode = updates::setMode,
                                 // Either way, only once the check has passed.
