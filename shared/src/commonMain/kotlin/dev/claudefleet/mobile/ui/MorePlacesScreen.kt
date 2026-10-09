@@ -590,7 +590,7 @@ private fun gutter() = OrbitTokens.spacing("phone-gutter").dp
 
 /** A group's heading with its count: "Needs attention 1". */
 @Composable
-private fun GroupHeading(text: String, count: Int?) {
+internal fun GroupHeading(text: String, count: Int?) {
     val o = Fleet.colors
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = gutter(), end = gutter(), top = 16.dp, bottom = 4.dp).semantics { heading() },
