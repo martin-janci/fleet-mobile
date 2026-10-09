@@ -101,6 +101,15 @@ class MissionsViewModel(
         read()
     }
 
+    /**
+     * Open the sheet straight on one mission: the New layout's Missions
+     * screen lists them itself and hands a tap to the sheet's detail.
+     */
+    fun openOne(missionId: Long): Job = scope.launch {
+        local.update { it.copy(open = true, detail = null, results = null, notice = null, error = null) }
+        readOne(missionId)
+    }
+
     fun close() {
         local.update { it.copy(open = false, detail = null, results = null, notice = null) }
     }

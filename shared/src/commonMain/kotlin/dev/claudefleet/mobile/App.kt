@@ -248,6 +248,8 @@ import dev.claudefleet.mobile.ui.DebugDevicesHandlers
 import dev.claudefleet.mobile.ui.DebugDevicesSheet
 import dev.claudefleet.mobile.ui.DebugDevicesViewModel
 import dev.claudefleet.mobile.ui.devicesLine
+import dev.claudefleet.mobile.ui.OrbitMissionsHandlers
+import dev.claudefleet.mobile.ui.OrbitMissionsScreen
 import dev.claudefleet.mobile.ui.MissionsViewModel
 import dev.claudefleet.mobile.ui.UsageHandlers
 import dev.claudefleet.mobile.ui.CompanyHandlers
@@ -1468,7 +1470,8 @@ private fun FleetRoute(
                             sessions = attention.total,
                             missions = missionsState.missions.size.takeIf { missionsState.available },
                             onSessions = { nav.select(Tab.Sessions) },
-                            onMissions = { missions.open(); Unit }.takeIf { missionsState.available },
+                            // The New layout's Missions screen (14.16).
+                            onMissions = { nav.openMissions() }.takeIf { missionsState.available },
                         )
                     }
                     val sessionId = controlState.sessionId
@@ -1523,7 +1526,7 @@ private fun FleetRoute(
                                 // Routines, their runs and Pause all (8.9); Missions open from inside.
                                 add(MoreEntry("Automation", automationLine(automationState.routines, automationState.paused)) { automation.open() })
                             } else if (missionsState.available) {
-                                add(MoreEntry("Automation", "Missions, and Pause all") { missions.open() })
+                                add(MoreEntry("Automation", "Missions, and Pause all") { nav.openMissions() })
                             }
                             if (debugDevicesState.available) {
                                 // Test phones on the hosts (11.10), not the people's own devices.
@@ -1556,6 +1559,22 @@ private fun FleetRoute(
                         onLesson = helpSettings::startLesson,
                         onGuide = nav::openGuide,
                         tip = { TipFor(Tip.LEARN, help, helpSettings) },
+                    )
+                }
+                Screen.Missions -> {
+                    val agentState by agent.state.collectAsState()
+                    LaunchedEffect(Unit) { missions.refresh() }
+                    OrbitMissionsScreen(
+                        state = missionsState,
+                        nowSeconds = epochSeconds(),
+                        handlers = OrbitMissionsHandlers(
+                            onBack = { nav.back() },
+                            onRefresh = { missions.refresh() },
+                            onOpen = { missions.openOne(it) },
+                            onPauseAll = if (missionsState.canPauseAll) ({ missions.pauseAll(); Unit }) else null,
+                            onNewInControl = if (agentState.available) ({ agent.open(); Unit }) else null,
+                            onDismissError = missions::dismissError,
+                        ),
                     )
                 }
                 Screen.Practice -> {
@@ -1778,7 +1797,20 @@ private fun FleetRoute(
                         onToggle = { automation.toggle(it) },
                         onSetPaused = { automation.setPaused(it) },
                         onOpenSession = { id -> automation.close(); nav.open(id) },
-                        onOpenMissions = if (missionsState.available) ({ automation.close(); missions.open() }) else null,
+                        onOpenMissions = if (missionsState.available) {
+                            {
+                                automation.close()
+                                // The New layout's Missions screen (14.16); Classic keeps the sheet.
+                                if (layout == PhoneLayout.New) {
+                                    nav.openMissions()
+                                } else {
+                                    missions.open()
+                                }
+                                Unit
+                            }
+                        } else {
+                            null
+                        },
                         onDismissError = automation::dismissError,
                     ),
                 )
