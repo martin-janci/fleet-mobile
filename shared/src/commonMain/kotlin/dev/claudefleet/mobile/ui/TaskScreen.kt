@@ -17,7 +17,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -49,6 +48,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.AlertDialog
+import dev.claudefleet.mobile.ui.kit.InlineLoading
 
 /** Everything a task's screen reports. */
 data class TaskHandlers(
@@ -95,7 +95,7 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
         ConnectionBanner(status)
         ErrorBanner(state.error, onDismiss = handlers.onDismissError)
         if (state.error != null && state.conflict) ReloadRow(handlers.onRefresh)
-        if (state.loading || state.busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        InlineLoading(waiting = state.loading || state.busy)
 
         if (state.gone) {
             Text(

@@ -22,7 +22,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -42,6 +41,7 @@ import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.StatusDot
 import dev.claudefleet.mobile.ui.components.formatUsd
+import dev.claudefleet.mobile.ui.kit.InlineLoading
 
 /** What the Details sheet reports. */
 data class SessionDetailsHandlers(
@@ -107,7 +107,7 @@ fun SessionDetailsList(
             handlers.onOpenRepo?.let { open ->
                 TextButton(onClick = open, modifier = Modifier.padding(horizontal = 12.dp)) { Text("Worktree: changes, history, files") }
             }
-            if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 24.dp))
+            InlineLoading(waiting = state.loading, modifier = Modifier.padding(horizontal = 24.dp))
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
         }
         if (row != null) {

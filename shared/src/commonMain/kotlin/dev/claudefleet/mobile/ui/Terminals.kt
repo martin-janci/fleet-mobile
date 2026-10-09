@@ -199,7 +199,8 @@ class SessionExtrasViewModel(
         poll?.cancel()
         poll = scope.launch {
             while (true) {
-                capture()
+                // Offline or stopped: skip the read rather than fail it (review r16).
+                if (fleet.status.value is ConnectionStatus.Connected) capture()
                 delay(pollMs)
             }
         }
@@ -415,9 +416,8 @@ class TerminalsHandlers(
 @Composable
 fun TerminalsPane(state: TerminalsUiState, handlers: TerminalsHandlers, modifier: Modifier = Modifier) {
     // Read while shown, and not after: the poll is the tab's, not the session's.
-    // And only while the app is on screen: a backgrounded Android activity
-    // keeps its composition, so an effect tied only to it went on capturing
-    // the shell every two seconds from a phone in a pocket.
+    // The lifecycle, not the composition: a backgrounded Android activity keeps
+    // its composition, and a pocketed phone must not capture every 2 s (review r16).
     LifecycleStartEffect(Unit) {
         handlers.onShow()
         onStopOrDispose { handlers.onHide() }

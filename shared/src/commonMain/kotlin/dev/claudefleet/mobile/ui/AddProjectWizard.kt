@@ -27,6 +27,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +42,7 @@ import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.kit.DataRain
 import dev.claudefleet.mobile.ui.kit.SheetOption
+import dev.claudefleet.mobile.ui.kit.StepBars
 import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.FleetIcons
@@ -162,6 +164,8 @@ data class AddProjectHandlers(
     /** Close the wizard; while a clone runs it keeps running, and the form says so. */
     val onClose: () -> Unit = {},
     val onDismissError: () -> Unit = {},
+    /** Whether something is typed, so closing can ask first (the wizard rules). */
+    val onTyped: (Boolean) -> Unit = {},
 )
 
 @Composable
@@ -181,6 +185,8 @@ internal fun AddProjectWizard(
     var owner by remember { mutableStateOf("") }
     var repo by remember { mutableStateOf("") }
     var onGithub by remember { mutableStateOf(false) }
+    val typed = addProjectTyped(url, folder, owner, repo)
+    LaunchedEffect(typed) { handlers.onTyped(typed) }
     val creating = source is ProjectSource.New
     val adopting = source is ProjectSource.Folder
     val host = tools.addingOn.orEmpty()
@@ -242,6 +248,7 @@ private fun ColumnScope.AskingSteps(
             }
         },
     )
+    StepBars(step = step.number, total = 3)
     ErrorBanner(tools.error, onDismiss = handlers.onDismissError)
     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
         when (step) {

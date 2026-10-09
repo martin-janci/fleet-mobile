@@ -48,6 +48,7 @@ import dev.claudefleet.mobile.ui.components.FieldView
 import dev.claudefleet.mobile.ui.components.Note
 import dev.claudefleet.mobile.ui.components.parseNumber
 import dev.claudefleet.mobile.ui.kit.Atom
+import dev.claudefleet.mobile.ui.kit.StepBars
 import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
@@ -333,6 +334,7 @@ private fun PagedForm(
             Text(spec.title, style = Fleet.type.textMd, color = o.fg, modifier = Modifier.weight(1f))
             Text("Step ${index + 1} of ${pages.size}", style = Fleet.type.textSm, color = o.fgMuted)
         }
+        StepBars(step = index + 1, total = pages.size, gutter = false)
         Column(
             modifier = (if (full) Modifier.weight(1f) else Modifier).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(8.dp),

@@ -213,6 +213,8 @@ import dev.claudefleet.mobile.ui.kit.BottomBarBadge
 import dev.claudefleet.mobile.ui.kit.BottomBarItem
 import dev.claudefleet.mobile.ui.kit.OrbitIcons
 import dev.claudefleet.mobile.ui.NewSessionScreen
+import dev.claudefleet.mobile.ui.DiscardSheet
+import dev.claudefleet.mobile.ui.newSessionTyped
 import dev.claudefleet.mobile.ui.NewSessionViewModel
 import dev.claudefleet.mobile.ui.WizardStep
 import dev.claudefleet.mobile.ui.PairScreen
@@ -933,6 +935,10 @@ private fun FleetRoute(
             ) {
                 val attention by sessions.state.collectAsState()
                 if (layout == PhoneLayout.New) {
+                    val barRows by repository.sessions.collectAsState()
+                    val barAccess by repository.access.collectAsState()
+                    // The Inbox's own rows, so the badge, the Inbox and Today agree (review r09 B1).
+                    val needYou = remember(barRows, barAccess) { inboxRows(barRows, barAccess).size }
                     // The Orbit Fleet bar: one badge, the Needs you count, on
                     // Inbox. Work's To review count stays on the Work screen.
                     val items = PhoneLayout.New.tabs
@@ -943,7 +949,7 @@ private fun FleetRoute(
                         items = items,
                         selected = tab.name,
                         onSelect = { key -> nav.select(Tab.valueOf(key)) },
-                        badge = BottomBarBadge(Tab.Inbox.name, attention.attentionCount),
+                        badge = BottomBarBadge(Tab.Inbox.name, needYou),
                     )
                 } else NavigationBar {
                     // Work only when the hub serves `work { tree }`, Files only
@@ -1479,11 +1485,10 @@ private fun FleetRoute(
                     val shared = remember(all, access) { sharedRows(all, access) }
                     val todayInbox by today.state.collectAsState()
                     val inboxList by sessions.state.collectAsState()
-                    // The hub's version, read again on every connection: an owner
-                    // can upgrade it under a running app.
-                    val connected = inboxList.status is ConnectionStatus.Connected
-                    var hubVersion by remember { mutableStateOf<String?>(null) }
-                    LaunchedEffect(connected) { if (connected) hubVersion = container.versionActions.hubVersion() }
+                    // The hub's version from its last `ready`: every reconnect
+                    // names it, so an owner's upgrade under a running app shows
+                    // without a fleet_health call each time Inbox opens (review r16).
+                    val hubVersion by repository.hubVersion.collectAsState()
                     val mismatch = remember(hubVersion) { hubMismatch(container.appVersion, hubVersion) }
                     InboxScreen(
                         rows = rows,
@@ -1523,14 +1528,15 @@ private fun FleetRoute(
                     // 14.7). New bar only: the Classic bar has no Control tab.
                     val controlState by control.state.collectAsState()
                     val attention by sessions.state.collectAsState()
-                    // Followed while the app is on screen, not while it sits in
-                    // the background with its composition kept (see the stream's
-                    // LifecycleStartEffect above): the loop polls every few seconds.
+                    // The lifecycle, not the composition: a pocketed phone on
+                    // this tab must not poll every 4 s (review r16).
                     LifecycleStartEffect(control) {
                         control.attach()
                         onStopOrDispose { control.detach() }
                     }
-                    val subtitle = "${attention.attentionCount} need you"
+                    val controlRows by repository.sessions.collectAsState()
+                    val controlAccess by repository.access.collectAsState()
+                    val subtitle = "${remember(controlRows, controlAccess) { inboxRows(controlRows, controlAccess).size }} need you"
                     val views: @Composable () -> Unit = {
                         ControlViews(
                             sessions = attention.total,
@@ -1673,7 +1679,9 @@ private fun FleetRoute(
                                 onNext = trackers::next,
                                 onConnect = { trackers.connect() },
                                 onBack = trackers::back,
-                                onClose = trackers::closeWizard,
+                                onClose = trackers::requestClose,
+                                onKeepEditing = trackers::keepEditing,
+                                onDiscard = trackers::closeWizard,
                             ),
                         ),
                     )
@@ -1860,6 +1868,7 @@ private fun FleetRoute(
             // as well as from the Sessions header, so they are drawn over any tab.
             val todayOverlay by today.state.collectAsState()
             val todaySessions by repository.sessions.collectAsState()
+            val todayAccess by repository.access.collectAsState()
             if (todayOverlay.open) {
                 TodaySheet(
                     state = todayOverlay,
@@ -1875,7 +1884,7 @@ private fun FleetRoute(
                         onOpenTidy = { today.close(); tidy.open(); Unit }.takeIf { tidyState.available },
                     ),
                     // New: Waiting on me is the Inbox's own list, so the counts agree.
-                    waitingNow = if (layout == PhoneLayout.New) inboxRows(todaySessions) else null,
+                    waitingNow = if (layout == PhoneLayout.New) inboxRows(todaySessions, todayAccess) else null,
                     nowSeconds = epochSeconds(),
                 )
             }
@@ -2048,6 +2057,10 @@ private fun NewSessionRoute(
     // (and while a start runs, which is safe to leave) `nav.back()` leaves.
     var wizardStep by remember { mutableStateOf(WizardStep.Where) }
     BackHandler(enabled = wizard && wizardStep.previous != null && !state.creating) { wizardStep.previous?.let { wizardStep = it } }
+    // Leaving from the first step asks first when something was typed (review r09 B5).
+    var askDiscard by remember { mutableStateOf(false) }
+    BackHandler(enabled = wizard && wizardStep.previous == null && !state.creating && newSessionTyped(state)) { askDiscard = true }
+    val leave: () -> Unit = { if (wizard && !state.creating && newSessionTyped(state)) askDiscard = true else onBack() }
     val tools = remember(repository, scope) { ProjectToolsViewModel(repository, container.projectActions, scope, credentials.canWrite) }
     val toolsState by tools.state.collectAsState()
     LaunchedEffect(tools, state.host, state.projectId) { tools.loadWorktrees(state.host, state.projectId) }
@@ -2055,12 +2068,15 @@ private fun NewSessionRoute(
     // Where goes to Source, on Source closes it, and while a clone runs it
     // leaves the clone running in the background.
     var addStep by remember { mutableStateOf(AddProjectStep.Source) }
+    var addTyped by remember { mutableStateOf(false) }
+    var askDiscardAdd by remember { mutableStateOf(false) }
+    val closeAdd: () -> Unit = { if (!toolsState.adding && addTyped) askDiscardAdd = true else tools.closeAdd() }
     BackHandler(enabled = wizard && toolsState.addingOn != null) {
-        if (!toolsState.adding && addStep == AddProjectStep.Where) addStep = AddProjectStep.Source else tools.closeAdd()
+        if (!toolsState.adding && addStep == AddProjectStep.Where) addStep = AddProjectStep.Source else closeAdd()
     }
     NewSessionScreen(
         state = state,
-        onBack = onBack,
+        onBack = leave,
         onSelectHost = vm::selectHost,
         onProjectQuery = vm::onProjectQuery,
         onSelectProject = vm::selectProject,
@@ -2105,10 +2121,17 @@ private fun NewSessionRoute(
             onClone = { url -> tools.clone(url, vm::selectProject) },
             onAdopt = { path -> tools.adopt(path, vm::selectProject) },
             onCreate = { owner, repo, onGithub -> tools.create(owner, repo, onGithub, vm::selectProject) },
-            onClose = tools::closeAdd,
+            onClose = closeAdd,
             onDismissError = tools::dismissError,
+            onTyped = { addTyped = it },
         ),
     )
+    if (askDiscard) {
+        DiscardSheet(onKeep = { askDiscard = false }, onDiscard = { askDiscard = false; onBack() })
+    }
+    if (askDiscardAdd) {
+        DiscardSheet(onKeep = { askDiscardAdd = false }, onDiscard = { askDiscardAdd = false; addTyped = false; tools.closeAdd() })
+    }
 }
 
 @Composable

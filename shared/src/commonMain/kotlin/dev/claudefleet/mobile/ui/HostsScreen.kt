@@ -2,7 +2,6 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.relativeAgo
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,7 +19,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,6 +30,10 @@ import dev.claudefleet.mobile.ui.components.ScreenHeader
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import dev.claudefleet.mobile.ui.theme.FleetIcons
+import dev.claudefleet.mobile.ui.kit.MarkMotion
+import dev.claudefleet.mobile.ui.kit.OrbitMarkLoader
+import dev.claudefleet.mobile.ui.kit.OrbitPullToRefresh
+import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 
 /**
  * The machines: reachability, the versions the hub found, and how many sessions
@@ -59,17 +61,17 @@ fun HostsScreen(
 
         // Inside the pull-to-refresh, not instead of it: an empty host list is
         // exactly when a person pulls to ask whether the hub is answering, and
-        // an early return made that gesture do nothing. `PullToRefreshBox`
+        // an early return made that gesture do nothing. `OrbitPullToRefresh`
         // takes the drag through a scrollable child, so the message is a
         // single item filling the viewport rather than a bare `Box`.
-        PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
+        OrbitPullToRefresh(isRefreshing = state.refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 if (state.isEmpty) {
                     item(key = "empty") {
                         Box(modifier = Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
                             if (state.connecting) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    CircularProgressIndicator()
+                                    if (rememberLoaderVisible(true)) OrbitMarkLoader(MarkMotion.Chase, size = 48.dp)
                                     Text(
                                         "Connecting to the hub…",
                                         style = MaterialTheme.typography.bodyMedium,

@@ -40,4 +40,18 @@ class AccountLimitTest {
         )
         assertEquals(AccountLimit(weekly = false, resetsAt = 2_000), s.limitAt(now))
     }
+
+    /**
+     * Review r05 M4: the label follows the desktop's `accountLabel`, so one
+     * person's two accounts (one display name) stay apart on the phone.
+     */
+    @Test
+    fun an_account_label_is_the_nickname_then_the_email_then_the_short_uuid() {
+        val row = AccountRow(uuid = "0123456789ab", email = "me@work.io", displayName = "Martin")
+        assertEquals("Work", row.copy(nickname = " Work ").label)
+        assertEquals("me@work.io", row.label)
+        assertEquals("me@work.io", row.copy(nickname = "  ").label)
+        assertEquals("01234567", row.copy(email = "").label)
+        assertEquals("01234567", row.copy(email = null).label)
+    }
 }

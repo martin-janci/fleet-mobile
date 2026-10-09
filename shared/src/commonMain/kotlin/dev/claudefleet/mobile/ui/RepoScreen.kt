@@ -36,7 +36,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -68,6 +67,7 @@ import dev.claudefleet.mobile.ui.theme.diffColors
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import kotlinx.coroutines.launch
 import kotlin.math.round
+import dev.claudefleet.mobile.ui.kit.InlineLoading
 
 /** What the worktree screen reports. */
 data class RepoHandlers(
@@ -168,7 +168,7 @@ fun RepoBody(
                 }
             }
         }
-        if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        InlineLoading(waiting = state.loading)
         ErrorBanner(state.error, onDismiss = handlers.onDismissError)
         state.notice?.let { Notice(it, handlers.onDismissNotice) }
         when (val top = state.top) {

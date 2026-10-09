@@ -17,18 +17,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +36,12 @@ import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.theme.FleetIcons
+import dev.claudefleet.mobile.ui.kit.Comet
+import dev.claudefleet.mobile.ui.kit.MarkMotion
+import dev.claudefleet.mobile.ui.kit.OrbitMarkLoader
+import dev.claudefleet.mobile.ui.kit.OrbitPullToRefresh
+import dev.claudefleet.mobile.ui.kit.ProgressRing
+import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 
 /** What the Files tab can ask its view model to do. */
 data class FilesHandlers(
@@ -88,13 +91,13 @@ fun FilesScreen(
         }
         state.transfer?.let { TransferRow(it, handlers.onCancelTransfer) }
 
-        PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = handlers.onRefresh, modifier = Modifier.fillMaxSize()) {
+        OrbitPullToRefresh(isRefreshing = state.refreshing, onRefresh = handlers.onRefresh, modifier = Modifier.fillMaxSize()) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 if (state.isEmpty || !state.loaded) {
                     item(key = "empty") {
                         Box(modifier = Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
                             if (!state.loaded) {
-                                CircularProgressIndicator()
+                                if (rememberLoaderVisible(true)) OrbitMarkLoader(MarkMotion.Orbit, size = 48.dp)
                             } else {
                                 Text(
                                     text = "No files yet. When Claude sends you one — or you send one from the desktop's " +
@@ -161,6 +164,16 @@ fun FilesScreen(
 private fun TransferRow(transfer: Transfer, onCancel: () -> Unit) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            // The ring for a known size, the Comet while the size is unknown
+            // (manual: loaders); either sits before the name, in the row.
+            val fraction = transfer.fraction
+            if (fraction != null) {
+                ProgressRing(fraction)
+                Spacer(Modifier.width(12.dp))
+            } else if (rememberLoaderVisible(true)) {
+                Comet(size = 16.dp)
+                Spacer(Modifier.width(12.dp))
+            }
             Text(
                 "Downloading ${transfer.name}",
                 style = MaterialTheme.typography.bodyMedium,
@@ -169,12 +182,6 @@ private fun TransferRow(transfer: Transfer, onCancel: () -> Unit) {
                 modifier = Modifier.weight(1f),
             )
             TextButton(onClick = onCancel) { Text("Cancel") }
-        }
-        val fraction = transfer.fraction
-        if (fraction != null) {
-            LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
-        } else {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
     }
 }
@@ -220,8 +227,10 @@ private fun FileLineItem(file: FileLine, busy: Boolean, onTap: () -> Unit, onRem
         Spacer(Modifier.width(8.dp))
         if (file.state == FileState.Fetching) {
             // No percentage: the hub reports a copy's state, not its progress.
-            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-            Spacer(Modifier.width(12.dp))
+            if (rememberLoaderVisible(true)) {
+                Comet(size = 16.dp)
+                Spacer(Modifier.width(12.dp))
+            }
         }
         if (onRemove != null) {
             IconButton(onClick = onRemove) { Icon(FleetIcons.Close, contentDescription = "Remove ${file.name}") }

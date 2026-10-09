@@ -23,7 +23,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -40,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.ReopenedWork
 import dev.claudefleet.mobile.model.TidyCandidate
 import dev.claudefleet.mobile.ui.components.ErrorBanner
+import dev.claudefleet.mobile.ui.kit.InlineLoading
 
 data class TidyHandlers(
     val onClose: () -> Unit = {},
@@ -63,7 +63,7 @@ fun TidySheet(state: TidyUiState, handlers: TidyHandlers) {
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Text("Tidy up", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp).semantics { heading() })
-            if (state.loading || state.applying) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp))
+            InlineLoading(waiting = state.loading || state.applying, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
             state.results?.let { results ->
                 val failed = results.filter { !it.ok }

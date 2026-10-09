@@ -28,7 +28,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -75,6 +74,7 @@ import dev.claudefleet.mobile.ui.components.StatusDot
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.LocalStatusColors
 import dev.claudefleet.mobile.ui.theme.StatusTone
+import dev.claudefleet.mobile.ui.kit.InlineLoading
 
 /** Everything the Today sheet reports. */
 data class TodayHandlers(
@@ -146,9 +146,7 @@ fun TodaySheet(
             TodayHeader(state, handlers, needYou = waitingNow?.size)
             // Reserved whether or not it is loading, so a re-read does not
             // shift the list under a thumb about to tap it.
-            Box(Modifier.fillMaxWidth().height(4.dp)) {
-                if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
+            InlineLoading(waiting = state.loading)
             if (state.loaded && !state.view.isEmpty) TodayFilterRow(state, handlers, waitingCount = waitingNow?.size)
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
             val v = state.shown
