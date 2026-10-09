@@ -69,9 +69,11 @@ import dev.claudefleet.mobile.data.HubUsageActions
 import dev.claudefleet.mobile.data.CompanyActions
 import dev.claudefleet.mobile.data.HubCompanyActions
 import dev.claudefleet.mobile.data.HubMemberActions
+import dev.claudefleet.mobile.data.HubTrackerActions
 import dev.claudefleet.mobile.data.HubShareActions
 import dev.claudefleet.mobile.data.ShareActions
 import dev.claudefleet.mobile.data.MemberActions
+import dev.claudefleet.mobile.data.TrackerActions
 import dev.claudefleet.mobile.data.UsageActions
 import dev.claudefleet.mobile.data.HubSessionDetailsActions
 import dev.claudefleet.mobile.data.HubWorkActions
@@ -261,6 +263,10 @@ import dev.claudefleet.mobile.ui.devicesLine
 import dev.claudefleet.mobile.ui.OrbitMissionsHandlers
 import dev.claudefleet.mobile.ui.OrbitMissionsScreen
 import dev.claudefleet.mobile.ui.MissionsViewModel
+import dev.claudefleet.mobile.ui.OrbitTrackersHandlers
+import dev.claudefleet.mobile.ui.OrbitTrackersScreen
+import dev.claudefleet.mobile.ui.TrackerWizardHandlers
+import dev.claudefleet.mobile.ui.TrackersViewModel
 import dev.claudefleet.mobile.ui.UsageHandlers
 import dev.claudefleet.mobile.ui.CompanyHandlers
 import dev.claudefleet.mobile.ui.CompanyScreen
@@ -425,6 +431,7 @@ class AppContainer(
     val usageActions: UsageActions = HubUsageActions(session)
     val companyActions: CompanyActions = HubCompanyActions(session)
     val memberActions: MemberActions = HubMemberActions(session)
+    val trackerActions: TrackerActions = HubTrackerActions(session)
     val shareActions: ShareActions = HubShareActions(session)
     val hostActions: HostActions = HubHostActions(session)
     val projectActions: ProjectActions = HubProjectActions(session)
@@ -775,6 +782,8 @@ private fun FleetRoute(
     val tidyState by tidy.state.collectAsState()
     val missions = remember(repository, scope) { MissionsViewModel(repository, container.missionActions, scope, credentials.canWrite) }
     val missionsState by missions.state.collectAsState()
+    val trackers = remember(repository, scope) { TrackersViewModel(repository, container.trackerActions, scope, credentials.canWrite) }
+    val trackersState by trackers.state.collectAsState()
     val automation = remember(repository, scope) { AutomationViewModel(repository, container.routineActions, scope, credentials.canWrite) }
     val automationState by automation.state.collectAsState()
     val debugDevices = remember(repository, scope) { DebugDevicesViewModel(repository, container.deviceActions, scope, credentials.canWrite) }
@@ -1561,6 +1570,10 @@ private fun FleetRoute(
                             } else if (missionsState.available) {
                                 add(MoreEntry("Automation", "Missions, and Pause all") { nav.openMissions() })
                             }
+                            if (trackersState.available && layout == PhoneLayout.New) {
+                                // The owner's trusted phone manages the hub's trackers (14.20, contract 13).
+                                add(MoreEntry("Trackers", "Jira, GitHub, Linear, Asana") { nav.openTrackers() })
+                            }
                             if (debugDevicesState.available) {
                                 // Test phones on the hosts (11.10), not the people's own devices.
                                 add(MoreEntry("Debug devices", devicesLine(debugDevicesState.devices)) { debugDevices.open() })
@@ -1607,6 +1620,37 @@ private fun FleetRoute(
                             onPauseAll = if (missionsState.canPauseAll) ({ missions.pauseAll(); Unit }) else null,
                             onNewInControl = if (agentState.available) ({ agent.open(); Unit }) else null,
                             onDismissError = missions::dismissError,
+                        ),
+                    )
+                }
+                Screen.Trackers -> {
+                    LaunchedEffect(trackersState.available) { trackers.load() }
+                    // Back walks the wizard a step at a time, then out of it, before leaving Trackers.
+                    BackHandler(enabled = trackersState.wizard != null) { trackers.back() }
+                    OrbitTrackersScreen(
+                        state = trackersState,
+                        nowSeconds = epochSeconds(),
+                        handlers = OrbitTrackersHandlers(
+                            onBack = { nav.back() },
+                            onRefresh = { trackers.load() },
+                            onConnect = trackers::startConnect,
+                            onTest = { trackers.test(it) },
+                            onSignInAgain = trackers::signInAgain,
+                            onRemove = trackers::askRemove,
+                            onConfirmRemove = { trackers.confirmRemove() },
+                            onCancelRemove = trackers::cancelRemove,
+                            onDismissError = trackers::dismissError,
+                            onDismissNotice = trackers::dismissNotice,
+                            wizard = TrackerWizardHandlers(
+                                onSite = trackers::editSite,
+                                onProvider = trackers::chooseProvider,
+                                onEmail = trackers::editEmail,
+                                onSecret = trackers::editSecret,
+                                onNext = trackers::next,
+                                onConnect = { trackers.connect() },
+                                onBack = trackers::back,
+                                onClose = trackers::closeWizard,
+                            ),
                         ),
                     )
                 }

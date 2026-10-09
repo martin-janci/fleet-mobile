@@ -5,6 +5,8 @@ import dev.claudefleet.mobile.model.SessionGrant
 import dev.claudefleet.mobile.model.ShareTo
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.AccountRow
+import dev.claudefleet.mobile.model.TrackerAdminRow
+import dev.claudefleet.mobile.model.TrackerTestReport
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.FormView
 import dev.claudefleet.mobile.model.RepoTree
@@ -522,6 +524,68 @@ class HubClient(
     /** Every account's last usage reading (`account_usage`, readonly). */
     suspend fun accountUsage(): List<AccountUsageSnapshot> =
         call("account_usage") { json.decodeFromJsonElement(ListSerializer(AccountUsageSnapshot.serializer()), it) }
+
+    /**
+     * The hub's trackers (`work_admin { list }`). Since contract 13 the hub
+     * owner's trusted `full` phone may call `work_admin`'s tracker actions;
+     * anyone else is refused with `E_FORBIDDEN`.
+     */
+    suspend fun listTrackers(): List<TrackerAdminRow> =
+        call("work_admin", buildJsonObject { put("action", "list") }) {
+            json.decodeFromJsonElement(ListSerializer(TrackerAdminRow.serializer()), it)
+        }
+
+    /** Add a tracker from its site or any ticket URL (`work_admin { add }`); the hub infers the provider when [provider] is null. */
+    suspend fun addTracker(siteUrl: String, provider: String? = null): TrackerAdminRow =
+        call(
+            "work_admin",
+            buildJsonObject {
+                put("action", "add")
+                put("site_url", siteUrl)
+                if (provider != null) put("provider", provider)
+            },
+        ) { json.decodeFromJsonElement(TrackerAdminRow.serializer(), it) }
+
+    /**
+     * Store a tracker's sign-in on the hub (`work_admin { set_credential }`).
+     * [secret] goes to the hub once and is never answered back.
+     */
+    suspend fun setTrackerCredential(trackerId: Long, authKind: String, username: String?, secret: String): TrackerAdminRow =
+        call(
+            "work_admin",
+            buildJsonObject {
+                put("action", "set_credential")
+                put("tracker_id", trackerId)
+                put("auth_kind", authKind)
+                if (username != null) put("username", username)
+                put("secret", secret)
+            },
+        ) { json.decodeFromJsonElement(TrackerAdminRow.serializer(), it) }
+
+    /** Ask the tracker with the stored sign-in (`work_admin { test }`). */
+    suspend fun testTracker(trackerId: Long): TrackerTestReport =
+        call(
+            "work_admin",
+            buildJsonObject {
+                put("action", "test")
+                put("tracker_id", trackerId)
+            },
+        ) { json.decodeFromJsonElement(TrackerTestReport.serializer(), it) }
+
+    /**
+     * Disconnect a tracker (`work_admin { remove }`). Confirm-gated: with the
+     * hub's confirmations on, the first call answers `E_CONFIRM_REQUIRED`
+     * with a token, sent back once a person approved it.
+     */
+    suspend fun removeTracker(trackerId: Long, confirmNonce: String? = null): Unit =
+        call(
+            "work_admin",
+            buildJsonObject {
+                put("action", "remove")
+                put("tracker_id", trackerId)
+                if (confirmNonce != null) put("confirm_nonce", confirmNonce)
+            },
+        ) { }
 
     /** A review session in [sourceSessionId]'s worktree, seeded with [prompt] (`spawn_review`); answers its row. */
     suspend fun spawnReview(sourceSessionId: Long, prompt: String): SessionRow =
@@ -2087,6 +2151,8 @@ class HubClient(
             // Routines (redesign 8.9): `Deadline::Lifecycle` on the hub,
             // because `run_now` starts a session.
             "routines",
+            // Trackers (redesign 14.20): `test` talks to the tracker.
+            "work_admin",
         )
 
         /**

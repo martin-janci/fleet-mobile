@@ -120,6 +120,7 @@ class TheBackGestureReachesTheNavigatorTest {
                 "nav.isPushed(screen)",
                 "companyState.openId != null",
                 "installState.installing",
+                "trackersState.wizard != null",
                 "practiceState.open != null",
                 "fleetPageOpen || place != SettingsPlace.Home",
                 "fleetPageOpen",
