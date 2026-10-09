@@ -1475,11 +1475,10 @@ private fun FleetRoute(
                     val shared = remember(all, access) { sharedRows(all, access) }
                     val todayInbox by today.state.collectAsState()
                     val inboxList by sessions.state.collectAsState()
-                    // The hub's version, read again on every connection: an owner
-                    // can upgrade it under a running app.
-                    val connected = inboxList.status is ConnectionStatus.Connected
-                    var hubVersion by remember { mutableStateOf<String?>(null) }
-                    LaunchedEffect(connected) { if (connected) hubVersion = container.versionActions.hubVersion() }
+                    // The hub's version from its last `ready`: every reconnect
+                    // names it, so an owner's upgrade under a running app shows
+                    // without a fleet_health call each time Inbox opens (review r16).
+                    val hubVersion by repository.hubVersion.collectAsState()
                     val mismatch = remember(hubVersion) { hubMismatch(container.appVersion, hubVersion) }
                     InboxScreen(
                         rows = rows,
@@ -1519,9 +1518,11 @@ private fun FleetRoute(
                     // 14.7). New bar only: the Classic bar has no Control tab.
                     val controlState by control.state.collectAsState()
                     val attention by sessions.state.collectAsState()
-                    DisposableEffect(control) {
+                    // The lifecycle, not the composition: a pocketed phone on
+                    // this tab must not poll every 4 s (review r16).
+                    LifecycleStartEffect(control) {
                         control.attach()
-                        onDispose { control.detach() }
+                        onStopOrDispose { control.detach() }
                     }
                     val subtitle = "${attention.attentionCount} need you"
                     val views: @Composable () -> Unit = {

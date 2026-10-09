@@ -49,7 +49,9 @@ import kotlinx.coroutines.launch
  * and it stops itself when there is no credential to watch with.
  */
 class NeedsYouService : Service() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    // Default, not Main: SSE parsing and the row decode run per frame, and this
+    // service shares the app's process, so on Main they compete with its UI (review r16).
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var watching: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null

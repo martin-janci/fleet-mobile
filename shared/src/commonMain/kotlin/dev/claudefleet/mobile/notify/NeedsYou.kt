@@ -89,13 +89,19 @@ fun needsYouEvents(
     onSeen: (Map<Long, String?>) -> Unit = {},
 ): Flow<NeedsYouEvent> = flow {
     var seen: Map<Long, String?>? = remembered
+    var persisted: Map<Long, String?>? = null
     combine(fleet.sessions, fleet.status) { rows, status -> rows to status }
         .filter { (_, status) -> status is ConnectionStatus.Connected }
         .collect { (rows, _) ->
             val before = seen
             val (alerts, after) = needsYouAlerts(before.orEmpty(), rows)
             seen = after
-            onSeen(after)
+            // Once, then only when a reason moved: `onSeen` persists the whole
+            // map, and most session frames change none (review r16).
+            if (after != persisted) {
+                onSeen(after)
+                persisted = after
+            }
             if (before != null) {
                 alerts.forEach { emit(it) }
                 before.filter { (id, reason) -> reason != null && after[id] == null }.keys.forEach { emit(NeedsYouResolved(it)) }
