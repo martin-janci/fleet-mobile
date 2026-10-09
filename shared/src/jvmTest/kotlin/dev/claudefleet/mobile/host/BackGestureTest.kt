@@ -127,6 +127,7 @@ class TheBackGestureReachesTheNavigatorTest {
                 "fleetPageOpen || place != SettingsPlace.Home",
                 "fleetPageOpen",
                 "wizard && wizardStep.previous != null && !state.creating",
+                "wizard && wizardStep.previous == null && !state.creating && newSessionTyped(state)",
                 "wizard && toolsState.addingOn != null",
                 "filesOpen",
                 "full != SessionFull.None",

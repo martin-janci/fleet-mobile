@@ -266,3 +266,50 @@ class TrackersTest {
         assertEquals("Checking the token with Jira Cloud…", connectingLine(TrackerWork.Checking, "jira"))
     }
 }
+
+/** Review r09 B4, B5: step bars from two steps on, and closing asks only if something was typed. */
+class WizardRulesTest {
+    @Test
+    fun step_bars_show_from_two_steps_and_fill_up_to_the_current() {
+        assertFalse(dev.claudefleet.mobile.ui.kit.stepBarsShown(1))
+        assertTrue(dev.claudefleet.mobile.ui.kit.stepBarsShown(2))
+        assertTrue(dev.claudefleet.mobile.ui.kit.stepBarReached(2, 2))
+        assertFalse(dev.claudefleet.mobile.ui.kit.stepBarReached(3, 2))
+    }
+
+    @Test
+    fun what_counts_as_typed() {
+        assertFalse(newSessionTyped(NewSessionUiState()))
+        assertTrue(newSessionTyped(NewSessionUiState(branch = "fix/x")))
+        assertFalse(addProjectTyped("", " ", "", ""))
+        assertTrue(addProjectTyped("", "", "acme", ""))
+        assertFalse(trackerTyped(TrackerWizard()))
+        assertTrue(trackerTyped(TrackerWizard(siteUrl = "https://x")))
+        // Sign in again starts from the tracker's own address: only a token typed counts.
+        assertFalse(trackerTyped(TrackerWizard(siteUrl = "https://x", created = ACME, email = "me@acme.io")))
+        assertTrue(trackerTyped(TrackerWizard(created = ACME, secret = "t")))
+    }
+
+    @Test
+    fun closing_the_tracker_wizard_asks_only_when_typed() = runTest {
+        val vm = TrackersViewModel(TrackersFleet(WITH_WORK_ADMIN, 13), FakeTrackerActions(), backgroundScope, true)
+        runCurrent()
+        vm.startConnect()
+        vm.requestClose()
+        runCurrent()
+        assertNull(vm.state.value.wizard, "nothing typed: it just closes")
+
+        vm.startConnect()
+        vm.editSite("https://acme.atlassian.net")
+        vm.back()
+        runCurrent()
+        assertEquals(true, vm.state.value.wizard?.askingClose)
+        vm.keepEditing()
+        runCurrent()
+        assertEquals("https://acme.atlassian.net", vm.state.value.wizard?.siteUrl)
+        assertEquals(false, vm.state.value.wizard?.askingClose)
+        vm.closeWizard()
+        runCurrent()
+        assertNull(vm.state.value.wizard)
+    }
+}
