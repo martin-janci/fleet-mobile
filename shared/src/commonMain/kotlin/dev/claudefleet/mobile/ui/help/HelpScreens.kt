@@ -468,7 +468,8 @@ fun LessonBar(
         Row {
             Spacer(Modifier.weight(1f))
             TextButton(onClick = onNext) {
-                Text(if (step + 1 == lesson.steps.size) "Done" else "Next", color = o.accent, fontSize = 15.sp)
+                // fg, not accent: accent on accent-soft is 4.44:1 in light (review r11).
+                Text(if (step + 1 == lesson.steps.size) "Done" else "Next", color = o.fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -498,7 +499,7 @@ fun PracticeScreen(
                 Text("Practice fleet", color = o.fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 Text("Sample sessions · nothing real runs", color = o.fg2, fontSize = 13.sp)
             }
-            TextButton(onClick = onLeave) { Text("Leave", color = o.accent, fontSize = 15.sp) }
+            TextButton(onClick = onLeave) { Text("Leave", color = o.fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }
         }
         val open = state.open
         if (open == null) {

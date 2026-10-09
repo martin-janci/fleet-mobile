@@ -93,6 +93,8 @@ fun OrbitMarkLoader(
     modifier: Modifier = Modifier,
     size: Dp = 48.dp,
     pull: Float? = null,
+    /** Draw [motion]'s first frame and run no animation (the offline banner after a while, r16 M8). */
+    frozen: Boolean = false,
 ) {
     val o = Fleet.colors
     val ink = o.brandInk
@@ -106,7 +108,7 @@ fun OrbitMarkLoader(
         MarkMotion.GravityWell -> 1_800
         MarkMotion.SignalLost -> 2_400
     }
-    val clock = if (motion == MarkMotion.Still || pull != null) null else rememberLoaderClock(period)
+    val clock = if (motion == MarkMotion.Still || pull != null || frozen) null else rememberLoaderClock(period)
     val t = clock?.phase ?: 0f
     val alpha = clock?.alpha ?: 1f
     Canvas(modifier.size(size).semantics { contentDescription = motion.description }) {
@@ -243,20 +245,23 @@ data class RadarBlip(val x: Float, val y: Float, val ready: Boolean = true)
  * next pass. Ready hosts are Done green, a host missing something is amber.
  */
 @Composable
-fun Radar(blips: List<RadarBlip>, modifier: Modifier = Modifier, size: Dp = 200.dp) {
+fun Radar(blips: List<RadarBlip>, modifier: Modifier = Modifier, size: Dp = 200.dp, sweeping: Boolean = true) {
     val o = Fleet.colors
     val accent = o.loaderAccent
     val done = o.statusDone
     val waiting = o.statusWaiting
-    val clock = rememberLoaderClock(2_400)
-    Canvas(modifier.size(size).semantics { contentDescription = "Looking for hosts" }) {
+    // Once the scan is over the dish stands still with every blip lit, and
+    // runs no animation at all (r13 P19).
+    val clock = if (sweeping) rememberLoaderClock(2_400) else null
+    val fade = clock?.alpha ?: 1f
+    Canvas(modifier.size(size).semantics { contentDescription = if (sweeping) "Looking for hosts" else "Hosts found" }) {
         val c = center
         val radius = this.size.minDimension / 2f
-        drawCircle(accent, radius - 1f, c, alpha = 0.35f * clock.alpha, style = Stroke(1.5f))
-        drawCircle(accent, radius * 0.63f, c, alpha = 0.2f * clock.alpha, style = Stroke(1f))
-        drawCircle(accent, radius * 0.23f, c, alpha = 0.2f * clock.alpha, style = Stroke(1f))
-        val sweep = 360f * clock.phase
-        if (!clock.reduced) {
+        drawCircle(accent, radius - 1f, c, alpha = 0.35f * fade, style = Stroke(1.5f))
+        drawCircle(accent, radius * 0.63f, c, alpha = 0.2f * fade, style = Stroke(1f))
+        drawCircle(accent, radius * 0.23f, c, alpha = 0.2f * fade, style = Stroke(1f))
+        val sweep = 360f * (clock?.phase ?: 0f)
+        if (clock != null && !clock.reduced) {
             rotate(sweep, pivot = c) {
                 drawCircle(
                     Brush.sweepGradient(
@@ -274,10 +279,14 @@ fun Radar(blips: List<RadarBlip>, modifier: Modifier = Modifier, size: Dp = 200.
             val p = Offset(b.x * this.size.width, b.y * this.size.height)
             val angle = (atan2(p.y - c.y, p.x - c.x) * 180f / PI.toFloat() + 360f) % 360f
             // How long since the sweep passed it, as a share of a turn.
-            val since = if (clock.reduced) 0.5f else (((sweep - angle) % 360f) + 360f) % 360f / 360f
+            val since = when {
+                clock == null -> 0f
+                clock.reduced -> 0.5f
+                else -> (((sweep - angle) % 360f) + 360f) % 360f / 360f
+            }
             val glow = (1f - since * 1.5f).coerceIn(0.25f, 1f)
             val color = if (b.ready) done else waiting
-            drawCircle(color, 3.5.dp.toPx() * (1f + 0.4f * (glow - 0.25f) / 0.75f), p, alpha = glow * clock.alpha)
+            drawCircle(color, 3.5.dp.toPx() * (1f + 0.4f * (glow - 0.25f) / 0.75f), p, alpha = glow * fade)
         }
     }
 }

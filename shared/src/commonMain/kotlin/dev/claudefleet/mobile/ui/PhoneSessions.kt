@@ -91,9 +91,11 @@ internal fun phoneWord(row: SessionRow): StatusWord? =
 /**
  * How line two opens: the manual's "Waiting for you:" for Needs you, and
  * "Was working" for a working row the phone can no longer see live (PhoneRow:
- * "show stale data with its age and *Was working*, with no spinner").
+ * "show stale data with its age and *Was working*, with no spinner"). A stale
+ * Needs you row says "Was waiting for you": the hub may have moved on (r13 P17).
  */
 internal fun phoneLead(word: StatusWord?, live: Boolean): String? = when {
+    word == StatusWord.NEEDS_YOU && !live -> "Was waiting for you"
     word == StatusWord.NEEDS_YOU -> "Waiting for you"
     word == StatusWord.WORKING && !live -> "Was working"
     else -> word?.label
@@ -350,7 +352,7 @@ fun SessionsTab(
                 ) {
                     val searching = state.searchOpen && state.filters.query.isNotBlank()
                     if (searching) {
-                        searchSections(state, rows, hits, scope, handlers, live, tap, bulk, select)
+                        searchSections(state, rows, hits, scope, handlers, live, tap, bulk, select, onSearchAll = { scope = SearchScope.ALL })
                     } else {
                         if (state.isEmpty) {
                             item(key = "empty") {
@@ -486,14 +488,20 @@ data class BulkHandlers(
     val onArchive: () -> Unit = {},
 )
 
+/**
+ * The header's line while the list is not live: the state, then the time the
+ * rows are from, so the list never reads as current (r13 P17).
+ */
+internal fun staleLine(state: String, asOf: String?): String = if (asOf == null) state else "$state · as of $asOf"
+
 /** The tab's title, its live line, search and ⋮, and the filter chips under them. */
 @Composable
 private fun TabHeader(state: SessionsUiState, handlers: SessionsHandlers, canSelect: Boolean, hostCount: Int) {
     val subtitle = when (state.status) {
         is ConnectionStatus.Connected -> sessionsOnHosts(state.shown, hostCount)
-        is ConnectionStatus.Reconnecting -> "reconnecting…"
-        is ConnectionStatus.Offline -> "offline"
-        is ConnectionStatus.Refused -> "refused"
+        is ConnectionStatus.Reconnecting -> staleLine("reconnecting…", state.staleAt)
+        is ConnectionStatus.Offline -> staleLine("offline", state.staleAt)
+        is ConnectionStatus.Refused -> staleLine("refused", state.staleAt)
     }
     // Everything that narrows the list, Needs you included: the New tab has
     // no Needs you chip of its own (that is the Inbox), so a Needs you filter
@@ -690,12 +698,18 @@ private fun LazyListScope.searchSections(
     tap: (Long) -> Unit,
     bulk: BulkUiState,
     select: ((Long) -> Unit)?,
+    onSearchAll: () -> Unit = {},
 ) {
     fun on(s: SearchScope) = scope == SearchScope.ALL || scope == s
+    // A scope with nothing in it says so and offers the way out (review r13 P16):
+    // the other scopes, and the filters that may be hiding the match.
+    val searchAll = onSearchAll.takeIf { scope != SearchScope.ALL }
     if (on(SearchScope.SESSIONS)) {
         item(key = "search-sessions") { SectionHeading("Sessions", rows.size) }
         if (rows.isEmpty()) {
-            item(key = "search-sessions-none") { SearchNote("No session matches.") }
+            item(key = "search-sessions-none") {
+                SearchNote("No session matches.", searchAll, handlers.onClearAll.takeIf { state.stripFacets.isNotEmpty() })
+            }
         }
         items(rows, key = { "search-${it.id}" }) { row ->
             PhoneSessionRow(
@@ -711,6 +725,15 @@ private fun LazyListScope.searchSections(
                 onLongClick = select?.let { { it(row.id) } },
             )
         }
+    }
+    if (scope == SearchScope.PROJECTS && hits.projects.isEmpty()) {
+        item(key = "search-projects-none") { SearchNote("No project matches.", searchAll) }
+    }
+    if (scope == SearchScope.HOSTS && hits.hosts.isEmpty()) {
+        item(key = "search-hosts-none") { SearchNote("No host matches.", searchAll) }
+    }
+    if (scope == SearchScope.TICKETS && !hits.ticket) {
+        item(key = "search-tickets-none") { SearchNote("This hub has no tickets to search.", searchAll) }
     }
     if (on(SearchScope.PROJECTS) && hits.projects.isNotEmpty()) {
         item(key = "search-projects") { SectionHeading("Projects", hits.projects.size) }
@@ -751,8 +774,16 @@ private fun LazyListScope.searchSections(
 }
 
 @Composable
-private fun SearchNote(text: String) {
-    Text(text, color = Fleet.colors.fgMuted, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+private fun SearchNote(text: String, onSearchAll: (() -> Unit)? = null, onClearFilters: (() -> Unit)? = null) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Text(text, color = Fleet.colors.fgMuted, fontSize = 14.sp)
+        if (onSearchAll != null || onClearFilters != null) {
+            Row {
+                onSearchAll?.let { TextButton(onClick = it) { Text("Search all") } }
+                onClearFilters?.let { TextButton(onClick = it) { Text("Clear filters") } }
+            }
+        }
+    }
 }
 
 // ── Bulk select ──

@@ -16,13 +16,18 @@ import dev.claudefleet.mobile.ui.kit.StepState
  * Whether the first look at the fleet after pairing is over: the stream is
  * up, or the repository has stopped trying (refused, or offline for a reason
  * of its own). Either way the fleet's own screens say what happened from
- * here, so the loader gives way rather than hiding their banner.
+ * here, so the loader gives way rather than hiding their banner. A hub that
+ * has not answered [FLEET_CHECK_TRIES] tries is unreachable for now: the Hex
+ * field stops there and the Sessions banner carries Retry (r13 P18).
  */
 internal fun fleetCheckOver(status: ConnectionStatus): Boolean = when (status) {
     is ConnectionStatus.Connected, is ConnectionStatus.Refused -> true
     is ConnectionStatus.Offline -> status.reason != FleetRepository.NOT_STARTED
-    is ConnectionStatus.Reconnecting -> false
+    is ConnectionStatus.Reconnecting -> status.attempt >= FLEET_CHECK_TRIES
 }
+
+/** How many failed tries the after-pairing check waits through before giving way. */
+internal const val FLEET_CHECK_TRIES = 4
 
 /** The checklist under the Hex field: real steps, never "Loading…". */
 internal fun fleetCheckSteps(status: ConnectionStatus, hub: String, clientName: String): List<LoaderStep> {

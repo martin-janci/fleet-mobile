@@ -41,6 +41,7 @@ fun AddHostScreen(state: AddHostUiState, handlers: AddHostHandlers) {
         onExit = handlers.onClose,
         exitLabel = if (state.added.isEmpty()) FullscreenWait.FindHosts.exitLabel else "Done",
         blips = state.blips,
+        scanning = state.scanning,
         found = {
             ErrorBanner(state.error, onDismiss = handlers.onDismissError, onRetry = handlers.onRescan.takeIf { state.scanFailed })
             Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {

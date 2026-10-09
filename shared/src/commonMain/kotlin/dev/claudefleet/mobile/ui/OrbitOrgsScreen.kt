@@ -136,6 +136,7 @@ fun OrbitOrgsScreen(state: CompanyUiState, handlers: OrbitOrgsHandlers, nowSecon
         OrbitPullToRefresh(isRefreshing = state.loading, onRefresh = handlers.onRefresh, modifier = Modifier.fillMaxSize()) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 when {
+                    !state.available && !state.capsKnown -> item { Quiet("Connecting to the hub…") }
                     !state.available -> item { Quiet("This hub does not list organisations.") }
                     open != null -> orgDetail(open, handlers, nowSeconds)
                     state.orgs.isEmpty() && state.listFailed && !state.loading ->

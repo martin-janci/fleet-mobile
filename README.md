@@ -279,12 +279,12 @@ costs one reconnect.
   one (each deletable when no session lives in it); **Add a project** (clone
   a URL or a repository `gh` there sees, or a new one, on GitHub too after a
   confirmation); or a **Background agent** started on a task.
-- **Usage** (Settings → Usage) — estimated cost over 24 h / 7 / 30 days: the
+- **Usage** (More → Accounts and usage; Settings → Usage in Classic) — estimated cost over 24 h / 7 / 30 days: the
   total, by host, by day and the costliest sessions; the fleet's Claude
   accounts. A subscription's 5-hour and weekly windows are the desktop's own
   read and are not served by the hub.
-- **Company** (Settings → Company, once the hub lists an organisation to this
-  device) — claude-fleet's org overview, read only: each org's sessions and
+- **Company** (More → Organisations; Settings → Company in Classic; once the
+  hub lists an organisation to this device) — claude-fleet's org overview, read only: each org's sessions and
   how many need you, its hosts and trackers, and, as far as the hub sends
   them to this token, its spend today / this week / this month against its
   budgets, its members with their roles, and its bound devices. The hub

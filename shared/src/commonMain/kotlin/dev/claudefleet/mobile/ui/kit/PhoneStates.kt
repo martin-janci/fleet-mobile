@@ -37,6 +37,7 @@ import dev.claudefleet.mobile.data.FleetRepository
 import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
+import kotlinx.coroutines.delay
 
 /**
  * Where the phone stands with its hub, in the four states the MobileStates
@@ -116,6 +117,9 @@ fun rememberPhoneConnection(status: ConnectionStatus): PhoneConnection {
  */
 val LocalHubReconnect = staticCompositionLocalOf<() -> Unit> { {} }
 
+/** How long the offline banner's Signal lost mark plays before it stands still. */
+internal const val SIGNAL_LOST_MS = 6_000L
+
 /** What the offline banner says under its title. [asOf] is the time of the last answer ("14:52"), when known. */
 fun offlineDetail(asOf: String?): String =
     if (asOf != null) "Showing what it said at $asOf. Answers wait until it is back."
@@ -160,7 +164,16 @@ fun HubBanner(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         when (connection) {
-            is PhoneConnection.Offline -> OrbitMarkLoader(MarkMotion.SignalLost, size = 34.dp)
+            is PhoneConnection.Offline -> {
+                // Signal lost plays for a few seconds, then holds its first
+                // frame: a hub down for hours must not animate every frame (r16 M8).
+                var settled by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) {
+                    delay(SIGNAL_LOST_MS)
+                    settled = true
+                }
+                OrbitMarkLoader(MarkMotion.SignalLost, size = 34.dp, frozen = settled)
+            }
             is PhoneConnection.Reconnecting -> OrbitMarkLoader(MarkMotion.GravityWell, size = 34.dp)
             else -> Unit
         }
@@ -268,37 +281,6 @@ private fun SkeletonTurn(fromPerson: Boolean, widths: List<Float>) {
                 Box(Modifier.fillMaxWidth(w).height(12.dp).background(bar, RoundedCornerShape(6.dp)))
             }
         }
-    }
-}
-
-/** What the pull-to-refresh label says at [progress] (1 = far enough to release) and while [refreshing]. */
-fun pullLabel(progress: Float, refreshing: Boolean): String = when {
-    refreshing -> "Refreshing"
-    progress >= 1f -> "Release to refresh"
-    else -> "Pull to refresh"
-}
-
-/**
- * The pull-to-refresh indicator (MobileStates: Pull to refresh): the Orbit
- * mark draws its ring as the list is pulled, then Chases while the refresh
- * runs, once that has taken `loader-delay`. For Sessions, Inbox, Work and
- * Hosts alike.
- */
-@Composable
-fun PullOrbit(progress: Float, refreshing: Boolean, modifier: Modifier = Modifier) {
-    val o = Fleet.colors
-    val chasing = rememberLoaderVisible(refreshing)
-    Column(
-        modifier = modifier.fillMaxWidth().padding(vertical = 10.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        if (chasing) {
-            OrbitMarkLoader(MarkMotion.Chase, size = 30.dp)
-        } else {
-            OrbitMarkLoader(MarkMotion.Still, size = 30.dp, pull = if (refreshing) 1f else progress)
-        }
-        Text(pullLabel(progress, refreshing), color = o.fgMuted, fontSize = 12.sp, lineHeight = 16.sp)
     }
 }
 

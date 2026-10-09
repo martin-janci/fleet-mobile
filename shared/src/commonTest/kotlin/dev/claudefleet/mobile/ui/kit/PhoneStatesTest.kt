@@ -96,13 +96,6 @@ class PhoneStatesTest {
     }
 
     @Test
-    fun pull_to_refresh_says_what_letting_go_will_do() {
-        assertEquals("Pull to refresh", pullLabel(0.4f, refreshing = false))
-        assertEquals("Release to refresh", pullLabel(1f, refreshing = false))
-        assertEquals("Refreshing", pullLabel(0f, refreshing = true))
-    }
-
-    @Test
     fun every_full_screen_wait_has_a_way_out() {
         assertEquals(
             listOf("Skip, open Inbox", "Back to the session", "Cancel", "Continue in the background"),

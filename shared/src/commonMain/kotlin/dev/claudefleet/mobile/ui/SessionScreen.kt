@@ -150,6 +150,7 @@ import dev.claudefleet.mobile.ui.components.contextIsTight
 import dev.claudefleet.mobile.ui.components.statusStripText
 import dev.claudefleet.mobile.ui.kit.ConversationLoading
 import dev.claudefleet.mobile.ui.kit.HubBanner
+import dev.claudefleet.mobile.ui.kit.reducedMotion
 import dev.claudefleet.mobile.ui.kit.rememberPhoneConnection
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.Fleet
@@ -2056,7 +2057,8 @@ private val KILL_CONFIRM_DELAY = 800.milliseconds
  * and leaving one discards its state, which is exactly the intent here.
  */
 @Composable
-private fun refreshAngle(busy: Boolean): Float = if (busy) {
+// Reduced motion keeps the icon still; the busy state shows in the bar's enabled state (review r11).
+private fun refreshAngle(busy: Boolean): Float = if (busy && !reducedMotion()) {
     rememberInfiniteTransition(label = "refresh").animateFloat(
         initialValue = 0f,
         targetValue = 360f,

@@ -267,7 +267,7 @@ fun OrbitUsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: L
                             if (state.limitsAvailable) AccountLimitsBlock(state.limits[it.uuid], nowSeconds)
                         }
                     }
-                    if (!state.limitsAvailable) item(key = "limits") { Quiet(LIMITS_ON_DESKTOP, small = true) }
+                    if (!state.limitsAvailable && state.capsKnown) item(key = "limits") { Quiet(LIMITS_ON_DESKTOP, small = true) }
                 }
                 if (state.available) {
                     item(key = "windows") {
@@ -279,8 +279,10 @@ fun OrbitUsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: L
                         }
                     }
                     state.report?.let { orbitUsage(it, handlers) }
-                } else {
+                } else if (state.capsKnown) {
                     item(key = "no-usage") { Quiet("This hub does not report usage.") }
+                } else {
+                    item(key = "no-usage") { Quiet("Connecting to the hub…") }
                 }
             }
         }
