@@ -236,6 +236,8 @@ import dev.claudefleet.mobile.ui.SessionDetailsHandlers
 import dev.claudefleet.mobile.ui.SessionDetailsSheet
 import dev.claudefleet.mobile.ui.SessionDetailsList
 import dev.claudefleet.mobile.ui.DetailsAction
+import dev.claudefleet.mobile.ui.KillConfirmDialog
+import dev.claudefleet.mobile.ui.ReviewDialog
 import dev.claudefleet.mobile.ui.SessionTab
 import dev.claudefleet.mobile.ui.SessionTabsHost
 import dev.claudefleet.mobile.ui.sessionTabs
@@ -775,7 +777,12 @@ private fun FleetRoute(
     BackHandler(enabled = nav.isPushed(screen)) { nav.back() }
 
     val sessions = remember(repository, scope) { SessionsViewModel(repository, scope, prefs = container.prefs) }
-    val bulk = remember(repository, scope) { BulkViewModel(repository, container.sessionActions, scope, credentials.canWrite) }
+    val bulk = remember(repository, scope) {
+        BulkViewModel(
+            repository, container.sessionActions, scope, credentials.canWrite,
+            archiveOne = { id -> container.sessionExtrasActions.archive(id) },
+        )
+    }
     val hostDetail = remember(repository, scope) { HostDetailViewModel(repository, container.hostActions, scope, credentials.canWrite) }
     // A host joining from the phone (14.19): held here so leaving Hosts and
     // coming back finds the install where it was.
@@ -1102,6 +1109,7 @@ private fun FleetRoute(
                                 onSelectAll = bulk::selectAll,
                                 onRetry = { bulk.retry(it) },
                                 onRetryAll = { bulk.retryFailed() },
+                                onArchive = { bulk.archive(); Unit },
                             ),
                         )
                     } else {
@@ -2308,6 +2316,8 @@ private fun SessionRoute(
     LaunchedEffect(sessionId) { vm.load() }
 
     val state by vm.state.collectAsState()
+    // The Details tab's Review… and Force kill… ask here (r09 B18); ⋮ keeps its own.
+    var detailsAsk by remember { mutableStateOf<DetailsAsk?>(null) }
     val work by workVm.state.collectAsState()
     val tasks by tasksVm.state.collectAsState()
     val status by repository.status.collectAsState()
@@ -2581,12 +2591,24 @@ private fun SessionRoute(
                             DetailsAction("Share…", { shareVm.open(sessionId) }).takeIf { canShare },
                             DetailsAction(if (tasks.count > 0) "Tasks ${tasks.count}" else "Tasks", tasksVm::openSheet).takeIf { tasks.available },
                             work.chip?.key?.let { key -> DetailsAction("Ticket $key", workVm::openSheet) },
+                            // r09 B18: the board's Review, Archive and Force kill, as in ⋮.
+                            DetailsAction("Review…", { detailsAsk = DetailsAsk.Review }).takeIf { state.canReview && state.connected },
+                            DetailsAction("Archive", { extrasVm.archive(onBack); Unit }).takeIf { caps.archiveSession && credentials.canWrite },
+                            DetailsAction("Force kill…", { detailsAsk = DetailsAsk.Kill }).takeIf { state.canManage && state.canKill && state.connected },
                         ),
                     )
                 },
             )
         },
     )
+    when (detailsAsk) {
+        DetailsAsk.Review -> ReviewDialog(
+            onStart = { prompt -> detailsAsk = null; vm.spawnReview(prompt, onOpenSession) },
+            onDismiss = { detailsAsk = null },
+        )
+        DetailsAsk.Kill -> KillConfirmDialog(onConfirm = { detailsAsk = null; vm.kill() }, onDismiss = { detailsAsk = null })
+        null -> Unit
+    }
     if (shareState.open) {
         ShareSheet(
             state = shareState,
@@ -2687,3 +2709,6 @@ private fun RepoRoute(
         ),
     )
 }
+
+/** What the Details tab's buttons put up over the session (r09 B18). */
+private enum class DetailsAsk { Review, Kill }
