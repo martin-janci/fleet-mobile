@@ -161,7 +161,7 @@ internal fun ToolCallRow(tool: ConvItem.Tool, modifier: Modifier = Modifier) {
         ) {
             Box(Modifier.size(ICON), contentAlignment = Alignment.Center) {
                 when {
-                    !tool.done && LocalToolsLive.current -> if (rememberLoaderVisible(true)) Comet(size = 16.dp)
+                    !tool.done && LocalToolsLive.current -> { if (rememberLoaderVisible(true)) Comet(size = 16.dp) }
                     tool.error -> Icon(FleetIcons.Failed, contentDescription = "failed", tint = colors.error, modifier = Modifier.size(ICON))
                     else -> Icon(iconFor(line.kind), contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(ICON))
                 }
@@ -314,7 +314,7 @@ private fun ToolDetailCard(tool: ConvItem.Tool, kind: ToolKind, load: ToolDetail
                 .padding(12.dp),
         ) {
             when (load) {
-                null, ToolDetailLoad.Loading -> DetailLoading()
+                null, ToolDetailLoad.Loading -> InlineLoading(waiting = true, modifier = Modifier.padding(vertical = 8.dp))
                 ToolDetailLoad.Failed -> Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         "Couldn't load details",
@@ -328,12 +328,6 @@ private fun ToolDetailCard(tool: ConvItem.Tool, kind: ToolKind, load: ToolDetail
             }
         }
     }
-}
-
-/** The detail's read, drawn only once it has taken `loader-delay` (14.12). */
-@Composable
-private fun DetailLoading() {
-    InlineLoading(waiting = true, modifier = Modifier.padding(vertical = 8.dp))
 }
 
 @Composable

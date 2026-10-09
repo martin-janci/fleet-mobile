@@ -56,7 +56,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.PaddingValues
 import dev.claudefleet.mobile.ui.kit.InlineLoading
-import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 
 /**
