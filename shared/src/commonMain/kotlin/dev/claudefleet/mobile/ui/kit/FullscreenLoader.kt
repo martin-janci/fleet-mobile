@@ -91,9 +91,9 @@ fun FullscreenLoader(
     progress: LoaderProgress? = null,
     secondary: Pair<String, () -> Unit>? = null,
     waiting: Boolean = true,
-    found: (@Composable ColumnScope.() -> Unit)? = null,
     /** FindHosts only: whether the Radar still sweeps; false once the scan is over (r13 P19). */
     scanning: Boolean = true,
+    found: (@Composable ColumnScope.() -> Unit)? = null,
 ) {
     val o = Fleet.colors
     val shown = rememberLoaderVisible(waiting)
