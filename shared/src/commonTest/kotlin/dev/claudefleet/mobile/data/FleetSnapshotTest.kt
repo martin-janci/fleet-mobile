@@ -463,8 +463,8 @@ class FleetSnapshotTest {
      */
     @Test
     fun the_stream_also_asks_for_download_signals_which_leave_the_snapshot_alone() {
-        assertEquals(listOf("session", "host", "project", "work", "download", "account_usage", "grant"), STREAM_EVENT_KINDS)
-        assertEquals(listOf("download", "account_usage", "grant"), SIGNAL_EVENT_KINDS)
+        assertEquals(listOf("session", "host", "project", "work", "download", "account_usage", "grant", "account"), STREAM_EVENT_KINDS)
+        assertEquals(listOf("download", "account_usage", "grant", "account"), SIGNAL_EVENT_KINDS)
 
         val frame = row("download:changed", """{"id":7}""")
         val empty = FleetSnapshot()

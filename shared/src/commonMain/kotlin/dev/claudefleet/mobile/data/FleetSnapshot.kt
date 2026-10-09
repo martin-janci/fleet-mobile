@@ -46,14 +46,16 @@ val SNAPSHOT_EVENT_KINDS: List<String> = listOf("session", "host", "project", "w
  * signal to re-read: `download` (`download:changed { id }`, claude-fleet
  * file downloads) tells the Files tab to ask `list_downloads` again;
  * `account_usage` (`account_usage:updated`) re-reads the accounts' usage,
- * because `?fields=` projects its payload to the row fields. A hub
- * that does not know the kind ignores it in `?kinds=`.
+ * because `?fields=` projects its payload to the row fields; `grant`
+ * re-reads `my_grants`; `account` (`account:upserted`, a new account or a
+ * nickname change) re-reads `list_accounts`. A hub that does not know the
+ * kind ignores it in `?kinds=`.
  *
  * Kept apart from [SNAPSHOT_EVENT_KINDS] so that list still means "what the
  * snapshot applies" — `FleetSnapshotTest` holds every entry of it to changing
  * the snapshot, which a signal never does.
  */
-val SIGNAL_EVENT_KINDS: List<String> = listOf("download", "account_usage", "grant")
+val SIGNAL_EVENT_KINDS: List<String> = listOf("download", "account_usage", "grant", "account")
 
 /** Everything the stream asks the hub for with `?kinds=`. */
 val STREAM_EVENT_KINDS: List<String> = SNAPSHOT_EVENT_KINDS + SIGNAL_EVENT_KINDS
@@ -154,6 +156,13 @@ fun HubEvent.Row.isWorkFrame(): Boolean = name.startsWith("work:")
 
 /** An `account_usage:*` frame: an account's usage reading changed. */
 fun HubEvent.Row.isAccountUsageFrame(): Boolean = name.startsWith("account_usage:")
+
+/**
+ * An `account:*` frame: an account was first seen or its nickname changed. A
+ * re-read signal, as [isAccountUsageFrame] is; `list_accounts` answers it.
+ * (`account_usage:*` does not start with `account:`.)
+ */
+fun HubEvent.Row.isAccountFrame(): Boolean = name.startsWith("account:")
 
 /**
  * A `grant:changed` frame: a share on a session this person holds or owns
