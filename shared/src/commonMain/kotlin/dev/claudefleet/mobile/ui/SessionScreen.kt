@@ -1699,7 +1699,7 @@ private fun SessionOverflowMenu(
             }
             if (state.canDismissGhost) {
                 DropdownMenuItem(
-                    text = { Text("Dismiss ghost") },
+                    text = { Text("Dismiss lost session") },
                     enabled = actionable,
                     onClick = { expanded = false; showDismissGhostConfirm = true },
                 )
@@ -1717,7 +1717,7 @@ private fun SessionOverflowMenu(
         if (manage) {
             HorizontalDivider()
             DropdownMenuItem(
-                text = { Text("Retire safely") },
+                text = { Text("Safe remove") },
                 enabled = actionable,
                 onClick = { expanded = false; showSafeKillConfirm = true },
             )
@@ -1794,7 +1794,7 @@ private fun SessionOverflowMenu(
     if (showDismissGhostConfirm) {
         AlertDialog(
             onDismissRequest = { showDismissGhostConfirm = false },
-            title = { Text("Dismiss this ghost?") },
+            title = { Text("Dismiss this lost session?") },
             text = { Text("Its row is deleted for good. Its conversation stays on the host, and can still be found from the host's sheet.") },
             confirmButton = { TextButton(onClick = { showDismissGhostConfirm = false; onDismissGhost() }) { Text("Dismiss") } },
             dismissButton = { TextButton(onClick = { showDismissGhostConfirm = false }) { Text("Cancel") } },
@@ -2502,7 +2502,7 @@ private fun NotificationBlock(item: ConvItem.Notification, report: String) {
 
 /** The status a notification's block names under its title; null when the title says it all. */
 internal fun notificationStatusWord(status: String?): String? = when (status) {
-    "completed" -> "Completed"
+    "completed" -> "Done"
     "failed" -> "Failed"
     "stopped" -> "Stopped"
     "killed" -> "Killed"
