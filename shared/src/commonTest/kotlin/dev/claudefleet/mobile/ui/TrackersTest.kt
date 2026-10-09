@@ -313,3 +313,32 @@ class WizardRulesTest {
         assertNull(vm.state.value.wizard)
     }
 }
+
+/** Review r09 B2: the Inbox's Running and Done today views. */
+class InboxViewsTest {
+    private val midnight = 1_000_000L
+
+    @Test
+    fun running_is_working_and_not_stuck_newest_first() {
+        val rows = listOf(
+            SessionRow(id = 1, claudeStatus = "working", lastActivityAt = midnight + 10),
+            SessionRow(id = 2, claudeStatus = "working", lastActivityAt = midnight + 20),
+            SessionRow(id = 3, claudeStatus = "working", stuckKind = "trust_prompt"),
+            SessionRow(id = 4, claudeStatus = "idle"),
+        )
+        assertEquals(listOf(2L, 1L), runningRows(rows).map { it.id })
+    }
+
+    @Test
+    fun done_today_is_a_finished_turn_since_midnight() {
+        val rows = listOf(
+            SessionRow(id = 1, claudeStatus = "idle", lastActivityAt = midnight + 5),
+            SessionRow(id = 2, claudeStatus = "completed", lastActivityAt = midnight + 50),
+            SessionRow(id = 3, claudeStatus = "idle", lastActivityAt = midnight - 5),
+            SessionRow(id = 4, claudeStatus = "working", lastActivityAt = midnight + 9),
+            SessionRow(id = 5, claudeStatus = "failed", lastActivityAt = midnight + 9),
+            SessionRow(id = 6, claudeStatus = "blocked", lastActivityAt = midnight + 9),
+        )
+        assertEquals(listOf(2L, 1L), doneTodayRows(rows, midnight).map { it.id })
+    }
+}

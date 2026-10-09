@@ -205,6 +205,9 @@ import dev.claudefleet.mobile.ui.Navigator
 import dev.claudefleet.mobile.ui.PhoneLayout
 import dev.claudefleet.mobile.ui.hostsLine
 import dev.claudefleet.mobile.ui.inboxRows
+import dev.claudefleet.mobile.ui.runningRows
+import dev.claudefleet.mobile.ui.doneTodayRows
+import dev.claudefleet.mobile.model.localMidnight
 import dev.claudefleet.mobile.ui.sharedRows
 import dev.claudefleet.mobile.ui.loadPhoneLayout
 import dev.claudefleet.mobile.ui.savePhoneLayout
@@ -1493,6 +1496,10 @@ private fun FleetRoute(
                     InboxScreen(
                         rows = rows,
                         running = all.count { it.claudeStatus == "working" },
+                        runningList = remember(all) { runningRows(all) },
+                        doneTodayList = remember(all, inboxList.nowSeconds / 60) {
+                            doneTodayRows(all, localMidnight(inboxList.nowSeconds, utcOffsetSeconds(inboxList.nowSeconds)))
+                        },
                         nowSeconds = inboxList.nowSeconds,
                         live = inboxList.status is ConnectionStatus.Connected,
                         refreshing = inboxList.refreshing,
