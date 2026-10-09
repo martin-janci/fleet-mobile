@@ -4,6 +4,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,6 +29,7 @@ import dev.claudefleet.mobile.model.GrantLevel
 import dev.claudefleet.mobile.model.MyAccess
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
+import dev.claudefleet.mobile.model.AccountLimit
 import dev.claudefleet.mobile.model.limitAt
 import dev.claudefleet.mobile.model.askedAt
 import dev.claudefleet.mobile.ui.components.ScreenHeader
@@ -76,6 +78,32 @@ internal fun inboxWord(row: SessionRow): StatusWord =
         StatusWord.FAILED -> StatusWord.FAILED
         else -> StatusWord.NEEDS_YOU
     }
+
+/**
+ * The limit a paused row waits on, for its "resets in …" (MobileNav). The
+ * account's reading decides it when it shows a window at its limit
+ * ([limitAt]); when the hub has paused the row on the account's limit
+ * (`account_limit`) but the reading has not caught up — the window reads
+ * 98 % — the fullest window that has not reset yet is the one it waits on.
+ * Null when nothing says when it resets.
+ */
+internal fun inboxLimit(row: SessionRow, usage: AccountUsageSnapshot?, nowSeconds: Long): AccountLimit? {
+    if (usage == null) return null
+    usage.limitAt(nowSeconds)?.let { return it }
+    if (row.attention?.reason != "account_limit") return null
+    val windows = usage.usage ?: return null
+    val pending = listOfNotNull(windows.sevenDay?.let { true to it }, windows.fiveHour?.let { false to it })
+        .filter { (_, w) -> (w.resetsAt ?: 0L) > nowSeconds }
+    val (weekly, w) = pending.maxByOrNull { it.second.utilization } ?: return null
+    return AccountLimit(weekly = weekly, resetsAt = w.resetsAt)
+}
+
+/**
+ * What a failed Inbox row's Retry sends again: the last prompt the row
+ * knows ([failedSession] with no turns read), or null when the session has
+ * not failed or there is nothing to send. Stuck rows offer no Retry.
+ */
+internal fun inboxRetryPrompt(row: SessionRow): String? = failedSession(row, emptyList())?.retryPrompt
 
 /**
  * The Inbox's three views (boards MobileNav, MobileTutorials): Needs you,
@@ -142,6 +170,10 @@ fun InboxScreen(
     runningList: List<SessionRow> = emptyList(),
     /** The Done today view's rows ([doneTodayRows]). */
     doneTodayList: List<SessionRow> = emptyList(),
+    /** A failed row's Open log: the session on its agent's screen (MobileNav). Null leaves it out. */
+    onOpenLog: ((Long) -> Unit)? = null,
+    /** A failed row's Retry: the session's last prompt sent again ([inboxRetryPrompt]). Null for a read-only pairing. */
+    onRetry: ((Long, String) -> Unit)? = null,
 ) {
     var view by rememberSaveable { mutableStateOf(InboxView.NeedsYou) }
     Column(modifier = modifier.fillMaxSize()) {
@@ -221,8 +253,9 @@ fun InboxScreen(
                         showHost = true,
                         since = row.askedAt,
                         accountName = row.accountUuid?.let(accountNames::get),
-                        limit = row.accountUuid?.let(accountUsage::get)?.limitAt(nowSeconds),
+                        limit = inboxLimit(row, row.accountUuid?.let(accountUsage::get), nowSeconds),
                         onClick = { onOpenSession(row.id) },
+                        actions = failedActions(row, onOpenLog, onRetry),
                     )
                 }
                 if (shared.isNotEmpty()) {
@@ -255,5 +288,24 @@ fun InboxScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * A failed row's inline next steps (MobileNav: "Failed: tests crashed · Open
+ * log · Retry"), so the person can act without opening the session first;
+ * null for any other row, or when neither is offered.
+ */
+private fun failedActions(
+    row: SessionRow,
+    onOpenLog: ((Long) -> Unit)?,
+    onRetry: ((Long, String) -> Unit)?,
+): (@Composable RowScope.() -> Unit)? {
+    if (inboxWord(row) != StatusWord.FAILED) return null
+    val retry = inboxRetryPrompt(row)?.takeIf { onRetry != null }
+    if (onOpenLog == null && retry == null) return null
+    return {
+        if (onOpenLog != null) RowLink("Open log", onClick = { onOpenLog(row.id) })
+        if (retry != null && onRetry != null) RowLink("Retry", onClick = { onRetry(row.id, retry) })
     }
 }

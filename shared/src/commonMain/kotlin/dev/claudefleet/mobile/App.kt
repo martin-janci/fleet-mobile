@@ -247,6 +247,7 @@ import dev.claudefleet.mobile.ui.SessionDetailsList
 import dev.claudefleet.mobile.ui.DetailsAction
 import dev.claudefleet.mobile.ui.KillConfirmDialog
 import dev.claudefleet.mobile.ui.ReviewDialog
+import dev.claudefleet.mobile.ui.SessionIntent
 import dev.claudefleet.mobile.ui.SessionTab
 import dev.claudefleet.mobile.ui.SessionTabsHost
 import dev.claudefleet.mobile.ui.sessionTabs
@@ -433,10 +434,26 @@ class AppContainer(
     /** Taken exactly once. */
     fun consumeOpenSession(): Long? = _openSession.getAndUpdate { null }
 
+    /** What the next session screen for its id does on opening (an Inbox row's Open log or Retry). */
+    private val _sessionIntent = MutableStateFlow<SessionIntent?>(null)
+    val sessionIntent: StateFlow<SessionIntent?> = _sessionIntent.asStateFlow()
+
+    fun askSession(intent: SessionIntent) {
+        _sessionIntent.value = intent
+    }
+
+    /** The intent parked for [sessionId], once; null when there is none for it. */
+    fun consumeSessionIntent(sessionId: Long): SessionIntent? {
+        var taken: SessionIntent? = null
+        _sessionIntent.update { if (it?.sessionId == sessionId) { taken = it; null } else it }
+        return taken
+    }
+
     /** Forget a parked notification tap: a new pairing may be another hub, where its id is another session. */
     fun dropOpenRequests() {
         _openSession.value = null
         _questionFocus.value = null
+        _sessionIntent.value = null
     }
 
     /**
@@ -1607,6 +1624,13 @@ private fun FleetRoute(
                         accountNames = inboxList.accountNames,
                         accountUsage = inboxList.accountUsage,
                         shared = shared,
+                        // A failed row's next steps in place (MobileNav); each opens the session, which acts.
+                        onOpenLog = { id -> container.askSession(SessionIntent.OpenLog(id)); nav.open(id) },
+                        onRetry = if (credentials.canWrite) {
+                            { id, prompt -> container.askSession(SessionIntent.RetryLastTurn(id, prompt)); nav.open(id) }
+                        } else {
+                            null
+                        },
                         top = {
                             // Like every other tab (14.12): the hub's state once, at the top, and a failed pull with its Retry.
                             HubBanner(inboxConnection, asOf = inboxList.staleAt, onRetry = { sessions.refresh() })
@@ -2479,6 +2503,19 @@ private fun SessionRoute(
     val focus by container.questionFocus.collectAsState()
     LaunchedEffect(focus, sessionId) {
         if (focus == sessionId && container.consumeQuestionFocus(sessionId)) selectTab(SessionTab.Conversation)
+    }
+    // An Inbox row's Open log or Retry, carried out here once the screen is up.
+    val asked by container.sessionIntent.collectAsState()
+    LaunchedEffect(asked, sessionId) {
+        if (asked?.sessionId != sessionId) return@LaunchedEffect
+        when (val intent = container.consumeSessionIntent(sessionId)) {
+            is SessionIntent.OpenLog -> if (newLayout) selectTab(SessionTab.Agent)
+            is SessionIntent.RetryLastTurn -> {
+                if (newLayout) selectTab(SessionTab.Conversation)
+                vm.retryLastTurn(intent.prompt)
+            }
+            null -> Unit
+        }
     }
     // Back closes an open diff, commit or file in the Files tab before it
     // leaves the session; composed after `App`'s handler, so asked first.

@@ -220,11 +220,16 @@ fun PhoneSessionRow(
     accountName: String? = null,
     /** The limit that account is at, from `account_usage`; null when none is known. */
     limit: AccountLimit? = null,
+    /** After the chips: what the row offers in place (the Inbox's Open log and Retry); null for none. */
+    actions: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val word = phoneWord(row)
     val chipList = rowChips(row, showHost, showWork, accountName)
-    val chipRow: (@Composable RowScope.() -> Unit)? = if (chipList.isEmpty()) null else {
-        { for ((text, tone) in chipList) OrbitChip(text, word = tone) }
+    val chipRow: (@Composable RowScope.() -> Unit)? = if (chipList.isEmpty() && actions == null) null else {
+        {
+            for ((text, tone) in chipList) OrbitChip(text, word = tone)
+            actions?.invoke(this)
+        }
     }
     PhoneRow(
         title = row.displayName,
@@ -260,6 +265,25 @@ internal fun rowChips(
     val named = row.attention?.reason == "account_limit" || row.attention?.reason == "no_credentials"
     val account = accountName?.takeIf { it.isNotBlank() && !named }?.let { it to null }
     return if (account != null && chips.size < 2) chips + account else chips
+}
+
+/**
+ * A word on a row's chip line that acts in place — the Inbox's Open log and
+ * Retry, Start… on a task or ticket with no session: accent text with a
+ * target of its own, so the row's tap still opens the row.
+ */
+@Composable
+internal fun RowLink(label: String, onClick: () -> Unit, enabled: Boolean = true) {
+    Text(
+        label,
+        color = if (enabled) Fleet.colors.accent else Fleet.colors.fgMuted,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier
+            .heightIn(min = 32.dp)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 6.dp),
+    )
 }
 
 /** The check box a row shows in its dot's place while rows are picked. */

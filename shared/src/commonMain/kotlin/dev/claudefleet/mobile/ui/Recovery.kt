@@ -70,6 +70,20 @@ fun failedSession(row: SessionRow?, turns: List<ConvTurn>): FailedSession? {
     )
 }
 
+/**
+ * What a session screen does once it opens, asked from outside it: an Inbox
+ * failed row's Open log (the agent's own screen) or Retry (the last turn's
+ * prompt again, through the screen's own [SessionViewModel.retryLastTurn]
+ * so its checks and its Not sent card apply). Taken once.
+ */
+sealed interface SessionIntent {
+    val sessionId: Long
+
+    data class OpenLog(override val sessionId: Long) : SessionIntent
+
+    data class RetryLastTurn(override val sessionId: Long, val prompt: String) : SessionIntent
+}
+
 /** The words a failed session's quick replies change to (MobileRecovery): Retry and Show the error. */
 internal val FAILED_QUICK_REPLIES = listOf("Retry", "Show the error")
 
