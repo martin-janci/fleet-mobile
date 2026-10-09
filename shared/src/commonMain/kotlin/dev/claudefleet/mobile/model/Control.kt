@@ -31,3 +31,35 @@ data class ConfirmRequest(
     val operator: Boolean = false,
     @SerialName("asked_at") val askedAt: Long = 0,
 )
+
+/** A work item as a handoff receipt carries it (the hub's `HandoffItem`, redesign 9.3). */
+@Serializable
+data class HandoffItem(
+    val id: Long,
+    val title: String = "",
+    /** The status category: `todo`, `in_progress`, `done`, … */
+    val status: String = "",
+    @SerialName("proposal_state") val proposalState: String? = null,
+)
+
+/**
+ * What Control's agent handed on, and where (`control_handoffs`, the hub's
+ * `ControlHandoffRow`): a prompt or task to a session, a mission, a task, a
+ * proposed tree of subtasks. The target's state is read now: a session's
+ * from the live rows, a mission's and a task's from the receipt.
+ */
+@Serializable
+data class ControlHandoff(
+    val id: Long,
+    val at: Long = 0,
+    /** `session` | `mission` | `task` | `tree`. */
+    val kind: String = "",
+    val tool: String = "",
+    @SerialName("session_id") val sessionId: Long? = null,
+    @SerialName("mission_id") val missionId: Long? = null,
+    @SerialName("mission_name") val missionName: String? = null,
+    @SerialName("mission_state") val missionState: String? = null,
+    val item: HandoffItem? = null,
+    val items: List<HandoffItem> = emptyList(),
+    val preview: String? = null,
+)

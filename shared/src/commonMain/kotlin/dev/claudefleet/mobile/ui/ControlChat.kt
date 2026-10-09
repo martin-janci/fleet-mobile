@@ -32,6 +32,8 @@ import dev.claudefleet.mobile.data.AgentActions
 import dev.claudefleet.mobile.data.ControlActions
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.ConfirmRequest
+import dev.claudefleet.mobile.model.ControlHandoff
+import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.OperatorStatus
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.ui.components.ErrorBanner
@@ -79,6 +81,8 @@ data class ControlUiState(
     val confirms: List<ConfirmRequest> = emptyList(),
     /** Nonces with an answer in flight. */
     val answering: Set<String> = emptySet(),
+    /** What Control handed on, oldest first, as chips (redesign 9.3); empty on a hub without the receipts. */
+    val handoffs: List<HandoffChip> = emptyList(),
     val error: Friendly? = null,
 ) {
     /** Waking may help: nothing runs, or what ran is gone or lost its tools. */
@@ -122,6 +126,7 @@ class ControlViewModel(
         val waking: Boolean = false,
         val confirms: List<ConfirmRequest> = emptyList(),
         val answering: Set<String> = emptySet(),
+        val handoffs: List<ControlHandoff> = emptyList(),
         val error: Friendly? = null,
     )
 
@@ -129,10 +134,10 @@ class ControlViewModel(
     private var loop: Job? = null
 
     val state: StateFlow<ControlUiState> =
-        combine(local, fleet.capabilities) { l, caps -> assemble(l, caps) }
-            .stateIn(scope, SharingStarted.Eagerly, assemble(local.value, fleet.capabilities.value))
+        combine(local, fleet.capabilities, fleet.sessions) { l, caps, rows -> assemble(l, caps, rows) }
+            .stateIn(scope, SharingStarted.Eagerly, assemble(local.value, fleet.capabilities.value, fleet.sessions.value))
 
-    private fun assemble(l: Local, caps: HubCapabilities): ControlUiState {
+    private fun assemble(l: Local, caps: HubCapabilities, rows: List<SessionRow>): ControlUiState {
         val available = canWrite && caps.agent
         val status = l.status
         val sessionId = status?.session?.id?.takeIf { status.ready } ?: l.woken
@@ -146,6 +151,7 @@ class ControlViewModel(
             canConfirm = caps.confirms,
             confirms = if (caps.confirms) l.confirms else emptyList(),
             answering = l.answering,
+            handoffs = if (caps.handoffs) handoffChips(l.handoffs, rows) else emptyList(),
             error = l.error,
         )
     }
@@ -155,8 +161,9 @@ class ControlViewModel(
         loop?.cancel()
         return scope.launch {
             readStatus()
-            while (isActive && fleet.capabilities.value.confirms) {
-                readConfirms()
+            while (isActive && (fleet.capabilities.value.confirms || fleet.capabilities.value.handoffs)) {
+                if (fleet.capabilities.value.confirms) readConfirms()
+                if (fleet.capabilities.value.handoffs) readHandoffs()
                 delay(pollMs)
             }
         }.also { loop = it }
@@ -171,6 +178,7 @@ class ControlViewModel(
     fun refresh(): Job = scope.launch {
         readStatus()
         if (fleet.capabilities.value.confirms) readConfirms()
+        if (fleet.capabilities.value.handoffs) readHandoffs()
     }
 
     /** Wake Control: the one tap that may start its session. */
@@ -237,8 +245,23 @@ class ControlViewModel(
         }
     }
 
+    private suspend fun readHandoffs() {
+        try {
+            val handoffs = actions.handoffs(HANDOFFS_SHOWN)
+            local.update { it.copy(handoffs = handoffs) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            // Keep what is shown; the next tick reads again.
+        }
+    }
+
     companion object {
         const val CONFIRM_POLL_MS = 4_000L
+
+        /** How many receipts Control reads, and how many chips it draws. */
+        const val HANDOFFS_SHOWN = 20
+        const val CHIPS_SHOWN = 3
     }
 }
 
@@ -390,3 +413,103 @@ class ControlChrome(
     val header: @Composable () -> Unit,
     val aboveComposer: @Composable () -> Unit,
 )
+
+/**
+ * One handoff as a chip: what was handed on, to what, and the target's state
+ * now in the manual's five words (working, waiting, done, failed, idle), or
+ * null once the target is gone. [sessionId] is set when a tap opens it.
+ */
+data class HandoffChip(
+    val id: Long,
+    val label: String,
+    val state: String?,
+    val sessionId: Long? = null,
+)
+
+/** A session's live state as one of the five. */
+fun handoffSessionState(row: SessionRow): String = when {
+    row.stuckKind != null -> "failed"
+    row.claudeStatus == "working" -> "working"
+    row.claudeStatus == "blocked" || row.pendingForm != null -> "waiting"
+    row.claudeStatus == "failed" -> "failed"
+    row.claudeStatus == "completed" -> "done"
+    else -> "idle"
+}
+
+/** A mission's or a task's state as one of the five. */
+fun handoffWorkState(state: String?): String = when (state) {
+    "active", "in_progress", "running" -> "working"
+    "completed", "done" -> "done"
+    "failed", "cancelled" -> "failed"
+    "blocked" -> "waiting"
+    else -> "idle"
+}
+
+/** The newest [ControlViewModel.CHIPS_SHOWN] receipts as chips, oldest first (the order a transcript reads). */
+fun handoffChips(handoffs: List<ControlHandoff>, rows: List<SessionRow>): List<HandoffChip> =
+    handoffs.take(ControlViewModel.CHIPS_SHOWN).reversed().map { h -> handoffChip(h, rows) }
+
+fun handoffChip(h: ControlHandoff, rows: List<SessionRow>): HandoffChip = when (h.kind) {
+    "session" -> {
+        val row = rows.firstOrNull { it.id == h.sessionId }
+        if (row == null) {
+            HandoffChip(h.id, "Sent to ${h.preview ?: "a session"} · ended", null)
+        } else {
+            HandoffChip(h.id, "Sent to ${row.displayName}", handoffSessionState(row), row.id)
+        }
+    }
+    "mission" -> HandoffChip(
+        h.id,
+        "Mission ${h.missionName ?: "#${h.missionId}"}",
+        h.missionName?.let { handoffWorkState(h.missionState) },
+    )
+    "task" -> HandoffChip(h.id, "Task ${h.item?.title ?: "(gone)"}", h.item?.let { handoffWorkState(it.status) })
+    "tree" -> {
+        val waiting = h.items.count { it.proposalState == "proposed" }
+        val parent = h.item?.title?.let { " under $it" }.orEmpty()
+        HandoffChip(
+            h.id,
+            "Proposed ${h.items.size} subtasks$parent" + if (waiting > 0) " · $waiting to decide on the desktop" else "",
+            if (waiting > 0) "waiting" else "done",
+        )
+    }
+    else -> HandoffChip(h.id, h.preview ?: h.tool, null)
+}
+
+const val HANDOFF_CHIP_TAG = "control.handoff."
+
+/** Control's recent handoffs, above its confirms: "Sent to api · Working". A session's chip opens it. */
+@Composable
+fun HandoffChips(chips: List<HandoffChip>, onOpenSession: (Long) -> Unit) {
+    if (chips.isEmpty()) return
+    val o = Fleet.colors
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        for (c in chips) {
+            val tint = when (c.state) {
+                "working" -> o.statusWorking
+                "waiting" -> o.statusWaiting
+                "done" -> o.statusDone
+                "failed" -> o.statusFailed
+                else -> o.statusIdle
+            }
+            Surface(
+                color = o.bgPane,
+                border = BorderStroke(1.dp, o.controlBorder),
+                shape = RoundedCornerShape(50),
+                modifier = Modifier
+                    .heightIn(min = 32.dp)
+                    .then(if (c.sessionId != null) Modifier.clickable(role = Role.Button) { onOpenSession(c.sessionId) } else Modifier)
+                    .testTag(HANDOFF_CHIP_TAG + c.id),
+            ) {
+                Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("↗ ", style = Fleet.type.textSm, color = o.fgMuted)
+                    Text(c.label, style = Fleet.type.textSm, color = o.fg, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                    c.state?.let {
+                        Text(" · ", style = Fleet.type.textSm, color = o.fgMuted)
+                        Text(it.replaceFirstChar { ch -> ch.uppercase() }, style = Fleet.type.textSm, color = tint)
+                    }
+                }
+            }
+        }
+    }
+}

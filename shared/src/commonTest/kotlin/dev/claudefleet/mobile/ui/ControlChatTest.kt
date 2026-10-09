@@ -5,6 +5,8 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.ControlActions
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.ConfirmRequest
+import dev.claudefleet.mobile.model.ControlHandoff
+import dev.claudefleet.mobile.model.HandoffItem
 import dev.claudefleet.mobile.model.FieldProblem
 import dev.claudefleet.mobile.model.FormView
 import dev.claudefleet.mobile.model.OperatorStatus
@@ -32,6 +34,7 @@ private val CONTROL_TOOLS = setOf(
     HubCapabilities.OPERATOR_STATUS,
     HubCapabilities.MCP_CONFIRMS,
     HubCapabilities.ANSWER_MCP_CONFIRM,
+    HubCapabilities.CONTROL_HANDOFFS,
 )
 
 private class ControlFleet(tools: Set<String>) : FleetState {
@@ -63,6 +66,9 @@ private class FakeControl(var status: OperatorStatus) : ControlActions, AgentAct
         confirms = confirms.filterNot { it.nonce == nonce }
         return true
     }
+    var handoffReads = 0
+    var handoffs = listOf<ControlHandoff>()
+    override suspend fun handoffs(limit: Int): List<ControlHandoff> { handoffReads++; return handoffs.take(limit) }
     override suspend fun ensureOperator(): SessionRow {
         wakes++
         status = OperatorStatus(ready = true, session = SessionRow(id = 77))
@@ -162,6 +168,62 @@ class ControlChatTest {
         assertFalse(vm.state.value.available)
         assertNull(vm.state.value.sessionId)
         assertNull(vm.wake())
+    }
+
+    @Test
+    fun handoffs_are_read_with_the_confirms_and_follow_the_session_live() = runTest {
+        val fleet = ControlFleet(CONTROL_TOOLS)
+        fleet.sessions.value = listOf(SessionRow(id = 3, tmuxName = "api", claudeStatus = "working"))
+        val fake = FakeControl(OperatorStatus(ready = true, session = SessionRow(id = 5)))
+        fake.handoffs = listOf(ControlHandoff(id = 1, kind = "session", tool = "send_prompt", sessionId = 3, preview = "Fix CI"))
+        val vm = ControlViewModel(fleet, fake, fake, backgroundScope, canWrite = true, pollMs = 100)
+        vm.attach()
+        runCurrent()
+        assertEquals(listOf(HandoffChip(1, "Sent to api", "working", 3)), vm.state.value.handoffs)
+
+        fleet.sessions.value = listOf(SessionRow(id = 3, tmuxName = "api", claudeStatus = "completed"))
+        runCurrent()
+        assertEquals("done", vm.state.value.handoffs.single().state)
+        vm.detach()
+    }
+
+    @Test
+    fun a_hub_without_receipts_draws_no_chips_and_is_not_asked() = runTest {
+        val fake = FakeControl(OperatorStatus(ready = true, session = SessionRow(id = 5)))
+        fake.handoffs = listOf(ControlHandoff(id = 1, kind = "session", sessionId = 3))
+        val tools = CONTROL_TOOLS - HubCapabilities.CONTROL_HANDOFFS
+        val vm = ControlViewModel(ControlFleet(tools), fake, fake, backgroundScope, canWrite = true)
+        vm.refresh().join(); runCurrent()
+        assertEquals(0, fake.handoffReads)
+        assertEquals(emptyList(), vm.state.value.handoffs)
+    }
+
+    @Test
+    fun each_kind_of_handoff_reads_as_a_chip() {
+        val ended = handoffChip(ControlHandoff(id = 1, kind = "session", sessionId = 9, preview = "Fix CI"), emptyList())
+        assertEquals(HandoffChip(1, "Sent to Fix CI · ended", null), ended)
+        val mission = handoffChip(ControlHandoff(id = 2, kind = "mission", missionId = 4, missionName = "Release", missionState = "active"), emptyList())
+        assertEquals(HandoffChip(2, "Mission Release", "working"), mission)
+        val task = handoffChip(ControlHandoff(id = 3, kind = "task", item = HandoffItem(7, "Write docs", "done")), emptyList())
+        assertEquals(HandoffChip(3, "Task Write docs", "done"), task)
+        val tree = handoffChip(
+            ControlHandoff(
+                id = 4,
+                kind = "tree",
+                item = HandoffItem(1, "Ship 2.0", "todo"),
+                items = listOf(HandoffItem(2, "a", "todo", "proposed"), HandoffItem(3, "b", "todo", "accepted")),
+            ),
+            emptyList(),
+        )
+        assertEquals("Proposed 2 subtasks under Ship 2.0 · 1 to decide on the desktop", tree.label)
+        assertEquals("waiting", tree.state)
+        assertEquals("failed", handoffSessionState(SessionRow(id = 1, claudeStatus = "working", stuckKind = "oom")))
+    }
+
+    @Test
+    fun the_newest_three_show_oldest_first() {
+        val hs = (5L downTo 1L).map { ControlHandoff(id = it, kind = "task", item = HandoffItem(it, "t$it", "todo")) }
+        assertEquals(listOf(3L, 4L, 5L), handoffChips(hs, emptyList()).map { it.id })
     }
 
     @Test

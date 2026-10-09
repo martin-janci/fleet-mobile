@@ -106,6 +106,7 @@ import dev.claudefleet.mobile.ui.ControlHeader
 import dev.claudefleet.mobile.ui.ControlViewModel
 import dev.claudefleet.mobile.ui.ControlViews
 import dev.claudefleet.mobile.ui.ControlWaiting
+import dev.claudefleet.mobile.ui.HandoffChips
 import dev.claudefleet.mobile.ui.FilesHandlers
 import dev.claudefleet.mobile.ui.FilesScreen
 import dev.claudefleet.mobile.ui.FilesViewModel
@@ -1491,7 +1492,10 @@ private fun FleetRoute(
                                         ControlHeader(subtitle, views)
                                         ErrorBanner(controlState.error, onDismiss = control::dismissError)
                                     },
-                                    aboveComposer = { ConfirmCards(controlState) { nonce, ok -> control.answer(nonce, ok) } },
+                                    aboveComposer = {
+                                        HandoffChips(controlState.handoffs, onOpenSession = nav::open)
+                                        ConfirmCards(controlState) { nonce, ok -> control.answer(nonce, ok) }
+                                    },
                                 ),
                             )
                         }

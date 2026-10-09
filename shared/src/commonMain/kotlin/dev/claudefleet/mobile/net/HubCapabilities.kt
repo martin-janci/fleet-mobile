@@ -56,6 +56,9 @@ data class HubCapabilities(
      */
     val confirms: Boolean get() = MCP_CONFIRMS in tools && ANSWER_MCP_CONFIRM in tools
 
+    /** What Control's agent handed on (`control_handoffs`, redesign 9.3), for its chips. */
+    val handoffs: Boolean get() = CONTROL_HANDOFFS in tools
+
     /**
      * The hub keeps the composer's chip row (`quick_replies`). Absent on a hub
      * older than that tool — the app then draws its cached chips and never
@@ -239,6 +242,7 @@ data class HubCapabilities(
         const val OPERATOR_STATUS = "operator_status"
         const val MCP_CONFIRMS = "mcp_confirms"
         const val ANSWER_MCP_CONFIRM = "answer_mcp_confirm"
+        const val CONTROL_HANDOFFS = "control_handoffs"
         const val QUICK_REPLIES = "quick_replies"
         const val SESSION_TOOL_DETAIL = "session_tool_detail"
         const val LIST_PAGES = "list_pages"
