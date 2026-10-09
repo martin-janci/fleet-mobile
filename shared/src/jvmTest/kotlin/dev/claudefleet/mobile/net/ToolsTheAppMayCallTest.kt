@@ -151,6 +151,8 @@ class ToolsTheAppMayCallTest {
         "repo_commit_diff",
         "repo_tree",
         "repo_file",
+        // How far the branch is from its remote and its base (r09 A3).
+        "repo_branch_diff",
         // The Usage screen: estimated usage and the fleet's Claude accounts,
         // both readonly and `Access::Client`.
         "usage_report",

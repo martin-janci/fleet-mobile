@@ -1213,6 +1213,7 @@ private fun FleetRoute(
                     }
                 }
                 is Screen.NewSession -> key(current) {
+                    val ticketsAvailable = tickets.state.collectAsState().value.available
                     NewSessionRoute(
                         initialHost = current.hostAlias,
                         ticketKey = current.ticketKey,
@@ -1226,6 +1227,9 @@ private fun FleetRoute(
                         onCreated = nav::created,
                         onBack = { nav.back() },
                         wizard = layout == PhoneLayout.New,
+                        // r09 B14: the tickets list lives on Sessions; its Start comes back here.
+                        onFromTicket = { nav.select(Tab.Sessions); tickets.open(); Unit }
+                            .takeIf { ticketsAvailable },
                     )
                 }
                 is Screen.Session -> key(current.id) {
@@ -2118,6 +2122,7 @@ private fun NewSessionRoute(
     onCreated: (Long) -> Unit,
     onBack: () -> Unit,
     wizard: Boolean = false,
+    onFromTicket: (() -> Unit)? = null,
 ) {
     val scope = rememberWorkScope()
     val vm = remember(repository, scope) {
@@ -2208,6 +2213,7 @@ private fun NewSessionRoute(
             onDismissError = tools::dismissError,
             onTyped = { addTyped = it },
         ),
+        onFromTicket = onFromTicket,
     )
     if (askDiscard) {
         DiscardSheet(onKeep = { askDiscard = false }, onDiscard = { askDiscard = false; onBack() })

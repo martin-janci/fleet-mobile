@@ -47,6 +47,7 @@ import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.TidyReport
 import dev.claudefleet.mobile.model.Mission
 import dev.claudefleet.mobile.model.FailingRoutine
+import dev.claudefleet.mobile.model.BranchDiff
 import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.DebugDevice
 import dev.claudefleet.mobile.model.DebugDeviceList
@@ -742,6 +743,12 @@ class HubClient(
     suspend fun repoChanges(sessionId: Long): List<ChangedFile> =
         call("repo_changes", buildJsonObject { put("session_id", sessionId) }) {
             json.decodeFromJsonElement(ListSerializer(ChangedFile.serializer()), it)
+        }
+
+    /** What a session's branch carries: unpushed commits, and how far it is past the base (`repo_branch_diff`, readonly). */
+    suspend fun repoBranchDiff(sessionId: Long): BranchDiff =
+        call("repo_branch_diff", buildJsonObject { put("session_id", sessionId) }) {
+            json.decodeFromJsonElement(BranchDiff.serializer(), it)
         }
 
     /** A session's worktree files (`repo_tree`, readonly). */

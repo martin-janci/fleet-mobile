@@ -113,6 +113,8 @@ data class HubCapabilities(
     val repo: Boolean get() = REPO_CHANGES in tools && REPO_DIFF in tools
     val repoLog: Boolean get() = REPO_LOG in tools && REPO_COMMIT in tools && REPO_COMMIT_DIFF in tools
     val repoFiles: Boolean get() = REPO_TREE in tools && REPO_FILE in tools
+    /** Changes says how far the branch is from its remote and its base (r09 A3). */
+    val repoBranch: Boolean get() = REPO_BRANCH_DIFF in tools
 
     /** A review session, a workspace repair, a background agent — all writes. */
     val spawnReview: Boolean get() = SPAWN_REVIEW in tools
@@ -304,6 +306,7 @@ data class HubCapabilities(
         const val REPO_COMMIT = "repo_commit"
         const val REPO_COMMIT_DIFF = "repo_commit_diff"
         const val REPO_TREE = "repo_tree"
+        const val REPO_BRANCH_DIFF = "repo_branch_diff"
         const val REPO_FILE = "repo_file"
         const val RELATED_SESSIONS = "related_sessions"
         const val LIST_TASKS = "list_tasks"

@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.data
 
+import dev.claudefleet.mobile.model.BranchDiff
 import dev.claudefleet.mobile.model.ChangedFile
 import dev.claudefleet.mobile.model.Commit
 import dev.claudefleet.mobile.model.CommitDetail
@@ -22,6 +23,9 @@ interface RepoActions {
     suspend fun commitDiff(sessionId: Long, hash: String, path: String): FileDiff
     suspend fun tree(sessionId: Long): RepoTree
     suspend fun file(sessionId: Long, path: String): FileContent
+
+    /** Null where the hub cannot say (and in fakes that do not care). */
+    suspend fun branch(sessionId: Long): BranchDiff? = null
 }
 
 class HubRepoActions(private val session: AppSession) : RepoActions {
@@ -33,4 +37,5 @@ class HubRepoActions(private val session: AppSession) : RepoActions {
         session.withClient { it.repoCommitDiff(sessionId, hash, path) }
     override suspend fun tree(sessionId: Long) = session.withClient { it.repoTree(sessionId) }
     override suspend fun file(sessionId: Long, path: String) = session.withClient { it.repoFile(sessionId, path) }
+    override suspend fun branch(sessionId: Long): BranchDiff? = session.withClient { it.repoBranchDiff(sessionId) }
 }
