@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.model.BackgroundOptions
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -89,7 +90,7 @@ internal fun NewSessionWizard(
     onCreate: () -> Unit,
     onDismissError: () -> Unit,
     multiStart: MultiStartHandlers,
-    onStartBackground: (String, String) -> Unit,
+    onStartBackground: (String, String, BackgroundOptions) -> Unit,
     tools: ProjectToolsUiState,
     toolHandlers: ProjectToolsHandlers,
     onSelectWorktree: (Long?) -> Unit,
@@ -138,12 +139,14 @@ internal fun NewSessionWizard(
     if (askingBackground) {
         BackgroundAgentDialog(
             host = state.host.orEmpty(),
-            onStart = { name, prompt ->
+            onStart = { name, prompt, options ->
                 askingBackground = false
                 background = true
-                onStartBackground(name, prompt)
+                onStartBackground(name, prompt, options)
             },
             onDismiss = { askingBackground = false },
+            options = state.backgroundOptions,
+            project = state.projectLabel.takeIf { state.projectId != null },
         )
     }
 

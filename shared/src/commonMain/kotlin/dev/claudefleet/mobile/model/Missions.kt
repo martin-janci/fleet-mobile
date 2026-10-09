@@ -214,6 +214,17 @@ fun dollars(micros: Long): String {
     return "$sign\$${c / 100}.${(c % 100).toString().padStart(2, '0')}"
 }
 
+/**
+ * The next run's likely cost (contract 14, redesign 14.16): "Next run about
+ * $0.42 · the average of 5 runs of this mission", or "… across the fleet"
+ * while the mission has no history of its own.
+ */
+fun runEstimateLine(e: RunEstimate): String {
+    val runs = if (e.runs == 1) "1 run" else "${e.runs} runs"
+    val where = if (e.basis == "mission") "of this mission" else "across the fleet"
+    return "Next run about ${dollars(e.micros)} · the average of $runs $where"
+}
+
 /** What the autonomy level lets the loop do, in words. */
 fun autonomyLabel(level: Int): String = when (level) {
     0 -> "keeps the cards only"

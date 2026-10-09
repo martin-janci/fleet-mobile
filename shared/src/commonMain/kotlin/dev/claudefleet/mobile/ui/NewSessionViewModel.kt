@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.NewSessionRequest
 import dev.claudefleet.mobile.data.WorkActions
+import dev.claudefleet.mobile.model.BackgroundOptions
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.MultiStart
 import dev.claudefleet.mobile.model.OrgDirectory
@@ -54,6 +55,8 @@ data class NewSessionUiState(
     val worktreeId: Long? = null,
     /** A background agent may be started from here (`new_bg_session`, a pairing that may write, not ticket mode). */
     val backgroundAvailable: Boolean = false,
+    /** The hub takes a background agent's project, read-only and stop-after (contract 14, redesign 14.16). */
+    val backgroundOptions: Boolean = false,
     val hosts: List<HostChoice> = emptyList(),
     /** The host the session will go to: the person's pick, or the form's guess. */
     val host: String? = null,
@@ -371,14 +374,25 @@ class NewSessionViewModel(
      * next reconcile when the hub could not match it at once; then
      * [onUntracked] says so rather than [onCreated] opening nothing.
      */
-    fun startBackground(name: String, prompt: String, onUntracked: (String?) -> Unit): Job? {
+    fun startBackground(
+        name: String,
+        prompt: String,
+        options: BackgroundOptions = BackgroundOptions(),
+        onUntracked: (String?) -> Unit,
+    ): Job? {
         val s = current()
         val host = s.host ?: return null
         if (!s.backgroundAvailable || s.creating || prompt.isBlank()) return null
         local.update { it.copy(creating = true, error = null) }
         return callScope.launch {
             try {
-                val result = actions.newBackground(host, name.trim().ifEmpty { prompt.trim().take(40) }, prompt.trim())
+                val shownName = name.trim().ifEmpty { prompt.trim().take(40) }
+                // In the project picked on the form, when the hub takes one (contract 14).
+                val result = if (s.backgroundOptions) {
+                    actions.newBackground(host, shownName, prompt.trim(), options.copy(projectId = options.projectId ?: s.projectId))
+                } else {
+                    actions.newBackground(host, shownName, prompt.trim())
+                }
                 local.update { it.copy(creating = false) }
                 val row = result.session
                 if (row != null) onCreated(row.id) else onUntracked(result.warning)
@@ -554,6 +568,7 @@ class NewSessionViewModel(
             confirm = confirm,
             result = l.result,
             backgroundAvailable = canWrite && ticketKey == null && caps.newBgSession,
+            backgroundOptions = caps.accepts(HubCapabilities.NEW_BG_SESSION, "read_only"),
             worktreeId = l.worktreeId,
         )
     }

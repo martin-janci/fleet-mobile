@@ -1,5 +1,8 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.model.BackgroundOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import dev.claudefleet.mobile.ui.components.DangerTextButton
@@ -84,7 +87,7 @@ fun NewSessionScreen(
     modifier: Modifier = Modifier,
     multiStart: MultiStartHandlers = MultiStartHandlers(),
     /** Start a background agent on the chosen host, with a name and a prompt. */
-    onStartBackground: (String, String) -> Unit = { _, _ -> },
+    onStartBackground: (String, String, BackgroundOptions) -> Unit = { _, _, _ -> },
     /** Adding a project, and the chosen project's worktrees on the chosen host. */
     tools: ProjectToolsUiState = ProjectToolsUiState(),
     toolHandlers: ProjectToolsHandlers = ProjectToolsHandlers(),
@@ -141,8 +144,10 @@ fun NewSessionScreen(
     if (askingBackground) {
         BackgroundAgentDialog(
             host = state.host.orEmpty(),
-            onStart = { name, prompt -> askingBackground = false; onStartBackground(name, prompt) },
+            onStart = { name, prompt, options -> askingBackground = false; onStartBackground(name, prompt, options) },
             onDismiss = { askingBackground = false },
+            options = state.backgroundOptions,
+            project = state.projectLabel.takeIf { state.projectId != null },
         )
     }
     Column(modifier = modifier.fillMaxSize()) {
@@ -445,16 +450,32 @@ internal val IDENTIFIER_KEYBOARD = KeyboardOptions(
 )
 
 /** A background agent: a name (optional — the prompt names it otherwise) and the task it starts on. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun BackgroundAgentDialog(host: String, onStart: (String, String) -> Unit, onDismiss: () -> Unit) {
+internal fun BackgroundAgentDialog(
+    host: String,
+    onStart: (String, String, BackgroundOptions) -> Unit,
+    onDismiss: () -> Unit,
+    /** The hub takes project, read-only and stop-after (contract 14): the limits are offered. */
+    options: Boolean = false,
+    /** The project picked on the form, which the agent starts in. */
+    project: String? = null,
+) {
     var name by remember { mutableStateOf("") }
     var prompt by remember { mutableStateOf("") }
+    var readOnly by remember { mutableStateOf(false) }
+    var stopAfter by remember { mutableStateOf<Long?>(null) }
+    var spend by remember { mutableStateOf<Double?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Background agent on $host") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+            ) {
                 Text("A headless Claude session the fleet supervises, started on the task below. It shows in the list once the hub has matched it.")
+                if (options) Text(if (project != null) "Agent: Claude · in $project" else "Agent: Claude", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, label = { Text("Name (optional)") })
                 OutlinedTextField(
                     value = prompt,
@@ -463,12 +484,43 @@ internal fun BackgroundAgentDialog(host: String, onStart: (String, String) -> Un
                     label = { Text("Task") },
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
                 )
+                if (options) {
+                    // MobileMissions' background agent: read-only and a stop after time or money.
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Read only")
+                            Text("No edits, commits or pushes", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(checked = readOnly, onCheckedChange = { readOnly = it })
+                    }
+                    Text("Stop after", style = MaterialTheme.typography.labelMedium)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for ((secs, label) in BACKGROUND_STOP_AFTER) ChoiceChip(label, stopAfter == secs, { stopAfter = secs })
+                    }
+                    Text("Spend limit", style = MaterialTheme.typography.labelMedium)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for ((usd, label) in BACKGROUND_SPEND) ChoiceChip(label, spend == usd, { spend = usd })
+                    }
+                }
             }
         },
-        confirmButton = { TextButton(onClick = { onStart(name, prompt) }, enabled = prompt.isNotBlank()) { Text("Start") } },
+        confirmButton = {
+            TextButton(
+                onClick = { onStart(name, prompt, BackgroundOptions(readOnly = readOnly, stopAfterSecs = stopAfter, stopAfterUsd = spend)) },
+                enabled = prompt.isNotBlank(),
+            ) { Text("Start") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
+
+/** A background agent's stop-after choices, within the hub's 60 s to 7 days. */
+internal val BACKGROUND_STOP_AFTER: List<Pair<Long?, String>> =
+    listOf(null to "No limit", 3_600L to "1 hour", 14_400L to "4 hours", 86_400L to "1 day")
+
+/** Its spend-limit choices, within the hub's (0, 1000]. */
+internal val BACKGROUND_SPEND: List<Pair<Double?, String>> =
+    listOf(null to "No limit", 1.0 to "$1", 5.0 to "$5", 20.0 to "$20")
 
 /** What the project tools report. */
 data class ProjectToolsHandlers(

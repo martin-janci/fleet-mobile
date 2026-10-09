@@ -62,6 +62,7 @@ import dev.claudefleet.mobile.model.TidyApplied
 import dev.claudefleet.mobile.model.ReopenedWork
 import dev.claudefleet.mobile.model.PastWorkSummary
 import dev.claudefleet.mobile.model.RepairReport
+import dev.claudefleet.mobile.model.BackgroundOptions
 import dev.claudefleet.mobile.model.NewBgSessionResult
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SendPromptResult
@@ -607,13 +608,23 @@ class HubClient(
         }
 
     /** A supervised headless Claude session on [hostAlias] with [prompt] (`new_bg_session`). */
-    suspend fun newBgSession(hostAlias: String, name: String, prompt: String): NewBgSessionResult =
+    suspend fun newBgSession(
+        hostAlias: String,
+        name: String,
+        prompt: String,
+        options: BackgroundOptions = BackgroundOptions(),
+    ): NewBgSessionResult =
         call(
             "new_bg_session",
             buildJsonObject {
                 put("host_alias", hostAlias)
                 put("name", name)
                 put("prompt", prompt)
+                // Contract 14; each only when set, so an older hub sees the call it knew.
+                options.projectId?.let { put("project_id", it) }
+                if (options.readOnly) put("read_only", true)
+                options.stopAfterSecs?.let { put("stop_after_secs", it) }
+                options.stopAfterUsd?.let { put("stop_after_usd", it) }
             },
         ) { json.decodeFromJsonElement(NewBgSessionResult.serializer(), it) }
 

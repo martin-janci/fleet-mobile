@@ -70,6 +70,21 @@ data class RepairReport(
     @SerialName("needs_explicit_repair") val needsExplicitRepair: Boolean = false,
 )
 
+/**
+ * `new_bg_session`'s optional arguments (hub contract 14, redesign 14.16):
+ * the project to start in, read-only (no Edit, Write, commit or push), and a
+ * stop after so many seconds or dollars. The agent is always Claude: the hub
+ * refuses a Codex background agent. Unset fields are not sent.
+ */
+data class BackgroundOptions(
+    val projectId: Long? = null,
+    val readOnly: Boolean = false,
+    /** 60 s to 7 days. */
+    val stopAfterSecs: Long? = null,
+    /** Above 0, at most 1000. */
+    val stopAfterUsd: Double? = null,
+)
+
 /** `new_bg_session`: the headless session's Claude id, and its fleet row once reconcile matched it. */
 @Serializable
 data class NewBgSessionResult(

@@ -2179,7 +2179,7 @@ private fun NewSessionRoute(
         onDismissError = vm::dismissError,
         // An agent the hub could not match to a row yet has no screen to
         // open: back to the list, where it appears with the next pass.
-        onStartBackground = { name, prompt -> vm.startBackground(name, prompt) { onBack() } },
+        onStartBackground = { name, prompt, options -> vm.startBackground(name, prompt, options) { onBack() } },
         tools = toolsState,
         toolHandlers = ProjectToolsHandlers(
             onOpenAdd = {

@@ -1,6 +1,8 @@
 package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.model.Mission
+import dev.claudefleet.mobile.model.RunEstimate
+import dev.claudefleet.mobile.model.runEstimateLine
 import dev.claudefleet.mobile.ui.kit.StatusWord
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -70,5 +72,39 @@ class OrbitMissionsTest {
         assertTrue(nav.isPushed(Screen.Missions))
         nav.back()
         assertEquals(Screen.Control, nav.screen.value)
+    }
+
+    /** Contract 14: a row says what the mission spent, against its budget when a grant sets one. */
+    @Test
+    fun a_row_says_what_the_mission_spent() {
+        val m = mission(1, "active", done = 1, total = 5)
+        assertNull(missionSpend(m), "an older hub sends no spend")
+        assertEquals("step 2 of 5", missionRowLine(m))
+        assertNull(missionSpend(m.copy(costMicros = 0)), "nothing spent and no budget says nothing")
+        assertEquals("step 2 of 5 · $1.20 spent", missionRowLine(m.copy(costMicros = 1_200_000)))
+        assertEquals("$1.20 of $5.00", missionSpend(m.copy(costMicros = 1_200_000, budgetMicros = 5_000_000)))
+        assertEquals("$0.00 of $5.00", missionSpend(m.copy(costMicros = 0, budgetMicros = 5_000_000)))
+    }
+
+    /** The plan says what the next run will likely cost, and from what. */
+    @Test
+    fun the_run_estimate_says_its_basis() {
+        assertEquals(
+            "Next run about $0.42 · the average of 5 runs of this mission",
+            runEstimateLine(RunEstimate(micros = 420_000, runs = 5, basis = "mission")),
+        )
+        assertEquals(
+            "Next run about $1.00 · the average of 1 run across the fleet",
+            runEstimateLine(RunEstimate(micros = 1_000_000, runs = 1, basis = "fleet")),
+        )
+    }
+
+    /** The background agent's limits stay within what the hub takes. */
+    @Test
+    fun the_background_limits_are_within_the_hubs_bounds() {
+        assertTrue(BACKGROUND_STOP_AFTER.mapNotNull { it.first }.all { it in 60L..604_800L })
+        assertTrue(BACKGROUND_SPEND.mapNotNull { it.first }.all { it > 0 && it <= 1000 })
+        assertNull(BACKGROUND_STOP_AFTER.first().first, "no limit is the default")
+        assertNull(BACKGROUND_SPEND.first().first, "no limit is the default")
     }
 }
