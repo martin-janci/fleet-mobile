@@ -38,8 +38,10 @@ fun StatusStrip(
     context: ConvContext?,
     nowSeconds: Long,
     modifier: Modifier = Modifier,
+    /** The update stream is up; see [statusStripText]. */
+    live: Boolean = true,
 ) {
-    val text = statusStripText(row, context, nowSeconds)
+    val text = statusStripText(row, context, nowSeconds, live)
     if (text.isBlank()) return
     val amber = contextIsTight(row, context)
     val colors = LocalStatusColors.current(StatusTone.BLOCKED)
@@ -98,14 +100,21 @@ internal const val CONTEXT_WARNING_PCT: Double = 80.0
  * conversation read's context view, falling back to [SessionRow.contextPct]
  * when the transcript tail carried none.
  *
+ * While not [live] (the update stream is down) a working session reads
+ * "was working · no live updates" and its clock stops.
+ *
  * Cost, model and context are only shown while the agent is actually
  * [working][ConvContext] — that is what makes them belong to *this* turn
  * rather than reading as leftover numbers on a session that has gone idle.
  * `idle` says only how long ago it stopped; any other status is shown as the
  * bare word, since nothing else here has a caption for it yet.
  */
-fun statusStripText(row: SessionRow?, context: ConvContext?, nowSeconds: Long): String {
+fun statusStripText(row: SessionRow?, context: ConvContext?, nowSeconds: Long, live: Boolean = true): String {
     if (row == null) return ""
+    // Without the stream "working 4 min" is a guess that keeps counting: the
+    // session may have stopped minutes ago. Say what was last known, that it
+    // is not live, and stop the clock (14.12: stale data marked stale).
+    if (!live && row.claudeStatus == "working" && row.stuckKind.isNullOrBlank()) return "was working · no live updates"
     // Stuck before any status: it is what a person has to go and clear, and
     // what it is stuck on is the useful half.
     row.stuckKind?.takeIf { it.isNotBlank() }?.let { return "stuck · ${it.replace('_', ' ')}" }

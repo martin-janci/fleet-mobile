@@ -37,16 +37,26 @@ private const val FALLBACK = "something went wrong"
 
 /**
  * [explain] for a pairing attempt, the very first thing a new user does: the
- * common refusals in words, with what to do next, and the hub's own answer
- * kept after them for whoever reads the hub's log.
+ * common refusals in words, with what to do next. The hub's own answer (the
+ * HTTP status, the transport's kind) is [pairDetails]'s, for a Details line —
+ * a person reading "HTTP 404: invalid code" learns nothing they can act on.
  */
 internal fun explainPair(t: Throwable): String = when {
     t is HubError.Http && t.status == 404 ->
         "That code didn't work. A code works once and expires a few minutes after it is made — " +
-            "run `fleet-hub pair` for a new one. (${explain(t)})"
+            "run `fleet-hub pair` for a new one."
     t is HubError.Http && t.status == 429 ->
-        "Too many tries in a row. Wait a minute, then try again. (${explain(t)})"
+        "Too many tries in a row. Wait a minute, then try again."
     t is HubError.Transport ->
-        "Can't reach that address. Check it, and that this phone can reach the hub's network. (${explain(t)})"
+        "Can't reach that address. Check it, and that this phone can reach the hub's network."
+    t is HubError.Http -> "The hub turned this pairing down. Try a new code, and check the hub's log if it happens again."
+    // Written for a person, and promised to carry nothing from outside.
+    t is NotAPairingCode || t is SecretsUnavailable -> explain(t)
+    else -> "Couldn't pair with that hub. What went wrong is under Details."
+}
+
+/** The technical half of a pairing failure, for Details; null when [explainPair] already said all of it. */
+internal fun pairDetails(t: Throwable): String? = when (t) {
+    is NotAPairingCode, is SecretsUnavailable -> null
     else -> explain(t)
 }

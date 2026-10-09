@@ -139,7 +139,7 @@ fun PairScreen(
                 )
             }
             val errorAsFriendly = state.error?.let {
-                Friendly(title = "Couldn't pair", body = it.replaceFirstChar { c -> c.uppercaseChar() }, isError = true)
+                Friendly(title = "Couldn't pair", body = it.replaceFirstChar { c -> c.uppercaseChar() }, isError = true, details = state.errorDetails)
             }
             ErrorBanner(reasonAsFriendly, onDismiss = onDismissReason, modifier = Modifier.clip(phoneCard()))
             if (reasonAsFriendly != null && errorAsFriendly != null) Spacer(Modifier.height(8.dp))

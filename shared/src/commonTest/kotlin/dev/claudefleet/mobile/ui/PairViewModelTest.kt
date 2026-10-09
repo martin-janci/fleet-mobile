@@ -503,7 +503,11 @@ class PairViewModelTest {
         runCurrent()
 
         val error = assertNotNull(vm.state.value.error)
-        assertTrue("404" in error, "the hub's own words should survive: $error")
+        // Review r13 (P13-5): the sentence is plain; the hub's own words go
+        // behind Details, where an operator still finds them.
+        assertFalse("404" in error, "the HTTP status reached the sentence: $error")
+        val details = assertNotNull(vm.state.value.errorDetails)
+        assertTrue("404" in details, "the hub's own words should survive: $details")
         assertNull(vm.state.value.paired)
         assertFalse(vm.state.value.pairing)
     }

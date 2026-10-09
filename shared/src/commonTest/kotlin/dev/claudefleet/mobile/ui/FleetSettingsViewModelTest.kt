@@ -112,13 +112,29 @@ class FleetSettingsViewModelTest {
 
         assertFalse(vm.state.value.loading)
         assertFalse(vm.state.value.loaded)
-        assertNotNull(vm.state.value.error)
+        // A failed read is the home screen's to draw, with Retry: a plain
+        // sentence up front, the code only behind Details.
+        val failed = assertNotNull(vm.state.value.loadError)
+        assertFalse("E_FORBIDDEN" in failed.body, failed.body)
+        assertEquals("E_FORBIDDEN: nope", failed.details)
 
         // the scope survived: the very same view-model loads again
         hub.failPages = null
         vm.load(); runCurrent()
         assertTrue(vm.state.value.loaded)
+        assertNull(vm.state.value.loadError)
         assertNull(vm.state.value.error)
+    }
+
+    @Test
+    fun a_refused_write_is_said_in_words_without_its_code() = runTest {
+        val hub = FakeHub()
+        hub.refuseWrite = HubError.Tool("E_INVALID", "must be between 1 and 30")
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+        vm.set("work.recent_days", "99"); runCurrent()
+        val said = assertNotNull(vm.state.value.fieldErrors["work.recent_days"])
+        assertEquals("must be between 1 and 30", said)
     }
 
     @Test

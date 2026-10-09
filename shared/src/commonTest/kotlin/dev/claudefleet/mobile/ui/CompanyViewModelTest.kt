@@ -43,6 +43,24 @@ private class CompanyCalls(var answer: List<OrgDetail>) : CompanyActions {
 
 class CompanyViewModelTest {
 
+    /** Review r13 (P13-9): a failed read is not "No organisations this device can see". */
+    @Test
+    fun a_failed_read_is_marked_failed_not_empty() = runTest {
+        val calls = CompanyCalls(emptyList())
+        calls.fail = dev.claudefleet.mobile.net.HubError.Transport(IllegalStateException("x"))
+        val vm = CompanyViewModel(CompanyFleet(setOf(HubCapabilities.WORK)), calls, backgroundScope)
+        vm.load().join()
+        runCurrent()
+        assertTrue(vm.state.value.listFailed)
+        assertFalse(vm.state.value.loaded)
+
+        calls.fail = null
+        vm.refresh().join()
+        runCurrent()
+        assertFalse(vm.state.value.listFailed)
+        assertTrue(vm.state.value.loaded)
+    }
+
     private val work = setOf(HubCapabilities.WORK)
 
     @Test

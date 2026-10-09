@@ -53,6 +53,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import dev.claudefleet.mobile.data.ConnectionStatus
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 
 /*
  * Control on the phone (redesign 9.8 and 14.7, the MobileControl board): the
@@ -85,9 +88,27 @@ data class ControlUiState(
     /** What Control handed on, oldest first, as chips (redesign 9.3); empty on a hub without the receipts. */
     val handoffs: List<HandoffChip> = emptyList(),
     val error: Friendly? = null,
+    /** The stream to the hub is up: while it is not, nothing here can be asked. */
+    val connected: Boolean = true,
+    /** The last `operator_status` read failed: Control's state is unknown, not "not running". */
+    val statusFailed: Boolean = false,
 ) {
     /** Waking may help: nothing runs, or what ran is gone or lost its tools. */
-    val canWake: Boolean get() = available && sessionId == null && (blocked == null || blocked in WAKEABLE)
+    val canWake: Boolean get() = available && connected && !statusFailed && sessionId == null && (blocked == null || blocked in WAKEABLE)
+}
+
+/**
+ * What the Control tab says before there is a conversation. A failed status
+ * read is not "Control is not running" — nothing is known — and a hub that is
+ * down is said to be down rather than asked about.
+ */
+internal fun controlWaitingLine(state: ControlUiState): String = when {
+    !state.available -> "The hub does not offer Control to this device."
+    !state.connected -> "Not connected to the hub. Control's state shows once it answers."
+    state.waking -> "Waking Control…"
+    state.statusFailed -> "Couldn't read Control's state."
+    !state.known -> "Asking the hub about Control…"
+    else -> controlBlockedLine(state.blocked, state.host)
 }
 
 private val WAKEABLE = setOf("absent", "lost", "no_mcp")
@@ -102,7 +123,8 @@ fun controlBlockedLine(blocked: String?, host: String?): String {
         "token_revoked" -> "Control's token was revoked. Mint a new one on the desktop: Settings › Devices."
         "no_host" -> "Control has no host to run on. Choose one on the desktop: Settings › Control."
         "host_down" -> "Control's host$on does not answer. It comes back when the host does."
-        else -> "Control cannot take a message right now ($blocked)."
+        // The hub's own word for it is not a sentence; it stays off the screen.
+        else -> "Control cannot take a message right now."
     }
 }
 
@@ -129,31 +151,34 @@ class ControlViewModel(
         val answering: Set<String> = emptySet(),
         val handoffs: List<ControlHandoff> = emptyList(),
         val error: Friendly? = null,
+        val statusFailed: Boolean = false,
     )
 
     private val local = MutableStateFlow(Local())
     private var loop: Job? = null
 
     val state: StateFlow<ControlUiState> =
-        combine(local, fleet.capabilities, fleet.sessions) { l, caps, rows -> assemble(l, caps, rows) }
-            .stateIn(scope, SharingStarted.Eagerly, assemble(local.value, fleet.capabilities.value, fleet.sessions.value))
+        combine(local, fleet.capabilities, fleet.sessions, fleet.status) { l, caps, rows, status -> assemble(l, caps, rows, status) }
+            .stateIn(scope, SharingStarted.Eagerly, assemble(local.value, fleet.capabilities.value, fleet.sessions.value, fleet.status.value))
 
-    private fun assemble(l: Local, caps: HubCapabilities, rows: List<SessionRow>): ControlUiState {
+    private fun assemble(l: Local, caps: HubCapabilities, rows: List<SessionRow>, status: ConnectionStatus): ControlUiState {
         val available = canWrite && caps.agent
-        val status = l.status
-        val sessionId = status?.session?.id?.takeIf { status.ready } ?: l.woken
+        val op = l.status
+        val sessionId = op?.session?.id?.takeIf { op.ready } ?: l.woken
         return ControlUiState(
             available = available,
             known = l.known || !caps.operatorStatus,
             sessionId = if (available) sessionId else null,
-            blocked = status?.blocked?.takeIf { sessionId == null },
-            host = status?.host,
+            blocked = op?.blocked?.takeIf { sessionId == null },
+            host = op?.host,
             waking = l.waking,
             canConfirm = caps.confirms,
             confirms = if (caps.confirms) l.confirms else emptyList(),
             answering = l.answering,
             handoffs = if (caps.handoffs) handoffChips(l.handoffs, rows) else emptyList(),
             error = l.error,
+            connected = status is ConnectionStatus.Connected,
+            statusFailed = l.statusFailed,
         )
     }
 
@@ -161,6 +186,16 @@ class ControlViewModel(
     fun attach(): Job {
         loop?.cancel()
         return scope.launch {
+            // Read again whenever what the answer depends on moves: the hub
+            // coming back (a read made while it was down failed), or a
+            // reconnect to a hub that now lists `operator_status`. The first
+            // value is the read below, so it is skipped.
+            launch {
+                combine(fleet.capabilities, fleet.status) { caps, status -> caps.operatorStatus to (status is ConnectionStatus.Connected) }
+                    .distinctUntilChanged()
+                    .drop(1)
+                    .collect { (_, up) -> if (up) readStatus() }
+            }
             readStatus()
             while (isActive && (fleet.capabilities.value.confirms || fleet.capabilities.value.handoffs)) {
                 // Offline or stopped (the app went to the background): no call
@@ -179,8 +214,9 @@ class ControlViewModel(
         loop = null
     }
 
-    /** Re-read Control's state, as after a reconnect or a pull. */
+    /** Re-read Control's state, as after a reconnect or a pull — and the Retry under a failed read. */
     fun refresh(): Job = scope.launch {
+        local.update { it.copy(error = null) }
         readStatus()
         if (fleet.capabilities.value.confirms) readConfirms()
         if (fleet.capabilities.value.handoffs) readHandoffs()
@@ -231,11 +267,11 @@ class ControlViewModel(
         if (!fleet.capabilities.value.operatorStatus) return
         try {
             val status = actions.status()
-            local.update { it.copy(known = true, status = status, woken = if (status.ready) null else it.woken) }
+            local.update { it.copy(known = true, status = status, woken = if (status.ready) null else it.woken, statusFailed = false) }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(known = true, error = friendly(t)) }
+            local.update { it.copy(known = true, error = friendly(t), statusFailed = true) }
         }
     }
 
@@ -382,23 +418,26 @@ fun ControlWaiting(
     onAnswer: (String, Boolean) -> Unit,
     onDismissError: () -> Unit,
     below: @Composable () -> Unit = {},
+    /** Read Control's state again after a failed read. */
+    onRetry: () -> Unit = {},
 ) {
     val o = Fleet.colors
     val gutter = OrbitTokens.spacing("phone-gutter").dp
     Column(modifier = Modifier.fillMaxSize()) {
         ControlHeader(subtitle, views)
-        ErrorBanner(state.error, onDismiss = onDismissError)
+        ErrorBanner(state.error, onDismiss = onDismissError, onRetry = onRetry.takeIf { state.statusFailed && state.connected })
         Column(modifier = Modifier.padding(horizontal = gutter, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
-                when {
-                    !state.available -> "The hub does not offer Control to this device."
-                    !state.known -> "Asking the hub about Control…"
-                    state.waking -> "Waking Control…"
-                    else -> controlBlockedLine(state.blocked, state.host)
-                },
+                controlWaitingLine(state),
                 style = Fleet.type.textMd,
                 color = o.fg2,
             )
+            if (state.available && state.connected && state.statusFailed && !state.waking) {
+                OutlinedButton(
+                    onClick = onRetry,
+                    modifier = Modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp),
+                ) { Text("Retry") }
+            }
             if (state.canWake && state.known) {
                 Button(
                     onClick = onWake,

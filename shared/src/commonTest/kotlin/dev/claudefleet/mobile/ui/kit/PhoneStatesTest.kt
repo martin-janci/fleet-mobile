@@ -1,6 +1,8 @@
 package dev.claudefleet.mobile.ui.kit
 
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.data.FleetRepository
+import dev.claudefleet.mobile.data.STOPPED
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -48,6 +50,37 @@ class PhoneStatesTest {
             PhoneConnection.Offline("the hub refused the token"),
             phoneConnection(ConnectionStatus.Offline("the hub refused the token"), hubLost = false),
         )
+    }
+
+    /** Review r13 (P13-13): before the first connect and while backgrounded nothing has failed yet. */
+    @Test
+    fun not_started_or_stopped_reads_as_the_first_attempt_not_signal_lost() {
+        for (reason in listOf(FleetRepository.NOT_STARTED, STOPPED)) {
+            assertEquals(PhoneConnection.Reconnecting(1), phoneConnection(ConnectionStatus.Offline(reason), hubLost = false), reason)
+            // Past hub-lost-after it may say so, but never with the internal words.
+            assertEquals(PhoneConnection.Offline(null), phoneConnection(ConnectionStatus.Offline(reason), hubLost = true), reason)
+        }
+    }
+
+    /** P13-4: the banner's line is the sentence; the technical half rides along for Details only. */
+    @Test
+    fun the_reconnect_details_ride_along_for_the_details_line() {
+        val retrying = ConnectionStatus.Reconnecting(3, "Can't reach the hub from this network.", "could not reach the hub (IOException)")
+        assertEquals(
+            PhoneConnection.Offline("Can't reach the hub from this network.", "could not reach the hub (IOException)"),
+            phoneConnection(retrying, hubLost = true),
+        )
+    }
+
+    /** P13-9: a failed read is never drawn as the empty state. */
+    @Test
+    fun a_failed_read_is_not_an_empty_list() {
+        assertEquals(ListBody.Failed, listBody(loaded = true, failed = true, empty = true))
+        assertEquals(ListBody.Failed, listBody(loaded = false, failed = true, empty = true))
+        assertEquals(ListBody.Empty, listBody(loaded = true, failed = false, empty = true))
+        assertEquals(ListBody.Loading, listBody(loaded = false, failed = false, empty = true))
+        // Rows already on screen stay; the banner says the refresh failed.
+        assertEquals(ListBody.Rows, listBody(loaded = true, failed = true, empty = false))
     }
 
     @Test

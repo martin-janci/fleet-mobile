@@ -21,10 +21,11 @@ import dev.claudefleet.mobile.net.sentence
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -55,8 +56,12 @@ sealed interface ConnectionStatus {
      * never what it was retrying from. It is a sentence from `explain`, not a
      * raw throwable message, for the same reason every other string that
      * reaches a screen is.
+     *
+     * [reason] is a plain sentence ([connectionReason]); [details] is what
+     * `explain` says about the same failure — the exception's kind, an HTTP
+     * status — for a Details line and never for the banner's own text.
      */
-    data class Reconnecting(val attempt: Int, val reason: String?) : ConnectionStatus
+    data class Reconnecting(val attempt: Int, val reason: String?, val details: String? = null) : ConnectionStatus
 
     /** Not streaming, and not going to without a nudge. */
     data class Offline(val reason: String) : ConnectionStatus
@@ -229,6 +234,24 @@ class FleetRepository(
     }
 
     /**
+     * Wakes a waiting [follow]: the backoff's sleep ends now and the count of
+     * failures starts again, so the next attempt is the first one's short wait
+     * rather than the 30 s cap. What a HubBanner Retry calls — without it,
+     * Retry re-listed over a dead stream and the banner stayed up until the
+     * backoff came round on its own. Conflated: a burst of taps is one wake.
+     * Starts the loop when it is not running (the lifecycle stopped it).
+     */
+    override fun reconnectNow() {
+        if (job?.isActive != true) {
+            start()
+            return
+        }
+        wake.trySend(Unit)
+    }
+
+    private val wake = Channel<Unit>(Channel.CONFLATED)
+
+    /**
      * Re-list everything, replacing the snapshot.
      *
      * All or nothing: the flows are written only once every call has answered,
@@ -329,6 +352,7 @@ class FleetRepository(
     private suspend fun follow() {
         var failures = 0
         var reason: String? = null
+        var details: String? = null
         // The first attempt, announced once. Every later one is announced by
         // the line at the foot of the loop, before the wait — which is where it
         // has to be, so the banner names the attempt a person is waiting
@@ -441,6 +465,7 @@ class FleetRepository(
                     }
                 }
                 reason = STREAM_CLOSED
+                details = null
             } catch (e: CancellationException) {
                 throw e
             } catch (e: HubError.Unauthorized) {
@@ -459,11 +484,22 @@ class FleetRepository(
                 // was never drawn; now that the banner shows it, it is the
                 // difference between a sentence written for a person and
                 // whatever a library author put in a constructor.
-                reason = explain(t)
+                //
+                // And now not `explain(t)` on the banner either: that names
+                // the exception's class and the HTTP status, which belongs
+                // under Details. The banner gets a sentence.
+                reason = connectionReason(t)
+                details = explain(t)
             }
             failures += 1
-            _status.value = ConnectionStatus.Reconnecting(failures + 1, reason)
-            delay(backoff(failures))
+            _status.value = ConnectionStatus.Reconnecting(failures + 1, reason, details)
+            // A wake left over from while the stream was up is not a request
+            // to skip this wait.
+            wake.tryReceive()
+            if (withTimeoutOrNull(backoff(failures)) { wake.receive() } != null) {
+                failures = 0
+                _status.value = ConnectionStatus.Reconnecting(1, reason, details)
+            }
         }
     }
 
@@ -654,7 +690,7 @@ class FleetRepository(
     internal companion object {
         /** The status before [start]: offline, but not for any reason the person needs to read. */
         const val NOT_STARTED = "not connected yet"
-        private const val STREAM_CLOSED = "the hub closed the stream"
+        private const val STREAM_CLOSED = "The hub closed the connection."
 
         /**
          * How long a signal frame (`grant`, `account_usage`) waits before its
@@ -663,6 +699,18 @@ class FleetRepository(
          */
         const val SIGNAL_COALESCE_MS = 250L
     }
+}
+
+/**
+ * Why the stream dropped, as a sentence a person can read: no exception
+ * class, no HTTP status, no `E_*` code — those are [explain]'s, for Details.
+ */
+internal fun connectionReason(t: Throwable): String = when (t) {
+    is HubError.Transport -> "Can't reach the hub from this network."
+    is HubError.Http -> "The hub answered with an error."
+    is HubError.Tool -> "The hub refused the connection."
+    is HubError -> "The hub's answer could not be read."
+    else -> "The connection dropped."
 }
 
 /**

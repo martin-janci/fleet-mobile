@@ -78,8 +78,11 @@ data class FilesUiState(
     /** A sentence that is not an error: "Saved to Downloads". */
     val notice: String? = null,
     val error: Friendly? = null,
+    /** The last list read failed. Not cleared by Dismiss: the list is still unread. */
+    val listFailed: Boolean = false,
 ) {
-    val isEmpty: Boolean get() = loaded && files.isEmpty()
+    /** Empty only when the hub answered with nothing; a failed read is not "No files yet". */
+    val isEmpty: Boolean get() = loaded && files.isEmpty() && !listFailed
 }
 
 /**
@@ -117,6 +120,8 @@ class FilesViewModel(
         val notice: String? = null,
         /** An action's failure (a fetch, a hand-off, a remove): a later read does not clear it. */
         val error: Friendly? = null,
+        /** The last read failed; only a good read clears it (Dismiss clears [listError] alone). */
+        val listFailed: Boolean = false,
         /** The last read's failure: the next good read clears it. */
         val listError: Friendly? = null,
     )
@@ -179,12 +184,13 @@ class FilesViewModel(
                     maxTotalBytes = list.maxTotalBytes,
                     loaded = true,
                     listError = null,
+                    listFailed = false,
                 )
             }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(loaded = true, listError = friendly(t)) }
+            local.update { it.copy(loaded = true, listError = friendly(t), listFailed = true) }
         }
     }
 
@@ -323,6 +329,7 @@ class FilesViewModel(
             confirmRemove = l.confirmRemove?.let { id -> l.rows.firstOrNull { it.id == id }?.toLine(now) },
             notice = l.notice,
             error = l.error ?: l.listError,
+            listFailed = l.listFailed,
         )
     }
 

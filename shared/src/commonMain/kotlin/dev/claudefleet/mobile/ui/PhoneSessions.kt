@@ -355,6 +355,7 @@ fun SessionsTab(
                                     onClearAll = handlers.onClearAll,
                                     onSetShowArchived = handlers.onSetShowArchived,
                                     modifier = Modifier.fillParentMaxSize(),
+                                    onRetry = handlers.onRefresh,
                                 )
                             }
                         }

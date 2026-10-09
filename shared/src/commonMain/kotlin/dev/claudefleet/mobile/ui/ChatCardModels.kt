@@ -43,6 +43,8 @@ data class AskFormState(
     /** The hub's refusal of an answer, field by field. */
     val problems: List<FieldProblem> = emptyList(),
     val error: String? = null,
+    /** The form could not be read: its title and body are drawn with Try again (re-runs [AskFormModel.load]). */
+    val loadFailure: Friendly? = null,
     val declining: Boolean = false,
     val note: String = "",
 ) {
@@ -69,7 +71,7 @@ class AskFormModel(
     val state: StateFlow<AskFormState> = _state.asStateFlow()
 
     fun load(): Job = scope.launch {
-        _state.update { it.copy(loading = true, error = null) }
+        _state.update { it.copy(loading = true, error = null, loadFailure = null) }
         try {
             val form = actions.get(formId)
             val spec = readAskForm(form.spec)
@@ -85,7 +87,7 @@ class AskFormModel(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            _state.update { it.copy(loading = false, error = friendly(t).body) }
+            _state.update { it.copy(loading = false, loadFailure = friendly(t)) }
         }
     }
 
@@ -167,6 +169,8 @@ data class SettingCardState(
     val busy: Boolean = false,
     val confirming: Boolean = false,
     val failure: String? = null,
+    /** The proposal could not be read: drawn as title and body with Try again (re-runs [SettingCardModel.load]). */
+    val loadFailure: Friendly? = null,
     /** applied | later | null. */
     val done: String? = null,
     /** What this card applied, for the receipt. */
@@ -206,6 +210,7 @@ class SettingCardModel(
     val state: StateFlow<SettingCardState> = _state.asStateFlow()
 
     fun load(): Job = scope.launch {
+        _state.update { it.copy(loaded = false, loadFailure = null) }
         try {
             val pending = actions.pending()
             val p = pending.proposals.firstOrNull { it.id == proposalId }
@@ -222,7 +227,7 @@ class SettingCardModel(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            _state.update { it.copy(loaded = true, failure = friendly(t).body) }
+            _state.update { it.copy(loaded = true, loadFailure = friendly(t)) }
         }
     }
 

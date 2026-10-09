@@ -54,6 +54,27 @@ private class FakeForms : ChatFormActions {
 }
 
 class AskFormModelTest {
+
+    /** Review r13 (P13-11): a failed read keeps its title and body, and Try again reads again. */
+    @Test
+    fun a_failed_read_keeps_the_friendly_and_load_reads_again() = runTest {
+        val hub = object : ChatFormActions by FakeForms() {
+            var fail = true
+            override suspend fun get(formId: String): FormView =
+                if (fail) throw HubError.Transport(IllegalStateException("x")) else FakeForms().view
+        }
+        val m = AskFormModel(hub, "f_a", this)
+        m.load().join()
+        val failure = m.state.value.loadFailure
+        assertEquals("Cannot reach the hub", failure?.title)
+        assertFalse(failure?.body.orEmpty().contains("IllegalStateException"))
+        assertNull(m.state.value.error)
+
+        hub.fail = false
+        m.load().join()
+        assertNull(m.state.value.loadFailure)
+        assertTrue(m.state.value.pending)
+    }
     @Test
     fun answers_once_every_required_field_has_a_value_and_forgets_the_secret() = runTest {
         val hub = FakeForms()

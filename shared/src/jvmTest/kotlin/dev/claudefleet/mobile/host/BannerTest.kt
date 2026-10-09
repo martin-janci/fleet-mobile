@@ -39,6 +39,7 @@ class EveryErrorBannerCanBeDismissedTest {
                 "AddHostScreen.kt",
                 "CompanyScreen.kt",
                 "FilesScreen.kt",
+                "FleetSettingsScreen.kt",
                 "HostsScreen.kt",
                 "MorePlacesScreen.kt",
                 "MyWorkScreen.kt",

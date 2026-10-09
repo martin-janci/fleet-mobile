@@ -23,6 +23,10 @@ data class CompanyUiState(
     val openId: Long? = null,
     val loading: Boolean = false,
     val error: Friendly? = null,
+    /** The hub has answered the list at least once. */
+    val loaded: Boolean = false,
+    /** The last list read failed: the screen says so rather than "No organisations". */
+    val listFailed: Boolean = false,
 ) {
     val open: OrgDetail? get() = openId?.let { id -> orgs.firstOrNull { it.id == id } }
 }
@@ -44,6 +48,8 @@ class CompanyViewModel(
         val openId: Long? = null,
         val loading: Boolean = false,
         val error: Friendly? = null,
+        val loaded: Boolean = false,
+        val listFailed: Boolean = false,
     )
 
     private val local = MutableStateFlow(Local())
@@ -55,6 +61,8 @@ class CompanyViewModel(
             openId = l.openId,
             loading = l.loading,
             error = l.error,
+            loaded = l.loaded,
+            listFailed = l.listFailed,
         )
     }.stateIn(scope, SharingStarted.Eagerly, CompanyUiState())
 
@@ -83,11 +91,11 @@ class CompanyViewModel(
         try {
             val orgs = actions.orgs().sortedBy { it.name.lowercase() }
             // An org that left the list while its detail was open closes it.
-            local.update { l -> l.copy(orgs = orgs, openId = l.openId?.takeIf { id -> orgs.any { it.id == id } }) }
+            local.update { l -> l.copy(orgs = orgs, openId = l.openId?.takeIf { id -> orgs.any { it.id == id } }, loaded = true, listFailed = false) }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(error = friendly(t)) }
+            local.update { it.copy(error = friendly(t), listFailed = true) }
         } finally {
             local.update { it.copy(loading = false) }
         }

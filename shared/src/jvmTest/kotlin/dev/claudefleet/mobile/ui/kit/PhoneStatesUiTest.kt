@@ -167,6 +167,51 @@ class PhoneStatesUiTest {
         }
     }
 
+    /**
+     * Review r13 (P13-2): a Retry on Signal lost starts the 6 s again. The
+     * repository answers a Retry with attempt 1 carrying the last reason;
+     * without the restart the banner stayed on Signal lost while the new
+     * attempt ran, so Retry looked like it did nothing.
+     */
+    @Test
+    fun a_retry_after_signal_lost_shows_the_new_attempt_then_waits_6_s_again() {
+        var seen: PhoneConnection? = null
+        val status = mutableStateOf<ConnectionStatus>(ConnectionStatus.Reconnecting(3, "Can't reach the hub from this network."))
+        val scene = ImageComposeScene(width = 10, height = 10, density = Density(1f)) {
+            seen = rememberPhoneConnection(status.value)
+        }
+        try {
+            for (t in listOf(0L, 16L, 6_100L, 6_116L)) scene.render(ms(t))
+            assertEquals(PhoneConnection.Offline("Can't reach the hub from this network."), seen)
+            status.value = ConnectionStatus.Reconnecting(1, "Can't reach the hub from this network.")
+            for (t in listOf(6_200L, 6_216L, 6_232L, 9_000L)) scene.render(ms(t))
+            assertEquals(PhoneConnection.Reconnecting(1), seen)
+            for (t in listOf(12_300L, 12_316L, 12_332L)) scene.render(ms(t))
+            assertEquals(PhoneConnection.Offline("Can't reach the hub from this network."), seen)
+        } finally {
+            scene.close()
+        }
+    }
+
+    /** P13-13: launching is not losing the hub — no Signal lost before the first attempt has had its 6 s. */
+    @Test
+    fun a_cold_start_shows_the_first_attempt_not_signal_lost() {
+        var seen: PhoneConnection? = null
+        val status = mutableStateOf<ConnectionStatus>(ConnectionStatus.Offline(dev.claudefleet.mobile.data.FleetRepository.NOT_STARTED))
+        val scene = ImageComposeScene(width = 10, height = 10, density = Density(1f)) {
+            seen = rememberPhoneConnection(status.value)
+        }
+        try {
+            scene.render(ms(0))
+            assertEquals(PhoneConnection.Reconnecting(1), seen)
+            status.value = ConnectionStatus.Reconnecting(1, null)
+            for (t in listOf(16L, 3_000L)) scene.render(ms(t))
+            assertEquals(PhoneConnection.Reconnecting(1), seen)
+        } finally {
+            scene.close()
+        }
+    }
+
     @Test
     fun the_reconnecting_banner_draws_nothing_before_400_ms() {
         val banner: @Composable () -> Unit = { HubBanner(PhoneConnection.Reconnecting(2)) }

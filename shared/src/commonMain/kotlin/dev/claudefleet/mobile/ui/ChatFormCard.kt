@@ -110,7 +110,15 @@ fun ChatFormCard(
                 }
             }
             if (form == null) {
-                if (s.loading) Note("Reading the form…")
+                if (s.loading) {
+                    Note("Reading the form…")
+                } else {
+                    s.loadFailure?.let { f ->
+                        Text(f.title, style = MaterialTheme.typography.bodyMedium, color = colors.error)
+                        Text(f.body, style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = { model.load() }) { Text("Try again") }
+                    }
+                }
             } else if (!s.pending) {
                 Text("Form ${formOutcome(form)}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag(FORM_OUTCOME))
             } else {

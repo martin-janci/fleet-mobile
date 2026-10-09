@@ -118,7 +118,13 @@ internal fun bannerTone(message: Friendly?): BannerTone? = when {
  * and whether anything is drawn.
  */
 @Composable
-fun ErrorBanner(error: Friendly?, onDismiss: (() -> Unit)? = null, modifier: Modifier = Modifier) {
+fun ErrorBanner(
+    error: Friendly?,
+    onDismiss: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    /** Runs the failed call again — every error has a next step (14.12). Only drawn on an error, not a note. */
+    onRetry: (() -> Unit)? = null,
+) {
     if (error == null) return
     val tone = bannerTone(error) ?: return
     var showDetails by remember(error) { mutableStateOf(false) }
@@ -163,6 +169,7 @@ fun ErrorBanner(error: Friendly?, onDismiss: (() -> Unit)? = null, modifier: Mod
                     }
                 }
                 if (onDismiss != null) TextButton(onClick = onDismiss) { Text("Dismiss") }
+                if (onRetry != null && tone == BannerTone.Error) TextButton(onClick = onRetry) { Text("Retry") }
             }
             AnimatedVisibility(showDetails && error.details != null) {
                 Text(

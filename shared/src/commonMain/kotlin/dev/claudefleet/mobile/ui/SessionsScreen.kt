@@ -98,6 +98,12 @@ import dev.claudefleet.mobile.ui.kit.OrbitPullToRefresh
 import dev.claudefleet.mobile.ui.kit.ProgressRing
 import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 import dev.claudefleet.mobile.ui.theme.Fleet
+import dev.claudefleet.mobile.ui.kit.DotWave
+import dev.claudefleet.mobile.ui.kit.LocalHubReconnect
+import dev.claudefleet.mobile.ui.kit.PhoneConnection
+import dev.claudefleet.mobile.ui.kit.ReconnectingPanel
+import dev.claudefleet.mobile.ui.kit.rememberPhoneConnection
+import androidx.compose.ui.text.style.TextAlign
 
 /**
  * Everything the fleet list reports.
@@ -271,6 +277,7 @@ fun SessionsScreen(
                             onClearAll = handlers.onClearAll,
                             onSetShowArchived = handlers.onSetShowArchived,
                             modifier = Modifier.fillParentMaxSize(),
+                            onRetry = handlers.onRefresh,
                         )
                     }
                 }
@@ -816,6 +823,55 @@ private fun SessionRowItem(
     HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
 }
 
+/** What a list that has never loaded draws while the hub is not there yet (14.12). */
+internal sealed interface ColdStart {
+    /** The first attempt: a quiet loader, after `loader-delay`. */
+    data object Connecting : ColdStart
+
+    /** A later attempt, still inside `hub-lost-after`: the Gravity well. */
+    data object Reconnecting : ColdStart
+
+    /** Past `hub-lost-after`, or refused: no spinner, the reason and Retry. */
+    data class Unreachable(val reason: String?) : ColdStart
+}
+
+@Composable
+private fun ColdStartBody(body: ColdStart, onRetry: (() -> Unit)?) {
+    when (body) {
+        ColdStart.Connecting -> if (rememberLoaderVisible(true)) {
+            DotWave()
+            Text(
+                text = "Connecting to the hub…",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        ColdStart.Reconnecting -> ReconnectingPanel(hub = "the hub", modifier = Modifier.heightIn(min = 240.dp))
+        is ColdStart.Unreachable -> {
+            val reconnect = LocalHubReconnect.current
+            Text(
+                text = "Can't reach the hub",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = body.reason ?: "The phone keeps trying. Check the network and the hub address.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            TextButton(onClick = { reconnect(); onRetry?.invoke() }) { Text("Retry") }
+        }
+    }
+}
+
+internal fun coldStartBody(connection: PhoneConnection): ColdStart = when (connection) {
+    PhoneConnection.Live -> ColdStart.Connecting
+    is PhoneConnection.Reconnecting -> if (connection.attempt <= 1) ColdStart.Connecting else ColdStart.Reconnecting
+    is PhoneConnection.Offline -> ColdStart.Unreachable(connection.reason)
+    is PhoneConnection.Refused -> ColdStart.Unreachable(connection.reason)
+}
+
 /**
  * What the list says when it has nothing to draw.
  *
@@ -839,6 +895,8 @@ internal fun EmptyFleet(
     onClearAll: () -> Unit,
     onSetShowArchived: (Boolean) -> Unit,
     modifier: Modifier = Modifier.fillMaxSize(),
+    /** The screen's refresh, run with the reconnect when "Can't reach the hub" is retried. */
+    onRetry: (() -> Unit)? = null,
 ) {
     val facets = state.facets
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
@@ -849,15 +907,10 @@ internal fun EmptyFleet(
         ) {
             when {
                 // Not "no sessions": nothing has been listed yet — what a
-                // person sees opening the app from a notification.
-                state.connecting -> {
-                    if (rememberLoaderVisible(true)) OrbitMarkLoader(MarkMotion.Chase, size = 48.dp)
-                    Text(
-                        text = "Connecting to the hub…",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                // person sees opening the app from a notification. Nothing
+                // for `loader-delay`, then the wait in words; past
+                // `hub-lost-after` it stops spinning and says so (14.12).
+                state.connecting -> ColdStartBody(coldStartBody(rememberPhoneConnection(state.status)), onRetry)
                 facets.isNotEmpty() -> {
                     Text(
                         text = emptySessionsSentence(facets.let(::facetSentence)),

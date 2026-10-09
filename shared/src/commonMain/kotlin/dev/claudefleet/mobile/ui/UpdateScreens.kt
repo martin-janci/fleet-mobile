@@ -55,6 +55,9 @@ import dev.claudefleet.mobile.update.ReleaseInfo
 import dev.claudefleet.mobile.update.UpdatePhase
 import dev.claudefleet.mobile.update.UpdateState
 import dev.claudefleet.mobile.update.WhatsNew
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 
 /** "31 MB · you have 0.9.4": the card's second line. */
 internal fun updateMeta(release: ReleaseInfo, appVersion: String): String =
@@ -127,7 +130,10 @@ class UpdateHandlers(
     val onPause: () -> Unit = {},
     val onCancel: () -> Unit = {},
     val onInstall: () -> Unit = {},
+    /** Try again after a failure: downloads again. */
     val onRetry: () -> Unit = {},
+    /** Clear a refusal, so the card offers the download again. */
+    val onReset: () -> Unit = {},
 )
 
 /** The checklist under the ring: download, signature, Android. */
@@ -225,10 +231,15 @@ fun UpdateScreen(state: UpdateState, appVersion: String, handlers: UpdateHandler
                 }
                 is UpdatePhase.Refused -> {
                     Callout("Not installed", phase.reason + " The download was deleted; this app was not changed.")
-                    QuietOutline("Back", handlers.onRetry)
+                    QuietOutline("Back") { handlers.onReset(); handlers.onBack() }
                 }
                 is UpdatePhase.Failed -> {
                     Callout("The download stopped", phase.message)
+                    phase.details?.let { details ->
+                        var open by remember(details) { mutableStateOf(false) }
+                        if (open) Note(details)
+                        TextButton(onClick = { open = !open }) { Text(if (open) "Hide details" else "Details") }
+                    }
                     PrimaryButton("Try again", handlers.onRetry)
                 }
                 UpdatePhase.Handed -> {

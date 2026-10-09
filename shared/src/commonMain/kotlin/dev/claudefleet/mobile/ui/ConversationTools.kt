@@ -96,6 +96,13 @@ class ToolDetailsHost(
 
 val LocalToolDetails = compositionLocalOf { ToolDetailsHost.None }
 
+/**
+ * Whether an unfinished tool may spin: the session is working and the update
+ * stream is up. Otherwise "not done" only means "not known to be done", and a
+ * spinner would claim progress nobody can see.
+ */
+val LocalToolsLive = compositionLocalOf { true }
+
 /** The largest the expanded body grows before it scrolls inside itself. */
 private val DETAIL_MAX_HEIGHT = 400.dp
 private const val DIFF_ROW_CAP = 200
@@ -154,7 +161,7 @@ internal fun ToolCallRow(tool: ConvItem.Tool, modifier: Modifier = Modifier) {
         ) {
             Box(Modifier.size(ICON), contentAlignment = Alignment.Center) {
                 when {
-                    !tool.done -> if (rememberLoaderVisible(true)) Comet(size = 16.dp)
+                    !tool.done && LocalToolsLive.current -> if (rememberLoaderVisible(true)) Comet(size = 16.dp)
                     tool.error -> Icon(FleetIcons.Failed, contentDescription = "failed", tint = colors.error, modifier = Modifier.size(ICON))
                     else -> Icon(iconFor(line.kind), contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(ICON))
                 }
@@ -206,7 +213,7 @@ internal fun ToolGroupRow(run: ItemRun.Tools, modifier: Modifier = Modifier) {
     // becomes the live end of the turn, opens even if it was drawn closed.
     var expanded by rememberSaveable(key, run.startExpanded) { mutableStateOf(run.startExpanded || host.expandAll) }
     val colors = MaterialTheme.colorScheme
-    val running = run.tools.any { !it.done }
+    val running = run.tools.any { !it.done } && LocalToolsLive.current
     val failed = run.failed
 
     Column(modifier.fillMaxWidth()) {
@@ -307,7 +314,7 @@ private fun ToolDetailCard(tool: ConvItem.Tool, kind: ToolKind, load: ToolDetail
                 .padding(12.dp),
         ) {
             when (load) {
-                null, ToolDetailLoad.Loading -> InlineLoading(waiting = true, modifier = Modifier.padding(vertical = 8.dp))
+                null, ToolDetailLoad.Loading -> DetailLoading()
                 ToolDetailLoad.Failed -> Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         "Couldn't load details",
@@ -321,6 +328,12 @@ private fun ToolDetailCard(tool: ConvItem.Tool, kind: ToolKind, load: ToolDetail
             }
         }
     }
+}
+
+/** The detail's read, drawn only once it has taken `loader-delay` (14.12). */
+@Composable
+private fun DetailLoading() {
+    InlineLoading(waiting = true, modifier = Modifier.padding(vertical = 8.dp))
 }
 
 @Composable

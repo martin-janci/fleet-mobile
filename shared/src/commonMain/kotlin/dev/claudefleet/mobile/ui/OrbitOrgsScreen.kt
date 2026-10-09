@@ -44,6 +44,7 @@ import dev.claudefleet.mobile.ui.kit.PhoneRow
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
+import dev.claudefleet.mobile.ui.kit.LoadFailed
 
 // Organisations and AI settings in the New layout (redesign 14.17,
 // MobileOrgsSettings): an organisation with its budget meter and rows that
@@ -137,7 +138,9 @@ fun OrbitOrgsScreen(state: CompanyUiState, handlers: OrbitOrgsHandlers, nowSecon
                 when {
                     !state.available -> item { Quiet("This hub does not list organisations.") }
                     open != null -> orgDetail(open, handlers, nowSeconds)
-                    state.orgs.isEmpty() && !state.loading -> item { Quiet("No organisations this device can see.") }
+                    state.orgs.isEmpty() && state.listFailed && !state.loading ->
+                        item { LoadFailed("organisations", state.error?.body, handlers.onRefresh) }
+                    state.orgs.isEmpty() && state.loaded && !state.loading -> item { Quiet("No organisations this device can see.") }
                     else -> items(state.orgs, key = { "org:${it.id}" }) { org ->
                         PhoneRow(
                             title = org.name.ifBlank { "Organisation ${org.id}" },

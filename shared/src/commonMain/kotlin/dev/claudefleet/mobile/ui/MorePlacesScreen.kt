@@ -64,6 +64,7 @@ import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
 import dev.claudefleet.mobile.update.AppVersion
+import dev.claudefleet.mobile.ui.kit.LoadFailed
 
 // The New layout's places under More (redesign 14.10, MobileMore): Hosts,
 // Accounts and usage, Files. The Classic screens stay as they were; these
@@ -506,6 +507,8 @@ fun OrbitFilesScreen(
                     item(key = "empty") {
                         Quiet("No files yet. When Claude sends you one, or you send one from the desktop's file viewer, it appears here.")
                     }
+                } else if (state.listFailed && state.files.isEmpty() && !state.refreshing) {
+                    item(key = "failed") { LoadFailed("files", state.error?.body, handlers.onRefresh) }
                 }
                 items(state.files, key = { it.id }) { file ->
                     FileRowItem(file, state, handlers, hostReachable)

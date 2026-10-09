@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.net.HubError
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** The first screen's failures in words, with the hub's own answer kept after them. */
@@ -13,7 +14,9 @@ class PairWordsTest {
         val said = explainPair(HubError.Http(404, "invalid code"))
         assertTrue(said.startsWith("That code didn't work."), said)
         assertTrue("fleet-hub pair" in said, said)
-        assertTrue("404" in said, "the hub's answer stays for the log: $said")
+        // Review r13 (P13-5): the status is the Details line's, not the sentence's.
+        assertFalse("404" in said, "the HTTP status reached the sentence: $said")
+        assertTrue("404" in pairDetails(HubError.Http(404, "invalid code")).orEmpty(), "the hub's answer stays for the log")
     }
 
     @Test
@@ -22,9 +25,14 @@ class PairWordsTest {
     }
 
     @Test
-    fun anything_else_is_explained_as_before() {
+    fun anything_else_is_a_sentence_with_the_hubs_answer_behind_details() {
         val other = HubError.Http(502, "bad gateway")
-        assertEquals(explain(other), explainPair(other))
+        val said = explainPair(other)
+        assertFalse("502" in said || "HTTP" in said || "bad gateway" in said, said)
+        assertEquals(explain(other), pairDetails(other))
+        val odd = IllegalStateException("boom")
+        assertFalse("IllegalStateException" in explainPair(odd), explainPair(odd))
+        assertTrue("IllegalStateException" in pairDetails(odd).orEmpty())
     }
 
     @Test

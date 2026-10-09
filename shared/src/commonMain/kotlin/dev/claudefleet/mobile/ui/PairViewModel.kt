@@ -37,6 +37,8 @@ data class PairUiState(
     val cameraAvailable: Boolean = false,
     val pairing: Boolean = false,
     val error: String? = null,
+    /** The technical half of [error] (HTTP status, the hub's answer), for Details only. */
+    val errorDetails: String? = null,
     /** Non-null once the hub has answered. The screen leaves when it is set. */
     val paired: PairedHub? = null,
     /**
@@ -173,7 +175,7 @@ class PairViewModel(
      */
     fun onScannerUnavailable(reason: String) {
         // The sentence says to type the code, so the fields it points at open.
-        _state.update { it.copy(scanning = false, error = reason, manual = true) }
+        _state.update { it.copy(scanning = false, errorDetails = null, error = reason, manual = true) }
     }
 
     /** One decoded QR. Called per frame; see the class comment. */
@@ -227,13 +229,13 @@ class PairViewModel(
     fun paste(text: String?) {
         val raw = text?.trim().orEmpty()
         if (raw.isEmpty()) {
-            _state.update { it.copy(error = NOTHING_TO_PASTE) }
+            _state.update { it.copy(errorDetails = null, error = NOTHING_TO_PASTE) }
             return
         }
         val target = try {
             PairTarget.require(pairLinkPayload(raw) ?: raw)
         } catch (e: NotAPairingCode) {
-            _state.update { it.copy(error = explain(e)) }
+            _state.update { it.copy(errorDetails = null, error = explain(e)) }
             return
         }
         _state.update {
@@ -241,6 +243,7 @@ class PairViewModel(
                 address = target.base ?: it.address,
                 code = target.code,
                 error = null,
+                errorDetails = null,
                 scanning = false,
                 manual = true,
             )
@@ -276,7 +279,7 @@ class PairViewModel(
         val target = try {
             PairTarget.require(payload)
         } catch (e: NotAPairingCode) {
-            _state.update { it.copy(error = explain(e)) }
+            _state.update { it.copy(errorDetails = null, error = explain(e)) }
             return null
         }
         _state.update {
@@ -286,6 +289,7 @@ class PairViewModel(
                 address = target.base ?: it.address,
                 code = target.code,
                 error = null,
+                errorDetails = null,
                 scanning = false,
                 // What it filled in is on screen to be checked before Pair.
                 manual = true,
@@ -295,7 +299,7 @@ class PairViewModel(
     }
 
     fun dismissError() {
-        _state.update { it.copy(error = null) }
+        _state.update { it.copy(errorDetails = null, error = null) }
     }
 
     /** Put away a standing [PairUiState.reason] — read once, either explicitly or by dismissal. */
@@ -312,12 +316,12 @@ class PairViewModel(
         val target = try {
             PairTarget.require(input)
         } catch (e: NotAPairingCode) {
-            _state.update { it.copy(error = explain(e)) }
+            _state.update { it.copy(errorDetails = null, error = explain(e)) }
             return null
         }
         val typed = current.address.takeIf { it.isNotBlank() }
         if (target.base == null && typed == null) {
-            _state.update { it.copy(error = NotAPairingCode.NO_HUB) }
+            _state.update { it.copy(errorDetails = null, error = NotAPairingCode.NO_HUB) }
             return null
         }
 
@@ -337,7 +341,7 @@ class PairViewModel(
         // `SessionViewModel.local`, whose KDoc states the rule, and the same
         // change already made to `HostsViewModel`.
         val contacting = hubLabel(target.base ?: typed.orEmpty())
-        _state.update { it.copy(pairing = true, error = null, reason = null, contacting = contacting) }
+        _state.update { it.copy(pairing = true, errorDetails = null, error = null, reason = null, contacting = contacting) }
         auth.clearUnpairReason()
         return scope.launch {
             try {
@@ -363,7 +367,7 @@ class PairViewModel(
                 // or expired code needs a new QR, and a 429 needs less traffic,
                 // not thirty attempts a second more. Retrying is a deliberate
                 // act — a fresh QR, or the button.
-                _state.update { it.copy(pairing = false, contacting = null, error = explainPair(t)) }
+                _state.update { it.copy(pairing = false, contacting = null, error = explainPair(t), errorDetails = pairDetails(t)) }
             }
         }.also { job ->
             inFlight = job

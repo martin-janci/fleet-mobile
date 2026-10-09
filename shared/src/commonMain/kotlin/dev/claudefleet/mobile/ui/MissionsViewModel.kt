@@ -44,6 +44,10 @@ data class MissionsUiState(
     /** A short line after a press that has no step results ("Paused 2 missions"). */
     val notice: String? = null,
     val error: Friendly? = null,
+    /** The list has answered at least once. */
+    val loaded: Boolean = false,
+    /** The last list read failed: its body says so rather than "No missions yet". */
+    val listFailed: Boolean = false,
 ) {
     /** Missions the loop may be driving now — what Pause all would stop. */
     val running: Int get() = missions.count { it.state == "active" }
@@ -73,6 +77,8 @@ class MissionsViewModel(
         val results: List<StepResult>? = null,
         val notice: String? = null,
         val error: Friendly? = null,
+        val loaded: Boolean = false,
+        val listFailed: Boolean = false,
     )
 
     private val local = MutableStateFlow(Local())
@@ -93,6 +99,8 @@ class MissionsViewModel(
             results = l.results,
             notice = l.notice,
             error = l.error,
+            loaded = l.loaded,
+            listFailed = l.listFailed,
         )
     }.stateIn(scope, SharingStarted.Eagerly, MissionsUiState())
 
@@ -194,12 +202,12 @@ class MissionsViewModel(
         local.update { it.copy(loading = true) }
         try {
             val missions = actions.missions()
-            local.update { it.copy(loading = false, missions = missions) }
+            local.update { it.copy(loading = false, missions = missions, loaded = true, listFailed = false) }
             local.value.detail?.mission?.id?.let { readOne(it) }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(loading = false, error = friendly(t)) }
+            local.update { it.copy(loading = false, error = friendly(t), listFailed = true) }
         }
     }
 

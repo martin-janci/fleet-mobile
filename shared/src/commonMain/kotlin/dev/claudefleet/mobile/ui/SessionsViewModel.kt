@@ -761,7 +761,11 @@ class SessionsViewModel(
      * saying why.
      */
     fun refresh(): Job = scope.launch {
-        if (fleet.status.value is ConnectionStatus.Refused) return@launch
+        val status = fleet.status.value
+        if (status is ConnectionStatus.Refused) return@launch
+        // A pull while the stream is down is also a "try the hub now": wake
+        // the reconnect loop rather than leave it asleep in its backoff.
+        if (status !is ConnectionStatus.Connected) fleet.reconnectNow()
         local.update { it.copy(refreshing = true, error = null) }
         try {
             fleet.refresh()
@@ -772,7 +776,11 @@ class SessionsViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(refreshing = false, error = friendly(t)) }
+            // Offline, the HubBanner already says the hub is not answering
+            // and carries Retry; a second banner saying the same in other
+            // words is noise (14.12: once, at the top).
+            val offline = fleet.status.value !is ConnectionStatus.Connected
+            local.update { it.copy(refreshing = false, error = if (offline) null else friendly(t)) }
         }
     }
 

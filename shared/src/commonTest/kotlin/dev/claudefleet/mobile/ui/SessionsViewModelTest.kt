@@ -102,6 +102,36 @@ private fun session(
 
 class SessionsViewModelTest {
 
+    /**
+     * Review r13 (P13-15, P13-2): a pull while the stream is down wakes the
+     * reconnect, and its failure is not a second banner under the HubBanner
+     * that already says the hub is not answering.
+     */
+    @Test
+    fun a_pull_while_offline_reconnects_and_adds_no_second_banner() = runTest {
+        var wakes = 0
+        val fleet = object : FleetState by FakeFleet(rows = listOf(session(1))) {
+            override val status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Reconnecting(4, "Can't reach the hub from this network."))
+            override suspend fun refresh() {
+                throw HubError.Transport(IllegalStateException("x"))
+            }
+            override fun reconnectNow() { wakes += 1 }
+        }
+        val vm = SessionsViewModel(fleet, backgroundScope)
+        vm.refresh().join()
+        runCurrent()
+        assertEquals(1, wakes)
+        assertNull(vm.state.value.error)
+        assertFalse(vm.state.value.refreshing)
+
+        // Connected, a failed pull still says so.
+        fleet.status.value = ConnectionStatus.Connected("0.9.3")
+        vm.refresh().join()
+        runCurrent()
+        assertEquals(1, wakes, "a live stream has nothing to wake")
+        assertNotNull(vm.state.value.error)
+    }
+
     @Test
     fun sessions_are_grouped_by_host_then_project() = runTest {
         val fleet = FakeFleet(

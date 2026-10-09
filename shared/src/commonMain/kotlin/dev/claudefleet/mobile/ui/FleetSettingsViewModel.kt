@@ -44,6 +44,11 @@ data class FleetSettingsUiState(
     val fieldErrors: Map<String, String> = emptyMap(),
     val confirm: PendingConfirm? = null,
     val error: String? = null,
+    /**
+     * The settings could not be read: drawn on Settings home with Retry,
+     * rather than leaving the hub's groups silently missing.
+     */
+    val loadError: Friendly? = null,
     /** A field offers its History (the hub serves `setting_history`). */
     val historyAvailable: Boolean = false,
     /** The setting whose history is open, and its writes (null while they load). */
@@ -99,7 +104,7 @@ class FleetSettingsViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            _state.update { it.copy(history = null, error = explain(t)) }
+            _state.update { it.copy(history = null, error = friendly(t).body) }
         }
     }
 
@@ -115,7 +120,7 @@ class FleetSettingsViewModel(
 
     /** Read the pages, the settings and what waits for review. */
     fun load(): Job = scope.launch {
-        _state.update { it.copy(loading = true, error = null) }
+        _state.update { it.copy(loading = true, error = null, loadError = null) }
         try {
             // `coroutineScope { }` is what makes the catch below able to
             // contain a failure. Without it the `launch` job is the `async`
@@ -139,6 +144,7 @@ class FleetSettingsViewModel(
                 it.copy(
                     loading = false,
                     loaded = true,
+                    loadError = null,
                     pages = offeredPages(pages),
                     descriptors = descs.associateBy { d -> d.key },
                     values = descs.associate { d -> d.key to d.value },
@@ -150,7 +156,7 @@ class FleetSettingsViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            _state.update { it.copy(loading = false, error = explain(t)) }
+            _state.update { it.copy(loading = false, loadError = friendly(t)) }
         }
     }
 
@@ -207,7 +213,7 @@ class FleetSettingsViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {
-                _state.update { it.copy(busy = it.busy - key, fieldErrors = it.fieldErrors + (key to explain(t))) }
+                _state.update { it.copy(busy = it.busy - key, fieldErrors = it.fieldErrors + (key to friendly(t).body)) }
             }
         }
     }
@@ -239,12 +245,17 @@ class FleetSettingsViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {
-                _state.update { it.copy(busy = it.busy - tag, error = explain(t)) }
+                _state.update { it.copy(busy = it.busy - tag, error = friendly(t).body) }
             }
         }
     }
 
     fun dismissError() {
         _state.update { it.copy(error = null) }
+    }
+
+    /** Put the failed-read banner away; Retry stays on Settings home until a read works. */
+    fun dismissLoadError() {
+        _state.update { it.copy(loadError = null) }
     }
 }
