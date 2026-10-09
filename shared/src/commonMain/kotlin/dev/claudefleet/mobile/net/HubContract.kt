@@ -2,7 +2,7 @@ package dev.claudefleet.mobile.net
 
 /**
  * The hub wire-contract revisions this build understands (up to claude-fleet
- * revision 11). A hub
+ * revision 12). A hub
  * outside the range is refused the way the desktop refuses it: the banner
  * says which side is behind, and no row event from that hub is applied.
  *
@@ -51,6 +51,10 @@ package dev.claudefleet.mobile.net
  * reason is read as a string ([reasonLabel] words an unknown one) and every
  * new key is ignored, so a revision-11 hub is safe here; ranking the three
  * new reasons as Blocked is step 2.7's change.
+ * Revision 12 adds tools only (the prompt queue, branch and range diffs,
+ * presence, peer linking, the MCP confirm pair, routines, agent installs)
+ * and the row shapes they answer; nothing this app already reads changed
+ * meaning, so a revision-12 hub is safe here.
  *
  * [MIN_HUB_CONTRACT] does NOT mirror the desktop's minimum. The desktop
  * raised its own to 3 because a pre-3 hub would silently misperform
@@ -61,7 +65,7 @@ package dev.claudefleet.mobile.net
  * upgraded: this is the phone's own floor, not a copy of the desktop's.
  */
 const val MIN_HUB_CONTRACT: Int = 0
-const val MAX_HUB_CONTRACT: Int = 11
+const val MAX_HUB_CONTRACT: Int = 12
 
 /**
  * What a `contract` field that cannot be read as a revision counts as.
