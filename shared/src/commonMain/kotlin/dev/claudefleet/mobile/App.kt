@@ -552,6 +552,7 @@ class AppContainer(
  * exactly when [AuthState] says it holds nothing, which is also what puts it
  * back there when the hub answers 401 (`AppSession.withClient`).
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun App(container: AppContainer) {
     val theme by container.phone.theme.collectAsState()
