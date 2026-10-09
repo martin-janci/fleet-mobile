@@ -62,7 +62,18 @@ fun ChatFormCard(
     open: Boolean = true,
     onDismiss: () -> Unit = {},
     modifier: Modifier = Modifier,
+    /**
+     * The New bar's form (redesign 14.7, `OrbitChatForm.kt`): sized to the
+     * form, paged one step at a time, folded to one line once decided.
+     */
+    orbit: Boolean = false,
+    /** Ask the agent for an expired form again (New bar); null offers nothing. */
+    onAskAgain: (() -> Unit)? = null,
 ) {
+    if (orbit && actions != null) {
+        OrbitChatFormCard(pending, sessionName, actions, canAnswer, open, onDismiss, onAskAgain, modifier)
+        return
+    }
     val colors = MaterialTheme.colorScheme
     Surface(
         color = colors.surfaceContainerHigh,

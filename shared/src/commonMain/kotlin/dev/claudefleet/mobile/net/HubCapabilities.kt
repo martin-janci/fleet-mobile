@@ -47,6 +47,15 @@ data class HubCapabilities(
     /** The hub's agent (`ensure_operator`) — the desktop's ✦, on the phone. */
     val agent: Boolean get() = ENSURE_OPERATOR in tools
 
+    /** Control's state without waking it (`operator_status`, readonly). */
+    val operatorStatus: Boolean get() = OPERATOR_STATUS in tools
+
+    /**
+     * Control's confirms on this device (redesign 9.2): listed and answered.
+     * `Access::PersonDevice` on the hub, so only a person's own device sees them.
+     */
+    val confirms: Boolean get() = MCP_CONFIRMS in tools && ANSWER_MCP_CONFIRM in tools
+
     /**
      * The hub keeps the composer's chip row (`quick_replies`). Absent on a hub
      * older than that tool — the app then draws its cached chips and never
@@ -227,6 +236,9 @@ data class HubCapabilities(
         const val WORK = "work"
         const val WORK_LINK = "work_link"
         const val ENSURE_OPERATOR = "ensure_operator"
+        const val OPERATOR_STATUS = "operator_status"
+        const val MCP_CONFIRMS = "mcp_confirms"
+        const val ANSWER_MCP_CONFIRM = "answer_mcp_confirm"
         const val QUICK_REPLIES = "quick_replies"
         const val SESSION_TOOL_DETAIL = "session_tool_detail"
         const val LIST_PAGES = "list_pages"

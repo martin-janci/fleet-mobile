@@ -87,6 +87,13 @@ class ToolsTheAppMayCallTest {
         // (it may start the agent's session), so only a `full` pairing is
         // offered it — see `AgentViewModel`.
         "ensure_operator",
+        // Control on the phone (redesign 9.8): its state without waking it
+        // (`operator_status`, readonly, `Access::Client`), and the calls it
+        // waits on a person's yes for (`mcp_confirms` readonly and
+        // `answer_mcp_confirm` write, both `Access::PersonDevice`).
+        "operator_status",
+        "mcp_confirms",
+        "answer_mcp_confirm",
         // The composer's shared chip row. `Access::Client` and not readonly
         // (one tool both reads and replaces the list), so a `full` client may
         // and a `readonly` one is never shown it — which is also the token
