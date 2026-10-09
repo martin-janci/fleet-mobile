@@ -214,7 +214,7 @@ val LESSONS: List<Lesson> = listOf(
         "recover", "Recover a failed session", "Retry, repair, move",
         listOf(
             LessonStep(LessonPlace.Inbox, "A failed session shows in the Inbox in red, with what went wrong."),
-            LessonStep(LessonPlace.Inbox, "Open log shows why. Retry runs it again; Move takes it to another host you pick."),
+            LessonStep(LessonPlace.Inbox, "Open it to see why. Its card offers Retry the last turn and Repair session; Move takes it to another host you pick."),
         ),
     ),
     Lesson(
