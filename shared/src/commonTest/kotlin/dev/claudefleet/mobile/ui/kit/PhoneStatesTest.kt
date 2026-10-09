@@ -128,4 +128,10 @@ class PhoneStatesTest {
             assertTrue(dx * dx + dy * dy < 0.5f * 0.5f, "blip $i at ($x, $y) is off the dish")
         }
     }
+
+    @Test
+    fun a_failed_load_and_a_failed_show_more_share_one_title_shape() {
+        assertEquals("Couldn't load your work", loadFailedTitle("your work"))
+        assertEquals("Couldn't load more tasks", loadFailedTitle("more tasks"))
+    }
 }

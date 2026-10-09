@@ -57,7 +57,7 @@ class UsageViewModelTest {
     fun opening_reads_the_week_and_the_accounts() = runTest {
         val calls = UsageCalls()
         val vm = UsageViewModel(UsageFleet(both), calls, backgroundScope)
-        vm.load().join()
+        vm.attach()
         runCurrent()
 
         assertEquals(listOf<Long?>(UsageWindow.Week.seconds), calls.windows)
@@ -70,7 +70,8 @@ class UsageViewModelTest {
     fun another_window_rereads_the_report_but_not_the_accounts() = runTest {
         val calls = UsageCalls()
         val vm = UsageViewModel(UsageFleet(both), calls, backgroundScope)
-        vm.load().join()
+        vm.attach()
+        runCurrent()
         vm.select(UsageWindow.Day).join()
         vm.select(UsageWindow.Day).join()
         runCurrent()
@@ -83,7 +84,7 @@ class UsageViewModelTest {
     fun a_hub_without_the_tools_is_not_asked() = runTest {
         val calls = UsageCalls()
         val vm = UsageViewModel(UsageFleet(emptySet()), calls, backgroundScope)
-        vm.load().join()
+        vm.attach()
         runCurrent()
         assertTrue(calls.windows.isEmpty())
         assertEquals(0, calls.accountReads)
@@ -94,11 +95,47 @@ class UsageViewModelTest {
     fun a_hub_that_serves_the_limits_shows_the_fleets_readings() = runTest {
         val calls = UsageCalls()
         val vm = UsageViewModel(UsageFleet(both + HubCapabilities.ACCOUNT_USAGE), calls, backgroundScope)
-        vm.load().join()
+        vm.attach()
         runCurrent()
 
         assertTrue(vm.state.value.limitsAvailable)
         assertEquals(62.0, vm.state.value.limits["u1"]?.usage?.fiveHour?.utilization)
+    }
+
+    @Test
+    fun opening_before_discovery_reads_once_the_hub_says_it_serves_usage() = runTest {
+        val calls = UsageCalls()
+        val fleet = UsageFleet(emptySet())
+        val vm = UsageViewModel(fleet, calls, backgroundScope)
+        vm.attach()
+        runCurrent()
+        assertTrue(calls.windows.isEmpty())
+        assertEquals(0, calls.accountReads)
+
+        // Discovery lands after the screen opened.
+        fleet.capabilities.value = HubCapabilities(tools = both)
+        runCurrent()
+        assertEquals(listOf<Long?>(UsageWindow.Week.seconds), calls.windows)
+        assertEquals(1, calls.accountReads)
+        assertEquals(1_230_000, vm.state.value.report?.total?.costMicros)
+
+        // A capabilities change that does not touch usage reads nothing more.
+        fleet.capabilities.value = HubCapabilities(tools = both + HubCapabilities.ACCOUNT_USAGE)
+        runCurrent()
+        assertEquals(1, calls.windows.size)
+    }
+
+    @Test
+    fun a_detached_screen_stops_following_the_capabilities() = runTest {
+        val calls = UsageCalls()
+        val fleet = UsageFleet(emptySet())
+        val vm = UsageViewModel(fleet, calls, backgroundScope)
+        vm.attach()
+        runCurrent()
+        vm.detach()
+        fleet.capabilities.value = HubCapabilities(tools = both)
+        runCurrent()
+        assertTrue(calls.windows.isEmpty())
     }
 
     @Test

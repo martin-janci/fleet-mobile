@@ -42,6 +42,9 @@ private class FakeHub(
     /** What `list_pages` throws, for the containment test. */
     var failPages: Throwable? = null
 
+    /** What `setting_history` throws. */
+    var failHistory: Throwable? = null
+
     override suspend fun pages(): PagesBundle {
         calls += "list_pages"
         failPages?.let { throw it }
@@ -57,6 +60,7 @@ private class FakeHub(
     override suspend fun pending() = SettingsPending(canWrite, proposals).also { calls += "setting_proposals" }
     override suspend fun history(key: String): List<SettingWrite> {
         calls += "setting_history $key"
+        failHistory?.let { throw it }
         return listOf(SettingWrite(id = 1, key = key, before = "1", after = "2", actor = "person"))
     }
     override suspend fun decide(accept: List<Long>, reject: List<Long>): SettingsDecided {
@@ -259,5 +263,28 @@ class FleetSettingsViewModelTest {
 
         vm.closeHistory()
         assertEquals(null, vm.state.value.history)
+    }
+
+    @Test
+    fun a_failed_history_read_stays_in_its_dialog_and_says_so() = runTest {
+        val hub = FakeHub(); hub.failHistory = HubError.Transport(RuntimeException("connection reset"))
+        val vm = FleetSettingsViewModel(hub, backgroundScope, credentialCanWrite = true, historyAvailable = true)
+        vm.showHistory("work.recent_days").join()
+        // The dialog stays open on the setting, with the failure in it — not
+        // closed, with a sentence nothing draws.
+        assertEquals("work.recent_days", vm.state.value.history?.first)
+        assertNull(vm.state.value.history?.second)
+        assertEquals("Cannot reach the hub", vm.state.value.historyError?.title)
+
+        hub.failHistory = null
+        vm.showHistory("work.recent_days").join()
+        assertNull(vm.state.value.historyError, "a retry clears the failure")
+        assertEquals("2", vm.state.value.history?.second?.single()?.after)
+
+        hub.failHistory = HubError.Transport(RuntimeException("connection reset"))
+        vm.showHistory("work.recent_days").join()
+        vm.closeHistory()
+        assertNull(vm.state.value.history)
+        assertNull(vm.state.value.historyError)
     }
 }

@@ -365,6 +365,23 @@ internal fun Download.toLine(now: Long): FileLine = FileLine(
     sessionName = sessionName,
 )
 
+/**
+ * A failed copy in one plain sentence, for the row: the hub's `error` is its
+ * own wording ("reading /var/log/x on gpu-1 stopped at 0 of 412 bytes"),
+ * which stays on [FileLine.error] and is not what a row says.
+ */
+internal fun fileFailure(raw: String?, host: String): String {
+    val r = raw.orEmpty()
+    val off = host.takeIf { it.isNotBlank() }?.let { " off $it" }.orEmpty()
+    return when {
+        "the limit per file" in r -> "Too large for the hub to keep."
+        "the space left for downloads" in r -> "The hub has no room left for it."
+        "did the file change?" in r || Regex("""gave \d+ bytes, expected \d+""").containsMatchIn(r) ->
+            "The file changed while it was copied."
+        else -> "The hub couldn't copy it$off."
+    }
+}
+
 /** A fetch's failure in words: a vanished file is not "this session is gone". */
 private fun fetchFailure(t: Throwable): Friendly = when {
     t is HubError.Tool && t.code == DOWNLOAD_GONE ->
