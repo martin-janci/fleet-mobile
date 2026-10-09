@@ -311,6 +311,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
+import dev.claudefleet.mobile.notify.writeFleetNotify
 import dev.claudefleet.mobile.notify.NoBackgroundNotifier
 import dev.claudefleet.mobile.notify.BackgroundNotifier
 import dev.claudefleet.mobile.notify.keepSeenWhileOpen
@@ -879,7 +880,12 @@ private fun FleetRoute(
     // the hub serves this token the page specs and the settings, read again
     // on every connection that does.
     val fleetSettings = remember(repository, scope) {
-        FleetSettingsViewModel(container.fleetSettingsActions, scope, credentials.canWrite)
+        FleetSettingsViewModel(
+            container.fleetSettingsActions,
+            scope,
+            credentials.canWrite,
+            onValues = { container.prefs.writeFleetNotify(it) },
+        )
     }
     val settingsCaps by repository.capabilities.collectAsState()
     // The Company entry shows once the hub has listed an org to this device.

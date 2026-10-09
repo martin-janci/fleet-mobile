@@ -100,3 +100,31 @@ class FleetSettingsTest {
         assertTrue(d("work.recent_days").editableOnPhone)
     }
 }
+
+/** 11.9: the choice sets and the time range the notifications page uses. */
+class NotifySettingKindsTest {
+    private val set = SettingDescriptor(
+        key = "notify.phone",
+        label = "Phone",
+        kind = SettingKind("choice_set", options = listOf("needs_you", "failed", "blocked", "done", "routine_failed")),
+        optionLabels = listOf(listOf("needs_you", "Needs you"), listOf("failed", "Failed")),
+    )
+    private val range = SettingDescriptor(key = "notify.quiet_hours", label = "Quiet hours", kind = SettingKind("time_range"))
+
+    @Test
+    fun a_choice_set_ticks_in_the_settings_own_order() {
+        assertEquals(setOf("needs_you", "failed"), choiceSetOf("needs_you, failed,"))
+        assertEquals("needs_you,failed,done", set.withChoice("done,needs_you", "failed", on = true))
+        assertEquals("done", set.withChoice("needs_you,done", "needs_you", on = false))
+        assertEquals("", set.withChoice("failed", "failed", on = false))
+        assertEquals("Needs you, Failed", set.inWords("needs_you,failed"))
+    }
+
+    @Test
+    fun both_are_edited_on_the_phone_and_an_empty_range_is_none() {
+        assertTrue(set.editableOnPhone)
+        assertTrue(range.editableOnPhone)
+        assertEquals("None", range.inWords(""))
+        assertEquals("22:00–07:30", range.inWords("22:00-07:30"))
+    }
+}

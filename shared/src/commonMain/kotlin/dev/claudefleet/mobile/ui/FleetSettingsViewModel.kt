@@ -84,6 +84,8 @@ class FleetSettingsViewModel(
     private val credentialCanWrite: Boolean,
     /** The hub serves `setting_history` to this device. */
     historyAvailable: Boolean = false,
+    /** Every effective value, each time the hub answers them: the notifier keeps the notify.* ones. */
+    private val onValues: (Map<String, String>) -> Unit = {},
 ) {
     private val _state = MutableStateFlow(FleetSettingsUiState(historyAvailable = historyAvailable))
 
@@ -144,6 +146,7 @@ class FleetSettingsViewModel(
                     canWrite = credentialCanWrite && p?.canWrite == true,
                 )
             }
+            onValues(_state.value.values)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -200,6 +203,7 @@ class FleetSettingsViewModel(
             try {
                 val all = actions.set(key, value)
                 _state.update { it.copy(values = it.values + all, busy = it.busy - key) }
+                onValues(_state.value.values)
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {
@@ -231,6 +235,7 @@ class FleetSettingsViewModel(
                         error = failed,
                     )
                 }
+                if (descs != null) onValues(_state.value.values)
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {

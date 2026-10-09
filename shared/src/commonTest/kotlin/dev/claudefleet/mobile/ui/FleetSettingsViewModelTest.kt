@@ -78,6 +78,19 @@ private fun proposal(id: Long = 4, key: String = "work.recent_days", value: Stri
 
 class FleetSettingsViewModelTest {
 
+    /** 11.9: the notifier keeps the hub's notify.* values, so every answer of values reaches it. */
+    @Test
+    fun every_answer_of_values_reaches_the_notifier() = runTest {
+        val hub = FakeHub()
+        val seen = mutableListOf<Map<String, String>>()
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true, onValues = { seen += it })
+        vm.load(); runCurrent()
+        assertEquals(1, seen.size)
+        assertEquals(hub.values["work.recent_days"], seen.last()["work.recent_days"])
+        vm.set("work.recent_days", "3"); runCurrent()
+        assertEquals("3", seen.last()["work.recent_days"])
+    }
+
     /**
      * A refused settings read stays on this screen. The fan-out's `async`
      * children used to run directly under `load()`'s own `launch`, so a

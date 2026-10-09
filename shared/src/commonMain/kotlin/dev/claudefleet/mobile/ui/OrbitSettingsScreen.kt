@@ -39,7 +39,13 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.model.Page
+import dev.claudefleet.mobile.model.inWords
+import dev.claudefleet.mobile.notify.NOTIFY_PHONE
+import dev.claudefleet.mobile.notify.NOTIFY_QUIET_EXCEPT
+import dev.claudefleet.mobile.notify.NOTIFY_QUIET_HOURS
+import dev.claudefleet.mobile.notify.parseQuietHours
 import dev.claudefleet.mobile.notify.BackgroundNotifier
 import dev.claudefleet.mobile.notify.NoBackgroundNotifier
 import dev.claudefleet.mobile.notify.NotifyKind
@@ -228,6 +234,26 @@ private fun HubSummary(s: SettingsUiState) {
 internal fun thisPhoneLine(updates: Boolean, lock: Boolean): String =
     listOfNotNull("Notifications", "theme", "updates".takeIf { updates }, "lock".takeIf { lock }).joinToString(", ")
 
+/**
+ * What the fleet's notifications matrix and quiet hours add to This phone's
+ * switches (claude-fleet 11.9), in words; null on a hub without them.
+ */
+internal fun fleetNotifyLine(f: FleetSettingsUiState): String? {
+    val phone = f.values[NOTIFY_PHONE] ?: return null
+    fun words(key: String, v: String) = f.descriptors[key]?.inWords(v) ?: v.replace(",", ", ")
+    val reach = if (phone.isBlank()) "nothing" else words(NOTIFY_PHONE, phone)
+    val quiet = f.values[NOTIFY_QUIET_HOURS].orEmpty().trim()
+    val except = f.values[NOTIFY_QUIET_EXCEPT].orEmpty()
+    return buildString {
+        append("The fleet sends this phone only: $reach.")
+        if (parseQuietHours(quiet) != null) {
+            append(" Quiet hours ${quiet.replace("-", "–")}")
+            append(if (except.isBlank()) ", nothing through." else ", except ${words(NOTIFY_QUIET_EXCEPT, except)}.")
+        }
+        append(" Fleet settings › Notifications.")
+    }
+}
+
 private fun accessWords(s: SettingsUiState): String =
     if (s.readOnly) "Read only, this device cannot send prompts" else "Full access"
 
@@ -249,6 +275,9 @@ private fun ColumnScope.ThisPhone(input: OrbitSettingsInput, handlers: OrbitSett
             enabled = kindsLive,
             onChange = { handlers.onSetNotify(kind, it) },
         )
+    }
+    input.fleet?.let { f -> fleetNotifyLine(f) }?.let { line ->
+        Text(line, color = o.fgMuted, fontSize = 13.sp, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = gutter, vertical = 6.dp))
     }
 
     SectionLabel("Theme")
