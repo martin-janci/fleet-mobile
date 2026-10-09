@@ -136,8 +136,8 @@ internal fun QuestionCard(
                 Spacer(Modifier.height(4.dp))
                 Text("Sent. Still waiting for $agent to move on…", style = Fleet.type.textXs, color = Fleet.colors.fgMuted)
             }
-            val answers = questionAnswers(card, state.session?.stuckKind)
-            if (!state.readOnly && answers.isNotEmpty()) {
+            val answers = questionAnswers(card, state.session?.stuckKind).filter { state.mayAnswerWith(it.answer) }
+            if (answers.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     for (answer in answers) {

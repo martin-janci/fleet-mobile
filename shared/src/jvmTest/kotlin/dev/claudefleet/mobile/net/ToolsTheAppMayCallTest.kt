@@ -224,6 +224,14 @@ class ToolsTheAppMayCallTest {
         // change a role, remove. `Access::Device`, not readonly; the hub
         // answers an org's own admins and refuses anyone else.
         "org_admin",
+        // Sharing (redesign 11.10, share and watch). `my_grants` is readonly
+        // and any person's own; the other four are `Access::Client`, not
+        // readonly, and the hub answers them for the session's owner only.
+        "my_grants",
+        "session_access",
+        "session_share",
+        "session_narrow",
+        "session_unshare",
     )
 
     @Test

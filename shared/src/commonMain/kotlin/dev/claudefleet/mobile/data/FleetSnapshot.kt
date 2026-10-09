@@ -53,7 +53,7 @@ val SNAPSHOT_EVENT_KINDS: List<String> = listOf("session", "host", "project", "w
  * snapshot applies" — `FleetSnapshotTest` holds every entry of it to changing
  * the snapshot, which a signal never does.
  */
-val SIGNAL_EVENT_KINDS: List<String> = listOf("download", "account_usage")
+val SIGNAL_EVENT_KINDS: List<String> = listOf("download", "account_usage", "grant")
 
 /** Everything the stream asks the hub for with `?kinds=`. */
 val STREAM_EVENT_KINDS: List<String> = SNAPSHOT_EVENT_KINDS + SIGNAL_EVENT_KINDS
@@ -154,6 +154,14 @@ fun HubEvent.Row.isWorkFrame(): Boolean = name.startsWith("work:")
 
 /** An `account_usage:*` frame: an account's usage reading changed. */
 fun HubEvent.Row.isAccountUsageFrame(): Boolean = name.startsWith("account_usage:")
+
+/**
+ * A `grant:changed` frame: a share on a session this person holds or owns
+ * moved. A re-read signal like [isAccountUsageFrame], never a row — the
+ * payload's ids are projected away by `?fields=`, and `my_grants` is the
+ * answer anyway.
+ */
+fun HubEvent.Row.isGrantFrame(): Boolean = name.startsWith("grant:")
 
 /** The download a `download:changed` frame names, or null for any other frame. */
 fun HubEvent.Row.downloadId(): Long? =

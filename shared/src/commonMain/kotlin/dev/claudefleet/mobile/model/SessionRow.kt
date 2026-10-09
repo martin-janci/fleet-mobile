@@ -49,6 +49,12 @@ data class SessionRow(
     /** passing | failing | pending, from the PR's check rollup. */
     @SerialName("ci_status") val ciStatus: String? = null,
     @SerialName("is_controller") val isController: Boolean = false,
+    /**
+     * Whose session this is, as a `people` row id (multi-user M1, contract
+     * revision 8); null for an unclaimed row and from an older hub. What
+     * [dev.claudefleet.mobile.model.MyAccess] tells "mine" from "shared with me" by.
+     */
+    @SerialName("owner_person_id") val ownerPersonId: Long? = null,
     val tags: List<String> = emptyList(),
     @SerialName("last_prompt") val lastPrompt: String? = null,
     @SerialName("last_stop_at") val lastStopAt: Long? = null,

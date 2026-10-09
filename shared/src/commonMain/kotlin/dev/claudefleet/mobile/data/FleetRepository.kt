@@ -4,6 +4,7 @@ import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.ui.explain
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.MyAccess
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
@@ -171,6 +172,12 @@ class FleetRepository(
 
     private val _trackers = MutableStateFlow<List<TrackerRow>>(emptyList())
     override val trackers: StateFlow<List<TrackerRow>> = _trackers.asStateFlow()
+
+    private val _access = MutableStateFlow(MyAccess.UNKNOWN)
+    override val access: StateFlow<MyAccess> = _access.asStateFlow()
+
+    private val _hubContract = MutableStateFlow<Int?>(null)
+    override val hubContract: StateFlow<Int?> = _hubContract.asStateFlow()
 
     // Buffered and lossy for the reason `_sessionChanges` is: a timeline
     // entry is news for whichever screen is waiting on one, and emitting must
@@ -371,6 +378,9 @@ class FleetRepository(
                                 _accountNames.value = emptyMap()
                                 _accountUsage.value = emptyMap()
                                 _trackers.value = emptyList()
+                                grantsRead?.cancel()
+                                _access.value = MyAccess.UNKNOWN
+                                _hubContract.value = null
                                 _status.value = ConnectionStatus.Refused(refusal)
                                 return@collect
                             }
@@ -394,6 +404,7 @@ class FleetRepository(
                             // restart. A hub that sends no `now` leaves the
                             // last reading alone rather than zeroing it.
                             event.now?.let { _clockSkewSeconds.value = it - clock() }
+                            _hubContract.value = event.contract
                             _status.value = ConnectionStatus.Connected(event.version)
                             _sessionChanges.tryEmit(ALL_SESSIONS_CHANGED)
                             _downloadChanges.tryEmit(ALL_DOWNLOADS_CHANGED)
@@ -418,6 +429,7 @@ class FleetRepository(
                             // stays a no-op for the snapshot either way.
                             if (event.isWorkFrame()) _workChanges.tryEmit(++workTicks)
                             if (event.isAccountUsageFrame()) readAccountUsageSoon()
+                            if (event.isGrantFrame()) readGrantsSoon()
                             event.downloadId()?.let { _downloadChanges.tryEmit(it) }
                         }
                     }
@@ -476,6 +488,7 @@ class FleetRepository(
             _orgs.value = readOrgs(caps)
             _accountNames.value = readAccountNames(caps)
             _accountUsage.value = readAccountUsage(caps)
+            _access.value = readGrants(caps)
             if (!caps.work) _trackers.value = emptyList()
             _myWork.value = if (caps.work) readMyWork() else null
         }
@@ -510,6 +523,32 @@ class FleetRepository(
             OrgDirectory.EMPTY
         } catch (_: Throwable) {
             OrgDirectory.EMPTY
+        }
+    }
+
+    /** A `my_grants` read in flight; a newer `grant:changed` replaces it. */
+    private var grantsRead: Job? = null
+
+    private fun readGrantsSoon() {
+        grantsRead?.cancel()
+        grantsRead = scope.launch { _access.value = readGrants(_capabilities.value) }
+    }
+
+    /**
+     * Who this person is and what is shared with them, when the hub lists
+     * `my_grants`; [MyAccess.UNKNOWN] otherwise. A failed read keeps the last
+     * answer rather than dropping to UNKNOWN: unknown gates nothing, so
+     * forgetting a watch grant on a blip would light up a Send the hub will
+     * refuse.
+     */
+    private suspend fun readGrants(caps: HubCapabilities): MyAccess {
+        if (!caps.myGrants) return MyAccess.UNKNOWN
+        return try {
+            MyAccess.of(client.myGrants())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            _access.value
         }
     }
 

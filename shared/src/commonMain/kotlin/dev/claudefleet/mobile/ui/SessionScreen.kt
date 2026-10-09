@@ -7,6 +7,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.text.selection.SelectionContainer
+import dev.claudefleet.mobile.model.sharedSentence
 import dev.claudefleet.mobile.model.relativeAgo
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import androidx.compose.ui.semantics.Role
@@ -2763,6 +2764,7 @@ private fun PromptBox(
     // No surface of its own: it sits in the footer `SessionScreen` draws.
     Column(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp)) {
         val why = when {
+            state.share != null && state.readOnly -> sharedSentence(state.share)
             state.readOnly -> "This device is paired read-only."
             wordsMode -> "Send says No to the question and gives your words instead."
             state.card != null -> if (agent != null) "Answer with the buttons above, or Show in $agent." else "Answer with the buttons above, or Show terminal."

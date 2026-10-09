@@ -24,10 +24,17 @@ data class OrgMemberRow(
     val label: String get() = displayName?.takeIf { it.isNotBlank() } ?: name
 }
 
-/** `org_admin { member_grants }`: how many of the org's sessions are shared with a person. */
+/**
+ * `org_admin { member_grants }`: how many of the org's sessions are shared
+ * with a person, at each level. [answer] arrives from a hub with the Answer
+ * level (Orbit Fleet 11.7) and is zero from an older one.
+ */
 @Serializable
-data class MemberGrants(val watch: Int = 0, val drive: Int = 0) {
-    val total: Int get() = watch + drive
+data class MemberGrants(val watch: Int = 0, val answer: Int = 0, val drive: Int = 0) {
+    val total: Int get() = watch + answer + drive
+
+    /** Shares a narrow would lower to watch: everything above it. */
+    val aboveWatch: Int get() = answer + drive
 }
 
 /** `org_admin { remove_member }`. */

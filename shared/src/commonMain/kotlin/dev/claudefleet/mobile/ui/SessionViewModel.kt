@@ -13,6 +13,8 @@ import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
+import dev.claudefleet.mobile.model.GrantLevel
+import dev.claudefleet.mobile.model.MyAccess
 import dev.claudefleet.mobile.model.ConversationSummary
 import dev.claudefleet.mobile.model.RepairReport
 import dev.claudefleet.mobile.model.PendingInput
@@ -70,8 +72,23 @@ data class SessionUiState(
      */
     val refreshing: Boolean = false,
     val sending: Boolean = false,
-    /** True when this device's credential is `readonly` and may not send. */
+    /**
+     * True when this screen may not send a prompt: the device's credential is
+     * `readonly`, or the session is shared with this person below drive.
+     */
     val readOnly: Boolean = false,
+    /**
+     * The level the session is shared with this person at (`watch`,
+     * `answer`, `drive`), or null when it is theirs, unclaimed, or the hub
+     * has not said (redesign 11.10). Not null is someone else's session.
+     */
+    val share: String? = null,
+    /**
+     * A dialog's keys (an option's digit, Enter, Escape) may be pressed: the
+     * credential may write and the session is not shared at watch. Wider
+     * than ![readOnly] by exactly an Answer share.
+     */
+    val mayPressKeys: Boolean = true,
     /**
      * True when the fleet's connection is [ConnectionStatus.Connected], OR
      * this screen's own probe of the hub (`fleet_health`, via
@@ -229,7 +246,7 @@ data class SessionUiState(
      * offers no management action at all.
      */
     val canManage: Boolean
-        get() = !readOnly && session != null && !session.isController
+        get() = !readOnly && share == null && session != null && !session.isController
 
     /** Whether a reply offers Rewind here, Retry and Fork here at all — see [replyActionsFor]. */
     val canRewind: Boolean
@@ -287,7 +304,13 @@ data class SessionUiState(
      * refuse the call whatever the connection does.
      */
     val canAnswer: Boolean
-        get() = idle(sending, answering, busy) && !readOnly && connected && card != null
+        get() = idle(sending, answering, busy) && mayPressKeys && connected && card != null
+
+    /**
+     * [answer] may go out from this screen: a key while [mayPressKeys], and
+     * anything typed (or C-c) only where a prompt could go too.
+     */
+    fun mayAnswerWith(answer: Answer): Boolean = if (answer.isKey) mayPressKeys else !readOnly
 
     /**
      * Whether the question up now can be answered in the person's own words
@@ -295,7 +318,7 @@ data class SessionUiState(
      * answer could go out at all. The composer opens for it while the card is up.
      */
     val canAnswerInWords: Boolean
-        get() = canAnswer && card?.let(::declineOption) != null
+        get() = canAnswer && !readOnly && card?.let(::declineOption) != null
 
     /** Whether Send would answer in the person's own words right now: [canAnswerInWords] and words to send. */
     val canSendWords: Boolean
@@ -442,7 +465,23 @@ class SessionViewModel(
     )
 
     private val local = MutableStateFlow(Local(draft = drafts.recall(sessionId)))
-    private val readOnly = !canSendPrompts
+    private val tokenReadOnly = !canSendPrompts
+
+    /**
+     * No prompt from this screen: the credential's `readonly`, or a share
+     * below drive (redesign 11.10). Read live, so a narrow that lands while
+     * the screen is open darkens Send at once.
+     */
+    private val readOnly: Boolean
+        get() = readOnlyFor(shareNow())
+
+    private fun readOnlyFor(share: String?): Boolean =
+        tokenReadOnly || share == GrantLevel.WATCH || share == GrantLevel.ANSWER
+
+    private fun mayPressKeysFor(share: String?): Boolean = !tokenReadOnly && share != GrantLevel.WATCH
+
+    /** The level this session is shared with this person at, or null when it is theirs or nothing is known. */
+    private fun shareNow(): String? = fleet.access.value.levelFor(row())
 
     /**
      * The last answer from probing the hub directly while [fleet]'s stream is
@@ -531,12 +570,12 @@ class SessionViewModel(
         // into one `Pair` first rather than nesting a second `.stateIn` or
         // hand-rolling a sixth `combine`, so there is still exactly one
         // downstream collector to reason about.
-        combine(fleet.sessions, fleet.status, fleet.hubVersion, local, combine(probe, now, ::Pair)) { rows, status, version, l, (probed, nowSeconds) ->
-            assemble(rows.firstOrNull { it.id == sessionId }, status, version, l, probed, nowSeconds)
+        combine(fleet.sessions, fleet.status, fleet.hubVersion, local, combine(probe, now, fleet.access, ::Triple)) { rows, status, version, l, (probed, nowSeconds, access) ->
+            assemble(rows.firstOrNull { it.id == sessionId }, status, version, l, probed, nowSeconds, access)
         }.stateIn(
             scope,
             SharingStarted.Eagerly,
-            assemble(row(), fleet.status.value, fleet.hubVersion.value, local.value, probe.value, now.value),
+            assemble(row(), fleet.status.value, fleet.hubVersion.value, local.value, probe.value, now.value, fleet.access.value),
         )
 
     init {
@@ -784,7 +823,7 @@ class SessionViewModel(
      * outlives it and the gate has to be here.
      */
     fun answer(a: Answer): Job = scope.launch {
-        if (!canAnswerNow(local.value)) return@launch
+        if (!canAnswerNow(local.value, keys = a.isKey)) return@launch
         local.update { it.copy(answering = true, stillWaiting = false, error = null) }
         try {
             // Every KEY is pressed only after re-reading the pane. The hub
@@ -853,7 +892,7 @@ class SessionViewModel(
      */
     fun answerInWords(): Job = scope.launch {
         val current = local.value
-        if (current.draft.isBlank() || !canAnswerNow(current)) return@launch
+        if (current.draft.isBlank() || !canAnswerNow(current, keys = false)) return@launch
         val asked = row() ?: return@launch
         val no = blockedCard(asked, fleet.hubVersion.value)?.let(::declineOption) ?: return@launch
         local.update { it.copy(answering = true, stillWaiting = false, error = null) }
@@ -1371,7 +1410,7 @@ class SessionViewModel(
     }
 
     /** [SessionUiState.canManage] read from the live sources — see [runManaged]. */
-    private fun canManageNow(): Boolean = !readOnly && row()?.isController == false
+    private fun canManageNow(): Boolean = !readOnly && shareNow() == null && row()?.isController == false
 
     /** [SessionUiState.canRestart] read from the live sources — see [runManaged]. */
     private fun canRestartNow(): Boolean = canManageNow()
@@ -1387,8 +1426,8 @@ class SessionViewModel(
      * re-deciding what "blocked" means at the moment of the tap would be a
      * second copy of `blockedCard`'s rule.
      */
-    private fun canAnswerNow(l: Local): Boolean =
-        !readOnly && idle(l.sending, l.answering, l.busy) && connected()
+    private fun canAnswerNow(l: Local, keys: Boolean): Boolean =
+        (if (keys) mayPressKeysFor(shareNow()) else !readOnly) && idle(l.sending, l.answering, l.busy) && connected()
 
     /** The part of [canSendNow] that does not care what is being sent — shared with [sendCommand]. */
     private fun canWriteNow(l: Local): Boolean = idle(l.sending, l.answering, l.busy) && !readOnly && connected()
@@ -1614,6 +1653,7 @@ class SessionViewModel(
         l: Local,
         probed: Boolean?,
         nowSeconds: Long,
+        access: MyAccess,
     ) = SessionUiState(
         session = row,
         conversation = l.earlier ?: l.conversation,
@@ -1622,7 +1662,9 @@ class SessionViewModel(
         loading = l.loading,
         refreshing = l.refreshing,
         sending = l.sending,
-        readOnly = readOnly,
+        readOnly = readOnlyFor(access.levelFor(row)),
+        share = access.levelFor(row),
+        mayPressKeys = mayPressKeysFor(access.levelFor(row)),
         connected = isConnected(status, probed),
         hubReachable = probed,
         error = l.error,

@@ -18,6 +18,8 @@ import dev.claudefleet.mobile.model.PendingInput
 import dev.claudefleet.mobile.model.PendingOption
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SendPromptResult
+import dev.claudefleet.mobile.model.GrantLevel
+import dev.claudefleet.mobile.model.MyAccess
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.ToolDetail
 import dev.claudefleet.mobile.model.WaitResult
@@ -93,6 +95,7 @@ private class FakeFleetState(
     override val hubVersion = MutableStateFlow<String?>(null)
     override val clockSkewSeconds = MutableStateFlow(0L)
     override val sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val access = MutableStateFlow(MyAccess.UNKNOWN)
     override suspend fun refresh() = Unit
 }
 
@@ -853,6 +856,100 @@ class SessionViewModelTest {
         runCurrent()
 
         assertTrue(quickReplies.history().isEmpty(), "an answer from the card is not a prompt from the composer")
+    }
+
+    // ---- a session shared with this person (redesign 11.10) ----
+
+    /** Someone else's session, shared with person 1 at [level]. */
+    private fun sharedFleet(level: String, rows: List<SessionRow> = listOf(blockedRow().copy(ownerPersonId = 2))) =
+        FakeFleetState(rows).apply {
+            hubVersion.value = HUB_VERSION_DIGIT_KEYS
+            access.value = MyAccess(personId = 1, grants = mapOf(ID to level))
+        }
+
+    @Test
+    fun a_watch_share_reads_and_sends_nothing() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, sharedFleet(GrantLevel.WATCH), actions, backgroundScope)
+        vm.load().join()
+        vm.onDraftChange("ship it")
+        runCurrent()
+        val s = vm.state.value
+        assertEquals(GrantLevel.WATCH, s.share)
+        assertTrue(s.readOnly)
+        assertFalse(s.mayPressKeys)
+        assertFalse(s.canAnswer)
+        assertFalse(s.canManage, "renaming, moving and killing stay with the owner")
+
+        vm.answer(Answer.Option(1, "Yes")).join()
+        vm.send().join()
+        runCurrent()
+        assertTrue(actions.sentKeys.isEmpty())
+        assertTrue(actions.sentPrompts.isEmpty())
+    }
+
+    @Test
+    fun an_answer_share_presses_a_dialogs_key_and_types_nothing() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, sharedFleet(GrantLevel.ANSWER), actions, backgroundScope)
+        vm.load().join()
+        runCurrent()
+        val s = vm.state.value
+        assertTrue(s.readOnly, "a prompt still needs drive")
+        assertTrue(s.canAnswer)
+        assertTrue(s.mayAnswerWith(Answer.Option(1, "Yes")))
+        assertFalse(s.mayAnswerWith(Answer.Text("no, do this instead")))
+        assertFalse(s.mayAnswerWith(Answer.Interrupt))
+        assertFalse(s.canAnswerInWords)
+
+        vm.answer(Answer.Text("no")).join()
+        vm.answer(Answer.Interrupt).join()
+        runCurrent()
+        assertTrue(actions.sentPrompts.isEmpty())
+        assertTrue(actions.sentKeys.isEmpty())
+
+        vm.answer(Answer.Option(1, "Yes")).join()
+        runCurrent()
+        assertEquals(listOf("1"), actions.sentKeys)
+    }
+
+    @Test
+    fun a_drive_share_sends_but_does_not_manage() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, sharedFleet(GrantLevel.DRIVE, listOf(row().copy(ownerPersonId = 2))), actions, backgroundScope)
+        vm.onDraftChange("ship it")
+        runCurrent()
+        assertFalse(vm.state.value.readOnly)
+        assertTrue(vm.state.value.canSend)
+        assertFalse(vm.state.value.canManage)
+    }
+
+    @Test
+    fun a_narrowed_share_darkens_send_at_once() = runTest {
+        val fleet = sharedFleet(GrantLevel.DRIVE, listOf(row().copy(ownerPersonId = 2)))
+        val vm = SessionViewModel(ID, fleet, FakeActions(), backgroundScope)
+        vm.onDraftChange("ship it")
+        runCurrent()
+        assertTrue(vm.state.value.canSend)
+        fleet.access.value = MyAccess(personId = 1, grants = mapOf(ID to GrantLevel.WATCH))
+        runCurrent()
+        assertFalse(vm.state.value.canSend)
+    }
+
+    @Test
+    fun my_own_session_and_a_hub_without_sharing_gate_nothing() = runTest {
+        val mine = FakeFleetState(listOf(row().copy(ownerPersonId = 1))).apply {
+            access.value = MyAccess(personId = 1, grants = mapOf(ID to GrantLevel.WATCH))
+        }
+        val vm = SessionViewModel(ID, mine, FakeActions(), backgroundScope)
+        runCurrent()
+        assertNull(vm.state.value.share)
+        assertTrue(vm.state.value.canManage)
+
+        val old = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope)
+        runCurrent()
+        assertNull(old.state.value.share)
+        assertFalse(old.state.value.readOnly)
     }
 
     // ---- Send is disabled while the hub is unreachable ----

@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.MyAccess
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
@@ -162,6 +163,21 @@ interface FleetState {
      */
     val downloadChanges: Flow<Long> get() = emptyFlow()
 
+    /**
+     * Who this device's person is and what is shared with them, read with
+     * `my_grants` when the hub lists it, again on every `grant:changed`
+     * frame, and per connection; [MyAccess.UNKNOWN] otherwise, which gates
+     * nothing. What a shared session's screen reads its level from.
+     */
+    val access: StateFlow<MyAccess> get() = NoWork.access
+
+    /**
+     * The wire-contract revision the hub's last trusted `ready` named, or
+     * null before one and from a hub that names none. Gates what only a
+     * newer contract carries, such as the Answer share level (revision 15).
+     */
+    val hubContract: StateFlow<Int?> get() = NoWork.hubContract
+
     /** The hub refused [action] of [tool] as unknown: hide it for the rest of this connection. */
     fun actionMissing(tool: String, action: String) {}
 
@@ -179,6 +195,8 @@ private object NoWork {
     val accountUsage: StateFlow<Map<String, AccountUsageSnapshot>> =
         MutableStateFlow<Map<String, AccountUsageSnapshot>>(emptyMap()).asStateFlow()
     val trackers: StateFlow<List<TrackerRow>> = MutableStateFlow<List<TrackerRow>>(emptyList()).asStateFlow()
+    val access: StateFlow<MyAccess> = MutableStateFlow(MyAccess.UNKNOWN).asStateFlow()
+    val hubContract: StateFlow<Int?> = MutableStateFlow<Int?>(null).asStateFlow()
 }
 
 /** What [FleetState.downloadChanges] carries for "re-read everything". Download ids start at 1. */

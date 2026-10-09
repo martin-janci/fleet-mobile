@@ -69,6 +69,8 @@ import dev.claudefleet.mobile.data.HubUsageActions
 import dev.claudefleet.mobile.data.CompanyActions
 import dev.claudefleet.mobile.data.HubCompanyActions
 import dev.claudefleet.mobile.data.HubMemberActions
+import dev.claudefleet.mobile.data.HubShareActions
+import dev.claudefleet.mobile.data.ShareActions
 import dev.claudefleet.mobile.data.MemberActions
 import dev.claudefleet.mobile.data.UsageActions
 import dev.claudefleet.mobile.data.HubSessionDetailsActions
@@ -419,6 +421,7 @@ class AppContainer(
     val usageActions: UsageActions = HubUsageActions(session)
     val companyActions: CompanyActions = HubCompanyActions(session)
     val memberActions: MemberActions = HubMemberActions(session)
+    val shareActions: ShareActions = HubShareActions(session)
     val hostActions: HostActions = HubHostActions(session)
     val projectActions: ProjectActions = HubProjectActions(session)
     val moveActions: MoveActions = HubMoveActions(session)
@@ -1437,7 +1440,9 @@ private fun FleetRoute(
                 }
                 Screen.Inbox -> {
                     val all by repository.sessions.collectAsState()
-                    val rows = remember(all) { inboxRows(all) }
+                    val access by repository.access.collectAsState()
+                    val rows = remember(all, access) { inboxRows(all, access) }
+                    val shared = remember(all, access) { sharedRows(all, access) }
                     val todayInbox by today.state.collectAsState()
                     val inboxList by sessions.state.collectAsState()
                     // The hub's version, read again on every connection: an owner
@@ -1459,6 +1464,7 @@ private fun FleetRoute(
                         anchors = tourAnchors,
                         accountNames = inboxList.accountNames,
                         accountUsage = inboxList.accountUsage,
+                        shared = shared,
                         top = {
                             mismatch?.let { m -> HubVersionBanner(m, onUpdate = nav::openUpdate.takeIf { updateState.available != null }) }
                             updateState.available?.let { UpdateInboxLine(it, onOpen = nav::openUpdate) }
@@ -2194,6 +2200,11 @@ private fun SessionRoute(
         MoveViewModel(sessionId, repository, container.moveActions, scope, credentials.canWrite)
     }
     val move by moveVm.state.collectAsState()
+    // Share (redesign 11.10): the owner's sheet, opened from Details.
+    val shareVm = remember(repository, scope) { ShareViewModel(repository, container.shareActions, scope, credentials.canWrite) }
+    val shareState by shareVm.state.collectAsState()
+    val access by repository.access.collectAsState()
+    val canShare = caps.share && credentials.canWrite && access.owns(state.session)
     // The shells beside the session and ⋮ Archive (redesign 14.14), New bar only.
     val extrasVm = remember(sessionId, repository, scope) {
         SessionExtrasViewModel(sessionId, repository, container.sessionExtrasActions, scope, credentials.canWrite)
@@ -2430,6 +2441,7 @@ private fun SessionRoute(
                         ),
                         actions = listOfNotNull(
                             DetailsAction("Move to host…", { moveVm.open(fresh = true) }).takeIf { move.available && state.canManage },
+                            DetailsAction("Share…", { shareVm.open(sessionId) }).takeIf { canShare },
                             DetailsAction(if (tasks.count > 0) "Tasks ${tasks.count}" else "Tasks", tasksVm::openSheet).takeIf { tasks.available },
                             work.chip?.key?.let { key -> DetailsAction("Ticket $key", workVm::openSheet) },
                         ),
@@ -2438,6 +2450,23 @@ private fun SessionRoute(
             )
         },
     )
+    if (shareState.open) {
+        ShareSheet(
+            state = shareState,
+            handlers = ShareHandlers(
+                onClose = shareVm::close,
+                onKind = shareVm::setKind,
+                onRecipient = shareVm::setRecipient,
+                onLevel = shareVm::setLevel,
+                onShare = { shareVm.share() },
+                onNarrow = { shareVm.narrow(it) },
+                onAskRevoke = { g -> g.recipient?.let(shareVm::askRevoke) },
+                onRevoke = { shareVm.revoke() },
+                onCancelRevoke = shareVm::cancelRevoke,
+                onDismissError = shareVm::dismissError,
+            ),
+        )
+    }
     if (move.open) {
         MoveSheet(
             state = move,
