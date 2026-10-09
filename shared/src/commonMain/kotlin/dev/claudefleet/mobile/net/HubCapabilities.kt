@@ -138,6 +138,13 @@ data class HubCapabilities(
     val agentInstalls: Boolean get() = AGENT_INSTALLS in tools
     val installAgent: Boolean get() = INSTALL_AGENT in tools && AGENT_INSTALLS in tools
 
+    /**
+     * Adding a host from the phone (redesign 14.12's Radar): the hub's SSH
+     * config read and `add_host`. Contract 13 lists `add_host` to the hub
+     * owner's own phone only; the hub still refuses one it does not trust.
+     */
+    val addHost: Boolean get() = ADD_HOST in tools && DISCOVER_HOSTS in tools
+
     /** Archiving a session from its ⋮ menu (`work_link { action: archive }`). */
     val archiveSession: Boolean get() = has(WORK_LINK, "archive")
 
@@ -275,6 +282,8 @@ data class HubCapabilities(
         const val MOVE_SESSION = "move_session"
         const val NEW_SHELL_SESSION = "new_shell_session"
         const val INSTALL_AGENT = "install_agent"
+        const val ADD_HOST = "add_host"
+        const val DISCOVER_HOSTS = "discover_hosts"
         const val AGENT_INSTALLS = "agent_installs"
         const val LIST_GITHUB_REPOS = "list_github_repos"
         const val LIST_HOST_WORKTREES = "list_host_worktrees"

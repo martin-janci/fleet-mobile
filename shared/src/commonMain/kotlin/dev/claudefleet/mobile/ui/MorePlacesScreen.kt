@@ -146,13 +146,15 @@ data class OrbitHostsHandlers(
      * this pairing.
      */
     val onInstallAgent: ((String) -> Unit)? = null,
+    /** Add a host from the hub's SSH config (the Radar); null where the hub does not list `add_host` to this pairing. */
+    val onAddHost: (() -> Unit)? = null,
 )
 
 /**
  * Hosts under More: exceptions first. Signal lost is static, with Try again
  * and the recovery plan; healthy rows stay quiet; version drift is a chip.
- * Adding, removing and hiding a host stay on the desktop (fleet
- * administration a client token is refused).
+ * Adding a host is offered to the hub owner's phone (contract 13);
+ * removing and hiding one stay on the desktop.
  */
 @Composable
 fun OrbitHostsScreen(
@@ -171,7 +173,18 @@ fun OrbitHostsScreen(
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 if (state.isEmpty) {
                     item(key = "empty") {
-                        Quiet(if (state.connecting) "Connecting to the hub…" else "No hosts. Add one from the desktop app or the terminal.")
+                        Quiet(
+                            when {
+                                state.connecting -> "Connecting to the hub…"
+                                handlers.onAddHost != null -> "No hosts yet."
+                                else -> "No hosts. Add one from the desktop app or the terminal."
+                            },
+                        )
+                    }
+                }
+                handlers.onAddHost?.let { add ->
+                    item(key = "add") {
+                        PhoneRow(title = "Add a host", line = "From the hub's SSH config", lead = null, dot = false, onClick = add)
                     }
                 }
                 if (groups.attention.isNotEmpty()) {

@@ -19,7 +19,9 @@ fun friendly(t: Throwable): Friendly {
         is HubError.Tool -> when (t.code) {
             NO_TRANSCRIPT -> Friendly("Nothing has been said yet", "Send a prompt to start.", isError = false, details = raw)
             "E_NOTFOUND" -> Friendly("This session is gone", "It was killed or the fleet no longer lists it.", isError = true, details = raw)
-            "E_FORBIDDEN" -> Friendly("The hub refused that", t.message, isError = true, details = raw)
+            "E_FORBIDDEN" -> trustHint(t.message)?.let { command ->
+                Friendly("Trust this phone on the hub first", "On the hub, run: $command", isError = true, details = raw)
+            } ?: Friendly("The hub refused that", t.message, isError = true, details = raw)
             "E_CONFIRM_REQUIRED" -> Friendly("Needs a confirmation on the desktop", "Approve it there; this screen will follow.", isError = true, details = raw)
             "E_BG_SESSION" -> Friendly("Runs outside tmux", "This session has no terminal to type into.", isError = true, details = raw)
             else -> Friendly("The hub refused that", t.message, isError = true, details = raw)
@@ -69,3 +71,12 @@ fun friendly(t: Throwable): Friendly {
  * one, without pulling those view models into this migration.
  */
 internal fun String.asGenericFriendly(): Friendly = Friendly(title = "Something went wrong", body = this, isError = true)
+
+/**
+ * The command a refusal names when the hub wants this device trusted first
+ * (contract 13's owner's-phone grant: adding a host, installing fleet-agent):
+ * `fleet-hub client trust <name>`, to the end of the line because a device's
+ * name may have spaces; null for any other refusal.
+ */
+internal fun trustHint(message: String): String? =
+    Regex("""fleet-hub client trust .+""").find(message)?.value?.trim()
