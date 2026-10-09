@@ -68,6 +68,8 @@ internal object OrbitTokens {
         ColorToken("loader-accent", dark = 0xFF60A5FA, light = 0xFF60A5FA),
         ColorToken("comet-head", dark = 0xFFF2F4F7, light = 0xFF2563EB),
         ColorToken("agent-claude", dark = 0xFFD97757, light = 0xFFD97757),
+        ColorToken("term-bg", dark = 0xFF0A0A0A, light = 0xFF0A0A0A),
+        ColorToken("term-fg", dark = 0xFFE8E8E8, light = 0xFFE8E8E8),
         ColorToken("scrim", dark = 0x66000000, light = 0x6618181B),
         ColorToken("scrim-strong", dark = 0x9E000000, light = 0x9E18181B),
         ColorToken("ai-pre", dark = 0xFF60A5FA, light = 0xFF2563EB),
@@ -135,6 +137,8 @@ internal object OrbitTokens {
      * test compares it in both directions, as it does every other group.
      */
     val size: Map<String, Float> = mapOf(
+        "splash-mark" to 96f,
+        "splash-stage" to 160f,
         "control-px" to 8f,
         "control-px-lg" to 12f,
         "control-gap" to 6f,
@@ -146,6 +150,7 @@ internal object OrbitTokens {
         "inspector-max" to 320f,
         "fab-size" to 48f,
         "layer-gap" to 8f,
+        "command-w" to 260f,
     )
 
     /** Durations in milliseconds. A loader never shows before `loader-delay`. */
@@ -156,6 +161,8 @@ internal object OrbitTokens {
         "loader-delay" to 400L,
         "loader-reduced" to 2_400L,
         "hub-lost-after" to 6_000L,
+        "loop-fast" to 1_100L,
+        "loop-slow" to 1_600L,
     )
 
     private val byName: Map<String, ColorToken> = colors.associateBy { it.name }
