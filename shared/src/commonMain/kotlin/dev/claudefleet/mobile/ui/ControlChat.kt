@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.data.AgentActions
+import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.ControlActions
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.ConfirmRequest
@@ -162,8 +163,12 @@ class ControlViewModel(
         return scope.launch {
             readStatus()
             while (isActive && (fleet.capabilities.value.confirms || fleet.capabilities.value.handoffs)) {
-                if (fleet.capabilities.value.confirms) readConfirms()
-                if (fleet.capabilities.value.handoffs) readHandoffs()
+                // Offline or stopped (the app went to the background): no call
+                // can land, so the tick waits for the next one (review r16).
+                if (fleet.status.value is ConnectionStatus.Connected) {
+                    if (fleet.capabilities.value.confirms) readConfirms()
+                    if (fleet.capabilities.value.handoffs) readHandoffs()
+                }
                 delay(pollMs)
             }
         }.also { loop = it }

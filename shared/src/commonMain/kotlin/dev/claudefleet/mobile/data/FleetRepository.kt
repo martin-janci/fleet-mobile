@@ -491,12 +491,17 @@ class FleetRepository(
             }
             _capabilities.value = caps
             myWorkRead?.cancel()
-            _orgs.value = readOrgs(caps)
-            _accountNames.value = readAccountNames(caps)
-            // Through the cancellable read, so a frame's newer read started
+            // Three independent reads, side by side rather than one after
+            // another: on a resume they are round trips before the account
+            // chips and the Inbox's access settle (review r16). Usage goes
+            // through the cancellable read, so a frame's newer read started
             // meanwhile is never overwritten by this older answer.
             readAccountUsageSoon()
-            _access.value = readGrants(caps)
+            coroutineScope {
+                launch { _orgs.value = readOrgs(caps) }
+                launch { _accountNames.value = readAccountNames(caps) }
+                launch { _access.value = readGrants(caps) }
+            }
             if (!caps.work) _trackers.value = emptyList()
             _myWork.value = if (caps.work) readMyWork() else null
         }
@@ -539,7 +544,10 @@ class FleetRepository(
 
     private fun readGrantsSoon() {
         grantsRead?.cancel()
-        grantsRead = scope.launch { _access.value = readGrants(_capabilities.value) }
+        grantsRead = scope.launch {
+            delay(SIGNAL_COALESCE_MS)
+            _access.value = readGrants(_capabilities.value)
+        }
     }
 
     /**
@@ -565,7 +573,10 @@ class FleetRepository(
 
     private fun readAccountUsageSoon() {
         usageRead?.cancel()
-        usageRead = scope.launch { _accountUsage.value = readAccountUsage(_capabilities.value) }
+        usageRead = scope.launch {
+            delay(SIGNAL_COALESCE_MS)
+            _accountUsage.value = readAccountUsage(_capabilities.value)
+        }
     }
 
     /** A `list_accounts` read in flight; a newer `account:*` frame replaces it. */
@@ -644,6 +655,13 @@ class FleetRepository(
         /** The status before [start]: offline, but not for any reason the person needs to read. */
         const val NOT_STARTED = "not connected yet"
         private const val STREAM_CLOSED = "the hub closed the stream"
+
+        /**
+         * How long a signal frame (`grant`, `account_usage`) waits before its
+         * re-read. Each new frame cancels the waiting read, so a burst of K
+         * frames costs the hub one call, not K (review r16).
+         */
+        const val SIGNAL_COALESCE_MS = 250L
     }
 }
 
