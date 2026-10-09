@@ -412,6 +412,12 @@ class AppContainer(
     /** Taken exactly once. */
     fun consumeOpenSession(): Long? = _openSession.getAndUpdate { null }
 
+    /** Forget a parked notification tap: a new pairing may be another hub, where its id is another session. */
+    fun dropOpenRequests() {
+        _openSession.value = null
+        _questionFocus.value = null
+    }
+
     /**
      * The last `claudefleet:` link the platform handed over, if the Pair screen
      * has not consumed it yet.
@@ -548,6 +554,7 @@ class AppContainer(
  * exactly when [AuthState] says it holds nothing, which is also what puts it
  * back there when the hub answers 401 (`AppSession.withClient`).
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun App(container: AppContainer) {
     val theme by container.phone.theme.collectAsState()
@@ -612,6 +619,9 @@ fun App(container: AppContainer) {
                             FirstRun.Welcome -> WelcomeScreen(onPair = toPair, onNoHub = { firstRun = FirstRun.NoHub })
                             FirstRun.NoHub -> NoHubScreen(onBack = { firstRun = FirstRun.Welcome }, onPair = toPair, onShare = share)
                             FirstRun.Pair -> PairRoute(container) {
+                                // A notification tapped while unpaired names a
+                                // session of the old pairing (review r09 F7).
+                                container.dropOpenRequests()
                                 justPaired = it
                                 fleetCheck = true
                             }
@@ -628,7 +638,11 @@ fun App(container: AppContainer) {
                             val gate = rememberBiometricGate()
                             val lockOn by container.phone.lock.collectAsState()
                             val unlocked by container.phone.unlocked.collectAsState()
-                            if (lockShown(lockOn, unlocked, gate.available)) {
+                            val locked = lockShown(lockOn, unlocked, gate.available)
+                            // Back on the lock does nothing: under it, it would pop
+                            // a screen nobody can see (review r09 F8).
+                            BackHandler(enabled = locked) {}
+                            if (locked) {
                                 PhoneLockScreen(gate, onUnlocked = container.phone::unlock)
                             }
                         }
@@ -1906,6 +1920,7 @@ private fun FleetRoute(
                     onPrompt = if (layout == PhoneLayout.New && lessonAgent.available) ({ prompt: String -> agent.open(fill = prompt); Unit }) else null,
                 )
             }
+            BackHandler(enabled = whatsNew != null) { whatsNew = null }
             whatsNew?.let { news ->
                 WhatsNewScreen(
                     whatsNew = news,
@@ -2060,6 +2075,10 @@ private fun FleetRoute(
         val importSessions by repository.sessions.collectAsState()
         FirstImport(hosts = importHosts, sessions = importSessions.size, onDone = { importing = false })
     }
+    // The help picker, the fleet check and the first import cover the whole
+    // fleet and close only through their own buttons: back under them would
+    // pop a screen nobody can see (review r09 F8).
+    BackHandler(enabled = fleetCheck || importing || (help.mode == null && whatsNew == null)) {}
 }
 
 /** A destination on the New bar, keyed by its [Tab] name so `Navigator.select` can take it back. */

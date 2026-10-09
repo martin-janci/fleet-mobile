@@ -28,6 +28,7 @@ class AppLifecycleTest {
     }
     private val app by lazy { Repo.file("shared/src/commonMain/kotlin/dev/claudefleet/mobile/App.kt").readText() }
     private val terminals by lazy { Repo.file("shared/src/commonMain/kotlin/dev/claudefleet/mobile/ui/Terminals.kt").readText() }
+    private val sessionScreen by lazy { Repo.file("shared/src/commonMain/kotlin/dev/claudefleet/mobile/ui/SessionScreen.kt").readText() }
     private val bars by lazy {
         Repo.file("shared/src/androidMain/kotlin/dev/claudefleet/mobile/ui/SystemBars.android.kt").readText()
     }
@@ -117,5 +118,21 @@ class AppLifecycleTest {
         val count = summarize.indexOf("shown.size < 2")
         assertTrue(prune in 0 until count, "the summary must prune tapped alerts before it counts")
         assertTrue("retainAll" in summarize)
+    }
+
+    /** A tap parked while unpaired is dropped by the next pair: its id names a session of the old pairing (r09 F7). */
+    @Test
+    fun a_new_pair_forgets_a_parked_notification_tap() {
+        val pair = app.substringAfter("FirstRun.Pair -> PairRoute(container) {", "").substringBefore("}")
+        assertTrue("container.dropOpenRequests()" in pair)
+        val drop = app.substringAfter("fun dropOpenRequests()", "").substringBefore("\n    }")
+        assertTrue("_openSession.value = null" in drop && "_questionFocus.value = null" in drop)
+    }
+
+    /** Before the stream's first list, a missing row reads as loading, not gone (r09 F9). */
+    @Test
+    fun a_cold_start_does_not_call_the_session_gone() {
+        assertTrue("state.session == null && !state.streaming -> \"Reading the fleet…\"" in sessionScreen)
+        assertTrue("if (state.streaming) \"This session is gone.\" else \"Reading the fleet…\"" in sessionScreen)
     }
 }
