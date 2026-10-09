@@ -1304,7 +1304,7 @@ private fun CodeBlock(code: MdBlock.Code, modifier: Modifier = Modifier) {
                 maxLines = 1,
                 modifier = Modifier.weight(1f).padding(start = 12.dp),
             )
-            IconButton(onClick = { wrap = !wrap }, modifier = Modifier.size(32.dp)) {
+            IconButton(onClick = { wrap = !wrap }) {
                 Icon(
                     imageVector = FleetIcons.WrapText,
                     contentDescription = if (wrap) "Scroll long lines" else "Wrap long lines",
@@ -1321,7 +1321,6 @@ private fun CodeBlock(code: MdBlock.Code, modifier: Modifier = Modifier) {
                         copied = false
                     }
                 },
-                modifier = Modifier.size(32.dp),
             ) {
                 Icon(
                     imageVector = if (copied) FleetIcons.Check else FleetIcons.Copy,
