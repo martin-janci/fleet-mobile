@@ -39,7 +39,7 @@ class IconButtonTargetTest {
     fun no_icon_button_is_sized_under_the_touch_target() {
         val call = Regex("""\bIconButton\(""")
         val modifier = Regex("""modifier = Modifier\.(?:size|requiredSize|height|width)\((\d+)\.dp\)""")
-        val hits = Repo.file("shared/src/commonMain").walkTopDown().filter { it.extension == "kt" }.flatMap { f ->
+        val hits = Repo.shipped.asSequence().flatMap { f ->
             val src = f.readText()
             call.findAll(src).mapNotNull { m ->
                 val args = argsAt(src, m.range.last)
