@@ -614,6 +614,12 @@ private fun SettingCard(block: UiBlock.Setting) {
                     }
                 }
             }
+            s.loaded && s.loadFailure != null -> {
+                val f = s.loadFailure!!
+                Text(f.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = colors.error)
+                Text(f.body, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                TextButton(onClick = { model.load() }) { Text("Try again") }
+            }
             s.loaded && s.failure != null -> Text(s.failure!!, style = MaterialTheme.typography.bodySmall, color = colors.error)
             s.loaded -> Note("This change no longer waits for review: it was applied or rejected.")
             else -> Note("Reading the proposal…")

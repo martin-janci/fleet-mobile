@@ -115,6 +115,12 @@ data class SessionUiState(
      * live, which reads as a contradiction. See `connectionNotice`.
      */
     val hubReachable: Boolean? = null,
+    /**
+     * The update stream is up: what the header and the tool rows show is
+     * current. False while the stream is down, even when [connected] (the hub
+     * answers a probe): nothing on screen moves until it is back.
+     */
+    val streaming: Boolean = true,
     val error: Friendly? = null,
     /** True when the last read said [NO_TRANSCRIPT]: nothing has been said yet, not a failure. */
     val silent: Boolean = false,
@@ -1667,6 +1673,7 @@ class SessionViewModel(
         mayPressKeys = mayPressKeysFor(access.levelFor(row)),
         connected = isConnected(status, probed),
         hubReachable = probed,
+        streaming = status is ConnectionStatus.Connected,
         error = l.error,
         silent = l.silent,
         newReply = l.newReply,

@@ -75,6 +75,7 @@ import dev.claudefleet.mobile.ui.components.StatusDot
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.LocalStatusColors
 import dev.claudefleet.mobile.ui.theme.StatusTone
+import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 
 /** Everything the Today sheet reports. */
 data class TodayHandlers(
@@ -147,7 +148,7 @@ fun TodaySheet(
             // Reserved whether or not it is loading, so a re-read does not
             // shift the list under a thumb about to tap it.
             Box(Modifier.fillMaxWidth().height(4.dp)) {
-                if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                if (rememberLoaderVisible(state.loading)) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
             if (state.loaded && !state.view.isEmpty) TodayFilterRow(state, handlers, waitingCount = waitingNow?.size)
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)

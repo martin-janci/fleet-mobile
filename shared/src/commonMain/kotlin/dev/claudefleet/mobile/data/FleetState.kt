@@ -80,6 +80,12 @@ interface FleetState {
     suspend fun refresh()
 
     /**
+     * Try the hub again now rather than when the backoff says: HubBanner's
+     * Retry. A no-op for a fake that has no stream to wake.
+     */
+    fun reconnectNow() {}
+
+    /**
      * What this hub serves this token, discovered with `tools/list` on every
      * `ready` — the gate for every work-graph feature. Until a hub has said,
      * and forever for a hub that cannot, nothing work-shaped is offered.

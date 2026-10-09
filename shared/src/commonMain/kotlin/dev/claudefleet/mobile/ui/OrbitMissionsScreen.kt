@@ -33,6 +33,9 @@ import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
+import dev.claudefleet.mobile.ui.kit.ListBody
+import dev.claudefleet.mobile.ui.kit.LoadFailed
+import dev.claudefleet.mobile.ui.kit.listBody
 
 /*
  * Missions as a screen in the New layout (redesign 14.16, board
@@ -139,14 +142,17 @@ fun OrbitMissionsScreen(
                 IconButton(onClick = handlers.onBack) { Icon(FleetIcons.ArrowBack, contentDescription = "Back") }
             },
         )
-        ErrorBanner(state.error, onDismiss = handlers.onDismissError)
+        ErrorBanner(state.error, onDismiss = handlers.onDismissError, onRetry = handlers.onRefresh.takeIf { state.listFailed })
         state.notice?.let { Text(it, color = o.fg2, fontSize = 14.sp, modifier = Modifier.padding(horizontal = gutter(), vertical = 8.dp)) }
+        val body = listBody(loaded = state.loaded, failed = state.listFailed && !state.loading, empty = groups.isEmpty)
         LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            if (state.loading && state.missions.isEmpty()) {
+            if (body == ListBody.Loading) {
                 item(key = "loading") {
                     if (rememberLoaderVisible(true)) DotWave(modifier = Modifier.padding(horizontal = gutter(), vertical = 24.dp))
                 }
-            } else if (groups.isEmpty) {
+            } else if (body == ListBody.Failed) {
+                item(key = "failed") { LoadFailed("missions", state.error?.body, handlers.onRefresh) }
+            } else if (body == ListBody.Empty) {
                 item(key = "empty") {
                     Text(
                         "No missions yet. A mission is long work Control plans with you and runs step by step.",

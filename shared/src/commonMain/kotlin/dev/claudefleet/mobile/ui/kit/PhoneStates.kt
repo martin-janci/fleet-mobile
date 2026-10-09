@@ -20,17 +20,21 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.data.FleetRepository
+import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
 
@@ -47,8 +51,12 @@ sealed interface PhoneConnection {
     /** Trying again, and not for long yet: the Gravity well. */
     data class Reconnecting(val attempt: Int) : PhoneConnection
 
-    /** The hub is not answering: Signal lost, the last known rows and Retry. [reason] is what the last attempt said. */
-    data class Offline(val reason: String?) : PhoneConnection
+    /**
+     * The hub is not answering: Signal lost, the last known rows and Retry.
+     * [reason] is what the last attempt said, as a sentence; [details] is the
+     * technical half (exception kind, HTTP status), drawn only behind Details.
+     */
+    data class Offline(val reason: String?, val details: String? = null) : PhoneConnection
 
     /** The hub answered and this build will not use it: words only, no loader and no Retry. */
     data class Refused(val reason: String) : PhoneConnection
@@ -63,8 +71,16 @@ sealed interface PhoneConnection {
 fun phoneConnection(status: ConnectionStatus, hubLost: Boolean): PhoneConnection = when (status) {
     is ConnectionStatus.Connected -> PhoneConnection.Live
     is ConnectionStatus.Reconnecting ->
-        if (hubLost) PhoneConnection.Offline(status.reason) else PhoneConnection.Reconnecting(status.attempt)
-    is ConnectionStatus.Offline -> PhoneConnection.Offline(status.reason)
+        if (hubLost) PhoneConnection.Offline(status.reason, status.details) else PhoneConnection.Reconnecting(status.attempt)
+    // Before the first connect, and while the lifecycle has the stream down,
+    // nothing has failed: the app is about to connect. Read as the first
+    // attempt so Signal lost does not flash on every launch and resume.
+    is ConnectionStatus.Offline ->
+        if (status.reason == FleetRepository.NOT_STARTED || status.reason == STOPPED) {
+            if (hubLost) PhoneConnection.Offline(null) else PhoneConnection.Reconnecting(1)
+        } else {
+            PhoneConnection.Offline(status.reason)
+        }
     is ConnectionStatus.Refused -> PhoneConnection.Refused(status.reason)
 }
 
@@ -73,7 +89,14 @@ fun phoneConnection(status: ConnectionStatus, hubLost: Boolean): PhoneConnection
 fun rememberPhoneConnection(status: ConnectionStatus): PhoneConnection {
     val down = status !is ConnectionStatus.Connected
     var lost by remember { mutableStateOf(false) }
-    LaunchedEffect(down) {
+    // A Retry (FleetRepository.reconnectNow) starts the count again: the
+    // repository publishes attempt 1 *with* the last reason, which the very
+    // first attempt never has. Without this, a Retry tapped on Signal lost
+    // redrew Signal lost while the new attempt ran.
+    var retries by remember { mutableStateOf(0) }
+    val retried = status is ConnectionStatus.Reconnecting && status.attempt == 1 && status.reason != null
+    LaunchedEffect(retried) { if (retried) retries++ }
+    LaunchedEffect(down, retries) {
         lost = false
         if (!down) return@LaunchedEffect
         val start = withFrameMillis { it }
@@ -84,6 +107,14 @@ fun rememberPhoneConnection(status: ConnectionStatus): PhoneConnection {
     }
     return phoneConnection(status, hubLost = down && lost)
 }
+
+/**
+ * What HubBanner's Retry does on top of the screen's own refresh: wake the
+ * repository's reconnect loop ([dev.claudefleet.mobile.data.FleetRepository.reconnectNow]).
+ * Provided once by the fleet route, so every banner's Retry reconnects
+ * without each screen threading the repository through.
+ */
+val LocalHubReconnect = staticCompositionLocalOf<() -> Unit> { {} }
 
 /** What the offline banner says under its title. [asOf] is the time of the last answer ("14:52"), when known. */
 fun offlineDetail(asOf: String?): String =
@@ -143,9 +174,16 @@ fun HubBanner(
             }
             Text(title, color = o.fg, fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold)
             for (line in lines) Text(line, color = o.fgMuted, fontSize = 13.sp, lineHeight = 18.sp)
+            val details = (connection as? PhoneConnection.Offline)?.details
+            if (details != null) {
+                var open by remember(details) { mutableStateOf(false) }
+                if (open) Text(details, color = o.fgMuted, fontSize = 12.sp, lineHeight = 16.sp, fontFamily = FontFamily.Monospace)
+                TextButton(onClick = { open = !open }) { Text(if (open) "Hide details" else "Details", color = o.fg2, fontSize = 13.sp) }
+            }
         }
-        if (connection is PhoneConnection.Offline && onRetry != null) {
-            TextButton(onClick = onRetry) { Text("Retry", color = o.accent, fontSize = 15.sp) }
+        if (connection is PhoneConnection.Offline) {
+            val reconnect = LocalHubReconnect.current
+            TextButton(onClick = { reconnect(); onRetry?.invoke() }) { Text("Retry", color = o.accent, fontSize = 15.sp) }
         }
     }
 }
@@ -271,4 +309,38 @@ internal fun QuietButton(label: String, onClick: () -> Unit, modifier: Modifier 
         onClick = onClick,
         modifier = modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp),
     ) { Text(label, color = Fleet.colors.fg2, fontSize = 15.sp) }
+}
+
+/** What the body of a list draws, before its rows (14.12). */
+enum class ListBody { Loading, Failed, Empty, Rows }
+
+/**
+ * The one rule for a list's body: rows when there are rows; otherwise a
+ * failed read says it failed — never "No X yet", which is a claim about the
+ * fleet a failed read cannot make — and the empty state is only for a read
+ * that answered with nothing.
+ */
+fun listBody(loaded: Boolean, failed: Boolean, empty: Boolean): ListBody = when {
+    !empty -> ListBody.Rows
+    failed -> ListBody.Failed
+    loaded -> ListBody.Empty
+    else -> ListBody.Loading
+}
+
+/**
+ * A list whose read failed (MobileStates: a failed load): "Couldn't load
+ * [what]", the plain sentence, and Retry, which runs the read again. The
+ * technical half stays with the ErrorBanner's Details.
+ */
+@Composable
+fun LoadFailed(what: String, body: String?, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    val o = Fleet.colors
+    Column(
+        modifier = modifier.fillMaxWidth().padding(horizontal = OrbitTokens.spacing("phone-gutter").dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text("Couldn't load $what", color = o.fg, fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold)
+        if (body != null) Text(body, color = o.fgMuted, fontSize = 14.sp, lineHeight = 20.sp)
+        QuietButton("Retry", onRetry)
+    }
 }

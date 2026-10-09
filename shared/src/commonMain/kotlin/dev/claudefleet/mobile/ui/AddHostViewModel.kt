@@ -29,6 +29,8 @@ data class AddHostUiState(
     /** SSH aliases added from this screen. */
     val added: Set<String> = emptySet(),
     val error: Friendly? = null,
+    /** The scan of the hub's SSH config failed: "None new" would be a claim it cannot make. */
+    val scanFailed: Boolean = false,
 ) {
     /** One blip per host the sweep found; an added one reads as ready. */
     val blips: List<RadarBlip> get() = candidates.mapIndexed { i, h ->
@@ -56,6 +58,7 @@ class AddHostViewModel(
         val adding: String? = null,
         val added: Set<String> = emptySet(),
         val error: Friendly? = null,
+        val scanFailed: Boolean = false,
     )
 
     private val local = MutableStateFlow(Local())
@@ -69,19 +72,31 @@ class AddHostViewModel(
             adding = l.adding,
             added = l.added,
             error = l.error,
+            scanFailed = l.scanFailed,
         )
     }.stateIn(scope, SharingStarted.Eagerly, AddHostUiState())
 
     fun open(): Job = scope.launch {
         if (!state.value.available) return@launch
         local.value = Local(open = true, scanning = true)
+        scan()
+    }
+
+    /** Retry after a failed scan: reads the hub's SSH config again, keeping what was added. */
+    fun rescan(): Job = scope.launch {
+        if (!local.value.open) return@launch
+        local.update { it.copy(scanning = true, scanFailed = false, error = null) }
+        scan()
+    }
+
+    private suspend fun scan() {
         try {
             val found = actions.candidates()
-            local.update { if (it.open) it.copy(scanning = false, found = found) else it }
+            local.update { if (it.open) it.copy(scanning = false, found = found, scanFailed = false) else it }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(scanning = false, error = friendly(t)) }
+            local.update { if (it.open) it.copy(scanning = false, error = friendly(t), scanFailed = true) else it }
         }
     }
 

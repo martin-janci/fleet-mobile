@@ -192,7 +192,7 @@ fun MyWorkScreen(
             },
         )
         state.stale?.let { StaleNotice(it) }
-        ErrorBanner(state.error, onDismiss = handlers.onDismissError)
+        ErrorBanner(state.error, onDismiss = handlers.onDismissError, onRetry = handlers.onRefresh.takeIf { !state.loaded && !state.conflict })
         if (state.error != null && state.conflict) ReloadRow(handlers.onReload)
         if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
 
@@ -209,7 +209,11 @@ fun MyWorkScreen(
                 } else if (!state.loaded && !state.loading) {
                     item(key = "not-yet") {
                         Text(
-                            if (state.connected) "Nothing read yet — pull to load." else "Not connected to the hub.",
+                            when {
+                                !state.connected -> "Not connected to the hub."
+                                state.error != null -> "Couldn't load your work. Pull to try again."
+                                else -> "Nothing read yet — pull to load."
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(24.dp),

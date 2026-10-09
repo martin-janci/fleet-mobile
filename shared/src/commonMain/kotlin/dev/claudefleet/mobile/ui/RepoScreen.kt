@@ -68,6 +68,7 @@ import dev.claudefleet.mobile.ui.theme.diffColors
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import kotlinx.coroutines.launch
 import kotlin.math.round
+import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 
 /** What the worktree screen reports. */
 data class RepoHandlers(
@@ -168,7 +169,7 @@ fun RepoBody(
                 }
             }
         }
-        if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        if (rememberLoaderVisible(state.loading)) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         ErrorBanner(state.error, onDismiss = handlers.onDismissError)
         state.notice?.let { Notice(it, handlers.onDismissNotice) }
         when (val top = state.top) {

@@ -90,6 +90,9 @@ class OrbitSettingsHandlers(
     val onOpenUsage: (() -> Unit)? = null,
     /** The Company screen; null where the hub lists no organisation to this device. */
     val onOpenCompany: (() -> Unit)? = null,
+    /** Read the hub's settings again after a failed read. */
+    val onRetryFleet: () -> Unit = {},
+    val onDismissFleetError: () -> Unit = {},
 )
 
 /**
@@ -169,6 +172,9 @@ private fun ColumnScope.SettingsHome(
     val s = input.settings
     val gutter = OrbitTokens.spacing("phone-gutter").dp
     HubSummary(s)
+    // The hub's settings could not be read: said here, with Retry, rather
+    // than leaving its groups silently missing from the list below.
+    ErrorBanner(input.fleet?.loadError, onDismiss = handlers.onDismissFleetError, onRetry = handlers.onRetryFleet)
 
     // An action item, not a setting buried in a list (analysis 90).
     val waiting = input.fleet?.proposals?.size ?: 0

@@ -20,6 +20,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -212,6 +213,9 @@ import dev.claudefleet.mobile.ui.kit.BottomBar
 import dev.claudefleet.mobile.ui.kit.BottomBarBadge
 import dev.claudefleet.mobile.ui.kit.BottomBarItem
 import dev.claudefleet.mobile.ui.kit.OrbitIcons
+import dev.claudefleet.mobile.ui.kit.rememberPhoneConnection
+import dev.claudefleet.mobile.ui.kit.HubBanner
+import dev.claudefleet.mobile.ui.kit.LocalHubReconnect
 import dev.claudefleet.mobile.ui.NewSessionScreen
 import dev.claudefleet.mobile.ui.NewSessionViewModel
 import dev.claudefleet.mobile.ui.WizardStep
@@ -916,6 +920,9 @@ private fun FleetRoute(
     LaunchedEffect(settingsCaps) { fleetSettings.setHistoryAvailable(settingsCaps.settingHistory) }
     LaunchedEffect(settingsCaps.fleetSettings) { if (settingsCaps.fleetSettings) fleetSettings.load() }
 
+    // Every HubBanner's Retry wakes the reconnect loop, not only its screen's refresh (review r13).
+    val reconnect: () -> Unit = remember(repository) { { repository.reconnectNow() } }
+    CompositionLocalProvider(LocalHubReconnect provides reconnect) {
     Scaffold(
         bottomBar = {
             // Not on a session: it is a detail screen with its own Back, and
@@ -1454,7 +1461,7 @@ private fun FleetRoute(
                     if (addHostState.open) {
                         AddHostScreen(
                             addHostState,
-                            AddHostHandlers(onClose = addHost::close, onAdd = { addHost.add(it) }, onDismissError = addHost::dismissError),
+                            AddHostHandlers(onClose = addHost::close, onAdd = { addHost.add(it) }, onDismissError = addHost::dismissError, onRescan = { addHost.rescan() }),
                         )
                     }
                     val installState by installs.state.collectAsState()
@@ -1481,11 +1488,13 @@ private fun FleetRoute(
                     var hubVersion by remember { mutableStateOf<String?>(null) }
                     LaunchedEffect(connected) { if (connected) hubVersion = container.versionActions.hubVersion() }
                     val mismatch = remember(hubVersion) { hubMismatch(container.appVersion, hubVersion) }
+                    val inboxConnection = rememberPhoneConnection(inboxList.status)
                     InboxScreen(
                         rows = rows,
                         running = all.count { it.claudeStatus == "working" },
                         nowSeconds = inboxList.nowSeconds,
                         live = inboxList.status is ConnectionStatus.Connected,
+                        connection = inboxConnection,
                         refreshing = inboxList.refreshing,
                         onRefresh = { sessions.refresh() },
                         onOpenSession = nav::open,
@@ -1496,6 +1505,9 @@ private fun FleetRoute(
                         accountUsage = inboxList.accountUsage,
                         shared = shared,
                         top = {
+                            // Like every other tab (14.12): the hub's state once, at the top, and a failed pull with its Retry.
+                            HubBanner(inboxConnection, asOf = inboxList.staleAt, onRetry = { sessions.refresh() })
+                            ErrorBanner(inboxList.error, onDismiss = sessions::dismissError, onRetry = { sessions.refresh() })
                             mismatch?.let { m -> HubVersionBanner(m, onUpdate = nav::openUpdate.takeIf { updateState.available != null }) }
                             updateState.available?.let { UpdateInboxLine(it, onOpen = nav::openUpdate) }
                             // A change an agent proposed for the hub is an Inbox item, not a row 14 deep in Settings (14.17).
@@ -1567,6 +1579,7 @@ private fun FleetRoute(
                             onAnswer = { nonce, ok -> control.answer(nonce, ok) },
                             onDismissError = control::dismissError,
                             below = { TipFor(Tip.CONTROL, help, helpSettings) },
+                            onRetry = { control.refresh() },
                         )
                     }
                 }
@@ -1708,7 +1721,8 @@ private fun FleetRoute(
                         onPause = updates::pause,
                         onCancel = updates::cancel,
                         onInstall = updates::install,
-                        onRetry = updates::reset,
+                        onRetry = updates::retry,
+                        onReset = updates::reset,
                     ),
                 )
                 Screen.Settings -> {
@@ -1734,6 +1748,8 @@ private fun FleetRoute(
                                 onCancelConfirm = fleetSettings::cancelConfirm,
                                 onHistory = { fleetSettings.showHistory(it) },
                                 onCloseHistory = fleetSettings::closeHistory,
+                                onRetry = { fleetSettings.load() },
+                                onDismissError = fleetSettings::dismissLoadError,
                                 pageHead = { pageId ->
                                     // Decisions (Jev) opens with who opted in and what Jev may do (14.17).
                                     if (layout == PhoneLayout.New && pageId == DECISIONS_PAGE) {
@@ -1791,6 +1807,8 @@ private fun FleetRoute(
                                 onDismissError = settings::dismissError,
                                 onOpenUsage = onOpenUsage,
                                 onOpenCompany = onOpenCompany,
+                                onRetryFleet = { fleetSettings.load() },
+                                onDismissFleetError = fleetSettings::dismissLoadError,
                             ),
                             fleetPageOpen = fleetPageOpen,
                             fleetPage = fleetSection,
@@ -1953,6 +1971,7 @@ private fun FleetRoute(
                 )
             }
         }
+    }
     }
     // The tour runs on the real Inbox, over the bar as well, and stops for nothing else.
     val stop = help.tourStop

@@ -63,6 +63,34 @@ private val WITH_ADD_HOST = HubCapabilities(tools = setOf("add_host", "discover_
  */
 class AddHostTest {
 
+    /** Review r13 (P13-9/10): a failed scan is not "None new", and Retry scans again. */
+    @Test
+    fun a_failed_scan_says_so_and_retry_scans_again() = runTest {
+        val actions = object : AddHostActions by FakeAddHost() {
+            var fail = true
+            var scans = 0
+            override suspend fun candidates(): List<SshHost> {
+                scans += 1
+                if (fail) throw HubError.Transport(IllegalStateException("x"))
+                return listOf(PINE)
+            }
+        }
+        val v = AddHostViewModel(AddHostFleet(WITH_ADD_HOST), actions, backgroundScope, canWrite = true)
+        runCurrent()
+        v.open().join()
+        runCurrent()
+        assertTrue(v.state.value.scanFailed)
+        assertEquals("Couldn't read the hub's SSH config", addHostMeta(v.state.value))
+
+        actions.fail = false
+        v.rescan().join()
+        runCurrent()
+        assertEquals(2, actions.scans)
+        assertFalse(v.state.value.scanFailed)
+        assertNull(v.state.value.error)
+        assertEquals(listOf("pine.lan"), v.state.value.candidates.map { it.alias })
+    }
+
     private fun TestScope.vm(
         caps: HubCapabilities = WITH_ADD_HOST,
         actions: FakeAddHost = FakeAddHost(),

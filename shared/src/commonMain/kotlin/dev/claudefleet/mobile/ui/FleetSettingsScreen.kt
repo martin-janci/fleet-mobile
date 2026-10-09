@@ -56,6 +56,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.PaddingValues
+import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
+import dev.claudefleet.mobile.ui.components.ErrorBanner
 
 /**
  * The fleet's settings, drawn from the hub's own page specs (claude-fleet
@@ -82,11 +84,15 @@ fun FleetSettingsSection(
     onCloseHistory: () -> Unit = {},
     /** Drawn above an open page's fields, by page id: Decisions (Jev) opens with who opted in (14.17). */
     pageHead: @Composable (String) -> Unit = {},
+    /** Read the settings again after a failed read. */
+    onRetry: () -> Unit = {},
+    onDismissError: () -> Unit = {},
 ) {
     state.history?.let { (key, rows) -> SettingHistoryDialog(state.descriptors[key]?.label ?: key, rows, onCloseHistory) }
-    if (state.loading && !state.loaded) {
+    if (rememberLoaderVisible(state.loading && !state.loaded)) {
         LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
     }
+    ErrorBanner(state.loadError, onDismiss = onDismissError, onRetry = onRetry)
     val page = state.page
     if (page == null) {
         PageList(state, clientName, onOpen)

@@ -21,6 +21,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.ui.components.ErrorBanner
+import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 
 /** The New layout's one ticket sheet is up while either half of it was opened. */
 internal fun ticketSheetOpen(work: SessionWorkUiState, tasks: SessionTasksUiState): Boolean =
@@ -68,7 +69,7 @@ fun PhoneTicketSheet(
             if (work.chip == null) {
                 Text("Ticket and tasks", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp).semantics { heading() })
             }
-            if (tasks.loading || tasks.busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            if (rememberLoaderVisible(tasks.loading || tasks.busy)) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             val crossOrg = tasks.crossOrg
             if (crossOrg != null) {
                 CrossOrgPanel(crossOrg, tasks, tasksHandlers)

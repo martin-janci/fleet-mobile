@@ -78,6 +78,40 @@ private class FakeControl(var status: OperatorStatus) : ControlActions, AgentAct
 
 class ControlChatTest {
 
+    /** Review r13 (P13-7): a failed status read is not "not running"; Retry and a reconnect read it again. */
+    @Test
+    fun a_failed_status_read_is_said_and_read_again_when_the_hub_returns() = runTest {
+        val fleet = ControlFleet(CONTROL_TOOLS)
+        val fake = object : ControlActions by FakeControl(OperatorStatus(ready = false, blocked = "absent")) {
+            var fail = true
+            var reads = 0
+            override suspend fun status(): OperatorStatus {
+                reads += 1
+                if (fail) throw dev.claudefleet.mobile.net.HubError.Transport(IllegalStateException("x"))
+                return OperatorStatus(ready = true, session = SessionRow(id = 9))
+            }
+        }
+        val agent = FakeControl(OperatorStatus(ready = false))
+        val vm = ControlViewModel(fleet, fake, agent, backgroundScope, canWrite = true, pollMs = 100)
+        vm.attach()
+        runCurrent()
+        assertTrue(vm.state.value.statusFailed)
+        assertEquals("Couldn't read Control's state.", controlWaitingLine(vm.state.value))
+        assertFalse(vm.state.value.canWake)
+
+        // The hub drops and comes back: the status is read again on its own.
+        fleet.status.value = ConnectionStatus.Reconnecting(2, "Can't reach the hub from this network.")
+        runCurrent()
+        assertTrue(controlWaitingLine(vm.state.value).startsWith("Not connected"))
+        fake.fail = false
+        fleet.status.value = ConnectionStatus.Connected("0.9.3")
+        runCurrent()
+        assertEquals(2, fake.reads)
+        assertFalse(vm.state.value.statusFailed)
+        assertEquals(9L, vm.state.value.sessionId)
+        vm.detach()
+    }
+
     @Test
     fun a_running_control_opens_its_conversation_in_the_tab_and_wakes_nothing() = runTest {
         val fake = FakeControl(OperatorStatus(ready = true, session = SessionRow(id = 5), host = "pine"))

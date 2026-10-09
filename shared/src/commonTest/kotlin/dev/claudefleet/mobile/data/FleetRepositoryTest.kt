@@ -581,14 +581,62 @@ class FleetRepositoryTest {
         val reconnecting = repository.status.first { it is ConnectionStatus.Reconnecting && it.attempt == 2 }
                 as ConnectionStatus.Reconnecting
         assertTrue(
-            reconnecting.reason.orEmpty().contains("RuntimeException"),
-            "an idle timeout should explain the drop like any other transport failure: ${reconnecting.reason}",
+            reconnecting.details.orEmpty().contains("RuntimeException"),
+            "an idle timeout should explain the drop like any other transport failure: ${reconnecting.details}",
         )
+        assertEquals("Can't reach the hub from this network.", reconnecting.reason)
 
         reconnected.await()
         val status = repository.status.first { it is ConnectionStatus.Connected }
 
         assertEquals(ConnectionStatus.Connected("0.9.3"), status)
+        repository.stop()
+    }
+
+    /**
+     * Review r13 (P13-2): HubBanner's Retry wakes the backoff. Without it a
+     * Retry at the 30 s cap re-listed over a dead stream and the next attempt
+     * still waited out the cap; now it goes at once and the count starts over.
+     */
+    @Test
+    fun reconnect_now_cuts_the_backoff_short_and_starts_the_count_again() = runTest {
+        val hub = FakeHub()
+        val stream = FakeStream { throw HubError.Transport(RuntimeException("down")) }
+        stream.clock = this
+        val repository = repo(hub, stream, backgroundScope)
+
+        repository.start()
+        // 0, 1, 3, 7, 15, 31 s: deep into the backoff, waiting 30 s for the next.
+        testScheduler.advanceTimeBy(31_500)
+        val before = stream.openedAt.size
+        assertEquals(31_000L, stream.openedAt.last())
+
+        repository.reconnectNow()
+        testScheduler.advanceTimeBy(1)
+        assertEquals(before + 1, stream.openedAt.size, "the Retry attempt goes at once: ${stream.openedAt}")
+        assertEquals(31_500L, stream.openedAt.last())
+        // And the next wait is the first step again, not the cap.
+        testScheduler.advanceTimeBy(1_000)
+        assertEquals(32_500L, stream.openedAt.last(), "${stream.openedAt}")
+        repository.stop()
+    }
+
+    /** A burst of Retry taps is one wake: one early attempt, then the backoff as usual. */
+    @Test
+    fun a_burst_of_retries_is_one_wake() = runTest {
+        val hub = FakeHub()
+        val stream = FakeStream { throw HubError.Transport(RuntimeException("down")) }
+        stream.clock = this
+        val repository = repo(hub, stream, backgroundScope)
+        repository.start()
+        testScheduler.advanceTimeBy(10)
+        // Retry pressed twice before the first wait: one wake, one early attempt.
+        repository.reconnectNow()
+        repository.reconnectNow()
+        testScheduler.advanceTimeBy(10)
+        val n = stream.openedAt.size
+        testScheduler.advanceTimeBy(500)
+        assertEquals(n, stream.openedAt.size, "a conflated burst is one wake: ${stream.openedAt}")
         repository.stop()
     }
 
@@ -636,9 +684,19 @@ class FleetRepositoryTest {
             status.reason.orEmpty().contains("Bearer"),
             "an unexpected throwable's own message reached the banner: ${status.reason}",
         )
-        assertTrue(
+        assertFalse(
+            status.details.orEmpty().contains("Bearer"),
+            "nor the Details line: ${status.details}",
+        )
+        // Review r13 (P13-4): the banner gets a sentence; the class name is
+        // the Details line's, not the banner's.
+        assertFalse(
             status.reason.orEmpty().contains("IllegalStateException"),
-            "it should still say what kind of failure it was: ${status.reason}",
+            "an exception class reached the banner's text: ${status.reason}",
+        )
+        assertTrue(
+            status.details.orEmpty().contains("IllegalStateException"),
+            "Details should still say what kind of failure it was: ${status.details}",
         )
     }
 
@@ -660,12 +718,16 @@ class FleetRepositoryTest {
         // stopped repeating `cause.message` when it turned out that a truncated
         // pair reply put the bearer token in it. See `TokenNeverLeaksTest`.
         assertTrue(
-            status.reason.orEmpty().contains("RuntimeException"),
-            "the banner should still say what kind of failure it was: ${status.reason}",
+            status.details.orEmpty().contains("RuntimeException"),
+            "Details should still say what kind of failure it was: ${status.details}",
         )
         assertFalse(
-            status.reason.orEmpty().contains("connection reset"),
-            "and must not repeat the cause's own text: ${status.reason}",
+            status.reason.orEmpty().contains("RuntimeException"),
+            "the banner's own line is a sentence, not a class name: ${status.reason}",
+        )
+        assertFalse(
+            (status.reason.orEmpty() + status.details.orEmpty()).contains("connection reset"),
+            "and must not repeat the cause's own text: ${status.reason} / ${status.details}",
         )
     }
 

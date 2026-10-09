@@ -741,6 +741,10 @@ fun SessionScreen(
                         LocalToolDetails provides toolDetails,
                         LocalChatHost provides chat.copyWith(progress = progress, nowSeconds = state.nowSeconds),
                         LocalFindQuery provides if (findOpen) findQuery else "",
+                        // A tool spins only while the session works and the
+                        // stream would say when it stops; otherwise it is
+                        // drawn still (14.12: no live spinner over stale rows).
+                        LocalToolsLive provides (state.session?.claudeStatus == "working" && state.streaming),
                         // A reply's cards (RichCards.kt) act by filling the
                         // composer, after what is typed, never by sending.
                         LocalComposerFill provides if (!state.readOnly && state.session != null) {
@@ -759,7 +763,7 @@ fun SessionScreen(
                         ) {
                             turnItems(
                                 rows,
-                                working = state.session?.claudeStatus == "working",
+                                working = state.session?.claudeStatus == "working" && state.streaming,
                                 replies = ReplyHost(
                                     turns = turns,
                                     truncated = truncated,
@@ -989,7 +993,10 @@ fun SessionScreen(
                                         onRetry = failed.retryPrompt?.let { prompt -> { scrollToNewest(); onRetryLastTurn(prompt) } },
                                         onShowError = { tabs.onSelect(SessionTab.Agent) },
                                     )
-                                } else if (state.card == null && !state.readOnly) {
+                                } else if (state.card == null && !state.readOnly && state.loaded) {
+                                    // Not before the conversation has loaded: the
+                                    // board's Loading state keeps quick replies
+                                    // hidden until turns arrive (ConversationLoading).
                                     QuickRepliesRow(
                                         chips = quickReplies,
                                         draft = state.draft,
@@ -1216,7 +1223,7 @@ private fun CompactSessionBar(state: SessionUiState, onBack: () -> Unit, onExpan
                         )
                         // The strip's own words, small: a dot alone said
                         // working but not for how long or how full.
-                        val status = statusStripText(state.session, state.conversation.context, state.nowSeconds)
+                        val status = statusStripText(state.session, state.conversation.context, state.nowSeconds, live = state.streaming)
                         if (status.isNotBlank()) {
                             Text(
                                 text = status,
@@ -1429,6 +1436,7 @@ private fun SessionBar(
                     context = state.conversation.context,
                     nowSeconds = state.nowSeconds,
                     modifier = Modifier.weight(1f),
+                    live = state.streaming,
                 )
                 IconButton(
                     onClick = { prevTurn?.let { target -> scope.launch { listState.showTurn(target) } } },

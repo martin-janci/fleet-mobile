@@ -47,6 +47,7 @@ import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
+import dev.claudefleet.mobile.ui.kit.LoadFailed
 
 /*
  * The hub's trackers on the phone (redesign 14.20, board MobileWizards
@@ -121,7 +122,10 @@ fun OrbitTrackersScreen(
                 IconButton(onClick = handlers.onBack) { Icon(FleetIcons.ArrowBack, contentDescription = "Back") }
             },
         )
-        ErrorBanner(state.error, onDismiss = handlers.onDismissError)
+        // A list that never loaded: Retry runs the read again. An action's
+        // failure (Test, Remove) is not retried from here — that is its row's.
+        val listFailed = !state.loaded && !state.loading && state.error != null
+        ErrorBanner(state.error, onDismiss = handlers.onDismissError, onRetry = handlers.onRefresh.takeIf { listFailed })
         state.notice?.let {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = gutter(), vertical = 4.dp)) {
                 Text(it, color = o.fg2, fontSize = 14.sp, modifier = Modifier.weight(1f))
@@ -133,6 +137,8 @@ fun OrbitTrackersScreen(
                 item(key = "loading") {
                     if (rememberLoaderVisible(true)) DotWave(modifier = Modifier.padding(horizontal = gutter(), vertical = 24.dp))
                 }
+            } else if (listFailed && state.trackers.isEmpty()) {
+                item(key = "failed") { LoadFailed("trackers", state.error?.body, handlers.onRefresh) }
             } else if (state.loaded && state.trackers.isEmpty()) {
                 item(key = "empty") {
                     Text(

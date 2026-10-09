@@ -99,6 +99,29 @@ private fun download(id: Long, state: String = Download.READY, at: Long = NOW - 
  */
 class FilesViewModelTest {
 
+    /** Review r13 (P13-9): a first read that failed is not "No files yet" — not even once the banner is dismissed. */
+    @Test
+    fun a_failed_first_read_is_never_the_empty_state() = runTest {
+        val actions = object : DownloadActions by FakeDownloads() {
+            var fail = true
+            override suspend fun list(sessionId: Long?, limit: Int?): DownloadList =
+                if (fail) throw HubError.Transport(IllegalStateException("x")) else DownloadList(emptyList())
+        }
+        val files = FilesViewModel(FilesFleet(ALL), actions, backgroundScope, true, FakeHandoff(), clock = { NOW })
+        files.refresh().join()
+        runCurrent()
+        assertTrue(files.state.value.listFailed)
+        assertFalse(files.state.value.isEmpty, "a failed read drew the empty state")
+        files.dismissError()
+        runCurrent()
+        assertFalse(files.state.value.isEmpty, "dismissing the banner does not make the list read")
+
+        actions.fail = false
+        files.refresh().join()
+        runCurrent()
+        assertTrue(files.state.value.isEmpty, "a read that answered nothing is empty")
+    }
+
     private fun vm(
         fleet: FilesFleet,
         actions: FakeDownloads,

@@ -12,6 +12,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.model.GrantLevel
@@ -25,6 +26,7 @@ import dev.claudefleet.mobile.ui.help.TourAnchor
 import dev.claudefleet.mobile.ui.help.TourAnchors
 import dev.claudefleet.mobile.ui.help.tourAnchor
 import dev.claudefleet.mobile.ui.kit.OrbitPullToRefresh
+import dev.claudefleet.mobile.ui.kit.PhoneConnection
 import dev.claudefleet.mobile.ui.kit.StatusWord
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.StatusTone
@@ -69,6 +71,18 @@ internal fun inboxWord(row: SessionRow): StatusWord =
 /** "4 need you · 6 running": the Inbox header's line. */
 internal fun inboxSubtitle(needYou: Int, running: Int): String = "$needYou need${if (needYou == 1) "s" else ""} you · $running running"
 
+/**
+ * What an empty Inbox says. "Nothing needs you" is a claim about the fleet,
+ * and only a live hub can make it: while connecting or offline an empty list
+ * may just be a list the phone has not been told about yet.
+ */
+internal fun inboxEmptyText(connection: PhoneConnection): String = when (connection) {
+    PhoneConnection.Live -> "Nothing needs you."
+    is PhoneConnection.Reconnecting -> "Connecting to the hub. Anything that needs you appears once it answers."
+    is PhoneConnection.Offline -> "Not connected. This phone can't tell whether anything needs you until the hub answers."
+    is PhoneConnection.Refused -> "Not connected. This hub can't be used from this phone."
+}
+
 @Composable
 fun InboxScreen(
     rows: List<SessionRow>,
@@ -78,6 +92,8 @@ fun InboxScreen(
     onOpenToday: (() -> Unit)?,
     modifier: Modifier = Modifier,
     live: Boolean = true,
+    /** Where the phone stands with the hub: what an empty Inbox may claim. */
+    connection: PhoneConnection = PhoneConnection.Live,
     refreshing: Boolean = false,
     onRefresh: () -> Unit = {},
     /** Above the list: the hub-version banner and the Update ready line (14.18), when there are any. */
@@ -106,7 +122,7 @@ fun InboxScreen(
                 if (rows.isEmpty() && shared.isEmpty()) {
                     item(key = "empty") {
                         Box(modifier = Modifier.fillParentMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-                            Text("Nothing needs you.", color = Fleet.colors.fgMuted, fontSize = 15.sp)
+                            Text(inboxEmptyText(connection), color = Fleet.colors.fgMuted, fontSize = 15.sp, textAlign = TextAlign.Center)
                         }
                     }
                 } else if (rows.isNotEmpty()) {

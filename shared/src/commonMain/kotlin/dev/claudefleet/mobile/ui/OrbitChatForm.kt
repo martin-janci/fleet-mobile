@@ -156,6 +156,11 @@ internal fun OrbitChatFormCard(
                         FormBuilding(pending.title, sessionName)
                     } else {
                         Text(pending.title.ifBlank { "A form" }, style = Fleet.type.textMd, color = o.fg)
+                        s.loadFailure?.let { f ->
+                            Text(f.title, style = Fleet.type.textSm, color = o.danger)
+                            Text(f.body, style = Fleet.type.textSm, color = o.fg2)
+                            TextButton(onClick = { model.load() }) { Text("Try again") }
+                        }
                     }
                 }
                 !s.pending -> {

@@ -23,6 +23,8 @@ data class AddHostHandlers(
     val onClose: () -> Unit = {},
     val onAdd: (SshHost) -> Unit = {},
     val onDismissError: () -> Unit = {},
+    /** Read the hub's SSH config again after a failed scan. */
+    val onRescan: () -> Unit = {},
 )
 
 /**
@@ -40,7 +42,7 @@ fun AddHostScreen(state: AddHostUiState, handlers: AddHostHandlers) {
         exitLabel = if (state.added.isEmpty()) FullscreenWait.FindHosts.exitLabel else "Done",
         blips = state.blips,
         found = {
-            ErrorBanner(state.error, onDismiss = handlers.onDismissError)
+            ErrorBanner(state.error, onDismiss = handlers.onDismissError, onRetry = handlers.onRescan.takeIf { state.scanFailed })
             Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
                 for (h in state.candidates) {
                     val action = when {
@@ -68,6 +70,7 @@ fun AddHostScreen(state: AddHostUiState, handlers: AddHostHandlers) {
 /** "3 in the hub's SSH config", "None new in the hub's SSH config", or the scan under way. */
 internal fun addHostMeta(state: AddHostUiState): String = when {
     state.scanning -> "Reading the hub's SSH config"
+    state.scanFailed -> "Couldn't read the hub's SSH config"
     state.candidates.isEmpty() -> "None new in the hub's SSH config"
     state.candidates.size == 1 -> "1 in the hub's SSH config"
     else -> "${state.candidates.size} in the hub's SSH config"

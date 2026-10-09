@@ -30,6 +30,9 @@ import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import dev.claudefleet.mobile.net.HubError
+import dev.claudefleet.mobile.ui.kit.ListBody
+import dev.claudefleet.mobile.ui.kit.listBody
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -83,6 +86,30 @@ private class FakeMissionActions : MissionActions {
 
 /** The Missions sheet: the wire shapes, the desktop's words, and what a press sends. */
 class MissionsTest {
+
+    /** Review r13 (P13-9): a failed list read is not "No missions yet", and Retry reads again. */
+    @Test
+    fun a_failed_list_read_is_not_an_empty_list_and_retry_reads_again() = runTest {
+        val actions = object : MissionActions by FakeMissionActions() {
+            var fail = true
+            override suspend fun missions(): List<Mission> =
+                if (fail) throw HubError.Transport(IllegalStateException("x")) else emptyList()
+        }
+        val vm = MissionsViewModel(MissionsFleet(loop), actions, backgroundScope, canWrite = true)
+        vm.refresh().join()
+        runCurrent()
+        val failed = vm.state.value
+        assertTrue(failed.listFailed)
+        assertFalse(failed.loaded)
+        assertEquals(ListBody.Failed, listBody(failed.loaded, failed.listFailed, empty = failed.missions.isEmpty()))
+
+        actions.fail = false
+        vm.refresh().join()
+        runCurrent()
+        val answered = vm.state.value
+        assertFalse(answered.listFailed)
+        assertEquals(ListBody.Empty, listBody(answered.loaded, answered.listFailed, empty = answered.missions.isEmpty()))
+    }
 
     private val loop = HubCapabilities(
         tools = setOf(HubCapabilities.WORK, HubCapabilities.WORK_LINK),

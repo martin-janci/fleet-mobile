@@ -72,6 +72,34 @@ class UpdatesTest {
         override fun discard(release: ReleaseInfo) { discarded++; have = 0 }
     }
 
+    /** Review r13 (P13-12): a stopped download says so in words, and Try again downloads again. */
+    @Test
+    fun try_again_runs_the_download_again_and_the_message_is_a_sentence() = runTest {
+        val installer = object : AppInstaller by FakeInstaller() {
+            var fail = true
+            var tries = 0
+            override suspend fun download(release: ReleaseInfo, onProgress: (Long, Long) -> Unit): Downloaded {
+                tries++
+                if (fail) throw IllegalStateException("socket closed reading https://example.invalid/x")
+                return Downloaded(release.sizeBytes, "ab".repeat(32))
+            }
+        }
+        val vm = UpdateViewModel({ release }, installer, FakePrefs(), "0.9.4", backgroundScope)
+        vm.check()
+        vm.download()
+        runCurrent()
+        val failed = assertIs<UpdatePhase.Failed>(vm.state.value.phase)
+        assertEquals(DOWNLOAD_STOPPED, failed.message)
+        assertTrue("IllegalStateException" in failed.details.orEmpty(), "${failed.details}")
+        assertTrue("socket" !in failed.message && "socket" !in failed.details.orEmpty())
+
+        installer.fail = false
+        vm.retry()
+        runCurrent()
+        assertEquals(2, installer.tries)
+        assertIs<UpdatePhase.Ready>(vm.state.value.phase)
+    }
+
     @Test
     fun versions_order_by_their_numbers_and_a_suffix_comes_first() {
         assertEquals(AppVersion(0, 9, 5), AppVersion.parse("v0.9.5"))

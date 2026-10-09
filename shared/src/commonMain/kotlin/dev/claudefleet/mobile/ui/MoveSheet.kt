@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.MovePreview
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.components.ErrorBanner
+import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 
 data class MoveHandlers(
     val onClose: () -> Unit = {},
@@ -65,7 +66,7 @@ fun MoveSheet(state: MoveUiState, handlers: MoveHandlers, nowSeconds: Long, orbi
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (state.busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
+            if (rememberLoaderVisible(state.busy)) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
             state.waiting?.let { w ->
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {

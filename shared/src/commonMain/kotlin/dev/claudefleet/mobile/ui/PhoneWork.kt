@@ -83,6 +83,7 @@ import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
 import dev.claudefleet.mobile.ui.theme.StatusTone
+import dev.claudefleet.mobile.ui.kit.LoadFailed
 
 // ── Words a task row says (MobileWork) ──
 
@@ -328,7 +329,8 @@ fun PhoneMyWorkScreen(
             },
         )
         HubBanner(connection, asOf = state.stale?.substringAfter("as of ", "")?.takeIf { it.isNotBlank() }, onRetry = handlers.onRefresh)
-        ErrorBanner(state.error, onDismiss = handlers.onDismissError)
+        // The first read failed: Retry runs it again (a conflict has its own Reload row).
+        ErrorBanner(state.error, onDismiss = handlers.onDismissError, onRetry = handlers.onRefresh.takeIf { !state.loaded && !state.conflict })
         if (state.error != null && state.conflict) ReloadRow(handlers.onReload)
 
         OrbitPullToRefresh(
@@ -339,6 +341,8 @@ fun PhoneMyWorkScreen(
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 if (state.isEmpty) {
                     item(key = "empty") { PhoneEmptyWork(state, handlers, Modifier.fillParentMaxSize()) }
+                } else if (!state.loaded && !state.loading && state.error != null) {
+                    item(key = "failed") { LoadFailed("your work", state.error?.body, handlers.onRefresh) }
                 }
                 for (org in state.orgs) {
                     stickyHeader(key = org.key) {
