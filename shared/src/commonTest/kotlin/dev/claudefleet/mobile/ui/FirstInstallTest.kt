@@ -194,6 +194,7 @@ class FirstInstallTest {
         vm.open("pine")
         runCurrent()
         vm.install().join()
+        runCurrent()
         val error = assertNotNull(vm.state.value.error)
         assertEquals("Trust this phone on the hub first", error.title)
         assertEquals("On the hub, run: fleet-hub client trust Martin's Pixel", error.body)
