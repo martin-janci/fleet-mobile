@@ -209,6 +209,14 @@ class MorePlacesTest {
     }
 
     @Test
+    fun the_classic_files_row_does_not_show_the_hubs_raw_error() {
+        val raw = "reading /var/log/x on oci-arm stopped at 0 of 8192 bytes"
+        val line = classicFailedLine(file(FileState.Failed, error = raw))
+        assertEquals("Failed: The hub couldn't copy it off oci-arm.", line)
+        assertFalse(raw in line)
+    }
+
+    @Test
     fun a_transfer_shows_its_real_size_not_a_spinner_word() {
         val transfer = Transfer(id = 1, name = "release.apk", received = 12_400_000, total = 31_000_000)
         assertNull(fileLead(file(FileState.Ready), transferring = true, hostReachable = { true }))
