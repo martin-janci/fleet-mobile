@@ -1440,8 +1440,9 @@ private fun FleetRoute(
                             ),
                         )
                     }
+                    // Back leaves the Radar first; a host being added is the hub's either way.
+                    BackHandler(enabled = addHostState.open) { addHost.close() }
                     if (addHostState.open) {
-                        BackHandler(enabled = true) { addHost.close() }
                         AddHostScreen(
                             addHostState,
                             AddHostHandlers(onClose = addHost::close, onAdd = { addHost.add(it) }, onDismissError = addHost::dismissError),

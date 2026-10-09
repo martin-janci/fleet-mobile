@@ -166,6 +166,6 @@ class AddHostTest {
         )
         assertEquals(22, hosts[0].port)
         assertNull(hosts[1].user)
-        assertEquals("10.0.0.5", sshHostLine(hosts[0]))
+        assertEquals("martin@10.0.0.5", sshHostLine(hosts[0]))
     }
 }
