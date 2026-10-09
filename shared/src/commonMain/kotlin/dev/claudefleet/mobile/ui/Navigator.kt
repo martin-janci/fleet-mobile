@@ -271,7 +271,8 @@ class Navigator(layout: PhoneLayout = PhoneLayout.Classic) {
         val current = s.screen
         val host = when (current) {
             is Screen.Sessions -> current.hostAlias
-            is Screen.Task -> if (ticketKey != null) null else return@move s
+            // The Work tab's Start chip, like a task's Start here, names its ticket.
+            is Screen.Task, Screen.Work -> if (ticketKey != null) null else return@move s
             else -> return@move s
         }
         s.pushing(current).going(Screen.NewSession(hostAlias = host, ticketKey = ticketKey))

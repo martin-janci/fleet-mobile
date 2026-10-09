@@ -26,6 +26,7 @@ import dev.claudefleet.mobile.model.TidyApplyItem
 import dev.claudefleet.mobile.model.ReopenedWork
 import dev.claudefleet.mobile.model.PastWorkSummary
 import dev.claudefleet.mobile.model.PullRequestList
+import kotlinx.coroutines.CancellationException
 
 /**
  * The work-graph calls a screen may make — narrow for the same reason
@@ -190,8 +191,22 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
 
     override suspend fun reopened(): List<ReopenedWork> = session.withClient { it.workReopened() }
 
-    override suspend fun tidyApply(items: List<TidyApplyItem>): List<TidyApplyResult> =
-        session.withClient { it.workTidyApply(items) }.results
+    override suspend fun tidyApply(items: List<TidyApplyItem>): List<TidyApplyResult> {
+        // Undo's `unarchive` is not a tidy_apply action on the hub (it answers
+        // "unknown tidy action"): it goes through work_link, item by item.
+        val (undo, rest) = items.partition { it.action == TIDY_UNARCHIVE }
+        val applied = if (rest.isEmpty()) emptyList() else session.withClient { it.workTidyApply(rest) }.results
+        return applied + undo.map { item ->
+            try {
+                session.withClient { it.unarchiveWork(item.sessionId) }
+                TidyApplyResult(sessionId = item.sessionId, action = item.action, ok = true)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                TidyApplyResult(sessionId = item.sessionId, action = item.action, ok = false, error = t.message)
+            }
+        }
+    }
 
     override suspend fun dismissReopened(itemId: Long) = session.withClient { it.workDismissReopened(itemId) }
 
@@ -274,3 +289,6 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
     override suspend fun pullRequests(state: String, limit: Int?): PullRequestList =
         session.withClient { it.listPullRequests(state, limit) }
 }
+
+/** Tidy's Undo, sent by `TidyViewModel` as an item action. */
+internal const val TIDY_UNARCHIVE = "unarchive"
