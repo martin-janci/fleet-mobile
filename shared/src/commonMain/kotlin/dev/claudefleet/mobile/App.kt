@@ -504,6 +504,7 @@ class AppContainer(
         appVersion = appVersion,
         check = { body -> session.withClient { it.updateCheck(body) } },
         fallback = GitHubReleases(this.http),
+        hubBase = { session.credentials()?.hub },
     )
 
     /** The New session form's one call, through the same 401 rule. */

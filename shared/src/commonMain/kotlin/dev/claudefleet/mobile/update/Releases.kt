@@ -59,6 +59,12 @@ data class ReleaseInfo(
     val required: Boolean = false,
     /** The hub's sentence for why, when it gave one. */
     val reason: String? = null,
+    /**
+     * The same APK on the paired hub's mirror (`/update/artifact/<sha256>`),
+     * absolute; tried before [apkUrl]. The token for it comes from the
+     * session at download time, never from here.
+     */
+    val mirrorUrl: String? = null,
 )
 
 /** Where the phone learns that a newer release exists. */

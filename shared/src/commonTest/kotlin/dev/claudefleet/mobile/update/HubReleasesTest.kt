@@ -107,6 +107,18 @@ class HubReleasesTest {
         assertNull(releaseFromDecision(decision("update_available", artifact = apk(signerSha = ""))))
     }
 
+    @Test
+    fun a_mirrored_apk_is_fetched_from_the_paired_hub() {
+        val path = "/update/artifact/$sha"
+        val mirrored = decision("update_available").replace(""""url":"https://github.com""", """"mirror":"$path","url":"https://github.com""")
+        val r = assertNotNull(releaseFromDecision(mirrored, "https://fleet.example.com/"))
+        assertEquals("https://fleet.example.com$path", r.mirrorUrl)
+        assertTrue(r.apkUrl.startsWith("https://github.com/"), "GitHub stays the fallback")
+        assertNull(releaseFromDecision(mirrored)?.mirrorUrl, "no hub, no mirror")
+        val odd = mirrored.replace(path, "/elsewhere/$sha")
+        assertNull(releaseFromDecision(odd, "https://fleet.example.com")?.mirrorUrl)
+    }
+
     private val gitHub = ReleaseSource { ReleaseInfo("0.9.9", "https://gh/apk", 1, null, emptyList(), "") }
 
     @Test
