@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.DownloadActions
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.RepoActions
+import dev.claudefleet.mobile.model.BranchDiff
 import dev.claudefleet.mobile.model.ChangedFile
 import dev.claudefleet.mobile.model.Commit
 import dev.claudefleet.mobile.model.CommitDetail
@@ -43,6 +44,8 @@ data class RepoUiState(
     val tabs: List<RepoTab> = emptyList(),
     /** Null until read. */
     val changes: List<ChangedFile>? = null,
+    /** How far the branch is from its remote and its base; null when unread or not served. */
+    val branch: BranchDiff? = null,
     val log: List<Commit>? = null,
     /** The log's last page came back short: there is nothing older. */
     val logEnd: Boolean = false,
@@ -85,6 +88,7 @@ class RepoViewModel(
     private data class Local(
         val tab: RepoTab? = null,
         val changes: List<ChangedFile>? = null,
+        val branch: BranchDiff? = null,
         val log: List<Commit>? = null,
         val logEnd: Boolean = false,
         val tree: RepoTree? = null,
@@ -110,6 +114,7 @@ class RepoViewModel(
                 tab = l.tab?.takeIf { it in tabs } ?: tabs.firstOrNull() ?: RepoTab.Changes,
                 tabs = tabs,
                 changes = l.changes,
+                branch = l.branch?.takeIf { caps.repoBranch },
                 log = l.log,
                 logEnd = l.logEnd,
                 tree = l.tree,
@@ -217,6 +222,18 @@ class RepoViewModel(
             RepoTab.Changes -> {
                 val changes = actions.changes(sessionId)
                 local.update { it.copy(changes = changes) }
+                // Ahead and behind (r09 A3): a line under the tab, so a hub
+                // that cannot say leaves the changes as they are.
+                if (fleet.capabilities.value.repoBranch) {
+                    val branch = try {
+                        actions.branch(sessionId)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        null
+                    }
+                    local.update { it.copy(branch = branch) }
+                }
             }
             RepoTab.History -> {
                 val log = actions.log(sessionId)
