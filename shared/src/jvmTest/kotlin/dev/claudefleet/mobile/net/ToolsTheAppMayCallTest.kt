@@ -94,6 +94,9 @@ class ToolsTheAppMayCallTest {
         "operator_status",
         "mcp_confirms",
         "answer_mcp_confirm",
+        // What Control's agent handed on, for its chips (redesign 9.3):
+        // readonly, `Access::PersonDevice` (a receipt quotes its prompt).
+        "control_handoffs",
         // The composer's shared chip row. `Access::Client` and not readonly
         // (one tool both reads and replaces the list), so a `full` client may
         // and a `readonly` one is never shown it — which is also the token

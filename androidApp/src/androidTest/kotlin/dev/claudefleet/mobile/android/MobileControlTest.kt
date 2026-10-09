@@ -20,6 +20,9 @@ import dev.claudefleet.mobile.ui.ConfirmCards
 import dev.claudefleet.mobile.ui.ControlUiState
 import dev.claudefleet.mobile.ui.ControlViews
 import dev.claudefleet.mobile.ui.ControlWaiting
+import dev.claudefleet.mobile.ui.HANDOFF_CHIP_TAG
+import dev.claudefleet.mobile.ui.HandoffChip
+import dev.claudefleet.mobile.ui.HandoffChips
 import dev.claudefleet.mobile.ui.theme.FleetTheme
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -57,6 +60,28 @@ class MobileControlTest {
         compose.onNodeWithTag(CONFIRM_DENY_TAG + "n2").performClick()
         compose.waitForIdle()
         assertEquals(listOf("n1" to true, "n2" to false), answers)
+    }
+
+    @Test
+    fun a_session_chip_shows_its_state_and_opens_the_session() {
+        val opened = mutableListOf<Long>()
+        compose.setContent {
+            FleetTheme {
+                HandoffChips(
+                    listOf(
+                        HandoffChip(1, "Sent to api", "working", 3),
+                        HandoffChip(2, "Mission Release", "done"),
+                    ),
+                    onOpenSession = { opened += it },
+                )
+            }
+        }
+        compose.onNodeWithText("Sent to api").assertExists()
+        compose.onNodeWithText("Working").assertExists()
+        compose.onNodeWithTag(HANDOFF_CHIP_TAG + 1).performClick()
+        compose.onNodeWithTag(HANDOFF_CHIP_TAG + 2).performClick()
+        compose.waitForIdle()
+        assertEquals(listOf(3L), opened)
     }
 
     @Test

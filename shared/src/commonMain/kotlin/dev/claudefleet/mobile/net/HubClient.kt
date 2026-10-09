@@ -11,6 +11,7 @@ import dev.claudefleet.mobile.model.CommitDetail
 import dev.claudefleet.mobile.model.Commit
 import dev.claudefleet.mobile.model.AgentInstall
 import dev.claudefleet.mobile.model.ConfirmRequest
+import dev.claudefleet.mobile.model.ControlHandoff
 import dev.claudefleet.mobile.model.OperatorStatus
 import dev.claudefleet.mobile.model.ChangedFile
 import dev.claudefleet.mobile.model.Conversation
@@ -939,6 +940,12 @@ class HubClient(
                 put("approved", approved)
             },
         ) { (it as? JsonPrimitive)?.booleanOrNull ?: false }
+
+    /** What Control's agent handed on, newest first (`control_handoffs`, redesign 9.3). */
+    suspend fun controlHandoffs(limit: Int): List<ControlHandoff> =
+        call("control_handoffs", buildJsonObject { put("limit", limit) }) {
+            json.decodeFromJsonElement(ListSerializer(ControlHandoff.serializer()), it)
+        }
 
     // ---- the work graph: `work` reads, `work_link` decides ----
     //
