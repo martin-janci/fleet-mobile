@@ -112,8 +112,7 @@ class AppLifecycleTest {
     /** The group summary counts the alerts still showing, not every one posted (r09 F11). */
     @Test
     fun the_summary_counts_only_the_alerts_still_showing() {
-        val summarize = service.substringAfter("private fun summarize(", "").substringBefore("
-    }")
+        val summarize = service.substringAfter("private fun summarize(", "").substringBefore("\n    }")
         val prune = summarize.indexOf("activeNotifications")
         val count = summarize.indexOf("shown.size < 2")
         assertTrue(prune in 0 until count, "the summary must prune tapped alerts before it counts")
