@@ -164,6 +164,15 @@ jobs:
           disable-animations: true
           script: ./gradlew :shared:connectedAndroidDeviceTest :androidApp:connectedAndroidTest --stacktrace
 
+      # The console says only "There were failing tests"; the names and the
+      # messages are in the XML results, and the uploaded artifact is not
+      # always reachable. Print the failures where the log shows them.
+      - name: Print failed device tests
+        if: failure()
+        run: |
+          grep -r --include='*.xml' -B2 -A20 '<failure' shared/build androidApp/build 2>/dev/null \
+            || echo "No <failure> in the instrumentation results."
+
       - name: Instrumentation reports
         if: always()
         uses: actions/upload-artifact@v4
