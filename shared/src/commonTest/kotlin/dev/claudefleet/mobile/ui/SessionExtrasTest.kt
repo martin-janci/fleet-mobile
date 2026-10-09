@@ -265,6 +265,17 @@ class SessionExtrasTest {
         val items = orbitMenuItems(OrbitMenuFacts(tmuxName = "s")).map { it.id }
         assertEquals(listOf(OrbitItem.CopyAttach, OrbitItem.Details), items)
     }
+
+    /** MobileFormsSession: a background agent starts from inside a session, with the steering items. */
+    @Test
+    fun background_agent_is_offered_only_where_one_can_start() {
+        val on = orbitMenuItems(OrbitMenuFacts(manage = true, steer = true, background = true))
+        val item = on.first { it.id == OrbitItem.Background }
+        assertEquals("Background agent…", item.label)
+        assertEquals(on.first { it.id == OrbitItem.Model }.group, item.group)
+        assertTrue(item.writes)
+        assertTrue(orbitMenuItems(OrbitMenuFacts(manage = true, steer = true)).none { it.id == OrbitItem.Background })
+    }
 }
 
 /** Two shells side by side in landscape (redesign 14.21, MobileFullscreen). */

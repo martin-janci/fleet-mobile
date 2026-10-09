@@ -2371,6 +2371,8 @@ private fun SessionRoute(
             drafts = container.drafts,
             // The New bar keeps a refused prompt in the conversation (redesign 14.5).
             keepNotSent = newLayout,
+            // ⋮ Background agent… (MobileFormsSession), on this session's host.
+            background = container.newSessionActions,
         )
     }
     val workVm = remember(sessionId, repository, scope) {
@@ -2525,8 +2527,8 @@ private fun SessionRoute(
         onRestart = { vm.restart() },
         onSafeKill = { vm.safeKill() },
         onKill = { vm.kill() },
-        onSetTags = { vm.setTags(it) },
-        onRename = { vm.rename(it) },
+        onEdit = { vm.edit(it.name, it.tags) },
+        onStartBackground = { name, prompt, options -> vm.startBackground(name, prompt, options) },
         onSendCommand = { vm.sendCommand(it) },
         quickReplies = chips,
         quickRepliesEditable = caps.quickReplies,

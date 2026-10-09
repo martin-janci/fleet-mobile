@@ -6,6 +6,10 @@ import dev.claudefleet.mobile.data.ALL_SESSIONS_CHANGED
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.SessionActions
+import dev.claudefleet.mobile.model.NewBgSessionResult
+import dev.claudefleet.mobile.model.BackgroundOptions
+import dev.claudefleet.mobile.data.NewSessionRequest
+import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.model.Attention
 import dev.claudefleet.mobile.model.QueuedPrompt
@@ -380,6 +384,21 @@ private class FakeActions : SessionActions {
 
     override suspend fun rename(sessionId: Long, friendlyName: String) {
         renamed += sessionId to friendlyName
+    }
+}
+
+/** `new_bg_session` with the test holding the calls; an older hub's form (no options) records none. */
+private class FakeBackground : NewSessionActions {
+    val calls = mutableListOf<Triple<String, String, String>>()
+    val options = mutableListOf<BackgroundOptions>()
+    override suspend fun newSession(request: NewSessionRequest): SessionRow = error("not used")
+    override suspend fun newBackground(hostAlias: String, name: String, prompt: String): NewBgSessionResult {
+        calls += Triple(hostAlias, name, prompt)
+        return NewBgSessionResult(claudeSessionId = "c")
+    }
+    override suspend fun newBackground(hostAlias: String, name: String, prompt: String, options: BackgroundOptions): NewBgSessionResult {
+        this.options += options
+        return newBackground(hostAlias, name, prompt)
     }
 }
 
@@ -2853,6 +2872,87 @@ class SessionViewModelTest {
 
         assertEquals(listOf(ID to "new name"), actions.renamed)
         assertTrue(actions.reads > readsBefore)
+    }
+
+    /**
+     * The rename-and-tags sheet's one Save sends both in one managed call:
+     * two would have the second refused while the first's refetch is out.
+     */
+    @Test
+    fun edit_sends_the_name_and_the_tags_in_one_call() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+
+        vm.edit("new name", listOf("mobile", "orbit")).join()
+        runCurrent()
+
+        assertEquals(listOf(ID to "new name"), actions.renamed)
+        assertEquals(listOf(ID to listOf("mobile", "orbit")), actions.tags)
+    }
+
+    @Test
+    fun edit_sends_only_what_changed_and_nothing_when_nothing_did() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        vm.load().join()
+        val readsBefore = actions.reads
+
+        vm.edit(null, null).join()
+        runCurrent()
+        assertTrue(actions.renamed.isEmpty() && actions.tags.isEmpty())
+        assertEquals(readsBefore, actions.reads, "an unchanged sheet does not even refetch")
+
+        vm.edit(null, listOf("x")).join()
+        runCurrent()
+        assertTrue(actions.renamed.isEmpty())
+        assertEquals(listOf(ID to listOf("x")), actions.tags)
+    }
+
+    @Test
+    fun a_background_agent_starts_on_this_sessions_host_and_project_and_says_where_it_lands() = runTest {
+        val fleet = FakeFleetState(tools = setOf(HubCapabilities.NEW_BG_SESSION))
+        fleet.capabilities.value = HubCapabilities(
+            tools = setOf(HubCapabilities.NEW_BG_SESSION),
+            params = mapOf(HubCapabilities.NEW_BG_SESSION to setOf("project_id", "read_only", "stop_after_secs", "stop_after_usd")),
+        )
+        val start = FakeBackground()
+        val vm = SessionViewModel(ID, fleet, FakeActions(), backgroundScope, background = start)
+        vm.load().join()
+        runCurrent()
+        assertTrue(vm.state.value.canStartBackground)
+        assertTrue(vm.state.value.backgroundOptions)
+
+        vm.startBackground("", "Find every caller of connect", BackgroundOptions(readOnly = true, stopAfterSecs = 3_600)).join()
+        runCurrent()
+
+        assertEquals(listOf(Triple("pine", "Find every caller of connect", "Find every caller of connect")), start.calls)
+        assertEquals(listOf(BackgroundOptions(projectId = 1, readOnly = true, stopAfterSecs = 3_600)), start.options)
+        val notice = assertNotNull(vm.state.value.error)
+        assertFalse(notice.isError)
+        assertTrue("Inbox" in notice.body)
+    }
+
+    @Test
+    fun no_background_agent_without_the_tool_a_starter_or_a_task() = runTest {
+        val start = FakeBackground()
+        val vm = SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope, background = start)
+        vm.load().join()
+        runCurrent()
+        assertFalse(vm.state.value.canStartBackground, "the hub has no new_bg_session")
+        vm.startBackground("n", "task").join()
+
+        val withTool = FakeFleetState(tools = setOf(HubCapabilities.NEW_BG_SESSION))
+        val noStarter = SessionViewModel(ID, withTool, FakeActions(), backgroundScope)
+        runCurrent()
+        assertFalse(noStarter.state.value.canStartBackground, "nothing to call it with")
+
+        val blank = SessionViewModel(ID, withTool, FakeActions(), backgroundScope, background = start)
+        blank.load().join()
+        blank.startBackground("n", "   ").join()
+        runCurrent()
+
+        assertTrue(start.calls.isEmpty())
     }
 
     /**
