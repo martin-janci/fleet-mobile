@@ -56,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.ChangedFile
+import dev.claudefleet.mobile.model.branchLine
 import dev.claudefleet.mobile.model.Commit
 import dev.claudefleet.mobile.model.CommitDetail
 import dev.claudefleet.mobile.model.FileContent
@@ -155,7 +156,11 @@ fun RepoBody(
             Row(modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (state.top != null) TextButton(onClick = handlers.onClose) { Text("‹ Back") }
                 Text(
-                    listOfNotNull(state.session?.branch, state.changes?.takeIf { it.isNotEmpty() }?.let { "${it.count { c -> !c.staged }} not committed" })
+                    listOfNotNull(
+                        state.session?.branch,
+                        state.changes?.takeIf { it.isNotEmpty() }?.let { "${it.count { c -> !c.staged }} not committed" },
+                        state.branch?.let(::branchLine),
+                    )
                         .joinToString(" · "),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -66,7 +66,7 @@ import kotlinx.coroutines.flow.drop
  */
 
 /** Control's views across the top of the tab. Sessions and Missions open their own screens. */
-enum class ControlView { Chat, Sessions, Missions }
+enum class ControlView { Chat, Sessions, Missions, PullRequests }
 
 data class ControlUiState(
     /** The hub offers the coordinator to this pairing at all. */
@@ -324,7 +324,14 @@ fun ControlHeader(subtitle: String?, views: @Composable () -> Unit) {
 
 /** Chat, Sessions N, Missions N: the board's view tabs. Chat is this tab; the others open their screens. */
 @Composable
-fun ControlViews(sessions: Int?, missions: Int?, onSessions: () -> Unit, onMissions: (() -> Unit)?) {
+fun ControlViews(
+    sessions: Int?,
+    missions: Int?,
+    onSessions: () -> Unit,
+    onMissions: (() -> Unit)?,
+    pullRequests: Int? = null,
+    onPullRequests: (() -> Unit)? = null,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -333,6 +340,10 @@ fun ControlViews(sessions: Int?, missions: Int?, onSessions: () -> Unit, onMissi
         ViewPill(listOfNotNull("Sessions", sessions?.toString()).joinToString(" "), selected = false, tag = ControlView.Sessions, onClick = onSessions)
         if (onMissions != null) {
             ViewPill(listOfNotNull("Missions", missions?.toString()).joinToString(" "), selected = false, tag = ControlView.Missions, onClick = onMissions)
+        }
+        // MobileControl: "Chat | Sessions 22 | Missions 3 | Pull requests 5" (review r09 B8).
+        if (onPullRequests != null) {
+            ViewPill(listOfNotNull("Pull requests", pullRequests?.toString()).joinToString(" "), selected = false, tag = ControlView.PullRequests, onClick = onPullRequests)
         }
     }
 }

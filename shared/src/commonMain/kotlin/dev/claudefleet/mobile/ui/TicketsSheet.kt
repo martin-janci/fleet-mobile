@@ -175,12 +175,31 @@ fun TicketsSheet(
                     // The chosen ticket's actions open under its own row, not
                     // above the list: there they pushed the row it was tapped on
                     // down or off the screen.
-                    for (ticket in section.tickets) {
-                        item(key = "${section.view}-${ticket.id}") {
-                            TicketRow(ticket, state.selected?.ticket?.id == ticket.id, state.ticketOrgs[ticket.id], handlers, rowOf)
+                    // The New layout groups a section by organisation and tracker
+                    // (MobileTidyTickets) when it holds more than one (r09 B15).
+                    val groups = if (rowOf != null) {
+                        ticketGroups(section.tickets, { state.ticketOrgs[it.id] }, { t -> state.trackerChoices.firstOrNull { it.id == t.trackerId }?.let(::trackerName) })
+                    } else {
+                        listOf(TicketGroup(null, section.tickets))
+                    }
+                    for (group in groups) {
+                        group.heading?.let { heading ->
+                            item(key = "${section.view}-group-$heading") {
+                                Text(
+                                    "$heading ${group.tickets.size}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 2.dp),
+                                )
+                            }
                         }
-                        state.selected?.takeIf { it.ticket.id == ticket.id }?.let { detail ->
-                            item(key = "${section.view}-actions-${ticket.id}") { TicketActions(detail, state.busy, handlers) }
+                        for (ticket in group.tickets) {
+                            item(key = "${section.view}-${ticket.id}") {
+                                TicketRow(ticket, state.selected?.ticket?.id == ticket.id, state.ticketOrgs[ticket.id], handlers, rowOf)
+                            }
+                            state.selected?.takeIf { it.ticket.id == ticket.id }?.let { detail ->
+                                item(key = "${section.view}-actions-${ticket.id}") { TicketActions(detail, state.busy, handlers) }
+                            }
                         }
                     }
                 }
@@ -385,6 +404,24 @@ private fun TicketRow(ticket: Ticket, selected: Boolean, org: String?, handlers:
         unavailable = ticket.unavailable,
         selected = selected,
     )
+}
+
+/** One run of a section's tickets under "Personal · GitHub issues"; [heading] is null when the section has one group. */
+internal data class TicketGroup(val heading: String?, val tickets: List<Ticket>)
+
+/**
+ * A section's tickets by organisation and tracker, in the order each group
+ * first appears (the section's own sort stays inside each group). One group,
+ * or none named, draws no headings.
+ */
+internal fun ticketGroups(tickets: List<Ticket>, orgOf: (Ticket) -> String?, trackerOf: (Ticket) -> String?): List<TicketGroup> {
+    val byKey = linkedMapOf<String?, MutableList<Ticket>>()
+    for (t in tickets) {
+        val key = listOfNotNull(orgOf(t), trackerOf(t)).joinToString(" · ").ifEmpty { null }
+        byKey.getOrPut(key) { mutableListOf() } += t
+    }
+    if (byKey.size < 2) return listOf(TicketGroup(null, tickets))
+    return byKey.map { (key, list) -> TicketGroup(key ?: "Other", list) }
 }
 
 /**

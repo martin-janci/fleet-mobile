@@ -318,7 +318,12 @@ fun SessionsTab(
 
     Column(modifier = modifier.fillMaxSize()) {
         when {
-            bulk.active -> SelectionHeader(bulk, onClear = handlers.onClearSelection, onSelectAll = { bulkHandlers.onSelectAll(rows.map { it.id }) })
+            bulk.active -> SelectionHeader(
+                bulk,
+                onClear = handlers.onClearSelection,
+                onSelectAll = { bulkHandlers.onSelectAll(rows.map { it.id }) },
+                onSelectIdle = idleIds(rows).takeIf { it.isNotEmpty() }?.let { ids -> { bulkHandlers.onSelectAll(ids) } },
+            )
             state.searchOpen -> SearchHeader(
                 query = state.filters.query,
                 onSetQuery = handlers.onSetQuery,
@@ -442,6 +447,7 @@ fun SessionsTab(
                 bulk = bulk,
                 onSend = { sending = true },
                 onKill = { killing = true },
+                onArchive = bulkHandlers.onArchive,
             )
         }
     }
@@ -476,6 +482,8 @@ data class BulkHandlers(
     val onSelectAll: (List<Long>) -> Unit = {},
     val onRetry: (Long) -> Unit = {},
     val onRetryAll: () -> Unit = {},
+    /** Archive the picked sessions (r09 B6); shown only when [BulkUiState.canArchive]. */
+    val onArchive: () -> Unit = {},
 )
 
 /** The tab's title, its live line, search and ⋮, and the filter chips under them. */
@@ -751,7 +759,7 @@ private fun SearchNote(text: String) {
 
 /** In the title's place while rows are picked: ✕, how many, and Select all. */
 @Composable
-private fun SelectionHeader(bulk: BulkUiState, onClear: () -> Unit, onSelectAll: () -> Unit) {
+private fun SelectionHeader(bulk: BulkUiState, onClear: () -> Unit, onSelectAll: () -> Unit, onSelectIdle: (() -> Unit)? = null) {
     val o = Fleet.colors
     Surface(color = o.accentSoft, contentColor = o.fg) {
         Row(
@@ -763,6 +771,7 @@ private fun SelectionHeader(bulk: BulkUiState, onClear: () -> Unit, onSelectAll:
                 Text(if (bulk.selected.isEmpty()) "Pick sessions" else "${bulk.selected.size} selected", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                 Text("Tap a row to pick it", color = o.fgMuted, fontSize = 12.sp)
             }
+            onSelectIdle?.let { TextButton(onClick = it) { Text("All idle") } }
             TextButton(onClick = onSelectAll) { Text("Select all") }
         }
     }
@@ -770,7 +779,7 @@ private fun SelectionHeader(bulk: BulkUiState, onClear: () -> Unit, onSelectAll:
 
 /** The actions at the bottom, in thumb reach: Send a message, and Kill… which asks again. */
 @Composable
-private fun BulkActionBar(bulk: BulkUiState, onSend: () -> Unit, onKill: () -> Unit) {
+private fun BulkActionBar(bulk: BulkUiState, onSend: () -> Unit, onKill: () -> Unit, onArchive: () -> Unit = {}) {
     val o = Fleet.colors
     Surface(color = o.bgPane) {
         Column {
@@ -782,6 +791,11 @@ private fun BulkActionBar(bulk: BulkUiState, onSend: () -> Unit, onKill: () -> U
             ) {
                 TextButton(onClick = onSend, enabled = !bulk.running && bulk.selected.isNotEmpty(), modifier = Modifier.weight(1f)) {
                     Text("Send a message")
+                }
+                if (bulk.canArchive) {
+                    TextButton(onClick = onArchive, enabled = !bulk.running && bulk.selected.isNotEmpty(), modifier = Modifier.weight(1f)) {
+                        Text("Archive")
+                    }
                 }
                 TextButton(onClick = onKill, enabled = !bulk.running && bulk.killable > 0, modifier = Modifier.weight(1f)) {
                     Text("Kill…", color = if (!bulk.running && bulk.killable > 0) o.danger else o.fgMuted)
@@ -832,13 +846,23 @@ private fun KillSheet(killable: List<String>, skipped: Int, onDismiss: () -> Uni
 internal fun bulkOutcomeTitle(action: BulkAction?, count: Int): String = when (action) {
     is BulkAction.Send -> "Sent to ${sessionsWord(count)}"
     BulkAction.Kill -> "Killed ${sessionsWord(count)}"
+    BulkAction.Archive -> "Archived ${sessionsWord(count)}"
     null -> "Done for ${sessionsWord(count)}"
 }
 
-/** "2 delivered, 1 not delivered" (or "killed"): the outcome's line. */
+private fun bulkVerb(action: BulkAction?): String = when (action) {
+    BulkAction.Kill -> "killed"
+    BulkAction.Archive -> "archived"
+    else -> "delivered"
+}
+
+/** The rows "All idle" picks: the agent waits at its prompt (MobileSessionsTools, r09 B6). */
+internal fun idleIds(rows: List<SessionRow>): List<Long> = rows.filter { it.claudeStatus == "idle" }.map { it.id }
+
+/** "2 delivered, 1 not delivered" (or "killed", "archived"): the outcome's line. */
 internal fun bulkOutcomeLine(action: BulkAction?, outcome: List<BulkOutcome>): String {
     val ok = outcome.count { it.ok }
-    val verb = if (action == BulkAction.Kill) "killed" else "delivered"
+    val verb = bulkVerb(action)
     val failed = outcome.size - ok
     return if (failed == 0) "$ok $verb" else "$ok $verb, $failed not $verb"
 }
@@ -860,7 +884,7 @@ private fun BulkOutcomeSheet(
 ) {
     val o = Fleet.colors
     val retryable = outcome.filter { !it.ok && it.retryable }
-    val verb = if (action == BulkAction.Kill) "killed" else "delivered"
+    val verb = bulkVerb(action)
     BottomSheet(
         title = bulkOutcomeTitle(action, outcome.size),
         meta = ((action as? BulkAction.Send)?.let { "“${it.text}” · " } ?: "") + bulkOutcomeLine(action, outcome),

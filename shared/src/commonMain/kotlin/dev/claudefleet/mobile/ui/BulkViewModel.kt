@@ -31,6 +31,8 @@ data class BulkOutcome(
 sealed interface BulkAction {
     data class Send(val text: String) : BulkAction
     data object Kill : BulkAction
+    /** Off the work board (MobileSessionsTools, r09 B6). */
+    data object Archive : BulkAction
 }
 
 /** The sessions list's multi-select: which rows are picked, and the last bulk action's outcome. */
@@ -47,6 +49,8 @@ data class BulkUiState(
     val selecting: Boolean = false,
     /** The action [outcome] reports on; Retry repeats it. */
     val action: BulkAction? = null,
+    /** The hub can archive and this pairing may: the bar shows Archive. */
+    val canArchive: Boolean = false,
 ) {
     val active: Boolean get() = selecting || selected.isNotEmpty()
 
@@ -66,6 +70,8 @@ class BulkViewModel(
     private val actions: SessionActions,
     private val scope: CoroutineScope,
     private val canWrite: Boolean,
+    /** Archives one session (`archive` on the work link); offered only while the hub says it can. */
+    private val archiveOne: (suspend (Long) -> Unit)? = null,
 ) {
     private data class Local(
         val selected: Set<Long> = emptySet(),
@@ -77,7 +83,7 @@ class BulkViewModel(
 
     private val local = MutableStateFlow(Local())
 
-    val state: StateFlow<BulkUiState> = combine(local, fleet.sessions) { l, rows ->
+    val state: StateFlow<BulkUiState> = combine(local, fleet.sessions, fleet.capabilities) { l, rows, caps ->
         // A session that left the fleet leaves the selection with it.
         val live = l.selected.filterTo(LinkedHashSet()) { id -> rows.any { it.id == id } }
         BulkUiState(
@@ -88,6 +94,7 @@ class BulkViewModel(
             killable = rows.count { it.id in live && killRefusal(it) == null },
             selecting = l.selecting,
             action = l.action,
+            canArchive = canWrite && archiveOne != null && caps.archiveSession,
         )
     }.stateIn(scope, SharingStarted.Eagerly, BulkUiState(enabled = canWrite))
 
@@ -125,6 +132,9 @@ class BulkViewModel(
     /** Kill every picked session the hub would let go; skip and name the rest. */
     fun kill(): Job = run(BulkAction.Kill, local.value.selected, merge = false)
 
+    /** Archive every picked session; the controller is skipped. */
+    fun archive(): Job = run(BulkAction.Archive, local.value.selected, merge = false)
+
     /**
      * The last action again, for one session the outcome says did not go
      * through. Its line in the outcome is replaced by the new answer; the
@@ -145,11 +155,17 @@ class BulkViewModel(
     private fun run(action: BulkAction, ids: Set<Long>, merge: Boolean): Job = scope.launch {
         val l = local.value
         if (!canWrite || l.running || ids.isEmpty()) return@launch
-        fun skip(row: SessionRow): String? = if (action == BulkAction.Kill) killRefusal(row) else null
+        if (action == BulkAction.Archive && (archiveOne == null || !fleet.capabilities.value.archiveSession)) return@launch
+        fun skip(row: SessionRow): String? = when (action) {
+            BulkAction.Kill -> killRefusal(row)
+            BulkAction.Archive -> if (row.isController) "the fleet's controller is not archived" else null
+            is BulkAction.Send -> null
+        }
         suspend fun call(row: SessionRow) {
             when (action) {
                 is BulkAction.Send -> actions.sendPrompt(row.id, action.text)
                 BulkAction.Kill -> actions.kill(row.id)
+                BulkAction.Archive -> (archiveOne ?: throw IllegalStateException("this hub cannot archive"))(row.id)
             }
         }
         val rows = fleet.sessions.value
