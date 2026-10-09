@@ -283,7 +283,8 @@ class ControlChatTest {
         assertTrue("Wake" in controlBlockedLine(null, null))
         assertTrue("Settings › Devices" in controlBlockedLine("token_revoked", null))
         assertTrue("(pine)" in controlBlockedLine("host_down", "pine"))
-        assertTrue("odd" in controlBlockedLine("odd", null))
+        // An unknown word from the hub stays off the screen (review r13).
+        assertEquals("Control cannot take a message right now.", controlBlockedLine("odd", null))
     }
 }
 
