@@ -206,6 +206,10 @@ import dev.claudefleet.mobile.ui.Navigator
 import dev.claudefleet.mobile.ui.openOverSheets
 import dev.claudefleet.mobile.ui.PhoneLayout
 import dev.claudefleet.mobile.ui.hostsLine
+import dev.claudefleet.mobile.ui.accountsLine
+import dev.claudefleet.mobile.ui.filesLine
+import dev.claudefleet.mobile.ui.moreFooter
+import dev.claudefleet.mobile.ui.moreSubtitle
 import dev.claudefleet.mobile.ui.inboxRows
 import dev.claudefleet.mobile.ui.runningRows
 import dev.claudefleet.mobile.ui.doneTodayRows
@@ -1572,6 +1576,7 @@ private fun FleetRoute(
                     val controlRows by repository.sessions.collectAsState()
                     val controlAccess by repository.access.collectAsState()
                     val subtitle = "${remember(controlRows, controlAccess) { inboxRows(controlRows, controlAccess).size }} need you"
+                    val controlPrs by pullRequests.state.collectAsState()
                     val views: @Composable () -> Unit = {
                         ControlViews(
                             sessions = attention.total,
@@ -1579,6 +1584,9 @@ private fun FleetRoute(
                             onSessions = { nav.select(Tab.Sessions) },
                             // The New layout's Missions screen (14.16).
                             onMissions = { nav.openMissions() }.takeIf { missionsState.available },
+                            // The list lives on Work; the pill opens it there.
+                            pullRequests = controlPrs.total.takeIf { controlPrs.loaded },
+                            onPullRequests = { nav.select(Tab.Work); pullRequests.open(); Unit }.takeIf { controlPrs.available },
                         )
                     }
                     val sessionId = controlState.sessionId
@@ -1621,14 +1629,20 @@ private fun FleetRoute(
                 }
                 Screen.More -> {
                     val hostRows by repository.hosts.collectAsState()
+                    val moreList by sessions.state.collectAsState()
+                    val moreHubVersion by repository.hubVersion.collectAsState()
+                    val moreStatus by repository.status.collectAsState()
                     LaunchedEffect(automationState.available) { if (automationState.available) automation.refresh() }
                     LaunchedEffect(debugDevicesState.available) { if (debugDevicesState.available) debugDevices.refresh() }
                     MoreScreen(
+                        subtitle = moreSubtitle(hubLabel(credentials.hub), credentials.canWrite),
+                        footer = moreFooter(container.appVersion, moreHubVersion, hostRows, moreStatus is ConnectionStatus.Connected),
                         top = { updateState.available?.let { UpdateCard(it, container.appVersion, onOpen = nav::openUpdate) } },
                         entries = buildList {
                             add(MoreEntry("Hosts", hostsLine(hostRows)) { nav.openFromMore(Screen.Hosts) })
                             if (settingsCaps.usage || settingsCaps.accounts) {
-                                add(MoreEntry("Accounts and usage", "Quotas, and estimated spend by host and day") { nav.openUsage() })
+                                val usageLine = accountsLine(moreList.accountUsage.values, moreList.nowSeconds)
+                                add(MoreEntry("Accounts and usage", usageLine ?: "Quotas, and estimated spend by host and day") { nav.openUsage() })
                             }
                             if (automationState.available) {
                                 // Routines, their runs and Pause all (8.9); Missions open from inside.
@@ -1645,7 +1659,7 @@ private fun FleetRoute(
                                 add(MoreEntry("Debug devices", devicesLine(debugDevicesState.devices)) { debugDevices.open() })
                             }
                             if (filesState.available) {
-                                val line = if (filesState.loaded) "${filesState.files.size} files" else "Files sessions sent to the hub"
+                                val line = if (filesState.loaded) filesLine(filesState.files.size, filesState.transfer) else "Files sessions sent to the hub"
                                 add(MoreEntry("Files", line) { nav.openFromMore(Screen.Files) })
                             }
                             if (orgDirectory.orgs.isNotEmpty()) {
