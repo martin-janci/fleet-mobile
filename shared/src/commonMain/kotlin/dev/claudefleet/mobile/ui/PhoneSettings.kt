@@ -24,13 +24,34 @@ enum class ThemeChoice(val label: String) {
     }
 }
 
+/**
+ * How much the app moves (review r11), the desktop's Settings → Appearance →
+ * Motion on the phone. System follows the phone's own setting (Android's
+ * animator scale at 0, iOS's Reduce Motion); Reduced keeps only fades. The
+ * desktop's Off is Reduced here: the phone's loaders have no motion beyond it.
+ */
+enum class MotionChoice(val label: String) {
+    SYSTEM("System"),
+    FULL("Full"),
+    REDUCED("Reduced"),
+    ;
+
+    /** What the app root provides as `LocalReducedMotion`: null follows the system. */
+    val reduced: Boolean? get() = when (this) {
+        SYSTEM -> null
+        FULL -> false
+        REDUCED -> true
+    }
+}
+
 private const val THEME_PREF = "phone.theme"
+private const val MOTION_PREF = "phone.motion"
 private const val LOCK_PREF = "phone.lock"
 
 /**
  * The settings that belong to this phone alone (redesign 14.11, "This phone"):
- * which notifications it posts, which theme it draws in, and whether the
- * fingerprint lock is on. Kept on the device, never sent to the hub, and
+ * which notifications it posts, which theme it draws in, how much it moves,
+ * and whether the fingerprint lock is on. Kept on the device, never sent to the hub, and
  * saved as they change; there is no Save.
  *
  * One instance for the app, held by `AppContainer`, so the theme switch
@@ -40,6 +61,9 @@ private const val LOCK_PREF = "phone.lock"
 class PhoneSettings(private val prefs: Prefs) {
     private val _theme = MutableStateFlow(readTheme())
     val theme: StateFlow<ThemeChoice> = _theme.asStateFlow()
+
+    private val _motion = MutableStateFlow(readMotion())
+    val motion: StateFlow<MotionChoice> = _motion.asStateFlow()
 
     private val _notifyKinds = MutableStateFlow(prefs.notifyKinds())
     val notifyKinds: StateFlow<NotifyKinds> = _notifyKinds.asStateFlow()
@@ -59,6 +83,11 @@ class PhoneSettings(private val prefs: Prefs) {
     fun setTheme(choice: ThemeChoice) {
         prefs.putStringList(THEME_PREF, listOf(choice.name.lowercase()))
         _theme.value = choice
+    }
+
+    fun setMotion(choice: MotionChoice) {
+        prefs.putStringList(MOTION_PREF, listOf(choice.name.lowercase()))
+        _motion.value = choice
     }
 
     fun setNotify(kind: NotifyKind, on: Boolean) {
@@ -84,5 +113,10 @@ class PhoneSettings(private val prefs: Prefs) {
     private fun readTheme(): ThemeChoice {
         val stored = prefs.getStringList(THEME_PREF).firstOrNull()
         return ThemeChoice.entries.firstOrNull { it.name.lowercase() == stored } ?: ThemeChoice.SYSTEM
+    }
+
+    private fun readMotion(): MotionChoice {
+        val stored = prefs.getStringList(MOTION_PREF).firstOrNull()
+        return MotionChoice.entries.firstOrNull { it.name.lowercase() == stored } ?: MotionChoice.SYSTEM
     }
 }

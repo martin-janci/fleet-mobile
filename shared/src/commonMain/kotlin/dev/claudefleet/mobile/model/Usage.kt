@@ -78,6 +78,13 @@ data class AccountRow(
     val label: String get() = nickname?.trim()?.ifEmpty { null } ?: email?.trim()?.ifEmpty { null } ?: uuid.take(8)
 }
 
+/**
+ * A window with less than this percent LEFT is low: the desktop's
+ * `LOW_BELOW_PCT` (src/lib/account_usage.ts, "low < 20"), so the phone warns
+ * where the desktop does (review r05).
+ */
+const val LOW_BELOW_PCT: Double = 20.0
+
 /** One usage window of an account. `utilization` is percent USED, 0..100. */
 @Serializable
 data class UsageWindow(

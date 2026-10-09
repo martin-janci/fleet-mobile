@@ -169,9 +169,10 @@ internal fun groupModeLabel(mode: GroupMode): String = when (mode) {
     else -> mode.label
 }
 
-/** The views the New layout offers, in the sheet's order; Work only with the work graph. */
-internal fun newGroupModes(workAvailable: Boolean): List<GroupMode> =
-    listOf(GroupMode.URGENCY, GroupMode.HOST, GroupMode.PROJECT, GroupMode.WORK).filter { it != GroupMode.WORK || workAvailable }
+/** The views the New layout offers, in the sheet's order; Work only with the work graph, Org only across two orgs or more. */
+internal fun newGroupModes(workAvailable: Boolean, orgs: Boolean = false): List<GroupMode> =
+    listOf(GroupMode.URGENCY, GroupMode.HOST, GroupMode.PROJECT, GroupMode.WORK, GroupMode.ORG)
+        .filter { (it != GroupMode.WORK || workAvailable) && (it != GroupMode.ORG || orgs) }
 
 /** "22 on 5 hosts", "1 on 1 host": the Sessions header while live. */
 internal fun sessionsOnHosts(sessions: Int, hosts: Int): String = "$sessions on $hosts ${if (hosts == 1) "host" else "hosts"}"

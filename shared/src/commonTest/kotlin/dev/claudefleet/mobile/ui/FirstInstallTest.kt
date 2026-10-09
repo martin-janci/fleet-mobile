@@ -8,6 +8,7 @@ import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.net.HubCapabilities
+import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.ui.kit.StepState
 import dev.claudefleet.mobile.ui.kit.sonarRing
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -46,9 +47,11 @@ private class InstallFleet(tools: Set<String>) : FleetState {
 private class Installs : AgentInstallActions {
     val installs = mutableListOf<String>()
     var reads = 0
+    var refuse: Throwable? = null
     private val walk = listOf("download", "start", "connect", "done")
 
     override suspend fun install(alias: String): AgentInstall {
+        refuse?.let { throw it }
         installs += alias
         return AgentInstall(id = 9, hostAlias = alias, version = "0.9.3")
     }
@@ -176,6 +179,25 @@ class FirstInstallTest {
             vm.install().join()
         }
         assertEquals(emptyList<String>(), actions.installs)
+    }
+
+    /** r03: the owner's untrusted phone is told the command, not a bare "failed". */
+    @Test
+    fun an_untrusted_phone_is_told_the_command_that_trusts_it() = runTest {
+        val actions = Installs().apply {
+            refuse = HubError.Tool(
+                "E_FORBIDDEN",
+                "installing the agent from a device needs the hub's operator to trust it (a full device): fleet-hub client trust Martin's Pixel",
+            )
+        }
+        val vm = AgentInstallViewModel(InstallFleet(INSTALL_TOOLS), actions, backgroundScope, canWrite = true)
+        vm.open("pine")
+        runCurrent()
+        vm.install().join()
+        runCurrent()
+        val error = assertNotNull(vm.state.value.error)
+        assertEquals("Trust this phone on the hub first", error.title)
+        assertEquals("On the hub, run: fleet-hub client trust Martin's Pixel", error.body)
     }
 
     @Test

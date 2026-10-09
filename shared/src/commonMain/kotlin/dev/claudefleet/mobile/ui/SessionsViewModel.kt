@@ -125,6 +125,13 @@ enum class GroupMode(val label: String) {
      * Classic list never lands here unless New chose it.
      */
     HOST("host"),
+
+    /**
+     * Orgs with their sessions under them, by project — the New layout's
+     * "Group: org" (review r09 B7). Offered by the New layout's sheet only
+     * while the sessions span two orgs or more; the Classic cycle skips it.
+     */
+    ORG("org"),
 }
 
 /**
@@ -703,7 +710,7 @@ class SessionsViewModel(
      * ignored, so the cycle a person sees is the cycle they get.
      */
     fun cycleGroupMode(workAvailable: Boolean) {
-        val modes = GroupMode.entries.filter { it != GroupMode.HOST && (it != GroupMode.WORK || workAvailable) }
+        val modes = GroupMode.entries.filter { it != GroupMode.HOST && it != GroupMode.ORG && (it != GroupMode.WORK || workAvailable) }
         val next = modes[(modes.indexOf(local.value.groupMode).coerceAtLeast(0) + 1) % modes.size]
         setGroupMode(next)
     }
@@ -797,10 +804,15 @@ class SessionsViewModel(
         // takes the toggles with it rather than leaving a filter nobody can see.
         // A hub that loses the work graph cannot leave the list in a mode
         // whose chip is gone, the same rule the filters follow below.
-        val groupMode = if (l.groupMode == GroupMode.WORK && !work.available) GroupMode.PROJECT else l.groupMode
+        val choices = orgChoices(sessions, work.orgs)
+        // Likewise Org: one org or none is nothing to group by.
+        val groupMode = when {
+            l.groupMode == GroupMode.WORK && !work.available -> GroupMode.PROJECT
+            l.groupMode == GroupMode.ORG && choices.isEmpty() -> GroupMode.PROJECT
+            else -> l.groupMode
+        }
         val byWork = groupMode == GroupMode.WORK
         val myWorkAvailable = work.available && work.myWork != null
-        val choices = orgChoices(sessions, work.orgs)
         // Only a hub with the work graph has a ticket cache worth overlaying;
         // without one these are the rows as they came.
         val rows = if (work.available) sessions.map { it.withTicketsFrom(work.tickets) } else sessions
@@ -878,6 +890,7 @@ class SessionsViewModel(
                 orgLabel = if (choices.isNotEmpty() && filters.orgFilter == null) work.orgs::name else null,
                 collapsedHosts = l.collapsedHosts,
                 flat = groupMode == GroupMode.HOST,
+                byOrg = if (groupMode == GroupMode.ORG) work.orgs::name else null,
             )
         }
         return SessionsUiState(
@@ -986,6 +999,9 @@ private fun projectLabel(id: Long?, byId: Map<Long, ProjectRow>): String = when 
 /** The heading for sessions that belong to no project — a shell session, say. */
 internal const val NO_PROJECT = "No project"
 
+/** The heading for sessions that belong to no org, in [GroupMode.ORG]. */
+internal const val NO_ORG = "No org"
+
 /**
  * Cut [sessions] into host groups and then project groups.
  *
@@ -1040,6 +1056,12 @@ internal fun groupSessions(
     collapsedHosts: Set<String> = emptySet(),
     /** [GroupMode.HOST]: one unlabelled group per host, most recent first, in place of its projects. */
     flat: Boolean = false,
+    /**
+     * [GroupMode.ORG]: an org's name by id. When set the top level is orgs,
+     * alphabetically with [NO_ORG] last, each holding its project groups;
+     * host headings give way to org headings (review r09 B7).
+     */
+    byOrg: ((Long) -> String)? = null,
 ): List<HostGroup> {
     val byId = projects.associateBy { it.id }
     val kept = sessions.filter { row ->
@@ -1047,6 +1069,16 @@ internal fun groupSessions(
             (myWork == null || row.work?.itemId in myWork)
     }
     if (kept.isEmpty()) return emptyList()
+
+    if (byOrg != null) {
+        return kept.groupBy { it.orgOf }
+            .map { (org, rows) -> org?.let(byOrg) to rows }
+            .sortedWith(compareBy({ it.first == null }, { it.first?.lowercase() }))
+            .map { (name, rows) ->
+                val heading = name ?: NO_ORG
+                HostGroup(alias = heading, reachable = null, collapsed = heading in collapsedHosts, projects = projectGroups(rows, byId))
+            }
+    }
 
     val reachability = hosts.associate { it.alias to it.reachable }
 
@@ -1069,19 +1101,22 @@ internal fun groupSessions(
                 alias = alias,
                 reachable = reachability[alias],
                 collapsed = alias in collapsedHosts,
-                projects = workGroups(keyed, orgLabel) + rest.groupBy { it.projectId }
-                    .map { (id, inProject) ->
-                        ProjectGroup(
-                            projectId = id,
-                            label = projectLabel(id, byId),
-                            sessions = inProject.sortedWith(BY_RECENCY),
-                        )
-                    }
-                    // `null` last whatever it is called, then by label.
-                    .sortedWith(compareBy({ it.projectId == null }, { it.label })),
+                projects = workGroups(keyed, orgLabel) + projectGroups(rest, byId),
             )
         }
 }
+
+/** [rows] by project: `null` last whatever it is called, then by label; most recent first inside. */
+private fun projectGroups(rows: List<SessionRow>, byId: Map<Long, ProjectRow>): List<ProjectGroup> =
+    rows.groupBy { it.projectId }
+        .map { (id, inProject) ->
+            ProjectGroup(
+                projectId = id,
+                label = projectLabel(id, byId),
+                sessions = inProject.sortedWith(BY_RECENCY),
+            )
+        }
+        .sortedWith(compareBy({ it.projectId == null }, { it.label }))
 
 /**
  * The key a session joins a work group under, or null when it stays in its
