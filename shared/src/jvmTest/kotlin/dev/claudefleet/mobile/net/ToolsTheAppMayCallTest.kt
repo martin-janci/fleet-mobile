@@ -40,9 +40,6 @@ class ToolsTheAppMayCallTest {
         "pair_client",
         "list_clients",
         "revoke_client",
-        // Tracker administration — connecting Jira, storing its credential.
-        // Master-only on the hub, and the phone must never even name it.
-        "work_admin",
     )
 
     /**
@@ -158,6 +155,11 @@ class ToolsTheAppMayCallTest {
         // both readonly and `Access::Client`.
         "usage_report",
         "list_accounts",
+        // Tracker administration from the owner's trusted `full` phone
+        // (contract 13, Martin 2026-10-08): `Access::Person`, and the handler
+        // lets a device reach only list, add, update, set_credential, test
+        // and remove. Called only on a contract-13 hub that lists it.
+        "work_admin",
         // Each account's 5-hour and weekly windows (claude-fleet contract
         // revision 11, readonly): when a paused row's limit resets (4.10)
         // and the meters on Accounts and usage (14.10).

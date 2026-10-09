@@ -122,6 +122,7 @@ class TheBackGestureReachesTheNavigatorTest {
                 "companyState.openId != null",
                 "addHostState.open",
                 "installState.installing",
+                "trackersState.wizard != null",
                 "practiceState.open != null",
                 "fleetPageOpen || place != SettingsPlace.Home",
                 "fleetPageOpen",

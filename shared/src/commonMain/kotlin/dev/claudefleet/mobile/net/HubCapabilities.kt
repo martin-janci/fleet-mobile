@@ -297,6 +297,7 @@ data class HubCapabilities(
         const val RECREATE_SESSION = "recreate_session"
         const val DISMISS_GHOST_SESSION = "dismiss_ghost_session"
         const val LIST_ACCOUNTS = "list_accounts"
+        const val WORK_ADMIN = "work_admin"
         const val ACCOUNT_USAGE = "account_usage"
         const val REPO_DIFF = "repo_diff"
         const val REPO_LOG = "repo_log"

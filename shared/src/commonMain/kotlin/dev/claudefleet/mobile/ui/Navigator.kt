@@ -76,6 +76,9 @@ sealed interface Screen {
     /** New layout only (redesign 14.16): Missions as a screen, opened from Control and More. */
     data object Missions : Screen
 
+    /** New layout only (redesign 14.20): the hub's trackers and Connect a tracker, from More. */
+    data object Trackers : Screen
+
     /** One of the hub's approved guides, step by step, with Undo per change. */
     data class Guide(val pageId: String) : Screen
 }
@@ -212,6 +215,9 @@ class Navigator(layout: PhoneLayout = PhoneLayout.Classic) {
 
     /** Open Missions over whatever is showing (Control, More); back returns there. */
     fun openMissions() = move { s -> if (s.screen == Screen.Missions) s else s.pushing(s.screen).going(Screen.Missions) }
+
+    /** Open Trackers over whatever is showing (More, an empty Work tab); back returns there. */
+    fun openTrackers() = move { s -> if (s.screen == Screen.Trackers) s else s.pushing(s.screen).going(Screen.Trackers) }
 
     /** Open the practice fleet over whatever is showing (Learn, the help picker, Settings). */
     fun openPractice() = move { s -> if (s.screen == Screen.Practice) s else s.pushing(s.screen).going(Screen.Practice) }
@@ -438,6 +444,7 @@ internal fun isPushedOn(screen: Screen, layout: PhoneLayout): Boolean =
     screen is Screen.Session || screen is Screen.NewSession || screen is Screen.Task || screen is Screen.Repo ||
         screen == Screen.Usage || screen == Screen.Company || screen == Screen.Update ||
         screen == Screen.Learn || screen == Screen.Practice || screen is Screen.Guide || screen == Screen.Missions ||
+        screen == Screen.Trackers ||
         (layout == PhoneLayout.New && (screen == Screen.Hosts || screen == Screen.Files || screen == Screen.Settings))
 
 private fun rootOf(tab: Tab): Screen = when (tab) {
@@ -455,7 +462,7 @@ private fun rootOf(tab: Tab): Screen = when (tab) {
 private fun tabOf(screen: Screen, layout: PhoneLayout): Tab? = when (screen) {
     is Screen.Sessions -> Tab.Sessions
     is Screen.Session, is Screen.NewSession, is Screen.Repo, Screen.Usage, Screen.Company, Screen.Update,
-    Screen.Learn, Screen.Practice, is Screen.Guide, Screen.Missions -> null
+    Screen.Learn, Screen.Practice, is Screen.Guide, Screen.Missions, Screen.Trackers -> null
     Screen.Work, is Screen.Task -> Tab.Work
     Screen.Files -> if (layout == PhoneLayout.New) null else Tab.Files
     Screen.Hosts -> if (layout == PhoneLayout.New) null else Tab.Hosts
