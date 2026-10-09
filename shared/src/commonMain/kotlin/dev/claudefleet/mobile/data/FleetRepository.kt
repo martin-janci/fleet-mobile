@@ -249,6 +249,11 @@ class FleetRepository(
         // are the person's changes on the tracker, and no frame says so. A
         // `ready` does not come through here — its discovery reads it.
         if (_capabilities.value.work) readMyWorkSoon()
+        // And the account reads: no frame repeats a change a `lagged` gap
+        // dropped, and a pull is a person asking for fresh limits too.
+        readAccountsSoon()
+        readAccountUsageSoon()
+        readGrantsSoon()
     }
 
     /**
@@ -429,6 +434,7 @@ class FleetRepository(
                             // stays a no-op for the snapshot either way.
                             if (event.isWorkFrame()) _workChanges.tryEmit(++workTicks)
                             if (event.isAccountUsageFrame()) readAccountUsageSoon()
+                            if (event.isAccountFrame()) readAccountsSoon()
                             if (event.isGrantFrame()) readGrantsSoon()
                             event.downloadId()?.let { _downloadChanges.tryEmit(it) }
                         }
@@ -487,7 +493,9 @@ class FleetRepository(
             myWorkRead?.cancel()
             _orgs.value = readOrgs(caps)
             _accountNames.value = readAccountNames(caps)
-            _accountUsage.value = readAccountUsage(caps)
+            // Through the cancellable read, so a frame's newer read started
+            // meanwhile is never overwritten by this older answer.
+            readAccountUsageSoon()
             _access.value = readGrants(caps)
             if (!caps.work) _trackers.value = emptyList()
             _myWork.value = if (caps.work) readMyWork() else null
@@ -560,10 +568,18 @@ class FleetRepository(
         usageRead = scope.launch { _accountUsage.value = readAccountUsage(_capabilities.value) }
     }
 
+    /** A `list_accounts` read in flight; a newer `account:*` frame replaces it. */
+    private var accountsRead: Job? = null
+
+    private fun readAccountsSoon() {
+        accountsRead?.cancel()
+        accountsRead = scope.launch { _accountNames.value = readAccountNames(_capabilities.value) }
+    }
+
     /**
      * Every account's last usage reading by uuid, when the hub lists
-     * `account_usage`; empty otherwise and on a failed read, which leaves a
-     * paused row without its reset time rather than saying anything.
+     * `account_usage`; empty otherwise. A failed read keeps the last answer,
+     * as [readGrants] does: a blip must not drop a paused row's reset time.
      */
     private suspend fun readAccountUsage(caps: HubCapabilities): Map<String, AccountUsageSnapshot> {
         if (!caps.accountUsage) return emptyMap()
@@ -572,14 +588,14 @@ class FleetRepository(
         } catch (e: CancellationException) {
             throw e
         } catch (_: Throwable) {
-            emptyMap()
+            _accountUsage.value
         }
     }
 
     /**
      * Account labels by uuid, when the hub lists `list_accounts`; empty
-     * otherwise and on a failed read, which leaves rows without an account
-     * chip rather than saying anything.
+     * otherwise. A failed read keeps the last answer rather than dropping
+     * every row's account chip.
      */
     private suspend fun readAccountNames(caps: HubCapabilities): Map<String, String> {
         if (!caps.accounts) return emptyMap()
@@ -588,7 +604,7 @@ class FleetRepository(
         } catch (e: CancellationException) {
             throw e
         } catch (_: Throwable) {
-            emptyMap()
+            _accountNames.value
         }
     }
 

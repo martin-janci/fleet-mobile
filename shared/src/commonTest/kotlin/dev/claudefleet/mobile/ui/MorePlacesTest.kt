@@ -226,9 +226,18 @@ class MorePlacesTest {
     fun a_meter_says_how_much_is_used_and_when_it_starts_over() {
         val now = 1_000_000L
         assertEquals("62% used · resets in 2 h", limitFigure(LimitWindow(62.4, resetsAt = now + 2 * 3_600), now))
-        assertEquals("100% used", limitFigure(LimitWindow(104.0, resetsAt = now - 60), now))
-        assertTrue(nearLimit(LimitWindow(90.0)))
-        assertFalse(nearLimit(LimitWindow(89.9)))
+        assertTrue(nearLimit(LimitWindow(90.0), now))
+        assertFalse(nearLimit(LimitWindow(89.9), now))
+    }
+
+    /** Review r05 M1: a reading from before its window's reset is not shown as current. */
+    @Test
+    fun a_window_past_its_reset_says_so_instead_of_its_old_figure() {
+        val now = 1_000_000L
+        val reset = LimitWindow(104.0, resetsAt = now - 60)
+        assertEquals("Reset · not re-read yet", limitFigure(reset, now))
+        assertFalse(nearLimit(reset, now), "a window that has started over is not near its limit")
+        assertTrue(nearLimit(LimitWindow(100.0, resetsAt = now + 60), now))
     }
 
     @Test
@@ -242,6 +251,10 @@ class MorePlacesTest {
             limitsNote(ok.copy(status = "login_expired", fetchedAt = now - 3 * 3_600), now),
         )
         assertEquals("No host with this account is online.", limitsNote(ok.copy(status = "no_online_host", usage = null), now))
+        assertEquals(
+            "Refreshing its login · meters from 3 h ago.",
+            limitsNote(ok.copy(status = "access_token_expired", fetchedAt = now - 3 * 3_600), now),
+        )
         assertEquals("Could not read the limits · meters from 3 h ago.", limitsNote(ok.copy(status = "something_new", fetchedAt = now - 3 * 3_600), now))
     }
 
