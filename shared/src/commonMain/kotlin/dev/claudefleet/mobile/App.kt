@@ -1797,7 +1797,12 @@ private fun FleetRoute(
                             {
                                 automation.close()
                                 // The New layout's Missions screen (14.16); Classic keeps the sheet.
-                                if (layout == PhoneLayout.New) nav.openMissions() else missions.open()
+                                if (layout == PhoneLayout.New) {
+                                    nav.openMissions()
+                                } else {
+                                    missions.open()
+                                }
+                                Unit
                             }
                         } else {
                             null
