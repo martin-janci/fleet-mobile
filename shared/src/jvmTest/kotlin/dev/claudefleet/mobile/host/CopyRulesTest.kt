@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.host
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * The design manual's copy rules on the phone's own strings (review round
@@ -14,7 +15,9 @@ import kotlin.test.assertEquals
 class CopyRulesTest {
 
     private val sources: List<File> by lazy {
-        Repo.file("shared/src/commonMain/kotlin").walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+        // A directory, so not `Repo.file`: that one insists on a regular file.
+        File(Repo.root, "shared/src/commonMain/kotlin").walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+            .also { assertTrue(it.isNotEmpty(), "found no Kotlin sources under shared/src/commonMain/kotlin") }
     }
 
     /** Every `"…"` literal in [f] with its line, wire names and comments left out. */
