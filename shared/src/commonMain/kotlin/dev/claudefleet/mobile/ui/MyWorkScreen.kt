@@ -277,7 +277,7 @@ internal fun ReloadRow(onReload: () -> Unit) {
 private fun OrgHeader(org: WorkOrgSection, onClick: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         Row(
-            modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable(onClick = onClick).padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClick = onClick).padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {

@@ -41,6 +41,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -696,7 +698,7 @@ internal fun StepLabel(text: String) {
         color = Fleet.colors.fgMuted,
         fontSize = 12.sp,
         fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
+        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp).semantics { heading() },
     )
 }
 

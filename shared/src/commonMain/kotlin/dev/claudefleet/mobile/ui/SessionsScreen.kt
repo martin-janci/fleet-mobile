@@ -637,7 +637,7 @@ private fun HostHeader(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 40.dp)
+                .heightIn(min = 48.dp)
                 .clickable(onClick = onClick)
                 .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
