@@ -14,7 +14,8 @@ import kotlin.test.assertEquals
 class CopyRulesTest {
 
     private val sources: List<File> by lazy {
-        Repo.file("shared/src/commonMain/kotlin").walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+        // `Repo.file` takes files only; this is a directory.
+        File(Repo.root, "shared/src/commonMain/kotlin").walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
     }
 
     /** Every `"…"` literal in [f] with its line, wire names and comments left out. */
