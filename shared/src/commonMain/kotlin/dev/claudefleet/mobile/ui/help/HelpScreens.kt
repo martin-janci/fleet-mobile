@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -426,13 +427,23 @@ private fun Label(text: String) {
 /**
  * The bar a running lesson puts over the real screen: which lesson, which
  * step, one sentence saying where to look. Next and End lesson are its only
- * buttons; a lesson never presses anything on the screen under it.
+ * buttons; a lesson never presses anything on the screen under it. With
+ * [onPrompt], a step's suggested prompts are offered too, and a tap only
+ * puts one in the coordinator's composer (14.22).
  */
 @Composable
-fun LessonBar(lesson: Lesson, step: Int, onNext: () -> Unit, onEnd: () -> Unit, modifier: Modifier = Modifier) {
+fun LessonBar(
+    lesson: Lesson,
+    step: Int,
+    onNext: () -> Unit,
+    onEnd: () -> Unit,
+    modifier: Modifier = Modifier,
+    onPrompt: ((String) -> Unit)? = null,
+) {
     val o = Fleet.colors
     val index = LESSONS.indexOfFirst { it.id == lesson.id } + 1
-    val text = lesson.steps.getOrNull(step)?.text ?: return
+    val current = lesson.steps.getOrNull(step) ?: return
+    val text = current.text
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -447,6 +458,13 @@ fun LessonBar(lesson: Lesson, step: Int, onNext: () -> Unit, onEnd: () -> Unit, 
             TextButton(onClick = onEnd) { Text("End lesson", color = o.fgMuted, fontSize = 13.sp) }
         }
         Text("Step ${step + 1} · $text", color = o.fg2, fontSize = 14.sp, lineHeight = 20.sp)
+        if (onPrompt != null && current.prompts.isNotEmpty()) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (prompt in current.prompts) {
+                    OutlinedButton(onClick = { onPrompt(prompt) }) { Text(prompt, fontSize = 14.sp) }
+                }
+            }
+        }
         Row {
             Spacer(Modifier.weight(1f))
             TextButton(onClick = onNext) {

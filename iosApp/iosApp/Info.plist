@@ -38,6 +38,8 @@
 	-->
 	<key>NSCameraUsageDescription</key>
 	<string>The camera reads the pairing QR code your hub prints. Nothing is recorded, stored or sent anywhere.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Face ID opens Orbit Fleet and confirms an answer when you turn on the lock in This phone. The app only learns whether it passed.</string>
 
 	<!--
 	  A self-hosted hub is often on the same network as the phone rather than

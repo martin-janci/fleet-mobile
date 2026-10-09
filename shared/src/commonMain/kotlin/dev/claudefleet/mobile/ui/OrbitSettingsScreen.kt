@@ -64,6 +64,8 @@ data class OrbitSettingsInput(
     val notifyKinds: NotifyKinds,
     /** The app's own updates (14.18); null where the platform updates elsewhere (iOS: TestFlight). */
     val updateMode: UpdateMode? = null,
+    /** This phone's fingerprint lock is on (14.11). */
+    val lock: Boolean = false,
 )
 
 /** Every tap the New layout's Settings reports. */
@@ -74,6 +76,8 @@ class OrbitSettingsHandlers(
     val onSetTheme: (ThemeChoice) -> Unit = {},
     val onSetNotify: (NotifyKind, Boolean) -> Unit = { _, _ -> },
     val onSetUpdateMode: (UpdateMode) -> Unit = {},
+    /** The fingerprint lock's switch; null where the phone cannot ask for one, and the row is not drawn. */
+    val onSetLock: ((Boolean) -> Unit)? = null,
     val onForget: () -> Unit = {},
     val onDismissError: () -> Unit = {},
     /** The Usage screen; null where the hub reports neither usage nor accounts. */
@@ -180,7 +184,7 @@ private fun ColumnScope.SettingsHome(
 
     SectionLabel("Settings")
     val groups = input.fleet?.pages?.let(::groupPages).orEmpty()
-    SettingsRow("This phone", if (input.updateMode != null) "Notifications, theme, updates" else "Notifications, theme", onClick = { handlers.onOpen(SettingsPlace.ThisPhone) })
+    SettingsRow("This phone", thisPhoneLine(updates = input.updateMode != null, lock = handlers.onSetLock != null), onClick = { handlers.onOpen(SettingsPlace.ThisPhone) })
     for (group in SettingsGroup.entries) {
         // General holds the hub's details and Organisations the Company
         // screen, so those two are there even when the hub serves no pages.
@@ -220,6 +224,10 @@ private fun HubSummary(s: SettingsUiState) {
     }
 }
 
+/** What This phone's row on the home says it holds. */
+internal fun thisPhoneLine(updates: Boolean, lock: Boolean): String =
+    listOfNotNull("Notifications", "theme", "updates".takeIf { updates }, "lock".takeIf { lock }).joinToString(", ")
+
 private fun accessWords(s: SettingsUiState): String =
     if (s.readOnly) "Read only, this device cannot send prompts" else "Full access"
 
@@ -245,6 +253,18 @@ private fun ColumnScope.ThisPhone(input: OrbitSettingsInput, handlers: OrbitSett
 
     SectionLabel("Theme")
     ThemePicker(input.theme, handlers.onSetTheme)
+
+    handlers.onSetLock?.let { onSetLock ->
+        SectionLabel("Security")
+        // The switch asks for the fingerprint before it moves, either way.
+        SwitchRow(
+            title = "Lock with fingerprint",
+            line = "Asked when the app opens and before every answer to a permission",
+            on = input.lock,
+            enabled = true,
+            onChange = onSetLock,
+        )
+    }
 
     input.updateMode?.let { mode ->
         SectionLabel("Updates")

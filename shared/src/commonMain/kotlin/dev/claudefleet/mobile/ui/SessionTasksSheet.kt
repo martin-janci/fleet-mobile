@@ -112,11 +112,13 @@ fun SessionTasksSheet(state: SessionTasksUiState, handlers: SessionTasksHandlers
     }
 }
 
-private fun androidx.compose.foundation.lazy.LazyListScope.section(
+internal fun androidx.compose.foundation.lazy.LazyListScope.section(
     title: String,
     links: List<WorkTaskLink>,
     state: SessionTasksUiState,
     handlers: SessionTasksHandlers,
+    /** The New layout's ticket sheet says Unlink (redesign 14.15). */
+    removeLabel: String = "Remove",
 ) {
     if (links.isEmpty()) return
     item(key = "h-$title") {
@@ -127,12 +129,12 @@ private fun androidx.compose.foundation.lazy.LazyListScope.section(
             modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 4.dp),
         )
     }
-    items(links, key = { "l-$title-${it.linkId}" }) { link -> TaskLinkRow(link, state, handlers) }
+    items(links, key = { "l-$title-${it.linkId}" }) { link -> TaskLinkRow(link, state, handlers, removeLabel) }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TaskLinkRow(link: WorkTaskLink, state: SessionTasksUiState, handlers: SessionTasksHandlers) {
+private fun TaskLinkRow(link: WorkTaskLink, state: SessionTasksUiState, handlers: SessionTasksHandlers, removeLabel: String = "Remove") {
     val task = link.task
     val enabled = !state.busy
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
@@ -161,7 +163,7 @@ private fun TaskLinkRow(link: WorkTaskLink, state: SessionTasksUiState, handlers
             when (link.state) {
                 LinkState.Active -> {
                     if (!link.primary && state.canMakePrimary) OutlinedButton(onClick = { handlers.onMakePrimary(link) }, enabled = enabled) { Text("Make primary") }
-                    if (state.canRemove) DangerTextButton(onClick = { handlers.onRemove(link) }, enabled = enabled) { Text("Remove") }
+                    if (state.canRemove) DangerTextButton(onClick = { handlers.onRemove(link) }, enabled = enabled) { Text(removeLabel) }
                 }
                 LinkState.Suggested -> {
                     if (state.canConfirm) OutlinedButton(onClick = { handlers.onConfirm(link) }, enabled = enabled) { Text("Confirm") }
@@ -174,7 +176,7 @@ private fun TaskLinkRow(link: WorkTaskLink, state: SessionTasksUiState, handlers
 }
 
 @Composable
-private fun AddTask(state: SessionTasksUiState, handlers: SessionTasksHandlers) {
+internal fun AddTask(state: SessionTasksUiState, handlers: SessionTasksHandlers) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(
             value = state.addQuery,
@@ -237,7 +239,7 @@ private fun AddTask(state: SessionTasksUiState, handlers: SessionTasksHandlers) 
  * rule, the hub master's to add, so the command is shown to copy.
  */
 @Composable
-private fun CrossOrgPanel(choice: CrossOrgChoice, state: SessionTasksUiState, handlers: SessionTasksHandlers) {
+internal fun CrossOrgPanel(choice: CrossOrgChoice, state: SessionTasksUiState, handlers: SessionTasksHandlers) {
     val clipboard = LocalClipboardManager.current
     val task = choice.taskOrgName ?: "another organisation"
     val session = choice.sessionOrgName ?: "a different one"

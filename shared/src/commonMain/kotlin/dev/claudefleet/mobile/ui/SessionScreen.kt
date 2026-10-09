@@ -148,6 +148,9 @@ import dev.claudefleet.mobile.ui.components.StatusStrip
 import dev.claudefleet.mobile.ui.components.WorkChip
 import dev.claudefleet.mobile.ui.components.contextIsTight
 import dev.claudefleet.mobile.ui.components.statusStripText
+import dev.claudefleet.mobile.ui.kit.ConversationLoading
+import dev.claudefleet.mobile.ui.kit.HubBanner
+import dev.claudefleet.mobile.ui.kit.rememberPhoneConnection
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.data.ConnectionStatus
@@ -405,6 +408,10 @@ fun SessionScreen(
         hasDraft = state.draft.isNotEmpty(),
         needsAnswer = state.card != null,
     )
+    // New (redesign 14.15): the ticket chip, the Tasks chip and ⋮ Ticket and
+    // tasks all open the one ticket sheet; Classic keeps its two.
+    val openTicket: () -> Unit =
+        if (tabs != null) ({ workHandlers.onOpen(); if (tasks.available) tasksHandlers.onOpen() }) else workHandlers.onOpen
     // Find in the conversation: the query, and which match is shown (an
     // index into `matches`, newest first like the list).
     var findOpen by remember { mutableStateOf(false) }
@@ -610,6 +617,8 @@ fun SessionScreen(
                         workHandlers = workHandlers,
                         tasks = tasks,
                         onOpenTasks = tasksHandlers.onOpen,
+                        onOpenTicket = openTicket,
+                        newLayout = tabs != null,
                         onOpenDetails = onOpenDetails,
                         onViewConversation = onViewConversation,
                         onOpenRepo = onOpenRepo,
@@ -623,9 +632,9 @@ fun SessionScreen(
                         orbit = tabs?.let {
                             OrbitMenu(
                                 onArchive = onArchive,
-                                onTicket = workHandlers.onOpen.takeIf { work.chip != null || work.canSetWork || work.canNameWork },
+                                onTicket = openTicket.takeIf { work.chip != null || work.canSetWork || work.canNameWork },
                                 ticketKey = work.chip?.key,
-                                onTasks = tasksHandlers.onOpen.takeIf { tasks.available },
+                                onTasks = openTicket.takeIf { tasks.available },
                             )
                         },
                     )
@@ -658,15 +667,27 @@ fun SessionScreen(
                     onScope = { findScope = it },
                 )
             }
-            ConnectionBanner(status, state.hubReachable)
+            // The New bar draws the hub's state as the other tabs do (14.12),
+            // except where the hub answers and only the stream is down: that
+            // is not "not answering", and the old banner says what is true.
+            if (tabs != null && state.hubReachable != true) {
+                HubBanner(rememberPhoneConnection(status), onRetry = onRefresh)
+            } else {
+                ConnectionBanner(status, state.hubReachable)
+            }
             // A send's failure is drawn by the composer, where the thumb is.
             if (!state.errorFromSend) ErrorBanner(state.error, onDismiss = onDismissError)
             ErrorBanner(notice, onDismiss = onDismissNotice)
             // Behind an open sheet a banner cannot be read: the sheet shows it instead.
             if (!work.sheetOpen) ErrorBanner(work.error, onDismiss = workHandlers.onDismissError)
-            if (work.sheetOpen) WorkTicketSheet(work, workHandlers)
+            // New (redesign 14.15): the ticket and its tasks are one sheet.
+            if (tabs != null) {
+                if (ticketSheetOpen(work, tasks)) PhoneTicketSheet(work, workHandlers, tasks, tasksHandlers)
+            } else if (work.sheetOpen) {
+                WorkTicketSheet(work, workHandlers)
+            }
         state.viewing?.let { EarlierConversationBanner(it, state.nowSeconds, state.loadingOlder, onBackToCurrent) }
-            if (tasks.sheetOpen) SessionTasksSheet(tasks, tasksHandlers)
+            if (tabs == null && tasks.sheetOpen) SessionTasksSheet(tasks, tasksHandlers)
             // The New bar's tabs: under the header, and still there when a
             // read-back folds it, so another tab is never more than a tap away.
             if (!wide && !fullScreen) tabs?.let { SessionTabRow(it) }
@@ -707,6 +728,8 @@ fun SessionScreen(
             ) {
                 if (state.loaded && turns.isEmpty()) {
                     EmptyConversation(state, onRetry = onRefresh)
+                } else if (showsConversationLoading(newBar = tabs != null, loading = state.loading, loaded = state.loaded, turns = turns.size)) {
+                    ConversationLoading(waiting = true)
                 } else {
                     // Tagged so a device test can address this list rather than
                     // guessing which of the screen's scrollable nodes it meant.
@@ -1297,6 +1320,10 @@ private fun SessionBar(
     workHandlers: SessionWorkHandlers,
     tasks: SessionTasksUiState,
     onOpenTasks: () -> Unit,
+    /** The ticket chip's tap: [SessionWorkHandlers.onOpen] on Classic, the one ticket sheet on New. */
+    onOpenTicket: () -> Unit,
+    /** The New bar (redesign 14.15): the ticket chip stands for the tasks chip too. */
+    newLayout: Boolean,
     onOpenDetails: () -> Unit,
     onViewConversation: (ConversationSummary) -> Unit,
     onOpenRepo: (() -> Unit)?,
@@ -1430,7 +1457,8 @@ private fun SessionBar(
             val retiring = state.safeKillState
             val ticket = work.chip
             val manyConversations = state.conversations.size > 1
-            if (tight || retiring != null || ticket != null || tasks.available || manyConversations) {
+            val tasksChip = tasksChipShown(newLayout, ticket != null, tasks.available)
+            if (tight || retiring != null || ticket != null || tasksChip || manyConversations) {
                 FlowRow(
                     modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1442,7 +1470,7 @@ private fun SessionBar(
                             work = ticket,
                             suggested = work.work == null,
                             showTitle = true,
-                            onClick = workHandlers.onOpen,
+                            onClick = onOpenTicket,
                             modifier = Modifier.align(Alignment.CenterVertically),
                         )
                     }
@@ -1452,15 +1480,15 @@ private fun SessionBar(
                         WorkChip(
                             work = guess.work,
                             suggested = true,
-                            onClick = workHandlers.onOpen,
+                            onClick = onOpenTicket,
                             modifier = Modifier.align(Alignment.CenterVertically),
                         )
                     }
                     // Every task of the session, not only the primary the
                     // ticket chip shows: the Work view's *Tasks* section.
-                    if (tasks.available) {
+                    if (tasksChip) {
                         SuggestionChip(
-                            onClick = onOpenTasks,
+                            onClick = if (newLayout) onOpenTicket else onOpenTasks,
                             label = { Text(if (tasks.count > 0) "Tasks · ${tasks.count}" else "Tasks", maxLines = 1) },
                             modifier = Modifier.align(Alignment.CenterVertically),
                         )
@@ -2634,6 +2662,14 @@ private fun EarlierConversationBanner(viewing: ConversationSummary, nowSeconds: 
         }
     }
 }
+
+/**
+ * Whether the New bar draws the conversation's loading state (MobileStates:
+ * Loading a session) in place of the list: only on the first read, before it
+ * has answered and while nothing is on screen. Classic keeps its list.
+ */
+internal fun showsConversationLoading(newBar: Boolean, loading: Boolean, loaded: Boolean, turns: Int): Boolean =
+    newBar && loading && !loaded && turns == 0
 
 /** "clear · 12 turns · 3 h" — how it started, how long it ran, how long ago. */
 internal fun conversationCaption(c: ConversationSummary, nowSeconds: Long): String =

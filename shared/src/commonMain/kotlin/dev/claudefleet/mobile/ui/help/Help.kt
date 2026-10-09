@@ -163,7 +163,12 @@ val TOUR_STOPS: List<TourStop> = listOf(
 /** Where a lesson step sends the person. The step only points; the person does the thing. */
 enum class LessonPlace { Practice, Inbox, Sessions, Control, Settings }
 
-data class LessonStep(val place: LessonPlace, val text: String)
+/**
+ * One step: where to look and what to try. [prompts] are words a Control step
+ * suggests (MobileTutorialModes · Lesson in Control); a tap puts one in the
+ * coordinator's composer and sends nothing.
+ */
+data class LessonStep(val place: LessonPlace, val text: String, val prompts: List<String> = emptyList())
 
 /** A short lesson on the real screens (MobileTutorials · Learn). */
 data class Lesson(val id: String, val title: String, val line: String, val steps: List<LessonStep>)
@@ -189,8 +194,12 @@ val LESSONS: List<Lesson> = listOf(
     Lesson(
         "control", "Ask the fleet in Control", "Plain questions, forms, missions",
         listOf(
-            LessonStep(LessonPlace.Control, "Control answers from your real fleet. Try asking it \"What needs me?\"."),
-            LessonStep(LessonPlace.Control, "Ask it to do something, like \"start a session for FLEET-150\". It shows a form before anything runs."),
+            LessonStep(LessonPlace.Control, "Control answers from your real fleet. Try asking it \"What needs me?\".", listOf("What needs me?")),
+            LessonStep(
+                LessonPlace.Control,
+                "Ask it to do something, like \"start a session for FLEET-150\". It shows a form before anything runs.",
+                listOf("Start a session for FLEET-150", "What did I ship today?"),
+            ),
             LessonStep(LessonPlace.Control, "Missions are longer jobs Control runs; Pause all stops every one."),
         ),
     ),

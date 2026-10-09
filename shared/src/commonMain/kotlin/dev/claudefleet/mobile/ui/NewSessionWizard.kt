@@ -48,13 +48,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.BorderStroke
-import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
+import dev.claudefleet.mobile.ui.kit.HubBanner
 import dev.claudefleet.mobile.ui.kit.pastLoaderDelay
 import dev.claudefleet.mobile.ui.kit.PulseSequence
 import dev.claudefleet.mobile.ui.kit.SheetOption
+import dev.claudefleet.mobile.ui.kit.rememberPhoneConnection
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
@@ -152,7 +153,7 @@ internal fun NewSessionWizard(
                 }
             },
         )
-        ConnectionBanner(state.status)
+        HubBanner(rememberPhoneConnection(state.status))
         ErrorBanner(state.error, onDismiss = onDismissError)
 
         if (pastLoaderDelay(state.creating)) {

@@ -54,10 +54,14 @@ import dev.claudefleet.mobile.ui.theme.OrbitTokens
  * drive both, so the hub's own checks (a GitHub creation is confirmed first)
  * hold here unchanged.
  *
- * The sources are today's three: a repository `gh` on the host can see, a
- * URL, or a new empty repository (on GitHub too). The fourth, a folder
- * already on the host, comes with the desktop's Add project (6.11).
+ * The sources are the desktop's four (6.11): a repository `gh` on the host
+ * can see, a URL, a folder already on the host, or a new empty repository
+ * (on GitHub too). The hub adopts a folder on its own machine only
+ * ([LOCAL_HOST]), so that source is offered only where the fleet lists it.
  */
+
+/** The hub's own machine: the one host `add_project` adopts a folder on. */
+internal const val LOCAL_HOST = "local"
 
 /** The wizard's two asking steps; the third is the clone running. */
 enum class AddProjectStep(val title: String) {
@@ -75,6 +79,9 @@ sealed interface ProjectSource {
     /** A clone URL typed or pasted. */
     data class Url(val url: String) : ProjectSource
 
+    /** A checkout already on the hub's own machine, by its absolute [path]; it stays where it is. */
+    data class Folder(val path: String) : ProjectSource
+
     /** A new empty repository, on the host, and on GitHub when [onGithub]. */
     data class New(val owner: String, val repo: String, val onGithub: Boolean) : ProjectSource
 }
@@ -87,6 +94,11 @@ internal fun sourceBlocker(source: ProjectSource?): String? = when (source) {
     null -> "Pick where the project comes from."
     is ProjectSource.Github -> null
     is ProjectSource.Url -> if (source.url.isBlank()) "Paste the repository's URL." else null
+    is ProjectSource.Folder -> when {
+        source.path.isBlank() -> "Type the folder's path on the host."
+        !source.path.trim().startsWith("/") -> "Give the whole path, from /."
+        else -> null
+    }
     is ProjectSource.New -> when {
         source.owner.isBlank() -> "Name the owner."
         source.repo.isBlank() -> "Name the repository."
@@ -97,8 +109,20 @@ internal fun sourceBlocker(source: ProjectSource?): String? = when (source) {
 /** The last step's button names the action, as the wizard rules ask. */
 internal fun addActionLabel(source: ProjectSource?): String = when (source) {
     is ProjectSource.New -> if (source.onGithub) "Create on GitHub" else "Create"
+    is ProjectSource.Folder -> "Add"
     else -> "Clone"
 }
+
+/**
+ * Why the Where step cannot add [source] on [host], beyond reachability: a
+ * folder is adopted on the hub's own machine only. Null when it can.
+ */
+internal fun hostBlocker(source: ProjectSource?, host: String): String? =
+    if (source is ProjectSource.Folder && host != LOCAL_HOST) "A folder is added on $LOCAL_HOST, the hub's own machine." else null
+
+/** The name a folder's project is shown by while it is added: the last part of its path. */
+internal fun folderName(path: String): String? =
+    path.trim().trimEnd('/').substringAfterLast('/').takeIf { it.isNotBlank() }
 
 /**
  * Whether the fleet already holds [repo] as a project: the board lists it
@@ -109,15 +133,20 @@ internal fun alreadyAdded(repo: GithubRepo, projects: Collection<String>): Boole
     projects.any { it.equals(repo.nameWithOwner, ignoreCase = true) }
 
 /** The Cloning screen's title: "Cloning papaya-pos", "Creating papaya-pos". */
-internal fun addingTitle(what: String?, creating: Boolean): String =
-    (if (creating) "Creating " else "Cloning ") + (what ?: "the project")
+internal fun addingTitle(what: String?, creating: Boolean, adopting: Boolean = false): String =
+    (if (adopting) "Adding " else if (creating) "Creating " else "Cloning ") + (what ?: "the project")
 
 /**
  * The steps the hub runs for this add, in order. It answers once, at the
  * end, so none of them is ticked off on the way: they say what is coming,
  * not how far it got.
  */
-internal fun addSteps(creating: Boolean, onGithub: Boolean): List<String> = buildList {
+internal fun addSteps(creating: Boolean, onGithub: Boolean, adopting: Boolean = false): List<String> = buildList {
+    if (adopting) {
+        add("Check the folder is a git checkout")
+        add("Add to Projects")
+        return@buildList
+    }
     if (creating && onGithub) add("Create the repository on GitHub")
     add(if (creating) "Create the repository on the host" else "Clone onto the host")
     add("Add to Projects")
@@ -128,6 +157,8 @@ data class AddProjectHandlers(
     val onChooseHost: (String) -> Unit = {},
     val onClone: (String) -> Unit = {},
     val onCreate: (String, String, Boolean) -> Unit = { _, _, _ -> },
+    /** Add the folder at this path on [LOCAL_HOST] (`add_project` with a `folder` source). */
+    val onAdopt: (String) -> Unit = {},
     /** Close the wizard; while a clone runs it keeps running, and the form says so. */
     val onClose: () -> Unit = {},
     val onDismissError: () -> Unit = {},
@@ -146,27 +177,31 @@ internal fun AddProjectWizard(
     var source by remember { mutableStateOf<ProjectSource?>(null) }
     // What was typed stays when the kind changes: Back keeps answers.
     var url by remember { mutableStateOf("") }
+    var folder by remember { mutableStateOf("") }
     var owner by remember { mutableStateOf("") }
     var repo by remember { mutableStateOf("") }
     var onGithub by remember { mutableStateOf(false) }
     val creating = source is ProjectSource.New
+    val adopting = source is ProjectSource.Folder
     val host = tools.addingOn.orEmpty()
 
     Column(modifier = modifier.fillMaxSize().background(Fleet.colors.bg)) {
         if (tools.adding) {
             ScreenHeader(
-                title = addingTitle(tools.addingWhat, creating),
+                title = addingTitle(tools.addingWhat, creating, adopting),
                 subtitle = "on ${tools.addingWhere ?: host}",
                 navigation = {
                     IconButton(onClick = handlers.onClose) { Icon(FleetIcons.ArrowBack, contentDescription = "Continue in the background") }
                 },
             )
-            AddingPanel(creating, (source as? ProjectSource.New)?.onGithub == true, handlers.onClose, Modifier.weight(1f))
+            AddingPanel(creating, (source as? ProjectSource.New)?.onGithub == true, handlers.onClose, Modifier.weight(1f), adopting)
         } else {
             AskingSteps(
                 tools, step, hosts, host, projects, handlers, source, url, owner, repo, onGithub,
+                folder = folder,
                 onSource = { source = it },
                 onUrl = { url = it },
+                onFolder = { folder = it },
                 onNew = { o, r, g ->
                     owner = o
                     repo = r
@@ -190,10 +225,14 @@ private fun ColumnScope.AskingSteps(
     owner: String,
     repo: String,
     onGithub: Boolean,
+    folder: String,
     onSource: (ProjectSource) -> Unit,
     onUrl: (String) -> Unit,
+    onFolder: (String) -> Unit,
     onNew: (String, String, Boolean) -> Unit,
 ) {
+    // A folder only where the hub has its own machine in the fleet to adopt it on.
+    val folderOffered = tools.canAdd && hosts.any { it.alias == LOCAL_HOST }
     ScreenHeader(
         title = "Add a project",
         subtitle = addStepHeading(step),
@@ -215,10 +254,15 @@ private fun ColumnScope.AskingSteps(
                 owner = owner,
                 repo = repo,
                 onGithub = onGithub,
+                folder = folder.takeIf { folderOffered },
                 onPick = onSource,
                 onUrl = {
                     onUrl(it)
                     onSource(ProjectSource.Url(it))
+                },
+                onFolder = {
+                    onFolder(it)
+                    onSource(ProjectSource.Folder(it))
                 },
                 onNew = { o, r, g ->
                     onNew(o, r, g)
@@ -228,7 +272,8 @@ private fun ColumnScope.AskingSteps(
             AddProjectStep.Where -> WhereToAdd(hosts, host, source, handlers.onChooseHost)
         }
     }
-    val blocker = sourceBlocker(source) ?: if (hosts.none { it.alias == host && it.reachable }) "Pick a host the hub can reach." else null
+    val blocker = sourceBlocker(source) ?: hostBlocker(source, host)
+        ?: if (hosts.none { it.alias == host && it.reachable }) "Pick a host the hub can reach." else null
     WizardFooter(
         caption = if (step == AddProjectStep.Source) sourceBlocker(source).takeIf { source != null } else blocker,
         backLabel = if (step == AddProjectStep.Source) "Cancel" else "Back",
@@ -237,10 +282,15 @@ private fun ColumnScope.AskingSteps(
         primaryEnabled = if (step == AddProjectStep.Source) sourceBlocker(source) == null else blocker == null && tools.canAdd,
         onPrimary = {
             when (step) {
-                AddProjectStep.Source -> handlers.onStep(AddProjectStep.Where)
+                AddProjectStep.Source -> {
+                    // A folder has one host it can be added on: Where opens on it.
+                    if (source is ProjectSource.Folder) handlers.onChooseHost(LOCAL_HOST)
+                    handlers.onStep(AddProjectStep.Where)
+                }
                 AddProjectStep.Where -> when (val s = source) {
                     is ProjectSource.Github -> handlers.onClone("https://github.com/${s.nameWithOwner}")
                     is ProjectSource.Url -> handlers.onClone(s.url)
+                    is ProjectSource.Folder -> handlers.onAdopt(s.path.trim())
                     is ProjectSource.New -> handlers.onCreate(s.owner, s.repo, s.onGithub)
                     null -> Unit
                 }
@@ -260,8 +310,11 @@ private fun SourceStep(
     owner: String,
     repo: String,
     onGithub: Boolean,
+    /** What was typed for a folder; null when the folder source is not offered. */
+    folder: String?,
     onPick: (ProjectSource) -> Unit,
     onUrl: (String) -> Unit,
+    onFolder: (String) -> Unit,
     onNew: (String, String, Boolean) -> Unit,
 ) {
     val repos = tools.repos
@@ -297,6 +350,21 @@ private fun SourceStep(
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
             )
+        }
+        if (folder != null) {
+            item(key = "folder") {
+                StepLabel("A folder already on the host")
+                OutlinedTextField(
+                    value = folder,
+                    onValueChange = onFolder,
+                    singleLine = true,
+                    label = { Text("Path on $LOCAL_HOST") },
+                    placeholder = { Text("/home/me/projects/app") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
+                )
+                StepHint("A git checkout on the hub's own machine. It stays where it is; nothing is cloned.")
+            }
         }
         item(key = "new") {
             StepLabel("A new empty repository")
@@ -344,18 +412,26 @@ private fun WhereToAdd(hosts: List<HostChoice>, host: String, source: ProjectSou
         item(key = "host-label") { StepLabel("Host") }
         if (hosts.isEmpty()) item(key = "no-hosts") { StepHint("No hosts yet. They appear once the hub has listed them.") }
         items(hosts, key = { "host-${it.alias}" }) { h ->
+            val elsewhere = hostBlocker(source, h.alias) != null
             SheetOption(
                 title = h.alias,
                 selected = h.alias == host,
                 onSelect = { onChooseHost(h.alias) },
-                sub = if (h.reachable) null else "Signal lost · cannot add there now",
-                enabled = h.reachable,
+                sub = when {
+                    !h.reachable -> "Signal lost · cannot add there now"
+                    elsewhere -> "A folder is added on $LOCAL_HOST only"
+                    else -> null
+                },
+                enabled = h.reachable && !elsewhere,
                 modifier = Modifier.padding(bottom = 8.dp),
             )
         }
         item(key = "folder") {
             StepLabel("Folder")
-            StepHint("The hub puts it where its projects layout says, under the owner and the repository's name.")
+            StepHint(
+                if (source is ProjectSource.Folder) "It stays where it is. The owner and name come from its origin remote."
+                else "The hub puts it where its projects layout says, under the owner and the repository's name.",
+            )
             StepLabel("Adding")
             StepHint(sourceSummary(source))
         }
@@ -367,6 +443,7 @@ internal fun sourceSummary(source: ProjectSource?): String = when (source) {
     null -> "Nothing picked yet."
     is ProjectSource.Github -> "Clone ${source.nameWithOwner}"
     is ProjectSource.Url -> "Clone ${source.url.trim()}"
+    is ProjectSource.Folder -> "Add the folder ${source.path.trim()}"
     is ProjectSource.New -> "A new repository ${source.owner.trim()}/${source.repo.trim()}" + if (source.onGithub) ", on GitHub too" else ""
 }
 
@@ -376,7 +453,7 @@ internal fun sourceSummary(source: ProjectSource?): String = when (source) {
  * background. The rain shows only once the wait has passed `loader-delay`.
  */
 @Composable
-private fun AddingPanel(creating: Boolean, onGithub: Boolean, onBackground: () -> Unit, modifier: Modifier = Modifier) {
+private fun AddingPanel(creating: Boolean, onGithub: Boolean, onBackground: () -> Unit, modifier: Modifier = Modifier, adopting: Boolean = false) {
     val o = Fleet.colors
     Column(
         modifier = modifier.fillMaxWidth().padding(horizontal = OrbitTokens.spacing("phone-gutter").dp, vertical = 24.dp),
@@ -386,12 +463,12 @@ private fun AddingPanel(creating: Boolean, onGithub: Boolean, onBackground: () -
             if (rememberLoaderVisible(true)) DataRain()
         }
         Text(
-            if (creating) "Creating the repository" else "Receiving the repository",
+            if (adopting) "Checking the folder" else if (creating) "Creating the repository" else "Receiving the repository",
             color = o.fg,
             style = Fleet.type.textLg,
         )
         Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(vertical = 4.dp)) {
-            for (line in addSteps(creating, onGithub)) {
+            for (line in addSteps(creating, onGithub, adopting)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(8.dp).border(1.5.dp, o.loaderAccent, CircleShape))
                     Text(line, color = o.fg2, style = Fleet.type.textMd, modifier = Modifier.padding(start = 12.dp))

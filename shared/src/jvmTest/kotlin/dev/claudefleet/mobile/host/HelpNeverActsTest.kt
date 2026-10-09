@@ -37,10 +37,27 @@ class HelpNeverActsTest {
         assertEquals(listOf("HelpScreens.kt" to "PracticeQuestion(state.answered, onAnswer = practice::answer)"), callers)
     }
 
-    /** A lesson step has no action: it has a place and a sentence, nothing to run. */
+    /** A lesson step has no action: it has a place, a sentence and words to suggest, nothing to run. */
     @Test
     fun a_lesson_step_is_a_place_and_a_sentence() {
         val help = Repo.file("shared/src/commonMain/kotlin/dev/claudefleet/mobile/ui/help/Help.kt").readText()
-        assertTrue("data class LessonStep(val place: LessonPlace, val text: String)" in help)
+        assertTrue("data class LessonStep(val place: LessonPlace, val text: String, val prompts: List<String> = emptyList())" in help)
+    }
+
+    /**
+     * A Control lesson's prompt only fills the coordinator's composer (14.22):
+     * the one place that hands one on is `App.kt`'s `onPrompt`, and it goes to
+     * the agent's `open(fill = …)`, which writes the draft and never sends.
+     */
+    @Test
+    fun a_lesson_prompt_only_fills_the_composer() {
+        val callers = Repo.shipped.flatMap { f -> f.readLines().filter { "onPrompt = " in it }.map { f.name to it.trim() } }
+        assertEquals(1, callers.size, "one place hands a lesson's prompt on: $callers")
+        assertEquals("App.kt", callers.single().first)
+        assertTrue("agent.open(fill = prompt)" in callers.single().second)
+
+        val agent = Repo.file("shared/src/commonMain/kotlin/dev/claudefleet/mobile/ui/AgentViewModel.kt").readText()
+        assertTrue("drafts?.fill(row.id, fill)" in agent)
+        assertTrue("send" !in agent.lowercase().substringAfter("fun open(").substringBefore("fun dismissError"), "opening the agent never sends")
     }
 }

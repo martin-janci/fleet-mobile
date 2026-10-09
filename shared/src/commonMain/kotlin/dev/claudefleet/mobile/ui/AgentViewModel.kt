@@ -38,6 +38,8 @@ class AgentViewModel(
     private val actions: AgentActions,
     private val scope: CoroutineScope,
     private val canWrite: Boolean,
+    /** Where [open]'s `fill` goes: the agent session's draft, which its Session screen starts from. */
+    private val drafts: DraftMemory? = null,
     /** Show the agent's session. */
     private val onOpenSession: (Long) -> Unit,
 ) {
@@ -49,14 +51,19 @@ class AgentViewModel(
         combine(fleet.capabilities, local) { caps, l -> assemble(caps, l) }
             .stateIn(scope, SharingStarted.Eagerly, assemble(fleet.capabilities.value, local.value))
 
-    /** Wake the agent (a no-op while one wake is in flight) and open its session. */
-    fun open(): Job? {
+    /**
+     * Wake the agent (a no-op while one wake is in flight) and open its session.
+     * [fill] is put in its composer after what is already typed, never sent: a
+     * lesson's suggested prompt (redesign 14.22), for the person to send or edit.
+     */
+    fun open(fill: String? = null): Job? {
         if (!state.value.available || local.value.waking) return null
         local.update { Local(waking = true) }
         return scope.launch {
             try {
                 val row = actions.ensureOperator()
                 local.update { Local() }
+                if (fill != null) drafts?.fill(row.id, fill)
                 onOpenSession(row.id)
             } catch (e: CancellationException) {
                 local.update { Local() }

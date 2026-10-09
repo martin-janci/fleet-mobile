@@ -43,6 +43,31 @@ class SessionWorkspaceTest {
     }
 
     @Test
+    fun the_agent_tab_takes_the_hubs_agent_and_an_older_hub_means_claude_code() {
+        assertEquals("Claude Code", agentName(row().copy(agent = "claude")))
+        assertEquals("Codex", agentName(row().copy(agent = "codex")))
+        assertEquals("Agy", agentName(row().copy(agent = "agy")))
+        assertEquals("Shell", agentName(row().copy(agent = "shell")))
+        // A hub older than contract 11 sends no agent; a blank one says nothing either.
+        assertEquals("Claude Code", agentName(row().copy(agent = null)))
+        assertEquals("Claude Code", agentName(row().copy(agent = " ")))
+        // An agent this build has no name for is shown as the hub spells it.
+        assertEquals("aider", agentName(row().copy(agent = "aider")))
+    }
+
+    @Test
+    fun the_new_bar_shows_the_loading_state_only_on_the_first_read() {
+        assertTrue(showsConversationLoading(newBar = true, loading = true, loaded = false, turns = 0))
+        // Classic keeps its list.
+        assertFalse(showsConversationLoading(newBar = false, loading = true, loaded = false, turns = 0))
+        // Answered: the turns, or the empty conversation, take over.
+        assertFalse(showsConversationLoading(newBar = true, loading = false, loaded = true, turns = 0))
+        assertFalse(showsConversationLoading(newBar = true, loading = true, loaded = false, turns = 3))
+        // A read that failed is not loading: nothing spins forever.
+        assertFalse(showsConversationLoading(newBar = true, loading = false, loaded = false, turns = 0))
+    }
+
+    @Test
     fun tabs_follow_the_desktop_order_and_files_needs_a_worktree() {
         assertEquals(
             listOf(SessionTab.Conversation, SessionTab.Agent, SessionTab.Files, SessionTab.Details),

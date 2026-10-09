@@ -113,7 +113,11 @@ import dev.claudefleet.mobile.ui.FilesViewModel
 import dev.claudefleet.mobile.ui.rememberFileHandoff
 import dev.claudefleet.mobile.ui.MyWorkHandlers
 import dev.claudefleet.mobile.ui.MyWorkScreen
+import dev.claudefleet.mobile.ui.PhoneLockScreen
 import dev.claudefleet.mobile.ui.PhoneTidyHandlers
+import dev.claudefleet.mobile.ui.guard
+import dev.claudefleet.mobile.ui.lockShown
+import dev.claudefleet.mobile.ui.rememberBiometricGate
 import dev.claudefleet.mobile.ui.PhoneTidySheet
 import dev.claudefleet.mobile.ui.PhoneTaskHandlers
 import dev.claudefleet.mobile.ui.PhoneTaskScreen
@@ -275,7 +279,9 @@ import dev.claudefleet.mobile.ui.SessionsViewModel
 import dev.claudefleet.mobile.ui.FleetSettingsSection
 import dev.claudefleet.mobile.ui.FleetSettingsViewModel
 import dev.claudefleet.mobile.ui.SettingsScreen
+import dev.claudefleet.mobile.ui.FirstImport
 import dev.claudefleet.mobile.ui.FleetCheck
+import dev.claudefleet.mobile.ui.firstImportProgress
 import dev.claudefleet.mobile.ui.hubLabel
 import dev.claudefleet.mobile.ui.kit.FullscreenWait
 import dev.claudefleet.mobile.ui.OrbitSettingsScreen
@@ -580,6 +586,14 @@ fun App(container: AppContainer) {
                             PairedScreen(paired, onContinue = { justPaired = null }, notifier = container.notifier)
                         } else {
                             FleetRoute(container, state.credentials, fleetCheck = fleetCheck, onFleetCheckDone = { fleetCheck = false })
+                            // This phone's lock (redesign 14.11): over the fleet
+                            // until the check passes, once per start of the app.
+                            val gate = rememberBiometricGate()
+                            val lockOn by container.phone.lock.collectAsState()
+                            val unlocked by container.phone.unlocked.collectAsState()
+                            if (lockShown(lockOn, unlocked, gate.available)) {
+                                PhoneLockScreen(gate, onUnlocked = container.phone::unlock)
+                            }
                         }
                     }
                 }
@@ -711,6 +725,8 @@ private fun FleetRoute(
     val openRequest by container.openSession.collectAsState()
     LaunchedEffect(openRequest) { if (openRequest != null) container.consumeOpenSession()?.let(nav::open) }
     val tab by nav.tab.collectAsState()
+    // The first import after a pair (14.12): set as the fleet check ends, on the New bar only.
+    var importing by remember(credentials) { mutableStateOf(false) }
 
     // `Navigator.back()` returns false on a tab specifically so the
     // platform can have the gesture instead, `NavigatorTest` pins that, and a
@@ -773,6 +789,7 @@ private fun FleetRoute(
             actions = container.agentActions,
             scope = scope,
             canWrite = credentials.canWrite,
+            drafts = container.drafts,
             onOpenSession = { nav.open(it) },
         )
     }
@@ -1665,6 +1682,8 @@ private fun FleetRoute(
                         val place by settings.place.collectAsState()
                         val theme by container.phone.theme.collectAsState()
                         val notifyKinds by container.phone.notifyKinds.collectAsState()
+                        val lockOn by container.phone.lock.collectAsState()
+                        val gate = rememberBiometricGate()
                         BackHandler(enabled = fleetPageOpen || place != SettingsPlace.Home) {
                             if (!fleetSettings.back()) settings.back()
                         }
@@ -1676,6 +1695,7 @@ private fun FleetRoute(
                                 theme = theme,
                                 notifyKinds = notifyKinds,
                                 updateMode = updateState.mode.takeIf { updateState.supported },
+                                lock = lockOn,
                             ),
                             handlers = OrbitSettingsHandlers(
                                 onOpen = settings::open,
@@ -1684,6 +1704,12 @@ private fun FleetRoute(
                                 onSetTheme = container.phone::setTheme,
                                 onSetNotify = container.phone::setNotify,
                                 onSetUpdateMode = updates::setMode,
+                                // Either way, only once the check has passed.
+                                onSetLock = if (gate.available) {
+                                    { on: Boolean -> gate.ask(if (on) "Turn on the lock" else "Turn off the lock") { ok -> if (ok) container.phone.setLock(on) } }
+                                } else {
+                                    null
+                                },
                                 onForget = { settings.forget() },
                                 onDismissError = settings::dismissError,
                                 onOpenUsage = onOpenUsage,
@@ -1727,12 +1753,16 @@ private fun FleetRoute(
                 }
             }
             help.lesson?.let { (lesson, step) ->
+                val lessonAgent by agent.state.collectAsState()
                 LessonBar(
                     lesson = lesson,
                     step = step,
                     onNext = helpSettings::nextStep,
                     onEnd = helpSettings::endLesson,
                     modifier = Modifier.align(Alignment.BottomCenter),
+                    // On the New bar a Control step's prompts open the coordinator
+                    // with the prompt in its composer; nothing is sent (14.22).
+                    onPrompt = if (layout == PhoneLayout.New && lessonAgent.available) ({ prompt: String -> agent.open(fill = prompt); Unit }) else null,
                 )
             }
             whatsNew?.let { news ->
@@ -1848,11 +1878,11 @@ private fun FleetRoute(
     }
     // The tour runs on the real Inbox, over the bar as well, and stops for nothing else.
     val stop = help.tourStop
-    if (stop != null && screen == Screen.Inbox && !fleetCheck) {
+    if (stop != null && screen == Screen.Inbox && !fleetCheck && !importing) {
         TourOverlay(stop, tourAnchors, onNext = helpSettings::nextStop, onSkip = helpSettings::skipTour)
     }
     // Once, after pairing and the fleet check: how much help.
-    if (help.mode == null && !fleetCheck && whatsNew == null) {
+    if (help.mode == null && !fleetCheck && !importing && whatsNew == null) {
         HelpPicker(
             onPick = { mode -> helpSettings.pick(mode, tourHere = layout == PhoneLayout.New && screen == Screen.Inbox) },
             onPracticeFirst = { mode ->
@@ -1865,13 +1895,26 @@ private fun FleetRoute(
     // Over the whole fleet, in App's Box: the first connection after a pair.
     if (fleetCheck) {
         val status by repository.status.collectAsState()
+        val checkHosts by repository.hosts.collectAsState()
         FleetCheck(
             status = status,
             hub = hubLabel(credentials.hub),
             clientName = credentials.name,
             exitLabel = if (layout == PhoneLayout.New) FullscreenWait.FleetCheck.exitLabel else "Skip, open Sessions",
-            onDone = onFleetCheckDone,
+            onDone = {
+                // The New bar follows a connected check with the first import
+                // while the hub still has hosts it never read.
+                importing = layout == PhoneLayout.New && status is ConnectionStatus.Connected &&
+                    firstImportProgress(checkHosts) != null
+                onFleetCheckDone()
+            },
         )
+    }
+    // Then, once after a pair, the Galaxy while the hub reads the fleet for the first time.
+    if (importing && !fleetCheck) {
+        val importHosts by repository.hosts.collectAsState()
+        val importSessions by repository.sessions.collectAsState()
+        FirstImport(hosts = importHosts, sessions = importSessions.size, onDone = { importing = false })
     }
 }
 
@@ -1975,6 +2018,7 @@ private fun NewSessionRoute(
             onStep = { addStep = it },
             onChooseHost = tools::chooseHost,
             onClone = { url -> tools.clone(url, vm::selectProject) },
+            onAdopt = { path -> tools.adopt(path, vm::selectProject) },
             onCreate = { owner, repo, onGithub -> tools.create(owner, repo, onGithub, vm::selectProject) },
             onClose = tools::closeAdd,
             onDismissError = tools::dismissError,
@@ -2207,6 +2251,8 @@ private fun SessionRoute(
     // Read once per visit: whether the hint is owed does not change under
     // a screen that is showing it.
     val foldHintOwed = remember(container) { !container.hints.shown(Hints.DOUBLE_TAP) }
+    val answerGate = rememberBiometricGate()
+    val answerLock by container.phone.lock.collectAsState()
     SessionScreen(
         sessionId = sessionId,
         state = state,
@@ -2217,7 +2263,8 @@ private fun SessionRoute(
         onBack = onBack,
         onDismissError = vm::dismissError,
         onAtBottom = vm::onAtBottom,
-        onAnswer = { vm.answer(it) },
+        // With This phone's lock on, an answer waits for the fingerprint (14.11).
+        onAnswer = { a -> answerGate.guard(answerLock, "Answer ${state.session?.displayName ?: "the session"}") { vm.answer(a) } },
         onShowTerminal = { vm.showTerminal() },
         onHideTerminal = vm::hideTerminal,
         onRestart = { vm.restart() },

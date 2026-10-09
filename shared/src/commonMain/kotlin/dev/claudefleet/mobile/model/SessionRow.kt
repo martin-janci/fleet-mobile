@@ -99,6 +99,12 @@ data class SessionRow(
      * that this row's work changed, apart from its status churn.
      */
     @SerialName("work_rev") val workRev: Long = 0,
+    /**
+     * Which coding agent runs in the session's pane (hub contract 11,
+     * migration 121): `claude`, `codex`, `agy` or `shell`. A hub older than
+     * the column sends none, and every session it runs is Claude Code.
+     */
+    val agent: String? = null,
 ) {
     val isBackground: Boolean get() = tmuxName.startsWith("bg:")
 

@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.epochSeconds
+import dev.claudefleet.mobile.utcOffsetSeconds
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.Facet
 import dev.claudefleet.mobile.model.HostRow
@@ -202,6 +203,8 @@ data class SessionsUiState(
     val connecting: Boolean = false,
     /** While not live: how old the rows on screen are ("12 min"); null when live or never. */
     val staleFor: String? = null,
+    /** While not live: the time of day the rows on screen were last live ("14:52"), for the New bar's banner; null when live or never. */
+    val staleAt: String? = null,
     /** The hub has a tracker and answered *My work*: the chip is offered. */
     val myWorkAvailable: Boolean = false,
     /**
@@ -302,6 +305,8 @@ class SessionsViewModel(
     private val clock: () -> Long = { epochSeconds() + fleet.clockSkewSeconds.value },
     /** Where *By work* is remembered across launches; null keeps it for this run only. */
     private val prefs: Prefs? = null,
+    /** The device's offset from UTC at a moment, for [SessionsUiState.staleAt]'s time of day. */
+    private val utcOffset: (Long) -> Int = ::utcOffsetSeconds,
 ) {
     /** The four fleet flows combined into one value, so a second `combine` can fold in [local] and [now]. */
     private data class FleetSnapshot(
@@ -886,6 +891,7 @@ class SessionsViewModel(
             // spinner turns, and the banner above already says why.
             connecting = l.liveAt == null && sessions.isEmpty() && status !is ConnectionStatus.Refused,
             staleFor = if (status is ConnectionStatus.Connected) null else l.liveAt?.let { relativeTime(it, nowSeconds) },
+            staleAt = if (status is ConnectionStatus.Connected) null else l.liveAt?.let { clockLabel(it, utcOffset(it)) },
             myWorkAvailable = myWorkAvailable,
             orgChoices = choices,
             accountNames = work.accountNames,

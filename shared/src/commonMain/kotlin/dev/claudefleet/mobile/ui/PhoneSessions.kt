@@ -63,15 +63,16 @@ import dev.claudefleet.mobile.model.limitAt
 import dev.claudefleet.mobile.model.relativeWithin
 import dev.claudefleet.mobile.model.reasonLabel
 import dev.claudefleet.mobile.model.relativeTime
-import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.kit.BottomSheet
+import dev.claudefleet.mobile.ui.kit.HubBanner
 import dev.claudefleet.mobile.ui.kit.OrbitChip
 import dev.claudefleet.mobile.ui.kit.OrbitPullToRefresh
 import dev.claudefleet.mobile.ui.kit.PhoneRow
 import dev.claudefleet.mobile.ui.kit.SheetAction
 import dev.claudefleet.mobile.ui.kit.StatusWord
+import dev.claudefleet.mobile.ui.kit.rememberPhoneConnection
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
@@ -329,7 +330,7 @@ fun SessionsTab(
             else -> TabHeader(state, handlers, canSelect = bulk.enabled, hostCount = rows.mapTo(HashSet()) { it.hostAlias }.size)
         }
         HiddenAttentionBanner(count = state.hiddenAttention, onClearAll = handlers.onClearAll)
-        ConnectionBanner(state.status, staleFor = state.staleFor)
+        HubBanner(rememberPhoneConnection(state.status), asOf = state.staleAt, onRetry = handlers.onRefresh)
         ErrorBanner(state.error, onDismiss = handlers.onDismissError)
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {

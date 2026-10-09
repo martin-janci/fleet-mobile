@@ -2,10 +2,12 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetRepository
+import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.ui.kit.StepState
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class FleetCheckTest {
@@ -37,5 +39,37 @@ class FleetCheckTest {
 
         val up = fleetCheckSteps(ConnectionStatus.Connected(null), "fleet.janci.dev", "Pixel 9 Pro")
         assertEquals(listOf(StepState.Done, StepState.Done, StepState.Done), up.map { it.state })
+    }
+
+    // ---- the first import (Galaxy) ----
+
+    @Test
+    fun the_first_import_counts_the_hosts_the_hub_has_read() {
+        val hosts = listOf(
+            HostRow(alias = "mac", lastPingedAt = 1_000),
+            HostRow(alias = "nas"),
+            HostRow(alias = "pi"),
+            // A hidden host is not the fleet a person is waiting for.
+            HostRow(alias = "old", hidden = true),
+        )
+        val progress = firstImportProgress(hosts)
+        assertEquals(1, progress?.done)
+        assertEquals(3, progress?.total)
+        assertEquals("1 of 3 hosts read", progress?.label)
+    }
+
+    @Test
+    fun a_fleet_already_read_never_shows_the_galaxy() {
+        assertNull(firstImportProgress(listOf(HostRow(alias = "mac", lastPingedAt = 1_000), HostRow(alias = "old", hidden = true))))
+        assertNull(firstImportProgress(emptyList()))
+    }
+
+    @Test
+    fun the_galaxy_names_real_counts() {
+        assertEquals(
+            "The hub found 3 hosts and is reading them for the first time. 14 sessions so far. This happens once.",
+            firstImportMeta(hosts = 3, sessions = 14),
+        )
+        assertEquals("The hub found 1 host and is reading it for the first time. This happens once.", firstImportMeta(hosts = 1, sessions = 0))
     }
 }

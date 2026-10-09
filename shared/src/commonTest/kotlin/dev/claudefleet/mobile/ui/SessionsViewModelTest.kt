@@ -1763,6 +1763,23 @@ class CollapsingAHostTest {
         runCurrent()
         assertNotNull(vm.state.value.staleFor)
     }
+
+    @Test
+    fun offline_says_when_the_rows_were_last_live_for_the_new_banner() = runTest {
+        val fleet = FakeFleet(rows = listOf(session(1)))
+        // 14:52 UTC on the first day, read in UTC.
+        val vm = SessionsViewModel(fleet, backgroundScope, clock = { 14 * 3600L + 52 * 60 }, utcOffset = { 0 })
+        runCurrent()
+        assertNull(vm.state.value.staleAt, "live: nothing to say")
+
+        fleet.status.value = ConnectionStatus.Offline("no network")
+        runCurrent()
+        assertEquals("14:52", vm.state.value.staleAt)
+
+        fleet.status.value = ConnectionStatus.Connected("0.9.3")
+        runCurrent()
+        assertNull(vm.state.value.staleAt)
+    }
 }
 
 /**

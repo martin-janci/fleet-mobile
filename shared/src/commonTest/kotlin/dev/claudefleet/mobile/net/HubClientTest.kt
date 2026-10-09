@@ -1222,6 +1222,26 @@ class HubClientTest {
         assertTrue(HUB_LONG_POLL_TIMEOUT_MS > 660_000L, "at or under the hub's own cap would cut a clone short")
     }
 
+    /** A folder already on the host (redesign 14.20) is `add_project`'s `folder` source, by its path. */
+    @Test
+    fun add_project_sends_a_folder_as_its_path() = runTest {
+        var sent: JsonObject? = null
+        val hub = clientAnswering { body ->
+            sent = body
+            """{"id":3,"owner":"acme","repo":"app"}"""
+        }
+
+        hub.addProject("local", folderPath = "/home/me/app")
+
+        val args = sent!!.args()
+        assertEquals("add_project", sent!!.tool())
+        assertEquals("local", args["host_alias"]!!.jsonPrimitive.content)
+        val source = args["source"]!!.jsonObject
+        assertEquals("folder", source["kind"]!!.jsonPrimitive.content)
+        assertEquals("/home/me/app", source["path"]!!.jsonPrimitive.content)
+        assertNull(source["url"])
+    }
+
     /** Starting work creates a session — a worktree, perhaps a clone — so it rides the lifecycle mount. */
     @Test
     fun work_link_rides_the_framed_mount_under_the_lifecycle_deadline() = runTest {

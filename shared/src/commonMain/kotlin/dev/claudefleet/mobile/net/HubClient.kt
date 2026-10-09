@@ -995,7 +995,8 @@ class HubClient(
         }
 
     /**
-     * Add a project on [hostAlias] (`add_project`): clone [cloneUrl], or make
+     * Add a project on [hostAlias] (`add_project`): clone [cloneUrl], adopt
+     * the checkout at [folderPath] (the hub's own `local` host only), or make
      * a new repository [owner]/[repo] — on GitHub too when [createRemote],
      * which the hub refuses once with a token ([confirm]) to send back.
      * Answers the project row.
@@ -1003,6 +1004,7 @@ class HubClient(
     suspend fun addProject(
         hostAlias: String,
         cloneUrl: String? = null,
+        folderPath: String? = null,
         owner: String? = null,
         repo: String? = null,
         createRemote: Boolean = false,
@@ -1018,6 +1020,9 @@ class HubClient(
                         if (cloneUrl != null) {
                             put("kind", "clone")
                             put("url", cloneUrl)
+                        } else if (folderPath != null) {
+                            put("kind", "folder")
+                            put("path", folderPath)
                         } else {
                             put("kind", "new")
                             put("owner", owner.orEmpty())
