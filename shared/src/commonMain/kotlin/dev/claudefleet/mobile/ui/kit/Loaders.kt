@@ -424,3 +424,35 @@ internal fun rainEdge(mid: Float): Float = when {
     mid > 0.7f -> ((1f - mid) / 0.3f).coerceIn(0f, 1f)
     else -> 1f
 }
+
+/**
+ * The Atom: three electron rings round a nucleus, each with its electron,
+ * for something being put together (a chat form Control is building). Small,
+ * inline beside what it builds. With reduced motion the electrons hold still.
+ */
+@Composable
+fun Atom(modifier: Modifier = Modifier, size: Dp = 20.dp) {
+    val accent = Fleet.colors.accent
+    val clock = rememberLoaderClock(2_400)
+    Canvas(modifier.size(size).semantics { contentDescription = "Building" }) {
+        val c = Offset(this.size.width / 2f, this.size.height / 2f)
+        val rx = this.size.width * 0.46f
+        val ry = this.size.height * 0.17f
+        val stroke = this.size.width * 0.05f
+        drawCircle(accent, this.size.width * 0.09f, c, alpha = clock.alpha)
+        for (i in 0 until 3) {
+            val tilt = i * 60f
+            rotate(tilt, c) {
+                drawOval(
+                    accent,
+                    topLeft = Offset(c.x - rx, c.y - ry),
+                    size = Size(rx * 2f, ry * 2f),
+                    style = Stroke(stroke),
+                    alpha = clock.alpha * 0.45f,
+                )
+                val a = (clock.phase + i / 3f) * 2f * PI.toFloat()
+                drawCircle(accent, stroke * 1.4f, Offset(c.x + rx * cos(a), c.y + ry * sin(a)), alpha = clock.alpha)
+            }
+        }
+    }
+}
