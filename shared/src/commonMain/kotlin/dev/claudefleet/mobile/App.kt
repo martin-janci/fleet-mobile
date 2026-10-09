@@ -744,9 +744,6 @@ private fun FleetRoute(
     val nav = remember(credentials) { Navigator(loadPhoneLayout(container.prefs)) }
     val screen by nav.screen.collectAsState()
     val layout by nav.layout.collectAsState()
-    // A tapped "needs you" notification: open its session.
-    val openRequest by container.openSession.collectAsState()
-    LaunchedEffect(openRequest) { if (openRequest != null) container.consumeOpenSession()?.let(nav::open) }
     val tab by nav.tab.collectAsState()
     // The first import after a pair (14.12): set as the fleet check ends, on the New bar only.
     var importing by remember(credentials) { mutableStateOf(false) }
@@ -843,6 +840,24 @@ private fun FleetRoute(
     // Work's Pull requests sheet (redesign 6.7): drawn on a hub that serves `prs`.
     val pullRequests = remember(repository, scope) {
         PullRequestsViewModel(fleet = repository, actions = container.workActions, scope = scope)
+    }
+    // A tapped "needs you" notification: open its session over nothing. A
+    // sheet left open (Today, Tidy, …) would sit on top of the question the
+    // tap was for, as the in-app paths already know (review r09 F5).
+    val openRequest by container.openSession.collectAsState()
+    LaunchedEffect(openRequest) {
+        if (openRequest != null) {
+            container.consumeOpenSession()?.let { id ->
+                openOverSheets(
+                    id,
+                    closers = listOf(
+                        { today.close() }, { tidy.close() }, { tickets.close() }, { missions.close() },
+                        { automation.close() }, { debugDevices.close() }, { pullRequests.close() },
+                    ),
+                    open = nav::open,
+                )
+            }
+        }
     }
     val workState by myWork.state.collectAsState()
     // The hub stopped serving the Work view (or a reconnect found an older

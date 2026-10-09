@@ -24,3 +24,17 @@ class NeedsYouCountTest {
         assertFalse("BottomBarBadge(Tab.Inbox.name, attention.attentionCount)" in app)
     }
 }
+
+/** Review r09 F5: the notification path closes the sheets, as the in-app paths do. */
+class NotificationOpensOverSheetsTest {
+    private val app = Repo.file("shared/src/commonMain/kotlin/dev/claudefleet/mobile/App.kt").readText()
+
+    @Test
+    fun the_tap_goes_through_open_over_sheets() {
+        val path = app.substringAfter("container.consumeOpenSession()", "").take(600)
+        assertTrue("openOverSheets(" in path, "a tapped notification opens through openOverSheets")
+        for (sheet in listOf("today", "tidy", "tickets", "missions", "automation", "debugDevices", "pullRequests")) {
+            assertTrue("$sheet.close()" in path, "$sheet stays open over the session")
+        }
+    }
+}
