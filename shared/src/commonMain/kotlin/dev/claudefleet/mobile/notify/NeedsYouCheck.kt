@@ -13,6 +13,9 @@ interface AlertPoster {
     fun post(alert: NeedsYouAlert)
 
     fun withdraw(sessionId: Long)
+
+    /** A routine run failed (the matrix's Routine failed row); a platform that cannot say it says nothing. */
+    fun postRoutine(alert: RoutineFailedAlert) {}
 }
 
 /** The seen set the background check and the open app share, in [Prefs]. */
@@ -74,6 +77,25 @@ class NeedsYouCheck(
             before.filter { (id, reason) -> reason != null && after[id] == null }.keys.forEach(poster::withdraw)
         }
         prefs.writeSeen(after)
+        routines()
+    }
+
+    /**
+     * The matrix's Routine failed row (review r19, R19-5): the session list
+     * carries no routine runs, so one more look, at `routines { failing }`.
+     * A hub or token without it answers an error, and the check says nothing.
+     */
+    private suspend fun routines() {
+        val failing = try {
+            withTimeoutOrNull(timeout) { session.withClient { it.failingRoutines() } }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        } ?: return
+        val (alerts, after) = routineFailedAlerts(prefs.readRoutineSeen(), failing)
+        if (prefs.notifyAllows(ROUTINE_FAILED_REASON)) alerts.forEach(poster::postRoutine)
+        prefs.writeRoutineSeen(after)
     }
 }
 

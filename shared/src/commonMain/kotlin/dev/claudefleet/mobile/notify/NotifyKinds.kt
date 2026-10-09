@@ -11,7 +11,7 @@ import dev.claudefleet.mobile.store.Prefs
  */
 enum class NotifyKind(val label: String, val line: String, val startsOn: Boolean = true) {
     NEEDS_YOU("Needs you", "A session waits for an answer or a permission"),
-    FAILED("Failed", "A session stopped with an error"),
+    FAILED("Failed", "A session stopped with an error, or a routine run failed"),
     DONE("Done", "A session finished its task", startsOn = false),
 }
 
@@ -24,7 +24,7 @@ const val DONE_REASON: String = "done"
 
 /** The kind of notification a reason makes: failed and stop_failed are Failed, [DONE_REASON] is Done; the rest wait on a person. */
 fun notifyKindOf(reason: String?): NotifyKind = when (reason) {
-    "failed", "stop_failed" -> NotifyKind.FAILED
+    "failed", "stop_failed", ROUTINE_FAILED_REASON -> NotifyKind.FAILED
     DONE_REASON -> NotifyKind.DONE
     else -> NotifyKind.NEEDS_YOU
 }

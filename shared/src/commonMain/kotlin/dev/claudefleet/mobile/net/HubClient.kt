@@ -46,6 +46,7 @@ import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.TidyReport
 import dev.claudefleet.mobile.model.Mission
+import dev.claudefleet.mobile.model.FailingRoutine
 import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.DebugDevice
 import dev.claudefleet.mobile.model.DebugDeviceList
@@ -1270,6 +1271,12 @@ class HubClient(
     suspend fun routines(): List<Routine> =
         call("routines", buildJsonObject { put("action", "list") }) {
             json.decodeFromJsonElement(ListSerializer(Routine.serializer()), it)
+        }
+
+    /** Each routine whose newest run failed, newest failure first: the background watcher's Routine failed. */
+    suspend fun failingRoutines(): List<FailingRoutine> =
+        call("routines", buildJsonObject { put("action", "failing") }) {
+            json.decodeFromJsonElement(ListSerializer(FailingRoutine.serializer()), it)
         }
 
     /** One routine with its last runs (newest first) and whether this person may change it. */
