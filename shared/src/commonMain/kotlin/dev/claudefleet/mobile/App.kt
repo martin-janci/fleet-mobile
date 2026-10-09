@@ -1842,6 +1842,7 @@ private fun FleetRoute(
                         onPauseAll = { missions.pauseAll() },
                         onDismissError = missions::dismissError,
                     ),
+                    orbit = layout == PhoneLayout.New,
                 )
             }
         }
