@@ -160,6 +160,9 @@ import dev.claudefleet.mobile.ui.OrbitOrgsHandlers
 import dev.claudefleet.mobile.ui.MembersHandlers
 import dev.claudefleet.mobile.ui.MembersSheet
 import dev.claudefleet.mobile.ui.MembersViewModel
+import dev.claudefleet.mobile.ui.ShareHandlers
+import dev.claudefleet.mobile.ui.ShareSheet
+import dev.claudefleet.mobile.ui.ShareViewModel
 import dev.claudefleet.mobile.ui.OrbitOrgsScreen
 import dev.claudefleet.mobile.ui.ProposedChangeCard
 import dev.claudefleet.mobile.ui.HostsViewModel
@@ -195,6 +198,7 @@ import dev.claudefleet.mobile.ui.Navigator
 import dev.claudefleet.mobile.ui.PhoneLayout
 import dev.claudefleet.mobile.ui.hostsLine
 import dev.claudefleet.mobile.ui.inboxRows
+import dev.claudefleet.mobile.ui.sharedRows
 import dev.claudefleet.mobile.ui.loadPhoneLayout
 import dev.claudefleet.mobile.ui.savePhoneLayout
 import dev.claudefleet.mobile.ui.kit.BottomBar
