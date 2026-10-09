@@ -1761,25 +1761,7 @@ private fun SessionOverflowMenu(
         )
     }
     if (showReview) {
-        var prompt by remember { mutableStateOf(DEFAULT_REVIEW_PROMPT) }
-        AlertDialog(
-            onDismissRequest = { showReview = false },
-            title = { Text("Review this worktree") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("A new session in this session's worktree, seeded with the prompt below. It reviews the worktree as it is now.")
-                    TextField(
-                        value = prompt,
-                        onValueChange = { prompt = it },
-                        minLines = 4,
-                        maxLines = 10,
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
-                    )
-                }
-            },
-            confirmButton = { TextButton(onClick = { showReview = false; onReview(prompt) }, enabled = prompt.isNotBlank()) { Text("Start review") } },
-            dismissButton = { TextButton(onClick = { showReview = false }) { Text("Cancel") } },
-        )
+        ReviewDialog(onStart = { showReview = false; onReview(it) }, onDismiss = { showReview = false })
     }
     if (showRepairConfirm) {
         AlertDialog(
@@ -1914,6 +1896,30 @@ private fun ManageDialogs(
     }
 }
 
+/** ⋮ Review…'s prompt, and the Details tab's Review… (r09 B18). */
+@Composable
+internal fun ReviewDialog(onStart: (String) -> Unit, onDismiss: () -> Unit) {
+    var prompt by remember { mutableStateOf(DEFAULT_REVIEW_PROMPT) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Review this worktree") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("A new session in this session's worktree, seeded with the prompt below. It reviews the worktree as it is now.")
+                TextField(
+                    value = prompt,
+                    onValueChange = { prompt = it },
+                    minLines = 4,
+                    maxLines = 10,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onStart(prompt) }, enabled = prompt.isNotBlank()) { Text("Start review") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 @Composable
 private fun RenameDialog(initial: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
     var text by remember { mutableStateOf(initial) }
@@ -2003,7 +2009,7 @@ private fun TagsDialog(tags: List<String>, onConfirm: (List<String>) -> Unit, on
  * dialog dismissed by a stray tap cannot also kill the session.
  */
 @Composable
-private fun KillConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+internal fun KillConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
     var enabled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         delay(KILL_CONFIRM_DELAY)

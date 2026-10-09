@@ -124,6 +124,20 @@ class PhoneSessionsTest {
         assertEquals("2 delivered, 1 not delivered", bulkOutcomeLine(BulkAction.Send("go"), outcome))
         assertEquals("Killed 1 session", bulkOutcomeTitle(BulkAction.Kill, 1))
         assertEquals("2 killed", bulkOutcomeLine(BulkAction.Kill, outcome.take(2)))
+        assertEquals("Archived 2 sessions", bulkOutcomeTitle(BulkAction.Archive, 2))
+        assertEquals("2 archived", bulkOutcomeLine(BulkAction.Archive, outcome.take(2)))
+    }
+
+    /** r09 B6: "All idle" picks the sessions whose agent waits at its prompt. */
+    @Test
+    fun all_idle_picks_the_idle_rows() {
+        val rows = listOf(
+            SessionRow(id = 1, claudeStatus = "idle"),
+            SessionRow(id = 2, claudeStatus = "working"),
+            SessionRow(id = 3, claudeStatus = "idle"),
+            SessionRow(id = 4),
+        )
+        assertEquals(listOf(1L, 3L), idleIds(rows))
     }
 
     /** Step 4.10: a Blocked row says why in the desktop's words, naming the account. */

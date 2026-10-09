@@ -13,6 +13,7 @@ import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.ToolDetail
 import dev.claudefleet.mobile.model.WaitResult
+import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,6 +33,7 @@ private class BulkFleet(rows: List<SessionRow>) : FleetState {
     override val hubVersion = MutableStateFlow<String?>("0.9.3")
     override val clockSkewSeconds = MutableStateFlow(0L)
     override val sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16)
+    override val capabilities = MutableStateFlow(HubCapabilities())
     override suspend fun refresh() = Unit
 }
 
@@ -77,6 +79,27 @@ private val ROWS = listOf(
 )
 
 class BulkViewModelTest {
+
+    /** r09 B6: Archive is offered only where the hub archives, and skips the controller. */
+    @Test
+    fun archive_is_offered_where_the_hub_archives_and_skips_the_controller() = runTest {
+        val fleet = BulkFleet(ROWS)
+        val archived = mutableListOf<Long>()
+        val vm = BulkViewModel(fleet, BulkCalls(), backgroundScope, canWrite = true, archiveOne = { archived += it })
+        runCurrent()
+        assertFalse(vm.state.value.canArchive, "an old hub has no archive")
+
+        fleet.capabilities.value = HubCapabilities(tools = setOf(HubCapabilities.WORK_LINK))
+        vm.toggle(1)
+        vm.toggle(3)
+        runCurrent()
+        assertTrue(vm.state.value.canArchive)
+        vm.archive().join()
+        runCurrent()
+        assertEquals(listOf(1L), archived)
+        assertEquals(BulkAction.Archive, vm.state.value.action)
+        assertEquals(listOf(true, false), vm.state.value.outcome?.map { it.ok })
+    }
 
     @Test
     fun select_mode_can_start_with_nothing_picked_and_ends_on_clear() = runTest {
