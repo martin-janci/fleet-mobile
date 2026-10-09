@@ -69,10 +69,11 @@ class TheBackGestureReachesTheNavigatorTest {
      */
     @Test
     fun it_is_enabled_only_on_a_pushed_screen() {
-        val call = Regex("""BackHandler\(enabled = ([^)]+\)?)\)""").find(app)
-            ?: fail("BackHandler is not called with an explicit `enabled`")
+        val calls = Regex("""BackHandler\(enabled = ([^)]+\)?)\)""").findAll(app).map { it.groupValues[1].trim() }.toList()
+        if (calls.isEmpty()) fail("BackHandler is not called with an explicit `enabled`")
 
-        assertEquals("nav.isPushed(screen)", call.groupValues[1].trim())
+        // The lock's comes first in the file (it is in `App`, over FleetRoute); the navigator's is FleetRoute's first.
+        assertEquals("nav.isPushed(screen)", calls[1])
         assertTrue(
             Regex("""BackHandler\(enabled = nav\.isPushed\(screen\)\)\s*\{\s*nav\.back\(\)\s*\}""").containsMatchIn(app),
             "the handler must call nav.back() and nothing else",
@@ -108,6 +109,10 @@ class TheBackGestureReachesTheNavigatorTest {
      * agent install (redesign 14.19) is enabled only while its screen is
      * up over Hosts, so back leaves it (the job runs on the hub) first; the
      * Radar's (adding a host, redesign 14.12) the same while it is open.
+     * The full-screen covers take the gesture so it never pops a screen
+     * hidden under them (review r09 F8): the lock (first, in `App`) and the
+     * help picker, fleet check and first import (last in FleetRoute) swallow
+     * it; What's new closes on it.
      */
     @Test
     fun there_is_exactly_one() {
@@ -118,6 +123,7 @@ class TheBackGestureReachesTheNavigatorTest {
         val enables = Regex("""BackHandler\(enabled = ([^)]+\)?)\)""").findAll(app).map { it.groupValues[1].trim() }.toList()
         assertEquals(
             listOf(
+                "locked",
                 "nav.isPushed(screen)",
                 "companyState.openId != null",
                 "addHostState.open",
@@ -126,6 +132,8 @@ class TheBackGestureReachesTheNavigatorTest {
                 "practiceState.open != null",
                 "fleetPageOpen || place != SettingsPlace.Home",
                 "fleetPageOpen",
+                "whatsNew != null",
+                "fleetCheck || importing || (help.mode == null && whatsNew == null)",
                 "wizard && wizardStep.previous != null && !state.creating",
                 "wizard && wizardStep.previous == null && !state.creating && newSessionTyped(state)",
                 "wizard && toolsState.addingOn != null",
