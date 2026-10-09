@@ -99,6 +99,16 @@ class AppSession(
     /** The credential in hand, or null. */
     fun credentials(): Credentials? = (_state.value as? AuthState.Paired)?.credentials
 
+    /**
+     * This device's bearer token for [url] when it is on the paired hub — the
+     * update mirror (`/update/artifact/…`) asks for it — and null for any
+     * other host, so a token never leaves for GitHub.
+     */
+    fun bearerFor(url: String): String? {
+        val c = credentials() ?: return null
+        return c.token.takeIf { url.startsWith(c.hub.trimEnd('/') + "/") }
+    }
+
     /** Read the store once at start-up and publish what it held. */
     suspend fun restore(): AuthState {
         val stored = secrets.read()

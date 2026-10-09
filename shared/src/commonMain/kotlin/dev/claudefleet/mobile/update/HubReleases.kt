@@ -35,6 +35,8 @@ class HubReleases(
     /** POSTs the body to the paired hub's `/update/check`; null on 404. */
     private val check: suspend (String) -> String?,
     private val fallback: ReleaseSource,
+    /** The paired hub's base URL, for a decision's mirror path. */
+    private val hubBase: () -> String? = { null },
 ) : ReleaseSource {
     override suspend fun latest(): ReleaseInfo? {
         val body = platform?.let { checkRequest(it, appVersion) } ?: return fallback.latest()
@@ -48,7 +50,7 @@ class HubReleases(
             return null
         } ?: return fallback.latest()
         return try {
-            releaseFromDecision(answer)
+            releaseFromDecision(answer, hubBase())
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -105,6 +107,7 @@ private data class WireTarget(
     val deadline: String? = null,
     val artifact: JsonObject = JsonObject(emptyMap()),
     val url: String? = null,
+    val mirror: String? = null,
 )
 
 @Serializable
@@ -118,7 +121,7 @@ private val HEX64 = Regex("^[0-9a-f]{64}$")
  * never downgrades itself), `client_too_new`, an unknown status, or a target
  * whose artifact is not a well-formed APK.
  */
-internal fun releaseFromDecision(body: String): ReleaseInfo? {
+internal fun releaseFromDecision(body: String, hubBase: String? = null): ReleaseInfo? {
     val d = decisionJson.decodeFromString(WireDecision.serializer(), body)
     if (d.status != "update_available" && d.status != "update_required") return null
     val t = d.target ?: return null
@@ -142,5 +145,8 @@ internal fun releaseFromDecision(body: String): ReleaseInfo? {
         required = required,
         reason = d.reason?.text?.takeIf { required && it.isNotBlank() }
             ?: t.deadline?.takeIf { t.mandatory }?.let { "Required by ${it.take(10)}." },
+        mirrorUrl = t.mirror
+            ?.takeIf { it.startsWith("/update/artifact/") && it.length == "/update/artifact/".length + 64 }
+            ?.let { path -> hubBase?.trimEnd('/')?.let { it + path } },
     )
 }

@@ -37,7 +37,7 @@ class FleetApplication : Application() {
             // The app's own update from GitHub releases (14.18). A debug build
             // has its own application id, so the signature check refuses a
             // release on it and says why.
-            installer = AndroidAppInstaller(this),
+            installer = AndroidAppInstaller(this, bearerFor = { url -> container.session.bearerFor(url) }),
             clientPlatform = ClientPlatform("android", androidArch(), BuildConfig.GIT_SHA),
         )
     }

@@ -10,6 +10,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import dev.claudefleet.mobile.net.CLIENT_HEADER
+import dev.claudefleet.mobile.net.FleetClient
 import dev.claudefleet.mobile.update.AppInstaller
 import dev.claudefleet.mobile.update.Downloaded
 import dev.claudefleet.mobile.update.ReleaseInfo
@@ -38,7 +40,11 @@ import java.security.cert.X509Certificate
  * build has its own application id, so a release never passes the check on
  * one: the refusal says so.
  */
-class AndroidAppInstaller(private val context: Context) : AppInstaller {
+class AndroidAppInstaller(
+    private val context: Context,
+    /** The paired hub's token for a mirror URL on that hub; null otherwise. */
+    private val bearerFor: (String) -> String? = { null },
+) : AppInstaller {
 
     private val dir: File get() = File(context.cacheDir, "updates")
 
@@ -56,40 +62,18 @@ class AndroidAppInstaller(private val context: Context) : AppInstaller {
                 have = 0L
             }
             if (release.sizeBytes <= 0 || have < release.sizeBytes) {
-                val conn = (URL(release.apkUrl).openConnection() as HttpURLConnection).apply {
-                    instanceFollowRedirects = true
-                    connectTimeout = 15_000
-                    readTimeout = 30_000
-                    if (have > 0) setRequestProperty("Range", "bytes=$have-")
-                }
-                try {
-                    when (val code = conn.responseCode) {
-                        HttpURLConnection.HTTP_OK -> have = 0L // the server ignored the range: start over
-                        HttpURLConnection.HTTP_PARTIAL -> Unit
-                        else -> throw IOException("GitHub answered $code for the download.")
+                // The paired hub's mirror first (claude-fleet update S9), then
+                // the release itself; the bytes are checked against the
+                // signed sha256 either way, so a resumed download may mix them.
+                val mirror = release.mirrorUrl?.let { url -> bearerFor(url)?.let { url to it } }
+                have = if (mirror != null) {
+                    try {
+                        fetchInto(mirror.first, mirror.second, target, have, release.sizeBytes, onProgress)
+                    } catch (e: IOException) {
+                        fetchInto(release.apkUrl, null, target, if (target.exists()) target.length() else 0L, release.sizeBytes, onProgress)
                     }
-                    val total = if (release.sizeBytes > 0) release.sizeBytes else have + conn.contentLengthLong
-                    FileOutputStream(target, have > 0).use { out ->
-                        conn.inputStream.use { input ->
-                            val buf = ByteArray(64 * 1024)
-                            var reported = have
-                            onProgress(have, total)
-                            while (true) {
-                                currentCoroutineContext().ensureActive()
-                                val n = input.read(buf)
-                                if (n < 0) break
-                                out.write(buf, 0, n)
-                                have += n
-                                if (have - reported >= 256 * 1024) {
-                                    reported = have
-                                    onProgress(have, total)
-                                }
-                            }
-                            onProgress(have, total)
-                        }
-                    }
-                } finally {
-                    conn.disconnect()
+                } else {
+                    fetchInto(release.apkUrl, null, target, have, release.sizeBytes, onProgress)
                 }
             }
             if (release.sizeBytes > 0 && target.length() != release.sizeBytes) {
@@ -97,6 +81,60 @@ class AndroidAppInstaller(private val context: Context) : AppInstaller {
             }
             Downloaded(target.length(), sha256(target))
         }
+
+    /** Append `url`'s bytes from `have` on to `target`; returns the new length. */
+    private suspend fun fetchInto(
+        url: String,
+        bearer: String?,
+        target: File,
+        start: Long,
+        size: Long,
+        onProgress: (Long, Long) -> Unit,
+    ): Long {
+        var have = start
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            // GitHub redirects to its CDN; the hub's mirror never does, and a
+            // redirect must not carry the hub's token anywhere else.
+            instanceFollowRedirects = bearer == null
+            connectTimeout = 15_000
+            readTimeout = 30_000
+            if (have > 0) setRequestProperty("Range", "bytes=$have-")
+            if (bearer != null) {
+                setRequestProperty("Authorization", "Bearer $bearer")
+                FleetClient.header?.let { setRequestProperty(CLIENT_HEADER, it) }
+            }
+        }
+        try {
+            when (val code = conn.responseCode) {
+                HttpURLConnection.HTTP_OK -> have = 0L // the server ignored the range: start over
+                HttpURLConnection.HTTP_PARTIAL -> Unit
+                else -> throw IOException(if (bearer != null) "The hub's mirror answered $code." else "GitHub answered $code for the download.")
+            }
+            val total = if (size > 0) size else have + conn.contentLengthLong
+            FileOutputStream(target, have > 0).use { out ->
+                conn.inputStream.use { input ->
+                    val buf = ByteArray(64 * 1024)
+                    var reported = have
+                    onProgress(have, total)
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        have += n
+                        if (have - reported >= 256 * 1024) {
+                            reported = have
+                            onProgress(have, total)
+                        }
+                    }
+                    onProgress(have, total)
+                }
+            }
+        } finally {
+            conn.disconnect()
+        }
+        return have
+    }
 
     override suspend fun checkSignature(release: ReleaseInfo): SignatureCheck = withContext(Dispatchers.IO) {
         val apk = file(release)
