@@ -2110,7 +2110,7 @@ private fun ReplyMenu(turn: ConvTurn, chronological: Int, host: ReplyHost) {
     var open by remember { mutableStateOf(false) }
     var asking by remember { mutableStateOf<ReplyAsk?>(null) }
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-        IconButton(onClick = { open = true }, modifier = Modifier.size(32.dp)) {
+        IconButton(onClick = { open = true }) {
             Icon(FleetIcons.MoreVert, contentDescription = "Reply actions", modifier = Modifier.size(18.dp))
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {

@@ -15,6 +15,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -113,7 +114,7 @@ internal fun QuestionCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(card.headline, style = Fleet.type.textLg, modifier = Modifier.weight(1f))
                 relativeAgo(state.session?.lastActivityAt, state.nowSeconds)?.let {
-                    Text("asked $it", style = Fleet.type.textXs, color = Fleet.colors.fgMuted)
+                    Text("asked $it", style = Fleet.type.textXs, color = Fleet.colors.fg2)
                 }
             }
             asking?.let { tool ->
@@ -122,7 +123,7 @@ internal fun QuestionCard(
                     Text(
                         text = tool.target?.takeIf { it.isNotBlank() } ?: tool.summary,
                         style = Fleet.type.code,
-                        color = Fleet.colors.code,
+                        color = Fleet.colors.fg2,
                         maxLines = 6,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -134,7 +135,7 @@ internal fun QuestionCard(
             }
             if (state.stillWaiting) {
                 Spacer(Modifier.height(4.dp))
-                Text("Sent. Still waiting for $agent to move on…", style = Fleet.type.textXs, color = Fleet.colors.fgMuted)
+                Text("Sent. Still waiting for $agent to move on…", style = Fleet.type.textXs, color = Fleet.colors.fg2)
             }
             val answers = questionAnswers(card, state.session?.stuckKind).filter { state.mayAnswerWith(it.answer) }
             if (answers.isNotEmpty()) {
@@ -149,15 +150,19 @@ internal fun QuestionCard(
                     }
                 }
             }
+            // The card sits on a 13% amber (or red) tint: fg-muted, code and
+            // the accent fall under 4.5:1 on it in the light theme, so its
+            // text is fg or fg-2 and its text buttons are fg (review r11).
+            val onTint = ButtonDefaults.textButtonColors(contentColor = Fleet.colors.fg)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (!state.readOnly && onAnswerInWords != null && declineOption(card) != null) {
-                    TextButton(onClick = onAnswerInWords, enabled = state.canAnswer) { Text("Answer in your own words…") }
+                    TextButton(onClick = onAnswerInWords, enabled = state.canAnswer, colors = onTint) { Text("Answer in your own words…") }
                 }
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = onShowAgent) { Text("Show in $agent") }
+                TextButton(onClick = onShowAgent, colors = onTint) { Text("Show in $agent") }
             }
             if (stuck && !state.readOnly && onRestart != null) {
-                TextButton(onClick = onRestart, enabled = state.connected) { Text("Restart") }
+                TextButton(onClick = onRestart, enabled = state.connected, colors = onTint) { Text("Restart") }
             }
         }
     }
