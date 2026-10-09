@@ -14,10 +14,14 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import dev.claudefleet.mobile.AppContainer
 import dev.claudefleet.mobile.data.AuthState
+import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.notify.BackgroundNotifier
 import dev.claudefleet.mobile.notify.NeedsYouAlert
 import dev.claudefleet.mobile.notify.NeedsYouResolved
 import dev.claudefleet.mobile.notify.NotifyActionKind
+import dev.claudefleet.mobile.notify.ROUTINE_FAILED_REASON
+import dev.claudefleet.mobile.notify.RoutineFailedAlert
+import dev.claudefleet.mobile.notify.routineFailedAlerts
 import dev.claudefleet.mobile.notify.needsYouContent
 import dev.claudefleet.mobile.notify.decodeSeen
 import dev.claudefleet.mobile.notify.encodeSeen
@@ -27,11 +31,13 @@ import dev.claudefleet.mobile.store.AndroidPrefs
 import dev.claudefleet.mobile.store.AndroidSecrets
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -90,10 +96,11 @@ class NeedsYouService : Service() {
     }
 
     private suspend fun watch() {
+        val http = HttpClient(OkHttp)
         val container = AppContainer(
             secrets = AndroidSecrets(applicationContext),
             prefs = AndroidPrefs(getSharedPreferences("quick_replies", MODE_PRIVATE)),
-            http = HttpClient(OkHttp),
+            http = http,
             appVersion = BuildConfig.VERSION_NAME,
         )
         val credentials = (container.session.restore() as? AuthState.Paired)?.credentials
@@ -103,6 +110,7 @@ class NeedsYouService : Service() {
         }
         val fleet = container.repository(credentials, scope)
         fleet.start()
+        scope.launch { watchRoutines(HubClient(http, credentials.hub, credentials.token), container) }
         // What the last run saw, so a session that began waiting while the
         // service was down is still news when it comes back.
         val memory = getSharedPreferences("notifications", MODE_PRIVATE)
@@ -141,6 +149,10 @@ class NeedsYouService : Service() {
      */
     private fun summarize() {
         val m = manager(this)
+        // An alert the person tapped (auto-cancel) or swiped away left
+        // without telling [shown]: count only what is still showing.
+        val showing = m.activeNotifications.map { it.id }.toSet()
+        shown.keys.retainAll { alertId(it) in showing }
         if (shown.size < 2) {
             m.cancel(SUMMARY_ID)
             return
@@ -215,6 +227,49 @@ class NeedsYouService : Service() {
         summarize()
     }
 
+    /**
+     * The matrix's Routine failed row (review r19, R19-5): the hub's event
+     * stream carries sessions, not routine runs, so ask `routines { failing }`
+     * every [ROUTINE_POLL_MS]. The first answer is the baseline: a failure
+     * from before the watcher started is on the Inbox already, not news. A hub
+     * that answers with an error (an older hub, a token without routines) is
+     * asked again less often.
+     */
+    private suspend fun watchRoutines(client: HubClient, container: AppContainer) {
+        var seen: Set<Long>? = null
+        while (true) {
+            val failing = try {
+                client.failingRoutines()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+            if (failing != null) {
+                val (alerts, now) = routineFailedAlerts(seen, failing)
+                seen = now
+                if (!AppVisibility.foreground && container.prefs.notifyAllows(ROUTINE_FAILED_REASON)) alerts.forEach(::postRoutine)
+            }
+            delay(if (failing != null) ROUTINE_POLL_MS else ROUTINE_RETRY_MS)
+        }
+    }
+
+    /** One "a routine run failed" notification; a tap opens the app. */
+    private fun postRoutine(alert: RoutineFailedAlert) {
+        val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        val n = NotificationCompat.Builder(this, ALERTS)
+            .setSmallIcon(R.drawable.ic_notify)
+            .setContentTitle(alert.title)
+            .setContentText(alert.text)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .build()
+        manager(this).notify(ROUTINE_BASE + (alert.runId % 100_000).toInt(), n)
+    }
+
     private fun alertId(sessionId: Long) = ALERT_BASE + (sessionId % 100_000).toInt()
 
     private fun ongoing(): Notification {
@@ -243,6 +298,9 @@ class NeedsYouService : Service() {
         private const val ONGOING_ID = 1
         private const val ALERT_BASE = 1_000
         private const val SUMMARY_ID = 2
+        private const val ROUTINE_BASE = 200_000
+        private const val ROUTINE_POLL_MS = 60_000L
+        private const val ROUTINE_RETRY_MS = 5 * 60_000L
         private const val GROUP = "needs_you"
         private const val SEEN = "seen"
 

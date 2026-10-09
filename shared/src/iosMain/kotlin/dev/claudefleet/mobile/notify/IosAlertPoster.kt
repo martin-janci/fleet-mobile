@@ -59,6 +59,20 @@ class IosAlertPoster : AlertPoster {
         center.setNotificationCategories(categories.toSet())
     }
 
+    /** A routine run failed: one per run, in the same thread; a tap opens the app. */
+    override fun postRoutine(alert: RoutineFailedAlert) {
+        val content = UNMutableNotificationContent().apply {
+            setTitle(alert.title)
+            setBody(alert.text)
+            setThreadIdentifier(NEEDS_YOU_THREAD)
+            setSound(UNNotificationSound.defaultSound)
+        }
+        center.addNotificationRequest(
+            UNNotificationRequest.requestWithIdentifier("${NEEDS_YOU_ID_PREFIX}routine-${alert.runId}", content, null),
+            withCompletionHandler = null,
+        )
+    }
+
     override fun withdraw(sessionId: Long) {
         center.removeDeliveredNotificationsWithIdentifiers(listOf(needsYouId(sessionId)))
     }

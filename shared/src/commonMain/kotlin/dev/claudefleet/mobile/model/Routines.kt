@@ -48,3 +48,11 @@ data class RoutineDetail(
     val runs: List<RoutineRun> = emptyList(),
     @SerialName("may_change") val mayChange: Boolean = false,
 )
+
+/** `routines { failing }`: a routine whose newest run failed, with that run (claude-fleet 8.6). */
+@Serializable
+data class FailingRoutine(
+    val routine: Routine,
+    val run: RoutineRun,
+    @SerialName("may_change") val mayChange: Boolean = false,
+)
