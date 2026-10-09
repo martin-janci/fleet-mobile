@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -50,9 +49,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
+import dev.claudefleet.mobile.ui.kit.Comet
+import dev.claudefleet.mobile.ui.kit.InlineLoading
+import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 
 /**
  * The New session form. Stateless, like every screen here: it draws a
@@ -366,8 +367,10 @@ fun NewSessionScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
                 if (state.creating) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(8.dp))
+                    if (rememberLoaderVisible(true)) {
+                        Comet(size = 16.dp)
+                        Spacer(Modifier.width(8.dp))
+                    }
                     Text(if (state.ticketKey != null) "Starting…" else "Creating…")
                 } else {
                     Text(
@@ -491,7 +494,7 @@ internal fun AddProjectSheet(tools: ProjectToolsUiState, handlers: ProjectToolsH
         LazyColumn(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
             item {
                 Text("Add a project on ${tools.addingOn}", style = MaterialTheme.typography.titleLarge)
-                if (tools.adding) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
+                InlineLoading(waiting = tools.adding, modifier = Modifier.padding(vertical = 4.dp))
                 tools.error?.let {
                     Text(it.title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }

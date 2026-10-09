@@ -8,7 +8,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.produceState
@@ -86,6 +85,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import dev.claudefleet.mobile.ui.kit.ProgressRing
 
 /*
  * The cards a reply can hold (model/RichBlocks.kt; claude-fleet's
@@ -394,7 +394,7 @@ private fun ProgressCard(block: UiBlock.Progress, raw: String) {
         progressCount(shown)?.let { count ->
             if (shown.total != null) {
                 val frac = ((shown.done ?: 0L).coerceAtMost(shown.total).toFloat() / shown.total).coerceIn(0f, 1f)
-                LinearProgressIndicator(progress = { frac }, modifier = Modifier.fillMaxWidth())
+                ProgressRing(frac)
             }
             Note(count)
         }
