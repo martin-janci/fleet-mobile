@@ -63,12 +63,23 @@ class NeedsYouService : Service() {
         if (intent?.action == ACTION_LATER) {
             intent.getLongExtra(EXTRA_SESSION_ID, -1L).takeIf { it >= 0 }?.let(::withdraw)
         }
+        // Started through `startForegroundService` (Later is a foreground
+        // PendingIntent), so the system wants `startForeground` within seconds
+        // whatever happens next — even on the way out.
         ServiceCompat.startForeground(
             this,
             ONGOING_ID,
             ongoing(),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0,
         )
+        // The stored choice, read here and not assumed: a Later tapped after
+        // "Notify me" was turned off, or a START_STICKY restart, must not
+        // bring the watcher back against it.
+        if (!AndroidBackgroundNotifier.isEnabled(this)) {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (watching == null) watching = scope.launch { watch() }
         return START_STICKY
     }
@@ -112,8 +123,14 @@ class NeedsYouService : Service() {
     /** The sessions with a notification up, for the group's summary. */
     private val shown = linkedMapOf<Long, String>()
 
+    /**
+     * Put one alert away. By id, whether or not this instance posted it:
+     * [shown] is this instance's memory, and a Later tapped on an alert a
+     * previous instance posted (the system restarted the service, or the
+     * person turned it off and on) found nothing there and did nothing.
+     */
     private fun withdraw(sessionId: Long) {
-        if (shown.remove(sessionId) == null) return
+        shown.remove(sessionId)
         manager(this).cancel(alertId(sessionId))
         summarize()
     }
@@ -259,7 +276,7 @@ object AppVisibility {
  * and the [NeedsYouService] started or stopped to match it.
  */
 class AndroidBackgroundNotifier(private val context: Context) : BackgroundNotifier {
-    private val prefs = context.getSharedPreferences("notifications", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val _enabled = MutableStateFlow(prefs.getBoolean(KEY, false))
 
     override val supported: Boolean = true
@@ -277,7 +294,12 @@ class AndroidBackgroundNotifier(private val context: Context) : BackgroundNotifi
         if (_enabled.value) context.startForegroundService(intent) else context.stopService(intent)
     }
 
-    private companion object {
-        const val KEY = "needs_you"
+    companion object {
+        private const val PREFS = "notifications"
+        private const val KEY = "needs_you"
+
+        /** The stored choice, for the service to check before it watches. */
+        fun isEnabled(context: Context): Boolean =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY, false)
     }
 }
