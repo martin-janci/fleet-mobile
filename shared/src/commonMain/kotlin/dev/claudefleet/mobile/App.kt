@@ -206,6 +206,10 @@ import dev.claudefleet.mobile.ui.Navigator
 import dev.claudefleet.mobile.ui.openOverSheets
 import dev.claudefleet.mobile.ui.PhoneLayout
 import dev.claudefleet.mobile.ui.hostsLine
+import dev.claudefleet.mobile.ui.accountsLine
+import dev.claudefleet.mobile.ui.filesLine
+import dev.claudefleet.mobile.ui.moreFooter
+import dev.claudefleet.mobile.ui.moreSubtitle
 import dev.claudefleet.mobile.ui.inboxRows
 import dev.claudefleet.mobile.ui.runningRows
 import dev.claudefleet.mobile.ui.doneTodayRows
@@ -412,6 +416,12 @@ class AppContainer(
     /** Taken exactly once. */
     fun consumeOpenSession(): Long? = _openSession.getAndUpdate { null }
 
+    /** Forget a parked notification tap: a new pairing may be another hub, where its id is another session. */
+    fun dropOpenRequests() {
+        _openSession.value = null
+        _questionFocus.value = null
+    }
+
     /**
      * The last `claudefleet:` link the platform handed over, if the Pair screen
      * has not consumed it yet.
@@ -548,6 +558,7 @@ class AppContainer(
  * exactly when [AuthState] says it holds nothing, which is also what puts it
  * back there when the hub answers 401 (`AppSession.withClient`).
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun App(container: AppContainer) {
     val theme by container.phone.theme.collectAsState()
@@ -612,6 +623,9 @@ fun App(container: AppContainer) {
                             FirstRun.Welcome -> WelcomeScreen(onPair = toPair, onNoHub = { firstRun = FirstRun.NoHub })
                             FirstRun.NoHub -> NoHubScreen(onBack = { firstRun = FirstRun.Welcome }, onPair = toPair, onShare = share)
                             FirstRun.Pair -> PairRoute(container) {
+                                // A notification tapped while unpaired names a
+                                // session of the old pairing (review r09 F7).
+                                container.dropOpenRequests()
                                 justPaired = it
                                 fleetCheck = true
                             }
@@ -628,7 +642,11 @@ fun App(container: AppContainer) {
                             val gate = rememberBiometricGate()
                             val lockOn by container.phone.lock.collectAsState()
                             val unlocked by container.phone.unlocked.collectAsState()
-                            if (lockShown(lockOn, unlocked, gate.available)) {
+                            val locked = lockShown(lockOn, unlocked, gate.available)
+                            // Back on the lock does nothing: under it, it would pop
+                            // a screen nobody can see (review r09 F8).
+                            BackHandler(enabled = locked) {}
+                            if (locked) {
                                 PhoneLockScreen(gate, onUnlocked = container.phone::unlock)
                             }
                         }
@@ -1195,6 +1213,7 @@ private fun FleetRoute(
                     }
                 }
                 is Screen.NewSession -> key(current) {
+                    val ticketsAvailable = tickets.state.collectAsState().value.available
                     NewSessionRoute(
                         initialHost = current.hostAlias,
                         ticketKey = current.ticketKey,
@@ -1208,6 +1227,9 @@ private fun FleetRoute(
                         onCreated = nav::created,
                         onBack = { nav.back() },
                         wizard = layout == PhoneLayout.New,
+                        // r09 B14: the tickets list lives on Sessions; its Start comes back here.
+                        onFromTicket = { nav.select(Tab.Sessions); tickets.open(); Unit }
+                            .takeIf { ticketsAvailable },
                     )
                 }
                 is Screen.Session -> key(current.id) {
@@ -1580,6 +1602,7 @@ private fun FleetRoute(
                     val controlRows by repository.sessions.collectAsState()
                     val controlAccess by repository.access.collectAsState()
                     val subtitle = "${remember(controlRows, controlAccess) { inboxRows(controlRows, controlAccess).size }} need you"
+                    val controlPrs by pullRequests.state.collectAsState()
                     val views: @Composable () -> Unit = {
                         ControlViews(
                             sessions = attention.total,
@@ -1587,6 +1610,9 @@ private fun FleetRoute(
                             onSessions = { nav.select(Tab.Sessions) },
                             // The New layout's Missions screen (14.16).
                             onMissions = { nav.openMissions() }.takeIf { missionsState.available },
+                            // The list lives on Work; the pill opens it there.
+                            pullRequests = controlPrs.total.takeIf { controlPrs.loaded },
+                            onPullRequests = { nav.select(Tab.Work); pullRequests.open(); Unit }.takeIf { controlPrs.available },
                         )
                     }
                     val sessionId = controlState.sessionId
@@ -1629,14 +1655,20 @@ private fun FleetRoute(
                 }
                 Screen.More -> {
                     val hostRows by repository.hosts.collectAsState()
+                    val moreList by sessions.state.collectAsState()
+                    val moreHubVersion by repository.hubVersion.collectAsState()
+                    val moreStatus by repository.status.collectAsState()
                     LaunchedEffect(automationState.available) { if (automationState.available) automation.refresh() }
                     LaunchedEffect(debugDevicesState.available) { if (debugDevicesState.available) debugDevices.refresh() }
                     MoreScreen(
+                        subtitle = moreSubtitle(hubLabel(credentials.hub), credentials.canWrite),
+                        footer = moreFooter(container.appVersion, moreHubVersion, hostRows, moreStatus is ConnectionStatus.Connected),
                         top = { updateState.available?.let { UpdateCard(it, container.appVersion, onOpen = nav::openUpdate) } },
                         entries = buildList {
                             add(MoreEntry("Hosts", hostsLine(hostRows)) { nav.openFromMore(Screen.Hosts) })
                             if (settingsCaps.usage || settingsCaps.accounts) {
-                                add(MoreEntry("Accounts and usage", "Quotas, and estimated spend by host and day") { nav.openUsage() })
+                                val usageLine = accountsLine(moreList.accountUsage.values, moreList.nowSeconds)
+                                add(MoreEntry("Accounts and usage", usageLine ?: "Quotas, and estimated spend by host and day") { nav.openUsage() })
                             }
                             if (automationState.available) {
                                 // Routines, their runs and Pause all (8.9); Missions open from inside.
@@ -1653,7 +1685,7 @@ private fun FleetRoute(
                                 add(MoreEntry("Debug devices", devicesLine(debugDevicesState.devices)) { debugDevices.open() })
                             }
                             if (filesState.available) {
-                                val line = if (filesState.loaded) "${filesState.files.size} files" else "Files sessions sent to the hub"
+                                val line = if (filesState.loaded) filesLine(filesState.files.size, filesState.transfer) else "Files sessions sent to the hub"
                                 add(MoreEntry("Files", line) { nav.openFromMore(Screen.Files) })
                             }
                             if (orgDirectory.orgs.isNotEmpty()) {
@@ -1906,6 +1938,7 @@ private fun FleetRoute(
                     onPrompt = if (layout == PhoneLayout.New && lessonAgent.available) ({ prompt: String -> agent.open(fill = prompt); Unit }) else null,
                 )
             }
+            BackHandler(enabled = whatsNew != null) { whatsNew = null }
             whatsNew?.let { news ->
                 WhatsNewScreen(
                     whatsNew = news,
@@ -2060,6 +2093,10 @@ private fun FleetRoute(
         val importSessions by repository.sessions.collectAsState()
         FirstImport(hosts = importHosts, sessions = importSessions.size, onDone = { importing = false })
     }
+    // The help picker, the fleet check and the first import cover the whole
+    // fleet and close only through their own buttons: back under them would
+    // pop a screen nobody can see (review r09 F8).
+    BackHandler(enabled = fleetCheck || importing || (help.mode == null && whatsNew == null)) {}
 }
 
 /** A destination on the New bar, keyed by its [Tab] name so `Navigator.select` can take it back. */
@@ -2085,6 +2122,7 @@ private fun NewSessionRoute(
     onCreated: (Long) -> Unit,
     onBack: () -> Unit,
     wizard: Boolean = false,
+    onFromTicket: (() -> Unit)? = null,
 ) {
     val scope = rememberWorkScope()
     val vm = remember(repository, scope) {
@@ -2175,6 +2213,7 @@ private fun NewSessionRoute(
             onDismissError = tools::dismissError,
             onTyped = { addTyped = it },
         ),
+        onFromTicket = onFromTicket,
     )
     if (askDiscard) {
         DiscardSheet(onKeep = { askDiscard = false }, onDiscard = { askDiscard = false; onBack() })

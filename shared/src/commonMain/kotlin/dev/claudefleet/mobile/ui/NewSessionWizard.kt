@@ -104,6 +104,8 @@ internal fun NewSessionWizard(
     /** Add a project's step (redesign 14.20), held by the route for the same reason as [step]. */
     addStep: AddProjectStep = AddProjectStep.Source,
     addHandlers: AddProjectHandlers = AddProjectHandlers(),
+    /** "Start from: A ticket" (MobileNewSession, r09 B14): opens the tickets list, whose Start comes back here; null hides the choice. */
+    onFromTicket: (() -> Unit)? = null,
 ) {
     // A background agent shows the same Starting panel, without the
     // project's steps: it has none of them.
@@ -181,6 +183,7 @@ internal fun NewSessionWizard(
                 tools = tools,
                 toolHandlers = toolHandlers,
                 onSelectWorktree = onSelectWorktree,
+                onFromTicket = onFromTicket,
             )
         }
     }
@@ -209,12 +212,16 @@ private fun ColumnScope.WizardBody(
     tools: ProjectToolsUiState,
     toolHandlers: ProjectToolsHandlers,
     onSelectWorktree: (Long?) -> Unit,
+    onFromTicket: (() -> Unit)?,
 ) {
     val previous = step.previous
     val editable = !state.creating
     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
         when (step) {
-            WizardStep.Where -> WhereStep(state, editable, onSelectHost, onBackground = onBackground)
+            WizardStep.Where -> WhereStep(
+                state, editable, onSelectHost, onBackground = onBackground,
+                onFromTicket = onFromTicket.takeIf { state.ticketKey == null },
+            )
             WizardStep.Project -> ProjectStep(
                 state, editable, onProjectQuery, onSelectProject, onNewWorktree, onBranchChange, onBaseBranchChange,
                 tools, toolHandlers, onSelectWorktree,
@@ -310,8 +317,25 @@ internal fun startingTitle(s: NewSessionUiState, background: Boolean): String = 
 }
 
 @Composable
-private fun WhereStep(s: NewSessionUiState, editable: Boolean, onSelectHost: (String) -> Unit, onBackground: () -> Unit) {
+private fun WhereStep(
+    s: NewSessionUiState,
+    editable: Boolean,
+    onSelectHost: (String) -> Unit,
+    onBackground: () -> Unit,
+    onFromTicket: (() -> Unit)? = null,
+) {
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = gutterPadding()) {
+        // A project is this wizard; a ticket is picked from the tickets list,
+        // whose Start opens this wizard again in the ticket's name.
+        if (onFromTicket != null) item(key = "start-from") {
+            Column {
+                StepLabel("Start from")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
+                    ChoiceChip("A project", selected = true, onClick = {})
+                    ChoiceChip("A ticket", selected = false, onClick = { if (editable) onFromTicket() })
+                }
+            }
+        }
         item(key = "host-label") { StepLabel("Host") }
         if (s.hosts.isEmpty()) {
             item(key = "no-hosts") { StepHint("No hosts yet. They appear once the hub has listed them.") }

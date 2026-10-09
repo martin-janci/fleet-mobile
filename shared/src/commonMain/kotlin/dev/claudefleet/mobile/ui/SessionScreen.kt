@@ -2563,6 +2563,9 @@ private fun EmptyConversation(state: SessionUiState, onRetry: () -> Unit = {}) {
     // about a busy session the phone could not reach was simply untrue.
     val failed = state.error != null && !state.errorFromSend && state.session?.kind != "shell"
     val text = when {
+        // Before the stream's first list (a cold start from a notification),
+        // a missing row is not yet news (review r09 F9).
+        state.session == null && !state.streaming -> "Reading the fleet…"
         state.session == null -> "This session was killed."
         state.session.kind == "shell" -> "Shell session — no conversation to show."
         failed -> "Couldn't load the conversation."
@@ -2785,7 +2788,7 @@ private fun PromptBox(
             wordsMode -> "Send says No to the question and gives your words instead."
             state.card != null -> if (agent != null) "Answer with the buttons above, or Show in $agent." else "Answer with the buttons above, or Show terminal."
             !state.connected -> "The hub is offline; the prompt will not be delivered."
-            state.session == null -> "This session is gone."
+            state.session == null -> if (state.streaming) "This session is gone." else "Reading the fleet…"
             else -> null
         }
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

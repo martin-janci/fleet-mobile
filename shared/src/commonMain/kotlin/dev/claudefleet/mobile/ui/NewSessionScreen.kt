@@ -96,6 +96,8 @@ fun NewSessionScreen(
     /** The wizard's Add a project (redesign 14.20); Classic keeps [AddProjectSheet]. */
     addStep: AddProjectStep = AddProjectStep.Source,
     addHandlers: AddProjectHandlers = AddProjectHandlers(),
+    /** The wizard's "Start from: A ticket" (r09 B14); null hides it. */
+    onFromTicket: (() -> Unit)? = null,
 ) {
     if (wizard) {
         NewSessionWizard(
@@ -120,6 +122,7 @@ fun NewSessionScreen(
             modifier = modifier,
             addStep = addStep,
             addHandlers = addHandlers,
+            onFromTicket = onFromTicket,
         )
         return
     }

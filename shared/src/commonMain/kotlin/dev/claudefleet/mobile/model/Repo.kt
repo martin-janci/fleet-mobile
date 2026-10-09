@@ -66,3 +66,27 @@ data class CommitDetail(
     val date: String = "",
     val files: List<ChangedFile> = emptyList(),
 )
+
+/**
+ * What a session's branch carries (`repo_branch_diff`, readonly): the commits
+ * no remote has, and how far HEAD is past the base branch. The phone shows
+ * the two counts; the commits and files themselves pass by.
+ */
+@Serializable
+data class BranchDiff(
+    val branch: String? = null,
+    val upstream: String? = null,
+    val unpushed: List<kotlinx.serialization.json.JsonElement> = emptyList(),
+    /** More unpushed commits than the hub lists. */
+    val truncated: Boolean = false,
+    val base: String? = null,
+    @SerialName("aheadOfBase") val aheadOfBase: Int = 0,
+)
+
+/** "3 not pushed · 5 ahead of main" (the desktop's Files › Changes); null when there is nothing to say. */
+fun branchLine(b: BranchDiff): String? {
+    val unpushed = b.unpushed.size.takeIf { it > 0 }?.let { "${it}${if (b.truncated) "+" else ""} not pushed" }
+    val base = b.base?.substringAfter("origin/")
+    val ahead = if (base != null && b.aheadOfBase > 0) "${b.aheadOfBase} ahead of $base" else null
+    return listOfNotNull(unpushed, ahead).joinToString(" · ").ifEmpty { null }
+}
