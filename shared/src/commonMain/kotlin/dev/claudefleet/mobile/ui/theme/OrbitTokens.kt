@@ -68,6 +68,19 @@ internal object OrbitTokens {
         ColorToken("loader-accent", dark = 0xFF60A5FA, light = 0xFF60A5FA),
         ColorToken("comet-head", dark = 0xFFF2F4F7, light = 0xFF2563EB),
         ColorToken("agent-claude", dark = 0xFFD97757, light = 0xFFD97757),
+        ColorToken("scrim", dark = 0x66000000, light = 0x6618181B),
+        ColorToken("scrim-strong", dark = 0x9E000000, light = 0x9E18181B),
+        ColorToken("ai-pre", dark = 0xFF60A5FA, light = 0xFF2563EB),
+        ColorToken("usage-ok", dark = 0xFF5DD17A, light = 0xFF17723E),
+        ColorToken("usage-warn", dark = 0xFFD29B4A, light = 0xFF8F520B),
+        ColorToken("usage-crit", dark = 0xFFEF5350, light = 0xFFC62828),
+        ColorToken("syn-code", dark = 0xFF56B6C2, light = 0xFF0E7490),
+        ColorToken("control-bg", dark = 0xFF1C1C1C, light = 0xFFFFFFFF),
+        ColorToken("control-bg-hover", dark = 0xFF262626, light = 0xFFF0F0F0),
+        ColorToken("control-bg-active", dark = 0xFF303030, light = 0xFFE4E4E4),
+        ColorToken("control-border-strong", dark = 0xFF6E6E6E, light = 0xFF8E8E8E),
+        ColorToken("control-fg", dark = 0xFFEDEDED, light = 0xFF1A1A1A),
+        ColorToken("control-fg-quiet", dark = 0xFFA8A8A8, light = 0xFF5A5A5A),
     )
 
     /** Spacing and layout sizes, in the manual's px, drawn as dp. */
@@ -115,6 +128,26 @@ internal object OrbitTokens {
         TypeToken("code", size = 12, lineHeight = 18, weight = 400, mono = true),
     )
 
+    /**
+     * The manual's `size` group: fixed sizes the layout and controls share, in
+     * px drawn as dp (a font size as sp). Most are desktop chrome (inspector
+     * widths, control padding); the phone holds the whole group so the drift
+     * test compares it in both directions, as it does every other group.
+     */
+    val size: Map<String, Float> = mapOf(
+        "control-px" to 8f,
+        "control-px-lg" to 12f,
+        "control-gap" to 6f,
+        "control-font" to 12f,
+        "control-font-sm" to 11f,
+        "ring-w" to 2f,
+        "ring-offset" to 1f,
+        "inspector-min" to 280f,
+        "inspector-max" to 320f,
+        "fab-size" to 48f,
+        "layer-gap" to 8f,
+    )
+
     /** Durations in milliseconds. A loader never shows before `loader-delay`. */
     val durationMs: Map<String, Long> = mapOf(
         "dur-fast" to 80L,
@@ -134,4 +167,6 @@ internal object OrbitTokens {
     fun spacing(name: String): Float = spacing[name] ?: error("no spacing token named $name")
 
     fun radius(name: String): Float = radius[name] ?: error("no radius token named $name")
+
+    fun size(name: String): Float = size[name] ?: error("no size token named $name")
 }

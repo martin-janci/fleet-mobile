@@ -354,7 +354,7 @@ private fun AccountLimitsBlock(snap: AccountUsageSnapshot?, nowSeconds: Long) {
                 Text(name, color = o.fg, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.weight(1f))
                 Text(
                     (if (near) "Near the limit · " else "") + limitFigure(w, nowSeconds),
-                    color = if (near) o.statusFailed else o.fgMuted,
+                    color = if (near) o.usageCrit else o.fgMuted,
                     fontSize = 13.sp,
                     lineHeight = 20.sp,
                 )
@@ -362,7 +362,7 @@ private fun AccountLimitsBlock(snap: AccountUsageSnapshot?, nowSeconds: Long) {
             Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(4.dp).background(o.track, RoundedCornerShape(2.dp))) {
                 Box(
                     Modifier.fillMaxWidth((used / 100.0).toFloat().coerceIn(0f, 1f)).fillMaxHeight()
-                        .background(if (near) o.statusFailed else o.accent, RoundedCornerShape(2.dp)),
+                        .background(if (near) o.usageCrit else o.usageOk, RoundedCornerShape(2.dp)),
                 )
             }
         }

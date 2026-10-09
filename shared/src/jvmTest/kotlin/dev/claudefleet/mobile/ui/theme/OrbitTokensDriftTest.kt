@@ -85,6 +85,35 @@ class OrbitTokensDriftTest {
     }
 
     @Test
+    fun the_size_group_matches_the_snapshot() {
+        val expected = tokens("size").associate { it.str("name") to px(it.str("value")) }
+        assertEquals(expected, OrbitTokens.size, "size")
+    }
+
+    @Test
+    fun every_group_of_the_snapshot_is_compared() {
+        // A group added to the manual (as `size` was, review r10) must get a
+        // comparison here; otherwise the copy grows and the phone never hears.
+        val compared = setOf("color", "type", "spacing", "radius", "duration", "size")
+        // `shadow` is desktop-only box-shadow CSS; Compose draws elevation.
+        val notDrawn = setOf("name", "version", "meta", "shadow")
+        assertEquals(emptySet(), snapshot.keys - compared - notDrawn, "groups in tokens.json nobody compares")
+    }
+
+    @Test
+    fun the_copy_is_held_to_claude_fleet_by_a_scheduled_check() {
+        // The tests above hold the literals to the copy; only this workflow
+        // holds the copy to claude-fleet main. Without the schedule nothing
+        // runs when the other repo moves, which is how the copy fell behind.
+        val wf = Repo.file(".github/workflows/design-tokens.yml").readText()
+        assertTrue(Regex("""(?m)^\s+schedule:""").containsMatchIn(wf), "design-tokens.yml must run on a schedule")
+        assertTrue("bash scripts/check-design-tokens.sh" in wf, "design-tokens.yml must run the check script")
+        val script = Repo.file("scripts/check-design-tokens.sh").readText()
+        assertTrue("cmp -s" in script, "the check compares byte for byte")
+        assertTrue("docs/design/tokens.json" in script)
+    }
+
+    @Test
     fun the_phone_tokens_are_there() {
         // Named because 14.1's kit is built on them; a snapshot that dropped one
         // would otherwise pass the equality above by dropping it here too.
