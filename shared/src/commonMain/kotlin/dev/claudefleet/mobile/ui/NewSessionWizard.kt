@@ -137,7 +137,7 @@ internal fun NewSessionWizard(
     }
     var askingBackground by remember { mutableStateOf(false) }
     if (askingBackground) {
-        BackgroundAgentDialog(
+        BackgroundAgentSheet(
             host = state.host.orEmpty(),
             onStart = { name, prompt, options ->
                 askingBackground = false

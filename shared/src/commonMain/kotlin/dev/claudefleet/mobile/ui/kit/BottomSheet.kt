@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,6 +47,11 @@ data class SheetAction(val label: String, val enabled: Boolean = true, val onCli
  * The phone's dialog (manual: BottomSheet), as a modal sheet: grip, title,
  * an optional one-line explanation, the content, then Cancel and one primary
  * at the bottom in thumb reach.
+ *
+ * A form passes [scrollable]: its fields scroll and Cancel and the verb stay
+ * pinned under them, so with the keyboard up (the sheet's own window insets
+ * lift it, `App`'s root padding does not reach a sheet) Save is still in
+ * reach rather than pushed off under the keys.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,6 +63,7 @@ fun BottomSheet(
     primary: SheetAction? = null,
     cancelLabel: String = "Cancel",
     state: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    scrollable: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val o = Fleet.colors
@@ -69,7 +77,7 @@ fun BottomSheet(
         contentColor = o.fg,
         dragHandle = { SheetGrip() },
     ) {
-        SheetBody(title = title, meta = meta, primary = primary, cancelLabel = cancelLabel, onCancel = onDismiss, content = content)
+        SheetBody(title = title, meta = meta, primary = primary, cancelLabel = cancelLabel, onCancel = onDismiss, scrollable = scrollable, content = content)
     }
 }
 
@@ -95,6 +103,7 @@ fun SheetBody(
     primary: SheetAction?,
     cancelLabel: String,
     onCancel: () -> Unit,
+    scrollable: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val o = Fleet.colors
@@ -106,7 +115,17 @@ fun SheetBody(
     ) {
         Text(title, color = o.fg, fontSize = 19.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold)
         if (meta != null) Text(meta, color = o.fgMuted, fontSize = 14.sp, lineHeight = 20.sp)
-        content()
+        if (scrollable) {
+            // `fill = false`: a short form keeps its own height, a tall one
+            // takes what is left above the pinned buttons and scrolls.
+            Column(
+                modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                content = content,
+            )
+        } else {
+            content()
+        }
         Row(modifier = Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(
                 onClick = onCancel,

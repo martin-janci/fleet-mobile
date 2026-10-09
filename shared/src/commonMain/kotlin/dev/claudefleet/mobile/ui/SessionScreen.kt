@@ -124,6 +124,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.claudefleet.mobile.model.BackgroundOptions
 import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.model.ConversationSummary
@@ -206,8 +207,10 @@ fun SessionScreen(
     onRestart: () -> Unit,
     onSafeKill: () -> Unit,
     onKill: () -> Unit,
-    onSetTags: (List<String>) -> Unit,
-    onRename: (String) -> Unit,
+    /** The rename-and-tags sheet's one Save ([SessionViewModel.edit]). */
+    onEdit: (SessionEdit) -> Unit,
+    /** ⋮ Background agent…'s Start ([SessionViewModel.startBackground]). */
+    onStartBackground: (String, String, BackgroundOptions) -> Unit = { _, _, _ -> },
     onSendCommand: (String) -> Unit,
     /** The chip row's own content — the fleet's list, see `ui/QuickReplies.kt`. */
     quickReplies: List<QuickReply>,
@@ -616,8 +619,8 @@ fun SessionScreen(
                         onRestart = onRestart,
                         onSafeKill = onSafeKill,
                         onKill = onKill,
-                        onSetTags = onSetTags,
-                        onRename = onRename,
+                        onEdit = onEdit,
+                        onStartBackground = onStartBackground,
                         onSendCommand = onSendCommand,
                         work = work,
                         workHandlers = workHandlers,
@@ -1335,8 +1338,10 @@ private fun SessionBar(
     onRestart: () -> Unit,
     onSafeKill: () -> Unit,
     onKill: () -> Unit,
-    onSetTags: (List<String>) -> Unit,
-    onRename: (String) -> Unit,
+    /** The rename-and-tags sheet's one Save ([SessionViewModel.edit]). */
+    onEdit: (SessionEdit) -> Unit,
+    /** ⋮ Background agent…'s Start ([SessionViewModel.startBackground]). */
+    onStartBackground: (String, String, BackgroundOptions) -> Unit = { _, _, _ -> },
     onSendCommand: (String) -> Unit,
     work: SessionWorkUiState,
     workHandlers: SessionWorkHandlers,
@@ -1420,8 +1425,8 @@ private fun SessionBar(
                     onRestart = onRestart,
                     onSafeKill = onSafeKill,
                     onKill = onKill,
-                    onSetTags = onSetTags,
-                    onRename = onRename,
+                    onEdit = onEdit,
+                    onStartBackground = onStartBackground,
                     onSetWork = workHandlers.onSetWork.takeIf { work.canSetWork },
                     onNameWork = workHandlers.onNameWork.takeIf { work.canNameWork },
                     onDetails = onOpenDetails,
@@ -1567,8 +1572,10 @@ private fun SessionOverflowMenu(
     onRestart: () -> Unit,
     onSafeKill: () -> Unit,
     onKill: () -> Unit,
-    onSetTags: (List<String>) -> Unit,
-    onRename: (String) -> Unit,
+    /** The rename-and-tags sheet's one Save ([SessionViewModel.edit]). */
+    onEdit: (SessionEdit) -> Unit,
+    /** ⋮ Background agent…'s Start ([SessionViewModel.startBackground]). */
+    onStartBackground: (String, String, BackgroundOptions) -> Unit = { _, _, _ -> },
     /** *Set work…*; null when this token or this hub cannot link work. */
     onSetWork: ((String) -> Unit)? = null,
     /** *Name this work…*; null unless the session has no work and this token and hub may name it. */
@@ -1599,7 +1606,18 @@ private fun SessionOverflowMenu(
     var showSafeKillConfirm by remember { mutableStateOf(false) }
     var showKillConfirm by remember { mutableStateOf(false) }
     var showSendLater by remember { mutableStateOf(false) }
+    var showBackground by remember { mutableStateOf(false) }
     val actionable = !state.busy && state.connected
+    // MobileFormsSession: the New session form's background agent, started
+    // from here on this session's host and in its project.
+    if (showBackground) {
+        BackgroundAgentSheet(
+            host = state.session?.hostAlias.orEmpty(),
+            onStart = { name, prompt, options -> showBackground = false; onStartBackground(name, prompt, options) },
+            onDismiss = { showBackground = false },
+            options = state.backgroundOptions,
+        )
+    }
     if (showSendLater && orbit != null) SendLaterSheet(state, orbit.later, onDismiss = { showSendLater = false })
 
     IconButton(onClick = { expanded = true }) {
@@ -1608,7 +1626,7 @@ private fun SessionOverflowMenu(
     // Grouped, a divider between groups: what it is, its work, steering the
     // agent, naming it, keeping it running, and — last, apart, in red — ending it.
     val hasWork = onSetWork != null || onNameWork != null
-    val hasSteer = state.canSendQuick || state.canReview
+    val hasSteer = state.canSendQuick || state.canReview || state.canStartBackground
     val hasUpkeep = (onMove != null && manage) || state.canRepair || (manage && state.canRestart) ||
         state.canRecreate || state.canDismissGhost
     val clipboard = LocalClipboardManager.current
@@ -1635,6 +1653,7 @@ private fun SessionOverflowMenu(
                     kill = manage && state.canKill,
                     worktree = onRepo != null,
                     sendLater = state.canSendLater,
+                    background = state.canStartBackground,
                 ),
             )
             for ((i, item) in items.withIndex()) {
@@ -1665,6 +1684,7 @@ private fun SessionOverflowMenu(
                             OrbitItem.Effort -> picking = "effort"
                             OrbitItem.Review -> showReview = true
                             OrbitItem.SendLater -> showSendLater = true
+                            OrbitItem.Background -> showBackground = true
                             OrbitItem.Tags -> showTags = true
                             OrbitItem.Archive -> orbit.onArchive?.invoke()
                             OrbitItem.Retire -> showSafeKillConfirm = true
@@ -1705,6 +1725,9 @@ private fun SessionOverflowMenu(
             }
             if (state.canReview) {
                 DropdownMenuItem(text = { Text("Review…") }, enabled = actionable, onClick = { expanded = false; showReview = true })
+            }
+            if (state.canStartBackground) {
+                DropdownMenuItem(text = { Text("Background agent…") }, enabled = actionable, onClick = { expanded = false; showBackground = true })
             }
         }
         if (manage) {
@@ -1835,8 +1858,7 @@ private fun SessionOverflowMenu(
         hideSafeKillConfirm = { showSafeKillConfirm = false },
         showKillConfirm = showKillConfirm,
         hideKillConfirm = { showKillConfirm = false },
-        onRename = onRename,
-        onSetTags = onSetTags,
+        onEdit = onEdit,
         onRestart = onRestart,
         onSafeKill = onSafeKill,
         onKill = onKill,
@@ -1856,24 +1878,19 @@ private fun ManageDialogs(
     hideSafeKillConfirm: () -> Unit,
     showKillConfirm: Boolean,
     hideKillConfirm: () -> Unit,
-    onRename: (String) -> Unit,
-    onSetTags: (List<String>) -> Unit,
+    onEdit: (SessionEdit) -> Unit,
     onRestart: () -> Unit,
     onSafeKill: () -> Unit,
     onKill: () -> Unit,
 ) {
-    if (showRename) {
-        RenameDialog(
-            initial = state.session?.friendlyName.orEmpty(),
-            onConfirm = { name -> hideRename(); onRename(name) },
-            onDismiss = hideRename,
-        )
-    }
-    if (showTags) {
-        TagsDialog(
-            tags = state.session?.tags.orEmpty(),
-            onConfirm = { tags -> hideTags(); onSetTags(tags) },
-            onDismiss = hideTags,
+    // ⋮ Rename and ⋮ Tags… open the one sheet (MobileFormsSession).
+    if (showRename || showTags) {
+        val close = { hideRename(); hideTags() }
+        SessionEditSheet(
+            initialName = state.session?.friendlyName.orEmpty(),
+            initialTags = state.session?.tags.orEmpty(),
+            onSave = { edit -> close(); if (edit.changes) onEdit(edit) },
+            onDismiss = close,
         )
     }
     if (showRestartConfirm) {
@@ -1933,87 +1950,6 @@ internal fun ReviewDialog(onStart: (String) -> Unit, onDismiss: () -> Unit) {
             }
         },
         confirmButton = { TextButton(onClick = { onStart(prompt) }, enabled = prompt.isNotBlank()) { Text("Start review") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-@Composable
-private fun RenameDialog(initial: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
-    var text by remember { mutableStateOf(initial) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Rename session") },
-        text = {
-            TextField(value = text, onValueChange = { text = it }, singleLine = true)
-        },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) { Text("Rename") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-/**
- * The tag editor: a [FlowRow] of removable [InputChip]s plus a field to add
- * one more. Local until Save, which is the point it becomes one `setTags`
- * call replacing the whole list — the hub has no per-tag add/remove of its
- * own.
- */
-@Composable
-private fun TagsDialog(tags: List<String>, onConfirm: (List<String>) -> Unit, onDismiss: () -> Unit) {
-    var current by remember { mutableStateOf(tags) }
-    var draft by remember { mutableStateOf("") }
-    fun addDraft() {
-        val t = draft.trim()
-        if (t.isNotEmpty() && t !in current) current = current + t
-        draft = ""
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Tags") },
-        text = {
-            Column {
-                if (current.isNotEmpty()) {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        for (tag in current) {
-                            InputChip(
-                                selected = false,
-                                // Tapping the chip removes it — there is no
-                                // "selected" state for a tag, so the whole
-                                // chip is the remove affordance, not just its
-                                // trailing icon.
-                                onClick = { current = current - tag },
-                                label = { Text(tag) },
-                                trailingIcon = {
-                                    Icon(
-                                        FleetIcons.Close,
-                                        contentDescription = "Remove $tag",
-                                        modifier = Modifier.size(InputChipDefaults.IconSize),
-                                    )
-                                },
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextField(
-                        value = draft,
-                        onValueChange = { draft = it },
-                        singleLine = true,
-                        placeholder = { Text("Add a tag") },
-                        modifier = Modifier.weight(1f),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { addDraft() }),
-                    )
-                    TextButton(onClick = ::addDraft, enabled = draft.isNotBlank()) { Text("Add") }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = { onConfirm(current) }) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
@@ -2199,9 +2135,14 @@ private fun ReplyMenu(turn: ConvTurn, chronological: Int, host: ReplyHost) {
             },
             onDismiss = { asking = null },
         )
-        ReplyAsk.Fork -> ForkDialog(
-            suggested = host.forkName,
-            onConfirm = { worktree -> host.onFork(view.forkAnchor, worktree); asking = null },
+        ReplyAsk.Fork -> ForkSheet(
+            // Opened on this reply; the sheet's From picks any other turn.
+            choices = remember(host.turns, host.truncated, host.supported) {
+                forkTurnChoices(host.turns, host.truncated, host.supported)
+            },
+            initialIndex = chronological,
+            suggestedName = host.forkName,
+            onFork = { anchor, worktree -> host.onFork(anchor, worktree); asking = null },
             onDismiss = { asking = null },
         )
         null -> Unit
@@ -2217,55 +2158,6 @@ private fun ConfirmRewind(title: String, body: String, confirm: String, onConfir
         title = { Text(title) },
         text = { Text(body) },
         confirmButton = { TextButton(onClick = onConfirm) { Text(confirm) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-/**
- * Fork here: a new session on the conversation so far. In a new worktree by
- * default — the desktop's default too — so the fork's edits do not land in
- * the tree this session is working in; unticked, it shares that worktree.
- */
-@Composable
-private fun ForkDialog(suggested: String, onConfirm: (String?) -> Unit, onDismiss: () -> Unit) {
-    var ownTree by remember { mutableStateOf(true) }
-    var name by remember { mutableStateOf(suggested) }
-    val slug = branchSlug(name)
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Fork here") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("A new session starts on this conversation up to here. This session is left as it is.")
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.toggleable(value = ownTree, role = Role.Checkbox) { ownTree = it },
-                ) {
-                    Checkbox(checked = ownTree, onCheckedChange = null)
-                    Text("In a new worktree")
-                }
-                if (ownTree) {
-                    // What git will be given, which is not always what was typed.
-                    TextField(
-                        supportingText = { if (slug != name) Text("As: ${slug.ifEmpty { "—" }}") },
-                        value = name,
-                        onValueChange = { name = it },
-                        singleLine = true,
-                        label = { Text("Worktree and branch") },
-                        keyboardOptions = KeyboardOptions(
-                            capitalization = KeyboardCapitalization.None,
-                            autoCorrectEnabled = false,
-                        ),
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onConfirm(if (ownTree) slug else null) },
-                enabled = !ownTree || slug.isNotEmpty(),
-            ) { Text("Fork") }
-        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
@@ -3058,7 +2950,7 @@ private fun QuickRepliesRow(
         }
     }
     editing?.let { chip ->
-        EditQuickReplyDialog(
+        EditQuickReplySheet(
             original = chip,
             onSave = { edited -> onEdit(chip, edited); editing = null },
             onRemove = { onRemove(chip); editing = null },
@@ -3066,7 +2958,7 @@ private fun QuickRepliesRow(
         )
     }
     if (adding) {
-        EditQuickReplyDialog(
+        EditQuickReplySheet(
             original = null,
             onSave = { chip -> onAdd(chip); adding = false },
             onRemove = null,
@@ -3217,86 +3109,6 @@ private fun ManageQuickRepliesDialog(
         },
         confirmButton = { TextButton(onClick = onAdd) { Text("New chip") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
-}
-
-/**
- * Write one chip: the label the button shows, and the prompt it sends.
- *
- * [original] null is a new chip — the dialog then offers no Remove, because
- * there is nothing yet to remove. The prompt field is multi-line: the built-in
- * Review chip is a paragraph, and a single-line field made such a chip
- * impossible to read, let alone edit, on a phone.
- */
-@Composable
-private fun EditQuickReplyDialog(
-    original: QuickReply?,
-    onSave: (QuickReply) -> Unit,
-    onRemove: (() -> Unit)?,
-    onDismiss: () -> Unit,
-) {
-    var label by remember { mutableStateOf(original?.label.orEmpty()) }
-    var text by remember { mutableStateOf(original?.text.orEmpty()) }
-    // A new chip fills the box by default, as on the desktop.
-    var autoSend by remember { mutableStateOf(original?.sendsOnTap ?: false) }
-    var confirmRemove by remember { mutableStateOf(false) }
-    if (confirmRemove && onRemove != null) {
-        AlertDialog(
-            onDismissRequest = { confirmRemove = false },
-            title = { Text("Remove this quick reply?") },
-            text = { Text("It goes from every device's chip row.") },
-            confirmButton = {
-                DangerTextButton(onClick = { confirmRemove = false; onRemove() }) {
-                    Text("Remove")
-                }
-            },
-            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("Cancel") } },
-        )
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (original == null) "New quick reply" else "Quick reply") },
-        text = {
-            Column {
-                TextField(
-                    value = label,
-                    onValueChange = { label = it },
-                    singleLine = true,
-                    label = { Text("Label (optional)") },
-                )
-                Spacer(Modifier.height(8.dp))
-                TextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    label = { Text("Prompt") },
-                    minLines = 2,
-                    maxLines = 6,
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.toggleable(value = autoSend, role = Role.Checkbox) { autoSend = it },
-                ) {
-                    Checkbox(checked = autoSend, onCheckedChange = null)
-                    Text("Send on tap (otherwise only fills the box)")
-                }
-                // Not where Cancel sits: a tap meant to back out must never
-                // delete a chip from every device. Asked first, too.
-                if (onRemove != null) {
-                    DangerTextButton(onClick = { confirmRemove = true }) {
-                        Text("Remove this quick reply…")
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    onSave(QuickReply(label = label.trim(), text = text.trim(), autoSend = autoSend))
-                },
-                enabled = text.isNotBlank(),
-            ) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 

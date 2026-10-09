@@ -87,7 +87,7 @@ class RotationKeepsPlaceTest {
                         status = ConnectionStatus.Connected("0.9.3"),
                         onDraftChange = {}, onSend = {}, onRefresh = {}, onBack = {}, onDismissError = {}, onAtBottom = {},
                         onAnswer = {}, onShowTerminal = {}, onHideTerminal = {}, onRestart = {}, onSafeKill = {}, onKill = {},
-                        onSetTags = {}, onRename = {}, onSendCommand = {}, quickReplies = emptyList(), onSendQuick = {},
+                        onEdit = {}, onSendCommand = {}, quickReplies = emptyList(), onSendQuick = {},
                         onAddQuickReply = {}, onEditQuickReply = { _, _ -> }, onRemoveQuickReply = {}, onOpenHistory = { emptyList() },
                         tabs = SessionTabsHost(
                             tabs = listOf(SessionTab.Conversation, SessionTab.Agent, SessionTab.Details),

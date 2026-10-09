@@ -23,7 +23,7 @@ class OrbitMenu(
 
 enum class OrbitItem {
     Rename, Ticket, Tags,
-    Model, Effort, Review, SendLater,
+    Model, Effort, Review, SendLater, Background,
     Move, Repair, Recreate, Restart, DismissGhost,
     CopyAttach, Details, Worktree,
     Archive, Retire, Kill,
@@ -61,6 +61,8 @@ data class OrbitMenuFacts(
     val worktree: Boolean = false,
     /** The hub keeps prompts for later and this person may drive the session. */
     val sendLater: Boolean = false,
+    /** The hub starts background agents and this person manages the session. */
+    val background: Boolean = false,
 )
 
 /** The command that attaches a terminal to the session on its host, as the desktop's Details copies it. */
@@ -77,6 +79,7 @@ fun orbitMenuItems(f: OrbitMenuFacts): List<OrbitMenuItem> = buildList {
     }
     if (f.review) add(OrbitMenuItem(OrbitItem.Review, "Review…", "a new session reviews this worktree", 1))
     if (f.sendLater) add(OrbitMenuItem(OrbitItem.SendLater, "Send later…", "goes in when the session is next idle", 1))
+    if (f.background) add(OrbitMenuItem(OrbitItem.Background, "Background agent…", "runs without a pane; the result lands in Inbox", 1))
     if (f.move) add(OrbitMenuItem(OrbitItem.Move, "Move to host…", f.hostAlias?.let { "now on $it" }, 2))
     if (f.repair) add(OrbitMenuItem(OrbitItem.Repair, "Repair workspace", "fix the worktree, re-attach the pane", 2))
     if (f.recreate) add(OrbitMenuItem(OrbitItem.Recreate, "Recreate", if (f.ghost) "bring it back in its worktree" else "new pane, same worktree and conversation", 2))

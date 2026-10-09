@@ -56,6 +56,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
+import dev.claudefleet.mobile.ui.kit.BottomSheet
+import dev.claudefleet.mobile.ui.kit.SheetAction
 import dev.claudefleet.mobile.ui.kit.Comet
 import dev.claudefleet.mobile.ui.kit.InlineLoading
 import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
@@ -142,7 +144,7 @@ fun NewSessionScreen(
     val editable = !state.creating
     var askingBackground by remember { mutableStateOf(false) }
     if (askingBackground) {
-        BackgroundAgentDialog(
+        BackgroundAgentSheet(
             host = state.host.orEmpty(),
             onStart = { name, prompt, options -> askingBackground = false; onStartBackground(name, prompt, options) },
             onDismiss = { askingBackground = false },
@@ -449,10 +451,16 @@ internal val IDENTIFIER_KEYBOARD = KeyboardOptions(
     imeAction = ImeAction.Next,
 )
 
-/** A background agent: a name (optional — the prompt names it otherwise) and the task it starts on. */
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * A background agent (MobileFormsSession): a task, a name (optional — the
+ * task names it otherwise), and where the hub takes them (contract 14)
+ * Read-only and a stop after time or spend. A sheet with Cancel and Start at
+ * the thumb; it starts and shows in Inbox, no spinner. Opened from New
+ * session on a host and from inside a session (⋮ Background agent…).
+ */
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
-internal fun BackgroundAgentDialog(
+internal fun BackgroundAgentSheet(
     host: String,
     onStart: (String, String, BackgroundOptions) -> Unit,
     onDismiss: () -> Unit,
@@ -466,53 +474,61 @@ internal fun BackgroundAgentDialog(
     var readOnly by remember { mutableStateOf(false) }
     var stopAfter by remember { mutableStateOf<Long?>(null) }
     var spend by remember { mutableStateOf<Double?>(null) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Background agent on $host") },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.verticalScroll(rememberScrollState()),
+    BottomSheet(
+        title = "Background agent",
+        meta = BACKGROUND_AGENT_META,
+        onDismiss = onDismiss,
+        primary = SheetAction("Start", enabled = prompt.isNotBlank()) {
+            onStart(name, prompt, BackgroundOptions(readOnly = readOnly, stopAfterSecs = stopAfter, stopAfterUsd = spend))
+        },
+        scrollable = true,
+    ) {
+        Text(
+            listOfNotNull("Claude", host.takeIf { it.isNotBlank() }?.let { "on $it" }, project?.takeIf { options }?.let { "in $it" })
+                .joinToString(" · "),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        OutlinedTextField(
+            value = prompt,
+            onValueChange = { prompt = it },
+            minLines = 3,
+            label = { Text("Task") },
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
+        )
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it },
+            singleLine = true,
+            label = { Text("Name (optional)") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (options) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().toggleable(value = readOnly, role = Role.Switch) { readOnly = it },
             ) {
-                Text("A headless Claude session the fleet supervises, started on the task below. It shows in the list once the hub has matched it.")
-                if (options) Text(if (project != null) "Agent: Claude · in $project" else "Agent: Claude", style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, label = { Text("Name (optional)") })
-                OutlinedTextField(
-                    value = prompt,
-                    onValueChange = { prompt = it },
-                    minLines = 3,
-                    label = { Text("Task") },
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
-                )
-                if (options) {
-                    // MobileMissions' background agent: read-only and a stop after time or money.
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Read only")
-                            Text("No edits, commits or pushes", style = MaterialTheme.typography.bodySmall)
-                        }
-                        Switch(checked = readOnly, onCheckedChange = { readOnly = it })
-                    }
-                    Text("Stop after", style = MaterialTheme.typography.labelMedium)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for ((secs, label) in BACKGROUND_STOP_AFTER) ChoiceChip(label, stopAfter == secs, { stopAfter = secs })
-                    }
-                    Text("Spend limit", style = MaterialTheme.typography.labelMedium)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for ((usd, label) in BACKGROUND_SPEND) ChoiceChip(label, spend == usd, { spend = usd })
-                    }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Read-only")
+                    Text(BACKGROUND_READ_ONLY_SUB, style = MaterialTheme.typography.bodySmall)
                 }
+                Switch(checked = readOnly, onCheckedChange = null)
             }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onStart(name, prompt, BackgroundOptions(readOnly = readOnly, stopAfterSecs = stopAfter, stopAfterUsd = spend)) },
-                enabled = prompt.isNotBlank(),
-            ) { Text("Start") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+            Text("Stop after", style = MaterialTheme.typography.labelMedium)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for ((secs, label) in BACKGROUND_STOP_AFTER) ChoiceChip(label, stopAfter == secs, { stopAfter = secs })
+            }
+            Text("Spend limit", style = MaterialTheme.typography.labelMedium)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for ((usd, label) in BACKGROUND_SPEND) ChoiceChip(label, spend == usd, { spend = usd })
+            }
+        }
+    }
 }
+
+/** The background agent sheet's words (MobileFormsSession). */
+internal const val BACKGROUND_AGENT_META = "Runs without a pane; the result lands in Inbox."
+internal const val BACKGROUND_READ_ONLY_SUB = "It may read and run tests, never edit or push"
 
 /** A background agent's stop-after choices, within the hub's 60 s to 7 days. */
 internal val BACKGROUND_STOP_AFTER: List<Pair<Long?, String>> =

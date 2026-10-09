@@ -2,6 +2,8 @@
 
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.model.BackgroundOptions
+import dev.claudefleet.mobile.data.NewSessionActions
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import dev.claudefleet.mobile.data.ALL_SESSIONS_CHANGED
@@ -192,6 +194,10 @@ data class SessionUiState(
      * [canManage], what offers Rewind here, Retry and Fork here under a reply.
      */
     val rewindAvailable: Boolean = false,
+    /** The hub has `new_bg_session` and this screen was given a way to call it ([SessionViewModel.startBackground]). */
+    val backgroundAvailable: Boolean = false,
+    /** It takes read-only and the stop-after limits too (contract 14). */
+    val backgroundOptions: Boolean = false,
     /** The session's Claude conversations, newest first; empty until read or on an older hub. */
     val conversations: List<ConversationSummary> = emptyList(),
     /**
@@ -289,6 +295,10 @@ data class SessionUiState(
     /** Whether a reply offers Rewind here, Retry and Fork here at all — see [replyActionsFor]. */
     val canRewind: Boolean
         get() = canManage && rewindAvailable && viewing == null
+
+    /** ⋮ Background agent…: an owner of this session, on a hub that starts one. */
+    val canStartBackground: Boolean
+        get() = canManage && backgroundAvailable
 
     /** Restart carries no narrowing beyond [canManage] — see [BlockedCard.offerRestart] for when it is worth showing. */
     val canRestart: Boolean
@@ -442,6 +452,12 @@ class SessionViewModel(
      * box. False keeps the Classic rule — the words return to the box.
      */
     private val keepNotSent: Boolean = false,
+    /**
+     * `new_bg_session`, for ⋮ Background agent… (MobileFormsSession): an agent
+     * started from inside this session, on its host and in its project. Null
+     * where the app has not handed one over; the menu then offers nothing.
+     */
+    private val background: NewSessionActions? = null,
 ) {
     /**
      * The screen state this class owns, as opposed to what the fleet owns.
@@ -1541,6 +1557,42 @@ class SessionViewModel(
     fun rename(name: String): Job = runManaged(::canManageNow) { actions.rename(sessionId, name) }
 
     /**
+     * The rename-and-tags sheet's one Save: [name] and [tags] are what
+     * changed ([sessionEdit]), null for what did not. Both go in ONE managed
+     * call — two would refuse the second, which [runManaged] does while the
+     * first's refetch is still out.
+     */
+    fun edit(name: String?, tags: List<String>?): Job =
+        runManaged({ canManageNow() && (name != null || tags != null) }) {
+            if (name != null) actions.rename(sessionId, name)
+            if (tags != null) actions.setTags(sessionId, tags)
+        }
+
+    /**
+     * ⋮ Background agent…: a headless agent on this session's host, in its
+     * project, started on [prompt] (`new_bg_session`). The screen stays where
+     * it is: the agent runs without a pane and its result lands in Inbox,
+     * which the banner says, with the hub's own warning behind Details.
+     */
+    fun startBackground(name: String, prompt: String, options: BackgroundOptions = BackgroundOptions()): Job =
+        runManagedThen({ canManageNow() && background != null && fleet.capabilities.value.newBgSession && prompt.isNotBlank() }) {
+            val start = background ?: return@runManagedThen null
+            val r = row() ?: return@runManagedThen null
+            val shownName = name.trim().ifEmpty { prompt.trim().take(40) }
+            val result = if (fleet.capabilities.value.accepts(HubCapabilities.NEW_BG_SESSION, "read_only")) {
+                start.newBackground(r.hostAlias, shownName, prompt.trim(), options.copy(projectId = options.projectId ?: r.projectId))
+            } else {
+                start.newBackground(r.hostAlias, shownName, prompt.trim())
+            }
+            Friendly(
+                title = "Background agent started",
+                body = "It runs without a pane on ${r.hostAlias}; the result lands in Inbox.",
+                isError = false,
+                details = result.warning,
+            )
+        }
+
+    /**
      * One management call — [restart], [safeKill], [kill], [setTags] or
      * [rename] — gated and bracketed the same way for all five: [guard] is
      * this action's own live-source rule ([canRestartNow] for restart,
@@ -1861,6 +1913,8 @@ class SessionViewModel(
         // Read rather than combined: the hub's tool list is learned once per
         // connection, before any row this screen could draw arrives.
         rewindAvailable = fleet.capabilities.value.rewind,
+        backgroundAvailable = background != null && fleet.capabilities.value.newBgSession,
+        backgroundOptions = fleet.capabilities.value.accepts(HubCapabilities.NEW_BG_SESSION, "read_only"),
         conversations = l.conversations,
         viewing = l.viewing,
         canLoadOlder = l.viewing == null && l.conversation.truncated && !l.olderLoaded &&

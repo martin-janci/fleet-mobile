@@ -79,8 +79,7 @@ class QuickReplyChipsTest {
                     onRestart = {},
                     onSafeKill = {},
                     onKill = {},
-                    onSetTags = {},
-                    onRename = {},
+                    onEdit = {},
                     onSendCommand = {},
                     quickReplies = chips,
                     onSendQuick = { sent += it },
@@ -121,9 +120,9 @@ class QuickReplyChipsTest {
         compose.onNodeWithText("Review").performTouchInput { longClick() }
         compose.waitForIdle()
 
-        // The dialog, not a send: the prompt is in an editable field and the
+        // The sheet, not a send: the prompt is in an editable field and the
         // row's own tap handler did not fire.
-        compose.onNodeWithText("Quick reply").assertIsDisplayed()
+        compose.onNodeWithText("Edit quick reply").assertIsDisplayed()
         compose.onNodeWithText("review the diff").assertIsDisplayed()
         assertEquals(emptyList<String>(), sent)
     }
