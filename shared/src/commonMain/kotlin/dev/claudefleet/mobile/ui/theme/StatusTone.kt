@@ -8,9 +8,25 @@ package dev.claudefleet.mobile.ui.theme
  * is the whole triage — answer a question, or go fix the terminal.
  */
 enum class StatusTone(val outlined: Boolean = false, val dotted: Boolean = false) {
-    WORKING, IDLE, BLOCKED, STUCK, FAILED(outlined = true), COMPLETED, STOPPED(outlined = true), UNKNOWN(outlined = true, dotted = true);
+    WORKING, IDLE, BLOCKED, STUCK, FAILED(outlined = true), COMPLETED, STOPPED(outlined = true), UNKNOWN(outlined = true, dotted = true),
+
+    /**
+     * Paused by the fleet, not by the session: an account at its usage limit
+     * (the hub's `account_limit`, contract 11, step 4.4's "Paused · limit").
+     * The idle grey, as the manual files paused beside idle; its line says
+     * why and when it resets, and the row offers Switch account and Wait.
+     */
+    PAUSED;
 
     companion object {
+        /**
+         * A row's tone, with the hub's verdict: an account at its limit is
+         * [PAUSED] whatever its status says (a turn that failed at the limit
+         * reads as the limit, as the hub's attention table has it).
+         */
+        fun of(row: dev.claudefleet.mobile.model.SessionRow): StatusTone =
+            if (row.attention?.reason == "account_limit") PAUSED else of(row.claudeStatus, row.stuckKind)
+
         fun of(claudeStatus: String?, stuckKind: String?): StatusTone = when {
             !stuckKind.isNullOrBlank() -> STUCK
             else -> when (claudeStatus) {

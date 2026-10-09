@@ -23,7 +23,7 @@ class NeedsYouTest {
     @Test
     fun a_session_that_comes_to_need_you_is_news_once() {
         val (first, seen) = needsYouAlerts(mapOf(1L to null), listOf(row(1, "waiting")))
-        assertEquals(listOf(NeedsYouAlert(1, "session 1", "Waiting for you · pine", reason = "waiting")), first)
+        assertEquals(listOf(NeedsYouAlert(1, "session 1", "Needs you · pine", reason = "waiting")), first)
 
         val (again, _) = needsYouAlerts(seen, listOf(row(1, "waiting")))
         assertTrue(again.isEmpty(), "still waiting is not news")
@@ -32,7 +32,7 @@ class NeedsYouTest {
     @Test
     fun a_different_reason_is_news_and_a_settled_session_is_not() {
         val (changed, seen) = needsYouAlerts(mapOf(1L to "waiting"), listOf(row(1, "stuck")))
-        assertEquals("Stuck · pine", changed.single().text)
+        assertEquals("Failed · stuck · pine", changed.single().text)
 
         val (settled, after) = needsYouAlerts(seen, listOf(row(1)))
         assertTrue(settled.isEmpty())
@@ -66,8 +66,8 @@ class NeedsYouTest {
 
     @Test
     fun the_reasons_read_as_words() {
-        assertEquals("Waiting for you", reasonWords("waiting"))
-        assertEquals("Needs a decision", reasonWords("lifecycle"))
+        assertEquals("Needs you", reasonWords("waiting"))
+        assertEquals("Paused", reasonWords("lifecycle"))
         assertEquals("CI failing", reasonWords("ci_failing"))
         assertEquals("Odd reason", reasonWords("odd_reason"))
     }

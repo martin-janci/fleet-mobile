@@ -2,6 +2,8 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.RoutineActions
+import dev.claudefleet.mobile.model.FleetRun
+import dev.claudefleet.mobile.model.LoopHealth
 import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineRun
@@ -21,7 +23,10 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class AutomationTab { Routines, Runs }
+enum class AutomationTab { Routines, Runs, Agents }
+
+/** One of the agents fleet runs itself (the desktop's `builtInAgents`, 8.4): what it does and what it is doing now. */
+data class BuiltInAgent(val id: String, val name: String, val does: String, val state: String)
 
 /** One row of the Runs list: the run and the routine it belongs to. */
 data class RunLine(val run: RoutineRun, val routine: String)
@@ -37,17 +42,28 @@ data class AutomationUiState(
     val loading: Boolean = false,
     val tab: AutomationTab = AutomationTab.Routines,
     val routines: List<Routine> = emptyList(),
-    /** The newest runs across the routines, newest first. */
+    /** The newest runs across the routines, newest first: an older hub's Runs tab. */
     val runs: List<RunLine> = emptyList(),
+    /**
+     * Every run on the fleet's behalf, newest first (`runs { list }`, 8.3):
+     * tasks, missions, Jev, `claude -p` and routine fires. Null where the hub
+     * has no such list, and the tab draws [runs] instead.
+     */
+    val fleetRuns: List<FleetRun>? = null,
     /** The routine opened from the list; null shows the list. */
     val detail: RoutineDetail? = null,
     /** The hub's `automation_paused`; null until read. */
     val paused: Boolean? = null,
+    /** The hub's built-in routines (8.1's loops), read-only; empty from an older hub. */
+    val loops: List<LoopHealth> = emptyList(),
     /** What is being sent: `routine:<id>` or `pause`. */
     val busy: String? = null,
     val notice: String? = null,
     val error: Friendly? = null,
-)
+) {
+    /** The three agents fleet runs itself (8.4), read-only: Control's operator, the orchestrator and Jev. */
+    fun agents(nowSeconds: Long): List<BuiltInAgent> = builtInAgents(loops, fleetRuns.orEmpty(), paused == true, nowSeconds)
+}
 
 /**
  * Automation on the phone (redesign 8.9): the routines with their switch, the
@@ -69,8 +85,10 @@ class AutomationViewModel(
         val tab: AutomationTab = AutomationTab.Routines,
         val routines: List<Routine> = emptyList(),
         val runs: List<RunLine> = emptyList(),
+        val fleetRuns: List<FleetRun>? = null,
         val detail: RoutineDetail? = null,
         val paused: Boolean? = null,
+        val loops: List<LoopHealth> = emptyList(),
         val busy: String? = null,
         val notice: String? = null,
         val error: Friendly? = null,
@@ -88,8 +106,10 @@ class AutomationViewModel(
             tab = l.tab,
             routines = l.routines,
             runs = l.runs,
+            fleetRuns = l.fleetRuns,
             detail = l.detail,
             paused = l.paused,
+            loops = l.loops,
             busy = l.busy,
             notice = l.notice,
             error = l.error,
@@ -169,9 +189,14 @@ class AutomationViewModel(
         local.update { it.copy(loading = true) }
         try {
             val routines = actions.routines()
-            val paused = runCatching { actions.paused() }.getOrNull()
-            local.update { it.copy(routines = routines, paused = paused ?: it.paused) }
-            local.update { it.copy(loading = false, runs = recentRuns(routines)) }
+            val health = runCatching { actions.health() }.getOrNull()
+            local.update { it.copy(routines = routines, paused = health?.automationPaused ?: it.paused, loops = health?.loops ?: it.loops) }
+            if (fleet.capabilities.value.runs) {
+                val all = actions.fleetRuns(RUNS_SHOWN)
+                local.update { it.copy(loading = false, fleetRuns = all, runs = emptyList()) }
+            } else {
+                local.update { it.copy(loading = false, runs = recentRuns(routines), fleetRuns = null) }
+            }
             local.value.detail?.routine?.id?.let { readOne(it) }
         } catch (e: CancellationException) {
             throw e
@@ -181,8 +206,8 @@ class AutomationViewModel(
     }
 
     /**
-     * The Runs list. The hub has no fleet-wide runs read yet (8.3), so it is
-     * each routine's own newest runs, merged: [RUNS_PER_ROUTINE] from each of
+     * The Runs list on a hub without `runs` (before 8.3): each routine's own
+     * newest runs, merged: [RUNS_PER_ROUTINE] from each of
      * the first [ROUTINES_READ], newest first.
      */
     private suspend fun recentRuns(routines: List<Routine>): List<RunLine> =
@@ -282,4 +307,118 @@ fun runLine(run: RoutineRun, nowSeconds: Long): String {
         run.costMicros.takeIf { it > 0 }?.let(::dollars),
         "run now".takeIf { run.trigger == "run_now" },
     ).joinToString(" · ")
+}
+
+/** A run's status word (8.3's outcomes): Working, Failed, Needs you, Done; nothing to do has none. */
+fun fleetRunWord(run: FleetRun): StatusWord? = when (run.outcome) {
+    "running" -> StatusWord.WORKING
+    "failed" -> StatusWord.FAILED
+    "needs_person" -> StatusWord.NEEDS_YOU
+    "ok" -> StatusWord.DONE
+    else -> null
+}
+
+/** Who made a run, in words: "Control" for the operator, else the kind ("Morning brief"). */
+fun fleetRunKind(kind: String): String = when (kind) {
+    "operator" -> "Control"
+    "jev" -> "Jev"
+    "" -> "Run"
+    else -> kind.replace('_', ' ').replaceFirstChar { it.uppercase() }
+}
+
+/** A run's title: its owner (a mission's, routine's or session's name), else its kind. */
+fun fleetRunTitle(run: FleetRun): String = run.owner.takeIf { it.isNotBlank() && it != run.kind } ?: fleetRunKind(run.kind)
+
+/**
+ * A run's line: what kind it is, what it came to when that is more than its
+ * word ("nothing to do", the error, the summary), when, how long, what it
+ * cost: "Mission · failed: no worktree · 2 h ago · 4 min · $0.42".
+ */
+fun fleetRunLine(run: FleetRun, nowSeconds: Long): String {
+    val outcome = when (run.outcome) {
+        "failed" -> run.error?.takeIf { it.isNotBlank() }?.let { "failed: $it" }
+        "nothing_to_do" -> "nothing to do"
+        else -> null
+    } ?: run.summary?.takeIf { it.isNotBlank() }
+    val took = run.durationMs?.takeIf { it > 0 }?.let { ms ->
+        val secs = ms / 1000
+        when {
+            secs < 60 -> "under a minute"
+            secs < 3600 -> "${secs / 60} min"
+            else -> "${secs / 3600} h ${(secs % 3600) / 60} min"
+        }
+    }
+    return listOfNotNull(
+        fleetRunKind(run.kind).takeIf { fleetRunTitle(run) != it },
+        outcome,
+        relativeAgo(run.startedAt, nowSeconds),
+        took,
+        run.costMicros?.takeIf { it > 0 }?.let(::dollars),
+    ).joinToString(" · ")
+}
+
+/** "3 min", "2 h", "4 d": a span in the desktop's Automation words. */
+private fun span(secs: Long): String = when {
+    secs < 60 -> "${maxOf(0, secs)} s"
+    secs < 3_600 -> "${secs / 60} min"
+    secs < 86_400 -> "${secs / 3_600} h"
+    else -> "${secs / 86_400} d"
+}
+
+/**
+ * A built-in routine's line, the desktop's `loopLine` (8.4): "last run 3 min
+ * ago · next in 5 min", "paused", "failed 2 min ago: …", "not run yet here".
+ */
+fun loopLine(loop: LoopHealth, nowSeconds: Long, paused: Boolean): String {
+    val parts = mutableListOf<String>()
+    val stopped = paused && loop.pausable
+    if (stopped) parts += "paused"
+    val last = loop.lastRunAt
+    if (last != null) {
+        val ago = "${span(nowSeconds - last)} ago"
+        parts += if (loop.result == "error") "failed $ago" + (loop.lastError?.takeIf { it.isNotBlank() }?.let { ": $it" } ?: "") else "last run $ago"
+    } else {
+        parts += "not run yet here"
+    }
+    val next = loop.nextRunAt
+    if (next != null && !stopped) parts += if (next > nowSeconds) "next in ${span(next - nowSeconds)}" else "due now"
+    return parts.joinToString(" · ")
+}
+
+/** A built-in routine's word: Failed after an error, Paused under Pause all, else none (it is the fleet's own). */
+fun loopWord(loop: LoopHealth, paused: Boolean): StatusWord? = when {
+    paused && loop.pausable -> StatusWord.PAUSED
+    loop.result == "error" -> StatusWord.FAILED
+    else -> null
+}
+
+/**
+ * The agents fleet runs itself, as the desktop's Automation lists them (8.4):
+ * the operator by its last run, the orchestrator by the missions loop, Jev by
+ * what it proposed among the runs read.
+ */
+fun builtInAgents(loops: List<LoopHealth>, runs: List<FleetRun>, paused: Boolean, nowSeconds: Long): List<BuiltInAgent> {
+    val lastOperator = runs.filter { it.kind == "operator" }.maxByOrNull { it.startedAt }
+    val missions = loops.firstOrNull { it.name == "missions" }
+    val jev = runs.count { it.kind == "jev" }
+    return listOf(
+        BuiltInAgent(
+            "operator",
+            "Operator",
+            "The fleet agent you talk to in Control; hands work to sessions and missions.",
+            lastOperator?.let { "last ran ${span(nowSeconds - it.startedAt)} ago" } ?: "no run lately",
+        ),
+        BuiltInAgent(
+            "orchestrator",
+            "Orchestrator",
+            "Runs missions: plans, dispatches tasks, applies the brakes.",
+            missions?.let { loopLine(it, nowSeconds, paused) } ?: "not reported",
+        ),
+        BuiltInAgent(
+            "jev",
+            "Jev",
+            "Proposes the small calls a person would otherwise make; a person confirms.",
+            if (jev == 0) "no proposals lately" else "$jev proposal${if (jev == 1) "" else "s"} among the last runs",
+        ),
+    )
 }

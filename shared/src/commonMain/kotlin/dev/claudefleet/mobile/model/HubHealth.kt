@@ -40,4 +40,28 @@ data class HubHealth(
      * on their own stand still. Sent only while true; an older hub never sends it.
      */
     @SerialName("automation_paused") val automationPaused: Boolean = false,
+    /**
+     * The hub's built-in routines (claude-fleet 8.1's loops: reconcile,
+     * missions, tidy, …) and how each last ran, in this hub process. What the
+     * desktop's Automation lists as built-in routines (8.4); absent from an
+     * older hub.
+     */
+    val loops: List<LoopHealth> = emptyList(),
+)
+
+/** One built-in routine (`service::loops::LoopHealth`). */
+@Serializable
+@JsonIgnoreUnknownKeys
+data class LoopHealth(
+    val name: String = "",
+    val label: String = "",
+    /** Pause all stops it. */
+    val pausable: Boolean = false,
+    @SerialName("last_run_at") val lastRunAt: Long? = null,
+    @SerialName("next_run_at") val nextRunAt: Long? = null,
+    /** `ok` | `error` | `paused`; null before its first run in this process. */
+    val result: String? = null,
+    @SerialName("last_error") val lastError: String? = null,
+    val runs: Long = 0,
+    val failures: Long = 0,
 )

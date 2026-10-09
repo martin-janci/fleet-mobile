@@ -203,4 +203,64 @@ class TriageTest {
         )
         assertEquals(listOf(5L, 4L, 3L, 6L, 1L, 2L), rows.byTriage(now = NOW).map { it.id })
     }
+
+    // ---- Done · unread (contract 11's last_viewed_at, redesign 2.7) ----
+
+    @Test
+    fun a_turn_that_ended_after_the_last_look_is_done_unread() {
+        val unread = row(claudeStatus = "idle").copy(startedAt = NOW - 900, lastStopAt = NOW - 60, lastViewedAt = NOW - 300)
+        assertEquals(TriageBucket.DONE_UNREAD, unread.triageBucket())
+        assertEquals("Done · unread", TriageBucket.DONE_UNREAD.label)
+        // Seen after the turn ended: plain idle.
+        assertEquals(TriageBucket.IDLE, unread.copy(lastViewedAt = NOW - 10).triageBucket())
+        // Viewed in the very second the turn ended counts as seen.
+        assertEquals(TriageBucket.IDLE, unread.copy(lastViewedAt = NOW - 60).triageBucket())
+    }
+
+    @Test
+    fun a_session_nobody_opened_counts_from_its_start_and_a_found_one_is_never_unread() {
+        val started = row(claudeStatus = "completed").copy(startedAt = NOW - 900, lastStopAt = NOW - 60)
+        assertEquals(TriageBucket.DONE_UNREAD, started.triageBucket(), "fleet started it and nobody has looked")
+        val found = row(claudeStatus = "idle").copy(lastStopAt = NOW - 60)
+        assertEquals(TriageBucket.IDLE, found.triageBucket(), "reconcile found it: neither stamp, never unread")
+    }
+
+    @Test
+    fun done_unread_is_only_for_a_live_idle_row_and_ranks_where_the_desktop_ranks_it() {
+        val base = row().copy(startedAt = NOW - 900, lastStopAt = NOW - 60)
+        assertEquals(TriageBucket.WORKING, base.copy(claudeStatus = "working").triageBucket(), "a working row is working")
+        assertEquals(TriageBucket.LIFECYCLE, base.copy(claudeStatus = "idle", status = "ghost").triageBucket())
+        assertEquals(TriageBucket.CI_FAILING, base.copy(claudeStatus = "idle", ciStatus = "failing").triageBucket())
+        assertTrue(TriageBucket.DONE_UNREAD.needsYou, "the Needs you filter shows it, as the desktop's does")
+        assertEquals(TriageBucket.DONE_UNREAD, base.copy(claudeStatus = "idle", attention = Attention("done_unread")).triageBucket())
+    }
+
+    @Test
+    fun bucket_labels_are_the_six_status_words() {
+        val words = setOf("Needs you", "Working", "Failed", "Done", "Paused", "Idle")
+        // Status labels: one of the words, optionally followed by " · " and the reason.
+        for (b in listOf(
+            TriageBucket.WAITING, TriageBucket.STUCK, TriageBucket.FAILED, TriageBucket.DONE_UNREAD,
+            TriageBucket.LIFECYCLE, TriageBucket.IDLE_LONG, TriageBucket.WORKING, TriageBucket.IDLE, TriageBucket.ACCOUNT_LIMIT,
+        )) {
+            assertTrue(b.label.substringBefore(" · ") in words, "${b.name} reads ${b.label}")
+        }
+        assertEquals("Needs you", reasonLabel("waiting"))
+        assertEquals("Failed · stuck", reasonLabel("stuck"))
+        assertEquals("Paused", reasonLabel("lifecycle"))
+    }
+
+    @Test
+    fun origin_and_last_viewed_are_read_off_the_wire() {
+        val r = dev.claudefleet.mobile.net.json.decodeFromString(
+            SessionRow.serializer(),
+            """{"id":4,"tmux_name":"s","origin":"routine","origin_ref":"12","last_viewed_at":1700000000,"claude_profile":"work"}""",
+        )
+        assertEquals("routine", r.origin)
+        assertEquals("12", r.originRef)
+        assertEquals(1_700_000_000L, r.lastViewedAt)
+        assertEquals("work", r.claudeProfile)
+        val old = dev.claudefleet.mobile.net.json.decodeFromString(SessionRow.serializer(), """{"id":4,"tmux_name":"s"}""")
+        assertEquals(null, old.origin, "an older hub sends none")
+    }
 }

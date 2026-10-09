@@ -18,5 +18,14 @@ Two tests in `shared/src/jvmTest/.../ui/theme/` keep it honest:
 - `OrbitThemeContrastTest` holds the pairs the phone makes from the tokens
   (status chips, metadata on each surface container) at 4.5:1 in both themes.
 
+A third check holds the copy to its source, across the two repositories:
+`scripts/check-design-tokens.sh` fetches claude-fleet main's
+`docs/design/tokens.json` and compares it byte for byte (`--diff` prints the
+difference). `.github/workflows/design-tokens.yml` runs it daily, on pushes to
+main and on every PR: drift fails the scheduled run and any PR that touches the
+copy or `OrbitTokens.kt`, and only warns on other PRs, since the drift almost
+always starts in claude-fleet. Both repositories are public, so it needs no
+secret.
+
 To change a token: change the manual, copy its `tokens.json` here unchanged,
 then update the literal in `OrbitTokens.kt`.

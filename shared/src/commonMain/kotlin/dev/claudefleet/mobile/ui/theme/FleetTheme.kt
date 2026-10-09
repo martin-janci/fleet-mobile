@@ -79,6 +79,19 @@ class OrbitColors internal constructor(val isDark: Boolean) {
     val loaderAccent = c("loader-accent")
     val cometHead = c("comet-head")
     val agentClaude = c("agent-claude")
+    val scrim = c("scrim")
+    val scrimStrong = c("scrim-strong")
+    val aiPre = c("ai-pre")
+    val usageOk = c("usage-ok")
+    val usageWarn = c("usage-warn")
+    val usageCrit = c("usage-crit")
+    val synCode = c("syn-code")
+    val controlBg = c("control-bg")
+    val controlBgHover = c("control-bg-hover")
+    val controlBgActive = c("control-bg-active")
+    val controlBorderStrong = c("control-border-strong")
+    val controlFg = c("control-fg")
+    val controlFgQuiet = c("control-fg-quiet")
 }
 
 /** The manual's text styles: px sizes drawn as sp, so the system font scale still applies. */
@@ -158,6 +171,7 @@ internal fun orbitColorScheme(o: OrbitColors): ColorScheme {
         onErrorContainer = o.fg,
         outline = o.controlBorder,
         outlineVariant = o.border,
+        scrim = o.scrim,
         surfaceBright = o.bgRaise,
         surfaceDim = o.bg,
         surfaceContainerLowest = o.bg,
@@ -175,7 +189,7 @@ internal fun orbitColorScheme(o: OrbitColors): ColorScheme {
  * `status-failed` on `failed-soft` over `bg` is 4.35:1, under the 4.5 floor,
  * so a failed or stuck chip writes its word in `fg` and keeps the red for its
  * dot and fill. A stopped or unknown session has no dot and no fill, only the
- * idle grey. `OrbitThemeContrastTest` holds every pair at 4.5:1.
+ * idle grey; a paused one (an account at its limit) has the idle dot. `OrbitThemeContrastTest` holds every pair at 4.5:1.
  */
 internal fun orbitStatusColors(o: OrbitColors, tone: StatusTone): FleetStatusColors = when (tone) {
     StatusTone.WORKING -> FleetStatusColors(o.statusWorking, o.chipBg, o.statusWorking)
@@ -185,6 +199,7 @@ internal fun orbitStatusColors(o: OrbitColors, tone: StatusTone): FleetStatusCol
     StatusTone.FAILED -> FleetStatusColors(o.statusFailed, o.failedSoft, o.fg)
     StatusTone.COMPLETED -> FleetStatusColors(o.statusDone, o.doneSoft, o.statusDone)
     StatusTone.STOPPED -> FleetStatusColors(Color.Transparent, Color.Transparent, o.statusIdle)
+    StatusTone.PAUSED -> FleetStatusColors(o.statusIdle, o.chipBg, o.statusIdle)
     StatusTone.UNKNOWN -> FleetStatusColors(Color.Transparent, Color.Transparent, o.statusIdle.copy(alpha = 0.7f))
 }
 

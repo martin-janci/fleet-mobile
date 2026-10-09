@@ -70,9 +70,14 @@ fun sharedRows(sessions: List<SessionRow>, access: MyAccess): List<SharedRow> =
 internal fun sharedLine(s: SharedRow): String =
     GrantLevel.word(s.level) + if (s.row.needsAttention) " · waiting for its owner" else ""
 
-/** The word a needs-you row leads with: Failed for stuck and failed, else Needs you. */
+/**
+ * The word a needs-you row leads with: Paused for an account at its limit
+ * (it waits on a reset or a switch, not an answer), Failed for stuck and
+ * failed, else Needs you.
+ */
 internal fun inboxWord(row: SessionRow): StatusWord =
-    when (StatusWord.of(StatusTone.of(row.claudeStatus, row.stuckKind))) {
+    when (StatusWord.of(StatusTone.of(row))) {
+        StatusWord.PAUSED -> StatusWord.PAUSED
         StatusWord.FAILED -> StatusWord.FAILED
         else -> StatusWord.NEEDS_YOU
     }

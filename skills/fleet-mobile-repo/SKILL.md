@@ -156,6 +156,18 @@ missing feature should only hide a button. Instead, on every `ready`,
   not, an action counts as present until the hub answers `E_INVALID`
   "unknown … action", which `FleetState.actionMissing` records **for that
   connection** (the next `ready` asks again — it may be an upgraded hub).
+- **Argument values.** `ToolCatalog.paramValues` keeps every argument's
+  schema `enum`, not only `action`'s. `send_prompt`'s `keys` enumerates the
+  keys a hub will press (claude-fleet 14.14): `HubCapabilities.paneKeys` is
+  Escape, Tab, Enter and C-c plus the arrows, `BTab` and the Ctrl letters a
+  hub lists, so the full-screen key bar draws ⇧Tab, ←↑↓→ and ⌃ only where
+  the hub takes them.
+- **Redesign phone gaps (2.7, 4.10, 14.14, 8.9).** `touch_session_viewed`
+  (Done · unread), `check_account_headroom` + `restart_session { profile }`
+  (a paused row's Switch account), `queue_prompt` / `queued_prompts` (Send
+  later, held by the hub until the session is next idle) and `runs` (the
+  Automation sheet's Runs union) are each called only where `tools/list`
+  names them; an older hub keeps the old screen.
 - A hub that cannot answer `tools/list` reads as the old hub: nothing
   work-shaped is offered, and nothing errors. `HUB_VERSION_KEYS` stays only
   for the `send_prompt { keys }` chips, and `HUB_VERSION_DIGIT_KEYS` (0.2.36)

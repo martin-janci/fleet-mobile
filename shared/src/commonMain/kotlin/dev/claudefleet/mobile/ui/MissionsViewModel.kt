@@ -7,6 +7,9 @@ import dev.claudefleet.mobile.model.MissionCard
 import dev.claudefleet.mobile.model.MissionDetail
 import dev.claudefleet.mobile.model.MissionStep
 import dev.claudefleet.mobile.model.StepResult
+import dev.claudefleet.mobile.model.grantHoursLeft
+import dev.claudefleet.mobile.model.dollars
+import dev.claudefleet.mobile.model.SpendAsk
 import dev.claudefleet.mobile.model.key
 import dev.claudefleet.mobile.model.pauseMove
 import dev.claudefleet.mobile.net.HubCapabilities
@@ -32,6 +35,11 @@ data class MissionsUiState(
     val canPause: Boolean = false,
     /** A person may pause every mission at once (`missions_pause_all`). */
     val canPauseAll: Boolean = false,
+    /**
+     * A person may answer a spend ask (redesign 14.16): re-sign the grant
+     * (`mission_grant`), resume (`mission_state`) and answer its card.
+     */
+    val canAnswerSpend: Boolean = false,
     val open: Boolean = false,
     val loading: Boolean = false,
     val missions: List<Mission> = emptyList(),
@@ -91,6 +99,7 @@ class MissionsViewModel(
             canDecide = link("card_decide"),
             canPause = link("mission_state"),
             canPauseAll = link("missions_pause_all"),
+            canAnswerSpend = link("mission_grant") && link("mission_state") && link("card_decide"),
             open = l.open,
             loading = l.loading,
             missions = l.missions,
@@ -148,6 +157,32 @@ class MissionsViewModel(
     fun decide(card: MissionCard, ok: Boolean, note: String? = null): Job = act("card:${card.id}") {
         actions.decideCard(card.id, ok, note)
         local.update { it.copy(notice = if (ok) "Applied." else "Dismissed.") }
+    }
+
+    /**
+     * The spend ask's Approve (redesign 14.16). Only ever from a person's tap
+     * on the card — nothing calls it on a read, and the card has no default
+     * answer. Re-signs the live grant with [ask]'s new limit (every other term
+     * unchanged, for what is left of its time), resumes the mission, and
+     * answers the brake's card so the lead knows.
+     */
+    fun approveSpend(ask: SpendAsk, nowSeconds: Long): Job = act("spend:${ask.missionId}") { id ->
+        if (!state.value.canAnswerSpend || id != ask.missionId) return@act
+        val m = local.value.detail?.mission ?: return@act
+        actions.regrant(id, ask.grant, budgetCents = ask.newLimitMicros / 10_000, hours = grantHoursLeft(ask.grant, nowSeconds))
+        actions.setState(id, "active", m.version)
+        actions.decideCard(ask.cardId, ok = true, note = "Approved ${dollars(ask.moreMicros)} more; the new limit is ${dollars(ask.newLimitMicros)}.")
+        local.update { it.copy(notice = "Approved ${dollars(ask.moreMicros)} more. The mission runs again.") }
+    }
+
+    /**
+     * The spend ask's Deny: the budget stays; the brake's card is answered so
+     * the lead finishes within it. The grant is not touched.
+     */
+    fun denySpend(ask: SpendAsk): Job = act("spend:${ask.missionId}") { id ->
+        if (!state.value.canDecide || id != ask.missionId) return@act
+        actions.decideCard(ask.cardId, ok = true, note = "No more spend: finish within ${dollars(ask.budgetMicros)}.")
+        local.update { it.copy(notice = "Denied. The budget stays at ${dollars(ask.budgetMicros)}.") }
     }
 
     /** Pause an active mission, resume a paused one. */

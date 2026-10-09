@@ -11,6 +11,10 @@ import dev.claudefleet.mobile.data.QuickReplyActions
 import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.epochSeconds
+import dev.claudefleet.mobile.model.loginLabel
+import dev.claudefleet.mobile.model.forAccount
+import dev.claudefleet.mobile.model.QueuedPrompt
+import dev.claudefleet.mobile.model.HostLogin
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.GrantLevel
@@ -24,6 +28,7 @@ import dev.claudefleet.mobile.model.appending
 import dev.claudefleet.mobile.model.fingerprint
 import dev.claudefleet.mobile.model.tailMarker
 import dev.claudefleet.mobile.model.turnsAddedAfter
+import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
@@ -203,6 +208,8 @@ data class SessionUiState(
     val dismissGhostAvailable: Boolean = false,
     val reviewAvailable: Boolean = false,
     val repairAvailable: Boolean = false,
+    /** The keys the full-screen agent's bar may press in the pane ([HubCapabilities.paneKeys]). */
+    val paneKeys: Set<String> = HubCapabilities.BASE_PANE_KEYS,
     /** What the last repair found and did, until dismissed. */
     val repair: RepairReport? = null,
     /**
@@ -218,7 +225,32 @@ data class SessionUiState(
      * Edit (redesign 14.5, New bar only); the box is left free meanwhile.
      */
     val notSent: NotSent? = null,
+    /** The hub keeps a prompt for the session's next idle moment (`queue_prompt`, redesign 14.14). */
+    val sendLaterAvailable: Boolean = false,
+    /** The prompts the hub keeps for this session, oldest first, as last read. */
+    val queued: List<QueuedPrompt> = emptyList(),
+    /** What the last Send later did, in words ("Sent now: the session was idle."). */
+    val sendLaterNotice: String? = null,
+    /** The hub can say which login has room and restart under it (Switch account, step 4.10). */
+    val switchAccountAvailable: Boolean = false,
+    /** The login Switch account proposes, waiting for the second tap; null when none is proposed. */
+    val switchTarget: HostLogin? = null,
+    /** A Wait chosen for this limit: unix seconds of the reset it waits for. */
+    val waitingUntil: Long? = null,
+    /** What the last Switch account said when it had nowhere to go or went. */
+    val limitNotice: String? = null,
 ) {
+    /** Send later is offered: the hub keeps prompts and this person may drive the session. */
+    val canSendLater: Boolean
+        get() = sendLaterAvailable && !readOnly && session != null && connected
+
+    /**
+     * The row is paused at its account's limit (the hub's `account_limit`),
+     * and this person may restart it under another login: Switch account.
+     */
+    val canSwitchAccount: Boolean
+        get() = switchAccountAvailable && canRestart && session?.attention?.reason == "account_limit"
+
     /** A working agent can be stopped (Escape) — Send's place while there is nothing to send. */
     val canStop: Boolean
         get() = idle(sending, answering, busy) && !readOnly && connected && card == null &&
@@ -468,6 +500,11 @@ class SessionViewModel(
          */
         val sendError: Friendly? = null,
         val notSent: NotSent? = null,
+        val queued: List<QueuedPrompt> = emptyList(),
+        val sendLaterNotice: String? = null,
+        val switchTarget: HostLogin? = null,
+        val waitingUntil: Long? = null,
+        val limitNotice: String? = null,
     )
 
     private val local = MutableStateFlow(Local(draft = drafts.recall(sessionId)))
@@ -593,6 +630,19 @@ class SessionViewModel(
         // A draft filled from outside the box while it is open (a lesson's prompt).
         scope.launch {
             drafts.filled.filter { it == sessionId }.collect { local.update { l -> l.copy(draft = drafts.recall(sessionId)) } }
+        }
+        // Done · unread (contract 11): while this screen is open the session
+        // is on screen, so every turn that ends here is seen. Stamped on the
+        // hub (`touch_session_viewed`) only when the row reads unread — a
+        // call per finished turn, not per frame — and only by someone who may
+        // drive it: a watcher looking must not clear what the owner has not
+        // seen, which the hub refuses anyway.
+        scope.launch {
+            fleet.sessions
+                .map { rows -> rows.firstOrNull { it.id == sessionId }?.takeIf { it.isUnread }?.lastStopAt }
+                .distinctUntilChanged()
+                .filter { it != null }
+                .collect { touchViewed() }
         }
         // Ticks `now` every 30s — the same period [SessionsViewModel] uses for
         // the fleet list — so the strip's "2 min" / "idle since 2 h" wording
@@ -1033,14 +1083,16 @@ class SessionViewModel(
 
     /**
      * One key of the full-screen agent's bar (redesign 14.21) pressed in the
-     * pane while nothing is asked: Escape, Tab, Enter or C-c, nothing else.
+     * pane while nothing is asked: Escape, Tab, Enter or C-c, and the arrows,
+     * ⇧Tab and Ctrl letters where the hub lists them (14.14,
+     * [HubCapabilities.paneKeys]); nothing else.
      * Guarded as [pressEnter] is — never into a question, whose keys go
      * through [answer] — and the pane is read again after it, since a key
      * such as Tab changes the screen without a turn the hub would announce.
      */
     fun pressKey(key: String): Job = scope.launch {
         val current = local.value
-        if (key !in PANE_KEYS || !canWriteNow(current) || row() == null || blockedNow()) return@launch
+        if (key !in fleet.capabilities.value.paneKeys || !canWriteNow(current) || row() == null || blockedNow()) return@launch
         local.update { it.copy(sending = true, error = null) }
         try {
             actions.sendKeys(sessionId, key)
@@ -1171,6 +1223,124 @@ class SessionViewModel(
      * [SessionUiState.canRestart]) when it draws one at all.
      */
     fun restart(): Job = runManaged(::canRestartNow) { actions.restart(sessionId) }
+
+    // ---- Send later (redesign 14.14, claude-fleet 5.10 deferred prompts) ----
+
+    /**
+     * Hand [text] to the hub to type as a new turn the next time the session
+     * is idle — or now, if it is idle already. The hub holds it, so it goes
+     * whether or not this phone is still running; it is never typed into a
+     * dialog. Only where the hub serves `queue_prompt` and this person may
+     * drive the session.
+     */
+    fun sendLater(text: String): Job = scope.launch {
+        val body = text.trim()
+        if (body.isEmpty() || !fleet.capabilities.value.sendLater || readOnly || row() == null || !connected()) return@launch
+        if (!idle(local.value.sending, local.value.answering, local.value.busy)) return@launch
+        local.update { it.copy(busy = true, error = null, sendLaterNotice = null) }
+        try {
+            val r = actions.queuePrompt(sessionId, body)
+            val notice = if (r.delivered) "Sent now: the session was idle." else "It goes in when the session is next idle."
+            val queued = runCatching { actions.queuedPrompts(sessionId) }.getOrNull()
+            local.update { it.copy(sendLaterNotice = notice, queued = queued?.filter { q -> q.waiting } ?: it.queued) }
+            if (r.delivered) requestRead(first = false)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(error = friendly(t)) }
+        } finally {
+            local.update { it.copy(busy = false) }
+        }
+    }
+
+    private suspend fun touchViewed() {
+        if (!fleet.capabilities.value.touchViewed || readOnly) return
+        try {
+            actions.touchViewed(sessionId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            // A stamp is bookkeeping: a refusal or a dropped call costs one
+            // row staying unread, never a banner.
+        }
+    }
+
+    /** Read what the hub keeps for this session, for the Send later sheet. Silent on failure. */
+    fun loadQueued(): Job = scope.launch {
+        if (!fleet.capabilities.value.sendLater || readOnly) return@launch
+        try {
+            val queued = actions.queuedPrompts(sessionId)
+            local.update { it.copy(queued = queued.filter { q -> q.waiting }) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+        }
+    }
+
+    /** Take a waiting prompt back before the session gets it. */
+    fun cancelQueued(id: Long): Job = scope.launch {
+        if (!fleet.capabilities.value.sendLater || readOnly || !connected()) return@launch
+        try {
+            val left = actions.queuedPrompts(sessionId, cancel = id)
+            local.update { it.copy(queued = left.filter { q -> q.waiting }, sendLaterNotice = "Taken back.") }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(error = friendly(t)) }
+        }
+    }
+
+    fun dismissSendLaterNotice() {
+        local.update { it.copy(sendLaterNotice = null) }
+    }
+
+    // ---- a paused-on-limit row: Switch account and Wait (step 4.10) ----
+
+    /**
+     * Switch account, first tap: ask the hub which login on the session's
+     * host has the most room on another account, and show it. Nothing moves
+     * until [confirmSwitch] — AI proposes, a person confirms.
+     */
+    fun proposeSwitch(): Job = scope.launch {
+        val r = row() ?: return@launch
+        if (!fleet.capabilities.value.switchAccount || !canRestartNow() || !connected()) return@launch
+        if (!idle(local.value.sending, local.value.answering, local.value.busy)) return@launch
+        local.update { it.copy(busy = true, error = null, limitNotice = null, switchTarget = null) }
+        try {
+            val h = actions.accountHeadroom(r.hostAlias, r.claudeProfile).forAccount(r.accountUuid)
+            val target = h.suggestion
+            local.update {
+                if (target != null) it.copy(switchTarget = target)
+                else it.copy(limitNotice = "No other login on ${r.hostAlias} has room left.")
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(error = friendly(t)) }
+        } finally {
+            local.update { it.copy(busy = false) }
+        }
+    }
+
+    /** Switch account, second tap: restart the session under the proposed login, resuming its conversation. */
+    fun confirmSwitch(accountName: (String) -> String? = { null }): Job {
+        val target = local.value.switchTarget
+        return runManagedThen({ target != null && canRestartNow() && fleet.capabilities.value.switchAccount }) {
+            val t = target ?: return@runManagedThen null
+            actions.restartUnder(sessionId, t.profile ?: "")
+            local.update { it.copy(switchTarget = null, limitNotice = "Resumed under ${loginLabel(t, accountName)}.") }
+            null
+        }
+    }
+
+    fun cancelSwitch() {
+        local.update { it.copy(switchTarget = null) }
+    }
+
+    /** Wait: fold the buttons into "Waiting until <reset>" — nothing is sent; the session resumes on its own after the reset. */
+    fun waitForReset(resetsAt: Long) {
+        local.update { it.copy(waitingUntil = resetsAt, switchTarget = null) }
+    }
 
     /**
      * Read the session's conversations (`session_conversations`), for the
@@ -1700,10 +1870,20 @@ class SessionViewModel(
         dismissGhostAvailable = fleet.capabilities.value.dismissGhost,
         reviewAvailable = fleet.capabilities.value.spawnReview,
         repairAvailable = fleet.capabilities.value.repairSession,
+        paneKeys = fleet.capabilities.value.paneKeys,
         repair = l.repair,
         pending = l.pending,
         errorFromSend = l.error != null && l.error === l.sendError,
         notSent = l.notSent,
+        sendLaterAvailable = fleet.capabilities.value.sendLater,
+        queued = l.queued,
+        sendLaterNotice = l.sendLaterNotice,
+        switchAccountAvailable = fleet.capabilities.value.switchAccount,
+        switchTarget = l.switchTarget,
+        // A wait holds for the limit it was chosen for: while its reset is
+        // ahead. A later limit asks afresh rather than "Waiting until <past>".
+        waitingUntil = l.waitingUntil?.takeIf { it > nowSeconds },
+        limitNotice = l.limitNotice,
     )
 }
 
@@ -1769,9 +1949,6 @@ internal val SESSION_EVENT_DEBOUNCE = 500.milliseconds
  * when the REPL never moves at all.
  */
 internal const val ANSWER_WAIT_SECONDS: Int = 30
-
-/** The keys [SessionViewModel.pressKey] presses in an agent's pane; the hub's own key list less the digits. */
-internal val PANE_KEYS: Set<String> = setOf("Escape", "Tab", "Enter", "C-c")
 
 /** How long after a key the pane is read again: long enough for the agent to redraw. */
 internal const val AFTER_KEY_MS: Long = 300L

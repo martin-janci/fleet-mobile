@@ -821,6 +821,25 @@ class HubClientTest {
 
     // ---- the work graph (M8) ----
 
+    /** claude-fleet 14.14: `send_prompt`'s `keys` enumerates the keys a hub presses; the bar reads it. */
+    @Test
+    fun the_tool_catalog_reads_the_keys_a_hub_presses() = runTest {
+        val tools = """{"jsonrpc":"2.0","id":1,"result":{"tools":[""" +
+            """{"name":"send_prompt","inputSchema":{"properties":{"prompt":{"type":"string"},""" +
+            """"keys":{"type":["string","null"],"enum":["Enter","Escape","Tab","BTab","Up","Down","Left","Right","C-c","C-r","1",null]}}}}]}}"""
+        val (hub, _) = client { tools to HttpStatusCode.OK }
+
+        val caps = HubCapabilities.of(hub.toolCatalog())
+
+        assertEquals(
+            setOf("Escape", "Tab", "Enter", "C-c", "BTab", "Up", "Down", "Left", "Right", "C-r"),
+            caps.paneKeys,
+            "the listed keys the bar has caps for; a digit answers through the card, null is no key",
+        )
+        assertTrue(caps.offers("send_prompt", "keys", "Up"))
+        assertEquals(HubCapabilities.BASE_PANE_KEYS, HubCapabilities(tools = setOf("send_prompt")).paneKeys, "an older hub: the four keys")
+    }
+
     /**
      * `tools/list` is plain MCP on the ordinary mount. What it answers is what
      * the hub serves this token: names, and the `action` enum where the

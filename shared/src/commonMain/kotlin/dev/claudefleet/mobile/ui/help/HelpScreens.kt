@@ -136,7 +136,7 @@ fun TourOverlay(stop: Int, anchors: TourAnchors, onNext: () -> Unit, onSkip: () 
     val current = TOUR_STOPS.getOrNull(stop) ?: return
     var area by remember { mutableStateOf(Rect.Zero) }
     val hole = anchors.rects[current.anchor]?.translate(-area.left, -area.top)
-    val scrim = o.bg.copy(alpha = 0.78f)
+    val scrim = o.scrimStrong
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -504,6 +504,9 @@ fun PracticeScreen(
         val open = state.open
         if (open == null) {
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                // The demo's notification, as a real one would arrive, marked
+                // Practice; a tap opens the demo, the way a real one opens its card.
+                if (state.answered == null) PracticeNotificationCard(PracticeFixtures.notification()) { practice.open(PracticeFixtures.demo.id) }
                 for (row in practice.sessions) {
                     PhoneSessionRow(row = row, nowSeconds = PracticeFixtures.NOW, showHost = true, onClick = { practice.open(row.id) })
                 }
@@ -528,6 +531,26 @@ fun PracticeScreen(
                 }
             }
         }
+    }
+}
+
+/** The practice notification, drawn as a notification: its accent edge, never the amber of Needs you. */
+@Composable
+private fun PracticeNotificationCard(n: PracticeNotification, onOpen: () -> Unit) {
+    val o = Fleet.colors
+    val shape = RoundedCornerShape(OrbitTokens.radius("radius-phone-card").dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = gutter, vertical = 8.dp)
+            .background(o.bgRaise, shape)
+            .border(1.dp, o.accent, shape)
+            .clickable(onClick = onOpen)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(n.title, color = o.fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(n.body, color = o.fg2, fontSize = 13.sp, lineHeight = 18.sp)
     }
 }
 

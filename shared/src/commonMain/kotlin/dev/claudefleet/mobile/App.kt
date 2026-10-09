@@ -41,6 +41,8 @@ import dev.claudefleet.mobile.data.AgentActions
 import dev.claudefleet.mobile.data.ControlActions
 import dev.claudefleet.mobile.data.AppSession
 import dev.claudefleet.mobile.data.AuthState
+import dev.claudefleet.mobile.model.limitAt
+import dev.claudefleet.mobile.ui.SessionLaterHost
 import dev.claudefleet.mobile.ui.components.ChatHost
 import dev.claudefleet.mobile.data.ChatFormActions
 import dev.claudefleet.mobile.data.HubChatFormActions
@@ -1419,6 +1421,8 @@ private fun FleetRoute(
                                 onOpenSessions = { org -> sessions.showOrg(org); nav.select(Tab.Sessions) },
                                 onOpenHosts = { nav.openFromMore(Screen.Hosts) },
                                 onOpenMembers = { org: OrgDetail -> members.open(org); Unit }.takeIf { membersState.available },
+                                onOpenAutomation = { automation.open(); Unit }.takeIf { automationState.available },
+                                automationLine = automationLine(automationState.routines, automationState.paused),
                             ),
                         )
                         if (membersState.open) {
@@ -2090,6 +2094,8 @@ private fun FleetRoute(
                         onTogglePause = { missions.togglePause() },
                         onPauseAll = { missions.pauseAll() },
                         onDismissError = missions::dismissError,
+                        onApproveSpend = { missions.approveSpend(it, epochSeconds()) },
+                        onDenySpend = { missions.denySpend(it) },
                     ),
                     orbit = layout == PhoneLayout.New,
                 )
@@ -2604,6 +2610,22 @@ private fun SessionRoute(
         notice = extras.archiveError.takeIf { newLayout },
         onDismissNotice = extrasVm::dismissArchiveError,
         onPaneKey = { vm.pressKey(it) },
+        later = run {
+            val names by repository.accountNames.collectAsState()
+            val usage by repository.accountUsage.collectAsState()
+            SessionLaterHost(
+                onSendLater = { vm.sendLater(it) },
+                onLoadQueued = { vm.loadQueued() },
+                onCancelQueued = { vm.cancelQueued(it) },
+                onDismissNotice = vm::dismissSendLaterNotice,
+                onProposeSwitch = { vm.proposeSwitch() },
+                onConfirmSwitch = { vm.confirmSwitch { uuid -> names[uuid] } },
+                onCancelSwitch = vm::cancelSwitch,
+                onWait = vm::waitForReset,
+                limitResetsAt = state.session?.accountUuid?.let(usage::get)?.limitAt(state.nowSeconds)?.resetsAt,
+                accountName = { uuid -> names[uuid] },
+            )
+        },
         full = full,
         onFull = { full = it },
         control = control,

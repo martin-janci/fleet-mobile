@@ -43,9 +43,9 @@ enum class StatusWord(val label: String) {
          * reason goes on the line after it); stuck is Failed, because both are
          * a terminal someone has to go and fix; a stopped session is Idle, as
          * the manual files paused, stopped and queued under the idle colour.
-         * Paused is for a session the fleet paused (an account at its limit,
-         * automation off), which the hub says from contract 11 on, so no tone
-         * maps to it yet. Unknown has no word: the row shows a dash.
+         * Paused is for a session the fleet paused: an account at its limit,
+         * which the hub says from contract 11 on ([StatusTone.PAUSED]).
+         * Unknown has no word: the row shows a dash.
          */
         fun of(tone: StatusTone): StatusWord? = when (tone) {
             StatusTone.BLOCKED -> NEEDS_YOU
@@ -53,6 +53,7 @@ enum class StatusWord(val label: String) {
             StatusTone.STUCK, StatusTone.FAILED -> FAILED
             StatusTone.COMPLETED -> DONE
             StatusTone.IDLE, StatusTone.STOPPED -> IDLE
+            StatusTone.PAUSED -> PAUSED
             StatusTone.UNKNOWN -> null
         }
     }

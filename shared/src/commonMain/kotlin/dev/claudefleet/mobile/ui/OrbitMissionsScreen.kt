@@ -45,10 +45,11 @@ import dev.claudefleet.mobile.ui.kit.listBody
  * mission opens in the Missions sheet's detail, where its steps, cards and
  * autonomy already are ("mission detail stays on MobileControl").
  *
- * The rest of the board comes with the steps it needs: the spend ask (Approve
- * and Deny, neither pre-selected) and "Waits on you" with 9.8's handoffs and
- * 8.6's routines; the background agent screen once the hub takes a project,
- * an agent, read-only and a stop limit for one.
+ * The spend ask (Approve and Deny, neither pre-selected) is the mission
+ * detail's first card ([SpendAskCard]), derived from the budget brake's ask
+ * card and the grant ([spendAsk]). "Waits on you" with 9.8's handoffs and
+ * 8.6's routines, and the background agent screen, come with the steps they
+ * need.
  */
 
 /** A week, for "Done this week". */
