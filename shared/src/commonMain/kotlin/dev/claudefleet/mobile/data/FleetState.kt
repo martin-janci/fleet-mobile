@@ -174,7 +174,7 @@ interface FleetState {
     /**
      * The wire-contract revision the hub's last trusted `ready` named, or
      * null before one and from a hub that names none. Gates what only a
-     * newer contract carries, such as the Answer share level (revision 15).
+     * newer contract carries, such as the Answer share level (revision 13).
      */
     val hubContract: StateFlow<Int?> get() = NoWork.hubContract
 
