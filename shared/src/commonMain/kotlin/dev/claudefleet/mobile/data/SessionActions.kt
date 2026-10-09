@@ -1,5 +1,8 @@
 package dev.claudefleet.mobile.data
 
+import dev.claudefleet.mobile.model.Headroom
+import dev.claudefleet.mobile.model.QueuePromptResult
+import dev.claudefleet.mobile.model.QueuedPrompt
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.ConversationSummary
@@ -74,6 +77,28 @@ interface SessionActions {
 
     /** Kill and recreate the tmux session in place — for a wedged REPL. */
     suspend fun restart(sessionId: Long)
+
+    /**
+     * Restart under another login: [profile] a credential profile, "" for the
+     * host's own (step 4.4's Switch account). The defaults below are a hub
+     * without the call; the screen asks only where `tools/list` names it.
+     */
+    suspend fun restartUnder(sessionId: Long, profile: String): Unit =
+        throw UnsupportedOperationException("restart_session { profile }")
+
+    /** Which login on [hostAlias] has room left (`check_account_headroom`). */
+    suspend fun accountHeadroom(hostAlias: String, profile: String?): Headroom =
+        throw UnsupportedOperationException("check_account_headroom")
+
+    /** Send later: typed now if idle, else kept by the hub for the next idle moment (`queue_prompt`). */
+    suspend fun queuePrompt(sessionId: Long, prompt: String): QueuePromptResult =
+        throw UnsupportedOperationException("queue_prompt")
+
+    /** The prompts the hub keeps for this session; [cancel] takes one back first (`queued_prompts`). */
+    suspend fun queuedPrompts(sessionId: Long, cancel: Long? = null): List<QueuedPrompt> = emptyList()
+
+    /** Stamp the session viewed now (`touch_session_viewed`), so its finished turns read as seen. */
+    suspend fun touchViewed(sessionId: Long) {}
 
     /**
      * `rewind_conversation`: [mode] `"rewind"` restarts this session on its
@@ -156,6 +181,23 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
 
     override suspend fun restart(sessionId: Long) =
         session.withClient { it.restart(sessionId) }
+
+    override suspend fun restartUnder(sessionId: Long, profile: String) {
+        session.withClient { it.restartUnder(sessionId, profile) }
+    }
+
+    override suspend fun accountHeadroom(hostAlias: String, profile: String?): Headroom =
+        session.withClient { it.checkAccountHeadroom(hostAlias, profile) }
+
+    override suspend fun queuePrompt(sessionId: Long, prompt: String): QueuePromptResult =
+        session.withClient { it.queuePrompt(sessionId, prompt) }
+
+    override suspend fun queuedPrompts(sessionId: Long, cancel: Long?): List<QueuedPrompt> =
+        session.withClient { it.queuedPrompts(sessionId, cancel) }
+
+    override suspend fun touchViewed(sessionId: Long) {
+        session.withClient { it.touchSessionViewed(sessionId) }
+    }
 
     override suspend fun rewind(sessionId: Long, anchorUuid: String?, mode: String, newWorktree: String?): SessionRow =
         session.withClient { it.rewind(sessionId, anchorUuid, mode, newWorktree) }

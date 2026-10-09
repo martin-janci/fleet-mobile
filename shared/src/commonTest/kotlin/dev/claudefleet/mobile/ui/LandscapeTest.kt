@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.net.HubCapabilities
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -114,5 +115,38 @@ class LandscapeTest {
         val keys = agentBarKeys(card).associate { it.label to it.press }
         assertNull(keys["Esc"])
         assertNull(keys["⏎"])
+    }
+
+    @Test
+    fun a_hub_that_lists_the_arrows_and_ctrl_keys_gets_their_caps() {
+        val listed = HubCapabilities.BASE_PANE_KEYS + setOf("BTab", "Left", "Up", "Down", "Right", "C-r", "C-u")
+        val keys = agentBarKeys(null, listed)
+        assertEquals(
+            listOf("Esc", "Tab", "⏎", "⌃C", "1", "2", "3", "⇧Tab", "←", "↑", "↓", "→", "⌃"),
+            keys.map { it.label },
+        )
+        val byLabel = keys.associate { it.label to it.press }
+        assertEquals(AgentPress.Key("BTab"), byLabel["⇧Tab"])
+        assertEquals(AgentPress.Key("Up"), byLabel["↑"])
+        assertNull(byLabel["⌃"], "the ⌃ cap opens the letters' row; it presses nothing itself")
+        assertEquals(listOf("⌃R", "⌃U"), ctrlBarKeys(null, listed).map { it.label })
+        assertEquals(listOf(AgentPress.Key("C-r"), AgentPress.Key("C-u")), ctrlBarKeys(null, listed).map { it.press })
+        assertEquals("Control R", ctrlBarKeys(null, listed).first().spoken)
+    }
+
+    @Test
+    fun the_extra_keys_wait_while_a_question_is_up() {
+        val listed = HubCapabilities.BASE_PANE_KEYS + setOf("BTab", "Up", "C-r")
+        val card = BlockedCard(headline = "Bash command", answers = listOf(Answer.Option(1, "Yes"), Answer.Enter))
+        val keys = agentBarKeys(card, listed).associate { it.label to it.press }
+        assertNull(keys["⇧Tab"])
+        assertNull(keys["↑"])
+        assertTrue(ctrlBarKeys(card, listed).isEmpty(), "a Ctrl key drives the session; it answers nothing")
+    }
+
+    @Test
+    fun an_older_hub_gets_only_the_four_keys() {
+        assertEquals(listOf("Esc", "Tab", "⏎", "⌃C", "1", "2", "3"), agentBarKeys(null, HubCapabilities.BASE_PANE_KEYS).map { it.label })
+        assertTrue(ctrlBarKeys(null, HubCapabilities.BASE_PANE_KEYS).isEmpty())
     }
 }

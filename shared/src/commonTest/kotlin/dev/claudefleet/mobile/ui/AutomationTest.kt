@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.RoutineActions
+import dev.claudefleet.mobile.model.FleetRun
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.HubHealth
 import dev.claudefleet.mobile.model.ProjectRow
@@ -69,6 +70,15 @@ private class FakeRoutineActions : RoutineActions {
         return list.first { it.id == routineId }.copy(enabled = enabled).also { r -> list = list.map { if (it.id == routineId) r else it } }
     }
 
+    var fleet = listOf(
+        FleetRun(id = "task:4", kind = "task", owner = "fix-login", startedAt = 500, outcome = "running", sessionIds = listOf(9)),
+        FleetRun(id = "orchestration:7", kind = "mission", owner = "Ship 2.0", startedAt = 400, outcome = "needs_person", missionId = 3),
+        FleetRun(id = "aux:2", kind = "morning_brief", owner = "morning_brief", startedAt = 300, outcome = "ok", costMicros = 420_000),
+        FleetRun(id = "routine:12", kind = "routine", owner = "Morning PR sweep", startedAt = 200, outcome = "failed", error = "no host", routineId = 1),
+    )
+
+    override suspend fun fleetRuns(limit: Int): List<FleetRun> = fleet.also { calls += "fleet_runs $limit" }
+
     override suspend fun paused(): Boolean = paused.also { calls += "paused" }
 
     override suspend fun setPaused(paused: Boolean) {
@@ -115,6 +125,35 @@ class AutomationTest {
         assertEquals("Friday release notes", s.runs[1].routine)
         assertEquals(true, s.paused)
         assertTrue("runs 1 10" in actions.calls)
+    }
+
+    @Test
+    fun a_hub_with_runs_lists_every_kind_of_run_in_one_list() = runTest {
+        // claude-fleet 8.3: tasks, missions, Jev, claude -p and routine fires
+        // in one union; the per-routine reads are not made.
+        val actions = FakeRoutineActions()
+        val vm = automation(caps = HubCapabilities(tools = setOf("routines", "runs", "set_setting", "fleet_health")), actions = actions)
+        runCurrent()
+        vm.open()
+        runCurrent()
+        val runs = assertNotNull(vm.state.value.fleetRuns)
+        assertEquals(listOf("task:4", "orchestration:7", "aux:2", "routine:12"), runs.map { it.id })
+        assertTrue(actions.calls.none { it.startsWith("runs ") }, "the union replaces each routine's own runs")
+        assertTrue(vm.state.value.runs.isEmpty())
+        assertEquals(listOf(StatusWord.WORKING, StatusWord.NEEDS_YOU, StatusWord.DONE, StatusWord.FAILED), runs.map(::fleetRunWord))
+        assertEquals("Morning brief", fleetRunTitle(runs[2]), "a run whose owner is its kind is titled by the kind, in words")
+        assertEquals("2 min ago · \$0.42", fleetRunLine(runs[2], nowSeconds = 420))
+        assertEquals("Routine · failed: no host · 3 min ago", fleetRunLine(runs[3], nowSeconds = 380))
+    }
+
+    @Test
+    fun an_older_hub_keeps_the_routines_own_runs() = runTest {
+        val vm = automation()
+        runCurrent()
+        vm.open()
+        runCurrent()
+        assertNull(vm.state.value.fleetRuns)
+        assertEquals(3, vm.state.value.runs.size)
     }
 
     @Test

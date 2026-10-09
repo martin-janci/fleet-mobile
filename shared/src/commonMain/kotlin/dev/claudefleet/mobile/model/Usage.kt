@@ -128,3 +128,56 @@ fun AccountUsageSnapshot.limitAt(now: Long): AccountLimit? {
     u.fiveHour?.takeIf { it.atLimit() }?.let { return AccountLimit(weekly = false, resetsAt = it.resetsAt) }
     return null
 }
+
+/** One login on a host (`check_account_headroom`, claude-fleet's `account_limits::HostLogin`). */
+@Serializable
+data class HostLogin(
+    /** Null = the host's own login; else the credential profile's name. */
+    val profile: String? = null,
+    @SerialName("account_uuid") val accountUuid: String,
+    /** Percent used of the account's tighter live window; null without a reading. */
+    @SerialName("used_pct") val usedPct: Double? = null,
+)
+
+/** `check_account_headroom` (hub contract 14): which login on a host has room left. */
+@Serializable
+data class Headroom(
+    @SerialName("pause_at_pct") val pauseAtPct: Double = 100.0,
+    val chosen: HostLogin? = null,
+    val over: Boolean = false,
+    val suggestion: HostLogin? = null,
+    val logins: List<HostLogin> = emptyList(),
+)
+
+/**
+ * The headroom answer for the account a session actually bills — the
+ * desktop's `headroomForAccount` (`account_limits.ts`, review r05). The hub
+ * reads the login by profile, but a row's `account_uuid` is what it runs on
+ * (a profile can be logged into another account since the start), so when
+ * the row names an account the host has a login for, `over` and the
+ * suggestion are read for that account: the login under the line with the
+ * least used, on another account.
+ */
+fun Headroom.forAccount(accountUuid: String?): Headroom {
+    val chosen = accountUuid?.let { a -> logins.firstOrNull { it.accountUuid == a } } ?: return this
+    val used = chosen.usedPct
+    val over = used != null && used >= pauseAtPct
+    var suggestion: HostLogin? = null
+    if (over) {
+        for (l in logins) {
+            val pct = l.usedPct ?: continue
+            if (l.accountUuid == chosen.accountUuid || pct >= pauseAtPct) continue
+            if (suggestion == null || pct < (suggestion.usedPct ?: Double.MAX_VALUE)) suggestion = l
+        }
+    }
+    return copy(chosen = chosen, over = over, suggestion = suggestion)
+}
+
+/** "work (m.janci@…)" or the account alone: how a login reads in the switch question. */
+fun loginLabel(l: HostLogin, accountName: (String) -> String?): String {
+    val who = accountName(l.accountUuid) ?: l.accountUuid.take(8)
+    return l.profile?.let { "$it ($who)" } ?: who
+}
+
+/** "95% used" or "no reading". */
+fun usedText(l: HostLogin): String = l.usedPct?.let { "${kotlin.math.round(it).toInt()}% used" } ?: "no reading"

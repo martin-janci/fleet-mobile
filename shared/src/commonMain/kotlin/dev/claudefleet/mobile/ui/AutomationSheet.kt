@@ -194,15 +194,51 @@ private fun AutomationList(state: AutomationUiState, nowSeconds: Long, handlers:
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         TabButton("Routines ${state.routines.size}", state.tab == AutomationTab.Routines) { handlers.onTab(AutomationTab.Routines) }
         TabButton("Runs", state.tab == AutomationTab.Runs) { handlers.onTab(AutomationTab.Runs) }
+        TabButton("Agents", state.tab == AutomationTab.Agents) { handlers.onTab(AutomationTab.Agents) }
     }
     when (state.tab) {
+        AutomationTab.Agents -> {
+            // Read-only, as on the desktop: what fleet runs itself.
+            val agents = state.agents(nowSeconds)
+            agents.forEachIndexed { i, a ->
+                PhoneRow(title = a.name, line = "${a.does} · ${a.state}", dot = false, divider = i < agents.lastIndex)
+            }
+        }
         AutomationTab.Routines -> {
+            if (state.loops.isNotEmpty()) {
+                // The fleet's own loops (8.1), read-only: Pause all stops the pausable ones.
+                Text("Built in", color = o.fgMuted, fontSize = 13.sp)
+                state.loops.forEachIndexed { i, loop ->
+                    PhoneRow(
+                        title = loop.label.ifBlank { loop.name },
+                        line = loopLine(loop, nowSeconds, state.paused == true),
+                        word = loopWord(loop, state.paused == true),
+                        dot = loopWord(loop, state.paused == true) != null,
+                        divider = i < state.loops.lastIndex,
+                    )
+                }
+                HorizontalDivider(color = o.border)
+                Text("Yours", color = o.fgMuted, fontSize = 13.sp)
+            }
             if (state.routines.isEmpty() && !state.loading) {
                 Text("No routines yet. Make one on the desktop: Automation, New routine.", color = o.fgMuted, fontSize = 14.sp)
             }
             for (r in state.routines) RoutineRow(r, nowSeconds, state, handlers, canToggle = state.canToggle, open = true)
         }
-        AutomationTab.Runs -> {
+        AutomationTab.Runs -> state.fleetRuns?.let { all ->
+            // Every run on the fleet's behalf (8.3): tasks, missions, Jev,
+            // `claude -p` and routine fires. A run opens its first session.
+            if (all.isEmpty() && !state.loading) Text("No runs yet.", color = o.fgMuted, fontSize = 14.sp)
+            all.forEachIndexed { i, run ->
+                PhoneRow(
+                    title = fleetRunTitle(run),
+                    line = fleetRunLine(run, nowSeconds),
+                    word = fleetRunWord(run),
+                    divider = i < all.lastIndex,
+                    onClick = run.sessionIds.firstOrNull()?.let { id -> { handlers.onOpenSession(id) } },
+                )
+            }
+        } ?: run {
             if (state.runs.isEmpty() && !state.loading) Text("No runs yet.", color = o.fgMuted, fontSize = 14.sp)
             state.runs.forEachIndexed { i, line ->
                 PhoneRow(

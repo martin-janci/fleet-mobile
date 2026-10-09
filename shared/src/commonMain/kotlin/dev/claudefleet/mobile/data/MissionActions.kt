@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.data
 import dev.claudefleet.mobile.model.Mission
 import dev.claudefleet.mobile.model.MissionCard
 import dev.claudefleet.mobile.model.MissionDetail
+import dev.claudefleet.mobile.model.MissionGrant
 import dev.claudefleet.mobile.model.StartOutcome
 
 /**
@@ -31,6 +32,14 @@ interface MissionActions {
 
     /** Pause every mission this person may change; the ids that were paused. */
     suspend fun pauseAll(): List<Long>
+
+    /**
+     * The spend ask's Approve: re-sign [grant] with a [budgetCents] budget for
+     * [hours]; every other term unchanged. The default is a hub the sheet
+     * never asks (it checks `mission_grant` first).
+     */
+    suspend fun regrant(missionId: Long, grant: MissionGrant, budgetCents: Long, hours: Int): MissionGrant =
+        throw UnsupportedOperationException("mission_grant")
 }
 
 /** [MissionActions] against the paired hub, through [AppSession.withClient]. */
@@ -49,4 +58,7 @@ class HubMissionActions(private val session: AppSession) : MissionActions {
         session.withClient { it.setMissionState(missionId, state, expectedVersion) }
 
     override suspend fun pauseAll(): List<Long> = session.withClient { it.pauseAllMissions() }
+
+    override suspend fun regrant(missionId: Long, grant: MissionGrant, budgetCents: Long, hours: Int): MissionGrant =
+        session.withClient { it.regrantMission(missionId, grant, budgetCents, hours) }
 }

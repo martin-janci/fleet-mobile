@@ -7,6 +7,11 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.data.STOPPED
+import dev.claudefleet.mobile.model.Attention
+import dev.claudefleet.mobile.model.QueuedPrompt
+import dev.claudefleet.mobile.model.QueuePromptResult
+import dev.claudefleet.mobile.model.HostLogin
+import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
@@ -288,6 +293,44 @@ private class FakeActions : SessionActions {
 
     override suspend fun restart(sessionId: Long) {
         restarted += sessionId
+    }
+
+    // ---- Send later, Switch account and Done · unread (redesign 14.14, 4.10, 2.7) ----
+
+    val queuedSent = mutableListOf<String>()
+    var queueDelivers = false
+    var waiting = mutableListOf<QueuedPrompt>()
+    val cancelled = mutableListOf<Long>()
+    val touched = mutableListOf<Long>()
+    var headroom = Headroom()
+    val headroomAsked = mutableListOf<Pair<String, String?>>()
+    val restartedUnder = mutableListOf<String>()
+
+    override suspend fun queuePrompt(sessionId: Long, prompt: String): QueuePromptResult {
+        queuedSent += prompt
+        if (!queueDelivers) waiting += QueuedPrompt(id = waiting.size + 1L, sessionId = sessionId, body = prompt)
+        return QueuePromptResult(sessionId, delivered = queueDelivers, queuedId = if (queueDelivers) null else waiting.size.toLong())
+    }
+
+    override suspend fun queuedPrompts(sessionId: Long, cancel: Long?): List<QueuedPrompt> {
+        if (cancel != null) {
+            cancelled += cancel
+            waiting.removeAll { it.id == cancel }
+        }
+        return waiting.toList()
+    }
+
+    override suspend fun touchViewed(sessionId: Long) {
+        touched += sessionId
+    }
+
+    override suspend fun accountHeadroom(hostAlias: String, profile: String?): Headroom {
+        headroomAsked += hostAlias to profile
+        return headroom
+    }
+
+    override suspend fun restartUnder(sessionId: Long, profile: String) {
+        restartedUnder += profile
     }
 
     val reviews = mutableListOf<String>()
@@ -3383,7 +3426,28 @@ class SessionViewModelTest {
         vm.pressKey("Up").join()
         vm.pressKey("1").join()
         runCurrent()
-        assertTrue(actions.sentKeys.isEmpty(), "digits answer through the card; arrows are not hub keys")
+        assertTrue(actions.sentKeys.isEmpty(), "digits answer through the card; arrows are not an older hub's keys")
+    }
+
+    @Test
+    fun the_key_bar_presses_the_arrows_and_ctrl_keys_a_hub_lists() = runTest {
+        // claude-fleet 14.14: a hub that enumerates `send_prompt`'s `keys`
+        // takes the arrows, BTab and the listed Ctrl letters.
+        val actions = FakeActions()
+        val fleet = FakeFleetState()
+        fleet.capabilities.value = HubCapabilities(
+            tools = setOf("send_prompt"),
+            paramValues = mapOf("send_prompt" to mapOf("keys" to setOf("Enter", "Escape", "Tab", "C-c", "Up", "BTab", "C-r", "1"))),
+        )
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.pressKey("Up").join()
+        vm.pressKey("BTab").join()
+        vm.pressKey("C-r").join()
+        vm.pressKey("Down").join() // not listed by this hub
+        vm.pressKey("C-z").join() // listed nowhere: the phone has no cap for it
+        vm.pressKey("1").join() // a digit still answers only through the card
+        runCurrent()
+        assertEquals(listOf("Up", "BTab", "C-r"), actions.sentKeys)
     }
 
     @Test
@@ -3647,5 +3711,144 @@ class SessionViewModelTest {
         assertEquals("half-written", vm.state.value.draft)
         vm.retryLastTurn("  ").join()
         assertEquals(1, actions.sentPrompts.size, "a blank prompt is never sent")
+    }
+
+    // ---- Send later (redesign 14.14 on claude-fleet's deferred prompts) ----
+
+    @Test
+    fun send_later_hands_the_prompt_to_the_hub_and_lists_what_waits() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(tools = setOf("queue_prompt", "queued_prompts")), actions, backgroundScope)
+        runCurrent()
+        assertTrue(vm.state.value.canSendLater)
+
+        vm.sendLater("  run the tests again  ").join()
+        runCurrent()
+
+        assertEquals(listOf("run the tests again"), actions.queuedSent, "trimmed, and through queue_prompt, never send_prompt")
+        assertTrue(actions.sentPrompts.isEmpty())
+        assertEquals(listOf("run the tests again"), vm.state.value.queued.map { it.body })
+        assertEquals("It goes in when the session is next idle.", vm.state.value.sendLaterNotice)
+
+        vm.cancelQueued(1).join()
+        runCurrent()
+        assertEquals(listOf(1L), actions.cancelled)
+        assertTrue(vm.state.value.queued.isEmpty())
+    }
+
+    @Test
+    fun send_later_to_an_idle_session_says_it_went_now() = runTest {
+        val actions = FakeActions().apply { queueDelivers = true }
+        val vm = SessionViewModel(ID, FakeFleetState(listOf(row(status = "idle")), tools = setOf("queue_prompt", "queued_prompts")), actions, backgroundScope)
+        runCurrent()
+        vm.sendLater("next step").join()
+        runCurrent()
+        assertEquals("Sent now: the session was idle.", vm.state.value.sendLaterNotice)
+    }
+
+    @Test
+    fun send_later_is_not_offered_or_called_on_an_older_hub_or_a_readonly_token() = runTest {
+        val actions = FakeActions()
+        val old = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        runCurrent()
+        assertFalse(old.state.value.canSendLater)
+        old.sendLater("x").join()
+        val readonly = SessionViewModel(ID, FakeFleetState(tools = setOf("queue_prompt", "queued_prompts")), actions, backgroundScope, canSendPrompts = false)
+        runCurrent()
+        assertFalse(readonly.state.value.canSendLater)
+        readonly.sendLater("x").join()
+        runCurrent()
+        assertTrue(actions.queuedSent.isEmpty())
+    }
+
+    // ---- Done · unread: the open screen stamps the session viewed (contract 11) ----
+
+    @Test
+    fun an_open_screen_marks_an_unread_turn_seen_once() = runTest {
+        val actions = FakeActions()
+        val unread = row(status = "idle").copy(startedAt = 10, lastStopAt = 90, lastViewedAt = 50)
+        val fleet = FakeFleetState(listOf(unread), tools = setOf("touch_session_viewed"))
+        SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+        assertEquals(listOf(ID), actions.touched)
+        // The hub's answer arrives as a row frame: seen now, nothing more to stamp.
+        fleet.sessions.value = listOf(unread.copy(lastViewedAt = 95))
+        runCurrent()
+        assertEquals(listOf(ID), actions.touched)
+        // The next turn ends while the screen is open: stamped again.
+        fleet.sessions.value = listOf(unread.copy(lastViewedAt = 95, lastStopAt = 120))
+        runCurrent()
+        assertEquals(listOf(ID, ID), actions.touched)
+    }
+
+    @Test
+    fun a_watcher_or_an_older_hub_never_stamps() = runTest {
+        val actions = FakeActions()
+        val unread = row(status = "idle").copy(startedAt = 10, lastStopAt = 90)
+        SessionViewModel(ID, FakeFleetState(listOf(unread)), actions, backgroundScope)
+        SessionViewModel(ID, FakeFleetState(listOf(unread), tools = setOf("touch_session_viewed")), actions, backgroundScope, canSendPrompts = false)
+        runCurrent()
+        assertTrue(actions.touched.isEmpty())
+    }
+
+    // ---- a paused-on-limit row: Switch account and Wait (step 4.10) ----
+
+    private val limited = row(status = "idle").copy(attention = Attention("account_limit"), accountUuid = "acc-a", claudeProfile = "work")
+    private val switchTools = setOf("check_account_headroom", "restart_session")
+
+    private fun switchFleet() = FakeFleetState(listOf(limited)).apply {
+        capabilities.value = HubCapabilities(tools = switchTools, params = mapOf("restart_session" to setOf("session_id", "profile")))
+    }
+
+    @Test
+    fun switch_account_proposes_first_and_restarts_only_on_the_second_tap() = runTest {
+        val actions = FakeActions().apply {
+            headroom = Headroom(
+                pauseAtPct = 95.0,
+                logins = listOf(HostLogin("work", "acc-a", 100.0), HostLogin(null, "acc-b", 40.0), HostLogin("spare", "acc-c", 20.0)),
+            )
+        }
+        val vm = SessionViewModel(ID, switchFleet(), actions, backgroundScope)
+        runCurrent()
+        assertTrue(vm.state.value.canSwitchAccount)
+
+        vm.proposeSwitch().join()
+        runCurrent()
+        assertEquals(listOf<Pair<String, String?>>("pine" to "work"), actions.headroomAsked)
+        assertEquals(HostLogin("spare", "acc-c", 20.0), vm.state.value.switchTarget, "the login with the most room, on another account")
+        assertTrue(actions.restartedUnder.isEmpty(), "nothing moves on the first tap")
+
+        vm.confirmSwitch { if (it == "acc-c") "m@spare" else null }.join()
+        runCurrent()
+        assertEquals(listOf("spare"), actions.restartedUnder)
+        assertEquals("Resumed under spare (m@spare).", vm.state.value.limitNotice)
+        assertNull(vm.state.value.switchTarget)
+    }
+
+    @Test
+    fun switch_account_with_nowhere_to_go_says_so_and_wait_folds_the_buttons() = runTest {
+        val actions = FakeActions().apply { headroom = Headroom(pauseAtPct = 95.0, logins = listOf(HostLogin("work", "acc-a", 100.0))) }
+        val vm = SessionViewModel(ID, switchFleet(), actions, backgroundScope, clock = { 1_000L })
+        runCurrent()
+        vm.proposeSwitch().join()
+        runCurrent()
+        assertEquals("No other login on pine has room left.", vm.state.value.limitNotice)
+        assertNull(vm.state.value.switchTarget)
+
+        vm.waitForReset(5_000L)
+        runCurrent()
+        assertEquals(5_000L, vm.state.value.waitingUntil)
+        assertTrue(actions.restartedUnder.isEmpty())
+    }
+
+    @Test
+    fun switch_account_is_not_offered_where_the_hub_cannot_restart_under_a_profile() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(listOf(limited), tools = switchTools), actions, backgroundScope)
+        runCurrent()
+        assertFalse(vm.state.value.canSwitchAccount, "restart_session without `profile` is an older hub")
+        vm.proposeSwitch().join()
+        runCurrent()
+        assertTrue(actions.headroomAsked.isEmpty())
     }
 }

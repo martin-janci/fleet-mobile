@@ -36,6 +36,7 @@ import dev.claudefleet.mobile.model.Mission
 import dev.claudefleet.mobile.model.MissionCard
 import dev.claudefleet.mobile.model.MissionDetail
 import dev.claudefleet.mobile.model.MissionStep
+import dev.claudefleet.mobile.model.SpendAsk
 import dev.claudefleet.mobile.model.autonomyLabel
 import dev.claudefleet.mobile.model.dollars
 import dev.claudefleet.mobile.model.isQuestion
@@ -59,6 +60,9 @@ data class MissionsHandlers(
     val onTogglePause: () -> Unit = {},
     val onPauseAll: () -> Unit = {},
     val onDismissError: () -> Unit = {},
+    /** The spend ask's two answers (redesign 14.16); each only ever from a tap. */
+    val onApproveSpend: (SpendAsk) -> Unit = {},
+    val onDenySpend: (SpendAsk) -> Unit = {},
 )
 
 /**

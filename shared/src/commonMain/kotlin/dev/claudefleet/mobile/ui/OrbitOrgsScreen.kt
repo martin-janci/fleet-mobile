@@ -111,6 +111,14 @@ data class OrbitOrgsHandlers(
     val onOpenHosts: () -> Unit = {},
     /** An org's members sheet; null where the hub does not serve `org_admin` to this phone. */
     val onOpenMembers: ((OrgDetail) -> Unit)? = null,
+    /**
+     * The fleet's Automation (redesign 14.17 on the desktop's 8.4): built-in
+     * and written routines, the agents fleet runs, the runs, Pause all. Null
+     * where the hub does not serve `routines` to this phone.
+     */
+    val onOpenAutomation: (() -> Unit)? = null,
+    /** Automation's line ("Paused · 3 of 5 routines on"); shown with [onOpenAutomation]. */
+    val automationLine: String? = null,
 )
 
 /** This phone may change [org]'s members: it administers it and the hub serves member actions. */
@@ -216,6 +224,17 @@ private fun LazyListScope.orgDetail(org: OrgDetail, handlers: OrbitOrgsHandlers,
                 },
                 lead = null,
                 dot = false,
+            )
+        }
+    }
+    handlers.onOpenAutomation?.let { open ->
+        item(key = "automation") {
+            PhoneRow(
+                title = "Automation",
+                line = listOfNotNull(handlers.automationLine, "whole fleet").joinToString(" · "),
+                lead = null,
+                dot = false,
+                onClick = open,
             )
         }
     }

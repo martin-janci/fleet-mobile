@@ -56,8 +56,12 @@ private class FakeTrackerActions : TrackerActions {
         return row
     }
 
+    /** A hub that refuses the credential and quotes it back, as a careless error message would. */
+    var echoSecret = false
+
     override suspend fun setCredential(trackerId: Long, authKind: String, username: String?, secret: String): TrackerAdminRow {
         calls += "credential $trackerId $authKind $username ${secret.length}"
+        if (echoSecret) throw HubError.Tool("E_INVALID", "credential \"$secret\" is not a valid token")
         return rows.first { it.id == trackerId }
     }
 
@@ -265,6 +269,32 @@ class TrackersTest {
         assertEquals("Step 2 of 2 · Sign in", trackerStepHeading(TrackerStep.SignIn))
         assertEquals("Checking the token with Jira Cloud…", connectingLine(TrackerWork.Checking, "jira"))
     }
+    /**
+     * 14.20's Verified by: the tracker secret never reaches a log. Not the
+     * state's string form (what a crash report or a debug log prints) at any
+     * step, not the call log, and not a refusal that quotes it back.
+     */
+    @Test
+    fun the_tracker_secret_never_reaches_a_log() = runTest {
+        val secret = "tok-SECRET-9f3a"
+        val actions = FakeTrackerActions().apply { echoSecret = true }
+        val vm = trackers(actions = actions)
+        runCurrent()
+        vm.startConnect()
+        vm.editSite("https://linear.app/acme")
+        vm.next()
+        vm.editSecret(secret)
+        runCurrent()
+        assertFalse(secret in vm.state.value.toString(), "typed: the state prints without it")
+        vm.connect()
+        runCurrent()
+        val s = vm.state.value
+        assertFalse(secret in s.toString(), "after a refusal: not in the state")
+        val error = assertNotNull(s.error)
+        assertFalse(secret in error.body || secret in error.title || secret in error.details.orEmpty(), "not in the banner or its details: $error")
+        assertTrue(actions.calls.none { secret in it }, "the call log has only its length")
+        assertEquals("", s.wizard?.secret, "and the phone keeps no copy")
+    }
 }
 
 /** Review r09 B4, B5: step bars from two steps on, and closing asks only if something was typed. */
@@ -341,4 +371,5 @@ class InboxViewsTest {
         )
         assertEquals(listOf(2L, 1L), doneTodayRows(rows, midnight).map { it.id })
     }
+
 }

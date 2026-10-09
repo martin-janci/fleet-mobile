@@ -63,6 +63,53 @@ class HelpTest {
         assertNull(s.lesson)
     }
 
+    /**
+     * 14.22's Verified by, the stored half: Skip and No help write nothing a
+     * later start would act on — only the mode the person picked.
+     */
+    @Test
+    fun skip_and_no_help_store_nothing_but_the_choice() {
+        val skipped = FakePrefs()
+        HelpSettings(skipped).apply {
+            pick(HelpMode.TOUR, tourHere = true)
+            skipTour()
+        }
+        assertEquals(setOf("help.mode"), skipped.written, "Skip leaves no tour, tip or lesson state")
+        val fresh = HelpSettings(skipped).state.value
+        assertNull(fresh.tourStop)
+        assertNull(fresh.lesson)
+        assertTrue(fresh.lessonsDone.isEmpty())
+
+        val none = FakePrefs()
+        HelpSettings(none).pick(HelpMode.NONE, tourHere = true)
+        assertEquals(setOf("help.mode"), none.written, "No help leaves nothing but the choice")
+        val again = HelpSettings(none).state.value
+        assertNull(again.tourStop, "and starts no tour on the next launch")
+        assertTrue(Tip.entries.none { again.shows(it) })
+    }
+
+    /** Leaving the practice fleet leaves nothing behind: it opens fresh, its demo waiting again. */
+    @Test
+    fun the_practice_fleet_starts_fresh_after_it_is_left() {
+        val practice = PracticeFleet()
+        practice.open(PracticeFixtures.demo.id)
+        practice.answer(1)
+        practice.reset()
+        assertEquals(PracticeState(), practice.state.value)
+        assertEquals("blocked", practice.sessions.first { it.id == PracticeFixtures.demo.id }.claudeStatus)
+    }
+
+    /** 14.22: practice notifications are marked Practice, offer no button, and name no real session. */
+    @Test
+    fun practice_notifications_are_marked_practice() {
+        val n = PracticeFixtures.notification()
+        assertTrue(n.title.startsWith("Practice · "), n.title)
+        assertTrue(n.publicBody.startsWith("Practice · "), "the lock screen line says Practice too")
+        assertTrue(PracticeFixtures.QUESTION !in n.publicBody, "a locked phone never shows the question")
+        assertTrue(n.actions.isEmpty(), "no Approve, no button at all")
+        assertTrue(n.sessionId < 0, "a practice id no hub session has")
+    }
+
     @Test
     fun a_tip_shows_once_and_no_more_tips_stops_them_all_until_reset() {
         val prefs = FakePrefs()

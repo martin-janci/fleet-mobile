@@ -38,6 +38,8 @@ import dev.claudefleet.mobile.model.dollars
 import dev.claudefleet.mobile.model.key
 import dev.claudefleet.mobile.model.pauseMove
 import dev.claudefleet.mobile.model.runEstimateLine
+import dev.claudefleet.mobile.model.SpendAsk
+import dev.claudefleet.mobile.model.spendAsk
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.kit.Comet
 import dev.claudefleet.mobile.ui.kit.StatusWord
@@ -55,6 +57,9 @@ import dev.claudefleet.mobile.ui.theme.OrbitTokens
  */
 
 const val MISSION_GRANT_TAG = "mission.grant"
+const val MISSION_SPEND_TAG = "mission.spend"
+const val MISSION_SPEND_APPROVE_TAG = "mission.spend.approve"
+const val MISSION_SPEND_DENY_TAG = "mission.spend.deny"
 const val MISSION_GRANT_NOT_NOW_TAG = "mission.grant.notNow"
 const val MISSION_PLAN_TAG = "mission.plan."
 const val MISSION_RUNNING_TAG = "mission.running."
@@ -148,6 +153,7 @@ fun OrbitMissionDetail(detail: MissionDetail, state: MissionsUiState, handlers: 
     val rows = remember(detail) { planRows(detail) }
     val titles = remember(detail.items) { detail.items.associate { it.id to (it.key ?: it.title) } }
     val ask = remember(plan) { grantAsk(plan) }
+    val spend = remember(detail) { spendAsk(detail) }
     var notNow by rememberSaveable(m.id) { mutableStateOf(false) }
     val gutter = OrbitTokens.spacing("phone-gutter").dp
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -177,9 +183,21 @@ fun OrbitMissionDetail(detail: MissionDetail, state: MissionsUiState, handlers: 
             if (ask != null && !notNow) {
                 item(key = "grant") { GrantCard(ask) { notNow = true } }
             }
-            if (plan != null && plan.cards.isNotEmpty()) {
-                item(key = "cards-h") { GroupHeading("Waiting for you", plan.cards.size) }
-                items(plan.cards, key = { "card:${it.id}" }) { c -> CardRow(c, state, detail.mayChange, handlers) }
+            if (spend != null) {
+                item(key = "spend") {
+                    SpendAskCard(
+                        spend,
+                        canAnswer = state.canAnswerSpend && detail.mayChange && state.busy == null,
+                        onApprove = { handlers.onApproveSpend(spend) },
+                        onDeny = { handlers.onDenySpend(spend) },
+                    )
+                }
+            }
+            // The brake's own card is the spend ask above; it is not listed twice.
+            val cards = plan?.cards.orEmpty().filter { it.id != spend?.cardId }
+            if (cards.isNotEmpty()) {
+                item(key = "cards-h") { GroupHeading("Waiting for you", cards.size) }
+                items(cards, key = { "card:${it.id}" }) { c -> CardRow(c, state, detail.mayChange, handlers) }
             }
             val running = rows.filter { it.mark == PlanMark.RUNNING }
             runningLine(rows)?.let { line ->
@@ -319,5 +337,51 @@ private fun GrantCard(ask: GrantAsk, onNotNow: () -> Unit) {
             lineHeight = 18.sp,
         )
         TextButton(onClick = onNotNow, modifier = Modifier.testTag(MISSION_GRANT_NOT_NOW_TAG)) { Text("Not now", color = o.fg2) }
+    }
+}
+
+/**
+ * The spend ask (redesign 14.16, board MobileMissions): who asked, what was
+ * spent of what, what Approve adds and the new limit, and why. Approve and
+ * Deny are both plain outlined buttons — neither is filled, focused or
+ * pre-selected, so nothing answers it but a deliberate tap.
+ */
+@Composable
+internal fun SpendAskCard(ask: SpendAsk, canAnswer: Boolean, onApprove: () -> Unit, onDeny: () -> Unit) {
+    val o = Fleet.colors
+    val shape = RoundedCornerShape(OrbitTokens.radius("radius-phone-card").dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = OrbitTokens.spacing("phone-gutter").dp, vertical = 8.dp)
+            .background(o.bgSunk, shape)
+            .border(1.dp, o.statusWaiting, shape)
+            .padding(14.dp)
+            .testTag(MISSION_SPEND_TAG),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text("Approve more spend?", color = o.fg, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.semantics { heading() })
+        Text("Spent ${dollars(ask.spentMicros)} of ${dollars(ask.budgetMicros)}", color = o.fg2, fontSize = 14.sp, lineHeight = 20.sp)
+        Text(
+            "Asks for ${dollars(ask.moreMicros)} more (new limit ${dollars(ask.newLimitMicros)})",
+            color = o.fg2,
+            fontSize = 14.sp,
+            lineHeight = 20.sp,
+        )
+        if (ask.why.isNotBlank()) Text("Why: ${ask.why}", color = o.fgMuted, fontSize = 13.sp, lineHeight = 18.sp)
+        Text(
+            "Nothing is pre-selected. Deny tells the lead to finish within ${dollars(ask.budgetMicros)}.",
+            color = o.fgMuted,
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+            androidx.compose.material3.OutlinedButton(onClick = onDeny, enabled = canAnswer, modifier = Modifier.testTag(MISSION_SPEND_DENY_TAG)) {
+                Text("Deny")
+            }
+            androidx.compose.material3.OutlinedButton(onClick = onApprove, enabled = canAnswer, modifier = Modifier.testTag(MISSION_SPEND_APPROVE_TAG)) {
+                Text("Approve ${dollars(ask.moreMicros)}")
+            }
+        }
     }
 }
