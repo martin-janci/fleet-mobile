@@ -49,6 +49,22 @@ data class ReleaseInfo(
     /** What changed, in plain words, most notable first. */
     val notes: List<String>,
     val pageUrl: String,
+    /**
+     * sha256 of the certificate the APK must be signed with, from the signed
+     * release manifest (the hub's decision); null from GitHub, where only the
+     * installed app's own certificate is compared.
+     */
+    val signerSha256: String? = null,
+    /** The hub requires this update: this build is withdrawn, below a minimum, or past a mandatory deadline. */
+    val required: Boolean = false,
+    /** The hub's sentence for why, when it gave one. */
+    val reason: String? = null,
+    /**
+     * The same APK on the paired hub's mirror (`/update/artifact/<sha256>`),
+     * absolute; tried before [apkUrl]. The token for it comes from the
+     * session at download time, never from here.
+     */
+    val mirrorUrl: String? = null,
 )
 
 /** Where the phone learns that a newer release exists. */

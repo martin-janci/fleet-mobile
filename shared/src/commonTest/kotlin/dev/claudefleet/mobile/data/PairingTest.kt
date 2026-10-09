@@ -202,6 +202,17 @@ class AppSessionTest {
         assertEquals("/pair", calls.path(0))
     }
 
+    /** The update mirror gets the token; GitHub, or a look-alike host, never does. */
+    @Test
+    fun the_bearer_goes_only_to_the_paired_hub() = runTest {
+        val (app, _, _) = session { pairOk() to HttpStatusCode.OK }
+        assertNull(app.bearerFor("$BASE/update/artifact/x"))
+        app.pair("$BASE/pair#$CODE")
+        assertEquals("tok-secret-value", app.bearerFor("$BASE/update/artifact/x"))
+        assertNull(app.bearerFor("https://github.com/x.apk"))
+        assertNull(app.bearerFor("$BASE.evil.example/update/artifact/x"))
+    }
+
     /** `/pair` is the one unauthenticated route: there is no token to send yet. */
     @Test
     fun the_pairing_request_carries_the_code_and_no_bearer_token() = runTest {

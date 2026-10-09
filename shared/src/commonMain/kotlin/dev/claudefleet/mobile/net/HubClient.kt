@@ -54,7 +54,12 @@ import dev.claudefleet.mobile.model.DebugDeviceList
 import dev.claudefleet.mobile.model.DeviceOutput
 import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineRun
+import dev.claudefleet.mobile.model.RunsPage
+import dev.claudefleet.mobile.model.Headroom
+import dev.claudefleet.mobile.model.QueuePromptResult
+import dev.claudefleet.mobile.model.QueuedPrompt
 import dev.claudefleet.mobile.model.MissionCard
+import dev.claudefleet.mobile.model.MissionGrant
 import dev.claudefleet.mobile.model.MissionDetail
 import dev.claudefleet.mobile.model.StartOutcome
 import dev.claudefleet.mobile.model.TidyApplyItem
@@ -125,6 +130,7 @@ import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -252,7 +258,19 @@ class HubClient(
             val properties = tool.properties() ?: return@mapNotNull null
             name to properties.keys
         }.toMap()
-        return ToolCatalog(names, actions, params)
+        // Every argument whose schema enumerates its values, not only
+        // `action`: `send_prompt`'s `keys` lists the keys a hub will press
+        // (claude-fleet 14.14), which is how the key bar learns the arrows.
+        val paramValues = tools.mapNotNull { tool ->
+            val name = (tool["name"] as? JsonPrimitive)?.content ?: return@mapNotNull null
+            val properties = tool.properties() ?: return@mapNotNull null
+            val enums = properties.mapNotNull { (param, schema) ->
+                val enum = (schema as? JsonObject)?.get("enum") as? JsonArray ?: return@mapNotNull null
+                param to enum.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }.toSet()
+            }.toMap()
+            if (enums.isEmpty()) null else name to enums
+        }.toMap()
+        return ToolCatalog(names, actions, params, paramValues)
     }
 
     /**
@@ -437,7 +455,9 @@ class HubClient(
      * Press one key instead of typing text — `send_prompt` with `keys` and an
      * empty `prompt`. [key] is one of `"Enter"`, `"Escape"`, `"C-c"` or, from
      * [HUB_VERSION_DIGIT_KEYS], a digit `"1"`–`"9"` that picks that option of
-     * a dialog — the set the hub's guard accepts.
+     * a dialog — the set the hub's guard accepts; a hub whose schema
+     * enumerates `keys` also takes the arrows, `BTab` and the Ctrl letters
+     * it lists ([HubCapabilities.paneKeys]).
      */
     suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult =
         call(
@@ -491,6 +511,70 @@ class HubClient(
     /** Kill and recreate the tmux session in place — for a wedged REPL. */
     suspend fun restart(sessionId: Long): Unit =
         call("restart_session", buildJsonObject { put("session_id", sessionId) }) { }
+
+    /**
+     * Restart the session under another login (step 4.4's Switch account,
+     * `restart_session { profile }`): [profile] is a credential profile's
+     * name, or "" for the host's own login. The conversation is resumed under
+     * it; a running `claude` cannot change its login, so a switch is a restart.
+     */
+    suspend fun restartUnder(sessionId: Long, profile: String): SessionRow =
+        call(
+            "restart_session",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("profile", profile)
+            },
+        ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
+
+    /**
+     * Which login on [hostAlias] has room left (`check_account_headroom`, hub
+     * contract 14): [profile] is the session's own, null for the host's login.
+     * From the usage the hub already keeps; never a fresh fetch.
+     */
+    suspend fun checkAccountHeadroom(hostAlias: String, profile: String?): Headroom =
+        call(
+            "check_account_headroom",
+            buildJsonObject {
+                put("host_alias", hostAlias)
+                profile?.let { put("profile", it) }
+            },
+        ) { json.decodeFromJsonElement(Headroom.serializer(), it) }
+
+    /**
+     * Send later (redesign 14.14 on claude-fleet's 5.10 deferred prompts):
+     * typed now when the session is idle, else kept by the hub and typed once
+     * its turn ends — never into a dialog. The hub holds it, so it is sent
+     * whether or not this phone is still running.
+     */
+    suspend fun queuePrompt(sessionId: Long, prompt: String): QueuePromptResult =
+        call(
+            "queue_prompt",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("prompt", prompt)
+            },
+        ) { json.decodeFromJsonElement(QueuePromptResult.serializer(), it) }
+
+    /** The session's prompts still waiting (and any whose typing failed); [cancel] takes one back first. */
+    suspend fun queuedPrompts(sessionId: Long, cancel: Long? = null): List<QueuedPrompt> =
+        call(
+            "queued_prompts",
+            buildJsonObject {
+                put("session_id", sessionId)
+                cancel?.let { put("cancel", it) }
+            },
+        ) { json.decodeFromJsonElement(ListSerializer(QueuedPrompt.serializer()), it) }
+
+    /**
+     * A person is looking at the session now (`touch_session_viewed`, hub
+     * contract 11): every turn that has ended reads as seen, so its Done ·
+     * unread clears on every device. Answers the row.
+     */
+    suspend fun touchSessionViewed(sessionId: Long): SessionRow =
+        call("touch_session_viewed", buildJsonObject { put("session_id", sessionId) }) {
+            json.decodeFromJsonElement(SessionRow.serializer(), it)
+        }
 
     /**
      * Copy the session's transcript up to [anchorUuid] (a turn's
@@ -1273,11 +1357,49 @@ class HubClient(
             },
         ) { json.decodeFromJsonElement(Mission.serializer(), it) }
 
+    /**
+     * Re-sign a mission's grant with a new budget (the spend ask's Approve,
+     * redesign 14.16): `work_link { mission_grant }` replaces the live grant,
+     * so every other term of [grant] — level, hosts, runs at once, login — is
+     * sent again unchanged and only [budgetCents] and [hours] are new. A
+     * person's call only; the hub refuses anything else.
+     */
+    suspend fun regrantMission(missionId: Long, grant: MissionGrant, budgetCents: Long, hours: Int): MissionGrant =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "mission_grant")
+                put("mission_id", missionId)
+                put("level", grant.level)
+                put("hours", hours)
+                put("budget_cents", budgetCents)
+                grant.hosts?.let { hs -> put("hosts", buildJsonArray { hs.forEach { add(it) } }) }
+                grant.maxParallel?.let { put("max_parallel", it) }
+                grant.profile?.let { put("profile", it) }
+            },
+        ) { json.decodeFromJsonElement(MissionGrant.serializer(), it) }
+
     /** Pause every active mission this token may change and end their grants; answers their ids. */
     suspend fun pauseAllMissions(): List<Long> =
         call("work_link", buildJsonObject { put("action", "missions_pause_all") }) {
             json.decodeFromJsonElement(ListSerializer(Long.serializer()), it)
         }
+
+    // ---- runs (claude-fleet redesign 8.3) ----
+
+    /**
+     * Every run this token may see, newest first: tasks, mission steps, Jev
+     * decisions, fleet's `claude -p` runs and routine fires (`runs { list }`,
+     * readonly on the hub). Called only where `tools/list` names `runs`.
+     */
+    suspend fun runs(limit: Int? = null): RunsPage =
+        call(
+            "runs",
+            buildJsonObject {
+                put("action", "list")
+                limit?.let { put("limit", it) }
+            },
+        ) { json.decodeFromJsonElement(RunsPage.serializer(), it) }
 
     // ---- routines (claude-fleet redesign 8.5) ----
     //
@@ -1942,6 +2064,7 @@ class HubClient(
     ): FetchedFile = try {
         http.prepareGet("$base/downloads/$id") {
             if (token != null) header(HttpHeaders.Authorization, "Bearer $token")
+            FleetClient.header?.let { header(CLIENT_HEADER, it) }
             timeout {
                 requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
                 socketTimeoutMillis = HUB_CALL_TIMEOUT_MS
@@ -1994,6 +2117,21 @@ class HubClient(
      */
     private var framedOnly: Boolean = false
 
+    /**
+     * `POST /update/check` (claude-fleet update design §6): what this app
+     * should install, as the hub decides it, with [request] as the body. The
+     * update wire is outside the contract gate, so this answers while the hub
+     * refuses this build for a contract skew — exactly when the phone most
+     * needs to learn what to install. Null from a hub too old to have the
+     * route (404).
+     */
+    suspend fun updateCheck(request: String): String? {
+        val (status, text) = send("$base/update/check", request, authenticated = true)
+        if (status == 404) return null
+        throwForStatus(status, text, base, token)
+        return text
+    }
+
     /** `/mcp` for a long poll, a lifecycle call or a hub with no JSON mount; `/mcp/json` otherwise. */
     private fun mountFor(framed: Boolean): String =
         if (framedOnly || framed) "$base/mcp" else "$base/mcp/json"
@@ -2016,6 +2154,7 @@ class HubClient(
             if (authenticated && token != null) {
                 header(HttpHeaders.Authorization, "Bearer $token")
             }
+            FleetClient.header?.let { header(CLIENT_HEADER, it) }
             setBody(body)
         }
         response.status.value to response.textWithin(MAX_RESPONSE_BYTES)

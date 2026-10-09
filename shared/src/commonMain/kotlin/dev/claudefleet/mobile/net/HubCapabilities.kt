@@ -12,6 +12,8 @@ data class ToolCatalog(
     val names: Set<String> = emptySet(),
     val actions: Map<String, Set<String>> = emptyMap(),
     val params: Map<String, Set<String>> = emptyMap(),
+    /** tool → argument → the values its schema enumerates, for every argument that has an `enum`. */
+    val paramValues: Map<String, Map<String, Set<String>>> = emptyMap(),
 )
 
 /**
@@ -40,6 +42,7 @@ data class HubCapabilities(
     val actions: Map<String, Set<String>> = emptyMap(),
     val missing: Map<String, Set<String>> = emptyMap(),
     val params: Map<String, Set<String>> = emptyMap(),
+    val paramValues: Map<String, Map<String, Set<String>>> = emptyMap(),
 ) {
     val work: Boolean get() = WORK in tools
 
@@ -172,6 +175,21 @@ data class HubCapabilities(
     val usage: Boolean get() = USAGE_REPORT in tools
     val accounts: Boolean get() = LIST_ACCOUNTS in tools
 
+    /**
+     * A paused-on-limit row's Switch account (claude-fleet 4.4 on the phone,
+     * 4.10): the hub says which login has room (`check_account_headroom`,
+     * contract 14, readonly) and restarts the session under it
+     * (`restart_session { profile }`). Both, or the button is not drawn.
+     */
+    val switchAccount: Boolean
+        get() = CHECK_ACCOUNT_HEADROOM in tools && accepts(RESTART_SESSION, "profile")
+
+    /** Send later (redesign 14.14): the hub keeps a prompt for the session's next idle moment (5.10). */
+    val sendLater: Boolean get() = QUEUE_PROMPT in tools && QUEUED_PROMPTS in tools
+
+    /** The phone stamps a session viewed while it is on screen (`touch_session_viewed`, contract 11). */
+    val touchViewed: Boolean get() = TOUCH_SESSION_VIEWED in tools
+
     /** Accounts' usage readings (`account_usage`): when a paused row's limit resets (step 4.10). */
     val accountUsage: Boolean get() = ACCOUNT_USAGE in tools
 
@@ -212,6 +230,13 @@ data class HubCapabilities(
     val routines: Boolean get() = ROUTINES in tools
 
     /**
+     * Every run on the fleet's behalf in one list (claude-fleet 8.3,
+     * `runs { list }`, readonly): what the Automation sheet's Runs tab reads.
+     * Without it the tab merges each routine's own runs, as before.
+     */
+    val runs: Boolean get() = has(RUNS, "list")
+
+    /**
      * Debug devices (contract revision 10): the test phones on the fleet's
      * hosts, claimed, booted and read from here. Not readonly on the hub, so
      * a readonly token is not served it.
@@ -241,6 +266,20 @@ data class HubCapabilities(
 
     /** Fleet settings can be written as this device (`set_setting`); the hub still refuses an untrusted one. */
     val setSetting: Boolean get() = SET_SETTING in tools
+
+    /**
+     * The keys the full-screen agent's bar may press in a pane (redesign
+     * 14.14): Escape, Tab, Enter and C-c on every hub with keys, plus the
+     * arrows, ⇧Tab (`BTab`) and the Ctrl letters a hub lists in
+     * `send_prompt`'s `keys` enum. A hub that enumerates nothing is the old
+     * one, whose guard refuses the rest, so they are not offered.
+     */
+    val paneKeys: Set<String>
+        get() = BASE_PANE_KEYS + (paramValues[SEND_PROMPT]?.get(KEYS).orEmpty() intersect EXTENDED_PANE_KEYS)
+
+    /** Whether a hub tool argument enumerates [value] — for a new value of an old argument. */
+    fun offers(tool: String, param: String, value: String): Boolean =
+        tool in tools && paramValues[tool]?.get(param)?.contains(value) == true
 
     fun has(tool: String, action: String): Boolean =
         tool in tools &&
@@ -321,13 +360,37 @@ data class HubCapabilities(
         const val SETTING_PROPOSALS = "setting_proposals"
         const val DECIDE_SETTING_PROPOSALS = "decide_setting_proposals"
         const val ROUTINES = "routines"
+        const val RUNS = "runs"
+        const val CHECK_ACCOUNT_HEADROOM = "check_account_headroom"
+        const val RESTART_SESSION = "restart_session"
+        const val QUEUE_PROMPT = "queue_prompt"
+        const val QUEUED_PROMPTS = "queued_prompts"
+        const val TOUCH_SESSION_VIEWED = "touch_session_viewed"
         const val SET_SETTING = "set_setting"
         const val DEBUG_DEVICES = "debug_devices"
         const val ORG_ADMIN = "org_admin"
         const val MY_GRANTS = "my_grants"
         val SHARE_TOOLS = listOf("session_access", "session_share", "session_narrow", "session_unshare")
+        const val SEND_PROMPT = "send_prompt"
+        const val KEYS = "keys"
 
-        fun of(catalog: ToolCatalog) = HubCapabilities(catalog.names, catalog.actions, params = catalog.params)
+        /** What every hub with keys presses in a pane: its own list less the digits. */
+        val BASE_PANE_KEYS: Set<String> = setOf("Escape", "Tab", "Enter", "C-c")
+
+        /**
+         * The keys the bar adds where the hub lists them. A closed list here
+         * too: a key name the hub grows later is not pressed until the bar
+         * has a cap for it.
+         */
+        val CTRL_KEYS: List<String> = listOf(
+            "C-a", "C-b", "C-d", "C-e", "C-f", "C-g", "C-h", "C-k", "C-l", "C-n",
+            "C-o", "C-p", "C-r", "C-t", "C-u", "C-v", "C-w", "C-x", "C-y",
+        )
+        val ARROW_KEYS: List<String> = listOf("Left", "Up", "Down", "Right")
+        val EXTENDED_PANE_KEYS: Set<String> = (ARROW_KEYS + "BTab" + CTRL_KEYS).toSet()
+
+        fun of(catalog: ToolCatalog) =
+            HubCapabilities(catalog.names, catalog.actions, params = catalog.params, paramValues = catalog.paramValues)
     }
 }
 

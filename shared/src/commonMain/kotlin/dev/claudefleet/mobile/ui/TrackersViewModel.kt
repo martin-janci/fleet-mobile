@@ -197,7 +197,9 @@ class TrackersViewModel(
             throw e
         } catch (t: Throwable) {
             setWizard { it.copy(working = null, secret = "") }
-            local.update { it.copy(error = trackerFriendly(t)) }
+            // A refusal that quotes what it was sent must not carry the token
+            // onto the screen or into a crash report (14.20).
+            local.update { it.copy(error = trackerFriendly(t).without(secret)) }
         }
     }
 
@@ -369,6 +371,13 @@ internal fun trackerLine(row: TrackerAdminRow, ago: String?): String = listOfNot
 ).joinToString(" · ")
 
 /** E_FORBIDDEN on this phone means the operator has not trusted it yet; the hub's message names the command. */
+/** [this] with every copy of [secret] blanked out of what it shows and keeps. */
+internal fun Friendly.without(secret: String): Friendly {
+    if (secret.length < 4) return this
+    fun String.scrub() = replace(secret, "…")
+    return copy(title = title.scrub(), body = body.scrub(), details = details?.scrub())
+}
+
 internal fun trackerFriendly(t: Throwable): Friendly =
     if (t is HubError.Tool && t.code == "E_FORBIDDEN") {
         Friendly(

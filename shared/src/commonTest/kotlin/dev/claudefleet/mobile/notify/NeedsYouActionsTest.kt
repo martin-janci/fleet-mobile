@@ -59,7 +59,7 @@ class NeedsYouActionsTest {
     fun the_lock_screen_shows_the_session_and_why_but_not_the_command() {
         val c = needsYouContent(alertFor(asking))
         assertEquals("Fix hub-e2e flake needs you", c.publicTitle)
-        assertEquals("Waiting for you · pine", c.publicBody)
+        assertEquals("Needs you · pine", c.publicBody)
         assertFalse("git push" in c.publicTitle + c.publicBody)
     }
 

@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.data
 
+import dev.claudefleet.mobile.model.FleetRun
+import dev.claudefleet.mobile.model.HubHealth
 import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineRun
@@ -20,10 +22,23 @@ interface RoutineActions {
 
     suspend fun runs(routineId: Long, limit: Int): List<RoutineRun>
 
+    /**
+     * Every run the fleet made on this person's behalf (`runs { list }`,
+     * claude-fleet 8.3): tasks, missions, Jev, `claude -p` and routine fires.
+     * The default is a hub without the tool, which the caller never asks.
+     */
+    suspend fun fleetRuns(limit: Int): List<FleetRun> = emptyList()
+
     suspend fun setEnabled(routineId: Long, enabled: Boolean): Routine
 
     /** Whether the hub's automation stands still now. */
     suspend fun paused(): Boolean
+
+    /**
+     * Pause all and the built-in routines in one `fleet_health` read (8.1).
+     * The default asks [paused] alone: a hub that reports no loops.
+     */
+    suspend fun health(): HubHealth = HubHealth(automationPaused = paused())
 
     /** Pause all automation, or let it run again. */
     suspend fun setPaused(paused: Boolean)
@@ -38,10 +53,14 @@ class HubRoutineActions(private val session: AppSession) : RoutineActions {
     override suspend fun runs(routineId: Long, limit: Int): List<RoutineRun> =
         session.withClient { it.routineRuns(routineId, limit) }
 
+    override suspend fun fleetRuns(limit: Int): List<FleetRun> = session.withClient { it.runs(limit).runs }
+
     override suspend fun setEnabled(routineId: Long, enabled: Boolean): Routine =
         session.withClient { it.setRoutineEnabled(routineId, enabled) }
 
     override suspend fun paused(): Boolean = session.withClient { it.fleetHealth().automationPaused }
+
+    override suspend fun health(): HubHealth = session.withClient { it.fleetHealth() }
 
     override suspend fun setPaused(paused: Boolean) {
         session.withClient { it.setSetting(AUTOMATION_PAUSED, paused.toString()) }

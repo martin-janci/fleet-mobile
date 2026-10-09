@@ -326,6 +326,8 @@ fun SessionScreen(
      * Null for every other session.
      */
     control: ControlChrome? = null,
+    /** Send later and a paused row's Switch account / Wait (redesign 14.14, 4.10); the default does nothing. */
+    later: SessionLaterHost = SessionLaterHost(),
 ) {
     // On the New bar the result sits in the conversation instead (RepairResultCard).
     if (tabs == null) state.repair?.let { RepairReportDialog(it, onDismissRepair) }
@@ -639,6 +641,7 @@ fun SessionScreen(
                                 onTicket = openTicket.takeIf { work.chip != null || work.canSetWork || work.canNameWork },
                                 ticketKey = work.chip?.key,
                                 onTasks = openTicket.takeIf { tasks.available },
+                                later = later,
                             )
                         },
                     )
@@ -922,6 +925,14 @@ fun SessionScreen(
             // Between the conversation and the composer: a person who opened this
             // screen because the agent is waiting should not have to scroll to
             // answer it, and the card sits where the answer goes.
+            // A row paused at its account's limit (4.10): Switch account and
+            // Wait, as the desktop's row offers them. Not on a readonly device,
+            // which may switch nothing.
+            if (state.session?.attention?.reason == "account_limit" && !state.readOnly && state.card == null &&
+                (state.canSwitchAccount || later.limitResetsAt != null || state.switchTarget != null || state.waitingUntil != null)
+            ) {
+                LimitCard(state, later)
+            }
             state.card?.let { card ->
                 if (tabs != null) {
                     QuestionCard(
@@ -1587,7 +1598,9 @@ private fun SessionOverflowMenu(
     var showRestartConfirm by remember { mutableStateOf(false) }
     var showSafeKillConfirm by remember { mutableStateOf(false) }
     var showKillConfirm by remember { mutableStateOf(false) }
+    var showSendLater by remember { mutableStateOf(false) }
     val actionable = !state.busy && state.connected
+    if (showSendLater && orbit != null) SendLaterSheet(state, orbit.later, onDismiss = { showSendLater = false })
 
     IconButton(onClick = { expanded = true }) {
         Icon(FleetIcons.MoreVert, contentDescription = "Session actions")
@@ -1621,6 +1634,7 @@ private fun SessionOverflowMenu(
                     archive = orbit.onArchive != null,
                     kill = manage && state.canKill,
                     worktree = onRepo != null,
+                    sendLater = state.canSendLater,
                 ),
             )
             for ((i, item) in items.withIndex()) {
@@ -1650,6 +1664,7 @@ private fun SessionOverflowMenu(
                             OrbitItem.Model -> picking = "model"
                             OrbitItem.Effort -> picking = "effort"
                             OrbitItem.Review -> showReview = true
+                            OrbitItem.SendLater -> showSendLater = true
                             OrbitItem.Tags -> showTags = true
                             OrbitItem.Archive -> orbit.onArchive?.invoke()
                             OrbitItem.Retire -> showSafeKillConfirm = true

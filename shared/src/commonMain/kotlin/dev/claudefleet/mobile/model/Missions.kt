@@ -91,6 +91,11 @@ data class MissionGrant(
     @SerialName("granted_by") val grantedBy: String = "",
     @SerialName("budget_micros") val budgetMicros: Long? = null,
     @SerialName("expires_at") val expiresAt: Long = 0,
+    /** The hosts its runs may use; null = any host the mission's owner may drive. */
+    val hosts: List<String>? = null,
+    @SerialName("max_parallel") val maxParallel: Int? = null,
+    /** The login its runs bill: a credential profile; null = the host's own. */
+    val profile: String? = null,
 )
 
 /** The autonomy that applies: the least of the mission's level, the fleet's ceiling and a live grant. */
@@ -245,4 +250,74 @@ fun Mission.pauseMove(): String? = when (state) {
     "active" -> "paused"
     "paused" -> "active"
     else -> null
+}
+
+/**
+ * A mission's spend ask (redesign 14.16, board MobileMissions): the loop
+ * spent its grant's budget and the brake paused it (`orchestrate::tick_mission`,
+ * "the workers spent $X of the grant's $Y") with an ask card open. Approve
+ * re-signs the same grant with [newLimitMicros] and resumes the mission; Deny
+ * answers the card, so the mission finishes within its budget.
+ */
+data class SpendAsk(
+    val missionId: Long,
+    /** The brake's open ask card, answered either way. */
+    val cardId: Long,
+    val spentMicros: Long,
+    val budgetMicros: Long,
+    /** What Approve adds, in whole dollars. */
+    val moreMicros: Long,
+    val newLimitMicros: Long,
+    /** The brake's own words, from the card. */
+    val why: String,
+    val askedAt: Long,
+    val grant: MissionGrant,
+)
+
+/** The brake's card says why it paused: "paused: the workers spent …". */
+private const val BUDGET_BRAKE = "paused: the workers spent"
+
+/** A whole dollar, in micro-USD. */
+private const val DOLLAR = 1_000_000L
+
+/**
+ * The spend ask a mission waits on, or null. All of: a paused mission, a live
+ * grant with a budget, spending at or over it, and the budget brake's ask card
+ * still open. The amount asked for is what the plan's next runs will likely
+ * cost — the run estimate times the runs it lists (at least one) — or a
+ * quarter of the budget while there is no estimate, rounded up to a dollar.
+ */
+fun spendAsk(detail: MissionDetail): SpendAsk? {
+    val m = detail.mission
+    val plan = detail.plan ?: return null
+    if (m.state != "paused") return null
+    val grant = plan.autonomy.grant ?: return null
+    val budget = grant.budgetMicros ?: return null
+    val spent = maxOf(plan.costMicros, m.costMicros ?: 0)
+    if (spent < budget) return null
+    val card = plan.cards.firstOrNull { c ->
+        c.state == "open" && c.kind == "ask" && c.payload.question()?.startsWith(BUDGET_BRAKE) == true
+    } ?: return null
+    val runs = plan.steps.count { it.kind == "run" || it.kind == "retry" }.coerceAtLeast(1)
+    val raw = plan.runEstimate?.micros?.takeIf { it > 0 }?.let { it * runs } ?: (budget / 4)
+    val more = ((raw + DOLLAR - 1) / DOLLAR).coerceAtLeast(1) * DOLLAR
+    return SpendAsk(
+        missionId = m.id,
+        cardId = card.id,
+        spentMicros = spent,
+        budgetMicros = budget,
+        moreMicros = more,
+        newLimitMicros = maxOf(budget, spent) + more,
+        why = card.payload.question()?.removePrefix("paused: ")?.replaceFirstChar { it.uppercase() } ?: "",
+        askedAt = card.createdAt,
+        grant = grant,
+    )
+}
+
+private fun JsonObject?.question(): String? = (this?.get("question") as? JsonPrimitive)?.contentOrNull
+
+/** The hours a re-signed grant keeps: what is left of the old one, rounded up, 1 to [maxHours]. */
+fun grantHoursLeft(grant: MissionGrant, nowSeconds: Long, maxHours: Int = 168): Int {
+    val left = grant.expiresAt - nowSeconds
+    return ((left + 3_599) / 3_600).toInt().coerceIn(1, maxHours)
 }

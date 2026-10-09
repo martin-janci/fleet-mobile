@@ -131,9 +131,12 @@ jobs:
           VERSION_CODE: ${{ github.run_number }}
         run: |
           set -euo pipefail
+          # `GITHUB_SHA` (the runner's own) becomes BuildConfig.GIT_SHA, the
+          # `build` part of the X-Fleet-Client header the hub reads.
           ./gradlew :androidApp:assembleRelease \
             -PversionName="$VERSION_NAME" \
             -PversionCode="$VERSION_CODE" \
+            -PgitSha="$GITHUB_SHA" \
             --stacktrace
 
       # A signing config that silently failed to apply (a bad path, an AGP
@@ -147,6 +150,7 @@ jobs:
       # and picks the newest build-tools version under whichever root has
       # one rather than assuming 37.0.0 stays the only one installed.
       - name: Verify the APK is signed
+        id: verify
         run: |
           set -euo pipefail
           apk="androidApp/build/outputs/apk/release/androidApp-release.apk"
@@ -178,7 +182,34 @@ jobs:
             exit 1
           }
 
-          "$apksigner_bin" verify --print-certs "$apk"
+          "$apksigner_bin" verify --print-certs "$apk" | tee certs.txt
+          # The signing certificate's sha256, for the hub's decision: a phone
+          # refuses an APK not signed with exactly this certificate.
+          # apksigner names the signer `Signer #1` when the APK carries a v1
+          # (JAR) signature and `V2 Signer` / `V3 Signer` when it carries
+          # only the newer schemes (minSdk >= 24), as our release APK does.
+          signer=$(sed -nE 's/^(Signer #1|V[0-9]+ Signer:) certificate SHA-256 digest: *([0-9a-f]{64})$/\2/p' certs.txt | head -1)
+          if [[ -z "$signer" ]]; then
+            echo "::error::apksigner printed no SHA-256 digest for the signer" >&2
+            exit 1
+          fi
+          echo "signer=$signer" >> "$GITHUB_OUTPUT"
+
+      # The versioned name the update channel points at, beside the old
+      # `androidApp-release.apk` that installed phones still look for on
+      # GitHub, and a SHA256SUMS for both.
+      - name: Name the APK and sum it
+        id: apk
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          set -euo pipefail
+          cd androidApp/build/outputs/apk/release
+          cp androidApp-release.apk "fleet-mobile-$VERSION_NAME.apk"
+          sha256sum "fleet-mobile-$VERSION_NAME.apk" androidApp-release.apk > SHA256SUMS
+          cat SHA256SUMS
+          echo "sha256=$(sha256sum "fleet-mobile-$VERSION_NAME.apk" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "size=$(stat -c %s "fleet-mobile-$VERSION_NAME.apk")" >> "$GITHUB_OUTPUT"
 
       # `gh` is preinstalled on the runner and uses `GITHUB_TOKEN` — no
       # third-party release action needed.
@@ -186,12 +217,58 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
         run: |
           set -euo pipefail
+          out=androidApp/build/outputs/apk/release
           gh release create "$TAG" \
             --title "$TAG" \
             --generate-notes \
-            androidApp/build/outputs/apk/release/androidApp-release.apk
+            "$out/fleet-mobile-$VERSION_NAME.apk" \
+            "$out/androidApp-release.apk" \
+            "$out/SHA256SUMS"
+
+      # claude-fleet signs the phone's part of its release as an amendment
+      # (its `android-amendment.yml`); this tells it what was published. A
+      # fine-grained token with Contents: write on claude-fleet only, never
+      # this workflow's own GITHUB_TOKEN (which cannot dispatch to another
+      # repository). Without the secret the release still stands and the
+      # amendment can be run by hand there.
+      - name: Tell claude-fleet
+        env:
+          FLEET_DISPATCH_TOKEN: ${{ secrets.FLEET_DISPATCH_TOKEN }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ github.run_number }}
+          SHA256: ${{ steps.apk.outputs.sha256 }}
+          SIZE: ${{ steps.apk.outputs.size }}
+          SIGNER: ${{ steps.verify.outputs.signer }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$FLEET_DISPATCH_TOKEN" ]]; then
+            echo "::notice::FLEET_DISPATCH_TOKEN is not set: run claude-fleet's android-amendment workflow by hand for $VERSION_NAME"
+            exit 0
+          fi
+          contract() {
+            sed -n "s/^const val $1: Int = \([0-9]\+\)$/\1/p" shared/src/commonMain/kotlin/dev/claudefleet/mobile/net/HubContract.kt
+          }
+          cmin=$(contract MIN_HUB_CONTRACT)
+          cmax=$(contract MAX_HUB_CONTRACT)
+          if [[ -z "$cmin" || -z "$cmax" ]]; then
+            echo "::error::could not read the contract window from HubContract.kt" >&2
+            exit 1
+          fi
+          GH_TOKEN="$FLEET_DISPATCH_TOKEN" gh api "repos/$OWNER/claude-fleet/dispatches" \
+            -f event_type=android-release \
+            -f "client_payload[version]=$VERSION_NAME" \
+            -f "client_payload[apk_url]=https://github.com/$REPO/releases/download/v$VERSION_NAME/fleet-mobile-$VERSION_NAME.apk" \
+            -f "client_payload[sha256]=$SHA256" \
+            -f "client_payload[size]=$SIZE" \
+            -f "client_payload[version_code]=$VERSION_CODE" \
+            -f "client_payload[signer_sha256]=$SIGNER" \
+            -f "client_payload[contract_min]=$cmin" \
+            -f "client_payload[contract_max]=$cmax"
 
       - name: Remove the decoded keystore
         if: always()

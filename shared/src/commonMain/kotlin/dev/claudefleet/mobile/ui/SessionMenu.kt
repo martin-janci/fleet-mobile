@@ -3,9 +3,9 @@ package dev.claudefleet.mobile.ui
 /*
  * The session ⋮ menu on the New bar (redesign 14.14, MobileSessionExtras):
  * everything the Classic ⋮ held, written out with what each item does.
- * Recovery sits in the middle; Kill is last and asks first. Send later is not
- * here: the hub has no way to hold a prompt for later yet, and a phone timer
- * would not fire once the app is gone.
+ * Recovery sits in the middle; Kill is last and asks first. Send later hands
+ * the hub a prompt for the session's next idle moment (claude-fleet's deferred
+ * prompts, 5.10), so it is sent whether or not the phone is still running.
  */
 
 /** What the session screen hands the New bar's menu beyond the Classic one's callbacks. */
@@ -17,11 +17,13 @@ class OrbitMenu(
     val ticketKey: String? = null,
     /** The tasks sheet, where the hub has tasks; Ticket and tasks opens it when there is no ticket sheet. */
     val onTasks: (() -> Unit)? = null,
+    /** Send later's sheet and the paused row's answers; the default does nothing. */
+    val later: SessionLaterHost = SessionLaterHost(),
 )
 
 enum class OrbitItem {
     Rename, Ticket, Tags,
-    Model, Effort, Review,
+    Model, Effort, Review, SendLater,
     Move, Repair, Recreate, Restart, DismissGhost,
     CopyAttach, Details, Worktree,
     Archive, Retire, Kill,
@@ -57,6 +59,8 @@ data class OrbitMenuFacts(
     val archive: Boolean = false,
     val kill: Boolean = false,
     val worktree: Boolean = false,
+    /** The hub keeps prompts for later and this person may drive the session. */
+    val sendLater: Boolean = false,
 )
 
 /** The command that attaches a terminal to the session on its host, as the desktop's Details copies it. */
@@ -72,6 +76,7 @@ fun orbitMenuItems(f: OrbitMenuFacts): List<OrbitMenuItem> = buildList {
         add(OrbitMenuItem(OrbitItem.Effort, "Effort…", "sets /effort", 1))
     }
     if (f.review) add(OrbitMenuItem(OrbitItem.Review, "Review…", "a new session reviews this worktree", 1))
+    if (f.sendLater) add(OrbitMenuItem(OrbitItem.SendLater, "Send later…", "goes in when the session is next idle", 1))
     if (f.move) add(OrbitMenuItem(OrbitItem.Move, "Move to host…", f.hostAlias?.let { "now on $it" }, 2))
     if (f.repair) add(OrbitMenuItem(OrbitItem.Repair, "Repair workspace", "fix the worktree, re-attach the pane", 2))
     if (f.recreate) add(OrbitMenuItem(OrbitItem.Recreate, "Recreate", if (f.ghost) "bring it back in its worktree" else "new pane, same worktree and conversation", 2))

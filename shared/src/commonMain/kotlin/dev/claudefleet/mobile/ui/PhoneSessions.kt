@@ -61,7 +61,9 @@ import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.AccountLimit
 import dev.claudefleet.mobile.model.limitAt
 import dev.claudefleet.mobile.model.relativeWithin
+import dev.claudefleet.mobile.model.TriageBucket
 import dev.claudefleet.mobile.model.reasonLabel
+import dev.claudefleet.mobile.model.triageBucket
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
@@ -82,11 +84,17 @@ import dev.claudefleet.mobile.ui.theme.StatusTone
 
 /**
  * The status word a session row leads with. A row that needs a person reads
- * Needs you, or Failed when what it needs is fixing (stuck, failed); every
+ * Needs you, Failed when what it needs is fixing (stuck, failed), or Paused
+ * when its account is at its limit; an unread finished turn reads Done; every
  * other row reads its tone's word.
  */
-internal fun phoneWord(row: SessionRow): StatusWord? =
-    if (row.needsAttention) inboxWord(row) else StatusWord.of(StatusTone.of(row.claudeStatus, row.stuckKind))
+internal fun phoneWord(row: SessionRow): StatusWord? = when {
+    row.needsAttention -> inboxWord(row)
+    // A finished turn nobody has read yet (contract 11's last_viewed_at):
+    // Done, as the desktop's seven states fold done_unread.
+    row.triageBucket() == TriageBucket.DONE_UNREAD -> StatusWord.DONE
+    else -> StatusWord.of(StatusTone.of(row))
+}
 
 /**
  * How line two opens: the manual's "Waiting for you:" for Needs you, and
@@ -98,6 +106,8 @@ internal fun phoneLead(word: StatusWord?, live: Boolean): String? = when {
     word == StatusWord.NEEDS_YOU && !live -> "Was waiting for you"
     word == StatusWord.NEEDS_YOU -> "Waiting for you"
     word == StatusWord.WORKING && !live -> "Was working"
+    // A paused row's line already opens with the word ("Paused · limit on …").
+    word == StatusWord.PAUSED -> null
     else -> word?.label
 }
 

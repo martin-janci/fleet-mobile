@@ -237,6 +237,18 @@ class ToolsTheAppMayCallTest {
         "session_share",
         "session_narrow",
         "session_unshare",
+        // Redesign phone gaps (claude-fleet 2.7, 4.10, 14.14, 8.9). Each is
+        // called only where `tools/list` names it:
+        // `touch_session_viewed` stamps the row seen (`Access::Client`, a
+        // write the hub takes only from a caller that may drive the session);
+        // `check_account_headroom` is readonly (contract 14);
+        // `queue_prompt` / `queued_prompts` are Send later, `Access::Client`
+        // writes like `send_prompt`; `runs` is the 8.3 union, readonly.
+        "touch_session_viewed",
+        "check_account_headroom",
+        "queue_prompt",
+        "queued_prompts",
+        "runs",
     )
 
     @Test

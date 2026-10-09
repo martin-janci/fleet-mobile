@@ -1,0 +1,63 @@
+name: Design tokens
+
+# docs/design/tokens.json is claude-fleet's file, copied unchanged
+# (docs/design/README.md). OrbitTokensDriftTest holds OrbitTokens.kt to the
+# copy; this holds the copy to claude-fleet main, so a token added there
+# (review r10 added fourteen) reaches the phone instead of sitting behind
+# with every test green.
+#
+# Its own workflow, not a job in ci.yml, for two reasons: the drift almost
+# always starts in the OTHER repo, so the run that notices it is the daily
+# schedule, and a schedule on ci.yml would re-run the macOS and emulator jobs
+# for nothing; and a PR here that does not touch the tokens should not turn red
+# because claude-fleet moved. So a PR or push that touches the copy, the
+# literals or this check fails on drift; any other PR only warns.
+#
+# No secret: both repositories are public. `github.token` (read-only, this
+# repo) only buys the REST API's higher rate limit for a public file.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tokens:
+    name: tokens.json matches claude-fleet main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compare with claude-fleet main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -uo pipefail
+          bash scripts/check-design-tokens.sh --diff
+          rc=$?
+          if [ "$rc" -eq 0 ]; then exit 0; fi
+          if [ "$rc" -eq 2 ]; then
+            echo "::warning::could not read claude-fleet's tokens.json; not a verdict either way"
+            exit 0
+          fi
+          strict=1
+          if [ "$EVENT" = pull_request ]; then
+            if ! git diff --name-only "$BASE" HEAD | grep -qE '^(docs/design/tokens\.json|shared/src/commonMain/kotlin/dev/claudefleet/mobile/ui/theme/OrbitTokens\.kt|scripts/check-design-tokens\.sh|\.github/workflows/design-tokens\.yml)$'; then
+              strict=""
+            fi
+          fi
+          if [ -n "$strict" ]; then
+            echo "::error::docs/design/tokens.json differs from claude-fleet main (diff above): copy it unchanged and update OrbitTokens.kt"
+            exit 1
+          fi
+          echo "::warning::docs/design/tokens.json differs from claude-fleet main (diff above); this PR does not touch the tokens, so it only warns"

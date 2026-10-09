@@ -66,12 +66,46 @@ object PracticeFixtures {
         "No, tell Claude what to do",
     )
 
+    /** The word every practice notification carries, so it is never mistaken for the real fleet's. */
+    const val PRACTICE_MARK = "Practice"
+
+    /**
+     * The practice fleet's Needs you notification (MobileTutorials: "its
+     * notifications are marked Practice"). The same words a real one has,
+     * built from the demo row, with "Practice · " on its title and its lock
+     * screen line, no buttons (a practice answer is a tap in the app, never a
+     * notification action), and the demo's negative id, which no hub session
+     * has. It is drawn inside the practice fleet only: nothing is posted to
+     * the system, so it cannot sit in the shade after the person leaves.
+     */
+    fun notification(): PracticeNotification {
+        val name = demo.friendlyName ?: demo.tmuxName
+        return PracticeNotification(
+            sessionId = demo.id,
+            title = "$PRACTICE_MARK · $name needs you",
+            body = "$QUESTION\nNeeds you · ${demo.hostAlias}",
+            publicBody = "$PRACTICE_MARK · Needs you · ${demo.hostAlias}",
+        )
+    }
+
     /** What the pretend session does with each answer, so the person sees an answer land. */
     fun outcome(choice: Int): String = when (choice) {
         1 -> "Pushed fix-login-flake. (Practice: nothing left this phone.)"
         2 -> "Pushed, and git push will not ask again in this session. (Practice: nothing left this phone.)"
         else -> "Claude Code waits for what you type instead. (Practice: nothing left this phone.)"
     }
+}
+
+/** A practice notification as the practice fleet draws it: marked, with no actions. */
+data class PracticeNotification(
+    val sessionId: Long,
+    val title: String,
+    val body: String,
+    /** What a locked phone would show: the session and why, never the question. */
+    val publicBody: String,
+) {
+    /** A practice notification offers no button: not Approve, not anything. */
+    val actions: List<String> get() = emptyList()
 }
 
 data class PracticeState(

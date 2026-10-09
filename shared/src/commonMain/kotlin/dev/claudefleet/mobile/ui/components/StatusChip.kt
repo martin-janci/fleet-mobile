@@ -38,7 +38,12 @@ fun StatusChip(
     reason: String? = null,
 ) {
     val shown = reason?.takeIf { it !in STATUS_REASONS }
-    val tone = if (shown != null && StatusTone.of(claudeStatus, stuckKind) !in URGENT_TONES) StatusTone.BLOCKED else StatusTone.of(claudeStatus, stuckKind)
+    val tone = when {
+        // An account at its limit is paused by the fleet, not waiting on a person.
+        reason == "account_limit" -> StatusTone.PAUSED
+        shown != null && StatusTone.of(claudeStatus, stuckKind) !in URGENT_TONES -> StatusTone.BLOCKED
+        else -> StatusTone.of(claudeStatus, stuckKind)
+    }
     val colors = LocalStatusColors.current(tone)
     val text = shown?.let { reasonLabel(it).lowercase().replace("ci ", "CI ") } ?: statusLabel(claudeStatus, stuckKind)
     val border = when {

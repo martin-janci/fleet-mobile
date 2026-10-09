@@ -7,6 +7,11 @@ import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.Mission
 import dev.claudefleet.mobile.model.MissionCard
 import dev.claudefleet.mobile.model.MissionDetail
+import dev.claudefleet.mobile.model.MissionAutonomy
+import dev.claudefleet.mobile.model.MissionGrant
+import dev.claudefleet.mobile.model.RunEstimate
+import dev.claudefleet.mobile.model.spendAsk
+import dev.claudefleet.mobile.model.grantHoursLeft
 import dev.claudefleet.mobile.model.MissionPlan
 import dev.claudefleet.mobile.model.MissionStep
 import dev.claudefleet.mobile.model.ProjectRow
@@ -82,6 +87,11 @@ private class FakeMissionActions : MissionActions {
     }
 
     override suspend fun pauseAll(): List<Long> = paused.also { calls += "pause_all" }
+
+    override suspend fun regrant(missionId: Long, grant: MissionGrant, budgetCents: Long, hours: Int): MissionGrant {
+        calls += "grant $missionId level=${grant.level} cents=$budgetCents hours=$hours hosts=${grant.hosts} parallel=${grant.maxParallel} profile=${grant.profile}"
+        return grant.copy(budgetMicros = budgetCents * 10_000)
+    }
 }
 
 /** The Missions sheet: the wire shapes, the desktop's words, and what a press sends. */
@@ -259,4 +269,113 @@ class MissionsTest {
         assertEquals(1L, vm.state.value.detail?.mission?.id)
         assertEquals(listOf("mission 1"), actions.calls, "the screen has the list already; only the mission is read")
     }
+
+    // ---- the spend ask (redesign 14.16) ----
+
+    private val spendLoop = HubCapabilities(
+        tools = setOf(HubCapabilities.WORK, HubCapabilities.WORK_LINK),
+        actions = mapOf(
+            HubCapabilities.WORK to setOf("missions", "mission"),
+            HubCapabilities.WORK_LINK to setOf("mission_start", "card_decide", "mission_state", "missions_pause_all", "mission_grant"),
+        ),
+    )
+
+    private val braked = MissionDetail(
+        mission = Mission(id = 1, name = "Hub federation v2", state = "paused", version = 9, costMicros = 31_800_000),
+        mayChange = true,
+        plan = MissionPlan(
+            steps = listOf(MissionStep(kind = "run", itemId = 12, reason = "ready"), MissionStep(kind = "run", itemId = 13, reason = "ready")),
+            cards = listOf(
+                MissionCard(
+                    id = 77,
+                    missionId = 1,
+                    source = "loop",
+                    kind = "ask",
+                    payload = buildJsonObject { put("question", "paused: the workers spent \$31.80 of the grant's \$30.00") },
+                    createdAt = 500,
+                ),
+            ),
+            autonomy = MissionAutonomy(
+                asked = 2,
+                ceiling = 3,
+                effective = 2,
+                grant = MissionGrant(level = 2, grantedBy = "martin", budgetMicros = 30_000_000, expiresAt = 1_000 + 5 * 3_600 - 10, hosts = listOf("pine"), maxParallel = 2, profile = "work"),
+            ),
+            costMicros = 31_800_000,
+            runEstimate = RunEstimate(micros = 3_600_000, runs = 5, basis = "mission"),
+        ),
+    )
+
+    @Test
+    fun a_spend_ask_is_read_from_the_brake_and_asks_for_the_next_runs() {
+        val ask = spendAsk(braked)!!
+        assertEquals(77, ask.cardId)
+        assertEquals(31_800_000, ask.spentMicros)
+        assertEquals(30_000_000, ask.budgetMicros)
+        assertEquals(8_000_000, ask.moreMicros, "two runs at about \$3.60, rounded up to a dollar")
+        assertEquals(39_800_000, ask.newLimitMicros, "over the budget already: the new limit starts from what was spent")
+        assertEquals("The workers spent \$31.80 of the grant's \$30.00", ask.why)
+        assertEquals(5, grantHoursLeft(ask.grant, nowSeconds = 1_000))
+        // No brake card, a running mission or no budget: no ask.
+        assertNull(spendAsk(braked.copy(plan = braked.plan!!.copy(cards = emptyList()))))
+        assertNull(spendAsk(braked.copy(mission = braked.mission.copy(state = "active"))))
+        assertNull(spendAsk(braked.copy(plan = braked.plan!!.copy(autonomy = MissionAutonomy(grant = MissionGrant(level = 2))))))
+    }
+
+    /** The plan's Verified by: a spend ask approves only on a tap. */
+    @Test
+    fun a_spend_ask_approves_only_on_a_tap() = runTest {
+        val actions = FakeMissionActions().apply { detail = braked; list = listOf(braked.mission) }
+        val vm = MissionsViewModel(MissionsFleet(spendLoop), actions, backgroundScope, canWrite = true)
+        vm.openOne(1).join()
+        runCurrent()
+        vm.refresh().join()
+        runCurrent()
+        assertTrue(vm.state.value.canAnswerSpend)
+        val ask = spendAsk(assertNotNullDetail(vm))!!
+        // Opening, reading and refreshing the mission answered nothing.
+        assertTrue(actions.calls.none { it.startsWith("grant") || it.startsWith("state") || it.startsWith("decide") }, "${actions.calls}")
+
+        vm.approveSpend(ask, nowSeconds = 1_000).join()
+        runCurrent()
+        val writes = actions.calls.filter { it.startsWith("grant") || it.startsWith("state") || it.startsWith("decide") }
+        assertEquals(
+            listOf(
+                "grant 1 level=2 cents=3980 hours=5 hosts=[pine] parallel=2 profile=work",
+                "state 1 active 9",
+                "decide 77 true Approved \$8.00 more; the new limit is \$39.80.",
+            ),
+            writes,
+            "the same grant re-signed with the new limit only, then resumed, then the lead told",
+        )
+    }
+
+    @Test
+    fun deny_keeps_the_budget_and_signs_nothing() = runTest {
+        val actions = FakeMissionActions().apply { detail = braked; list = listOf(braked.mission) }
+        val vm = MissionsViewModel(MissionsFleet(spendLoop), actions, backgroundScope, canWrite = true)
+        vm.openOne(1).join()
+        runCurrent()
+        vm.denySpend(spendAsk(braked)!!).join()
+        runCurrent()
+        assertTrue(actions.calls.none { it.startsWith("grant") || it.startsWith("state") })
+        assertTrue("decide 77 true No more spend: finish within \$30.00." in actions.calls)
+    }
+
+    @Test
+    fun a_spend_ask_cannot_be_approved_without_mission_grant_or_by_a_readonly_token() = runTest {
+        val actions = FakeMissionActions().apply { detail = braked; list = listOf(braked.mission) }
+        val old = MissionsViewModel(MissionsFleet(loop), actions, backgroundScope, canWrite = true)
+        val readonly = MissionsViewModel(MissionsFleet(spendLoop), actions, backgroundScope, canWrite = false)
+        for (vm in listOf(old, readonly)) {
+            vm.openOne(1).join()
+            runCurrent()
+            assertFalse(vm.state.value.canAnswerSpend)
+            vm.approveSpend(spendAsk(braked)!!, nowSeconds = 1_000).join()
+            runCurrent()
+        }
+        assertTrue(actions.calls.none { it.startsWith("grant") })
+    }
+
+    private fun assertNotNullDetail(vm: MissionsViewModel): MissionDetail = vm.state.value.detail ?: error("no detail open")
 }

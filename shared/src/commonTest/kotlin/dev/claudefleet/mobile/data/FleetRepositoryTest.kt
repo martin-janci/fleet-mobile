@@ -1452,6 +1452,33 @@ class FleetRepositoryTest {
         repository.stop()
     }
 
+    /** `update:decision` (claude-fleet update design S8): a hint to ask `/update/check` again. */
+    @Test
+    fun an_update_decision_frame_asks_for_a_new_check() = runTest {
+        val repository = repo(
+            FakeHub(sessionsJson = sessionRows(1)),
+            FakeStream {
+                emit(READY)
+                emit(rowEvent("update:decision", """{"target":"client:4","status":"update_available","version":"0.9.5"}"""))
+                emit(rowEvent("session:updated", """{"id":1,"tmux_name":"a","host_alias":"box"}"""))
+                awaitCancellation()
+            },
+            backgroundScope,
+        )
+        var seen = 0
+        val collector = backgroundScope.launch { repository.updateDecisions.collect { seen++ } }
+        runCurrent()
+
+        repository.start()
+        repository.sessions.first { it.singleOrNull()?.tmuxName == "a" }
+        runCurrent()
+
+        assertEquals(1, seen)
+        assertEquals(listOf(1L), repository.sessions.value.map { it.id }, "the snapshot is untouched by it")
+        collector.cancel()
+        repository.stop()
+    }
+
     // ---- Review r05: the account reads (names, usage) stay current ----
 
     private fun accountsHub() = FakeHub(sessionsJson = sessionRows(1)).apply {

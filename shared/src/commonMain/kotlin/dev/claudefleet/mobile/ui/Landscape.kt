@@ -38,6 +38,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
@@ -112,7 +113,7 @@ internal fun splitHunkStarts(rows: List<SplitRow>): List<Int> = rows.indices.fil
 sealed interface AgentPress {
     /** Through the question card's own path, which re-reads the pane first. */
     data class Card(val answer: Answer) : AgentPress
-    /** A key for the pane while nothing is asked: Escape, Tab, Enter or C-c. */
+    /** A key for the pane while nothing is asked: one of the hub's named keys ([HubCapabilities.paneKeys]). */
     data class Key(val key: String) : AgentPress
 }
 
@@ -120,25 +121,47 @@ sealed interface AgentPress {
 data class AgentBarKey(val label: String, val press: AgentPress?) {
     /** What TalkBack says for the cap: a glyph alone is read by its Unicode name (review r11). */
     val spoken: String
-        get() = when (label) {
-            "Esc" -> "Escape"
-            "⏎" -> "Enter"
-            "⌃C" -> "Control C"
+        get() = when {
+            label == "Esc" -> "Escape"
+            label == "⏎" -> "Enter"
+            label == "⇧Tab" -> "Shift Tab"
+            label == "←" -> "Left arrow"
+            label == "↑" -> "Up arrow"
+            label == "↓" -> "Down arrow"
+            label == "→" -> "Right arrow"
+            label == "⌃" -> "Control keys"
+            label.startsWith("⌃") -> "Control " + label.removePrefix("⌃")
             else -> label
         }
 }
 
+/** The arrows' caps, in the hub's key names. */
+private val ARROW_CAPS = listOf("←" to "Left", "↑" to "Up", "↓" to "Down", "→" to "Right")
+
+/** "C-r" → "⌃R": a Ctrl key's cap. */
+internal fun ctrlCap(key: String): String = "⌃" + key.removePrefix("C-").uppercase()
+
 /**
  * The full-screen agent's key bar, always the same caps in the same places:
- * Esc, Tab, ⏎, ⌃C and 1, 2, 3 for a question's numbered answers.
+ * Esc, Tab, ⏎, ⌃C and 1, 2, 3 for a question's numbered answers; then, where
+ * the hub takes them ([paneKeys], from `send_prompt`'s `keys` enum), ⇧Tab,
+ * the four arrows and ⌃, which opens a row of the Ctrl letters
+ * ([ctrlBarKeys]).
  *
  * While a question is up every key goes through its card, as the card's own
  * buttons do — the pane is re-read before a key is pressed, since Enter on a
- * permission question approves — and Tab and ⌃C wait. With no question, Esc,
- * Tab, ⏎ and ⌃C are pressed in the pane and the digits wait. The hub takes
- * no other keys, so ⇧Tab and the arrows of the board are not here.
+ * permission question approves — and Tab, ⌃C and the extra keys wait. With
+ * no question, the keys are pressed in the pane and the digits wait. An older
+ * hub takes only Esc, Tab, ⏎ and ⌃C, so its bar has no other caps.
  */
-fun agentBarKeys(card: BlockedCard?): List<AgentBarKey> {
+fun agentBarKeys(card: BlockedCard?, paneKeys: Set<String> = HubCapabilities.BASE_PANE_KEYS): List<AgentBarKey> {
+    val idle = card == null
+    val extra = buildList {
+        if ("BTab" in paneKeys) add(AgentBarKey("⇧Tab", AgentPress.Key("BTab").takeIf { idle }))
+        for ((cap, key) in ARROW_CAPS) if (key in paneKeys) add(AgentBarKey(cap, AgentPress.Key(key).takeIf { idle }))
+        // The ⌃ cap itself presses nothing; the bar opens the letters' row.
+        if (HubCapabilities.CTRL_KEYS.any { it in paneKeys }) add(AgentBarKey("⌃", null))
+    }
     if (card == null) {
         return listOf(
             AgentBarKey("Esc", AgentPress.Key("Escape")),
@@ -148,7 +171,7 @@ fun agentBarKeys(card: BlockedCard?): List<AgentBarKey> {
             AgentBarKey("1", null),
             AgentBarKey("2", null),
             AgentBarKey("3", null),
-        )
+        ) + extra
     }
     val option = { n: Int -> card.answers.firstOrNull { it is Answer.Option && it.n == n }?.let { AgentPress.Card(it) } }
     return listOf(
@@ -159,8 +182,16 @@ fun agentBarKeys(card: BlockedCard?): List<AgentBarKey> {
         AgentBarKey("1", option(1)),
         AgentBarKey("2", option(2)),
         AgentBarKey("3", option(3)),
-    )
+    ) + extra
 }
+
+/**
+ * The row the ⌃ cap opens: each Ctrl letter the hub takes, as "⌃R". Never
+ * while a question is up — a Ctrl key drives the session, it answers nothing.
+ */
+fun ctrlBarKeys(card: BlockedCard?, paneKeys: Set<String>): List<AgentBarKey> =
+    if (card != null) emptyList()
+    else HubCapabilities.CTRL_KEYS.filter { it in paneKeys }.map { AgentBarKey(ctrlCap(it), AgentPress.Key(it)) }
 
 const val AGENT_FULLSCREEN_TAG = "agent.fullscreen"
 const val AGENT_FULLSCREEN_KEY_TAG = "agent.fullscreen.key."
@@ -224,7 +255,32 @@ internal fun AgentFullscreen(
                 modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(down).horizontalScroll(across).padding(horizontal = 12.dp),
             )
             if (!state.readOnly) {
-                val keys = agentBarKeys(state.card)
+                val keys = agentBarKeys(state.card, state.paneKeys)
+                var ctrlOpen by remember { mutableStateOf(false) }
+                val ctrlRow = ctrlBarKeys(state.card, state.paneKeys)
+                if (ctrlOpen && ctrlRow.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        val can = state.connected && !state.sending
+                        for (key in ctrlRow) {
+                            val press = key.press
+                            OutlinedButton(
+                                onClick = {
+                                    if (press != null) onPress(press)
+                                    ctrlOpen = false
+                                },
+                                enabled = press != null && can,
+                                contentPadding = PaddingValues(horizontal = 8.dp),
+                                modifier = Modifier
+                                    .heightIn(min = OrbitTokens.spacing("touch-min").dp)
+                                    .widthIn(min = 44.dp)
+                                    .testTag(AGENT_FULLSCREEN_KEY_TAG + key.label),
+                            ) { Text(key.label, style = Fleet.type.code, modifier = Modifier.clearAndSetSemantics { contentDescription = key.spoken }) }
+                        }
+                    }
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -232,9 +288,10 @@ internal fun AgentFullscreen(
                     val can = if (state.card != null) state.canAnswer else state.connected && !state.sending
                     for (key in keys) {
                         val press = key.press
+                        val opensCtrl = key.label == "⌃"
                         OutlinedButton(
-                            onClick = { if (press != null) onPress(press) },
-                            enabled = press != null && can,
+                            onClick = { if (opensCtrl) ctrlOpen = !ctrlOpen else if (press != null) onPress(press) },
+                            enabled = if (opensCtrl) ctrlRow.isNotEmpty() && can else press != null && can,
                             contentPadding = PaddingValues(horizontal = 8.dp),
                             modifier = Modifier
                                 .heightIn(min = OrbitTokens.spacing("touch-min").dp)
