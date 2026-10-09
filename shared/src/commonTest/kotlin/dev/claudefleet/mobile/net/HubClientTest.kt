@@ -29,7 +29,6 @@ import dev.claudefleet.mobile.model.WorkDecision
 import dev.claudefleet.mobile.model.WorkRuleDraft
 import dev.claudefleet.mobile.model.WorkTreeFilters
 import dev.claudefleet.mobile.model.WorkViewDraft
-import kotlinx.serialization.json.jsonArray
 import dev.claudefleet.mobile.ui.explain
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
