@@ -29,6 +29,10 @@ data class Mission(
     val done: Int = 0,
     @SerialName("updated_at") val updatedAt: Long = 0,
     val version: Long = 0,
+    /** What it has spent, in micro-USD; from a contract-14 hub's list and detail. */
+    @SerialName("cost_micros") val costMicros: Long? = null,
+    /** The live grant's budget, in micro-USD, when it sets one (contract 14). */
+    @SerialName("budget_micros") val budgetMicros: Long? = null,
 )
 
 /** A member of a mission (`WorkItemRow`, the fields a line needs). */
@@ -107,6 +111,18 @@ data class MissionPlan(
     val cards: List<MissionCard> = emptyList(),
     val autonomy: MissionAutonomy = MissionAutonomy(),
     @SerialName("cost_micros") val costMicros: Long = 0,
+    /** What the next run will likely cost (contract 14); absent with no history. */
+    @SerialName("run_estimate") val runEstimate: RunEstimate? = null,
+)
+
+/** An average run's cost (`orchestrate::RunEstimate`). */
+@Serializable
+data class RunEstimate(
+    val micros: Long = 0,
+    /** How many finished runs it averages. */
+    val runs: Int = 0,
+    /** `mission` | `fleet`. */
+    val basis: String = "",
 )
 
 /** `work { action: mission }`. */
