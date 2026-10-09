@@ -18,7 +18,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -42,6 +41,7 @@ import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.WorkTaskLink
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.WorkStatusDot
+import dev.claudefleet.mobile.ui.kit.InlineLoading
 
 /** Everything a session's *Tasks* section reports. */
 data class SessionTasksHandlers(
@@ -85,7 +85,7 @@ fun SessionTasksSheet(state: SessionTasksUiState, handlers: SessionTasksHandlers
             }
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
             if (state.error != null && state.conflict) ReloadRow(handlers.onReload)
-            if (state.loading || state.busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            InlineLoading(waiting = state.loading || state.busy)
             val crossOrg = state.crossOrg
             if (crossOrg != null) {
                 CrossOrgPanel(crossOrg, state, handlers)

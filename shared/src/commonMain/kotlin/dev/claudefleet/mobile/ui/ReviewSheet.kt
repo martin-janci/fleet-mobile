@@ -15,7 +15,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -32,6 +31,7 @@ import dev.claudefleet.mobile.model.ReviewItem
 import dev.claudefleet.mobile.model.ReviewKind
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.theme.FleetIcons
+import dev.claudefleet.mobile.ui.kit.InlineLoading
 
 /** Everything the Review sheet reports. */
 data class ReviewHandlers(
@@ -92,7 +92,7 @@ fun ReviewSheet(state: ReviewUiState, handlers: ReviewHandlers) {
                     }
                 }
             }
-            if (state.loading || state.busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            InlineLoading(waiting = state.loading || state.busy)
             if (state.canBatch && state.batchCount > 1) {
                 OutlinedButton(
                     onClick = handlers.onConfirmAll,
