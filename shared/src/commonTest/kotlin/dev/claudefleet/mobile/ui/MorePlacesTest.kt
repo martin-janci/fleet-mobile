@@ -5,7 +5,10 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.HostActions
+import dev.claudefleet.mobile.model.AccountUsageWindows as AccountLimits
+import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.UsageWindow as LimitWindow
 import dev.claudefleet.mobile.model.LostCandidate
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.RestoreReport
@@ -19,6 +22,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -210,5 +214,49 @@ class MorePlacesTest {
     @Test
     fun the_limits_note_says_where_they_are_instead_of_drawing_an_empty_meter() {
         assertTrue("desktop" in LIMITS_ON_DESKTOP && "not send them to phones" in LIMITS_ON_DESKTOP)
+    }
+
+    @Test
+    fun an_accounts_limits_are_listed_in_the_boards_order_with_what_they_have() {
+        val usage = AccountLimits(sevenDay = LimitWindow(40.0), fiveHour = LimitWindow(62.4), sevenDaySonnet = LimitWindow(10.0))
+        assertEquals(listOf("5-hour", "Weekly", "Weekly Sonnet"), limitRows(usage).map { it.first })
+    }
+
+    @Test
+    fun a_meter_says_how_much_is_used_and_when_it_starts_over() {
+        val now = 1_000_000L
+        assertEquals("62% used · resets in 2 h", limitFigure(LimitWindow(62.4, resetsAt = now + 2 * 3_600), now))
+        assertEquals("100% used", limitFigure(LimitWindow(104.0, resetsAt = now - 60), now))
+        assertTrue(nearLimit(LimitWindow(90.0)))
+        assertFalse(nearLimit(LimitWindow(89.9)))
+    }
+
+    @Test
+    fun a_read_that_failed_says_why_and_how_old_the_meters_are() {
+        val now = 1_000_000L
+        val ok = AccountUsageSnapshot(accountUuid = "u1", usage = AccountLimits(), fetchedAt = now - 60, status = "ok")
+        assertNull(limitsNote(ok, now))
+        assertEquals("Not read yet.", limitsNote(null, now))
+        assertEquals(
+            "Its login expired; sign in again on the host · meters from 3 h ago.",
+            limitsNote(ok.copy(status = "login_expired", fetchedAt = now - 3 * 3_600), now),
+        )
+        assertEquals("No host with this account is online.", limitsNote(ok.copy(status = "no_online_host", usage = null), now))
+        assertEquals("Could not read the limits · meters from 3 h ago.", limitsNote(ok.copy(status = "something_new", fetchedAt = now - 3 * 3_600), now))
+    }
+
+    @Test
+    fun the_snapshot_reads_the_hubs_shape() {
+        val body = """[{"account_uuid":"u1","usage":{"five_hour":{"utilization":62.5,"resets_at":1700000000},"seven_day":null,
+            "seven_day_opus":null,"seven_day_sonnet":{"utilization":3.0,"resets_at":null}},"subscription":"max","fetched_at":1699990000,
+            "source_host":"pine","status":"ok","detail":null,"next_try_at":1699990300}]"""
+        val snap = dev.claudefleet.mobile.net.json.decodeFromString(
+            kotlinx.serialization.builtins.ListSerializer(AccountUsageSnapshot.serializer()),
+            body,
+        ).single()
+        assertEquals(62.5, snap.usage?.fiveHour?.utilization)
+        assertNull(snap.usage?.sevenDay)
+        assertEquals(1699990000L, snap.fetchedAt)
+        assertEquals("ok", snap.status)
     }
 }

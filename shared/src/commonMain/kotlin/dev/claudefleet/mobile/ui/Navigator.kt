@@ -73,6 +73,9 @@ sealed interface Screen {
     /** The practice fleet: sample sessions on this phone that never reach the hub. */
     data object Practice : Screen
 
+    /** New layout only (redesign 14.16): Missions as a screen, opened from Control and More. */
+    data object Missions : Screen
+
     /** One of the hub's approved guides, step by step, with Undo per change. */
     data class Guide(val pageId: String) : Screen
 }
@@ -206,6 +209,9 @@ class Navigator(layout: PhoneLayout = PhoneLayout.Classic) {
 
     /** Open Learn over whatever is showing (More); back returns there. */
     fun openLearn() = move { s -> if (s.screen == Screen.Learn) s else s.pushing(s.screen).going(Screen.Learn) }
+
+    /** Open Missions over whatever is showing (Control, More); back returns there. */
+    fun openMissions() = move { s -> if (s.screen == Screen.Missions) s else s.pushing(s.screen).going(Screen.Missions) }
 
     /** Open the practice fleet over whatever is showing (Learn, the help picker, Settings). */
     fun openPractice() = move { s -> if (s.screen == Screen.Practice) s else s.pushing(s.screen).going(Screen.Practice) }
@@ -431,7 +437,7 @@ class Navigator(layout: PhoneLayout = PhoneLayout.Classic) {
 internal fun isPushedOn(screen: Screen, layout: PhoneLayout): Boolean =
     screen is Screen.Session || screen is Screen.NewSession || screen is Screen.Task || screen is Screen.Repo ||
         screen == Screen.Usage || screen == Screen.Company || screen == Screen.Update ||
-        screen == Screen.Learn || screen == Screen.Practice || screen is Screen.Guide ||
+        screen == Screen.Learn || screen == Screen.Practice || screen is Screen.Guide || screen == Screen.Missions ||
         (layout == PhoneLayout.New && (screen == Screen.Hosts || screen == Screen.Files || screen == Screen.Settings))
 
 private fun rootOf(tab: Tab): Screen = when (tab) {
@@ -449,7 +455,7 @@ private fun rootOf(tab: Tab): Screen = when (tab) {
 private fun tabOf(screen: Screen, layout: PhoneLayout): Tab? = when (screen) {
     is Screen.Sessions -> Tab.Sessions
     is Screen.Session, is Screen.NewSession, is Screen.Repo, Screen.Usage, Screen.Company, Screen.Update,
-    Screen.Learn, Screen.Practice, is Screen.Guide -> null
+    Screen.Learn, Screen.Practice, is Screen.Guide, Screen.Missions -> null
     Screen.Work, is Screen.Task -> Tab.Work
     Screen.Files -> if (layout == PhoneLayout.New) null else Tab.Files
     Screen.Hosts -> if (layout == PhoneLayout.New) null else Tab.Hosts

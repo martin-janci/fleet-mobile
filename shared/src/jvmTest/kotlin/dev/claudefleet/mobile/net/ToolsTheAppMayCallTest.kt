@@ -157,7 +157,8 @@ class ToolsTheAppMayCallTest {
         "usage_report",
         "list_accounts",
         // Each account's 5-hour and weekly windows (claude-fleet contract
-        // revision 11, readonly): when a paused row's limit resets (4.10).
+        // revision 11, readonly): when a paused row's limit resets (4.10)
+        // and the meters on Accounts and usage (14.10).
         "account_usage",
         // A host's sheet and a ghost: `probe_host` and `discover_lost_sessions`
         // are readonly; `restore_host_sessions`, `recreate_session` and
