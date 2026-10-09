@@ -33,7 +33,6 @@ class ToolsTheAppMayCallTest {
      */
     private val forbidden = listOf(
         "provision_hosts",
-        "add_host",
         "remove_host",
         "hide_host",
         "apply_sync",
@@ -206,13 +205,15 @@ class ToolsTheAppMayCallTest {
         "prs",
         // A host joining from the phone (redesign 14.19, claude-fleet 4.9):
         // `agent_installs` is readonly and `Access::Client`. `install_agent`
-        // is `Access::Master` today, like `add_host`: the hub filters
-        // `tools/list` per token, so a client pairing is never offered it and
-        // the phone only calls it when the hub lists it to this token
-        // (`HubCapabilities.installAgent`). Whether a paired device may ever
-        // be offered it is the hub's call, not the phone's.
+        // and `add_host` are `Access::Person` since contract 13 (Martin's
+        // "Owner's phone"): the hub lists them to its owner's own device and
+        // refuses one it does not trust. The phone calls them only when the
+        // hub lists them to this token (`HubCapabilities.installAgent`,
+        // `addHost`). `discover_hosts` is readonly and `Access::Client`.
         "install_agent",
         "agent_installs",
+        "add_host",
+        "discover_hosts",
         // Automation (redesign 8.9): routines, their runs and their switch.
         // `Access::Client`, not readonly, so the hub does not list it for a
         // readonly token; never a per-host token's (`NOT_FOR_HOST_TOKENS`).

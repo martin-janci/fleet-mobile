@@ -106,7 +106,8 @@ class TheBackGestureReachesTheNavigatorTest {
      * conversation or the agent's screen has the whole phone, and composed
      * after the Files tab's, so back leaves full screen first. A host's
      * agent install (redesign 14.19) is enabled only while its screen is
-     * up over Hosts, so back leaves it (the job runs on the hub) first.
+     * up over Hosts, so back leaves it (the job runs on the hub) first; the
+     * Radar's (adding a host, redesign 14.12) the same while it is open.
      */
     @Test
     fun there_is_exactly_one() {
@@ -119,6 +120,7 @@ class TheBackGestureReachesTheNavigatorTest {
             listOf(
                 "nav.isPushed(screen)",
                 "companyState.openId != null",
+                "addHostState.open",
                 "installState.installing",
                 "practiceState.open != null",
                 "fleetPageOpen || place != SettingsPlace.Home",

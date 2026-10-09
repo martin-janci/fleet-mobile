@@ -37,6 +37,7 @@ import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.MemberGrants
 import dev.claudefleet.mobile.model.MemberRemoved
 import dev.claudefleet.mobile.model.OrgMemberRow
+import dev.claudefleet.mobile.model.SshHost
 import dev.claudefleet.mobile.model.PagesBundle
 import dev.claudefleet.mobile.model.PairResult
 import dev.claudefleet.mobile.model.ProjectRow
@@ -634,6 +635,25 @@ class HubClient(
                 put("session_id", sessionId)
             },
         ) { }
+
+    /** The hub's `~/.ssh/config` hosts (`discover_hosts`, readonly): candidates for [addHost]. */
+    suspend fun discoverHosts(): List<SshHost> =
+        call("discover_hosts") { json.decodeFromJsonElement(ListSerializer(SshHost.serializer()), it) }
+
+    /**
+     * Register [sshAlias] as fleet host [alias] (`add_host`, transport ssh):
+     * the hub probes it first and keeps it only if it answers. Offered to the
+     * hub owner's trusted full phone since contract 13; any other device is
+     * refused with E_FORBIDDEN naming `fleet-hub client trust`.
+     */
+    suspend fun addHost(alias: String, sshAlias: String): HostRow =
+        call(
+            "add_host",
+            buildJsonObject {
+                put("alias", alias)
+                put("ssh_alias", sshAlias)
+            },
+        ) { json.decodeFromJsonElement(HostRow.serializer(), it) }
 
     /**
      * Start the hub's fleet-agent install job on [alias] (`install_agent`,

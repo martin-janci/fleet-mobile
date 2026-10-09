@@ -60,6 +60,8 @@ import dev.claudefleet.mobile.data.HubProjectActions
 import dev.claudefleet.mobile.data.HubMoveActions
 import dev.claudefleet.mobile.data.HubSessionExtrasActions
 import dev.claudefleet.mobile.data.HubAgentInstallActions
+import dev.claudefleet.mobile.data.AddHostActions
+import dev.claudefleet.mobile.data.HubAddHostActions
 import dev.claudefleet.mobile.data.AgentInstallActions
 import dev.claudefleet.mobile.data.SessionExtrasActions
 import dev.claudefleet.mobile.data.HubSessionActions
@@ -157,6 +159,9 @@ import dev.claudefleet.mobile.ui.OrbitUsageScreen
 import dev.claudefleet.mobile.ui.DECISIONS_PAGE
 import dev.claudefleet.mobile.ui.DecisionsHead
 import dev.claudefleet.mobile.ui.OrbitOrgsHandlers
+import dev.claudefleet.mobile.ui.AddHostHandlers
+import dev.claudefleet.mobile.ui.AddHostScreen
+import dev.claudefleet.mobile.ui.AddHostViewModel
 import dev.claudefleet.mobile.ui.MembersHandlers
 import dev.claudefleet.mobile.ui.MembersSheet
 import dev.claudefleet.mobile.ui.MembersViewModel
@@ -435,6 +440,7 @@ class AppContainer(
 
     /** The fleet-agent install job, from Hosts (redesign 14.19). */
     val agentInstallActions: AgentInstallActions = HubAgentInstallActions(session)
+    val addHostActions: AddHostActions = HubAddHostActions(session)
 
     /** The hub's own version, for the Settings screen to show beside this app's. */
     val versionActions: VersionActions = HubVersionActions(session)
@@ -758,6 +764,7 @@ private fun FleetRoute(
     val installs = remember(repository, scope) {
         AgentInstallViewModel(repository, container.agentInstallActions, scope, credentials.canWrite)
     }
+    val addHost = remember(repository, scope) { AddHostViewModel(repository, container.addHostActions, scope, credentials.canWrite) }
     // The fleet's scope, like the New session form's `callScope`: a resume
     // started from the sheet must not be cancelled by closing it.
     val tickets = remember(repository, scope) {
@@ -1386,6 +1393,7 @@ private fun FleetRoute(
                 }
                 Screen.Hosts -> {
                     val state by hosts.state.collectAsState()
+                    val addHostState by addHost.state.collectAsState()
                     val hostCaps by repository.capabilities.collectAsState()
                     val hostSheet by hostDetail.state.collectAsState()
                     val onHostDetails = { alias: String -> hostDetail.open(alias); Unit }
@@ -1405,6 +1413,7 @@ private fun FleetRoute(
                                 // Only where the hub lists the job to this pairing; the tap opens the review, not the install.
                                 onInstallAgent = { alias: String -> installs.open(alias) }
                                     .takeIf { credentials.canWrite && hostCaps.installAgent },
+                                onAddHost = { addHost.open(); Unit }.takeIf { addHostState.available },
                             ),
                         )
                     } else {
@@ -1429,6 +1438,14 @@ private fun FleetRoute(
                                 onResume = { c -> hostDetail.resume(c) { id -> hostDetail.close(); nav.open(id) } },
                                 onDismissError = hostDetail::dismissError,
                             ),
+                        )
+                    }
+                    // Back leaves the Radar first; a host being added is the hub's either way.
+                    BackHandler(enabled = addHostState.open) { addHost.close() }
+                    if (addHostState.open) {
+                        AddHostScreen(
+                            addHostState,
+                            AddHostHandlers(onClose = addHost::close, onAdd = { addHost.add(it) }, onDismissError = addHost::dismissError),
                         )
                     }
                     val installState by installs.state.collectAsState()
