@@ -4,6 +4,8 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.UsageActions
 import dev.claudefleet.mobile.model.AccountRow
+import dev.claudefleet.mobile.model.AccountUsageSnapshot
+import dev.claudefleet.mobile.model.AccountUsageWindows
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
@@ -16,6 +18,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 private class UsageFleet(tools: Set<String>) : FleetState {
@@ -27,6 +30,9 @@ private class UsageFleet(tools: Set<String>) : FleetState {
     override val clockSkewSeconds = MutableStateFlow(0L)
     override val sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16)
     override val capabilities = MutableStateFlow(HubCapabilities(tools = tools))
+    override val accountUsage = MutableStateFlow(
+        mapOf("u1" to AccountUsageSnapshot("u1", AccountUsageWindows(fiveHour = dev.claudefleet.mobile.model.UsageWindow(62.0)), "ok")),
+    )
     override suspend fun refresh() = Unit
 }
 
@@ -81,6 +87,18 @@ class UsageViewModelTest {
         runCurrent()
         assertTrue(calls.windows.isEmpty())
         assertEquals(0, calls.accountReads)
+        assertFalse(vm.state.value.limitsAvailable)
+    }
+
+    @Test
+    fun a_hub_that_serves_the_limits_shows_the_fleets_readings() = runTest {
+        val calls = UsageCalls()
+        val vm = UsageViewModel(UsageFleet(both + HubCapabilities.ACCOUNT_USAGE), calls, backgroundScope)
+        vm.load().join()
+        runCurrent()
+
+        assertTrue(vm.state.value.limitsAvailable)
+        assertEquals(62.0, vm.state.value.limits["u1"]?.usage?.fiveHour?.utilization)
     }
 
     @Test

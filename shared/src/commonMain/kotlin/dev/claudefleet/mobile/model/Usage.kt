@@ -85,19 +85,25 @@ data class UsageWindow(
 data class AccountUsageWindows(
     @SerialName("five_hour") val fiveHour: UsageWindow? = null,
     @SerialName("seven_day") val sevenDay: UsageWindow? = null,
+    @SerialName("seven_day_opus") val sevenDayOpus: UsageWindow? = null,
+    @SerialName("seven_day_sonnet") val sevenDaySonnet: UsageWindow? = null,
 )
 
 /**
  * The last usage reading of one account (`account_usage`, claude-fleet's
- * `AccountUsageSnapshot`). Only what the paused row reads (redesign step
- * 4.10); the rest of the hub's snapshot is ignored.
+ * `AccountUsageSnapshot`). What the paused row (redesign step 4.10) and
+ * the Accounts and usage meters read; the rest of the hub's snapshot is
+ * ignored.
  */
 @Serializable
 data class AccountUsageSnapshot(
     @SerialName("account_uuid") val accountUuid: String,
     /** The last good reading, kept even when [status] says the last try failed. */
     val usage: AccountUsageWindows? = null,
+    /** `ok`, `rate_limited`, `login_expired`, … : how the latest try went. */
     val status: String? = null,
+    /** When [usage] was read, unix seconds. */
+    @SerialName("fetched_at") val fetchedAt: Long? = null,
 )
 
 /** An account at a usage limit: which window, and when it resets. */
