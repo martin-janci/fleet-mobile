@@ -55,7 +55,7 @@ data class ShareHandlers(
  * Share a session from the phone (redesign 11.10): the desktop's Share
  * sheet in the phone's sheet. Who holds a grant, with Narrow to watch and a
  * two-step Revoke; a share to a person or an org at Watch, Answer (from
- * contract 15) or Drive; and the two things a sharer is deciding without
+ * contract 13) or Drive; and the two things a sharer is deciding without
  * being told, said out loud.
  */
 @OptIn(ExperimentalMaterial3Api::class)
