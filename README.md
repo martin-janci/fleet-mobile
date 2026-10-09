@@ -243,6 +243,12 @@ costs one reconnect.
 
 ## What it does
 
+- **Layout** — Classic or New, like the desktop's layout switch: *New
+  navigation* in Settings, off until turned on. Classic's bottom bar is
+  Sessions, Work, Files, Hosts and Settings. New's is Inbox, Sessions,
+  Control, Work and More; Hosts, Files, Settings and the places below move
+  under More, and a session opens in tabs (Conversation, the agent, Terminals,
+  Files, Details).
 - **Sessions** — every session across every host, grouped by host and then by
   project, with status, the one-line activity the hub already computes, and a
   filter for the ones that need a human (blocked or stuck). A long press picks
@@ -319,6 +325,11 @@ costs one reconnect.
   **History** (who changed it, from what to what). Maps, id lists and price
   tables, resources (Trackers, Organisations) and data pages stay on a
   desktop.
+- **Automation** (More → Automation, when the hub serves `routines`) — the
+  routines with their runs, and **Pause all** at the top; missions open from
+  inside it.
+- **Debug devices** (More → Debug devices, when the hub serves
+  `debug_devices`) — the test phones, emulators and simulators on the hosts.
 - **Work** (a hub with the work graph) — what each session is working on, as
   the hub decided it:
   - a key chip on every row (a dotted outline for a guess nobody has decided,
@@ -495,11 +506,12 @@ what caught it.
 ./gradlew :shared:connectedAndroidDeviceTest   # needs an emulator or a phone
 ```
 
-The second is one test class, `AndroidSecretsTest`: write the credential, read
-it back, clear it, and confirm the entry is *gone* rather than blanked, plus
-that neither the key nor the token is on disk in the clear. It is the only test
-here that needs real hardware, because `EncryptedSharedPreferences` and the
-Keystore exist on a device and nowhere else.
+The second runs two test classes. `AndroidSecretsTest` writes the credential,
+reads it back, clears it, and confirms the entry is *gone* rather than blanked,
+plus that neither the key nor the token is on disk in the clear; it needs real
+hardware because `EncryptedSharedPreferences` and the Keystore exist on a
+device and nowhere else. `QrDecodeTest` decodes pairing QR codes with the
+Android scanner's decoder.
 
 ### iOS — needs a Mac
 
@@ -568,7 +580,11 @@ form** — `.gitignore` excludes `*.jks`, `*.jks.base64`, `*.keystore`,
 `*.keystore.base64` and `*.p12`, but that is a second line of defense, not a
 reason to create the file inside the repo in the first place.
 
-Cut a release by pushing a tag:
+A release is normally cut from claude-fleet, after its own release is
+pushed: `scripts/release-mobile.sh <X.Y.Z>` there tags this repository's
+`main` with the same version, and refuses when claude-fleet has no such tag
+yet, when `main` does not accept that release's hub contract, or when CI has
+not passed on `main`. By hand, a release is a pushed tag:
 
 ```bash
 git tag vX.Y.Z && git push origin vX.Y.Z
@@ -590,6 +606,16 @@ The workflow refuses to run rather than publish something it shouldn't:
   the checked-out workspace, and is deleted at the end of the job regardless
   of whether it succeeded.
 
+### iOS (TestFlight)
+
+`.github/workflows/testflight.yml` runs on the same `v*` tags. It archives the
+app on a macOS runner, signs it and uploads it to TestFlight. Its four App
+Store Connect secrets (`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`,
+`APPLE_TEAM_ID`) are secrets of the `testflight` environment, which only `v*`
+tags and `main` may use. A tag with a `-suffix` builds and signs but does not
+upload, and a manual dispatch proves the signing and never uploads. The
+design is in `docs/superpowers/specs/2026-10-05-ios-testflight-design.md`.
+
 ## What a Mac still has to check
 
 **The shared code runs on iOS, and so does the app itself — far enough to
@@ -597,8 +623,8 @@ launch, and far enough to use the Keychain. What still needs a person is a
 screen, a camera, and a real device.**
 
 What changed: the `macos` job runs `:shared:iosSimulatorArm64Test` on a booted
-simulator, so the whole shared suite — **313 tests** — executes on
-Kotlin/Native on every push. That is the app's
+simulator, so the whole shared suite executes on Kotlin/Native on every
+push. That is the app's
 entire logic layer: the address and transport rules, the SSE framing, the
 conversation merge, every view model, and the token-hygiene rules.
 
@@ -606,7 +632,7 @@ Those tests already ran twice — under `jvmTest`, and again on the emulator,
 because the device-test source-set tree pulls `commonTest` into the Android run
 — but both of those are a JVM. Kotlin/Native has its own string, regex,
 coroutine and memory implementations, and the shared code had only ever been
-*compiled* for it. All 313 pass there exactly as they do on the JVM, which is
+*compiled* for it. Every test passes there exactly as it does on the JVM, which is
 the first evidence that the two platforms agree about any of it.
 
 What that leaves, and what it no longer does:
@@ -695,24 +721,24 @@ not polish: get either wrong and the app does not work at all.
    `NSAllowsLocalNetworking` are in the plist for this. Nobody has seen the
    local-network permission dialog appear, or confirmed that Ktor's Darwin
    engine reaches `http://192.168.x.x:8899` once it has.
-8. **The app icon.** `Assets.xcassets/AppIcon.appiconset` declares the slot and
-   holds no image. Xcode will warn.
+8. **The app icon.** `Assets.xcassets/AppIcon.appiconset` holds
+   `AppIcon-1024.png` (drawn by `scripts/render-ios-icon.swift`). Check it on
+   the home screen of a real device.
 
 And the parts that need a **device or emulator on either platform**, or a
 **live hub**:
 
-- **One screen has now been rendered, once, on Android.**
-  `androidApp/src/androidTest` launches `MainActivity` with a `claudefleet:`
-  URL on the emulator and asserts the Pair screen comes back holding the code
-  and the hub — the first Compose this repository has drawn anywhere. It proves
-  the composition runs and recomposes on a state change from outside it.
+- **Screens are rendered on Android, and one flow on iOS.**
+  `androidApp/src/androidTest` holds about two dozen Compose tests that run on
+  the emulator: the Pair screen from a `claudefleet:` link, the sessions list
+  and its filters, the session screen and its header, the conversation and
+  its scrolling, the details sheet, the worktree screen, usage, missions,
+  bulk select and more. `iosApp/iosAppUITests/PairLinkUITests.swift` drives
+  the pairing link on the iOS simulator.
 
-  It proves nothing else, and the list of what is still open is almost
-  unchanged: every other screen compiles for Android and both iOS targets and
-  has never been drawn. Whether the grouped list scrolls, whether the prompt
-  box clears a soft keyboard, whether auto-scroll behaves when someone has
-  scrolled up, and whether the status chip colours are legible in both themes
-  are all still open, and nothing has rendered on iOS at all.
+  What they do not prove: whether the prompt box clears a soft keyboard on a
+  real device, whether the status chip colours are legible in both themes on
+  a real screen, and how every screen they do not cover behaves.
 - **`AndroidSecrets` now executes on every push.** It is the only thing the app
   persists — `EncryptedSharedPreferences` over a Keystore master key — and until
   2026-09-19 it had never run a line on real hardware, because the machine it was
@@ -742,10 +768,12 @@ shared/          Kotlin Multiplatform: models, hub client, repository,
   commonTest/    everything testable without a device
   jvmTest/       the same, plus the source scans that guard the two hosts
   androidMain/   EncryptedSharedPreferences, CameraX + ZXing scanner
-  androidDeviceTest/  the one instrumentation test
+  androidDeviceTest/  the device tests (the secure store, QR decoding)
   iosMain/       Keychain, AVFoundation scanner, the ComposeUIViewController
-androidApp/      one Activity, the manifest, permissions and icons
-iosApp/          a SwiftUI App and a UIViewControllerRepresentable. Two files.
+androidApp/      one Activity, the manifest, permissions and icons, and the
+                 Compose UI tests in src/androidTest
+iosApp/          a SwiftUI App, its delegate and a UIViewControllerRepresentable,
+                 plus the XCTest (iosAppTests) and UI-test (iosAppUITests) bundles
 docs/            the design this was built from, and what was measured
 ```
 
