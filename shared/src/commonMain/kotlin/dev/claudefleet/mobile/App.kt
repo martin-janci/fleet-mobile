@@ -1313,7 +1313,10 @@ private fun FleetRoute(
                 }
                 Screen.Usage -> {
                     val usage = remember(repository, scope) { UsageViewModel(repository, container.usageActions, scope) }
-                    LaunchedEffect(usage) { usage.load() }
+                    DisposableEffect(usage) {
+                        usage.attach()
+                        onDispose { usage.detach() }
+                    }
                     val usageState by usage.state.collectAsState()
                     val usageHandlers = UsageHandlers(
                         onBack = { nav.back() },

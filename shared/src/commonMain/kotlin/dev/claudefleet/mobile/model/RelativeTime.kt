@@ -22,9 +22,17 @@ fun relativeAgo(epochSeconds: Long?, nowSeconds: Long): String? {
     return if (t == "just now") t else "$t ago"
 }
 
-/** Time left until [deadlineSeconds]: "5 min", "2 h"; "under a minute" at the end, never "just now". */
+/**
+ * Time left until [deadlineSeconds]: "5 min", "2 h"; "under a minute" at the
+ * end, never "just now". Null once the deadline has passed: there is no time
+ * left to name, and every caller drops its "in …" / "… left" phrase on null.
+ */
 fun relativeWithin(deadlineSeconds: Long?, nowSeconds: Long): String? {
     if (deadlineSeconds == null) return null
     val left = deadlineSeconds - nowSeconds
-    return if (left < 60) "under a minute" else relativeTime(nowSeconds, deadlineSeconds)
+    return when {
+        left <= 0 -> null
+        left < 60 -> "under a minute"
+        else -> relativeTime(nowSeconds, deadlineSeconds)
+    }
 }

@@ -16,7 +16,15 @@ class RelativeAgoTest {
     @Test
     fun within_never_says_just_now() {
         assertEquals("under a minute", relativeWithin(1_030, 1_000))
-        assertEquals("under a minute", relativeWithin(900, 1_000))
+        assertEquals("under a minute", relativeWithin(1_001, 1_000))
         assertEquals("5 min", relativeWithin(1_300, 1_000))
+    }
+
+    @Test
+    fun within_a_passed_deadline_names_no_time_left() {
+        assertEquals(null, relativeWithin(1_000, 1_000))
+        assertEquals(null, relativeWithin(900, 1_000))
+        assertEquals(null, relativeWithin(1_000 - 86_400, 1_000))
+        assertEquals(null, relativeWithin(null, 1_000))
     }
 }

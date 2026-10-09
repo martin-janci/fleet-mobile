@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -73,7 +75,29 @@ class UsageViewModel(
         )
     }.stateIn(scope, SharingStarted.Eagerly, UsageUiState())
 
-    fun load(): Job = scope.launch { read(withAccounts = true) }
+    private var follow: Job? = null
+
+    /**
+     * The screen is showing: read now, and again whenever the hub's
+     * capabilities change what it serves, until [detach]. Discovery lands a
+     * beat after the connection is ready, so a Usage screen opened before it
+     * would otherwise read nothing and never try again.
+     */
+    fun attach() {
+        if (follow?.isActive == true) return
+        follow = scope.launch {
+            fleet.capabilities
+                .map { it.usage to it.accounts }
+                .distinctUntilChanged()
+                .collect { (usage, accounts) -> if (usage || accounts) read(withAccounts = true) }
+        }
+    }
+
+    /** The screen is gone: stop following. What was read stays for the next visit. */
+    fun detach() {
+        follow?.cancel()
+        follow = null
+    }
 
     fun select(window: UsageWindow): Job = scope.launch {
         if (local.value.window == window) return@launch
