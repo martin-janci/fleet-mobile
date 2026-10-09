@@ -626,7 +626,7 @@ fun App(container: AppContainer) {
 @Composable
 private fun Splash() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("claude-fleet", style = MaterialTheme.typography.titleLarge)
+        Text("Orbit Fleet", style = MaterialTheme.typography.titleLarge)
     }
 }
 

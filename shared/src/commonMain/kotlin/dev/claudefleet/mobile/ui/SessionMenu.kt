@@ -72,19 +72,19 @@ fun orbitMenuItems(f: OrbitMenuFacts): List<OrbitMenuItem> = buildList {
         add(OrbitMenuItem(OrbitItem.Effort, "Effort…", "sets /effort", 1))
     }
     if (f.review) add(OrbitMenuItem(OrbitItem.Review, "Review…", "a new session reviews this worktree", 1))
-    if (f.move) add(OrbitMenuItem(OrbitItem.Move, "Move to another host…", f.hostAlias?.let { "now on $it" }, 2))
-    if (f.repair) add(OrbitMenuItem(OrbitItem.Repair, "Repair", "fix the worktree, re-attach the pane", 2))
+    if (f.move) add(OrbitMenuItem(OrbitItem.Move, "Move to host…", f.hostAlias?.let { "now on $it" }, 2))
+    if (f.repair) add(OrbitMenuItem(OrbitItem.Repair, "Repair workspace", "fix the worktree, re-attach the pane", 2))
     if (f.recreate) add(OrbitMenuItem(OrbitItem.Recreate, "Recreate", if (f.ghost) "bring it back in its worktree" else "new pane, same worktree and conversation", 2))
     if (f.restart) add(OrbitMenuItem(OrbitItem.Restart, "Restart", "kill and recreate the tmux session", 2))
-    if (f.dismissGhost) add(OrbitMenuItem(OrbitItem.DismissGhost, "Dismiss ghost", "forget this row; the conversation stays", 2))
+    if (f.dismissGhost) add(OrbitMenuItem(OrbitItem.DismissGhost, "Dismiss lost session", "forget this row; the conversation stays", 2))
     f.tmuxName?.takeIf { it.isNotBlank() }?.let {
         add(OrbitMenuItem(OrbitItem.CopyAttach, "Copy tmux attach command", tmuxAttachCommand(it), 3, writes = false))
     }
     add(OrbitMenuItem(OrbitItem.Details, "Details", "host, branch, model, timeline", 3, writes = false))
     if (f.worktree) add(OrbitMenuItem(OrbitItem.Worktree, "Files", "changes, history, the worktree", 3, writes = false))
     if (f.archive) add(OrbitMenuItem(OrbitItem.Archive, "Archive", "off the work board", 4))
-    if (f.manage) add(OrbitMenuItem(OrbitItem.Retire, "Retire safely", "commit and push, then remove", 4))
-    if (f.kill) add(OrbitMenuItem(OrbitItem.Kill, "Kill…", "asks first", 4, danger = true))
+    if (f.manage) add(OrbitMenuItem(OrbitItem.Retire, "Safe remove", "commit and push, then remove", 4))
+    if (f.kill) add(OrbitMenuItem(OrbitItem.Kill, "Kill session…", "asks first", 4, danger = true))
 }
 
 const val ORBIT_MENU_TAG = "session.menu."

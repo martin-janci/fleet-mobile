@@ -467,7 +467,7 @@ fun Comet(modifier: Modifier = Modifier, size: Dp = 16.dp) {
     val head = Fleet.colors.cometHead
     val tail = Fleet.colors.accent
     val clock = rememberLoaderClock(1_400)
-    Canvas(modifier.size(size).semantics { contentDescription = "Running" }) {
+    Canvas(modifier.size(size).semantics { contentDescription = "Working" }) {
         val c = Offset(this.size.width / 2f, this.size.height / 2f)
         val r = this.size.width * 0.36f
         val dot = this.size.width * 0.1f

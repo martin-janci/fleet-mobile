@@ -345,7 +345,7 @@ internal const val RICH_SETTING = "rich-setting"
 internal const val RICH_SETTING_APPLY = "rich-setting-apply"
 internal const val RICH_GUIDE_PAGE = "rich-guide-page"
 
-private val PROGRESS_LABEL = mapOf("running" to "Running", "waiting" to "Needs you", "done" to "Done", "failed" to "Failed")
+private val PROGRESS_LABEL = mapOf("running" to "Working", "waiting" to "Needs you", "done" to "Done", "failed" to "Failed")
 private val STEP_MARK = mapOf("pending" to "○", "running" to "◐", "done" to "✓", "failed" to "✕", "skipped" to "–")
 
 private fun progressTone(state: String) = when (state) {

@@ -246,17 +246,17 @@ class SessionExtrasTest {
         )
         val labels = items.map { it.label }
         assertEquals("Rename", labels.first())
-        assertEquals("Kill…", labels.last())
+        assertEquals("Kill session…", labels.last())
         assertTrue(items.last().danger)
         assertEquals("asks first", items.last().detail)
-        for (label in listOf("Ticket and tasks", "Move to another host…", "Repair", "Recreate", "Copy tmux attach command", "Details", "Archive")) {
+        for (label in listOf("Ticket and tasks", "Move to host…", "Repair workspace", "Recreate", "Copy tmux attach command", "Details", "Archive")) {
             assertTrue(label in labels, label)
         }
         assertEquals("FLEET-142", items.first { it.id == OrbitItem.Ticket }.detail)
         assertEquals("now on mercury", items.first { it.id == OrbitItem.Move }.detail)
         assertEquals("tmux attach -t hosts-polish", items.first { it.id == OrbitItem.CopyAttach }.detail)
         // Recovery sits between the session's naming and its ending.
-        assertTrue(labels.indexOf("Repair") in (labels.indexOf("Rename") + 1) until labels.indexOf("Archive"))
+        assertTrue(labels.indexOf("Repair workspace") in (labels.indexOf("Rename") + 1) until labels.indexOf("Archive"))
         assertTrue(items.all { it.label == "Details" || it.detail != null || it.id == OrbitItem.Rename })
     }
 

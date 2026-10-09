@@ -59,7 +59,7 @@ fun MoveSheet(state: MoveUiState, handlers: MoveHandlers, nowSeconds: Long, orbi
     var confirming by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).verticalScroll(rememberScrollState())) {
-            Text("Move to another host", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+            Text("Move to host", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
             Text(
                 "Its uncommitted and unpushed work, small git-ignored files, its Claude conversation and memory go with it.",
                 style = MaterialTheme.typography.bodySmall,
