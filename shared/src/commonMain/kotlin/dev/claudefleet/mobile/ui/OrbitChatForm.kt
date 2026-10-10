@@ -135,10 +135,12 @@ internal fun OrbitChatFormCard(
     /** Ask the agent for an expired form again; null offers nothing. */
     onAskAgain: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    /** The answers filled in while the form was written; see [ChatFormCard]. */
+    seed: Map<String, JsonElement> = emptyMap(),
 ) {
     val o = Fleet.colors
     val scope = rememberCoroutineScope()
-    val model = remember(pending.formId, actions) { AskFormModel(actions, pending.formId, scope) }
+    val model = remember(pending.formId, actions) { AskFormModel(actions, pending.formId, scope, seed) }
     LaunchedEffect(model, open) { model.load() }
     val s by model.state.collectAsState()
     var numberText by remember(pending.formId) { mutableStateOf(mapOf<String, String>()) }

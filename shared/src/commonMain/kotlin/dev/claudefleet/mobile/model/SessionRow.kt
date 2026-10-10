@@ -130,6 +130,15 @@ data class SessionRow(
     @SerialName("last_viewed_at") val lastViewedAt: Long? = null,
     /** The credential profile the session runs under; absent for the host's own login (accounts, step 4.4). */
     @SerialName("claude_profile") val claudeProfile: String? = null,
+    /**
+     * The form the session's agent is still writing (`ask { draft }`,
+     * claude-fleet PR #779, migration 153), drawn in as skeleton fields until
+     * its `ask { form }` opens [pendingForm]; see `model/FormDraft.kt`. Null
+     * when none, and from an older hub. The hub's `view=phone` listing leaves
+     * it out; every `session:updated` frame carries it, and each draft write
+     * sends one.
+     */
+    @SerialName("form_draft") val formDraft: FormDraft? = null,
 ) {
     /**
      * A turn ended after the session was last viewed — or, for a session fleet

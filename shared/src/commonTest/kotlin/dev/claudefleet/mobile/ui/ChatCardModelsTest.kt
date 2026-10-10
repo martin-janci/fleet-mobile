@@ -116,6 +116,25 @@ class AskFormModelTest {
         assertNull(m.state.value.problemFor("env"))
     }
 
+    /** G0.3: what the person filled in while the agent wrote the form starts its answers, where it fits. */
+    @Test
+    fun answers_typed_into_the_draft_start_the_open_form() = runTest {
+        val hub = FakeForms()
+        val seed = mapOf(
+            "env" to JsonPrimitive("stg"),
+            "token" to JsonPrimitive("typed-early"),
+            "gone" to JsonPrimitive("x"),
+        )
+        val m = AskFormModel(hub, "f_a", this, seed)
+        m.load().join()
+        // The option still offered is kept; a secret and a field the form lost are not.
+        assertEquals(mapOf<String, JsonElement>("env" to JsonPrimitive("stg")), m.state.value.values)
+
+        val off = AskFormModel(hub, "f_a", this, mapOf("env" to JsonPrimitive("qa")))
+        off.load().join()
+        assertNull(off.state.value.values["env"])
+    }
+
     @Test
     fun decline_sends_the_note() = runTest {
         val hub = FakeForms()
