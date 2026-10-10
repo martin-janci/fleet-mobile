@@ -1,6 +1,8 @@
 package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.model.BackgroundOptions
+import dev.claudefleet.mobile.model.START_STEPS
+import dev.claudefleet.mobile.model.StartStepState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -107,6 +109,8 @@ internal fun NewSessionWizard(
     addHandlers: AddProjectHandlers = AddProjectHandlers(),
     /** "Start from: A ticket" (MobileNewSession, r09 B14): opens the tickets list, whose Start comes back here; null hides the choice. */
     onFromTicket: (() -> Unit)? = null,
+    /** Start from a branch, the drafted branch, the account and the first message (gap plan G5.6). */
+    extras: NewSessionExtras = NewSessionExtras(),
 ) {
     // A background agent shows the same Starting panel, without the
     // project's steps: it has none of them.
@@ -187,6 +191,7 @@ internal fun NewSessionWizard(
                 toolHandlers = toolHandlers,
                 onSelectWorktree = onSelectWorktree,
                 onFromTicket = onFromTicket,
+                extras = extras,
             )
         }
     }
@@ -216,6 +221,7 @@ private fun ColumnScope.WizardBody(
     toolHandlers: ProjectToolsHandlers,
     onSelectWorktree: (Long?) -> Unit,
     onFromTicket: (() -> Unit)?,
+    extras: NewSessionExtras,
 ) {
     val previous = step.previous
     val editable = !state.creating
@@ -224,16 +230,18 @@ private fun ColumnScope.WizardBody(
             WizardStep.Where -> WhereStep(
                 state, editable, onSelectHost, onBackground = onBackground,
                 onFromTicket = onFromTicket.takeIf { state.ticketKey == null },
+                onStartFrom = extras.onStartFrom,
             )
             WizardStep.Project -> ProjectStep(
                 state, editable, onProjectQuery, onSelectProject, onNewWorktree, onBranchChange, onBaseBranchChange,
-                tools, toolHandlers, onSelectWorktree,
+                tools, toolHandlers, onSelectWorktree, extras,
             )
             WizardStep.Review -> ReviewStep(
                 state, editable, onFriendlyNameChange, onToggleAlsoIn,
                 onChange = onStep,
                 onBackground = onBackground,
                 worktreeName = tools.worktrees?.worktrees?.firstOrNull { it.id == state.worktreeId }?.let { it.name.ifBlank { it.path } },
+                extras = extras,
             )
         }
     }
@@ -306,10 +314,79 @@ internal fun createLabel(s: NewSessionUiState): String = when {
  * is made (a new branch, or a ticket's), then the tmux pane, then the agent.
  */
 internal fun startSteps(s: NewSessionUiState): List<String> = buildList {
-    if (s.ticketKey != null || s.newWorktree) add("Worktree")
+    if (s.ticketKey != null || s.newWorktree || s.startFrom == StartFrom.Branch) add("Worktree")
     add("tmux pane")
     add("Claude Code")
 }
+
+/** One line of the Starting panel: its words, and where the hub says it stands (null: not reported). */
+data class StartLine(val text: String, val state: StartStepState?)
+
+/**
+ * The Starting panel's lines. With the hub's `start:progress` frames
+ * ([NewSessionUiState.startSteps]) each of the three real steps says where it
+ * stands — ticked as the hub reports it, never on a timer. Without them
+ * (ticket mode, an older hub) the steps are listed as [startSteps] names
+ * them, unticked.
+ */
+internal fun startLines(s: NewSessionUiState): List<StartLine> {
+    val live = s.startSteps ?: return startSteps(s).map { StartLine(it, null) }
+    return START_STEPS.map { step ->
+        val state = live[step] ?: StartStepState.PENDING
+        StartLine(startStepText(step, state, s), state)
+    }
+}
+
+/** "Worktree created", "tmux pane open", "Claude Code starting": one step in words. */
+internal fun startStepText(step: String, state: StartStepState, s: NewSessionUiState): String {
+    val made = s.newWorktree || s.startFrom == StartFrom.Branch
+    return when (step) {
+        "worktree" -> when (state) {
+            StartStepState.DONE -> if (made) "Worktree created" else "Checkout found"
+            StartStepState.FAILED -> if (made) "Worktree not created" else "Checkout not found"
+            StartStepState.STARTED -> if (made) "Creating the worktree" else "Finding the checkout"
+            StartStepState.PENDING -> if (made) "Worktree" else "Checkout"
+        }
+        "tmux" -> when (state) {
+            StartStepState.DONE -> "tmux pane open"
+            StartStepState.FAILED -> "tmux pane not opened"
+            StartStepState.STARTED -> "Opening the tmux pane"
+            StartStepState.PENDING -> "tmux pane"
+        }
+        else -> when (state) {
+            StartStepState.DONE -> "Claude Code started"
+            StartStepState.FAILED -> "Claude Code did not start"
+            StartStepState.STARTED -> "Claude Code starting"
+            StartStepState.PENDING -> "Claude Code"
+        }
+    }
+}
+
+/** The Review step's Worktree row in words. */
+internal fun worktreeLine(s: NewSessionUiState, worktreeName: String?): String = when {
+    s.ticketKey != null -> s.ticketBranch.trim().takeIf { it.isNotEmpty() }?.let { "New: $it" } ?: "Named after ${s.ticketKey} by the hub"
+    s.startFrom == StartFrom.Branch -> "${s.branch.trim().ifEmpty { "branch not named" }}, in its own worktree"
+    s.newWorktree -> "New: ${s.branch.trim().ifEmpty { "branch not named" }} from ${s.baseBranch.trim().ifEmpty { "the default branch" }}"
+    s.worktreeId != null -> worktreeName ?: "An existing worktree"
+    else -> "The project's own checkout"
+}
+
+/** The Account row: "m.janci@32bit.sk · 75% left", and the pause line when it is past it. */
+internal fun accountLine(a: AccountChoice): String =
+    "${a.label} · ${a.room}" + if (a.over) " · past the pause line" else ""
+
+/** "Drafted from FLEET-151": where the branch in the field came from. */
+internal fun draftedFrom(s: NewSessionUiState): String? =
+    s.branchDraft?.takeIf { !s.ticketBranchEdited && s.ticketKey != null }?.let { "Drafted from ${s.ticketKey}" }
+
+/** The taps the gap plan's G5.6 adds to the wizard; each defaults to nothing for a caller that does not offer it. */
+data class NewSessionExtras(
+    val onStartFrom: (StartFrom) -> Unit = {},
+    val onFirstMessage: (String) -> Unit = {},
+    val onPickLogin: (String?) -> Unit = {},
+    val onTicketBranch: (String) -> Unit = {},
+    val onClearDraft: () -> Unit = {},
+)
 
 /** "Starting orbit-redesign", "Starting FLEET-151 in 2 projects". */
 internal fun startingTitle(s: NewSessionUiState, background: Boolean): String = when {
@@ -326,16 +403,18 @@ private fun WhereStep(
     onSelectHost: (String) -> Unit,
     onBackground: () -> Unit,
     onFromTicket: (() -> Unit)? = null,
+    onStartFrom: (StartFrom) -> Unit = {},
 ) {
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = gutterPadding()) {
-        // A project is this wizard; a ticket is picked from the tickets list,
-        // whose Start opens this wizard again in the ticket's name.
-        if (onFromTicket != null) item(key = "start-from") {
+        // A project or a branch is this wizard; a ticket is picked from the
+        // tickets list, whose Start opens this wizard again in its name.
+        if (s.ticketKey == null) item(key = "start-from") {
             Column {
                 StepLabel("Start from")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
-                    ChoiceChip("A project", selected = true, onClick = {})
-                    ChoiceChip("A ticket", selected = false, onClick = { if (editable) onFromTicket() })
+                    ChoiceChip("A project", selected = s.startFrom == StartFrom.Project, onClick = { if (editable) onStartFrom(StartFrom.Project) })
+                    if (onFromTicket != null) ChoiceChip("A ticket", selected = false, onClick = { if (editable) onFromTicket() })
+                    ChoiceChip("A branch", selected = s.startFrom == StartFrom.Branch, onClick = { if (editable) onStartFrom(StartFrom.Branch) })
                 }
             }
         }
@@ -374,7 +453,9 @@ private fun ProjectStep(
     tools: ProjectToolsUiState,
     toolHandlers: ProjectToolsHandlers,
     onSelectWorktree: (Long?) -> Unit,
+    extras: NewSessionExtras = NewSessionExtras(),
 ) {
+    val fromBranch = s.ticketKey == null && s.startFrom == StartFrom.Branch
     var projectsOpen by remember(s.projectId) { mutableStateOf(false) }
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = gutterPadding()) {
         item(key = "project-query") {
@@ -419,9 +500,56 @@ private fun ProjectStep(
             }
         }
 
+        // Start from a branch: the branch is the one thing to ask. It gets a
+        // worktree of its own, checked out as it is.
+        if (fromBranch) item(key = "from-branch") {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 8.dp)) {
+                HorizontalDivider(color = Fleet.colors.border, modifier = Modifier.padding(bottom = 8.dp))
+                OutlinedTextField(
+                    value = s.branch,
+                    onValueChange = onBranchChange,
+                    label = { Text("Branch") },
+                    placeholder = { Text("feat/something") },
+                    isError = s.branchInvalid,
+                    supportingText = if (s.branchInvalid) ({ Text(s.missing ?: "A branch name has no spaces.") }) else null,
+                    singleLine = true,
+                    enabled = editable,
+                    keyboardOptions = IDENTIFIER_KEYBOARD,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                StepHint("The branch is checked out in a worktree of its own, local or from origin. A name the repository does not have starts a new branch from the default one.")
+            }
+        }
+        // Starting work: the hub names the branch after the ticket. Its plan
+        // is shown as drafted, and the person may make it their own.
+        if (s.ticketKey != null && (s.branchDraft != null || s.ticketBranchEdited)) item(key = "ticket-branch") {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 8.dp)) {
+                HorizontalDivider(color = Fleet.colors.border, modifier = Modifier.padding(bottom = 8.dp))
+                OutlinedTextField(
+                    value = s.ticketBranch,
+                    onValueChange = extras.onTicketBranch,
+                    label = { Text("Branch") },
+                    placeholder = { Text("named after ${s.ticketKey} by the hub") },
+                    singleLine = true,
+                    enabled = editable && s.ticketBranchEditable,
+                    keyboardOptions = IDENTIFIER_KEYBOARD,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                val drafted = draftedFrom(s)
+                if (drafted != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("✎ $drafted", color = Fleet.colors.fgMuted, style = Fleet.type.textSm, modifier = Modifier.weight(1f))
+                        if (s.ticketBranchEditable) TextButton(onClick = extras.onClearDraft, enabled = editable) { Text("Clear") }
+                    }
+                } else if (s.ticketBranch.isBlank()) {
+                    StepHint("Left empty, the hub names it after ${s.ticketKey}.")
+                }
+                if (!s.ticketBranchEditable && s.alsoInIds.isNotEmpty()) StepHint("One branch for every project, named by the hub.")
+            }
+        }
         // Starting work names the worktree after the ticket on the hub, and
-        // the label too: nothing to ask here.
-        if (s.ticketKey == null) item(key = "worktree") {
+        // the label too: nothing more to ask here.
+        if (s.ticketKey == null && !fromBranch) item(key = "worktree") {
             HorizontalDivider(color = Fleet.colors.border, modifier = Modifier.padding(vertical = 8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth()
@@ -443,7 +571,7 @@ private fun ProjectStep(
         // The project's worktrees on this host: start in one of them, or
         // delete one no session lives in.
         val worktrees = tools.worktrees
-        if (s.ticketKey == null && !s.newWorktree && worktrees != null && worktrees.worktrees.isNotEmpty()) {
+        if (s.ticketKey == null && !fromBranch && !s.newWorktree && worktrees != null && worktrees.worktrees.isNotEmpty()) {
             item(key = "worktrees-label") { StepHint("Or start in one of its worktrees on ${worktrees.hostAlias}:") }
             items(worktrees.worktrees, key = { "wt-${it.id}" }) { wt ->
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
@@ -477,7 +605,7 @@ private fun ProjectStep(
                 }
             }
         }
-        if (s.newWorktree && s.ticketKey == null) item(key = "branch") {
+        if (s.newWorktree && s.ticketKey == null && !fromBranch) item(key = "branch") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
                 OutlinedTextField(
                     value = s.branch,
@@ -515,7 +643,32 @@ private fun ReviewStep(
     onChange: (WizardStep) -> Unit,
     onBackground: () -> Unit,
     worktreeName: String?,
+    extras: NewSessionExtras = NewSessionExtras(),
 ) {
+    var pickingLogin by remember { mutableStateOf(false) }
+    if (pickingLogin && s.logins.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { pickingLogin = false },
+            title = { Text("Start under which login?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (l in s.logins) {
+                        SheetOption(
+                            title = l.label,
+                            selected = s.account?.let { a -> a.profile == l.profile && a.label == l.label } == true,
+                            onSelect = {
+                                pickingLogin = false
+                                extras.onPickLogin(l.profile)
+                            },
+                            sub = l.room + if (l.over) " · past the pause line: it starts anyway, as you chose it" else "",
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { pickingLogin = false }) { Text("Cancel") } },
+        )
+    }
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = gutterPadding()) {
         item(key = "summary") {
             Column(
@@ -532,13 +685,23 @@ private fun ReviewStep(
                     onChange = { onChange(WizardStep.Project) },
                     enabled = editable,
                 )
-                val worktree = when {
-                    s.ticketKey != null -> "Named after ${s.ticketKey} by the hub"
-                    s.newWorktree -> "New: ${s.branch.trim().ifEmpty { "branch not named" }} from ${s.baseBranch.trim().ifEmpty { "the default branch" }}"
-                    s.worktreeId != null -> worktreeName ?: "An existing worktree"
-                    else -> "The project's own checkout"
+                val account = s.account
+                ReviewRow(
+                    "Worktree",
+                    worktreeLine(s, worktreeName),
+                    onChange = { onChange(WizardStep.Project) },
+                    enabled = editable,
+                    divider = s.ticketKey != null || account != null,
+                )
+                if (account != null) {
+                    ReviewRow(
+                        "Account",
+                        accountLine(account),
+                        onChange = if (s.logins.size > 1 || account.over) ({ pickingLogin = true }) else null,
+                        enabled = editable,
+                        divider = s.ticketKey != null,
+                    )
                 }
-                ReviewRow("Worktree", worktree, onChange = { onChange(WizardStep.Project) }, enabled = editable, divider = s.ticketKey != null)
                 if (s.ticketKey != null) {
                     ReviewRow("Ticket", s.ticketKey + (s.orgLabel?.let { " · $it" } ?: ""), divider = false)
                 }
@@ -553,6 +716,21 @@ private fun ReviewStep(
                 singleLine = true,
                 enabled = editable,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+            )
+        }
+        // The first message: typed as soon as Claude is ready, kept by the
+        // hub until then. `new_session` itself takes no prompt.
+        if (s.firstMessageAvailable) item(key = "first-message") {
+            OutlinedTextField(
+                value = s.firstMessage,
+                onValueChange = extras.onFirstMessage,
+                label = { Text("First message (optional)") },
+                supportingText = { Text("Sent once Claude is ready. Left empty, the session waits for you.") },
+                minLines = 2,
+                maxLines = 6,
+                enabled = editable,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
             )
         }
@@ -630,16 +808,30 @@ private fun StartingPanel(s: NewSessionUiState, background: Boolean, onLeave: ()
         }
         if (!background) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(vertical = 4.dp)) {
-                for (line in startSteps(s)) {
+                for (line in startLines(s)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(8.dp).border(1.5.dp, o.loaderAccent, CircleShape))
-                        Text(line, color = o.fg2, style = Fleet.type.textMd, modifier = Modifier.padding(start = 12.dp))
+                        when (line.state) {
+                            StartStepState.DONE -> Icon(FleetIcons.Check, contentDescription = "done", tint = o.statusDone, modifier = Modifier.size(14.dp))
+                            StartStepState.FAILED -> Icon(FleetIcons.Close, contentDescription = "failed", tint = o.danger, modifier = Modifier.size(14.dp))
+                            StartStepState.STARTED -> Box(Modifier.size(8.dp).background(o.loaderAccent, CircleShape))
+                            StartStepState.PENDING, null -> Box(Modifier.size(8.dp).border(1.5.dp, o.loaderAccent, CircleShape))
+                        }
+                        Text(
+                            line.text,
+                            color = if (line.state == StartStepState.PENDING) o.fgMuted else o.fg2,
+                            style = Fleet.type.textMd,
+                            modifier = Modifier.padding(start = 12.dp),
+                        )
                     }
                 }
             }
         }
         Text(
-            "The hub runs these in one go and the session opens as soon as it exists. You can leave: it keeps starting and shows in Sessions.",
+            if (s.startSteps != null) {
+                "Each step is ticked as the hub reports it, and the session opens as soon as it exists. You can leave: it keeps starting and shows in Sessions."
+            } else {
+                "The hub runs these in one go and the session opens as soon as it exists. You can leave: it keeps starting and shows in Sessions."
+            },
             color = o.fgMuted,
             style = Fleet.type.textSm,
         )

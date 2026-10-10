@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.data
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.StartProgress
 import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.net.HubEvent
@@ -463,7 +464,7 @@ class FleetSnapshotTest {
      */
     @Test
     fun the_stream_also_asks_for_download_signals_which_leave_the_snapshot_alone() {
-        assertEquals(listOf("session", "host", "project", "work", "download", "account_usage", "grant", "account", "update"), STREAM_EVENT_KINDS)
+        assertEquals(listOf("session", "host", "project", "work", "download", "account_usage", "grant", "account", "update", "start"), STREAM_EVENT_KINDS)
         assertEquals(listOf("download", "account_usage", "grant", "account", "update"), SIGNAL_EVENT_KINDS)
 
         val frame = row("download:changed", """{"id":7}""")
@@ -473,6 +474,29 @@ class FleetSnapshotTest {
         assertTrue("id" in SNAPSHOT_PAYLOAD_FIELDS, "the projection would strip the id the frame carries")
         assertNull(row("session:updated", sessionPayload(id = 7)).downloadId())
         assertNull(row("download:changed", """{"what":7}""").downloadId())
+    }
+
+    /**
+     * `start:progress` (claude-fleet redesign 5.13) is read by the New
+     * session form, never applied: the snapshot is left alone, the frame
+     * decodes to its token and step, and its keys survive the `?fields=`
+     * projection the stream asks for — the hub's wire shape, from
+     * `start_progress_keeps_its_wire_shape` in `events.rs`.
+     */
+    @Test
+    fun a_start_progress_frame_reaches_the_form_and_leaves_the_snapshot_alone() {
+        val frame = row("start:progress", """{"token":"st-1","step":"tmux","index":2,"total":3,"state":"started"}""")
+        val empty = FleetSnapshot()
+        assertTrue(empty.applying(frame) === empty)
+        assertEquals(StartProgress("st-1", "tmux", 2, 3, "started"), frame.startProgress())
+
+        val keep = STREAM_PAYLOAD_FIELDS.toSet()
+        val projected = HubEvent.Row(frame.name, JsonObject((frame.payload as JsonObject).filterKeys { it in keep }))
+        assertEquals(frame.startProgress(), projected.startProgress(), "the projection keeps every key the frame needs")
+        assertTrue(SNAPSHOT_PAYLOAD_FIELDS.all { it in keep }, "and every row field besides")
+
+        assertNull(row("session:updated", sessionPayload(id = 7)).startProgress())
+        assertNull(row("start:progress", """{"token":"st-1"}""").startProgress(), "a frame missing its step is dropped")
     }
 
     /**

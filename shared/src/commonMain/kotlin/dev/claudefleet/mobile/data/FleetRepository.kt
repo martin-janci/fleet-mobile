@@ -8,6 +8,7 @@ import dev.claudefleet.mobile.model.MyAccess
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.StartProgress
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.TrackerRow
 import dev.claudefleet.mobile.net.EventStream
@@ -203,6 +204,10 @@ class FleetRepository(
     // Lossy and buffered like `_sessionChanges`: a hint to re-check, never the fact.
     private val _updateDecisions = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val updateDecisions: Flow<Unit> = _updateDecisions.asSharedFlow()
+
+    // Lossy and buffered like `_sessionChanges`: a start's step, for the form waiting on it.
+    private val _startProgress = MutableSharedFlow<StartProgress>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val startProgress: Flow<StartProgress> = _startProgress.asSharedFlow()
 
     override fun actionMissing(tool: String, action: String) {
         _capabilities.update { it.forgetting(tool, action) }
@@ -467,6 +472,7 @@ class FleetRepository(
                             if (event.isGrantFrame()) readGrantsSoon()
                             if (event.isUpdateDecisionFrame()) _updateDecisions.tryEmit(Unit)
                             event.downloadId()?.let { _downloadChanges.tryEmit(it) }
+                            event.startProgress()?.let { _startProgress.tryEmit(it) }
                         }
                     }
                 }

@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.model.MyAccess
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.StartProgress
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.TrackerRow
 import dev.claudefleet.mobile.net.HubCapabilities
@@ -175,6 +176,15 @@ interface FleetState {
      * waiting. Hot and lossy like [sessionChanges].
      */
     val updateDecisions: Flow<Unit> get() = emptyFlow()
+
+    /**
+     * `start:progress` frames as they arrive (claude-fleet redesign 5.13):
+     * the worktree, tmux and agent steps of a `new_session` some client
+     * started with a `start_token`. The New session form keeps the ones that
+     * carry its own token and ticks its steps off on them. Hot and lossy like
+     * [sessionChanges]: a frame nobody was waiting for is gone.
+     */
+    val startProgress: Flow<StartProgress> get() = emptyFlow()
 
     /**
      * Who this device's person is and what is shared with them, read with

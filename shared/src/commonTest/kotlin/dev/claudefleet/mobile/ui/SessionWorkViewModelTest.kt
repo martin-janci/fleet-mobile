@@ -8,6 +8,7 @@ import dev.claudefleet.mobile.data.TimelineFrame
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.MultiStart
+import dev.claudefleet.mobile.model.StartPreview
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.ResumePlan
@@ -163,6 +164,20 @@ internal class FakeWorkActions : WorkActions {
         return record("link $sessionId ${itemId ?: key}")
     }
     override suspend fun start(key: String, hostAlias: String, projectId: Long?) = record("start $key $hostAlias ${projectId ?: "-"}")
+
+    // G5.6: a start under the person's own branch name, and the preview that
+    // drafts one. Kept out of [calls] unless a branch is named, so the older
+    // tests' exact lists stand.
+    override suspend fun start(key: String, hostAlias: String, projectId: Long?, worktree: String?): SessionRow =
+        record("start $key $hostAlias ${projectId ?: "-"}" + (worktree?.let { " wt=$it" } ?: ""))
+
+    var previewAnswer: StartPreview? = null
+    val previewCalls = mutableListOf<String>()
+
+    override suspend fun previewStart(key: String, hostAlias: String, projectId: Long?): StartPreview {
+        previewCalls += "preview $key $hostAlias ${projectId ?: "-"}"
+        return previewAnswer ?: throw HubError.Tool("E_NOTFOUND", "no plan")
+    }
     override suspend fun resume(key: String, hostAlias: String?) = record("resume $key ${hostAlias ?: "-"}")
 
     /** What a multi-start answers; the call is recorded as `start_many KEY host [ids]`. */
