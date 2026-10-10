@@ -74,6 +74,8 @@ fun SettingsScreen(
     /** The bottom bar this phone draws (redesign 14.2); null hides the switch. */
     layout: PhoneLayout? = null,
     onSetLayout: (PhoneLayout) -> Unit = {},
+    /** The hub settings' Save bar ([FleetSaveBar]), under the fields so it stays in view. */
+    fleetSaveBar: @Composable () -> Unit = {},
 ) {
     // The header and the error stay put; only the fields scroll. The header
     // used to live inside the scrolling column and left with the content.
@@ -182,6 +184,7 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(24.dp))
         }
+        fleetSaveBar()
     }
 }
 

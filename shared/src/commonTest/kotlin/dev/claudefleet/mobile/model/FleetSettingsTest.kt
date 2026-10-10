@@ -127,4 +127,45 @@ class NotifySettingKindsTest {
         assertEquals("None", range.inWords(""))
         assertEquals("22:00–07:30", range.inWords("22:00-07:30"))
     }
+
+    /** G1.5: the hub says where a value lives; an older hub's descriptor still parses. */
+    @Test
+    fun the_scope_badge_says_hub_or_the_org_that_overrides_it() {
+        assertEquals(ScopeWords("hub", ""), d("work.recent_days").scopeWords(), "a hub before G1.5 sends no scope")
+        val one = json.decodeFromString(
+            SettingDescriptor.serializer(),
+            """{"key":"work.summary_model","label":"Summary model","kind":{"type":"choice","options":["haiku","opus"]},
+               "default":"haiku","value":"haiku","scope":"org","per_org":true,"modified":false,
+               "org_values":[{"org_id":2,"org":"Acme","value":"opus"}]}""",
+        )
+        assertEquals("org", one.scope)
+        assertEquals(ScopeWords("org Acme", "overrides the hub"), one.scopeWords())
+        val two = one.copy(orgValues = one.orgValues + OrgValue(orgId = 3, org = "zeta", value = "sonnet"))
+        assertEquals(ScopeWords("2 orgs", "override the hub"), two.scopeWords())
+        val process = json.decodeFromString(
+            SettingDescriptor.serializer(),
+            """{"key":"mcp.port","label":"Port","kind":{"type":"int"},"scope":"process","owned_by":"fleet-hub serve"}""",
+        )
+        assertEquals("hub", process.scopeWords().badge, "the hub's own value is the hub's too")
+    }
+
+    @Test
+    fun a_changed_value_says_what_it_was_changed_from() {
+        val days = d("work.recent_days")
+        assertEquals(null, days.changedFrom(days.default))
+        assertEquals("changed from 14 days", days.changedFrom("3"))
+        assertEquals("changed from Off", d("playbooks.press_enter").changedFrom("true"))
+    }
+
+    @Test
+    fun typed_text_becomes_the_stored_value_or_says_why_not() {
+        assertEquals(Result.success("7200"), d("gc.bg_idle_secs").parseTyped("2"))
+        assertTrue(d("work.recent_days").parseTyped("abc").isFailure)
+        val quiet = SettingDescriptor(key = "q", label = "Quiet", kind = SettingKind("time_range"))
+        assertEquals(Result.success("22:00-07:30"), quiet.parseTyped(" 22:00-07:30 "))
+        assertEquals(Result.success(""), quiet.parseTyped(""))
+        assertTrue(quiet.parseTyped("late").isFailure)
+        val text = SettingDescriptor(key = "t", label = "T", kind = SettingKind("text"))
+        assertEquals(Result.success("x"), text.parseTyped("  x "))
+    }
 }

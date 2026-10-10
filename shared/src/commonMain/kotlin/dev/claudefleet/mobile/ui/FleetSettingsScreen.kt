@@ -58,6 +58,17 @@ import androidx.compose.foundation.layout.PaddingValues
 import dev.claudefleet.mobile.ui.kit.InlineLoading
 import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 import dev.claudefleet.mobile.ui.components.ErrorBanner
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import dev.claudefleet.mobile.model.changedFrom
+import dev.claudefleet.mobile.model.scopeWords
+import dev.claudefleet.mobile.ui.theme.FleetIcons
 
 /**
  * The fleet's settings, drawn from the hub's own page specs (claude-fleet
@@ -87,6 +98,8 @@ fun FleetSettingsSection(
     /** Read the settings again after a failed read. */
     onRetry: () -> Unit = {},
     onDismissError: () -> Unit = {},
+    /** The Save bar's rows (G1.5): typed and picked values stage; Reset puts the default back. */
+    batch: FieldBatch? = null,
 ) {
     state.history?.let { (key, rows) ->
         SettingHistoryDialog(state.descriptors[key]?.label ?: key, rows, state.historyError, onCloseHistory, onRetry = { onHistory(key) })
@@ -97,7 +110,7 @@ fun FleetSettingsSection(
     if (page == null) {
         PageList(state, clientName, onOpen)
     } else {
-        PageBody(state, page, onBack, onOpen, onSet, onRefuse, onDecide, onHistory, head = { pageHead(page.id) })
+        PageBody(state, page, onBack, onOpen, onSet, onRefuse, onDecide, onHistory, head = { pageHead(page.id) }, batch = batch)
     }
     state.confirm?.let { c ->
         AlertDialog(
@@ -158,6 +171,7 @@ private fun PageBody(
     onDecide: (Long, Boolean) -> Unit,
     onHistory: (String) -> Unit,
     head: @Composable () -> Unit = {},
+    batch: FieldBatch? = null,
 ) {
     TextButton(onClick = onBack, modifier = Modifier.padding(horizontal = 8.dp)) { Text("‹ Fleet settings") }
     Text(page.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
@@ -193,7 +207,7 @@ private fun PageBody(
                 is PageItem.Field -> {
                     val d = state.descriptors[item.key]
                     if (d != null && item.condition.holds(state.values)) {
-                        FieldRow(state, d, item.hint, item.readOnly, onSet, onRefuse, onDecide, onHistory)
+                        FieldRow(state, d, item.hint, item.readOnly, onSet, onRefuse, onDecide, onHistory, batch)
                     }
                 }
                 is PageItem.Notice -> Text(
@@ -213,6 +227,62 @@ private fun PageBody(
     Spacer(Modifier.height(16.dp))
 }
 
+/**
+ * A settings page's Save bar hooks for its rows (claude-fleet G1.5). With
+ * them a typed or picked value stages ([onStage], [onType]) and the row says
+ * where its value lives and what it was changed from, with Reset. Without
+ * them (a guide) every change writes at once, as before.
+ */
+class FieldBatch(
+    val onStage: (String, String) -> Unit,
+    val onType: (String, String) -> Unit,
+    val onReset: (String) -> Unit,
+)
+
+/**
+ * The page's one Save bar (G1.5): "2 changes · Discard · Save" while
+ * something typed is not saved, and the toggle just written with Undo. Drawn
+ * by the settings screen under its scrolling fields, so it stays in view.
+ */
+@Composable
+fun FleetSaveBar(
+    state: FleetSettingsUiState,
+    onSave: () -> Unit,
+    onDiscard: () -> Unit,
+    onUndo: () -> Unit,
+    onDismissUndo: () -> Unit,
+) {
+    val n = state.changeCount
+    state.undo?.takeIf { n == 0 }?.let { u ->
+        HorizontalDivider()
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("${u.label}: ${u.words}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = onUndo) { Text("Undo") }
+            TextButton(onClick = onDismissUndo) { Text("OK") }
+        }
+    }
+    if (n == 0) return
+    HorizontalDivider()
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
+            .semantics { contentDescription = "Unsaved changes" },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(saveBarCount(n), style = MaterialTheme.typography.bodyMedium)
+            if (state.stageProblems.isNotEmpty()) {
+                Text("Fix the field marked below to save.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+        }
+        TextButton(enabled = !state.saving, onClick = onDiscard) { Text("Discard") }
+        Spacer(Modifier.width(4.dp))
+        Button(enabled = state.canSave, onClick = onSave) { Text(if (state.saving) "Saving…" else "Save") }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun FieldRow(
@@ -224,10 +294,14 @@ internal fun FieldRow(
     onRefuse: (String, String) -> Unit,
     onDecide: (Long, Boolean) -> Unit,
     onHistory: (String) -> Unit,
+    batch: FieldBatch? = null,
 ) {
-    val value = state.values[d.key] ?: d.value
+    val stored = state.values[d.key] ?: d.value
+    // On a page with a Save bar the row shows what is staged; a guide shows the hub's value.
+    val value = if (batch != null) state.shown(d.key) else stored
     val editable = state.editable(d.key) && !shownOnly
-    val busy = d.key in state.busy
+    val busy = d.key in state.busy || (batch != null && state.saving)
+    val unsaved = batch != null && (d.key in state.staged || d.key in state.stageProblems)
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         val isSwitch = editable && d.kind.type == "bool"
         Row(
@@ -240,6 +314,14 @@ internal fun FieldRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(d.label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+            if (unsaved) {
+                Text(
+                    "not saved",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 6.dp),
+                )
+            }
             if (isSwitch) {
                 Switch(checked = value == "true", enabled = !busy, onCheckedChange = null)
             } else if (!editable || d.kind.type !in setOf("choice", "choice_set")) {
@@ -254,7 +336,7 @@ internal fun FieldRow(
                     FilterChip(
                         selected = value == o,
                         enabled = !busy,
-                        onClick = { onSet(d.key, o) },
+                        onClick = { if (batch != null) batch.onStage(d.key, o) else onSet(d.key, o) },
                         label = { Text(d.optionLabel(o)) },
                     )
                 }
@@ -274,7 +356,11 @@ internal fun FieldRow(
             }
         }
         if (editable && d.kind.type in TYPED) {
-            ValueField(d, value, busy, onSet, onRefuse)
+            if (batch != null) {
+                StagedValueField(d, stored, value, state.fieldEpoch[d.key] ?: 0, busy, batch.onType)
+            } else {
+                ValueField(d, value, busy, onSet, onRefuse)
+            }
         }
         val range = d.rangeText()
         Text(
@@ -289,12 +375,105 @@ internal fun FieldRow(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        state.fieldErrors[d.key]?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        if (batch != null) {
+            ScopeLine(d, stored, editable && !busy, batch.onReset, onHistory.takeIf { state.historyAvailable })
+        }
+        (state.fieldErrors[d.key] ?: state.stageProblems[d.key].takeIf { batch != null })?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
         state.proposalFor(d.key)?.let { p -> Suggestion(state, d, p, onDecide) }
-        if (state.historyAvailable) {
+        if (batch == null && state.historyAvailable) {
             TextButton(onClick = { onHistory(d.key) }, contentPadding = PaddingValues(0.dp)) { Text("History") }
         }
     }
+}
+
+/**
+ * Under a row's help (G1.5): a badge for where the value lives ("hub", or
+ * the org whose own value overrides it), what it was changed from with
+ * Reset, else "default"; History behind ⋮.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ScopeLine(
+    d: SettingDescriptor,
+    stored: String,
+    canReset: Boolean,
+    onReset: (String) -> Unit,
+    onHistory: ((String) -> Unit)?,
+) {
+    val scope = d.scopeWords()
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
+        FlowRow(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                scope.badge,
+                style = MaterialTheme.typography.labelSmall,
+                color = muted,
+                modifier = Modifier
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(4.dp))
+                    .padding(horizontal = 5.dp, vertical = 1.dp)
+                    .semantics { contentDescription = "Kept on the ${scope.badge}" },
+            )
+            if (scope.note.isNotEmpty()) Text(scope.note, style = MaterialTheme.typography.labelSmall, color = muted)
+            val changed = d.changedFrom(stored)
+            if (changed != null) {
+                Text(changed, style = MaterialTheme.typography.labelSmall, color = muted)
+                if (canReset) {
+                    Text(
+                        "Reset",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable(role = Role.Button) { onReset(d.key) }.padding(horizontal = 2.dp),
+                    )
+                }
+            } else if (scope.note.isEmpty()) {
+                Text("default", style = MaterialTheme.typography.labelSmall, color = muted)
+            }
+        }
+        if (onHistory != null) {
+            var menu by remember { mutableStateOf(false) }
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(FleetIcons.MoreVert, contentDescription = "${d.label}: more") }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(text = { Text("History") }, onClick = { menu = false; onHistory(d.key) })
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A number or a short text staged as it is typed (G1.5): nothing is sent
+ * until the page's Save bar. The field keeps what the person typed; it starts
+ * again from the shown value only when the hub's value changes or Reset or
+ * Discard put it back ([epoch]).
+ */
+@Composable
+private fun StagedValueField(
+    d: SettingDescriptor,
+    stored: String,
+    shown: String,
+    epoch: Int,
+    busy: Boolean,
+    onType: (String, String) -> Unit,
+) {
+    val asText = d.kind.type == "text" || d.kind.type == "time_range"
+    val initial = if (asText) shown else d.toDisplay(shown)
+    var draft by remember(d.key, stored, epoch) { mutableStateOf(initial) }
+    OutlinedTextField(
+        value = draft,
+        onValueChange = { draft = it; onType(d.key, it) },
+        singleLine = true,
+        enabled = !busy,
+        suffix = if (d.unitWord.isNotEmpty() && !asText) ({ Text(d.unitWord) }) else null,
+        placeholder = if (d.kind.type == "time_range") ({ Text("22:00-07:30") }) else null,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 /** The kinds typed into a field and sent on Save. */

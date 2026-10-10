@@ -23,6 +23,8 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import dev.claudefleet.mobile.model.SettingWrite
+import dev.claudefleet.mobile.model.Danger
+import dev.claudefleet.mobile.model.changedFrom
 
 @Serializable
 private data class Registry(val pages: List<Page>, val descriptors: List<SettingDescriptor>)
@@ -286,5 +288,157 @@ class FleetSettingsViewModelTest {
         vm.closeHistory()
         assertNull(vm.state.value.history)
         assertNull(vm.state.value.historyError)
+    }
+
+    /** G1.5: a typed value waits for the Save bar; Save writes the lot, in the order staged. */
+    @Test
+    fun typed_values_stage_and_one_save_writes_them_in_order() = runTest {
+        val hub = FakeHub()
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+        vm.type("work.recent_days", "3")
+        vm.stage("work.summary_model", "opus")
+        vm.type("gc.bg_idle_secs", "2")
+        runCurrent()
+        val s = vm.state.value
+        assertTrue(hub.calls.none { it.startsWith("set_setting") }, "nothing sent before Save: ${hub.calls}")
+        assertEquals(3, s.changeCount)
+        assertEquals("3 changes", saveBarCount(s.changeCount))
+        assertEquals("3", s.shown("work.recent_days"), "the row shows what is staged")
+        assertEquals("7200", s.staged["gc.bg_idle_secs"], "hours typed, seconds staged")
+        assertTrue(s.canSave)
+
+        vm.save(); runCurrent()
+        assertEquals(
+            listOf("set_setting work.recent_days=3", "set_setting work.summary_model=opus", "set_setting gc.bg_idle_secs=7200"),
+            hub.calls.filter { it.startsWith("set_setting") },
+        )
+        val after = vm.state.value
+        assertEquals(0, after.changeCount)
+        assertFalse(after.saving)
+        assertEquals("3", after.values["work.recent_days"])
+        assertEquals("opus", after.values["work.summary_model"])
+    }
+
+    @Test
+    fun typing_the_stored_value_back_is_no_change_and_discard_puts_everything_back() = runTest {
+        val hub = FakeHub()
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+        val stored = vm.state.value.values.getValue("work.recent_days")
+        vm.type("work.recent_days", "3")
+        vm.type("work.recent_days", stored)
+        assertEquals(0, vm.state.value.changeCount)
+
+        vm.type("work.recent_days", "3")
+        vm.stage("work.summary_model", "opus")
+        val epoch = vm.state.value.fieldEpoch["work.recent_days"] ?: 0
+        vm.discard()
+        val s = vm.state.value
+        assertEquals(0, s.changeCount)
+        assertEquals(stored, s.shown("work.recent_days"))
+        assertEquals(epoch + 1, s.fieldEpoch["work.recent_days"], "the field starts again from the hub's value")
+        runCurrent()
+        assertTrue(hub.calls.none { it.startsWith("set_setting") })
+    }
+
+    @Test
+    fun a_half_typed_number_holds_the_save_bar_with_its_reason() = runTest {
+        val hub = FakeHub()
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+        vm.type("work.recent_days", "2.5")
+        val s = vm.state.value
+        assertEquals(1, s.changeCount, "a problem still counts as a change")
+        assertFalse(s.canSave)
+        assertTrue(s.stageProblems.getValue("work.recent_days").contains("whole number"))
+        assertNull(vm.save())
+        vm.type("work.recent_days", "2")
+        assertTrue(vm.state.value.canSave)
+        assertTrue(vm.state.value.stageProblems.isEmpty())
+    }
+
+    @Test
+    fun a_refused_value_stays_staged_beside_its_field_and_the_rest_are_written() = runTest {
+        val hub = object : FleetSettingsActions by FakeHub() {
+            override suspend fun set(key: String, value: String): Map<String, String> {
+                if (key == "work.recent_days") throw HubError.Tool("E_INVALID", "must be between 1 and 30")
+                return mapOf(key to value)
+            }
+        }
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+        vm.type("work.recent_days", "99")
+        vm.stage("work.summary_model", "opus")
+        vm.save(); runCurrent()
+        val s = vm.state.value
+        assertEquals(mapOf("work.recent_days" to "99"), s.staged)
+        assertEquals("must be between 1 and 30", s.fieldErrors["work.recent_days"])
+        assertEquals("opus", s.values["work.summary_model"])
+    }
+
+    @Test
+    fun a_switch_still_writes_at_once_and_offers_undo() = runTest {
+        val hub = FakeHub()
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+        val before = vm.state.value.values.getValue("playbooks.press_enter")
+        val next = if (before == "true") "false" else "true"
+        vm.stage("playbooks.press_enter", next); runCurrent()
+        assertEquals(0, vm.state.value.changeCount, "a switch is not staged")
+        assertEquals(next, vm.state.value.values["playbooks.press_enter"])
+        val u = assertNotNull(vm.state.value.undo)
+        assertEquals(before, u.before)
+        vm.undo(); runCurrent()
+        assertEquals(before, vm.state.value.values["playbooks.press_enter"])
+        assertNull(vm.state.value.undo, "undoing offers no undo of the undo")
+    }
+
+    @Test
+    fun reset_stages_the_default_for_a_typed_value_and_writes_it_for_a_switch() = runTest {
+        val hub = FakeHub()
+        hub.values["work.recent_days"] = "3"
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+        val d = vm.state.value.descriptors.getValue("work.recent_days")
+        assertEquals("changed from 14 days", d.changedFrom(vm.state.value.values.getValue("work.recent_days")))
+        vm.reset("work.recent_days")
+        assertEquals("14", vm.state.value.staged["work.recent_days"])
+        assertEquals(1, vm.state.value.fieldEpoch["work.recent_days"])
+        assertTrue(hub.calls.none { it.startsWith("set_setting") })
+    }
+
+    @Test
+    fun a_staged_value_that_needs_confirming_asks_once_on_save() = runTest {
+        // Every confirming setting today is a switch; a typed one would ask on Save, not per keystroke.
+        val base = FakeHub()
+        val hub = object : FleetSettingsActions by base {
+            override suspend fun describe() = base.describe().map {
+                if (it.key == "work.recent_days") it.copy(danger = Danger(level = "confirm", message = "Sure?")) else it
+            }
+        }
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+        vm.type("work.recent_days", "3")
+        assertNull(vm.state.value.confirm)
+        vm.save(); runCurrent()
+        val c = assertNotNull(vm.state.value.confirm)
+        assertTrue(c.thenSave)
+        assertTrue(base.calls.none { it.startsWith("set_setting") })
+        vm.confirm(); runCurrent()
+        assertEquals("3", vm.state.value.values["work.recent_days"])
+        assertEquals(0, vm.state.value.changeCount)
+    }
+
+    @Test
+    fun a_device_that_may_not_write_stages_nothing() = runTest {
+        val hub = FakeHub(canWrite = false)
+        val vm = FleetSettingsViewModel(hub, this, credentialCanWrite = true)
+        vm.load(); runCurrent()
+        vm.type("work.recent_days", "3")
+        vm.stage("work.summary_model", "opus")
+        vm.reset("work.recent_days")
+        assertEquals(0, vm.state.value.changeCount)
+        assertNull(vm.save())
     }
 }

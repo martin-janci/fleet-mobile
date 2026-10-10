@@ -319,6 +319,8 @@ import dev.claudefleet.mobile.ui.SessionsSheet
 import dev.claudefleet.mobile.ui.DraftMemory
 import dev.claudefleet.mobile.ui.SessionsViewModel
 import dev.claudefleet.mobile.ui.FleetSettingsSection
+import dev.claudefleet.mobile.ui.FleetSaveBar
+import dev.claudefleet.mobile.ui.FieldBatch
 import dev.claudefleet.mobile.ui.FleetSettingsViewModel
 import dev.claudefleet.mobile.ui.SettingsScreen
 import dev.claudefleet.mobile.ui.FirstImport
@@ -1877,6 +1879,11 @@ private fun FleetRoute(
                                 onCloseHistory = fleetSettings::closeHistory,
                                 onRetry = { fleetSettings.load() },
                                 onDismissError = fleetSettings::dismissLoadError,
+                                batch = FieldBatch(
+                                    onStage = fleetSettings::stage,
+                                    onType = fleetSettings::type,
+                                    onReset = fleetSettings::reset,
+                                ),
                                 pageHead = { pageId ->
                                     // Decisions (Jev) opens with who opted in and what Jev may do (14.17).
                                     if (layout == PhoneLayout.New && pageId == DECISIONS_PAGE) {
@@ -1886,6 +1893,17 @@ private fun FleetRoute(
                                         DecisionsHead(orgsState.orgs)
                                     }
                                 },
+                            )
+                        }
+                    }
+                    val fleetSaveBar: @Composable () -> Unit = {
+                        if (settingsCaps.fleetSettings) {
+                            FleetSaveBar(
+                                state = fleet,
+                                onSave = { fleetSettings.save() },
+                                onDiscard = fleetSettings::discard,
+                                onUndo = fleetSettings::undo,
+                                onDismissUndo = fleetSettings::dismissUndo,
                             )
                         }
                     }
@@ -1944,6 +1962,7 @@ private fun FleetRoute(
                             fleetPage = fleetSection,
                             notifier = container.notifier,
                             homeExtras = { LayoutRow(layout, onSetLayout) },
+                            fleetSaveBar = fleetSaveBar,
                             thisPhoneExtras = {
                                 HelpSettingsSection(
                                     help = help,
@@ -1972,6 +1991,7 @@ private fun FleetRoute(
                                 layout = layout,
                                 onSetLayout = onSetLayout,
                                 fleetSettings = fleetSection,
+                                fleetSaveBar = fleetSaveBar,
                             )
                         }
                     }

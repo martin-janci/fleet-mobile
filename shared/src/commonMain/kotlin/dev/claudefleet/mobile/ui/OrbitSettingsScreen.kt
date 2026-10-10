@@ -130,6 +130,8 @@ fun OrbitSettingsScreen(
     homeExtras: @Composable ColumnScope.() -> Unit = {},
     /** Under This phone, after the rest: Help (14.22). */
     thisPhoneExtras: @Composable ColumnScope.() -> Unit = {},
+    /** The hub settings' Save bar ([FleetSaveBar]), under the fields so it stays in view. */
+    fleetSaveBar: @Composable () -> Unit = {},
 ) {
     val o = Fleet.colors
     Column(modifier = modifier.fillMaxSize().background(o.bg)) {
@@ -164,6 +166,7 @@ fun OrbitSettingsScreen(
                 is SettingsPlace.Group -> SettingsGroupPage(place.group, input, handlers)
             }
         }
+        fleetSaveBar()
     }
 }
 
