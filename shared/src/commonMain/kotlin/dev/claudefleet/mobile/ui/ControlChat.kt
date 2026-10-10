@@ -246,9 +246,13 @@ class ControlViewModel(
         local.update { it.copy(answering = it.answering + nonce, error = null) }
         return scope.launch {
             try {
-                actions.answer(nonce, approved)
+                val recorded = actions.answer(nonce, approved)
                 // Gone either way: answered now, or already answered or expired elsewhere.
                 local.update { l -> l.copy(confirms = l.confirms.filterNot { it.nonce == nonce }, answering = l.answering - nonce) }
+                // The hub keeps the FIRST answer. False means the desktop got
+                // there first or the request expired: this tap counted for
+                // nothing, and the person must not believe it did.
+                if (!recorded) local.update { it.copy(error = notRecorded(approved)) }
             } catch (e: CancellationException) {
                 local.update { it.copy(answering = it.answering - nonce) }
                 throw e
@@ -308,6 +312,13 @@ class ControlViewModel(
 const val CONTROL_VIEW_TAG = "control.view."
 const val CONTROL_WAKE_TAG = "control.wake"
 const val CONFIRM_CARD_TAG = "control.confirm."
+/** What a confirm answer the hub refused says: answered elsewhere first, or expired. */
+internal fun notRecorded(approved: Boolean): Friendly = Friendly(
+    "Already answered or expired",
+    "Your ${if (approved) "approval" else "denial"} was not recorded — the request was answered on another device first, or it had expired.",
+    isError = false,
+)
+
 const val CONFIRM_APPROVE_TAG = "control.confirm.approve."
 const val CONFIRM_DENY_TAG = "control.confirm.deny."
 

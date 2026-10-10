@@ -2420,6 +2420,53 @@ class SessionViewModelTest {
         assertEquals("The question changed", vm.state.value.error?.title)
     }
 
+    /**
+     * Same question, same options, a different command: `Bash(rm -rf build)`
+     * on the card, `Bash(rm -rf ~)` on the pane. The tap must not approve it.
+     */
+    @Test
+    fun an_option_is_not_pressed_when_the_command_being_approved_changed() = runTest {
+        val actions = FakeActions()
+        val build = PendingInput("permission", "Do it?", listOf(PendingOption(1, "Yes")), detail = "Bash(rm -rf build)")
+        actions.probeAnswer = ActivityProbe(claudeStatus = "blocked", pendingInput = build.copy(detail = "Bash(rm -rf ~)"))
+        val fleet = FakeFleetState(listOf(blockedRow(build)))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Option(1, "Yes")).join()
+        runCurrent()
+
+        assertTrue(actions.sentKeys.isEmpty(), "${actions.sentKeys}")
+        assertEquals("The question changed", vm.state.value.error?.title)
+    }
+
+    /**
+     * Enter picks whatever is highlighted. Someone moved the cursor in a
+     * terminal to "don't ask again": Enter from the phone must not confirm it.
+     */
+    @Test
+    fun enter_is_not_pressed_when_the_highlight_moved() = runTest {
+        val actions = FakeActions()
+        val asked = PendingInput(
+            "permission",
+            "Do it?",
+            listOf(PendingOption(1, "Yes", selected = true), PendingOption(2, "Yes, and don’t ask again"), PendingOption(3, "No")),
+        )
+        actions.probeAnswer = ActivityProbe(
+            claudeStatus = "blocked",
+            pendingInput = asked.copy(options = asked.options.map { it.copy(selected = it.n == 2) }),
+        )
+        val fleet = FakeFleetState(listOf(blockedRow(asked)))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Enter).join()
+        runCurrent()
+
+        assertTrue(actions.sentKeys.isEmpty(), "${actions.sentKeys}")
+        assertEquals("The question changed", vm.state.value.error?.title)
+    }
+
     @Test
     fun a_timeout_keeps_the_card_and_says_still_waiting() = runTest {
         val actions = FakeActions()

@@ -927,6 +927,7 @@ class SessionViewModel(
                     asked?.stuckKind,
                     actions.activity(sessionId),
                     a as? Answer.Option,
+                    enter = a == Answer.Enter,
                 )
                 if (moved != null) {
                     local.update { it.copy(answering = false, error = moved) }
@@ -2028,12 +2029,19 @@ internal const val AFTER_KEY_MS: Long = 300L
  *    of the same identity, and — when [option] names one — still offer it.
  *    [option] is null for the bare Enter/Escape chips that sit beside the
  *    digits on that same card.
+ *
+ * [enter]: on a dialog Enter picks whichever option is HIGHLIGHTED, which
+ * the identity leaves out (arrow keys move it). If someone moved the cursor
+ * in a terminal — to "Yes, and don't ask again", say — Enter from the phone
+ * would confirm that, so for Enter the highlighted option must still be the
+ * one the card was drawn with.
  */
 internal fun dialogMoved(
     asked: PendingInput?,
     askedStuck: String?,
     probe: ActivityProbe,
     option: Answer.Option?,
+    enter: Boolean = false,
 ): Friendly? {
     val gone = Friendly(
         "That question is gone",
@@ -2057,6 +2065,7 @@ internal fun dialogMoved(
         onScreen == null -> gone
         asked == null || onScreen.fingerprint() != asked.fingerprint() -> changed
         option != null && onScreen.options.none { it.n == option.n && it.label == option.label } -> changed
+        enter && onScreen.options.firstOrNull { it.selected }?.n != asked.options.firstOrNull { it.selected }?.n -> changed
         else -> null
     }
 }

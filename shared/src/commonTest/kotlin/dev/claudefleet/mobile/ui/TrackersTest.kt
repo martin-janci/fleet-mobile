@@ -75,7 +75,7 @@ private class FakeTrackerActions : TrackerActions {
     override suspend fun remove(trackerId: Long, confirmNonce: String?) {
         calls += "remove $trackerId $confirmNonce"
         if (askConfirm && confirmNonce == null) {
-            throw HubError.Tool("E_CONFIRM_REQUIRED", "approve it first", buildJsonObject { put("confirm", JsonPrimitive("n-1")) })
+            throw HubError.Tool("E_CONFIRM_REQUIRED", "approve it first", buildJsonObject { put("confirm_nonce", JsonPrimitive("n-1")) })
         }
         rows = rows.filter { it.id != trackerId }
     }

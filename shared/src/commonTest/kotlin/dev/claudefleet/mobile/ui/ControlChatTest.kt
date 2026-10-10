@@ -54,6 +54,7 @@ private class FakeControl(var status: OperatorStatus) : ControlActions, AgentAct
     var confirmReads = 0
     var wakes = 0
     val answers = mutableListOf<Pair<String, Boolean>>()
+    var recorded = true
     var confirms = listOf(
         ConfirmRequest(nonce = "n1", tool = "kill_session", summary = "Stop pine/api", operator = true),
         ConfirmRequest(nonce = "n2", tool = "merge_pr", summary = "Merge #12", caller = "ci-bot"),
@@ -64,7 +65,7 @@ private class FakeControl(var status: OperatorStatus) : ControlActions, AgentAct
     override suspend fun answer(nonce: String, approved: Boolean): Boolean {
         answers += nonce to approved
         confirms = confirms.filterNot { it.nonce == nonce }
-        return true
+        return recorded
     }
     var handoffReads = 0
     var handoffs = listOf<ControlHandoff>()
@@ -197,6 +198,19 @@ class ControlChatTest {
         assertEquals(listOf("n2" to false), fake.answers)
         assertEquals(listOf("n1"), vm.state.value.confirms.map { it.nonce })
         assertNull(vm.answer("missing", true))
+    }
+
+    @Test
+    fun an_answer_the_hub_did_not_record_is_said() = runTest {
+        // The desktop answered first (the hub keeps the first answer), or the
+        // request expired: the tap counted for nothing, and the screen says so.
+        val fake = FakeControl(OperatorStatus(ready = true, session = SessionRow(id = 5))).apply { recorded = false }
+        val vm = ControlViewModel(ControlFleet(CONTROL_TOOLS), fake, fake, backgroundScope, canWrite = true)
+        vm.refresh().join(); runCurrent()
+
+        vm.answer("n1", true)?.join(); runCurrent()
+        assertEquals(listOf("n2"), vm.state.value.confirms.map { it.nonce })
+        assertEquals("Already answered or expired", vm.state.value.error?.title)
     }
 
     @Test
