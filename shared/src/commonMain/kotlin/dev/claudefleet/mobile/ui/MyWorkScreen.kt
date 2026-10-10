@@ -100,7 +100,26 @@ data class MyWorkHandlers(
     val onOpenRules: (() -> Unit)? = null,
     val onCloseRules: () -> Unit = {},
     val onDismissError: () -> Unit = {},
+    /** **New task**: its sheet, and Create (title, description, due date). */
+    val onOpenNewTask: () -> Unit = {},
+    val onCloseNewTask: () -> Unit = {},
+    val onCreateTask: (String, String, String) -> Unit = { _, _, _ -> },
+    val onDismissNewTaskError: () -> Unit = {},
 )
+
+/** The New task sheet over My work (either layout), while it is open. */
+@Composable
+internal fun NewTaskSheetFor(state: MyWorkUiState, handlers: MyWorkHandlers) {
+    if (!state.newTaskOpen) return
+    NewTaskSheet(
+        busy = state.newTaskBusy,
+        connected = state.connected,
+        error = state.newTaskError,
+        onDismissError = handlers.onDismissNewTaskError,
+        onCancel = handlers.onCloseNewTask,
+        onCreate = handlers.onCreateTask,
+    )
+}
 
 /**
  * The **My work** tab: saved views as chips, then *Filters (n)* beside the
@@ -127,6 +146,9 @@ fun MyWorkScreen(
             title = "My work",
             subtitle = state.stale ?: if (state.loaded) "${state.total} task${if (state.total == 1) "" else "s"}" else null,
             actions = {
+                if (state.canCreateTask) {
+                    IconButton(onClick = handlers.onOpenNewTask) { Icon(FleetIcons.Add, contentDescription = "New task") }
+                }
                 IconButton(onClick = handlers.onToggleSearch) {
                     Icon(FleetIcons.Search, contentDescription = if (state.searchOpen) "Close search" else "Search tasks")
                 }
@@ -252,6 +274,7 @@ fun MyWorkScreen(
     }
     if (state.filtersOpen) WorkFiltersSheet(state, handlers)
     if (state.rulesOpen) RulesSheet(state.rules, handlers.onCloseRules)
+    NewTaskSheetFor(state, handlers)
 }
 
 @Composable

@@ -381,7 +381,26 @@ data class WorkTask(
     val blocked: Boolean = false,
     /** What it waits for (`item:<id>`), only the items this token may see. */
     @SerialName("blocked_by") val blockedBy: List<String> = emptyList(),
+    /**
+     * Who wrote a local item: `manual` (a person), `proposed`, `agent` (a
+     * delegated job, whose description is its prompt). Empty for a ticket.
+     */
+    val origin: String? = null,
+    /** The date it is due, `YYYY-MM-DD` (claude-fleet M15); absent from an older hub. */
+    @SerialName("due_at") val dueAt: String? = null,
+    /** A local item's parent (`item:<id>`): the epic or task it is filed under. */
+    @SerialName("parent_task_id") val parentTaskId: String? = null,
+    /** An epic (claude-fleet's sprints design §3). */
+    val epic: Boolean = false,
+    /** Its children and how many are done: an epic's roll-up. */
+    @SerialName("children_total") val childrenTotal: Int = 0,
+    @SerialName("children_done") val childrenDone: Int = 0,
 ) {
+    /**
+     * Fleet's own work, which a person edits here: a local item (never a
+     * tracker's ticket, whose text and status are its tracker's).
+     */
+    val editable: Boolean get() = kind == TaskKind.Local && itemId != null
     /** The key, else the title, else the id. */
     val label: String get() = key?.takeIf { it.isNotBlank() } ?: title.ifBlank { taskId }
 
@@ -465,6 +484,8 @@ data class TaskDetail(
     val aliases: List<String> = emptyList(),
     /** Tracker text, fenced; plain text only. */
     val description: String? = null,
+    /** A local item's own description, what *Edit* changes. */
+    val notes: String? = null,
     @SerialName("last_outcome") val lastOutcome: LastOutcome? = null,
     val placement: Placement? = null,
     /** The ids of the placement rules that match this task. */
@@ -650,3 +671,17 @@ data class DecisionResult(
 
 @Serializable
 data class BatchResult(val results: List<DecisionResult> = emptyList())
+
+/**
+ * A work item as `work_link { create | edit | set_status }` answers it: only
+ * what the phone reads back (the new task's id, to open it).
+ */
+@Serializable
+data class WorkItem(
+    val id: Long = 0,
+    val key: String? = null,
+    val title: String = "",
+    @SerialName("status_category") val statusCategory: StatusCategory? = null,
+) {
+    val taskId: String get() = "item:$id"
+}

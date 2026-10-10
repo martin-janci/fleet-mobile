@@ -584,4 +584,54 @@ class MyWorkViewModelTest {
         assertEquals("In Review · Jira (acme) · 1 active · 2 past · 1 suggested · to review", taskCardLine(tasks[0]))
         assertEquals("no sessions · tracker down", taskCardLine(tasks[1]))
     }
+
+    // ---- a new task ----
+
+    /** Create sends the title and what was typed, closes the sheet once made, and hands its id over to open it. */
+    @Test
+    fun a_new_task_is_created_and_opened() = runTest {
+        val actions = FakeWorkActions().answeringTree()
+        val vm = myWork(actions = actions)
+        runCurrent()
+        assertTrue(vm.state.value.canCreateTask)
+        vm.openNewTask()
+        runCurrent()
+        assertTrue(vm.state.value.newTaskOpen)
+
+        val opened = mutableListOf<String>()
+        vm.createTask(" Write the notes ", "", "2026-10-23") { opened += it }
+        runCurrent()
+
+        assertTrue("create \"Write the notes\" notes=null due=2026-10-23" in actions.calls, "${actions.calls}")
+        assertFalse(vm.state.value.newTaskOpen)
+        assertEquals(listOf("item:31"), opened)
+    }
+
+    /** A refusal (a phone bound to one org may not add top-level work) stays in the sheet. */
+    @Test
+    fun a_refused_new_task_stays_in_its_sheet() = runTest {
+        val actions = FakeWorkActions().answeringTree().apply {
+            failWrite = HubError.Tool("E_FORBIDDEN", "a standalone task needs an unscoped caller")
+        }
+        val vm = myWork(actions = actions)
+        runCurrent()
+        vm.openNewTask()
+        val opened = mutableListOf<String>()
+        vm.createTask("Write the notes", "", "") { opened += it }
+        runCurrent()
+        assertTrue(vm.state.value.newTaskOpen)
+        assertTrue(vm.state.value.newTaskError != null)
+        assertTrue(opened.isEmpty())
+    }
+
+    /** A readonly token is offered no New task. */
+    @Test
+    fun a_readonly_token_cannot_create() = runTest {
+        val vm = myWork(actions = FakeWorkActions().answeringTree(), canWrite = false)
+        runCurrent()
+        assertFalse(vm.state.value.canCreateTask)
+        vm.openNewTask()
+        runCurrent()
+        assertFalse(vm.state.value.newTaskOpen)
+    }
 }

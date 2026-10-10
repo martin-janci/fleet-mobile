@@ -98,6 +98,7 @@ import dev.claudefleet.mobile.model.WorkDecision
 import dev.claudefleet.mobile.model.WorkRule
 import dev.claudefleet.mobile.model.WorkRuleDraft
 import dev.claudefleet.mobile.model.WorkTask
+import dev.claudefleet.mobile.model.WorkItem
 import dev.claudefleet.mobile.model.WorkTreeFilters
 import dev.claudefleet.mobile.model.WorkTreePage
 import dev.claudefleet.mobile.model.WorkView
@@ -1943,6 +1944,61 @@ class HubClient(
      * reads it — the rows that show the item change by their own
      * `session:updated` frames.
      */
+    /**
+     * A new task in fleet (`work_link { create }`, claude-fleet's shared work
+     * context): a title, and optionally its description and due date
+     * (`YYYY-MM-DD`). A token bound to one organisation is refused a
+     * standalone task (`E_FORBIDDEN`): the hub says so.
+     */
+    suspend fun createWorkTask(title: String, notes: String? = null, dueAt: String? = null): WorkItem =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "create")
+                put("title", title)
+                notes?.takeIf { it.isNotBlank() }?.let { put("notes", it) }
+                dueAt?.takeIf { it.isNotBlank() }?.let { put("due_at", it) }
+            },
+        ) { json.decodeFromJsonElement(WorkItem.serializer(), it) }
+
+    /**
+     * A person's status for a local item (`work_link { set_status }`): final
+     * over the one fleet derives. A tracker's ticket is refused, naming it.
+     */
+    suspend fun setWorkStatus(itemId: Long, status: String): WorkItem =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "set_status")
+                put("item_id", itemId)
+                put("status", status)
+            },
+        ) { json.decodeFromJsonElement(WorkItem.serializer(), it) }
+
+    /**
+     * A person's edit of a local item (`work_link { edit }`): each field left
+     * null stays as it is; `notes` / `dueAt` `""` and `assignees` empty clear
+     * them. A tracker's ticket is refused, naming it.
+     */
+    suspend fun editWorkItem(
+        itemId: Long,
+        title: String? = null,
+        notes: String? = null,
+        assignees: List<String>? = null,
+        dueAt: String? = null,
+    ): WorkItem =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "edit")
+                put("item_id", itemId)
+                title?.let { put("title", it) }
+                notes?.let { put("notes", it) }
+                assignees?.let { list -> put("assignees", JsonArray(list.map(::JsonPrimitive))) }
+                dueAt?.let { put("due_at", it) }
+            },
+        ) { json.decodeFromJsonElement(WorkItem.serializer(), it) }
+
     suspend fun renameWorkItem(itemId: Long, title: String) {
         call(
             "work_link",

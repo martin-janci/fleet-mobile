@@ -9,6 +9,7 @@ import dev.claudefleet.mobile.model.GroupSource
 import dev.claudefleet.mobile.model.LinkState
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.OrgSource
+import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.model.TaskDetail
 import dev.claudefleet.mobile.model.WorkTaskLink
 import dev.claudefleet.mobile.net.HubCapabilities
@@ -95,6 +96,18 @@ data class TaskUiState(
     /** The task's organisation by name and colour, for the New layout's chip. */
     val orgName: String? = null,
     val orgColor: String? = null,
+    /**
+     * **Edit…**: fleet's own task (a local item, never a ticket), a full
+     * token, a hub that serves `work_link edit`, a connection.
+     */
+    val canEdit: Boolean = false,
+    /** The status chips set it: the same, for `work_link set_status`. */
+    val canSetStatus: Boolean = false,
+    val editOpen: Boolean = false,
+    /** A delegated job's description is its prompt: shown, never edited. */
+    val notesLocked: Boolean = false,
+    /** What the Edit sheet starts from. */
+    val editFields: TaskEditFields = TaskEditFields(),
 ) {
     val task get() = detail?.task
 }
@@ -154,6 +167,7 @@ class TaskViewModel(
         val summarizing: Long? = null,
         val summary: PastWorkSummary? = null,
         val summaries: Map<Long, PastWorkSummary> = emptyMap(),
+        val editOpen: Boolean = false,
     )
 
     private val local = MutableStateFlow(Local())
@@ -367,6 +381,55 @@ class TaskViewModel(
         local.update { it.copy(error = null, conflict = false) }
     }
 
+    fun openEdit() {
+        if (state.value.canEdit) local.update { it.copy(editOpen = true, error = null, conflict = false) }
+    }
+
+    fun closeEdit() {
+        local.update { it.copy(editOpen = false) }
+    }
+
+    /**
+     * **Save** in the Edit sheet: only the fields that changed. The sheet
+     * stays open on a refusal, with the hub's reason in it.
+     */
+    fun saveEdit(edit: TaskEdit): Job? {
+        val itemId = state.value.task?.itemId ?: return null
+        if (edit.isEmpty) return null.also { closeEdit() }
+        return itemWrite(EDIT) {
+            actions.editItem(itemId, title = edit.title, notes = edit.notes, assignees = edit.assignees, dueAt = edit.dueAt)
+            local.update { it.copy(editOpen = false) }
+        }
+    }
+
+    /** A status chip: a person's status for fleet's own task, final over the derived one. */
+    fun setStatus(status: StatusCategory): Job? {
+        val s = state.value
+        val itemId = s.task?.itemId ?: return null
+        if (status == StatusCategory.Unknown || status == s.task?.statusCategory) return null
+        return itemWrite(SET_STATUS) { actions.setStatus(itemId, status.wire) }
+    }
+
+    /** One write about the item, then the task re-read. */
+    private fun itemWrite(action: String, call: suspend () -> Unit): Job? {
+        if (local.value.busy) return null
+        if (!allowed(fleet.capabilities.value, fleet.status.value, action)) return null.also { refuseOffline(action) }
+        local.update { it.copy(busy = true, error = null, conflict = false) }
+        return callScope.launch {
+            try {
+                call()
+                if (scope.isActive) scope.launch { load() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                if (t is HubError.Tool && t.isUnknownAction()) fleet.actionMissing(WORK_LINK, action)
+                local.update { it.copy(error = friendlyWorkWrite(t), conflict = t.isConflict()) }
+            } finally {
+                local.update { it.copy(busy = false) }
+            }
+        }
+    }
+
     /** A write this token and hub may make, tapped while offline: said, never silently dropped. */
     private fun refuseOffline(action: String) {
         if (canWrite && fleet.capabilities.value.has(WORK_LINK, action) && !fleet.status.value.isConnected()) {
@@ -423,6 +486,13 @@ class TaskViewModel(
             canDecide = suggested.isNotEmpty() && allowed(caps, status, CONFIRM) && allowed(caps, status, REJECT),
             orgName = task?.orgId?.let { orgs.name(it) },
             orgColor = task?.orgId?.let { orgs.orgs[it]?.color },
+            canEdit = task?.editable == true && allowed(caps, status, EDIT),
+            canSetStatus = task?.editable == true && allowed(caps, status, SET_STATUS),
+            editOpen = l.editOpen,
+            notesLocked = task?.origin == "agent",
+            editFields = detail?.let {
+                TaskEditFields(title = it.task.title, notes = it.notes.orEmpty(), assignees = it.task.assignees, dueAt = it.task.dueAt.orEmpty())
+            } ?: TaskEditFields(),
         )
     }
 
@@ -452,5 +522,7 @@ class TaskViewModel(
         const val SUMMARIZE = "summarize"
         const val CONFIRM = "confirm"
         const val REJECT = "reject"
+        const val EDIT = "edit"
+        const val SET_STATUS = "set_status"
     }
 }

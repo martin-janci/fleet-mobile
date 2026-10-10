@@ -14,6 +14,7 @@ import dev.claudefleet.mobile.model.RulePreview
 import dev.claudefleet.mobile.model.SessionTasks
 import dev.claudefleet.mobile.model.TaskDetail
 import dev.claudefleet.mobile.model.WorkDecision
+import dev.claudefleet.mobile.model.WorkItem
 import dev.claudefleet.mobile.model.WorkRule
 import dev.claudefleet.mobile.model.WorkRuleDraft
 import dev.claudefleet.mobile.model.WorkTask
@@ -129,6 +130,25 @@ interface WorkActions {
 
     /** Rename local work item [itemId] (never a ticket: the hub refuses one). */
     suspend fun renameItem(itemId: Long, title: String)
+
+    // ---- fleet's own tasks (claude-fleet: shared work context, task editing) ----
+
+    /** **New task**: a title, and optionally a description and due date (`YYYY-MM-DD`). */
+    suspend fun createTask(title: String, notes: String? = null, dueAt: String? = null): WorkItem =
+        throw UnsupportedOperationException("create")
+
+    /** A person's status for local item [itemId]: `todo`, `in_progress` or `done`. */
+    suspend fun setStatus(itemId: Long, status: String): WorkItem =
+        throw UnsupportedOperationException("set_status")
+
+    /** **Edit** local item [itemId]: a null field stays as it is; `""` / empty clears it. */
+    suspend fun editItem(
+        itemId: Long,
+        title: String? = null,
+        notes: String? = null,
+        assignees: List<String>? = null,
+        dueAt: String? = null,
+    ): WorkItem = throw UnsupportedOperationException("edit")
 
     // ---- the Work view (claude-fleet M14): reads are `work`, writes `work_link` ----
 
@@ -262,6 +282,15 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
         session.withClient { it.nameWork(sessionId, title, key) }
 
     override suspend fun renameItem(itemId: Long, title: String) = session.withClient { it.renameWorkItem(itemId, title) }
+
+    override suspend fun createTask(title: String, notes: String?, dueAt: String?): WorkItem =
+        session.withClient { it.createWorkTask(title, notes, dueAt) }
+
+    override suspend fun setStatus(itemId: Long, status: String): WorkItem =
+        session.withClient { it.setWorkStatus(itemId, status) }
+
+    override suspend fun editItem(itemId: Long, title: String?, notes: String?, assignees: List<String>?, dueAt: String?): WorkItem =
+        session.withClient { it.editWorkItem(itemId, title, notes, assignees, dueAt) }
 
     override suspend fun tree(filters: WorkTreeFilters, cursor: String?, limit: Int?, perTask: Int?): WorkTreePage =
         session.withClient { it.workTree(filters, cursor, limit, perTask) }

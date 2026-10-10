@@ -66,6 +66,11 @@ data class TaskHandlers(
     /** Summarise a past session for the journal; close the summary. */
     val onSummarize: (WorkTaskLink) -> Unit = {},
     val onDismissSummary: () -> Unit = {},
+    /** Fleet's own task: **Edit…**, its sheet, and the status chips. */
+    val onOpenEdit: () -> Unit = {},
+    val onCloseEdit: () -> Unit = {},
+    val onSaveEdit: (TaskEdit) -> Unit = {},
+    val onSetStatus: (dev.claudefleet.mobile.model.StatusCategory) -> Unit = {},
 )
 
 /**
@@ -126,6 +131,7 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
                         Text("Its tracker is failing to sync — sessions below are what fleet last knew.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     }
                     if (task.assignees.isNotEmpty()) Text("Assigned: ${task.assignees.joinToString()}", style = MaterialTheme.typography.bodySmall)
+                    task.dueAt?.takeIf { it.isNotBlank() }?.let { Text("Due: $it", style = MaterialTheme.typography.bodySmall) }
                     task.url?.let { Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                     state.orgLine?.let { Text("Organisation: $it", style = MaterialTheme.typography.bodySmall) }
                     Text("Group: ${state.groupLine}", style = MaterialTheme.typography.bodySmall)
@@ -141,6 +147,10 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
                     state.detail?.description?.takeIf { it.isNotBlank() }?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 8, overflow = TextOverflow.Ellipsis)
                     }
+                    state.detail?.notes?.takeIf { it.isNotBlank() && task.editable }?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 8, overflow = TextOverflow.Ellipsis)
+                    }
+                    OwnTaskControls(state, handlers)
                     state.detail?.lastOutcome?.let { o ->
                         val line = listOfNotNull(o.name, o.host?.let { "on $it" }, o.branch, o.prUrl?.let { "PR $it" }).joinToString(" · ")
                         if (line.isNotBlank()) Text("Last: $line", style = MaterialTheme.typography.bodySmall)
@@ -171,6 +181,7 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
         }
     }
     if (state.placeOpen) PlaceSheet(state, handlers)
+    if (state.editOpen) TaskEditSheetFor(state, handlers)
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.linkSection(
@@ -321,4 +332,33 @@ internal fun PastWorkSummaryDialog(summary: PastWorkSummary, onDismiss: () -> Un
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
     )
+}
+
+/** The Edit sheet over a task screen (either layout). */
+@Composable
+internal fun TaskEditSheetFor(state: TaskUiState, handlers: TaskHandlers) {
+    TaskEditSheet(
+        before = state.editFields,
+        notesLocked = state.notesLocked,
+        busy = state.busy,
+        connected = state.connected,
+        error = state.error,
+        onDismissError = handlers.onDismissError,
+        onCancel = handlers.onCloseEdit,
+        onSave = handlers.onSaveEdit,
+    )
+}
+
+/** Fleet's own task: its status chips and **Edit…**, where the person may. */
+@Composable
+internal fun OwnTaskControls(state: TaskUiState, handlers: TaskHandlers, modifier: Modifier = Modifier) {
+    if (!state.canSetStatus && !state.canEdit) return
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (state.canSetStatus) {
+            TaskStatusChips(current = state.task?.statusCategory, enabled = !state.busy, onPick = handlers.onSetStatus)
+        }
+        if (state.canEdit) {
+            TextButton(onClick = handlers.onOpenEdit, enabled = !state.busy) { Text("Edit…") }
+        }
+    }
 }
