@@ -221,6 +221,7 @@ class RichBlocksTest {
         assertEquals(JsonPrimitive("l"), defaults["size"])
         assertEquals(buildJsonArray { add(JsonPrimitive("lint")) }, defaults["steps"])
         assertTrue(riskyChoice("Yes, and don't ask again"))
+        assertTrue(riskyChoice("Yes, and don’t ask again for: ls *"), "Claude Code draws a curly apostrophe")
         assertTrue(!riskyChoice("Staging"))
     }
 

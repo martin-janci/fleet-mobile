@@ -35,6 +35,10 @@ import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -934,40 +938,88 @@ class SessionViewModel(
                 is Answer.Option -> a.n.toString()
                 Answer.Enter -> "Enter"
                 Answer.Escape -> "Escape"
+                Answer.Continue -> "Tab"
                 // Drawn by no card (`blockedCard` never offers it), so it
                 // cannot be pressed from a stale one; C-c interrupts rather
                 // than approving anything.
                 Answer.Interrupt -> null
                 is Answer.Text -> null
             }
-            if (keyToPress != null) {
+            // A dialog card on a hub that checks the dialog itself: the key
+            // goes out WITH the dialog it answers, and the hub re-reads the
+            // pane and presses in one step — no read here first, one round
+            // trip less, and no window between the check and the press.
+            val dialogAsked = row()?.takeIf { it.stuckKind == null }?.pendingInput
+            val hubChecks = keyToPress != null && dialogAsked != null && fleet.capabilities.value.answerExpects
+            if (keyToPress != null && !hubChecks) {
                 val asked = row()
                 val moved = dialogMoved(
                     asked?.pendingInput,
                     asked?.stuckKind,
                     actions.activity(sessionId),
                     a as? Answer.Option,
+                    enter = a == Answer.Enter,
                 )
                 if (moved != null) {
                     local.update { it.copy(answering = false, error = moved) }
                     return@launch
                 }
             }
-            val receipt = when (a) {
+            val asked = row()
+            val receipt = when {
+                hubChecks -> try {
+                    actions.sendKeysExpecting(sessionId, keyToPress!!, dialogAsked!!)
+                } catch (e: HubError.Tool) {
+                    if (e.code != "E_CONFLICT") throw e
+                    local.update { it.copy(answering = false, error = movedOnHub(e.message)) }
+                    return@launch
+                }
+                else -> when (a) {
                 is Answer.Option -> actions.sendKeys(sessionId, a.n.toString())
                 is Answer.Text -> actions.sendPrompt(sessionId, a.text)
                 Answer.Enter -> actions.sendKeys(sessionId, "Enter")
                 Answer.Escape -> actions.sendKeys(sessionId, "Escape")
+                Answer.Continue -> actions.sendKeys(sessionId, "Tab")
                 Answer.Interrupt -> actions.sendKeys(sessionId, "C-c")
+                }
             }
-            val wait = actions.waitForTurn(sessionId, receipt.turnSeqBefore, timeoutS = ANSWER_WAIT_SECONDS)
-            local.update { it.copy(answering = false, stillWaiting = wait.status != WAIT_SATISFIED) }
+            val landed = awaitAnswerLanded(asked, receipt.turnSeqBefore)
+            local.update { it.copy(answering = false, stillWaiting = !landed) }
             requestRead(first = false)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
             local.update { it.copy(answering = false, error = friendly(t)) }
         }
+    }
+
+    /**
+     * Whether the answer just sent has landed: the session's turn counter
+     * moved past [turnBefore] (the hub's long poll), OR the row moved on from
+     * the dialog the answer was for — no longer blocked, or showing another
+     * dialog or other ticks ([answerLanded]). Whichever comes first, within
+     * [ANSWER_WAIT_SECONDS].
+     *
+     * The turn alone was the wrong thing to wait for: it moves only when the
+     * whole TURN ends (Stop), so approving a tool call mid-turn held the card
+     * in "sending" for the full 30 s and then said "still waiting", and a
+     * second dialog in that window could not be answered. The hub now writes
+     * a dialog's answer through within a second, which the row shows.
+     */
+    private suspend fun awaitAnswerLanded(asked: SessionRow?, turnBefore: Long): Boolean = coroutineScope {
+        val turn = async {
+            actions.waitForTurn(sessionId, turnBefore, timeoutS = ANSWER_WAIT_SECONDS).status == WAIT_SATISFIED
+        }
+        val moved = async {
+            withTimeoutOrNull(ANSWER_WAIT_SECONDS.seconds) {
+                fleet.sessions.map { rows -> rows.firstOrNull { it.id == sessionId } }.first { answerLanded(asked, it) }
+            } != null || answerLanded(asked, row())
+        }
+        val first = select { turn.onAwait { it }; moved.onAwait { it } }
+        val landed = first || (if (turn.isCompleted) moved.await() else turn.await())
+        turn.cancel()
+        moved.cancel()
+        landed
     }
 
     /**
@@ -995,8 +1047,7 @@ class SessionViewModel(
                 return@launch
             }
             val receipt = actions.sendKeys(sessionId, no.n.toString())
-            val wait = actions.waitForTurn(sessionId, receipt.turnSeqBefore, timeoutS = ANSWER_WAIT_SECONDS)
-            if (wait.status != WAIT_SATISFIED) {
+            if (!awaitAnswerLanded(asked, receipt.turnSeqBefore)) {
                 local.update { it.copy(answering = false, stillWaiting = true) }
                 requestRead(first = false)
                 return@launch
@@ -2119,12 +2170,19 @@ internal const val AFTER_KEY_MS: Long = 300L
  *    of the same identity, and — when [option] names one — still offer it.
  *    [option] is null for the bare Enter/Escape chips that sit beside the
  *    digits on that same card.
+ *
+ * [enter]: on a dialog Enter picks whichever option is HIGHLIGHTED, which
+ * the identity leaves out (arrow keys move it). If someone moved the cursor
+ * in a terminal — to "Yes, and don't ask again", say — Enter from the phone
+ * would confirm that, so for Enter the highlighted option must still be the
+ * one the card was drawn with.
  */
 internal fun dialogMoved(
     asked: PendingInput?,
     askedStuck: String?,
     probe: ActivityProbe,
     option: Answer.Option?,
+    enter: Boolean = false,
 ): Friendly? {
     val gone = Friendly(
         "That question is gone",
@@ -2148,9 +2206,35 @@ internal fun dialogMoved(
         onScreen == null -> gone
         asked == null || onScreen.fingerprint() != asked.fingerprint() -> changed
         option != null && onScreen.options.none { it.n == option.n && it.label == option.label } -> changed
+        enter && onScreen.options.firstOrNull { it.selected }?.n != asked.options.firstOrNull { it.selected }?.n -> changed
         else -> null
     }
 }
+
+/**
+ * Whether [now] has moved on from the dialog [asked] showed when an answer
+ * went out: the row is gone or no longer blocked, its stuck kind changed, or
+ * it shows a different dialog — another question, or other ticks on the
+ * same multi-select (a digit there toggles a box). PURE, for the tests.
+ */
+internal fun answerLanded(asked: SessionRow?, now: SessionRow?): Boolean = when {
+    now == null -> true
+    now.claudeStatus != "blocked" -> true
+    asked == null -> false
+    now.stuckKind != asked.stuckKind -> true
+    else -> now.pendingInput != asked.pendingInput
+}
+
+/**
+ * The hub's `E_CONFLICT` for an answer whose dialog moved, as the card says
+ * it — the same two sentences [dialogMoved] uses for the phone's own check.
+ */
+internal fun movedOnHub(message: String): Friendly =
+    if (message.contains("gone", ignoreCase = true)) {
+        Friendly("That question is gone", "Nothing was sent — it was answered or dismissed already.", isError = false)
+    } else {
+        Friendly("The question changed", "Nothing was sent — read it again and choose.", isError = false)
+    }
 
 /** What `wait_for_session` answers when the turn actually moved. */
 internal const val WAIT_SATISFIED: String = "satisfied"

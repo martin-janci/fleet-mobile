@@ -236,7 +236,11 @@ class TrackersViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (e: HubError.Tool) {
-            val token = (e.details as? JsonObject)?.get("confirm")?.let { (it as? JsonPrimitive)?.content }
+            // The hub's confirm gate names its token `confirm_nonce`; `confirm`
+            // is `add_project`'s own token. Reading only the latter left the
+            // phone with no token, so every Remove asked again forever.
+            val details = e.details as? JsonObject
+            val token = (details?.get("confirm_nonce") ?: details?.get("confirm"))?.let { (it as? JsonPrimitive)?.content }
             if (e.code == "E_CONFIRM_REQUIRED" && token != null) {
                 local.update { it.copy(removeNonce = row.id to token, notice = REMOVE_NEEDS_APPROVAL) }
             } else {

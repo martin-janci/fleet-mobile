@@ -81,8 +81,15 @@ private class FakeMissionActions : MissionActions {
         return MissionCard(id = cardId, state = if (ok) "applied" else "dismissed")
     }
 
+    /** How many `setState` calls answer E_CONFLICT before one goes through. */
+    var stateConflicts = 0
+
     override suspend fun setState(missionId: Long, state: String, expectedVersion: Long): Mission {
         calls += "state $missionId $state $expectedVersion"
+        if (stateConflicts > 0) {
+            stateConflicts -= 1
+            throw dev.claudefleet.mobile.net.HubError.Tool("E_CONFLICT", "the mission moved on")
+        }
         return list.first().copy(state = state)
     }
 
@@ -358,6 +365,27 @@ class MissionsTest {
             writes,
             "the same grant re-signed with the new limit only, then resumed, then the lead told",
         )
+    }
+
+    /**
+     * The resume loses a version race after the budget was raised: it is
+     * tried again against the mission as it is now, and the lead is still
+     * told — not a raised budget behind a paused mission and no button left.
+     */
+    @Test
+    fun an_approve_whose_resume_loses_a_version_race_resumes_anyway() = runTest {
+        val actions = FakeMissionActions().apply { detail = braked; list = listOf(braked.mission); stateConflicts = 1 }
+        val vm = MissionsViewModel(MissionsFleet(spendLoop), actions, backgroundScope, canWrite = true)
+        vm.openOne(1).join()
+        runCurrent()
+
+        vm.approveSpend(spendAsk(braked)!!, nowSeconds = 1_000).join()
+        runCurrent()
+
+        val writes = actions.calls.filter { it.startsWith("state") || it.startsWith("decide") }
+        assertEquals(2, writes.count { it.startsWith("state 1 active") }, "$writes")
+        assertTrue(writes.last().startsWith("decide 77 true"), "$writes")
+        assertNull(vm.state.value.error)
     }
 
     @Test

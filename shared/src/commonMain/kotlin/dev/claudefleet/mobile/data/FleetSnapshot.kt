@@ -51,13 +51,16 @@ val SNAPSHOT_EVENT_KINDS: List<String> = listOf("session", "host", "project", "w
  * re-reads `my_grants`; `account` (`account:upserted`, a new account or a
  * nickname change) re-reads `list_accounts`; `update` (`update:decision`,
  * the hub's update decision for some client moved) asks `/update/check`
- * again. A hub that does not know the kind ignores it in `?kinds=`.
+ * again; `confirm` (`confirm:changed`, an empty object) says a call is
+ * waiting for a person, or was answered, so Control's queue is read at once
+ * rather than on its 4 s poll. A hub that does not know the kind ignores it
+ * in `?kinds=`.
  *
  * Kept apart from [SNAPSHOT_EVENT_KINDS] so that list still means "what the
  * snapshot applies" — `FleetSnapshotTest` holds every entry of it to changing
  * the snapshot, which a signal never does.
  */
-val SIGNAL_EVENT_KINDS: List<String> = listOf("download", "account_usage", "grant", "account", "update")
+val SIGNAL_EVENT_KINDS: List<String> = listOf("download", "account_usage", "grant", "account", "update", "confirm")
 
 /**
  * Kinds that carry a fact a screen waits on and the snapshot does not keep:
@@ -194,6 +197,9 @@ fun HubEvent.Row.isAccountFrame(): Boolean = name.startsWith("account:")
  * answer anyway.
  */
 fun HubEvent.Row.isGrantFrame(): Boolean = name.startsWith("grant:")
+
+/** `confirm:changed`: the hub's queue of calls waiting for a person moved. */
+fun HubEvent.Row.isConfirmFrame(): Boolean = name == "confirm:changed"
 
 /** `update:decision`: a decision moved (a pin, a new channel, a policy); which client's does not matter. */
 fun HubEvent.Row.isUpdateDecisionFrame(): Boolean = name == "update:decision"

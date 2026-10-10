@@ -204,6 +204,8 @@ class FleetRepository(
     // Lossy and buffered like `_sessionChanges`: a hint to re-check, never the fact.
     private val _updateDecisions = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val updateDecisions: Flow<Unit> = _updateDecisions.asSharedFlow()
+    private val _confirmChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val confirmChanges: Flow<Unit> = _confirmChanges.asSharedFlow()
 
     // Lossy and buffered like `_sessionChanges`: a start's step, for the form waiting on it.
     private val _startProgress = MutableSharedFlow<StartProgress>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
@@ -315,7 +317,14 @@ class FleetRepository(
                 val sessions = async { client.listSessions() }
                 val hosts = async { client.listHosts() }
                 val projects = async { client.listProjects() }
-                val fresh = FleetSnapshot(sessions.await(), hosts.await(), projects.await(), tickets = emptyList())
+                // Sessions first: they carry what needs a person (a dialog,
+                // a stuck pane), and they need not wait for the host and
+                // project lists to be drawn.
+                val rows = sessions.await()
+                snapshotLock.withLock {
+                    publish(applied.fold(snapshot().copy(sessions = rows)) { snapshot, frame -> snapshot.applying(frame) })
+                }
+                val fresh = FleetSnapshot(rows, hosts.await(), projects.await(), tickets = emptyList())
                 snapshotLock.withLock {
                     publish(applied.fold(fresh) { snapshot, frame -> snapshot.applying(frame) })
                     relistsInFlight -= applied
@@ -359,6 +368,12 @@ class FleetRepository(
      */
     private var lastEventId: String? = null
 
+    /** The connection just closed was ended by a `lagged` frame (see [follow]). */
+    private var lagged = false
+
+    /** `lagged` endings in a row; reset by any other ending. */
+    private var lagStreak = 0
+
     private suspend fun follow() {
         var failures = 0
         var reason: String? = null
@@ -382,6 +397,7 @@ class FleetRepository(
                 // against an upgraded app — gets its own fair verdict rather
                 // than inheriting the last one's refusal.
                 var contractRefused = false
+                lagged = false
                 events.connect(lastEventId).collect { event ->
                     if (contractRefused) return@collect
                     when (event) {
@@ -450,9 +466,13 @@ class FleetRepository(
                             discover()
                         }
                         is HubEvent.Lagged -> {
-                            refresh()
-                            _sessionChanges.tryEmit(ALL_SESSIONS_CHANGED)
-                            _downloadChanges.tryEmit(ALL_DOWNLOADS_CHANGED)
+                            // The hub closes the stream right after this
+                            // frame, and the reconnect below resyncs: a
+                            // replay when the hub still holds what was
+                            // missed, else a re-list on `ready`. Re-listing
+                            // here as well paid for the whole fleet twice
+                            // before the next status frame was applied.
+                            lagged = true
                         }
                         is HubEvent.Row -> {
                             snapshotLock.withLock {
@@ -471,6 +491,7 @@ class FleetRepository(
                             if (event.isAccountFrame()) readAccountsSoon()
                             if (event.isGrantFrame()) readGrantsSoon()
                             if (event.isUpdateDecisionFrame()) _updateDecisions.tryEmit(Unit)
+                            if (event.isConfirmFrame()) _confirmChanges.tryEmit(Unit)
                             event.downloadId()?.let { _downloadChanges.tryEmit(it) }
                             event.startProgress()?.let { _startProgress.tryEmit(it) }
                         }
@@ -503,6 +524,17 @@ class FleetRepository(
                 reason = connectionReason(t)
                 details = explain(t)
             }
+            // Fell behind, not fell over: the hub is fine and the stream
+            // only needs reopening, so no backoff — every second here is a
+            // second of status frames (a dialog going up) nobody applies.
+            // Once or twice: a phone that keeps falling behind gets the
+            // ordinary backoff, not a reconnect loop.
+            if (lagged && ++lagStreak <= LAG_RECONNECTS_WITHOUT_BACKOFF) {
+                lagged = false
+                continue
+            }
+            if (!lagged) lagStreak = 0
+            lagged = false
             failures += 1
             _status.value = ConnectionStatus.Reconnecting(failures + 1, reason, details)
             // A wake left over from while the stream was up is not a request
@@ -779,3 +811,6 @@ internal fun reconnectDelay(failures: Int): Duration {
     val doublings = (failures - 1).coerceIn(0, 5)
     return minOf(BASE_RECONNECT_DELAY * (1 shl doublings), MAX_RECONNECT_DELAY)
 }
+
+/** How many `lagged` endings in a row reconnect at once, before the ordinary backoff applies. */
+internal const val LAG_RECONNECTS_WITHOUT_BACKOFF: Int = 2

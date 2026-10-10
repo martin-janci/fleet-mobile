@@ -46,6 +46,8 @@ private class ControlFleet(tools: Set<String>) : FleetState {
     override val clockSkewSeconds = MutableStateFlow(0L)
     override val sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16)
     override val capabilities = MutableStateFlow(HubCapabilities(tools = tools))
+    val confirmFrames = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
+    override val confirmChanges = confirmFrames
     override suspend fun refresh() = Unit
 }
 
@@ -54,6 +56,7 @@ private class FakeControl(var status: OperatorStatus) : ControlActions, AgentAct
     var confirmReads = 0
     var wakes = 0
     val answers = mutableListOf<Pair<String, Boolean>>()
+    var recorded = true
     var confirms = listOf(
         ConfirmRequest(nonce = "n1", tool = "kill_session", summary = "Stop pine/api", operator = true),
         ConfirmRequest(nonce = "n2", tool = "merge_pr", summary = "Merge #12", caller = "ci-bot"),
@@ -64,7 +67,7 @@ private class FakeControl(var status: OperatorStatus) : ControlActions, AgentAct
     override suspend fun answer(nonce: String, approved: Boolean): Boolean {
         answers += nonce to approved
         confirms = confirms.filterNot { it.nonce == nonce }
-        return true
+        return recorded
     }
     var handoffReads = 0
     var handoffs = listOf<ControlHandoff>()
@@ -186,6 +189,23 @@ class ControlChatTest {
         vm.detach()
     }
 
+    /** A `confirm:changed` frame reads the queue at once, not a poll later. */
+    @Test
+    fun a_confirm_frame_reads_the_queue_at_once() = runTest {
+        val fake = FakeControl(OperatorStatus(ready = true, session = SessionRow(id = 5)))
+        val fleet = ControlFleet(CONTROL_TOOLS)
+        val vm = ControlViewModel(fleet, fake, fake, backgroundScope, canWrite = true, pollMs = 600_000)
+        vm.attach()
+        runCurrent()
+        val before = fake.confirmReads
+
+        fleet.confirmFrames.emit(Unit)
+        runCurrent()
+
+        assertEquals(before + 1, fake.confirmReads)
+        vm.detach()
+    }
+
     @Test
     fun an_answer_goes_on_the_tap_and_takes_its_card_away() = runTest {
         val fake = FakeControl(OperatorStatus(ready = true, session = SessionRow(id = 5)))
@@ -197,6 +217,19 @@ class ControlChatTest {
         assertEquals(listOf("n2" to false), fake.answers)
         assertEquals(listOf("n1"), vm.state.value.confirms.map { it.nonce })
         assertNull(vm.answer("missing", true))
+    }
+
+    @Test
+    fun an_answer_the_hub_did_not_record_is_said() = runTest {
+        // The desktop answered first (the hub keeps the first answer), or the
+        // request expired: the tap counted for nothing, and the screen says so.
+        val fake = FakeControl(OperatorStatus(ready = true, session = SessionRow(id = 5))).apply { recorded = false }
+        val vm = ControlViewModel(ControlFleet(CONTROL_TOOLS), fake, fake, backgroundScope, canWrite = true)
+        vm.refresh().join(); runCurrent()
+
+        vm.answer("n1", true)?.join(); runCurrent()
+        assertEquals(listOf("n2"), vm.state.value.confirms.map { it.nonce })
+        assertEquals("Already answered or expired", vm.state.value.error?.title)
     }
 
     @Test

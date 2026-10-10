@@ -7,9 +7,15 @@ import kotlinx.serialization.Serializable
  * One selectable choice in a `pending_input` prompt, as the hub's REPL parser
  * read it off the pane: `n` is the number a person would type, `label` is the
  * option's text, and `selected` marks the REPL's own default cursor.
+ * [checked] is a multi-select box that is ticked (always false elsewhere).
  */
 @Serializable
-data class PendingOption(val n: Int, val label: String, val selected: Boolean = false)
+data class PendingOption(
+    val n: Int,
+    val label: String,
+    val selected: Boolean = false,
+    val checked: Boolean = false,
+)
 
 /**
  * The hub's structured reading of a blocked session's prompt (the row's
@@ -23,16 +29,26 @@ data class PendingInput(
     val kind: String,
     val question: String? = null,
     val options: List<PendingOption> = emptyList(),
+    /**
+     * A multi-select question: a digit TOGGLES that option's box instead of
+     * answering, and `Tab` moves on. The hub leaves it off when false.
+     */
+    val multi: Boolean = false,
+    /** The tool call a permission dialog asks about (`Bash(git push)`), or null. */
+    val detail: String? = null,
 )
 
 /**
  * A stable identity for "the question being asked" — the desktop's
  * `answerFingerprint`, so both clients decide "is it still the same dialog"
  * the same way. Which option is *highlighted* is left out on purpose: an
- * arrow key moves the cursor without changing the question.
+ * arrow key moves the cursor without changing the question. The tool call
+ * ([PendingInput.detail]) is in: `Bash(rm -rf build)` and `Bash(rm -rf ~)`
+ * read the same question with the same options, and a tap meant for the
+ * first must not approve the second.
  */
 fun PendingInput.fingerprint(): List<Any?> =
-    listOf(kind, question, options.map { it.n to it.label })
+    listOf(kind, question, options.map { it.n to it.label }, detail)
 
 /**
  * What `session_activity` answers: one `capture-pane` read of the session's

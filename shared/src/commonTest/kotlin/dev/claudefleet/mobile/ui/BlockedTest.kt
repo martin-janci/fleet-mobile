@@ -25,6 +25,35 @@ class BlockedTest {
     }
 
     /**
+     * A multi-select question: a digit only toggles a box, so the card must
+     * offer Continue (Tab) or the phone can never finish it; each chip says
+     * whether its box is ticked.
+     */
+    @Test
+    fun a_multi_select_question_can_be_finished_from_the_phone() {
+        val p = PendingInput(
+            "input",
+            "Which features?",
+            listOf(PendingOption(1, "Auth", selected = true, checked = true), PendingOption(2, "Logging")),
+            multi = true,
+        )
+        val card = blockedCard(row(pending = p), HUB_VERSION_DIGIT_KEYS)!!
+        assertTrue(card.multi)
+        assertEquals(
+            listOf(Answer.Option(1, "Auth", checked = true), Answer.Option(2, "Logging"), Answer.Continue, Answer.Enter, Answer.Escape),
+            card.answers,
+        )
+        assertEquals(listOf("1  ☑ Auth", "2  ☐ Logging", "Continue with these · Tab"), questionAnswers(card, null).map { it.label })
+    }
+
+    /** The card carries the command a permission dialog asks about. */
+    @Test
+    fun a_permission_card_carries_the_command() {
+        val p = PendingInput("permission", "Do you want to proceed?", listOf(PendingOption(1, "Yes")), detail = "Bash(git push)")
+        assertEquals("Bash(git push)", blockedCard(row(pending = p), HUB_VERSION_DIGIT_KEYS)!!.detail)
+    }
+
+    /**
      * A 0.2.35 hub takes Enter / Esc / C-c as keys but not a digit, and it
      * refuses a typed "1" into a blocked session — so it gets no option chip
      * it would refuse, only the keys and the terminal.

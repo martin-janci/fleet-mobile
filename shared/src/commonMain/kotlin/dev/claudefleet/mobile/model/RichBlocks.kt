@@ -835,7 +835,7 @@ internal val RISKY_WORDS = listOf(
     "allow", "always", "bypass", "permission", "permissions", "sudo", "approve",
 )
 
-private val RISKY = Regex("""\b(?:${RISKY_WORDS.joinToString("|")})\b|don'?t ask again""", RegexOption.IGNORE_CASE)
+private val RISKY = Regex("""\b(?:${RISKY_WORDS.joinToString("|")})\b|don['’]?t ask again""", RegexOption.IGNORE_CASE)
 
 /** An option AI never picks for a person: a push, a permission, an approval, a step hard to undo. The desktop's `risky`. */
 fun riskyChoice(label: String): Boolean = RISKY.containsMatchIn(label)

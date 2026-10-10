@@ -117,6 +117,20 @@ fun BlockedCardView(
                     Comet(size = 16.dp)
                 }
             }
+            // The hub's own reading of the call, when the conversation has
+            // not shown the tool yet.
+            if (asking == null) card.detail?.let { detail ->
+                Spacer(Modifier.height(6.dp))
+                SelectionContainer {
+                    Text(
+                        text = detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 6,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
             asking?.let { tool ->
                 Spacer(Modifier.height(6.dp))
                 if (tool.name.isNotBlank()) Text(tool.name, style = MaterialTheme.typography.labelLarge)
@@ -249,7 +263,8 @@ private val TERMINAL_MAX_HEIGHT: Dp = 220.dp
  * word for it here would be a second place deciding what a prompt offers.
  */
 internal fun answerLabel(answer: Answer): String = when (answer) {
-    is Answer.Option -> "${answer.n} · ${answer.label}"
+    is Answer.Option -> "${answer.n} · ${if (answer.checked) "☑ " else ""}${answer.label}"
+    Answer.Continue -> "Continue · Tab"
     Answer.Enter -> "Enter"
     Answer.Escape -> "Esc"
     Answer.Interrupt -> "Interrupt"

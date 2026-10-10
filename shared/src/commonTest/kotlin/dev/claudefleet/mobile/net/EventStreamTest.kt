@@ -173,7 +173,7 @@ class EventStreamTest {
         // `account` for account names and nicknames (`account:upserted`), and
         // `update` for the app's own update decision (`update:decision`).
         // Then `start`, the steps of a session this phone started (`start:progress`).
-        assertEquals("session,host,project,work,download,account_usage,grant,account,update,start", request.url.parameters["kinds"])
+        assertEquals("session,host,project,work,download,account_usage,grant,account,update,confirm,start", request.url.parameters["kinds"])
 
         // And only the payload keys it decodes. Not spelled out here: the set
         // is derived from the row serializers, so a literal would be a second

@@ -32,8 +32,6 @@ import dev.claudefleet.mobile.notify.needsYouEvents
 import dev.claudefleet.mobile.notify.notifyAllows
 import dev.claudefleet.mobile.store.AndroidPrefs
 import dev.claudefleet.mobile.store.AndroidSecrets
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -99,7 +97,7 @@ class NeedsYouService : Service() {
     }
 
     private suspend fun watch() {
-        val http = HttpClient(OkHttp)
+        val http = hubHttpClient()
         val container = AppContainer(
             secrets = AndroidSecrets(applicationContext),
             prefs = AndroidPrefs(getSharedPreferences("quick_replies", MODE_PRIVATE)),
@@ -215,6 +213,9 @@ class NeedsYouService : Service() {
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            // The question arriving a moment after the status updates the
+            // notification already up; it does not ring a second time.
+            .setOnlyAlertOnce(alert.quiet)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(locked)
         for (action in c.actions) {

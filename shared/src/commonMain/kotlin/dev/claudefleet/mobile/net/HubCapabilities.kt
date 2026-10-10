@@ -287,6 +287,14 @@ data class HubCapabilities(
     val paneKeys: Set<String>
         get() = BASE_PANE_KEYS + (paramValues[SEND_PROMPT]?.get(KEYS).orEmpty() intersect EXTENDED_PANE_KEYS)
 
+    /**
+     * The hub checks a dialog answer itself (`send_prompt { keys, expect }`):
+     * it re-reads the pane and presses in one step, so the phone need not
+     * read the pane first — one round trip less on every answer.
+     */
+    val answerExpects: Boolean
+        get() = "expect" in params[SEND_PROMPT].orEmpty()
+
     /** Whether a hub tool argument enumerates [value] — for a new value of an old argument. */
     fun offers(tool: String, param: String, value: String): Boolean =
         tool in tools && paramValues[tool]?.get(param)?.contains(value) == true

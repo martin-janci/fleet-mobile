@@ -4,6 +4,8 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.Attention
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.PendingInput
+import dev.claudefleet.mobile.model.PendingOption
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -37,6 +39,32 @@ class NeedsYouTest {
         val (settled, after) = needsYouAlerts(seen, listOf(row(1)))
         assertTrue(settled.isEmpty())
         assertEquals(mapOf(1L to null), after)
+    }
+
+    /**
+     * The hook says "waiting" first; the dialog's question follows a moment
+     * later. That updates the alert quietly. A DIFFERENT question while still
+     * waiting is news: it used to be silent, since the reason never changed.
+     */
+    @Test
+    fun a_new_question_while_still_waiting_is_news_and_a_late_question_is_an_update() {
+        val ask = { q: String -> row(1, "waiting").copy(pendingInput = PendingInput("permission", q, listOf(PendingOption(1, "Yes")))) }
+        val (first, seen) = needsYouAlerts(mapOf(1L to null), listOf(row(1, "waiting")))
+        assertEquals(false, first.single().quiet)
+
+        val (filled, seen2) = needsYouAlerts(seen, listOf(ask("Run git push?")))
+        assertEquals("Run git push?", filled.single().question)
+        assertTrue(filled.single().quiet, "the question arriving updates the alert, quietly")
+
+        val (same, _) = needsYouAlerts(seen2, listOf(ask("Run git push?")))
+        assertTrue(same.isEmpty())
+
+        val (next, seen3) = needsYouAlerts(seen2, listOf(ask("Delete build/?")))
+        assertEquals("Delete build/?", next.single().question)
+        assertEquals(false, next.single().quiet, "a second question is news")
+
+        val (unparsed, _) = needsYouAlerts(seen3, listOf(row(1, "waiting")))
+        assertTrue(unparsed.isEmpty(), "losing the parsed question is not news")
     }
 
     @Test

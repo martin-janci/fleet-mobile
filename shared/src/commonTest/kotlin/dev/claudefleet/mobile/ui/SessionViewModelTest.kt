@@ -267,6 +267,14 @@ private class FakeActions : SessionActions {
         return SendPromptResult(delivered = true, sessionId = sessionId, turnSeqBefore = 3)
     }
 
+    /** The dialog each hub-checked key went out with, in order. */
+    val expected = mutableListOf<PendingInput>()
+
+    override suspend fun sendKeysExpecting(sessionId: Long, key: String, expect: PendingInput): SendPromptResult {
+        expected += expect
+        return sendKeys(sessionId, key)
+    }
+
     override suspend fun capture(sessionId: Long, maxLines: Int): String {
         captures += 1
         captureFails?.let { throw it }
@@ -2424,6 +2432,89 @@ class SessionViewModelTest {
         assertEquals("The question changed", vm.state.value.error?.title)
     }
 
+    /**
+     * Same question, same options, a different command: `Bash(rm -rf build)`
+     * on the card, `Bash(rm -rf ~)` on the pane. The tap must not approve it.
+     */
+    @Test
+    fun an_option_is_not_pressed_when_the_command_being_approved_changed() = runTest {
+        val actions = FakeActions()
+        val build = PendingInput("permission", "Do it?", listOf(PendingOption(1, "Yes")), detail = "Bash(rm -rf build)")
+        actions.probeAnswer = ActivityProbe(claudeStatus = "blocked", pendingInput = build.copy(detail = "Bash(rm -rf ~)"))
+        val fleet = FakeFleetState(listOf(blockedRow(build)))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Option(1, "Yes")).join()
+        runCurrent()
+
+        assertTrue(actions.sentKeys.isEmpty(), "${actions.sentKeys}")
+        assertEquals("The question changed", vm.state.value.error?.title)
+    }
+
+    /**
+     * Enter picks whatever is highlighted. Someone moved the cursor in a
+     * terminal to "don't ask again": Enter from the phone must not confirm it.
+     */
+    @Test
+    fun enter_is_not_pressed_when_the_highlight_moved() = runTest {
+        val actions = FakeActions()
+        val asked = PendingInput(
+            "permission",
+            "Do it?",
+            listOf(PendingOption(1, "Yes", selected = true), PendingOption(2, "Yes, and don’t ask again"), PendingOption(3, "No")),
+        )
+        actions.probeAnswer = ActivityProbe(
+            claudeStatus = "blocked",
+            pendingInput = asked.copy(options = asked.options.map { it.copy(selected = it.n == 2) }),
+        )
+        val fleet = FakeFleetState(listOf(blockedRow(asked)))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Enter).join()
+        runCurrent()
+
+        assertTrue(actions.sentKeys.isEmpty(), "${actions.sentKeys}")
+        assertEquals("The question changed", vm.state.value.error?.title)
+    }
+
+    /**
+     * A hub that checks the dialog itself gets the key WITH the dialog the
+     * card was drawn from, and no pane read is made here first.
+     */
+    @Test
+    fun a_hub_that_checks_the_dialog_gets_it_with_the_key_and_no_read_is_made() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(blockedRow()), tools = setOf("send_prompt"))
+        fleet.capabilities.value = HubCapabilities(tools = setOf("send_prompt"), params = mapOf("send_prompt" to setOf("keys", "expect")))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Option(1, "Yes")).join()
+        runCurrent()
+
+        assertEquals(0, actions.probes, "the hub reads the pane; the phone does not")
+        assertEquals(listOf("1"), actions.sentKeys)
+        assertEquals(listOf(blockedRow().pendingInput!!), actions.expected)
+    }
+
+    @Test
+    fun the_hubs_conflict_reads_as_a_changed_question() = runTest {
+        val actions = FakeActions()
+        actions.sendFails = HubError.Tool("E_CONFLICT", "The dialog changed — nothing was sent.")
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.capabilities.value = HubCapabilities(tools = setOf("send_prompt"), params = mapOf("send_prompt" to setOf("keys", "expect")))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Option(1, "Yes")).join()
+        runCurrent()
+
+        assertEquals("The question changed", vm.state.value.error?.title)
+        assertFalse(vm.state.value.answering)
+    }
+
     @Test
     fun a_timeout_keeps_the_card_and_says_still_waiting() = runTest {
         val actions = FakeActions()
@@ -2438,6 +2529,42 @@ class SessionViewModelTest {
         assertNotNull(vm.state.value.card, "the session is still blocked, so the card stays")
         assertTrue(vm.state.value.stillWaiting)
         assertFalse(vm.state.value.answering)
+    }
+
+    /**
+     * Approving a tool call mid-turn ends no turn: the turn wait times out.
+     * The row moving off the dialog is what says the answer landed — not
+     * 30 s of "sending" and then "still waiting".
+     */
+    @Test
+    fun an_answer_mid_turn_lands_when_the_row_leaves_the_dialog() = runTest {
+        val actions = FakeActions()
+        actions.waitAnswer = WaitResult(status = "timeout")
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        val job = vm.answer(Answer.Option(1, "Yes"))
+        runCurrent()
+        assertTrue(vm.state.value.answering)
+        fleet.sessions.value = listOf(row(status = "working"))
+        job.join()
+        runCurrent()
+
+        assertFalse(vm.state.value.answering)
+        assertFalse(vm.state.value.stillWaiting)
+    }
+
+    @Test
+    fun answer_landed_reads_the_row_against_the_dialog_answered() {
+        val asked = blockedRow()
+        assertFalse(answerLanded(asked, asked), "the same dialog still up")
+        assertTrue(answerLanded(asked, row(status = "working")))
+        assertTrue(answerLanded(asked, null))
+        assertTrue(
+            answerLanded(asked, blockedRow(PendingInput("permission", "Next?", listOf(PendingOption(1, "Yes"))))),
+            "the next dialog came up",
+        )
     }
 
     /** A second answer while the first is still out would race the turn counter. */

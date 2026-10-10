@@ -4,6 +4,7 @@ import dev.claudefleet.mobile.model.MyGrants
 import dev.claudefleet.mobile.model.SessionGrant
 import dev.claudefleet.mobile.model.ShareTo
 import dev.claudefleet.mobile.model.ActivityProbe
+import dev.claudefleet.mobile.model.PendingInput
 import dev.claudefleet.mobile.model.AccountRow
 import dev.claudefleet.mobile.model.TrackerAdminRow
 import dev.claudefleet.mobile.model.TrackerTestReport
@@ -462,13 +463,27 @@ class HubClient(
      * enumerates `keys` also takes the arrows, `BTab` and the Ctrl letters
      * it lists ([HubCapabilities.paneKeys]).
      */
-    suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult =
+    suspend fun sendKeys(sessionId: Long, key: String, expect: PendingInput? = null): SendPromptResult =
         call(
             "send_prompt",
             buildJsonObject {
                 put("session_id", sessionId)
                 put("prompt", "")
                 put("keys", key)
+                // The dialog the answer is for: the hub presses only while
+                // the pane still shows it (E_CONFLICT otherwise).
+                if (expect != null) {
+                    put(
+                        "expect",
+                        buildJsonObject {
+                            put("kind", expect.kind)
+                            put("question", expect.question)
+                            put("options", buildJsonArray { expect.options.forEach { o -> add(buildJsonObject { put("n", o.n); put("label", o.label) }) } })
+                            put("detail", expect.detail)
+                            put("selected", expect.options.firstOrNull { it.selected }?.n)
+                        },
+                    )
+                }
             },
         ) { json.decodeFromJsonElement(SendPromptResult.serializer(), it) }
 
