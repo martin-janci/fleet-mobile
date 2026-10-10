@@ -1,5 +1,8 @@
 package dev.claudefleet.mobile.android
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -9,6 +12,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import dev.claudefleet.mobile.data.ChatFormActions
 import dev.claudefleet.mobile.model.ConfirmRequest
+import dev.claudefleet.mobile.model.FormDraft
 import dev.claudefleet.mobile.model.FormView
 import dev.claudefleet.mobile.model.PendingForm
 import dev.claudefleet.mobile.ui.CONFIRM_APPROVE_TAG
@@ -16,6 +20,7 @@ import dev.claudefleet.mobile.ui.CONFIRM_DENY_TAG
 import dev.claudefleet.mobile.ui.CONTROL_VIEW_TAG
 import dev.claudefleet.mobile.ui.CONTROL_WAKE_TAG
 import dev.claudefleet.mobile.ui.ChatFormCard
+import dev.claudefleet.mobile.ui.ChatFormDraftCard
 import dev.claudefleet.mobile.ui.ConfirmCards
 import dev.claudefleet.mobile.ui.ControlUiState
 import dev.claudefleet.mobile.ui.ControlViews
@@ -26,6 +31,7 @@ import dev.claudefleet.mobile.ui.HandoffChips
 import dev.claudefleet.mobile.ui.theme.FleetTheme
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -217,6 +223,48 @@ class MobileControlTest {
             compose.onAllNodesWithText("Building a form · from Control").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithContentDescription("Building").assertExists()
+    }
+
+    @Test
+    fun a_form_still_being_written_lets_its_first_field_be_filled_while_the_rest_arrives() {
+        val text = """{"spec":"fleet.form/1","title":"Start Papaya receipts","steps":[{"title":"Project","fields":[""" +
+            """{"name":"project","type":"text","label":"Project name","required":true},""" +
+            """{"name":"host","type":"select","label":"Host","options":[["mercury","mer"""
+        var values by mutableStateOf(mapOf<String, JsonElement>())
+        compose.setContent {
+            FleetTheme {
+                ChatFormDraftCard(
+                    draft = FormDraft(text, why = "the Jira epic PD-3100", updatedAt = 0),
+                    values = values,
+                    onChange = { n, v -> values = if (v == null) values - n else values + (n to v) },
+                    canAnswer = true,
+                )
+            }
+        }
+        compose.onNodeWithText("Start Papaya receipts").assertExists()
+        compose.onNodeWithText("Writing the form · reading the Jira epic PD-3100").assertExists()
+        compose.onNodeWithContentDescription("Building").assertExists()
+        // The select's options are still arriving: a skeleton under its label.
+        compose.onNodeWithTag("form-draft-host").assertExists()
+        compose.onNodeWithTag("form-draft-rest").assertExists()
+        compose.onNodeWithText("You can fill this in while the rest arrives.").assertExists()
+        compose.onNodeWithText("Project name *").performTextInput("papaya-receipts")
+        compose.waitForIdle()
+        assertEquals(JsonPrimitive("papaya-receipts"), values["project"])
+    }
+
+    @Test
+    fun what_was_filled_in_the_draft_starts_the_open_form() {
+        val forms = Forms(form(1))
+        compose.setContent {
+            FleetTheme {
+                ChatFormCard(PendingForm("f", "Deploy"), "Control", forms, canAnswer = true, orbit = true, seed = mapOf("f1" to JsonPrimitive("api")))
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("form-answer").performClick()
+        compose.waitForIdle()
+        assertEquals(mapOf<String, JsonElement>("f1" to JsonPrimitive("api")), forms.answered.single())
     }
 
     @Test

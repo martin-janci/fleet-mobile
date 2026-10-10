@@ -33,6 +33,7 @@ import dev.claudefleet.mobile.model.visibleFields
 import dev.claudefleet.mobile.ui.components.FieldView
 import dev.claudefleet.mobile.ui.components.Note
 import dev.claudefleet.mobile.ui.components.parseNumber
+import kotlinx.serialization.json.JsonElement
 
 internal const val FORM_CARD = "form-card"
 internal const val FORM_ANSWER = "form-answer"
@@ -69,9 +70,15 @@ fun ChatFormCard(
     orbit: Boolean = false,
     /** Ask the agent for an expired form again (New bar); null offers nothing. */
     onAskAgain: (() -> Unit)? = null,
+    /**
+     * What the person filled in while the agent still wrote the form
+     * (`ChatFormDraftCard`): the form starts from it where it still fits.
+     * Read once, when the card first reads the form.
+     */
+    seed: Map<String, JsonElement> = emptyMap(),
 ) {
     if (orbit && actions != null) {
-        OrbitChatFormCard(pending, sessionName, actions, canAnswer, open, onDismiss, onAskAgain, modifier)
+        OrbitChatFormCard(pending, sessionName, actions, canAnswer, open, onDismiss, onAskAgain, modifier, seed)
         return
     }
     val colors = MaterialTheme.colorScheme
@@ -91,7 +98,7 @@ fun ChatFormCard(
                 return@Column
             }
             val scope = rememberCoroutineScope()
-            val model = remember(pending.formId, actions) { AskFormModel(actions, pending.formId, scope) }
+            val model = remember(pending.formId, actions) { AskFormModel(actions, pending.formId, scope, seed) }
             LaunchedEffect(model, open) { model.load() }
             val s by model.state.collectAsState()
             var numberText by remember(pending.formId) { mutableStateOf(mapOf<String, String>()) }

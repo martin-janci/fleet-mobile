@@ -140,7 +140,10 @@ import dev.claudefleet.mobile.ui.components.MarkdownText
 import dev.claudefleet.mobile.ui.components.LocalComposerFill
 import dev.claudefleet.mobile.ui.components.ChatHost
 import dev.claudefleet.mobile.ui.components.LocalChatHost
+import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.PendingForm
+import dev.claudefleet.mobile.model.liveFormDraft
+import kotlinx.serialization.json.JsonElement
 import dev.claudefleet.mobile.model.progressBoard
 import dev.claudefleet.mobile.data.ChatFormActions
 import dev.claudefleet.mobile.ui.components.RichText
@@ -351,6 +354,13 @@ fun SessionScreen(
     var closedForm by remember(sessionId) { mutableStateOf<PendingForm?>(null) }
     val liveForm = state.session?.pendingForm
     LaunchedEffect(liveForm) { if (liveForm != null) closedForm = liveForm }
+    // The form the agent is still writing (`ask { draft }`), and what the
+    // person filled in meanwhile: kept across draft writes and handed to the
+    // form once `ask { form }` opens it; forgotten once neither is left.
+    val liveDraft = liveFormDraft(state.session, epochSeconds())
+    var draftAnswers by remember(sessionId) { mutableStateOf(mapOf<String, JsonElement>()) }
+    val formGone = liveDraft == null && liveForm == null
+    LaunchedEffect(formGone) { if (formGone) draftAnswers = emptyMap() }
     val newestKey = rows.firstOrNull()?.key
     val lastItem = rows.size - 1 + if (truncated) 1 else 0
     // One state for the life of this screen — not keyed on the turns, so a
@@ -857,6 +867,15 @@ fun SessionScreen(
 
             // A chat form the agent waits on (`ask`), where the answer goes;
             // once the row drops it, how it ended, until dismissed.
+            if (liveDraft != null && state.viewing == null) {
+                ChatFormDraftCard(
+                    draft = liveDraft,
+                    values = draftAnswers,
+                    onChange = { name, v -> draftAnswers = if (v == null) draftAnswers - name else draftAnswers + (name to v) },
+                    canAnswer = chatForms != null && !state.readOnly && state.connected,
+                    modifier = Modifier.heightIn(max = cardMax),
+                )
+            }
             val formShown = state.session?.pendingForm ?: closedForm
             if (formShown != null && state.viewing == null && (state.session?.pendingForm != null || chatForms != null)) {
                 ChatFormCard(
@@ -872,6 +891,7 @@ fun SessionScreen(
                         onSendQuick("The form \"${formShown.title}\" expired before I answered it. Please ask it again.")
                         closedForm = null
                     }.takeIf { !state.readOnly && state.connected },
+                    seed = draftAnswers,
                 )
             }
             control?.aboveComposer?.invoke()

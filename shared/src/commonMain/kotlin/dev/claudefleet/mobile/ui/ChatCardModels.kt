@@ -7,6 +7,7 @@ import dev.claudefleet.mobile.model.FormView
 import dev.claudefleet.mobile.model.ReplyForm
 import dev.claudefleet.mobile.model.SettingDescriptor
 import dev.claudefleet.mobile.model.SettingProposal
+import dev.claudefleet.mobile.model.carryDraftAnswers
 import dev.claudefleet.mobile.model.fieldMissing
 import dev.claudefleet.mobile.model.fieldProblems
 import dev.claudefleet.mobile.model.formAnswers
@@ -61,11 +62,16 @@ data class AskFormState(
  * One chat form, read with `ask { get }` and decided with `ask { answer }` or
  * `ask { decline }`. [canAnswer] is false where this device may not drive the
  * session: the form is still shown, with nothing to press.
+ *
+ * [seed] is what the person filled in while the agent was still writing the
+ * form (`ask { draft }`, `model/FormDraft.kt`): it starts the form's answers
+ * over the defaults, where it still fits ([carryDraftAnswers]).
  */
 class AskFormModel(
     private val actions: ChatFormActions,
     private val formId: String,
     private val scope: CoroutineScope,
+    private val seed: Map<String, JsonElement> = emptyMap(),
 ) {
     private val _state = MutableStateFlow(AskFormState())
     val state: StateFlow<AskFormState> = _state.asStateFlow()
@@ -80,7 +86,7 @@ class AskFormModel(
                     loading = false,
                     form = form,
                     spec = spec,
-                    values = spec?.let(::formDefaults).orEmpty(),
+                    values = spec?.let { sp -> formDefaults(sp) + carryDraftAnswers(sp, seed) }.orEmpty(),
                     error = if (spec == null && form.state == "pending") "This form cannot be drawn on the phone; answer it on the desktop." else null,
                 )
             }
