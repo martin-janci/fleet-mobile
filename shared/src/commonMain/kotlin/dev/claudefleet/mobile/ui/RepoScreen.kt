@@ -20,6 +20,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.clickable
@@ -57,6 +58,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.ChangedFile
 import dev.claudefleet.mobile.model.branchLine
+import dev.claudefleet.mobile.model.lineCounts
+import dev.claudefleet.mobile.model.pushedLabel
 import dev.claudefleet.mobile.model.Commit
 import dev.claudefleet.mobile.model.CommitDetail
 import dev.claudefleet.mobile.model.FileContent
@@ -233,6 +236,7 @@ private fun ChangesList(changes: List<ChangedFile>?, handlers: RepoHandlers) {
                     status = change.status,
                     path = change.path,
                     sub = change.origPath?.let { "from $it" },
+                    counts = change,
                     onClick = { handlers.onOpenDiff(change.path) },
                 )
             }
@@ -264,7 +268,7 @@ private fun GroupTitle(text: String) {
  * old rows lost it ("HostsViewModelTes…"). At least a thumb tall.
  */
 @Composable
-private fun FileRow(status: String?, path: String, sub: String? = null, onClick: () -> Unit) {
+private fun FileRow(status: String?, path: String, sub: String? = null, counts: ChangedFile? = null, onClick: () -> Unit) {
     val (name, folder) = nameAndFolder(path)
     Row(
         modifier = Modifier
@@ -288,6 +292,17 @@ private fun FileRow(status: String?, path: String, sub: String? = null, onClick:
                     maxLines = 1,
                     overflow = TextOverflow.StartEllipsis,
                 )
+            }
+        }
+        // +N −M (claude-fleet M15 G1.10): absent for a binary or untracked file, and from an older hub.
+        if (counts != null && lineCounts(counts) != null) {
+            val diff = diffColors()
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.clearAndSetSemantics { contentDescription = "${counts.added ?: 0} lines added, ${counts.removed ?: 0} removed" },
+            ) {
+                Text("+${counts.added ?: 0}", style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace, color = diff.addedFg)
+                Text("−${counts.removed ?: 0}", style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace, color = diff.removedFg)
             }
         }
     }
@@ -643,7 +658,9 @@ private fun CommitPane(hash: String, detail: CommitDetail?, handlers: RepoHandle
                 Text(detail.subject, style = MaterialTheme.typography.titleMedium)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        listOf(detail.hash.take(12), detail.author, shortDate(detail.date)).filter { it.isNotBlank() }.joinToString(" · "),
+                        // Pushed / Not pushed (claude-fleet M15 G1.10); an older hub says neither.
+                        listOfNotNull(detail.hash.take(12), detail.author, shortDate(detail.date), pushedLabel(detail))
+                            .filter { it.isNotBlank() }.joinToString(" · "),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
@@ -656,7 +673,7 @@ private fun CommitPane(hash: String, detail: CommitDetail?, handlers: RepoHandle
             if (detail.files.isNotEmpty()) GroupTitle("${detail.files.size} ${if (detail.files.size == 1) "file" else "files"}")
         }
         items(detail.files, key = { "${it.status}:${it.path}" }) { file ->
-            FileRow(status = file.status, path = file.path, onClick = { handlers.onOpenCommitDiff(detail.hash, file.path) })
+            FileRow(status = file.status, path = file.path, counts = file, onClick = { handlers.onOpenCommitDiff(detail.hash, file.path) })
         }
     }
 }

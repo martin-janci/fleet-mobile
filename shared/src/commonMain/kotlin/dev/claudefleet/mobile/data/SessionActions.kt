@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.QueuePromptResult
+import dev.claudefleet.mobile.model.SendLaterTiming
 import dev.claudefleet.mobile.model.QueuedPrompt
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
@@ -90,8 +91,12 @@ interface SessionActions {
     suspend fun accountHeadroom(hostAlias: String, profile: String?): Headroom =
         throw UnsupportedOperationException("check_account_headroom")
 
-    /** Send later: typed now if idle, else kept by the hub for the next idle moment (`queue_prompt`). */
-    suspend fun queuePrompt(sessionId: Long, prompt: String): QueuePromptResult =
+    /**
+     * Send later: typed now if idle, else kept by the hub for the next idle
+     * moment (`queue_prompt`); [timing] holds it until a time, until the
+     * account's limit resets, or drops it if the session is archived first.
+     */
+    suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming = SendLaterTiming()): QueuePromptResult =
         throw UnsupportedOperationException("queue_prompt")
 
     /** The prompts the hub keeps for this session; [cancel] takes one back first (`queued_prompts`). */
@@ -189,8 +194,8 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
     override suspend fun accountHeadroom(hostAlias: String, profile: String?): Headroom =
         session.withClient { it.checkAccountHeadroom(hostAlias, profile) }
 
-    override suspend fun queuePrompt(sessionId: Long, prompt: String): QueuePromptResult =
-        session.withClient { it.queuePrompt(sessionId, prompt) }
+    override suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming): QueuePromptResult =
+        session.withClient { it.queuePrompt(sessionId, prompt, timing) }
 
     override suspend fun queuedPrompts(sessionId: Long, cancel: Long?): List<QueuedPrompt> =
         session.withClient { it.queuedPrompts(sessionId, cancel) }

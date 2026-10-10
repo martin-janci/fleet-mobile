@@ -31,7 +31,19 @@ data class AddHostUiState(
     val error: Friendly? = null,
     /** The scan of the hub's SSH config failed: "None new" would be a claim it cannot make. */
     val scanFailed: Boolean = false,
+    /** What the fleet lists for each host added here, by SSH alias: its probe, tmux included. */
+    val addedRows: Map<String, HostRow> = emptyMap(),
+    /** This pairing may start the hub's fleet-agent install job (`install_agent`). */
+    val canInstallAgent: Boolean = false,
 ) {
+    /**
+     * The fleet host an added row offers Install agent for: the hub reaches
+     * it over SSH and it answered. Null for a row not added here, or one the
+     * job cannot run on.
+     */
+    fun installTarget(sshAlias: String): HostRow? =
+        addedRows[sshAlias]?.takeIf { sshAlias in added && canInstallOn(it, canWrite = canInstallAgent, hubOffers = canInstallAgent) }
+
     /** One blip per host the sweep found; an added one reads as ready. */
     val blips: List<RadarBlip> get() = candidates.mapIndexed { i, h ->
         val (x, y) = radarSpot(i)
@@ -59,6 +71,8 @@ class AddHostViewModel(
         val added: Set<String> = emptySet(),
         val error: Friendly? = null,
         val scanFailed: Boolean = false,
+        /** The row `add_host` answered, by SSH alias: the fleet alias to follow it under. */
+        val rows: Map<String, HostRow> = emptyMap(),
     )
 
     private val local = MutableStateFlow(Local())
@@ -73,6 +87,9 @@ class AddHostViewModel(
             added = l.added,
             error = l.error,
             scanFailed = l.scanFailed,
+            // The fleet's own row once it lists it (a re-probe moves it on), else what add_host answered.
+            addedRows = l.rows.mapValues { (_, row) -> hosts.firstOrNull { it.alias == row.alias } ?: row },
+            canInstallAgent = canWrite && caps.installAgent,
         )
     }.stateIn(scope, SharingStarted.Eagerly, AddHostUiState())
 
@@ -113,8 +130,8 @@ class AddHostViewModel(
         if (!state.value.available || local.value.adding != null || host.alias in local.value.added) return@launch
         local.update { it.copy(adding = host.alias, error = null) }
         try {
-            actions.add(fleetAlias(host.alias), host.alias)
-            local.update { it.copy(adding = null, added = it.added + host.alias) }
+            val row = actions.add(fleetAlias(host.alias), host.alias)
+            local.update { it.copy(adding = null, added = it.added + host.alias, rows = it.rows + (host.alias to row)) }
             fleet.refresh()
         } catch (e: CancellationException) {
             throw e

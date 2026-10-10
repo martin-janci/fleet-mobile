@@ -105,7 +105,10 @@ class TheBackGestureReachesTheNavigatorTest {
      * session is open, so back returns to the sample list before it leaves.
      * A session's full screen (redesign 14.21) is enabled only while the
      * conversation or the agent's screen has the whole phone, and composed
-     * after the Files tab's, so back leaves full screen first. A host's
+     * after the Files tab's, so back leaves full screen first. The repair
+     * loader over a session (Repair workspace, Recreate) is enabled only
+     * while it is up, so back leaves the loader (the hub's job keeps
+     * running and its result still lands in the conversation). A host's
      * agent install (redesign 14.19) is enabled only while its screen is
      * up over Hosts, so back leaves it (the job runs on the hub) first; the
      * Radar's (adding a host, redesign 14.12) the same while it is open.
@@ -139,6 +142,7 @@ class TheBackGestureReachesTheNavigatorTest {
                 "wizard && toolsState.addingOn != null",
                 "filesOpen",
                 "full != SessionFull.None",
+                "repairWait != null",
                 "state.views.isNotEmpty()",
             ),
             enables,

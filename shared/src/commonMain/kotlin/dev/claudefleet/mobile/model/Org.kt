@@ -6,8 +6,8 @@ import kotlinx.serialization.Serializable
 /**
  * One organisation as `work { action: orgs }` lists it (claude-fleet M5's
  * `OrgDetail`): the name and colour a label draws, and the trackers whose
- * tickets belong to it. The hub also sends the org's rules, which the phone
- * does not read.
+ * tickets belong to it, and the rules that place sessions in it (read by
+ * Add a project, to say which org a repository lands in).
  *
  * Everything past [trackers] is the org overview (claude-fleet's company
  * administration, phases A–D), read by the Company screen. The hub decides
@@ -22,6 +22,7 @@ data class OrgDetail(
     val name: String = "",
     val color: String? = null,
     val trackers: List<OrgTracker> = emptyList(),
+    val rules: List<OrgRule> = emptyList(),
     val hosts: List<String> = emptyList(),
     @SerialName("session_count") val sessionCount: Int = 0,
     @SerialName("needs_you") val needsYou: Int = 0,
@@ -41,6 +42,21 @@ data class OrgDetail(
     @SerialName("my_role") val myRole: String? = null,
     /** This org consented to Jev (decision-model) calls; null from a hub that does not say. */
     @SerialName("jev_allowed") val jevAllowed: Boolean? = null,
+)
+
+/**
+ * One rule that places sessions in an org (claude-fleet M5, `org_rules`):
+ * every field it sets must match — the project's owner and repository
+ * (case-insensitively), the working path on a directory boundary, the host.
+ */
+@Serializable
+data class OrgRule(
+    val id: Long = 0,
+    @SerialName("org_id") val orgId: Long,
+    val owner: String? = null,
+    val repo: String? = null,
+    @SerialName("path_prefix") val pathPrefix: String? = null,
+    @SerialName("host_alias") val hostAlias: String? = null,
 )
 
 @Serializable
@@ -90,6 +106,10 @@ data class OrgDirectory(
     val orgs: Map<Long, OrgInfo> = emptyMap(),
     /** Tracker id → org id, from each org's tracker list. */
     val trackerOrg: Map<Long, Long> = emptyMap(),
+    /** Every org's rules, for [projectOrg]-style placement on the phone. */
+    val rules: List<OrgRule> = emptyList(),
+    /** Host alias → the org it is assigned to. */
+    val hostOrg: Map<String, Long> = emptyMap(),
 ) {
     /** What [id] is called; an id this directory has not heard of still gets a label. */
     fun name(id: Long): String = orgs[id]?.name?.takeIf { it.isNotBlank() } ?: "Org $id"
@@ -103,6 +123,8 @@ data class OrgDirectory(
         fun of(details: List<OrgDetail>) = OrgDirectory(
             orgs = details.associate { it.id to OrgInfo(it.id, it.name, it.color) },
             trackerOrg = details.flatMap { d -> d.trackers.map { it.id to d.id } }.toMap(),
+            rules = details.flatMap { it.rules },
+            hostOrg = details.flatMap { d -> d.hosts.map { it to d.id } }.toMap(),
         )
     }
 }

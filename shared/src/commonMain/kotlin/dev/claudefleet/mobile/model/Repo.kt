@@ -3,7 +3,12 @@ package dev.claudefleet.mobile.model
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/** One changed file in a session's worktree (`repo_changes`): git status's letter and the path. */
+/**
+ * One changed file in a session's worktree (`repo_changes`) or a commit
+ * (`repo_commit`): git status's letter and the path, and the lines it adds
+ * and removes (claude-fleet M15 G1.10). The counts are absent for a binary or
+ * untracked file, and from an older hub.
+ */
 @Serializable
 data class ChangedFile(
     val path: String,
@@ -11,7 +16,15 @@ data class ChangedFile(
     val status: String = "",
     val staged: Boolean = false,
     @SerialName("orig_path") val origPath: String? = null,
+    val added: Int? = null,
+    val removed: Int? = null,
 )
+
+/** "+12 −3" for a file's line counts; null when the hub sent none. */
+fun lineCounts(f: ChangedFile): String? {
+    if (f.added == null && f.removed == null) return null
+    return "+${f.added ?: 0} −${f.removed ?: 0}"
+}
 
 /** A worktree's files (`repo_tree`), tracked and untracked, gitignore respected. */
 @Serializable
@@ -65,7 +78,12 @@ data class CommitDetail(
     val author: String = "",
     val date: String = "",
     val files: List<ChangedFile> = emptyList(),
+    /** A remote-tracking branch contains it (claude-fleet M15 G1.10); null from an older hub. */
+    val pushed: Boolean? = null,
 )
+
+/** "Pushed" / "Not pushed"; null when the hub did not say. */
+fun pushedLabel(c: CommitDetail): String? = c.pushed?.let { if (it) "Pushed" else "Not pushed" }
 
 /**
  * What a session's branch carries (`repo_branch_diff`, readonly): the commits
@@ -81,12 +99,18 @@ data class BranchDiff(
     val truncated: Boolean = false,
     val base: String? = null,
     @SerialName("aheadOfBase") val aheadOfBase: Int = 0,
+    /** Commits on the base since the branch left it (claude-fleet M15 G1.10); null without a base and from an older hub. */
+    @SerialName("behindBase") val behindBase: Int? = null,
 )
 
-/** "3 not pushed · 5 ahead of main" (the desktop's Files › Changes); null when there is nothing to say. */
+/**
+ * "3 not pushed · 5 ahead of main · 2 behind main" (the desktop's Files ›
+ * Changes); null when there is nothing to say.
+ */
 fun branchLine(b: BranchDiff): String? {
     val unpushed = b.unpushed.size.takeIf { it > 0 }?.let { "${it}${if (b.truncated) "+" else ""} not pushed" }
     val base = b.base?.substringAfter("origin/")
     val ahead = if (base != null && b.aheadOfBase > 0) "${b.aheadOfBase} ahead of $base" else null
-    return listOfNotNull(unpushed, ahead).joinToString(" · ").ifEmpty { null }
+    val behind = b.behindBase?.takeIf { base != null && it > 0 }?.let { "$it behind $base" }
+    return listOfNotNull(unpushed, ahead, behind).joinToString(" · ").ifEmpty { null }
 }

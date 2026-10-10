@@ -91,3 +91,49 @@ fun prChecksLabel(pr: PullRequest): String = listOfNotNull(
         else -> null
     },
 ).joinToString(" · ")
+
+/**
+ * The check rollup the hub's PR probe counted (claude-fleet
+ * `outcome::CheckSummary`). [failing] names at most a few; [failingTotal]
+ * counts them all.
+ */
+@Serializable
+data class CheckSummary(
+    val total: Int = 0,
+    val pending: Int = 0,
+    /** Skipped or neutral: neither a pass nor a blocker. */
+    val skipped: Int = 0,
+    val failing: List<FailingCheck> = emptyList(),
+    @SerialName("failing_total") val failingTotal: Int = 0,
+)
+
+/** One failing check, by the name GitHub shows. */
+@Serializable
+data class FailingCheck(val name: String, val url: String? = null)
+
+/**
+ * What the PR probe last read as evidence about a session's PR (claude-fleet
+ * `outcome::PrEvidence`, a session row's `pr_evidence`). Only the checks are
+ * read here; every other key passes by.
+ */
+@Serializable
+data class PrEvidence(
+    val checks: CheckSummary = CheckSummary(),
+)
+
+/**
+ * Details' check count (MobileSession: "15/15 checks"): passed of those that
+ * count (skipped ones do not), then what is still running or failing. Null
+ * without checks: "no checks" is not a pass, and the CI fact already says
+ * what the hub knows.
+ */
+fun checksLabel(c: CheckSummary): String? {
+    val counted = c.total - c.skipped
+    if (counted <= 0) return null
+    val passed = (counted - c.pending - c.failingTotal).coerceAtLeast(0)
+    return listOfNotNull(
+        "$passed/$counted checks",
+        c.failingTotal.takeIf { it > 0 }?.let { "$it failing" },
+        c.pending.takeIf { it > 0 }?.let { "$it running" },
+    ).joinToString(" · ")
+}

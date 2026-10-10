@@ -139,6 +139,13 @@ data class SessionRow(
      * sends one.
      */
     @SerialName("form_draft") val formDraft: FormDraft? = null,
+    /**
+     * What the hub's PR probe last read about the session's PR (migration
+     * 082, `pr_evidence`): Details' "15/15 checks" (gap plan G5.5). Null
+     * without a PR, from an older `gh`, and from the `view=phone` listing,
+     * which leaves it out; every `session:updated` frame carries it.
+     */
+    @SerialName("pr_evidence") val prEvidence: PrEvidence? = null,
 ) {
     /**
      * A turn ended after the session was last viewed — or, for a session fleet

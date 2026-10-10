@@ -55,6 +55,8 @@ data class HostChoice(
     val needsYou: Int = 0,
     val working: Int = 0,
     val idle: Int = 0,
+    /** What the hub's last probe found there ("212 GB free · 16 CPUs"): Add a project's Where step shows it. */
+    val facts: String? = null,
 )
 
 /** A project the form can offer, by the name a person recognises. */
@@ -110,6 +112,8 @@ data class NewSessionUiState(
     val alsoInIds: List<Long> = emptyList(),
     /** The ticket's organisation, when the phone knows it — shown beside the picker and on the confirm sheet. */
     val orgLabel: String? = null,
+    /** The orgs and their rules: Add a project's Where step says which org the project lands in. */
+    val orgs: OrgDirectory = OrgDirectory.EMPTY,
     /** The confirm sheet, while it is up: nothing is sent until it is confirmed. */
     val confirm: MultiStartConfirm? = null,
     /** What the last multi-start answered, project by project. */
@@ -786,6 +790,7 @@ class NewSessionViewModel(
             alsoIn = alsoIn,
             alsoInIds = ticked,
             orgLabel = orgLabel,
+            orgs = work.orgs,
             confirm = confirm,
             result = l.result,
             backgroundAvailable = canWrite && ticketKey == null && caps.newBgSession,
@@ -874,6 +879,7 @@ private fun hostChoice(host: HostRow, sessions: List<SessionRow>): HostChoice {
         needsYou = tones.count { it == StatusTone.BLOCKED },
         working = tones.count { it == StatusTone.WORKING },
         idle = tones.count { it == StatusTone.IDLE },
+        facts = hostFacts(host),
     )
 }
 private const val PROJECT_IDS = "project_ids"

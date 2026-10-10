@@ -46,14 +46,21 @@ import dev.claudefleet.mobile.ui.kit.StatusWord
 import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import dev.claudefleet.mobile.ui.kit.BottomSheet
+import dev.claudefleet.mobile.ui.kit.SheetAction
 
 /*
  * One mission in the New layout (board MobileControl, the mission panel):
  * the name and how far it got, the grant waiting for a person as a card,
  * what runs now with Comet trails, and the plan ticking as steps land. The
  * cards, Go and Pause are the Missions sheet's own, so Classic and New press
- * the same calls. A grant is still signed on the desktop: the card says so
- * and Not now puts it away on this phone.
+ * the same calls. A grant is signed from its review sheet ([GrantSheet], gap
+ * plan G5.7), which says every term and pre-selects none; Not now puts the
+ * card away on this phone. A failed task offers Retry.
  */
 
 const val MISSION_GRANT_TAG = "mission.grant"
@@ -63,6 +70,23 @@ const val MISSION_SPEND_DENY_TAG = "mission.spend.deny"
 const val MISSION_GRANT_NOT_NOW_TAG = "mission.grant.notNow"
 const val MISSION_PLAN_TAG = "mission.plan."
 const val MISSION_RUNNING_TAG = "mission.running."
+const val MISSION_GRANT_REVIEW_TAG = "mission.grant.review"
+const val MISSION_RETRY_TAG = "mission.retry."
+
+/** How long a grant may run, as the review sheet offers it (the hub takes 1 to 168 hours). */
+internal val GRANT_HOURS: List<Int> = listOf(8, 24, 72)
+
+/** The spend caps the review sheet offers, in dollars; null is "No cap", said in words. */
+internal val GRANT_BUDGETS: List<Long?> = listOf(5L, 20L, 50L, null)
+
+/** "Sign level 2 for 24 h, up to $20": the sheet's verb, once both terms are picked; null until then. */
+internal fun grantSignLabel(level: Int, hours: Int?, budget: Long?, budgetPicked: Boolean): String? {
+    if (hours == null || !budgetPicked) return null
+    return "Sign level $level for $hours h" + (budget?.let { ", up to \$$it" } ?: ", no cap")
+}
+
+/** A failed task may be tried again: its node failed (not blocked, which waits on another task). */
+internal fun retryable(r: PlanRow, state: String): Boolean = r.mark == PlanMark.FAILED && state == "failed"
 
 /** How a plan line starts: ✓ done, a Comet while it runs, ○ still to do. */
 enum class PlanMark(val glyph: String, val word: StatusWord?) {
@@ -155,6 +179,8 @@ fun OrbitMissionDetail(detail: MissionDetail, state: MissionsUiState, handlers: 
     val ask = remember(plan) { grantAsk(plan) }
     val spend = remember(detail) { spendAsk(detail) }
     var notNow by rememberSaveable(m.id) { mutableStateOf(false) }
+    var reviewing by remember(m.id) { mutableStateOf(false) }
+    val nodeState = remember(detail.graph) { detail.graph.nodes.associate { it.itemId to it.state } }
     val gutter = OrbitTokens.spacing("phone-gutter").dp
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -181,7 +207,13 @@ fun OrbitMissionDetail(detail: MissionDetail, state: MissionsUiState, handlers: 
         Outcome(state)
         LazyColumn(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 16.dp)) {
             if (ask != null && !notNow) {
-                item(key = "grant") { GrantCard(ask) { notNow = true } }
+                item(key = "grant") {
+                    GrantCard(
+                        ask,
+                        onReview = { reviewing = true }.takeIf { state.canSignGrant && detail.mayChange },
+                        onNotNow = { notNow = true },
+                    )
+                }
             }
             if (spend != null) {
                 item(key = "spend") {
@@ -215,7 +247,10 @@ fun OrbitMissionDetail(detail: MissionDetail, state: MissionsUiState, handlers: 
             }
             if (rows.isNotEmpty()) {
                 item(key = "plan-h") { Heading("Plan") }
-                items(rows, key = { "plan:${it.itemId}" }) { r -> PlanLine(r) }
+                items(rows, key = { "plan:${it.itemId}" }) { r ->
+                    val canRetry = state.canRetry && detail.mayChange && state.busy == null && retryable(r, nodeState[r.itemId].orEmpty())
+                    PlanLine(r, onRetry = { handlers.onRetryItem(r.itemId) }.takeIf { canRetry })
+                }
             }
             if (plan == null) {
                 item(key = "noplan") {
@@ -267,6 +302,69 @@ fun OrbitMissionDetail(detail: MissionDetail, state: MissionsUiState, handlers: 
             }
         }
     }
+    if (reviewing && ask != null) {
+        GrantSheet(
+            name = m.name.ifBlank { "Mission ${m.id}" },
+            ask = ask,
+            busy = state.busy != null,
+            onDismiss = { reviewing = false },
+            onSign = { hours, budget ->
+                reviewing = false
+                handlers.onSignGrant(ask.level, hours, budget)
+            },
+        )
+    }
+}
+
+/**
+ * Review and sign (gap plan G5.7, board MobileControl): every term of the
+ * grant in words — the level and what it lets the loop do, how long, the
+ * spend cap — and Sign only once a duration and a cap are picked. Nothing is
+ * pre-selected: a signature is a deliberate tap, never a default.
+ */
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun GrantSheet(name: String, ask: GrantAsk, busy: Boolean, onDismiss: () -> Unit, onSign: (Int, Long?) -> Unit) {
+    val o = Fleet.colors
+    var hours by remember { mutableStateOf<Int?>(null) }
+    var budget by remember { mutableStateOf<Long?>(null) }
+    var budgetPicked by remember { mutableStateOf(false) }
+    val label = grantSignLabel(ask.level, hours, budget, budgetPicked)
+    BottomSheet(
+        title = "Sign the autonomy grant",
+        meta = name,
+        onDismiss = onDismiss,
+        primary = SheetAction(label ?: "Pick how long and a cap", enabled = label != null && !busy) {
+            hours?.let { h -> onSign(h, budget) }
+        },
+        scrollable = true,
+    ) {
+        Text(ask.line, color = o.fg, fontSize = 15.sp, lineHeight = 21.sp)
+        ask.why?.let { Text(it, color = o.fgMuted, fontSize = 13.sp, lineHeight = 18.sp) }
+        Text("For how long", color = o.fgMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (h in GRANT_HOURS) {
+                FilterChip(selected = hours == h, onClick = { hours = h }, label = { Text("$h h") })
+            }
+        }
+        Text("Spend cap", color = o.fgMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (b in GRANT_BUDGETS) {
+                FilterChip(
+                    selected = budgetPicked && budget == b,
+                    onClick = { budget = b; budgetPicked = true },
+                    label = { Text(b?.let { "\$$it" } ?: "No cap") },
+                )
+            }
+        }
+        Text(
+            "The loop then runs on its own within these terms until the grant ends. Pause the mission to stop it at any time; Pause all ends every grant.",
+            color = o.fgMuted,
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+    }
 }
 
 @Composable
@@ -285,7 +383,7 @@ private fun Heading(text: String) {
 }
 
 @Composable
-private fun PlanLine(r: PlanRow) {
+private fun PlanLine(r: PlanRow, onRetry: (() -> Unit)? = null) {
     val o = Fleet.colors
     Row(
         modifier = Modifier
@@ -309,12 +407,16 @@ private fun PlanLine(r: PlanRow) {
             lineHeight = 21.sp,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
         )
+        if (onRetry != null) {
+            TextButton(onClick = onRetry, modifier = Modifier.testTag("$MISSION_RETRY_TAG${r.itemId}")) { Text("Retry", color = o.accent) }
+        }
     }
 }
 
 @Composable
-private fun GrantCard(ask: GrantAsk, onNotNow: () -> Unit) {
+private fun GrantCard(ask: GrantAsk, onReview: (() -> Unit)?, onNotNow: () -> Unit) {
     val o = Fleet.colors
     val shape = RoundedCornerShape(OrbitTokens.radius("radius-phone-card").dp)
     Column(
@@ -330,13 +432,22 @@ private fun GrantCard(ask: GrantAsk, onNotNow: () -> Unit) {
         Text("Sign the autonomy grant", color = o.fg, fontSize = 16.sp, fontWeight = FontWeight.Medium)
         Text(ask.line, color = o.fg2, fontSize = 14.sp, lineHeight = 20.sp)
         ask.why?.let { Text(it, color = o.fgMuted, fontSize = 13.sp, lineHeight = 18.sp) }
-        Text(
-            "Review and sign it in Control on the desktop: a grant is a signature, so it is read in full there.",
-            color = o.fgMuted,
-            fontSize = 13.sp,
-            lineHeight = 18.sp,
-        )
-        TextButton(onClick = onNotNow, modifier = Modifier.testTag(MISSION_GRANT_NOT_NOW_TAG)) { Text("Not now", color = o.fg2) }
+        if (onReview == null) {
+            Text(
+                "Review and sign it in Control on the desktop: this pairing cannot sign a grant.",
+                color = o.fgMuted,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (onReview != null) {
+                androidx.compose.material3.OutlinedButton(onClick = onReview, modifier = Modifier.testTag(MISSION_GRANT_REVIEW_TAG)) {
+                    Text("Review and sign…")
+                }
+            }
+            TextButton(onClick = onNotNow, modifier = Modifier.testTag(MISSION_GRANT_NOT_NOW_TAG)) { Text("Not now", color = o.fg2) }
+        }
     }
 }
 

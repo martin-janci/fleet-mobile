@@ -136,6 +136,7 @@ internal fun NewSessionWizard(
             projects = state.projects.map { it.label },
             handlers = addHandlers,
             modifier = modifier,
+            orgs = state.orgs,
         )
         return
     }

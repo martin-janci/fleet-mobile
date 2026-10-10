@@ -140,15 +140,15 @@ class NewLayoutTest {
     }
 
     @Test
-    fun the_layout_is_remembered_and_classic_is_the_default() {
+    fun the_layout_is_remembered_and_new_is_the_default() {
         val prefs = FakePrefs()
-        assertEquals(PhoneLayout.Classic, loadPhoneLayout(prefs))
+        assertEquals(PhoneLayout.New, loadPhoneLayout(prefs), "G5.4: New is the default")
+        savePhoneLayout(prefs, PhoneLayout.Classic)
+        assertEquals(PhoneLayout.Classic, loadPhoneLayout(prefs), "a phone that chose Classic keeps it")
         savePhoneLayout(prefs, PhoneLayout.New)
         assertEquals(PhoneLayout.New, loadPhoneLayout(prefs))
-        savePhoneLayout(prefs, PhoneLayout.Classic)
-        assertEquals(PhoneLayout.Classic, loadPhoneLayout(prefs))
         prefs.putStringList(LAYOUT_PREF, listOf("something-newer"))
-        assertEquals(PhoneLayout.Classic, loadPhoneLayout(prefs), "an unknown value falls back to Classic")
+        assertEquals(PhoneLayout.New, loadPhoneLayout(prefs), "an unknown value falls back to the default")
     }
 
     @Test

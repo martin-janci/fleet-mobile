@@ -182,7 +182,12 @@ import dev.claudefleet.mobile.ui.ProposedChangeCard
 import dev.claudefleet.mobile.ui.HostsViewModel
 import dev.claudefleet.mobile.ui.MultiStartHandlers
 import dev.claudefleet.mobile.ui.components.ErrorBanner
+import dev.claudefleet.mobile.ui.InboxRowHandlers
 import dev.claudefleet.mobile.ui.InboxScreen
+import dev.claudefleet.mobile.ui.InboxViewModel
+import dev.claudefleet.mobile.ui.SessionInboxActions
+import dev.claudefleet.mobile.ui.inboxRowActions
+import dev.claudefleet.mobile.ui.missionWaits
 import dev.claudefleet.mobile.ui.help.GuideScreen
 import dev.claudefleet.mobile.ui.help.HelpPicker
 import dev.claudefleet.mobile.ui.help.HelpSettings
@@ -249,8 +254,15 @@ import dev.claudefleet.mobile.ui.SessionDetailsHandlers
 import dev.claudefleet.mobile.ui.SessionDetailsSheet
 import dev.claudefleet.mobile.ui.SessionDetailsList
 import dev.claudefleet.mobile.ui.DetailsAction
+import dev.claudefleet.mobile.ui.ForkSheet
+import dev.claudefleet.mobile.ui.SwitchAccountSheet
+import dev.claudefleet.mobile.ui.accountMeter
+import dev.claudefleet.mobile.ui.forkTurnChoices
+import dev.claudefleet.mobile.ui.forkWorktreeName
 import dev.claudefleet.mobile.ui.KillConfirmDialog
 import dev.claudefleet.mobile.ui.ReviewDialog
+import dev.claudefleet.mobile.ui.RepairWait
+import dev.claudefleet.mobile.ui.RepairWaitScreen
 import dev.claudefleet.mobile.ui.SessionTab
 import dev.claudefleet.mobile.ui.SessionTabsHost
 import dev.claudefleet.mobile.ui.sessionTabs
@@ -319,6 +331,8 @@ import dev.claudefleet.mobile.ui.SessionsSheet
 import dev.claudefleet.mobile.ui.DraftMemory
 import dev.claudefleet.mobile.ui.SessionsViewModel
 import dev.claudefleet.mobile.ui.FleetSettingsSection
+import dev.claudefleet.mobile.ui.FleetSaveBar
+import dev.claudefleet.mobile.ui.FieldBatch
 import dev.claudefleet.mobile.ui.FleetSettingsViewModel
 import dev.claudefleet.mobile.ui.SettingsScreen
 import dev.claudefleet.mobile.ui.FirstImport
@@ -348,6 +362,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.delay
@@ -640,13 +655,19 @@ fun App(container: AppContainer) {
                         // The New layout's first run (14.19): a welcome once
                         // per phone, and the "no hub yet" steps, before Pair.
                         val unpairReason by container.session.unpairReason.collectAsState()
+                        val pairLinkPending by container.pairLink.collectAsState()
                         var firstRun by remember(container) {
                             val welcome = showWelcome(
                                 layout = loadPhoneLayout(container.prefs),
                                 welcomed = container.hints.shown(WELCOME_HINT),
                                 signedOut = unpairReason != null,
+                                pairLink = pairLinkPending != null,
                             )
                             mutableStateOf(if (welcome) FirstRun.Welcome else FirstRun.Pair)
+                        }
+                        // A pair link that lands on the welcome goes straight to Pair, filled.
+                        LaunchedEffect(pairLinkPending) {
+                            if (pairLinkPending != null) firstRun = FirstRun.Pair
                         }
                         val share = rememberShareText()
                         val toPair = {
@@ -860,6 +881,16 @@ private fun FleetRoute(
     val tidyState by tidy.state.collectAsState()
     val missions = remember(repository, scope) { MissionsViewModel(repository, container.missionActions, scope, credentials.canWrite) }
     val missionsState by missions.state.collectAsState()
+    // The Inbox rows' inline answers (G5.4): the session screen's own calls.
+    // Here, not under the Inbox, so a Not waiting outlives a tab switch.
+    val inboxActions = remember(repository, scope) {
+        InboxViewModel(
+            SessionInboxActions(container.sessionActions),
+            scope,
+            credentials.canWrite,
+            accountName = { uuid -> repository.accountNames.value[uuid] },
+        )
+    }
     val trackers = remember(repository, scope) { TrackersViewModel(repository, container.trackerActions, scope, credentials.canWrite) }
     val trackersState by trackers.state.collectAsState()
     val automation = remember(repository, scope) { AutomationViewModel(repository, container.routineActions, scope, credentials.canWrite) }
@@ -1032,7 +1063,11 @@ private fun FleetRoute(
                     val barRows by repository.sessions.collectAsState()
                     val barAccess by repository.access.collectAsState()
                     // The Inbox's own rows, so the badge, the Inbox and Today agree (review r09 B1).
-                    val needYou = remember(barRows, barAccess) { inboxRows(barRows, barAccess).size }
+                    // A mission waiting on a person counts too (G5.4), as the Inbox's header does.
+                    val needYou = remember(barRows, barAccess, missionsState.missions, missionsState.available) {
+                        inboxRows(barRows, barAccess).size +
+                            (if (missionsState.available) missionWaits(missionsState.missions).size else 0)
+                    }
                     // The Orbit Fleet bar: one badge, the Needs you count, on
                     // Inbox. Work's To review count stays on the Work screen.
                     val items = PhoneLayout.New.tabs
@@ -1560,6 +1595,8 @@ private fun FleetRoute(
                                 onRestore = { hostDetail.restore() },
                                 onResume = { c -> hostDetail.resume(c) { id -> hostDetail.close(); nav.open(id) } },
                                 onDismissError = hostDetail::dismissError,
+                                onRunWhenBack = hostDetail::runWhenBack,
+                                onCancelWhenBack = hostDetail::cancelWhenBack,
                             ),
                         )
                     }
@@ -1568,7 +1605,14 @@ private fun FleetRoute(
                     if (addHostState.open) {
                         AddHostScreen(
                             addHostState,
-                            AddHostHandlers(onClose = addHost::close, onAdd = { addHost.add(it) }, onDismissError = addHost::dismissError, onRescan = { addHost.rescan() }),
+                            AddHostHandlers(
+                                onClose = addHost::close,
+                                onAdd = { addHost.add(it) },
+                                onDismissError = addHost::dismissError,
+                                onRescan = { addHost.rescan() },
+                                // "tmux is missing" → Install agent (MobileInstall): the Radar gives way to the review.
+                                onInstallAgent = { alias -> addHost.close(); installs.open(alias) },
+                            ),
                         )
                     }
                     val installState by installs.state.collectAsState()
@@ -1595,10 +1639,38 @@ private fun FleetRoute(
                     val hubVersion by repository.hubVersion.collectAsState()
                     val mismatch = remember(hubVersion) { hubMismatch(container.appVersion, hubVersion) }
                     val inboxConnection = rememberPhoneConnection(inboxList.status)
+                    val inboxState by inboxActions.state.collectAsState()
+                    val inboxCaps by repository.capabilities.collectAsState()
+                    val proposedList = remember(all, access, inboxState.setAside) { proposedRows(all, access, inboxState.setAside) }
+                    // A mission that waits on a person is an Inbox row (G5.4): read the missions when the Inbox shows.
+                    LaunchedEffect(missionsState.available) { if (missionsState.available) missions.refresh() }
+                    val missionRows = remember(missionsState.missions, missionsState.available) {
+                        if (missionsState.available) missionWaits(missionsState.missions) else emptyList()
+                    }
                     InboxScreen(
                         rows = rows,
                         running = all.count { it.claudeStatus == "working" },
-                        proposed = remember(all, access) { proposedRows(all, access).size },
+                        proposed = proposedList.size,
+                        proposedList = proposedList,
+                        missionRows = missionRows,
+                        onOpenMission = { missions.openOne(it) },
+                        inbox = inboxState,
+                        rowActions = { row ->
+                            inboxRowActions(
+                                row,
+                                credentials.canWrite,
+                                inboxCaps.switchAccount,
+                                row.accountUuid?.let(inboxList.accountUsage::get)?.limitAt(inboxList.nowSeconds),
+                            )
+                        },
+                        rowHandlers = InboxRowHandlers(
+                            onRetry = { inboxActions.retry(it, inboxCaps.switchAccount) },
+                            onProposeSwitch = { inboxActions.proposeSwitch(it, inboxCaps.switchAccount) },
+                            onConfirmSwitch = { inboxActions.confirmSwitch(it, inboxCaps.switchAccount) },
+                            onCancelSwitch = inboxActions::cancelSwitch,
+                            onWait = inboxActions::waitForReset,
+                            onNotWaiting = inboxActions::notWaiting,
+                        ),
                         runningList = remember(all) { runningRows(all) },
                         doneTodayList = remember(all, inboxList.nowSeconds / 60) {
                             doneTodayRows(all, localMidnight(inboxList.nowSeconds, utcOffsetSeconds(inboxList.nowSeconds)))
@@ -1607,7 +1679,10 @@ private fun FleetRoute(
                         live = inboxList.status is ConnectionStatus.Connected,
                         connection = inboxConnection,
                         refreshing = inboxList.refreshing,
-                        onRefresh = { sessions.refresh() },
+                        onRefresh = {
+                            sessions.refresh()
+                            if (missionsState.available) missions.refresh()
+                        },
                         onOpenSession = nav::open,
                         // Today is an Inbox view until Control grows its own.
                         onOpenToday = if (todayInbox.available) ({ today.open() }) else null,
@@ -1877,6 +1952,11 @@ private fun FleetRoute(
                                 onCloseHistory = fleetSettings::closeHistory,
                                 onRetry = { fleetSettings.load() },
                                 onDismissError = fleetSettings::dismissLoadError,
+                                batch = FieldBatch(
+                                    onStage = fleetSettings::stage,
+                                    onType = fleetSettings::type,
+                                    onReset = fleetSettings::reset,
+                                ),
                                 pageHead = { pageId ->
                                     // Decisions (Jev) opens with who opted in and what Jev may do (14.17).
                                     if (layout == PhoneLayout.New && pageId == DECISIONS_PAGE) {
@@ -1886,6 +1966,17 @@ private fun FleetRoute(
                                         DecisionsHead(orgsState.orgs)
                                     }
                                 },
+                            )
+                        }
+                    }
+                    val fleetSaveBar: @Composable () -> Unit = {
+                        if (settingsCaps.fleetSettings) {
+                            FleetSaveBar(
+                                state = fleet,
+                                onSave = { fleetSettings.save() },
+                                onDiscard = fleetSettings::discard,
+                                onUndo = fleetSettings::undo,
+                                onDismissUndo = fleetSettings::dismissUndo,
                             )
                         }
                     }
@@ -1944,6 +2035,7 @@ private fun FleetRoute(
                             fleetPage = fleetSection,
                             notifier = container.notifier,
                             homeExtras = { LayoutRow(layout, onSetLayout) },
+                            fleetSaveBar = fleetSaveBar,
                             thisPhoneExtras = {
                                 HelpSettingsSection(
                                     help = help,
@@ -1972,6 +2064,7 @@ private fun FleetRoute(
                                 layout = layout,
                                 onSetLayout = onSetLayout,
                                 fleetSettings = fleetSection,
+                                fleetSaveBar = fleetSaveBar,
                             )
                         }
                     }
@@ -2100,6 +2193,8 @@ private fun FleetRoute(
                         onDismissError = missions::dismissError,
                         onApproveSpend = { missions.approveSpend(it, epochSeconds()) },
                         onDenySpend = { missions.denySpend(it) },
+                        onSignGrant = { level, hours, budget -> missions.signGrant(level, hours, budget) },
+                        onRetryItem = { missions.retryItem(it) },
                     ),
                     orbit = layout == PhoneLayout.New,
                 )
@@ -2422,6 +2517,16 @@ private fun SessionRoute(
     val state by vm.state.collectAsState()
     // The Details tab's Review… and Force kill… ask here (r09 B18); ⋮ keeps its own.
     var detailsAsk by remember { mutableStateOf<DetailsAsk?>(null) }
+    // The Hex field while a repair or a recreate runs (MobileFullscreenLoaders), New bar only.
+    var repairWait by remember(sessionId) { mutableStateOf<RepairWait?>(null) }
+    fun underHex(wait: RepairWait, call: () -> Job) {
+        if (!newLayout) {
+            call()
+            return
+        }
+        repairWait = wait
+        call().invokeOnCompletion { if (repairWait == wait) repairWait = null }
+    }
     val work by workVm.state.collectAsState()
     val tasks by tasksVm.state.collectAsState()
     val status by repository.status.collectAsState()
@@ -2603,9 +2708,9 @@ private fun SessionRoute(
         onLoadOlder = { vm.loadOlder() },
         onViewConversation = { vm.view(it) },
         onBackToCurrent = vm::backToCurrent,
-        onRecreate = { vm.recreate() },
+        onRecreate = { underHex(RepairWait.Recreate) { vm.recreate() } },
         onReview = { prompt -> vm.spawnReview(prompt, onOpenSession) },
-        onRepair = { vm.repair() },
+        onRepair = { underHex(RepairWait.Repair) { vm.repair() } },
         onDismissRepair = vm::dismissRepair,
         onPressEnter = { vm.pressEnter() },
         onStop = { vm.interrupt() },
@@ -2629,7 +2734,7 @@ private fun SessionRoute(
             val names by repository.accountNames.collectAsState()
             val usage by repository.accountUsage.collectAsState()
             SessionLaterHost(
-                onSendLater = { vm.sendLater(it) },
+                onSendLater = { text, timing -> vm.sendLater(text, timing) },
                 onLoadQueued = { vm.loadQueued() },
                 onCancelQueued = { vm.cancelQueued(it) },
                 onDismissNotice = vm::dismissSendLaterNotice,
@@ -2662,6 +2767,7 @@ private fun SessionRoute(
                             onInput = extrasVm::setInput,
                             onSubmit = { extrasVm.submit() },
                             onKey = { extrasVm.press(it) },
+                            onPaneKey = { extrasVm.pressKey(it) },
                             onDismissError = extrasVm::dismissError,
                             onSplit = extrasVm::setSplit,
                         ),
@@ -2695,9 +2801,17 @@ private fun SessionRoute(
                 },
                 details = {
                     val rows by repository.sessions.collectAsState()
+                    val names by repository.accountNames.collectAsState()
+                    val usage by repository.accountUsage.collectAsState()
                     SessionDetailsList(
                         state = details,
                         sessions = rows,
+                        // The Account row and its meter (MobileSession, gap plan G5.5).
+                        account = details.session?.accountUuid?.let { uuid ->
+                            accountMeter(uuid, names[uuid], usage[uuid], details.nowSeconds)
+                        },
+                        // What Switch account… did; the paused card says it itself.
+                        notice = state.limitNotice?.takeIf { !state.canSwitchAccount },
                         handlers = SessionDetailsHandlers(
                             onReload = { detailsVm.reload() },
                             onToggle = detailsVm::toggle,
@@ -2710,6 +2824,10 @@ private fun SessionRoute(
                             DetailsAction("Move to host…", { moveVm.open(fresh = true) }).takeIf { move.available && state.canManage },
                             DetailsAction("Share…", { shareVm.open(sessionId) }).takeIf { canShare },
                             DetailsAction(if (tasks.count > 0) "Tasks ${tasks.count}" else "Tasks", tasksVm::openSheet).takeIf { tasks.available },
+                            // Gap plan G5.5, the desktop's G1.11 registry: Fork the whole
+                            // conversation (or any turn, in the sheet) and Switch account.
+                            DetailsAction("Fork…", { detailsAsk = DetailsAsk.Fork }).takeIf { state.canRewind && state.connected },
+                            DetailsAction("Switch account…", { vm.openAccountSwitch() }).takeIf { state.canSwitchAccountAnytime && state.connected },
                             work.chip?.key?.let { key -> DetailsAction("Ticket $key", workVm::openSheet) },
                             // r09 B18: the board's Review, Archive and Force kill, as in ⋮.
                             DetailsAction("Review…", { detailsAsk = DetailsAsk.Review }).takeIf { state.canReview && state.connected },
@@ -2727,7 +2845,37 @@ private fun SessionRoute(
             onDismiss = { detailsAsk = null },
         )
         DetailsAsk.Kill -> KillConfirmDialog(onConfirm = { detailsAsk = null; vm.kill() }, onDismiss = { detailsAsk = null })
+        DetailsAsk.Fork -> {
+            val turns = state.conversation.turns
+            ForkSheet(
+                choices = remember(turns, state.conversation.truncated, state.canRewind) {
+                    forkTurnChoices(turns, state.conversation.truncated, state.canRewind)
+                },
+                // Opened on the latest turn: the whole conversation.
+                initialIndex = turns.lastIndex,
+                suggestedName = forkWorktreeName(state.session?.displayName ?: "session"),
+                onFork = { anchor, worktree -> detailsAsk = null; vm.fork(anchor, worktree, onOpenSession) },
+                onDismiss = { detailsAsk = null },
+            )
+        }
         null -> Unit
+    }
+    state.accountSwitch?.let { sw ->
+        val names by repository.accountNames.collectAsState()
+        SwitchAccountSheet(
+            switch = sw,
+            session = state.session,
+            busy = state.busy,
+            connected = state.connected,
+            accountName = { uuid -> names[uuid] },
+            onPick = vm::pickAccountSwitch,
+            onConfirm = { vm.confirmAccountSwitch { uuid -> names[uuid] } },
+            onDismiss = vm::closeAccountSwitch,
+        )
+    }
+    BackHandler(enabled = repairWait != null) { repairWait = null }
+    repairWait?.let { wait ->
+        RepairWaitScreen(wait, state.session?.displayName) { repairWait = null }
     }
     if (shareState.open) {
         ShareSheet(
@@ -2831,4 +2979,4 @@ private fun RepoRoute(
 }
 
 /** What the Details tab's buttons put up over the session (r09 B18). */
-private enum class DetailsAsk { Review, Kill }
+private enum class DetailsAsk { Review, Kill, Fork }

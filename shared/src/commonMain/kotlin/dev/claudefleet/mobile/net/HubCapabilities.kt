@@ -187,6 +187,16 @@ data class HubCapabilities(
     /** Send later (redesign 14.14): the hub keeps a prompt for the session's next idle moment (5.10). */
     val sendLater: Boolean get() = QUEUE_PROMPT in tools && QUEUED_PROMPTS in tools
 
+    /**
+     * Send later's time choices (claude-fleet M15 G1.8): `queue_prompt` takes
+     * `not_before`, `until_limit_reset` and `skip_if_archived`. Read off the
+     * schema, since an older hub would ignore the arguments, not refuse them,
+     * and type a "tomorrow" prompt at the next idle moment.
+     */
+    val sendLaterAt: Boolean get() = sendLater && accepts(QUEUE_PROMPT, "not_before")
+    val sendLaterAfterLimit: Boolean get() = sendLater && accepts(QUEUE_PROMPT, "until_limit_reset")
+    val sendLaterSkipArchived: Boolean get() = sendLater && accepts(QUEUE_PROMPT, "skip_if_archived")
+
     /** The phone stamps a session viewed while it is on screen (`touch_session_viewed`, contract 11). */
     val touchViewed: Boolean get() = TOUCH_SESSION_VIEWED in tools
 

@@ -92,6 +92,16 @@ private class FakeMissionActions : MissionActions {
         calls += "grant $missionId level=${grant.level} cents=$budgetCents hours=$hours hosts=${grant.hosts} parallel=${grant.maxParallel} profile=${grant.profile}"
         return grant.copy(budgetMicros = budgetCents * 10_000)
     }
+
+    override suspend fun signGrant(missionId: Long, level: Int, hours: Int, budgetCents: Long?): MissionGrant {
+        calls += "sign $missionId level=$level hours=$hours cents=${budgetCents ?: "none"}"
+        return MissionGrant(level = level)
+    }
+
+    override suspend fun retryItem(itemId: Long): StepResult {
+        calls += "retry $itemId"
+        return StepResult(step = MissionStep(kind = "run", itemId = itemId, reason = "retry"), ok = true, detail = "task 9")
+    }
 }
 
 /** The Missions sheet: the wire shapes, the desktop's words, and what a press sends. */
@@ -378,4 +388,75 @@ class MissionsTest {
     }
 
     private fun assertNotNullDetail(vm: MissionsViewModel): MissionDetail = vm.state.value.detail ?: error("no detail open")
+
+    private val grantLoop = HubCapabilities(
+        tools = setOf(HubCapabilities.WORK, HubCapabilities.WORK_LINK),
+        actions = mapOf(
+            HubCapabilities.WORK to setOf("missions", "mission"),
+            HubCapabilities.WORK_LINK to setOf("mission_start", "mission_grant", "retry"),
+        ),
+    )
+
+    /** Gap plan G5.7: the grant is signed with what the person picked, in cents, and said back. */
+    @Test
+    fun sign_grant_sends_the_picked_terms_and_says_them_back() = runTest {
+        val actions = FakeMissionActions()
+        val vm = MissionsViewModel(MissionsFleet(grantLoop), actions, backgroundScope, canWrite = true)
+        vm.openOne(1).join()
+        runCurrent()
+        assertTrue(vm.state.value.canSignGrant)
+
+        vm.signGrant(level = 2, hours = 24, budgetDollars = 20).join()
+        runCurrent()
+        assertTrue("sign 1 level=2 hours=24 cents=2000" in actions.calls, "${actions.calls}")
+        assertEquals("Signed: level 2 for 24 h, up to \$20.", vm.state.value.notice)
+
+        vm.signGrant(level = 1, hours = 8, budgetDollars = null).join()
+        runCurrent()
+        assertTrue("sign 1 level=1 hours=8 cents=none" in actions.calls)
+        assertEquals("Signed: level 1 for 8 h, no spend cap.", vm.state.value.notice)
+    }
+
+    @Test
+    fun a_grant_out_of_range_or_without_mission_grant_signs_nothing() = runTest {
+        val actions = FakeMissionActions()
+        val vm = MissionsViewModel(MissionsFleet(grantLoop), actions, backgroundScope, canWrite = true)
+        val old = MissionsViewModel(MissionsFleet(loop), actions, backgroundScope, canWrite = true)
+        val readonly = MissionsViewModel(MissionsFleet(grantLoop), actions, backgroundScope, canWrite = false)
+        for (m in listOf(vm, old, readonly)) {
+            m.openOne(1).join()
+            runCurrent()
+        }
+        vm.signGrant(level = 4, hours = 24, budgetDollars = 20).join()
+        vm.signGrant(level = 2, hours = GRANT_MAX_HOURS + 1, budgetDollars = 20).join()
+        vm.signGrant(level = 2, hours = 24, budgetDollars = 0).join()
+        old.signGrant(level = 2, hours = 24, budgetDollars = 20).join()
+        readonly.signGrant(level = 2, hours = 24, budgetDollars = 20).join()
+        runCurrent()
+        assertFalse(old.state.value.canSignGrant)
+        assertFalse(readonly.state.value.canSignGrant)
+        assertTrue(actions.calls.none { it.startsWith("sign") }, "${actions.calls}")
+    }
+
+    /** Gap plan G5.7: Retry on a failed task is `work_link { retry }`, and its outcome is the step's line. */
+    @Test
+    fun retry_tries_the_failed_task_again_and_shows_the_outcome() = runTest {
+        val actions = FakeMissionActions()
+        val vm = MissionsViewModel(MissionsFleet(grantLoop), actions, backgroundScope, canWrite = true)
+        vm.openOne(1).join()
+        runCurrent()
+        assertTrue(vm.state.value.canRetry)
+        vm.retryItem(12).join()
+        runCurrent()
+        assertTrue("retry 12" in actions.calls)
+        assertEquals(listOf(12L), vm.state.value.results?.map { it.step.itemId })
+
+        val old = MissionsViewModel(MissionsFleet(loop), actions, backgroundScope, canWrite = true)
+        old.openOne(1).join()
+        runCurrent()
+        assertFalse(old.state.value.canRetry)
+        old.retryItem(12).join()
+        runCurrent()
+        assertEquals(1, actions.calls.count { it == "retry 12" })
+    }
 }

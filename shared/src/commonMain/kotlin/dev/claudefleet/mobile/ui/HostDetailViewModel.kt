@@ -33,7 +33,14 @@ data class HostDetailUiState(
     val candidates: List<LostCandidate>? = null,
     val resuming: String? = null,
     val error: Friendly? = null,
+    /** The host is armed: the restore runs from this phone when the hub next sees it answer. */
+    val whenBack: Boolean = false,
+    /** What the armed restore did when the host came back, in words; null when none has run. */
+    val backNote: String? = null,
 ) {
+    /** Run plan when back is offered: the host does not answer now, and this pairing may restore. */
+    val canRunWhenBack: Boolean get() = canRestore && host != null && !host.reachable
+
     /** What the plan would actually bring back. */
     val restorable: Int get() = plan?.plan?.count { it.restores } ?: 0
 
@@ -68,7 +75,27 @@ class HostDetailViewModel(
 
     private val local = MutableStateFlow(Local())
 
-    val state: StateFlow<HostDetailUiState> = combine(local, fleet.hosts, fleet.sessions, fleet.capabilities) { l, hosts, rows, caps ->
+    /**
+     * Run plan when back (MobileMore): the hosts whose restore waits for the
+     * host to answer again, and what each one's did. Held by this phone, not
+     * the hub, which has no deferred restore: it runs only while the app is
+     * open and connected, and the sheet says so. Kept across closing the
+     * sheet, which [Local] is not.
+     */
+    private data class Back(val armed: Set<String> = emptySet(), val notes: Map<String, String> = emptyMap())
+
+    private val back = MutableStateFlow(Back())
+
+    init {
+        // Arming a host that already answers runs it at once; otherwise the
+        // re-list that shows it reachable again does.
+        scope.launch {
+            combine(fleet.hosts, back) { hosts, b -> b.armed.filter { a -> hosts.any { it.alias == a && it.reachable } } }
+                .collect { due -> due.forEach { runBack(it) } }
+        }
+    }
+
+    val state: StateFlow<HostDetailUiState> = combine(local, fleet.hosts, fleet.sessions, fleet.capabilities, back) { l, hosts, rows, caps, b ->
         HostDetailUiState(
             alias = l.alias,
             host = hosts.firstOrNull { it.alias == l.alias },
@@ -83,6 +110,8 @@ class HostDetailViewModel(
             candidates = l.candidates,
             resuming = l.resuming,
             error = l.error,
+            whenBack = l.alias != null && l.alias in b.armed,
+            backNote = l.alias?.let(b.notes::get),
         )
     }.stateIn(scope, SharingStarted.Eagerly, HostDetailUiState())
 
@@ -130,6 +159,38 @@ class HostDetailViewModel(
         if (done != null) checkLost().join()
     }
 
+    /**
+     * Run plan when back: restore what the plan would once [HostDetailUiState.host]
+     * answers again. Asked first on the sheet, as Restore is.
+     */
+    fun runWhenBack() {
+        val alias = local.value.alias ?: return
+        if (!canWrite || !fleet.capabilities.value.restoreSessions) return
+        back.update { it.copy(armed = it.armed + alias, notes = it.notes - alias) }
+    }
+
+    /** Disarm Run plan when back for the open host. */
+    fun cancelWhenBack() {
+        val alias = local.value.alias ?: return
+        back.update { it.copy(armed = it.armed - alias) }
+    }
+
+    /** The armed restore for [alias], once: disarmed before the call, so a second re-list cannot run it twice. */
+    private suspend fun runBack(alias: String) {
+        if (alias !in back.value.armed) return
+        back.update { it.copy(armed = it.armed - alias) }
+        if (!canWrite || !fleet.capabilities.value.restoreSessions) return
+        val note = try {
+            backNote(alias, actions.restore(alias))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            "$alias answered again, but the restore failed: ${friendly(t).body}"
+        }
+        back.update { it.copy(notes = it.notes + (alias to note)) }
+        if (local.value.alias == alias) checkLost().join()
+    }
+
     /** Resume [candidate]'s conversation in a new session, and hand its id over to open. */
     fun resume(candidate: LostCandidate, onStarted: (Long) -> Unit): Job = scope.launch {
         val alias = local.value.alias ?: return@launch
@@ -148,4 +209,12 @@ class HostDetailViewModel(
         local.update { it.copy(error = friendly(t)) }
         null
     }
+}
+
+/** What an armed restore did when [alias] came back, in one line. */
+internal fun backNote(alias: String, report: RestoreReport): String {
+    val results = report.results
+    if (results.isEmpty()) return "$alias answered again; there was nothing to restore."
+    val ok = results.count { it.ok }
+    return "$alias answered again: restored $ok of ${results.size}."
 }

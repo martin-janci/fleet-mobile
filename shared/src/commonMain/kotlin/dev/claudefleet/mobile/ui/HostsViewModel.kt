@@ -35,6 +35,8 @@ data class HostLine(
     /** Of [sessions], how many need a person, and how many are working: the New layout's line. */
     val needsYou: Int = 0,
     val working: Int = 0,
+    /** The round trip of the hub's last probe, in ms; null for `local` and from an older hub. */
+    val latencyMs: Long? = null,
 )
 
 data class HostsUiState(
@@ -165,6 +167,7 @@ class HostsViewModel(
                     lastPingedAt = host.lastPingedAt,
                     needsYou = words[host.alias]?.count { it == StatusWord.NEEDS_YOU } ?: 0,
                     working = words[host.alias]?.count { it == StatusWord.WORKING } ?: 0,
+                    latencyMs = host.latencyMs,
                 )
             },
             status = status,
@@ -190,3 +193,22 @@ internal val BY_ALIAS: Comparator<HostRow> =
 
 /** The machine the hub itself runs on. */
 private const val LOCAL = "local"
+
+/**
+ * What the hub's last probe found on [host], in words: "212 GB free · 16
+ * CPUs · 64 GB memory". One line, read by the host's sheet and by Add a
+ * project's Where step. Only what the hub sampled: a fact it never read is
+ * left out, and null means it read none of them. The hub probes no
+ * toolchains (a JDK, an SDK), so none is claimed.
+ */
+internal fun hostFacts(host: HostRow): String? = listOfNotNull(
+    host.diskHomeFreeKb?.takeIf { it >= 0 }?.let { "${gigabytes(it)} free" },
+    host.cpuCount?.takeIf { it > 0 }?.let { if (it == 1) "1 CPU" else "$it CPUs" },
+    host.memTotalKb?.takeIf { it > 0 }?.let { "${gigabytes(it)} memory" },
+).joinToString(" · ").ifEmpty { null }
+
+/** [kb] kibibytes as "212 GB", or "3.4 GB" under ten; "0.2 GB" rather than "0 GB" for a nearly full disk. */
+internal fun gigabytes(kb: Long): String {
+    val gb = kb * 1024.0 / 1_000_000_000.0
+    return if (gb >= 10) "${gb.toLong()} GB" else "${(gb * 10).toLong() / 10.0} GB"
+}

@@ -142,12 +142,60 @@ data class SettingDescriptor(
     val restart: String = "none",
     @SerialName("owned_by") val ownedBy: String? = null,
     @SerialName("option_labels") val optionLabels: List<List<String>> = emptyList(),
+    /** Where the value lives (claude-fleet G1.5): `fleet`, `org` (an org may
+     *  override it) or `process` (the hub's own). Absent from an older hub. */
+    val scope: String? = null,
+    /** The orgs that set their own value of a per-org setting. Absent when none did. */
+    @SerialName("org_values") val orgValues: List<OrgValue> = emptyList(),
 ) {
     /** Changed somewhere else than here: shown, never edited. */
     val readOnlyHere: Boolean get() = ownedBy != null
 
     fun optionLabel(value: String): String =
         optionLabels.firstOrNull { it.firstOrNull() == value }?.getOrNull(1) ?: value
+}
+
+/** One org's own value of a per-org setting (`describe`'s `org_values`). */
+@Serializable
+data class OrgValue(
+    @SerialName("org_id") val orgId: Long = 0,
+    val org: String,
+    val value: String = "",
+)
+
+/**
+ * A settings row's scope badge and the words beside it (claude-fleet G1.5,
+ * the desktop's `scopeWords` with `remote` always on: a phone's fleet values
+ * are the hub's). [badge] is "hub", "org Acme" or "2 orgs"; [note] is
+ * "overrides the hub" when an org's own value takes over, else empty.
+ */
+data class ScopeWords(val badge: String, val note: String)
+
+fun SettingDescriptor.scopeWords(): ScopeWords {
+    if (orgValues.isEmpty()) return ScopeWords("hub", "")
+    return if (orgValues.size == 1) {
+        ScopeWords("org ${orgValues.single().org}", "overrides the hub")
+    } else {
+        ScopeWords("${orgValues.size} orgs", "override the hub")
+    }
+}
+
+/** "changed from 14 days" when [value] is not the default; null when it is.
+ *  The desktop's line under a modified row: what Reset puts back. */
+fun SettingDescriptor.changedFrom(value: String): String? =
+    if (value == default) null else "changed from ${inWords(default)}"
+
+/** Typed text to the value the hub stores, or why it cannot be: a range
+ *  like 22:00-07:30 (or empty for none), a trimmed line, or a number in the
+ *  setting's shown unit ([fromDisplay]). */
+fun SettingDescriptor.parseTyped(typed: String): Result<String> = when (kind.type) {
+    "time_range" -> {
+        val t = typed.trim()
+        if (t.isEmpty() || dev.claudefleet.mobile.notify.parseQuietHours(t) != null) Result.success(t)
+        else Result.failure(IllegalArgumentException("a range like 22:00-07:30, or empty for none"))
+    }
+    "text" -> Result.success(typed.trim())
+    else -> fromDisplay(typed)
 }
 
 @Serializable

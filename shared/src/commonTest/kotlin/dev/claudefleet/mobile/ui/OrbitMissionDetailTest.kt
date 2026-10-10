@@ -9,6 +9,8 @@ import dev.claudefleet.mobile.model.MissionGraph
 import dev.claudefleet.mobile.model.MissionItem
 import dev.claudefleet.mobile.model.MissionNode
 import dev.claudefleet.mobile.model.MissionPlan
+import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -110,5 +112,24 @@ class OrbitMissionDetailTest {
         )
         assertNull(grantAsk(plan(MissionAutonomy(asked = 3, ceiling = 3, effective = 1, enabled = false))), "the loop is off")
         assertNull(grantAsk(plan(MissionAutonomy(asked = 2, ceiling = 3, effective = 2))))
+    }
+
+    /** Gap plan G5.7: Sign says the terms it signs, and only once hours and a budget are both picked. */
+    @Test
+    fun sign_says_the_terms_once_both_are_picked() {
+        assertNull(grantSignLabel(2, hours = null, budget = 20, budgetPicked = true), "nothing is pre-selected")
+        assertNull(grantSignLabel(2, hours = 24, budget = null, budgetPicked = false))
+        assertEquals("Sign level 2 for 24 h, up to $20", grantSignLabel(2, hours = 24, budget = 20, budgetPicked = true))
+        assertEquals("Sign level 3 for 8 h, no cap", grantSignLabel(3, hours = 8, budget = null, budgetPicked = true))
+        assertTrue(GRANT_HOURS.all { it in 1..GRANT_MAX_HOURS }, "every choice is within the hub's bounds")
+    }
+
+    /** Gap plan G5.7: Retry is offered on a failed task, never on one blocked behind another. */
+    @Test
+    fun only_a_failed_task_is_retried() {
+        val failed = PlanRow(1, "a", PlanMark.FAILED, "failed")
+        assertTrue(retryable(failed, "failed"))
+        assertFalse(retryable(PlanRow(2, "b", PlanMark.FAILED, "blocked"), "blocked"))
+        assertFalse(retryable(PlanRow(3, "c", PlanMark.TODO, null), "ready"))
     }
 }

@@ -17,9 +17,31 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import dev.claudefleet.mobile.model.SettingWrite
+import dev.claudefleet.mobile.model.inWords
+import dev.claudefleet.mobile.model.parseTyped
 
-/** A change that needs the person's yes first: the setting's own sentence. */
-data class PendingConfirm(val key: String, val value: String, val label: String, val message: String)
+/** A change that needs the person's yes first: the setting's own sentence.
+ *  [thenSave]: it is one of the Save bar's staged values, and yes saves them all. */
+data class PendingConfirm(
+    val key: String,
+    val value: String,
+    val label: String,
+    val message: String,
+    val thenSave: Boolean = false,
+)
+
+/** A switch (or other toggle) the hub just wrote: Undo puts [before] back. */
+data class SettingUndo(val key: String, val before: String, val label: String, val words: String)
+
+/**
+ * The kinds a person types or picks one of, staged for the page's one Save
+ * bar (claude-fleet G1.5, the desktop's `BATCHED` widgets: number, duration,
+ * select, text). A switch and a set of ticks still write at once, with Undo.
+ */
+val BATCHED_KINDS: Set<String> = setOf("secs", "int", "text", "time_range", "choice")
+
+/** "1 change", "3 changes": the Save bar's count. */
+internal fun saveBarCount(n: Int): String = if (n == 1) "1 change" else "$n changes"
 
 /** What the fleet's settings pages draw. */
 data class FleetSettingsUiState(
@@ -55,8 +77,35 @@ data class FleetSettingsUiState(
     val history: Pair<String, List<SettingWrite>?>? = null,
     /** The open history could not be read: the dialog stays open and says so. */
     val historyError: Friendly? = null,
+    /**
+     * Typed and picked values not saved yet, in the order they were staged,
+     * as the hub would store them (G1.5): the Save bar writes them together.
+     */
+    val staged: Map<String, String> = emptyMap(),
+    /** A typed text that is not a value yet ("abc" in a number), by key: it
+     *  counts as a change and holds the Save bar until it is fixed. */
+    val stageProblems: Map<String, String> = emptyMap(),
+    /** The Save bar is writing [staged]. */
+    val saving: Boolean = false,
+    /** Bumped per key when Reset or Discard puts a typed field back, so the
+     *  field starts again from the value it now shows. */
+    val fieldEpoch: Map<String, Int> = emptyMap(),
+    /** The toggle just written, with Undo. */
+    val undo: SettingUndo? = null,
 ) {
     val page: Page? get() = pages.firstOrNull { it.id == openPage }
+
+    /** What the Save bar counts: "2 changes". */
+    val changeCount: Int get() = (staged.keys + stageProblems.keys).size
+
+    /** Save writes something and nothing typed is still not a value. */
+    val canSave: Boolean get() = staged.isNotEmpty() && stageProblems.isEmpty() && !saving
+
+    /** The value a row shows: the staged one while there is one, else the hub's. */
+    fun shown(key: String): String = staged[key] ?: values[key] ?: descriptors[key]?.value.orEmpty()
+
+    /** [key] goes through the Save bar rather than writing at once. */
+    fun batched(key: String): Boolean = descriptors[key]?.kind?.type in BATCHED_KINDS
 
     /** A field this device edits: it may write, the kind is one the phone
      *  draws a control for, and no other subsystem owns the key. */
@@ -154,6 +203,10 @@ class FleetSettingsViewModel(
                     values = descs.associate { d -> d.key to d.value },
                     proposals = p?.proposals.orEmpty(),
                     canWrite = credentialCanWrite && p?.canWrite == true,
+                    // A staged value the hub now holds anyway, or for a
+                    // setting it no longer describes, is no change to save.
+                    staged = it.staged.filter { (k, v) -> descs.any { d -> d.key == k && d.value != v } },
+                    stageProblems = it.stageProblems.filterKeys { k -> descs.any { d -> d.key == k } },
                 )
             }
             onValues(_state.value.values)
@@ -194,7 +247,135 @@ class FleetSettingsViewModel(
     fun confirm() {
         val c = _state.value.confirm ?: return
         _state.update { it.copy(confirm = null) }
-        write(c.key, c.value)
+        if (c.thenSave) saveNow() else write(c.key, c.value)
+    }
+
+    /**
+     * Stage [value] for [key] on the Save bar (G1.5): nothing is sent until
+     * [save]. Staging the hub's own value back takes the change away. A key
+     * that writes at once ([FleetSettingsUiState.batched] false) is [set].
+     */
+    fun stage(key: String, value: String) {
+        val s = _state.value
+        if (!s.editable(key) || s.saving) return
+        if (!s.batched(key)) return set(key, value)
+        val stored = s.values[key] ?: s.descriptors.getValue(key).value
+        _state.update {
+            it.copy(
+                staged = if (value == stored) it.staged - key else it.staged + (key to value),
+                stageProblems = it.stageProblems - key,
+                fieldErrors = it.fieldErrors - key,
+            )
+        }
+    }
+
+    /** Text typed into a field: staged when it is a value, else held as a
+     *  problem under the field, which keeps Save from writing a half-typed one. */
+    fun type(key: String, typed: String) {
+        val s = _state.value
+        if (!s.editable(key) || s.saving) return
+        val d = s.descriptors.getValue(key)
+        d.parseTyped(typed).fold(
+            onSuccess = { stage(key, it) },
+            onFailure = { e ->
+                _state.update {
+                    it.copy(
+                        staged = it.staged - key,
+                        stageProblems = it.stageProblems + (key to "${d.label}: ${e.message}"),
+                        fieldErrors = it.fieldErrors - key,
+                    )
+                }
+            },
+        )
+    }
+
+    /** "changed from … · Reset": put the default back — staged for a typed
+     *  value, written at once (with Undo) for a toggle. */
+    fun reset(key: String) {
+        val s = _state.value
+        val d = s.descriptors[key] ?: return
+        if (!s.editable(key)) return
+        if (s.batched(key)) {
+            stage(key, d.default)
+            _state.update { it.copy(fieldEpoch = it.fieldEpoch + (key to (it.fieldEpoch[key] ?: 0) + 1)) }
+        } else {
+            set(key, d.default)
+        }
+    }
+
+    /** The Save bar's Discard: every staged value and typed problem goes; the fields show the hub's values again. */
+    fun discard() {
+        val s = _state.value
+        if (s.saving) return
+        val keys = s.staged.keys + s.stageProblems.keys
+        _state.update {
+            it.copy(
+                staged = emptyMap(),
+                stageProblems = emptyMap(),
+                fieldErrors = it.fieldErrors - keys,
+                fieldEpoch = it.fieldEpoch + keys.associateWith { k -> (it.fieldEpoch[k] ?: 0) + 1 },
+            )
+        }
+    }
+
+    /**
+     * The Save bar's Save: every staged value, in the order it was staged.
+     * A written one leaves the bar; one the hub refuses stays staged with the
+     * refusal under its field. One that needs confirming asks first, once,
+     * for the lot.
+     */
+    fun save(): Job? {
+        val s = _state.value
+        if (!s.canSave || !s.canWrite) return null
+        val ask = s.staged.entries.firstNotNullOfOrNull { (k, v) ->
+            s.descriptors[k]?.takeIf { d -> d.danger.confirms && v != d.default }?.let { d -> k to (v to d) }
+        }
+        if (ask != null) {
+            val (k, vd) = ask
+            val (v, d) = vd
+            _state.update { it.copy(confirm = PendingConfirm(k, v, d.label, d.danger.message.orEmpty(), thenSave = true)) }
+            return null
+        }
+        return saveNow()
+    }
+
+    private fun saveNow(): Job {
+        val batch = _state.value.staged
+        _state.update { it.copy(saving = true, fieldErrors = it.fieldErrors - batch.keys) }
+        return scope.launch {
+            try {
+                for ((key, value) in batch) {
+                    try {
+                        val all = actions.set(key, value)
+                        _state.update {
+                            it.copy(
+                                values = it.values + all,
+                                // Still the value that was sent: a newer one typed meanwhile stays.
+                                staged = if (it.staged[key] == value) it.staged - key else it.staged,
+                            )
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (t: Throwable) {
+                        _state.update { it.copy(fieldErrors = it.fieldErrors + (key to friendly(t).body)) }
+                    }
+                }
+            } finally {
+                _state.update { it.copy(saving = false) }
+            }
+            onValues(_state.value.values)
+        }
+    }
+
+    /** Put back the toggle just written. */
+    fun undo() {
+        val u = _state.value.undo ?: return
+        _state.update { it.copy(undo = null) }
+        if (_state.value.editable(u.key) && u.key !in _state.value.busy) write(u.key, u.before, offerUndo = false)
+    }
+
+    fun dismissUndo() {
+        _state.update { it.copy(undo = null) }
     }
 
     fun cancelConfirm() {
@@ -207,12 +388,21 @@ class FleetSettingsViewModel(
         _state.update { it.copy(fieldErrors = it.fieldErrors + (key to message)) }
     }
 
-    private fun write(key: String, value: String) {
+    private fun write(key: String, value: String, offerUndo: Boolean = true) {
+        val before = _state.value.values[key]
         _state.update { it.copy(busy = it.busy + key, fieldErrors = it.fieldErrors - key) }
         scope.launch {
             try {
                 val all = actions.set(key, value)
-                _state.update { it.copy(values = it.values + all, busy = it.busy - key) }
+                _state.update {
+                    val d = it.descriptors[key]
+                    val undo = if (offerUndo && before != null && d != null && !it.batched(key)) {
+                        SettingUndo(key, before, d.label, d.inWords(all[key] ?: value))
+                    } else {
+                        it.undo?.takeIf { u -> u.key != key }
+                    }
+                    it.copy(values = it.values + all, busy = it.busy - key, undo = undo)
+                }
                 onValues(_state.value.values)
             } catch (e: CancellationException) {
                 throw e
