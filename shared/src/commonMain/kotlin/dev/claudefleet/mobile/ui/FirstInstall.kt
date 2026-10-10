@@ -238,8 +238,12 @@ private fun NoHubStep(n: Int, title: String, line: String, extra: @Composable ()
 
 // ── A host joins: the fleet-agent install job ──
 
-/** The job's steps in order, as `agent_installs` names them. */
-internal val INSTALL_STEPS: List<String> = listOf("target", "download", "start", "connect")
+/**
+ * The job's steps in order, as `agent_installs` names them. `tmux` checks
+ * that the host has tmux and installs it when it does not (claude-fleet
+ * 0.6.0, `service::agent_install::tmux_script`).
+ */
+internal val INSTALL_STEPS: List<String> = listOf("target", "tmux", "download", "start", "connect")
 
 /** Where an install stands, which decides the loader: Pulse while steps run, Sonar for the heartbeat. */
 enum class InstallPhase { Running, Heartbeat, Done, Failed }
@@ -263,6 +267,7 @@ fun installSteps(job: AgentInstall): List<LoaderStep> {
         val done = i < at
         val label = when (step) {
             "target" -> if (done) "Found the host's platform" else "Finding the host's platform"
+            "tmux" -> if (done) "tmux is on the host" else "Checking for tmux, installing it if missing"
             "download" -> if (done) "Copied fleet-agent$version" else "Copying fleet-agent$version"
             "start" -> if (done) "Started the service" else "Starting the service"
             else -> if (done) "First heartbeat" else "Waiting for the first heartbeat"
@@ -427,7 +432,7 @@ fun InstallAgentSheet(state: AgentInstallUiState, handlers: AgentInstallHandlers
         ErrorBanner(state.error, onDismiss = handlers.onDismissError)
         if (host != null && host.tmuxVersion == null) {
             Text(
-                "tmux is missing. The hub needs it to run sessions there; install it on the host (it is not part of the agent).",
+                TMUX_MISSING_REVIEW,
                 style = Fleet.type.textMd,
                 color = o.statusWaiting,
                 modifier = Modifier.padding(vertical = 8.dp),
@@ -463,8 +468,17 @@ fun InstallAgentSheet(state: AgentInstallUiState, handlers: AgentInstallHandlers
     }
 }
 
-/** The review's lines: the binary and where it goes, the service, and which way it connects. */
+/**
+ * The review's word on a host with no tmux: the install puts it there with
+ * the host's package manager, and says why when it cannot.
+ */
+internal const val TMUX_MISSING_REVIEW: String =
+    "tmux is missing. The install adds it with the host's package manager first; that needs root, " +
+        "passwordless sudo or Homebrew there. Without them the install stops and says so."
+
+/** The review's lines: the binary and where it goes, tmux, the service, and which way it connects. */
 internal fun installFacts(state: AgentInstallUiState): List<Pair<String, String>> = listOf(
+    "tmux" to (state.host?.tmuxVersion?.let { "already there ($it)" } ?: "installed if missing"),
     "fleet-agent" to listOfNotNull(state.hubVersion, "~/.local/bin", "checked against SHA256SUMS").joinToString(" · "),
     "Service" to "systemd user unit, starts at boot (or a plain process where there is no systemd)",
     "Connects to" to "this hub, outbound only",

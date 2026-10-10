@@ -115,20 +115,28 @@ private fun claudeVersionOf(h: HostLine): AppVersion? =
 
 private fun sessionsCount(n: Int): String = if (n == 1) "1 session" else "$n sessions"
 
+/**
+ * "ping 42 ms": the round trip of the hub's last probe of a host, as the
+ * hub timed it. Null when it was not timed (`local`, an older hub), so the
+ * row says nothing rather than a made-up figure.
+ */
+internal fun pingWords(latencyMs: Long?): String? = latencyMs?.takeIf { it >= 0 }?.let { "ping $it ms" }
+
 /** What a host's row says after its lead word. */
 internal fun hostRowLine(h: HostLine, nowSeconds: Long): String {
-    val hidden = if (h.hidden) " · hidden from Sessions" else ""
+    val ping = pingWords(h.latencyMs)?.takeIf { h.reachable }?.let { " · $it" }.orEmpty()
+    val tail = ping + if (h.hidden) " · hidden from Sessions" else ""
     return when {
         signalLost(h) -> listOfNotNull(relativeAgo(h.lastPingedAt, nowSeconds)?.let { "last seen $it" }, sessionsCount(h.sessions))
-            .joinToString(" · ") + hidden
+            .joinToString(" · ") + tail
         h.needsYou + h.working > 0 -> {
             val parts = listOfNotNull(
                 h.needsYou.takeIf { it > 0 }?.let { "$it needs you" },
                 h.working.takeIf { it > 0 }?.let { "$it working" },
             )
-            "${sessionsCount(h.sessions)}: ${parts.joinToString(" · ")}$hidden"
+            "${sessionsCount(h.sessions)}: ${parts.joinToString(" · ")}$tail"
         }
-        else -> sessionsCount(h.sessions) + hidden
+        else -> sessionsCount(h.sessions) + tail
     }
 }
 

@@ -95,16 +95,35 @@ class FirstInstallTest {
     @Test
     fun the_checklist_follows_the_job_and_marks_the_step_it_failed_on() {
         val running = installSteps(AgentInstall(id = 1, hostAlias = "pine", version = "0.9.3", step = "download"))
-        assertEquals(listOf(StepState.Done, StepState.Running, StepState.Pending, StepState.Pending), running.map { it.state })
-        assertEquals("Copying fleet-agent 0.9.3", running[1].label)
+        assertEquals(listOf(StepState.Done, StepState.Done, StepState.Running, StepState.Pending, StepState.Pending), running.map { it.state })
+        assertEquals("Copying fleet-agent 0.9.3", running[2].label)
+        assertEquals("tmux is on the host", running[1].label)
 
         val failed = installSteps(AgentInstall(id = 1, hostAlias = "pine", step = "connect", state = "failed"))
-        assertEquals("failed", failed[3].detail)
-        assertNull(failed[2].detail)
+        assertEquals("failed", failed[4].detail)
+        assertNull(failed[3].detail)
 
         val done = installSteps(AgentInstall(id = 1, hostAlias = "pine", step = "done", state = "done"))
         assertTrue(done.all { it.state == StepState.Done })
         assertEquals("First heartbeat", done.last().label)
+    }
+
+    @Test
+    fun the_install_puts_tmux_on_a_host_that_lacks_it_and_says_so_before_the_tap() {
+        // The hub's job checks for tmux, and installs it, before the agent (claude-fleet 0.6.0).
+        val tmux = installSteps(AgentInstall(id = 1, hostAlias = "elm", step = "tmux"))
+        assertEquals(StepState.Done, tmux[0].state)
+        assertEquals(StepState.Running, tmux[1].state)
+        assertEquals("Checking for tmux, installing it if missing", tmux[1].label)
+        // A tmux failure is the step it stopped on, with the hub's reason beside it on the screen.
+        assertEquals("failed", installSteps(AgentInstall(id = 1, hostAlias = "elm", step = "tmux", state = "failed"))[1].detail)
+
+        val missing = AgentInstallUiState(alias = "elm", host = HostRow(alias = "elm", reachable = true))
+        assertEquals("installed if missing", installFacts(missing).toMap()["tmux"])
+        assertTrue("package manager" in TMUX_MISSING_REVIEW)
+        assertFalse("not part of the agent" in TMUX_MISSING_REVIEW)
+        val present = missing.copy(host = HostRow(alias = "elm", reachable = true, tmuxVersion = "3.4"))
+        assertEquals("already there (3.4)", installFacts(present).toMap()["tmux"])
     }
 
     @Test

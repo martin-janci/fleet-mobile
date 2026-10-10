@@ -256,6 +256,8 @@ import dev.claudefleet.mobile.ui.forkTurnChoices
 import dev.claudefleet.mobile.ui.forkWorktreeName
 import dev.claudefleet.mobile.ui.KillConfirmDialog
 import dev.claudefleet.mobile.ui.ReviewDialog
+import dev.claudefleet.mobile.ui.RepairWait
+import dev.claudefleet.mobile.ui.RepairWaitScreen
 import dev.claudefleet.mobile.ui.SessionTab
 import dev.claudefleet.mobile.ui.SessionTabsHost
 import dev.claudefleet.mobile.ui.sessionTabs
@@ -355,6 +357,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.delay
@@ -1567,6 +1570,8 @@ private fun FleetRoute(
                                 onRestore = { hostDetail.restore() },
                                 onResume = { c -> hostDetail.resume(c) { id -> hostDetail.close(); nav.open(id) } },
                                 onDismissError = hostDetail::dismissError,
+                                onRunWhenBack = hostDetail::runWhenBack,
+                                onCancelWhenBack = hostDetail::cancelWhenBack,
                             ),
                         )
                     }
@@ -1575,7 +1580,14 @@ private fun FleetRoute(
                     if (addHostState.open) {
                         AddHostScreen(
                             addHostState,
-                            AddHostHandlers(onClose = addHost::close, onAdd = { addHost.add(it) }, onDismissError = addHost::dismissError, onRescan = { addHost.rescan() }),
+                            AddHostHandlers(
+                                onClose = addHost::close,
+                                onAdd = { addHost.add(it) },
+                                onDismissError = addHost::dismissError,
+                                onRescan = { addHost.rescan() },
+                                // "tmux is missing" → Install agent (MobileInstall): the Radar gives way to the review.
+                                onInstallAgent = { alias -> addHost.close(); installs.open(alias) },
+                            ),
                         )
                     }
                     val installState by installs.state.collectAsState()
@@ -2447,6 +2459,16 @@ private fun SessionRoute(
     val state by vm.state.collectAsState()
     // The Details tab's Review… and Force kill… ask here (r09 B18); ⋮ keeps its own.
     var detailsAsk by remember { mutableStateOf<DetailsAsk?>(null) }
+    // The Hex field while a repair or a recreate runs (MobileFullscreenLoaders), New bar only.
+    var repairWait by remember(sessionId) { mutableStateOf<RepairWait?>(null) }
+    fun underHex(wait: RepairWait, call: () -> Job) {
+        if (!newLayout) {
+            call()
+            return
+        }
+        repairWait = wait
+        call().invokeOnCompletion { if (repairWait == wait) repairWait = null }
+    }
     val work by workVm.state.collectAsState()
     val tasks by tasksVm.state.collectAsState()
     val status by repository.status.collectAsState()
@@ -2628,9 +2650,9 @@ private fun SessionRoute(
         onLoadOlder = { vm.loadOlder() },
         onViewConversation = { vm.view(it) },
         onBackToCurrent = vm::backToCurrent,
-        onRecreate = { vm.recreate() },
+        onRecreate = { underHex(RepairWait.Recreate) { vm.recreate() } },
         onReview = { prompt -> vm.spawnReview(prompt, onOpenSession) },
-        onRepair = { vm.repair() },
+        onRepair = { underHex(RepairWait.Repair) { vm.repair() } },
         onDismissRepair = vm::dismissRepair,
         onPressEnter = { vm.pressEnter() },
         onStop = { vm.interrupt() },
@@ -2792,6 +2814,10 @@ private fun SessionRoute(
             onConfirm = { vm.confirmAccountSwitch { uuid -> names[uuid] } },
             onDismiss = vm::closeAccountSwitch,
         )
+    }
+    repairWait?.let { wait ->
+        BackHandler(enabled = true) { repairWait = null }
+        RepairWaitScreen(wait, state.session?.displayName) { repairWait = null }
     }
     if (shareState.open) {
         ShareSheet(

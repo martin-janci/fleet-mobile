@@ -42,6 +42,9 @@ data class HostDetailHandlers(
     val onRestore: () -> Unit = {},
     val onResume: (LostCandidate) -> Unit = {},
     val onDismissError: () -> Unit = {},
+    /** Arm and disarm Run plan when back. */
+    val onRunWhenBack: () -> Unit = {},
+    val onCancelWhenBack: () -> Unit = {},
 )
 
 /**
@@ -54,6 +57,7 @@ data class HostDetailHandlers(
 @Composable
 fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowSeconds: Long) {
     var confirming by remember { mutableStateOf(false) }
+    var confirmingBack by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
         LazyColumn(modifier = Modifier.fillMaxWidth()) {
             item {
@@ -65,6 +69,7 @@ fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowS
                             if (host?.reachable == true) "reachable" else "unreachable",
                             host?.transport?.takeIf { it != "ssh" },
                             relativeAgo(host?.lastPingedAt, nowSeconds)?.let { "pinged $it" },
+                            pingWords(host?.latencyMs)?.takeIf { host?.reachable == true },
                         ).joinToString(" · "),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -75,6 +80,9 @@ fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowS
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    host?.let(::hostFacts)?.let { facts ->
+                        Text(facts, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
                         if (state.canProbe) {
                             OutlinedButton(onClick = handlers.onProbe, enabled = !state.probing) { Text(if (state.probing) "Probing…" else "Re-probe") }
@@ -120,6 +128,17 @@ fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowS
                                 }
                             }
                         }
+                        if (state.whenBack) {
+                            Text(
+                                "Runs when ${state.alias} answers again, from this phone while Orbit Fleet is open and connected.",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                            TextButton(onClick = handlers.onCancelWhenBack) { Text("Don't run it") }
+                        } else if (state.canRunWhenBack) {
+                            OutlinedButton(onClick = { confirmingBack = true }, modifier = Modifier.padding(top = 8.dp)) { Text("Run plan when back") }
+                        }
+                        state.backNote?.let { Text(it, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp)) }
                         state.restored?.results?.takeIf { it.isNotEmpty() }?.let { results ->
                             val ok = results.count { it.ok }
                             Text("Restored $ok of ${results.size}.", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
@@ -173,6 +192,20 @@ fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowS
             text = { Text("Each resumes its conversation in its own worktree, under its own name, a few at a time.") },
             confirmButton = { TextButton(onClick = { confirming = false; handlers.onRestore() }) { Text("Restore") } },
             dismissButton = { TextButton(onClick = { confirming = false }) { Text("Cancel") } },
+        )
+    }
+    if (confirmingBack) {
+        AlertDialog(
+            onDismissRequest = { confirmingBack = false },
+            title = { Text("Run the plan when ${state.alias} is back?") },
+            text = {
+                Text(
+                    "When the hub next sees ${state.alias} answer, every lost session the plan can bring back resumes in its own worktree. " +
+                        "This phone starts it, so it runs only while Orbit Fleet is open and connected.",
+                )
+            },
+            confirmButton = { TextButton(onClick = { confirmingBack = false; handlers.onRunWhenBack() }) { Text("Run when back") } },
+            dismissButton = { TextButton(onClick = { confirmingBack = false }) { Text("Cancel") } },
         )
     }
 }

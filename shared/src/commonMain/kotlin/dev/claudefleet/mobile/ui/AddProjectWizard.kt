@@ -38,6 +38,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.GithubRepo
+import dev.claudefleet.mobile.model.OrgDirectory
+import dev.claudefleet.mobile.model.OrgRule
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.kit.DataRain
@@ -154,6 +156,83 @@ internal fun addSteps(creating: Boolean, onGithub: Boolean, adopting: Boolean = 
     add("Add to Projects")
 }
 
+/**
+ * The owner and repository a source names, as the hub will store them: a
+ * GitHub pick and a new repository say so; a URL's last two path parts
+ * (`https://github.com/acme/app.git`, `git@github.com:acme/app`). A folder
+ * takes them from its origin remote on the host, which the phone cannot
+ * read, so it has none here.
+ */
+internal fun sourceOwnerRepo(source: ProjectSource?): Pair<String, String>? = when (source) {
+    is ProjectSource.Github -> source.nameWithOwner.split('/').takeIf { it.size == 2 && it.all(String::isNotBlank) }?.let { it[0] to it[1] }
+    is ProjectSource.New -> (source.owner.trim() to source.repo.trim()).takeIf { it.first.isNotBlank() && it.second.isNotBlank() }
+    is ProjectSource.Url -> {
+        val raw = source.url.trim().trimEnd('/').removeSuffix(".git")
+        // `scheme://host[:port]/path`, else scp-like `user@host:path`.
+        val path = if ("://" in raw) raw.substringAfter("://").substringAfter('/', "") else raw.substringAfter(':', "")
+        val parts = path.split('/').filter { it.isNotBlank() }
+        if (parts.size >= 2) parts[parts.size - 2] to parts.last() else null
+    }
+    is ProjectSource.Folder, null -> null
+}
+
+/** Which org a new project's sessions land in, and why, in words. */
+internal data class ProjectOrg(val orgId: Long, val name: String, val why: String)
+
+/**
+ * The org the hub will place this project's sessions in (claude-fleet
+ * `store::orgs`, session resolution): the most specific matching rule —
+ * path, then owner/repo, then owner, then a host-only rule, a rule bound to
+ * the host ranking above one that is not, ties to the lower id — else the
+ * host's own org. Read from the rules the hub already sends with its orgs.
+ *
+ * A clone's folder is not known until the hub has made it, so path rules are
+ * not weighed for one; a folder's owner is not known at all, so for a folder
+ * only a path rule or the host decides, and an owner rule that might outrank
+ * the host makes the answer unknown (null) rather than a guess. Null too
+ * when nothing places it, or the hub sent no orgs.
+ */
+internal fun projectOrg(source: ProjectSource?, host: String, orgs: OrgDirectory): ProjectOrg? {
+    if (orgs.orgs.isEmpty() || host.isBlank()) return null
+    val ownerRepo = sourceOwnerRepo(source)
+    val folder = (source as? ProjectSource.Folder)?.path?.trim()?.trimEnd('/')?.takeIf { it.startsWith("/") }
+    if (source == null || (ownerRepo == null && folder == null)) return null
+    fun underPrefix(prefix: String): Boolean {
+        val p = prefix.trimEnd('/')
+        return folder != null && (folder == p || folder.startsWith("$p/"))
+    }
+    fun matches(r: OrgRule): Boolean {
+        if (r.hostAlias != null && r.hostAlias != host) return false
+        if (r.pathPrefix != null && !underPrefix(r.pathPrefix)) return false
+        if (r.owner != null && (ownerRepo == null || !r.owner.equals(ownerRepo.first, ignoreCase = true))) return false
+        if (r.repo != null && (ownerRepo == null || !r.repo.equals(ownerRepo.second, ignoreCase = true))) return false
+        return true
+    }
+    fun rank(r: OrgRule): Int = when {
+        r.pathPrefix != null -> 3000 + r.pathPrefix.length
+        r.repo != null -> 2000
+        r.owner != null -> 1000
+        else -> 0
+    } + if (r.hostAlias != null) 1 else 0
+    val best = orgs.rules.filter(::matches).sortedWith(compareByDescending<OrgRule>(::rank).thenBy { it.id }).firstOrNull()
+    // A folder's owner is unknown: an owner or repo rule that could apply would outrank the host.
+    if (ownerRepo == null && (best == null || best.pathPrefix == null) &&
+        orgs.rules.any { (it.owner != null || it.repo != null) && it.pathPrefix == null && (it.hostAlias == null || it.hostAlias == host) }
+    ) return null
+    if (best != null) {
+        val why = when {
+            best.pathPrefix != null -> "from the rule for ${best.pathPrefix}"
+            best.repo != null && best.owner != null -> "from the rule for ${best.owner}/${best.repo}"
+            best.repo != null -> "from the rule for ${best.repo}"
+            best.owner != null -> "from the rule for ${best.owner}/*"
+            else -> "from the rule for $host"
+        }
+        return ProjectOrg(best.orgId, orgs.name(best.orgId), why)
+    }
+    val hostOrg = orgs.hostOrg[host] ?: return null
+    return ProjectOrg(hostOrg, orgs.name(hostOrg), "$host belongs to it")
+}
+
 data class AddProjectHandlers(
     val onStep: (AddProjectStep) -> Unit = {},
     val onChooseHost: (String) -> Unit = {},
@@ -177,6 +256,8 @@ internal fun AddProjectWizard(
     projects: Collection<String>,
     handlers: AddProjectHandlers,
     modifier: Modifier = Modifier,
+    /** The orgs and their rules, to say which org the project lands in on the Where step. */
+    orgs: OrgDirectory = OrgDirectory.EMPTY,
 ) {
     var source by remember { mutableStateOf<ProjectSource?>(null) }
     // What was typed stays when the kind changes: Back keeps answers.
@@ -205,6 +286,7 @@ internal fun AddProjectWizard(
             AskingSteps(
                 tools, step, hosts, host, projects, handlers, source, url, owner, repo, onGithub,
                 folder = folder,
+                orgs = orgs,
                 onSource = { source = it },
                 onUrl = { url = it },
                 onFolder = { folder = it },
@@ -232,6 +314,7 @@ private fun ColumnScope.AskingSteps(
     repo: String,
     onGithub: Boolean,
     folder: String,
+    orgs: OrgDirectory,
     onSource: (ProjectSource) -> Unit,
     onUrl: (String) -> Unit,
     onFolder: (String) -> Unit,
@@ -276,7 +359,7 @@ private fun ColumnScope.AskingSteps(
                     onSource(ProjectSource.New(o, r, g))
                 },
             )
-            AddProjectStep.Where -> WhereToAdd(hosts, host, source, handlers.onChooseHost)
+            AddProjectStep.Where -> WhereToAdd(hosts, host, source, handlers.onChooseHost, projectOrg(source, host, orgs))
         }
     }
     val blocker = sourceBlocker(source) ?: hostBlocker(source, host)
@@ -414,7 +497,7 @@ internal fun repoLine(r: GithubRepo, added: Boolean): String? = listOfNotNull(
 ).joinToString(" · ").ifEmpty { null }
 
 @Composable
-private fun WhereToAdd(hosts: List<HostChoice>, host: String, source: ProjectSource?, onChooseHost: (String) -> Unit) {
+private fun WhereToAdd(hosts: List<HostChoice>, host: String, source: ProjectSource?, onChooseHost: (String) -> Unit, org: ProjectOrg?) {
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = gutterPadding()) {
         item(key = "host-label") { StepLabel("Host") }
         if (hosts.isEmpty()) item(key = "no-hosts") { StepHint("No hosts yet. They appear once the hub has listed them.") }
@@ -424,11 +507,7 @@ private fun WhereToAdd(hosts: List<HostChoice>, host: String, source: ProjectSou
                 title = h.alias,
                 selected = h.alias == host,
                 onSelect = { onChooseHost(h.alias) },
-                sub = when {
-                    !h.reachable -> "Signal lost · cannot add there now"
-                    elsewhere -> "A folder is added on $LOCAL_HOST only"
-                    else -> null
-                },
+                sub = whereHostLine(h, elsewhere),
                 enabled = h.reachable && !elsewhere,
                 modifier = Modifier.padding(bottom = 8.dp),
             )
@@ -441,8 +520,19 @@ private fun WhereToAdd(hosts: List<HostChoice>, host: String, source: ProjectSou
             )
             StepLabel("Adding")
             StepHint(sourceSummary(source))
+            if (org != null) {
+                StepLabel("Organisation")
+                StepHint("${org.name}, ${org.why}")
+            }
         }
     }
+}
+
+/** A host's line on the Where step: why it cannot be picked, else what the hub's last probe found there. */
+internal fun whereHostLine(h: HostChoice, elsewhere: Boolean): String? = when {
+    !h.reachable -> "Signal lost · cannot add there now"
+    elsewhere -> "A folder is added on $LOCAL_HOST only"
+    else -> h.facts
 }
 
 /** What the Where step says is about to happen. */

@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.SshHost
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.kit.FoundHostRow
@@ -25,6 +26,8 @@ data class AddHostHandlers(
     val onDismissError: () -> Unit = {},
     /** Read the hub's SSH config again after a failed scan. */
     val onRescan: () -> Unit = {},
+    /** Install agent on a host just added, by its fleet alias: opens the install's review, which installs nothing yet. */
+    val onInstallAgent: (String) -> Unit = {},
 )
 
 /**
@@ -46,13 +49,18 @@ fun AddHostScreen(state: AddHostUiState, handlers: AddHostHandlers) {
             ErrorBanner(state.error, onDismiss = handlers.onDismissError, onRetry = handlers.onRescan.takeIf { state.scanFailed })
             Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
                 for (h in state.candidates) {
+                    val target = state.installTarget(h.alias)
                     val action = when {
+                        target != null -> "Install agent"
                         h.alias in state.added -> "Added"
                         state.adding == h.alias -> "Adding…"
                         else -> "Add"
                     }
-                    FoundHostRow(h.alias, sshHostLine(h), action) {
-                        if (action == "Add" && state.adding == null) handlers.onAdd(h)
+                    FoundHostRow(h.alias, addedHostLine(h, state.addedRows[h.alias].takeIf { h.alias in state.added }), action) {
+                        when {
+                            target != null -> handlers.onInstallAgent(target.alias)
+                            action == "Add" && state.adding == null -> handlers.onAdd(h)
+                        }
                     }
                 }
             }
@@ -66,6 +74,17 @@ fun AddHostScreen(state: AddHostUiState, handlers: AddHostHandlers) {
             )
         },
     )
+}
+
+/**
+ * A found host's line: where it is, and once added what the probe found
+ * that matters next — "tmux is missing", which Install agent puts there.
+ */
+internal fun addedHostLine(h: SshHost, added: HostRow?): String = when {
+    added == null -> sshHostLine(h)
+    !added.reachable -> "Added · does not answer yet"
+    added.tmuxVersion == null -> "Added · tmux is missing"
+    else -> listOfNotNull("Added", "tmux ${added.tmuxVersion}", pingWords(added.latencyMs)).joinToString(" · ")
 }
 
 /** "3 in the hub's SSH config", "None new in the hub's SSH config", or the scan under way. */
