@@ -254,6 +254,9 @@ internal class FakeWorkActions : WorkActions {
     val treeCalls = mutableListOf<TreeCall>()
     var failTree: Throwable? = null
     var taskAnswer: TaskDetail? = null
+    /** Answers for other task ids (a parent's, say); [taskAnswer] answers the rest. */
+    var taskAnswers: Map<String, TaskDetail> = emptyMap()
+    val taskIds = mutableListOf<String>()
     var failTask: Throwable? = null
     var taskCalls = 0
     var sessionTasksAnswer = SessionTasks()
@@ -300,6 +303,16 @@ internal class FakeWorkActions : WorkActions {
         return dev.claudefleet.mobile.model.WorkItem(id = createdId, key = "TASK-$createdId", title = title)
     }
 
+    override suspend fun createSubtask(
+        parentTaskId: String,
+        title: String,
+        notes: String?,
+        dueAt: String?,
+    ): dev.claudefleet.mobile.model.WorkItem {
+        write("create \"$title\" parent=$parentTaskId notes=$notes due=$dueAt")
+        return dev.claudefleet.mobile.model.WorkItem(id = createdId, title = title)
+    }
+
     override suspend fun setStatus(itemId: Long, status: String): dev.claudefleet.mobile.model.WorkItem {
         write("set_status $itemId $status")
         return dev.claudefleet.mobile.model.WorkItem(id = itemId)
@@ -318,8 +331,9 @@ internal class FakeWorkActions : WorkActions {
 
     override suspend fun task(taskId: String): TaskDetail {
         taskCalls += 1
+        taskIds += taskId
         failTask?.let { throw it }
-        return taskAnswer ?: throw HubError.Tool("E_NOTFOUND", "no such task")
+        return taskAnswers[taskId] ?: taskAnswer ?: throw HubError.Tool("E_NOTFOUND", "no such task")
     }
 
     override suspend fun sessionTasks(sessionId: Long): SessionTasks {
