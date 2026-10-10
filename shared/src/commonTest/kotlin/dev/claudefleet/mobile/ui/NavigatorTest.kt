@@ -19,6 +19,20 @@ class NavigatorTest {
         assertEquals(Tab.Sessions, nav.tab.value)
     }
 
+    /** Classic: the Sessions banner opens the waiting confirms; back returns to the list, and the bar keeps Sessions lit. */
+    @Test
+    fun confirms_open_over_the_classic_list_and_back_returns_there() {
+        val nav = Navigator()
+        nav.showSessionsFor("pine")
+        nav.openConfirms()
+        assertEquals(Screen.Confirms, nav.screen.value)
+        assertEquals(Tab.Sessions, nav.tab.value)
+        nav.openConfirms()
+        assertTrue(nav.back())
+        assertEquals(Screen.Sessions(hostAlias = "pine"), nav.screen.value)
+        assertFalse(nav.back(), "the list is the tab's root")
+    }
+
     @Test
     fun opening_a_session_keeps_the_sessions_tab_lit() {
         val nav = Navigator()

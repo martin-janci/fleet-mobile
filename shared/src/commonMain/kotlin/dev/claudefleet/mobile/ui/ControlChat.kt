@@ -317,6 +317,12 @@ class ControlViewModel(
     companion object {
         const val CONFIRM_POLL_MS = 4_000L
 
+        /**
+         * The Classic bar's confirms, followed on every screen rather than one
+         * tab: `confirm:changed` carries the urgency, so the net polls slower.
+         */
+        const val CLASSIC_CONFIRM_POLL_MS = 30_000L
+
         /** How many receipts Control reads, and how many chips it draws. */
         const val HANDOFFS_SHOWN = 20
         const val CHIPS_SHOWN = 3

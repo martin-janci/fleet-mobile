@@ -79,6 +79,12 @@ sealed interface Screen {
     /** New layout only (redesign 14.20): the hub's trackers and Connect a tracker, from More. */
     data object Trackers : Screen
 
+    /**
+     * Classic layout: the MCP calls waiting for your OK, the same cards
+     * Control shows on the New bar. Opened from the Sessions banner.
+     */
+    data object Confirms : Screen
+
     /** One of the hub's approved guides, step by step, with Undo per change. */
     data class Guide(val pageId: String) : Screen
 }
@@ -218,6 +224,9 @@ class Navigator(layout: PhoneLayout = PhoneLayout.Classic) {
 
     /** Open Trackers over whatever is showing (More, an empty Work tab); back returns there. */
     fun openTrackers() = move { s -> if (s.screen == Screen.Trackers) s else s.pushing(s.screen).going(Screen.Trackers) }
+
+    /** Open the waiting confirms over whatever is showing (the Classic Sessions list); back returns there. */
+    fun openConfirms() = move { s -> if (s.screen == Screen.Confirms) s else s.pushing(s.screen).going(Screen.Confirms) }
 
     /** Open the practice fleet over whatever is showing (Learn, the help picker, Settings). */
     fun openPractice() = move { s -> if (s.screen == Screen.Practice) s else s.pushing(s.screen).going(Screen.Practice) }
@@ -445,7 +454,7 @@ internal fun isPushedOn(screen: Screen, layout: PhoneLayout): Boolean =
     screen is Screen.Session || screen is Screen.NewSession || screen is Screen.Task || screen is Screen.Repo ||
         screen == Screen.Usage || screen == Screen.Company || screen == Screen.Update ||
         screen == Screen.Learn || screen == Screen.Practice || screen is Screen.Guide || screen == Screen.Missions ||
-        screen == Screen.Trackers ||
+        screen == Screen.Trackers || screen == Screen.Confirms ||
         (layout == PhoneLayout.New && (screen == Screen.Hosts || screen == Screen.Files || screen == Screen.Settings))
 
 private fun rootOf(tab: Tab): Screen = when (tab) {
@@ -463,7 +472,7 @@ private fun rootOf(tab: Tab): Screen = when (tab) {
 private fun tabOf(screen: Screen, layout: PhoneLayout): Tab? = when (screen) {
     is Screen.Sessions -> Tab.Sessions
     is Screen.Session, is Screen.NewSession, is Screen.Repo, Screen.Usage, Screen.Company, Screen.Update,
-    Screen.Learn, Screen.Practice, is Screen.Guide, Screen.Missions, Screen.Trackers -> null
+    Screen.Learn, Screen.Practice, is Screen.Guide, Screen.Missions, Screen.Trackers, Screen.Confirms -> null
     Screen.Work, is Screen.Task -> Tab.Work
     Screen.Files -> if (layout == PhoneLayout.New) null else Tab.Files
     Screen.Hosts -> if (layout == PhoneLayout.New) null else Tab.Hosts

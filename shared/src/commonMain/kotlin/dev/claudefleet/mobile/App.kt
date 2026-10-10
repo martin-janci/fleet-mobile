@@ -118,6 +118,9 @@ import dev.claudefleet.mobile.ui.AddProjectHandlers
 import dev.claudefleet.mobile.ui.AddProjectStep
 import dev.claudefleet.mobile.ui.AgentViewModel
 import dev.claudefleet.mobile.ui.ConfirmCards
+import dev.claudefleet.mobile.ui.ConfirmsBanner
+import dev.claudefleet.mobile.ui.ConfirmsScreen
+import dev.claudefleet.mobile.ui.classicSessionsBadge
 import dev.claudefleet.mobile.ui.ControlChrome
 import dev.claudefleet.mobile.ui.ControlForms
 import dev.claudefleet.mobile.ui.ControlHeader
@@ -929,6 +932,26 @@ private fun FleetRoute(
     val control = remember(repository, scope) {
         ControlViewModel(repository, container.controlActions, container.agentActions, scope, credentials.canWrite)
     }
+    // The Classic bar has no Control tab, so its confirms are followed here,
+    // on every screen while the app is in front: the Sessions badge counts
+    // them and the list's banner opens Screen.Confirms.
+    val classicConfirms = remember(repository, scope) {
+        ControlViewModel(
+            repository,
+            container.controlActions,
+            container.agentActions,
+            scope,
+            credentials.canWrite,
+            pollMs = ControlViewModel.CLASSIC_CONFIRM_POLL_MS,
+        )
+    }
+    if (layout == PhoneLayout.Classic) {
+        LifecycleStartEffect(classicConfirms) {
+            classicConfirms.attach()
+            onStopOrDispose { classicConfirms.detach() }
+        }
+    }
+    val classicConfirmsState by classicConfirms.state.collectAsState()
     val agent = remember(repository, scope) {
         AgentViewModel(
             fleet = repository,
@@ -1118,8 +1141,9 @@ private fun FleetRoute(
                                     Tab.Hosts -> FleetIcons.Hosts
                                     else -> FleetIcons.Settings
                                 }
-                                if (entry == Tab.Sessions && attention.attentionCount > 0) {
-                                    BadgedBox(badge = { Badge { Text("${attention.attentionCount}") } }) {
+                                val waiting = classicSessionsBadge(attention.attentionCount, classicConfirmsState.confirms.size)
+                                if (entry == Tab.Sessions && waiting > 0) {
+                                    BadgedBox(badge = { Badge { Text("$waiting") } }) {
                                         Icon(icon, contentDescription = entry.name)
                                     }
                                 } else if (entry == Tab.Work && workState.reviewCount > 0) {
@@ -1229,13 +1253,18 @@ private fun FleetRoute(
                             ),
                         )
                     } else {
-                        SessionsScreen(
-                            state = state,
-                            agent = agentState,
-                            bulk = bulkState,
-                            hits = hits,
-                            handlers = sessionsHandlers,
-                        )
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            ConfirmsBanner(classicConfirmsState.confirms.size, onOpen = nav::openConfirms)
+                            Box(modifier = Modifier.weight(1f)) {
+                                SessionsScreen(
+                                    state = state,
+                                    agent = agentState,
+                                    bulk = bulkState,
+                                    hits = hits,
+                                    handlers = sessionsHandlers,
+                                )
+                            }
+                        }
                     }
                     if (state.filtersOpen) {
                         SessionFiltersSheet(
@@ -1887,6 +1916,15 @@ private fun FleetRoute(
                             onNewInControl = if (agentState.available) ({ agent.open(); Unit }) else null,
                             onDismissError = missions::dismissError,
                         ),
+                    )
+                }
+                Screen.Confirms -> {
+                    // Classic only; on the New bar the same cards are on Control.
+                    ConfirmsScreen(
+                        state = classicConfirmsState,
+                        onBack = { nav.back() },
+                        onAnswer = { nonce, ok -> classicConfirms.answer(nonce, ok) },
+                        onDismissError = classicConfirms::dismissError,
                     )
                 }
                 Screen.Trackers -> {

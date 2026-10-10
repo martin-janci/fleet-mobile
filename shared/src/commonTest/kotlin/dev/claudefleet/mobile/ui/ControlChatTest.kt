@@ -206,6 +206,44 @@ class ControlChatTest {
         vm.detach()
     }
 
+    /**
+     * The Classic bar follows confirms at a 30 s net: a call that comes in
+     * still shows at once through `confirm:changed`, and its answer takes it
+     * off the badge's count.
+     */
+    @Test
+    fun the_classic_poll_is_slow_but_a_frame_still_shows_a_call_at_once() = runTest {
+        val fake = FakeControl(OperatorStatus(ready = false))
+        fake.confirms = emptyList()
+        val fleet = ControlFleet(CONTROL_TOOLS)
+        val vm = ControlViewModel(fleet, fake, fake, backgroundScope, canWrite = true, pollMs = ControlViewModel.CLASSIC_CONFIRM_POLL_MS)
+        vm.attach()
+        runCurrent()
+        assertEquals(0, vm.state.value.confirms.size)
+
+        fake.confirms = listOf(ConfirmRequest(nonce = "n9", tool = "kill_session", summary = "Stop pine/api", caller = "ci-bot"))
+        advanceTimeBy(10_000)
+        runCurrent()
+        assertEquals(0, vm.state.value.confirms.size, "no read before the slow poll")
+        fleet.confirmFrames.emit(Unit)
+        runCurrent()
+        assertEquals(listOf("n9"), vm.state.value.confirms.map { it.nonce })
+        assertEquals(3, classicSessionsBadge(attention = 2, confirms = vm.state.value.confirms.size))
+
+        vm.answer("n9", true)!!.join()
+        runCurrent()
+        assertEquals(listOf("n9" to true), fake.answers)
+        assertEquals(0, vm.state.value.confirms.size)
+        vm.detach()
+    }
+
+    @Test
+    fun the_banner_counts_calls_in_words() {
+        assertEquals("1 call waits for your OK", confirmsWaitingLine(1))
+        assertEquals("3 calls wait for your OK", confirmsWaitingLine(3))
+        assertEquals(0, classicSessionsBadge(0, 0))
+    }
+
     @Test
     fun an_answer_goes_on_the_tap_and_takes_its_card_away() = runTest {
         val fake = FakeControl(OperatorStatus(ready = true, session = SessionRow(id = 5)))
