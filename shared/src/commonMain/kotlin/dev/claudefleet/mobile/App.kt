@@ -115,10 +115,12 @@ import dev.claudefleet.mobile.ui.AddProjectStep
 import dev.claudefleet.mobile.ui.AgentViewModel
 import dev.claudefleet.mobile.ui.ConfirmCards
 import dev.claudefleet.mobile.ui.ControlChrome
+import dev.claudefleet.mobile.ui.ControlForms
 import dev.claudefleet.mobile.ui.ControlHeader
 import dev.claudefleet.mobile.ui.ControlViewModel
 import dev.claudefleet.mobile.ui.ControlViews
 import dev.claudefleet.mobile.ui.ControlWaiting
+import dev.claudefleet.mobile.ui.controlForms
 import dev.claudefleet.mobile.ui.HandoffChips
 import dev.claudefleet.mobile.ui.FilesHandlers
 import dev.claudefleet.mobile.ui.FilesScreen
@@ -1727,6 +1729,18 @@ private fun FleetRoute(
                     val controlAccess by repository.access.collectAsState()
                     val subtitle = "${remember(controlRows, controlAccess) { inboxRows(controlRows, controlAccess).size }} need you"
                     val controlPrs by pullRequests.state.collectAsState()
+                    val controlStatus by repository.status.collectAsState()
+                    // Other sessions' waiting forms, answered from Control's chat (G5.2).
+                    val otherForms: @Composable () -> Unit = {
+                        if (settingsCaps.ask) {
+                            ControlForms(
+                                rows = remember(controlRows, controlState.sessionId) { controlForms(controlRows, controlState.sessionId) },
+                                actions = container.chatFormActions,
+                                canAnswer = credentials.canWrite && controlStatus is ConnectionStatus.Connected,
+                                onOpenSession = nav::open,
+                            )
+                        }
+                    }
                     val views: @Composable () -> Unit = {
                         ControlViews(
                             sessions = attention.total,
@@ -1759,6 +1773,7 @@ private fun FleetRoute(
                                     },
                                     aboveComposer = {
                                         HandoffChips(controlState.handoffs, onOpenSession = nav::open)
+                                        otherForms()
                                         ConfirmCards(controlState) { nonce, ok -> control.answer(nonce, ok) }
                                     },
                                 ),
@@ -1772,7 +1787,10 @@ private fun FleetRoute(
                             onWake = { control.wake() },
                             onAnswer = { nonce, ok -> control.answer(nonce, ok) },
                             onDismissError = control::dismissError,
-                            below = { TipFor(Tip.CONTROL, help, helpSettings) },
+                            below = {
+                                otherForms()
+                                TipFor(Tip.CONTROL, help, helpSettings)
+                            },
                             onRetry = { control.refresh() },
                         )
                     }

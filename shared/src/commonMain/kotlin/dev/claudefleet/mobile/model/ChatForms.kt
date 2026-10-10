@@ -4,8 +4,10 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 
 /*
  * Chat forms (claude-fleet contract revision 9, `docs/forms.md`): an agent's
@@ -39,6 +41,20 @@ data class FormView(
     val note: String? = null,
     @SerialName("created_at") val createdAt: Long = 0,
     @SerialName("decided_at") val decidedAt: Long? = null,
+    /** An answered form's answers, never a secret's value. */
+    val answers: JsonObject? = null,
+    /** An answered form's secrets: field name to the file on the session's host. */
+    val secrets: Map<String, String>? = null,
+    /** What Jev proposes for the form's first choice while it waits (J5, assist mode); a person still answers. */
+    val proposal: FormProposal? = null,
+)
+
+/** The hub's `FormProposal`: Jev's likely value for one select of a waiting form. */
+@Serializable
+data class FormProposal(
+    val field: String,
+    val value: String,
+    val source: String = "jev",
 )
 
 /** One answer the hub refused, from an `E_INVALID`'s `details.problems`. */
@@ -70,3 +86,92 @@ fun formOutcome(form: FormView): String {
 /** The answers to send: the shown fields' values, in form order, never a disabled field's. */
 fun formAnswers(form: ReplyForm, values: Map<String, JsonElement>): Map<String, JsonElement> =
     answerable(form, values).mapNotNull { f -> values[f.name]?.let { f.name to it } }.toMap()
+
+/** One select's proposed option, as the card draws it: chosen while the field is empty, "Proposed by Jev · why · Change". */
+data class FormPick(val field: String, val value: String, val by: String, val reason: String?)
+
+/**
+ * Each select's proposal, as the desktop's `FormWizard` picks it: Jev's
+ * (`FormView.proposal`) first, else the option the spec marks `proposed`.
+ * Never for a disabled field, one the person already changed ([dismissed]),
+ * a value the field does not offer, or an option AI never picks ([riskyChoice]).
+ */
+fun formPicks(form: ReplyForm, proposal: FormProposal?, dismissed: Set<String> = emptySet()): Map<String, FormPick> =
+    form.steps.flatMap { it.fields }
+        .filter { it.type == "select" && it.disabledReason == null && it.name !in dismissed }
+        .mapNotNull { f ->
+            fun safe(value: String): Boolean {
+                val label = f.options.firstOrNull { it.first == value }?.second ?: return false
+                return !riskyChoice(label) && !riskyChoice(value)
+            }
+            val jev = proposal?.takeIf { it.field == f.name && safe(it.value) }
+            val spec = f.proposed?.takeIf { safe(it.value) }
+            when {
+                jev != null -> FormPick(f.name, jev.value, jev.source, null)
+                spec != null -> FormPick(f.name, spec.value, spec.by, spec.reason)
+                else -> null
+            }
+        }
+        .associateBy { it.field }
+
+/** Who proposed it, in words: "Jev", "a rule", "AI". */
+fun proposerWord(by: String): String = when (by) {
+    "jev" -> "Jev"
+    "rule" -> "a rule"
+    "llm" -> "AI"
+    else -> by
+}
+
+/** The line under a proposed choice: "Proposed by Jev · you used it for the last three deploys". */
+fun pickLine(pick: FormPick): String = "Proposed by ${proposerWord(pick.by)}" + pick.reason?.let { " · $it" }.orEmpty()
+
+/** A select's options in the order shown: the proposed one first, the rest as the form wrote them. */
+fun orderedOptions(f: ReplyField, pick: FormPick?): List<Pair<String, String>> {
+    val first = pick?.value ?: return f.options
+    return f.options.filter { it.first == first } + f.options.filter { it.first != first }
+}
+
+/**
+ * An answered form's answers, label over value, in form order: an option's
+ * label, Yes or No, a list joined, a secret as "Saved on the host". The
+ * card's View.
+ */
+fun answerLines(form: ReplyForm, view: FormView): List<Pair<String, String>> {
+    val answers: Map<String, JsonElement> = view.answers.orEmpty()
+    val secrets = view.secrets.orEmpty()
+    return visibleFields(form, answers).flatMap { it.second }.filter { it.disabledReason == null }.mapNotNull { f ->
+        when {
+            f.type == "secret" -> if (f.name in secrets) f.label to "Saved on the host" else null
+            else -> answers[f.name]?.takeIf { it !is JsonNull }?.let { f.label to answerWords(f, it) }
+        }
+    }
+}
+
+/** How many answers the folded line names before "+N more". */
+private const val SUMMARY_PARTS = 3
+
+/**
+ * An answered form in a few words, as the board folds it:
+ * "mercury · 2 tickets · token saved". A choice by its label, a list by its
+ * count, a yes by the field's name, a secret as saved; a no says nothing.
+ */
+fun answerSummary(form: ReplyForm, view: FormView): String? {
+    val answers: Map<String, JsonElement> = view.answers.orEmpty()
+    val secrets = view.secrets.orEmpty()
+    val parts = visibleFields(form, answers).flatMap { it.second }.filter { it.disabledReason == null }.mapNotNull { f ->
+        if (f.type == "secret") return@mapNotNull if (f.name in secrets) "${f.label.lowercase()} saved" else null
+        val v = answers[f.name]?.takeIf { it !is JsonNull } ?: return@mapNotNull null
+        when {
+            f.type == "bool" -> f.label.lowercase().takeIf { (v as? JsonPrimitive)?.booleanOrNull == true }
+            v is JsonArray -> when (v.size) {
+                0 -> null
+                1 -> answerWords(f, v)
+                else -> "${v.size} ${f.label.lowercase()}"
+            }
+            else -> answerWords(f, v).let { if (it.length > 28) it.take(27) + "…" else it }.takeIf { it.isNotBlank() }
+        }
+    }
+    if (parts.isEmpty()) return null
+    val more = parts.size - SUMMARY_PARTS
+    return parts.take(SUMMARY_PARTS).joinToString(" · ") + if (more > 0) " · +$more more" else ""
+}

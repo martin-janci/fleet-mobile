@@ -96,7 +96,12 @@ data class ReplyField(
     val draftedFrom: String? = null,
     /** secret: where the value goes, shown under the field (contract 15). */
     val secretNote: String? = null,
+    /** select: the option the form marks as the likely choice, `{by, reason}` (contract 15); at most one. */
+    val proposed: OptionProposal? = null,
 )
+
+/** A select option the form proposes: who (`rule`, `jev` or `llm`) and why. */
+data class OptionProposal(val value: String, val by: String, val reason: String)
 
 data class ReplyStep(
     val title: String,
@@ -608,6 +613,7 @@ private fun checkForm(v: JsonElement?, p: Problems, ask: Boolean = false): Reply
                 p.add(fat, "type ${f["type"] ?: "undefined"} is not a field type")
             }
             val details = mutableMapOf<String, String>()
+            var proposed: OptionProposal? = null
             val options = if (type == "select" || type == "multiselect") {
                 arr(f, "options", p, fat, 1, 50).mapIndexedNotNull { k, o ->
                     // `[value, label]`, or `{value, label, detail?, proposed?}` (contract 15).
@@ -620,6 +626,11 @@ private fun checkForm(v: JsonElement?, p: Problems, ask: Boolean = false): Reply
                         null
                     } else {
                         if (obj != null) str(obj, "detail", p, "$fat › option ${k + 1}", 200)?.let { details[a] = it }
+                        (obj?.get("proposed") as? JsonObject)?.let { po ->
+                            val by = po["by"].stringOrNull()
+                            val reason = po["reason"].stringOrNull()
+                            if (by != null && reason != null && proposed == null) proposed = OptionProposal(a, by, reason.take(500))
+                        }
                         a to b
                     }
                 }
@@ -649,6 +660,7 @@ private fun checkForm(v: JsonElement?, p: Problems, ask: Boolean = false): Reply
                 draftedBy = drafted?.let { str(it, "by", p, "$fat › drafted", 200) },
                 draftedFrom = drafted?.let { str(it, "from", p, "$fat › drafted", 200) },
                 secretNote = str(f, "secret_note", p, fat, 500),
+                proposed = proposed.takeIf { type == "select" },
             )
         }
         ReplyStep(stitle, sintro, s["when"], fs, name = sname, review = review)
@@ -887,7 +899,7 @@ fun reviewLines(form: ReplyForm, values: Map<String, JsonElement>, reviewStep: R
     return out
 }
 
-private fun answerWords(f: ReplyField, v: JsonElement): String {
+internal fun answerWords(f: ReplyField, v: JsonElement): String {
     fun option(x: String) = f.options.firstOrNull { it.first == x }?.second ?: x
     return when {
         f.type == "secret" -> "••••••"

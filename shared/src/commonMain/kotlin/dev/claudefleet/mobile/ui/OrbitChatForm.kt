@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -42,6 +43,8 @@ import dev.claudefleet.mobile.model.PendingForm
 import dev.claudefleet.mobile.model.ReplyField
 import dev.claudefleet.mobile.model.ReplyForm
 import dev.claudefleet.mobile.model.ReplyStep
+import dev.claudefleet.mobile.model.answerLines
+import dev.claudefleet.mobile.model.answerSummary
 import dev.claudefleet.mobile.model.fieldMissing
 import dev.claudefleet.mobile.model.reviewLines
 import dev.claudefleet.mobile.model.visibleFields
@@ -50,6 +53,7 @@ import dev.claudefleet.mobile.ui.components.Note
 import dev.claudefleet.mobile.ui.components.ReviewLines
 import dev.claudefleet.mobile.ui.components.parseNumber
 import dev.claudefleet.mobile.ui.kit.Atom
+import dev.claudefleet.mobile.ui.kit.Comet
 import dev.claudefleet.mobile.ui.kit.StepBars
 import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 import dev.claudefleet.mobile.ui.theme.Fleet
@@ -116,6 +120,18 @@ fun formOutcomeLine(form: FormView): String {
     }
 }
 
+/** The paged form's first Back: the whole screen goes back to the chat, a sheet closes. */
+fun firstBackLabel(index: Int, full: Boolean): String = when {
+    index > 0 -> "Back"
+    full -> "Chat"
+    else -> "Close"
+}
+
+internal const val FORM_SUMMARY = "form-summary"
+internal const val FORM_VIEW = "form-view"
+internal const val FORM_CHAT = "form-chat"
+internal const val FORM_ASKED_BY = "form-asked-by"
+internal const val FORM_SENDING = "form-sending"
 internal const val FORM_OPEN = "form-open"
 internal const val FORM_BUILDING = "form-building"
 internal const val FORM_PAGE = "form-page"
@@ -145,6 +161,7 @@ internal fun OrbitChatFormCard(
     val s by model.state.collectAsState()
     var numberText by remember(pending.formId) { mutableStateOf(mapOf<String, String>()) }
     var paging by remember(pending.formId) { mutableStateOf(false) }
+    var viewing by remember(pending.formId) { mutableStateOf(false) }
     val form = s.form
     val spec = s.spec
 
@@ -177,6 +194,15 @@ internal fun OrbitChatFormCard(
                         if (!open) TextButton(onClick = onDismiss) { Text("Dismiss") }
                     }
                     form.note?.takeIf { form.state == "declined" }?.let { Note("“$it”") }
+                    // Answered: what was answered in a few words, and View for all of it (MobileChatForms).
+                    if (form.state == "answered" && spec != null) {
+                        val summary = answerSummary(spec, form)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(summary.orEmpty(), style = Fleet.type.textSm, color = o.fgMuted, modifier = Modifier.weight(1f).testTag(FORM_SUMMARY))
+                            TextButton(onClick = { viewing = !viewing }, modifier = Modifier.testTag(FORM_VIEW)) { Text(if (viewing) "Hide" else "View") }
+                        }
+                        if (viewing) ReviewLines(answerLines(spec, form))
+                    }
                 }
                 else -> {
                     Text(form.title.ifBlank { pending.title }, style = Fleet.type.textMd, color = o.fg)
@@ -196,7 +222,7 @@ internal fun OrbitChatFormCard(
                                     onClick = { model.answer() },
                                     enabled = !s.busy && s.ready,
                                     modifier = Modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp).testTag(FORM_ANSWER),
-                                ) { Text(if (s.busy) "Sending…" else spec.submit ?: "Send answers") }
+                                ) { if (s.busy) SendingLabel() else Text(spec.submit ?: "Send answers") }
                             }
                         } else {
                             val count = formPages(spec, s.values).size
@@ -218,6 +244,8 @@ internal fun OrbitChatFormCard(
                                         numberText = numberText,
                                         onNumberText = { n, t -> numberText = numberText + (n to t) },
                                         full = size == FormSize.Full,
+                                        askedBy = sessionName,
+                                        why = form.why,
                                         onClose = { paging = false },
                                     )
                                 }
@@ -259,6 +287,16 @@ private fun FormBuilding(title: String, from: String) {
                     .background(o.fgMuted.copy(alpha = 0.14f), RoundedCornerShape(4.dp)),
             )
         }
+    }
+}
+
+/** A send in flight: the Comet beside "Sending…", as the board draws the button (MobileChatForms). */
+@Composable
+internal fun SendingLabel() {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.testTag(FORM_SENDING)) {
+        Comet(size = 14.dp)
+        Spacer(Modifier.width(6.dp))
+        Text("Sending…")
     }
 }
 
@@ -307,6 +345,8 @@ private fun FormFields(
                 model.set(f.name, if (t.isBlank()) null else parseNumber(f, t))
             },
             onChange = { model.set(f.name, it) },
+            pick = s.picks[f.name],
+            onChangePick = { model.changePick(f.name) },
         )
         s.problemFor(f.name)?.let { Text(it, style = Fleet.type.textSm, color = Fleet.colors.danger) }
     }
@@ -321,6 +361,8 @@ private fun PagedForm(
     numberText: Map<String, String>,
     onNumberText: (String, String) -> Unit,
     full: Boolean,
+    askedBy: String,
+    why: String?,
     onClose: () -> Unit,
 ) {
     val o = Fleet.colors
@@ -339,9 +381,21 @@ private fun PagedForm(
             .testTag(FORM_PAGE),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(spec.title, style = Fleet.type.textMd, color = o.fg, modifier = Modifier.weight(1f))
-            Text("Step ${index + 1} of ${pages.size}", style = Fleet.type.textSm, color = o.fgMuted)
+        if (full) {
+            // The whole screen: back to the chat, who asked and why, above the steps (MobileChatForms).
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onClose, enabled = !s.busy, modifier = Modifier.testTag(FORM_CHAT)) { Text("‹ Chat") }
+                Spacer(Modifier.weight(1f))
+                Text("Step ${index + 1} of ${pages.size}", style = Fleet.type.textSm, color = o.fgMuted)
+            }
+            Text(spec.title, style = Fleet.type.textMd, color = o.fg)
+            Text("Asked by $askedBy", style = Fleet.type.textSm, color = o.fgMuted, modifier = Modifier.testTag(FORM_ASKED_BY))
+            why?.let { Text(it, style = Fleet.type.textSm, color = o.fg2) }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(spec.title, style = Fleet.type.textMd, color = o.fg, modifier = Modifier.weight(1f))
+                Text("Step ${index + 1} of ${pages.size}", style = Fleet.type.textSm, color = o.fgMuted)
+            }
         }
         StepBars(step = index + 1, total = pages.size, gutter = false)
         Column(
@@ -362,13 +416,13 @@ private fun PagedForm(
                 onClick = { if (index == 0) onClose() else at = index - 1 },
                 enabled = !s.busy,
                 modifier = Modifier.testTag(FORM_BACK),
-            ) { Text(if (index == 0) "Close" else "Back") }
+            ) { Text(firstBackLabel(index, full)) }
             Spacer(Modifier.weight(1f))
             Button(
                 onClick = { if (last) model.answer() else at = index + 1 },
                 enabled = !s.busy && missing == null && (!last || s.ready),
                 modifier = Modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp).testTag(FORM_NEXT),
-            ) { Text(if (s.busy) "Sending…" else pageButton(missing, last, spec.submit)) }
+            ) { if (s.busy) SendingLabel() else Text(pageButton(missing, last, spec.submit)) }
         }
         Spacer(Modifier.padding(bottom = 12.dp))
     }

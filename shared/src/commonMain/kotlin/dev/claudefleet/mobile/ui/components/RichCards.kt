@@ -68,6 +68,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import dev.claudefleet.mobile.model.FormPick
 import dev.claudefleet.mobile.model.ReplyField
 import dev.claudefleet.mobile.model.ReplyForm
 import dev.claudefleet.mobile.model.RichSegment
@@ -77,6 +78,8 @@ import dev.claudefleet.mobile.model.fenced
 import dev.claudefleet.mobile.model.fieldMissing
 import dev.claudefleet.mobile.model.formAnswerPrompt
 import dev.claudefleet.mobile.model.formDefaults
+import dev.claudefleet.mobile.model.orderedOptions
+import dev.claudefleet.mobile.model.pickLine
 import dev.claudefleet.mobile.model.splitRich
 import dev.claudefleet.mobile.model.reviewLines
 import dev.claudefleet.mobile.model.visibleFields
@@ -793,6 +796,9 @@ internal fun FieldView(
     enabled: Boolean,
     onNumberText: (String) -> Unit,
     onChange: (JsonElement?) -> Unit,
+    /** A select's proposed option ([formPicks]): drawn first, and while chosen, who proposed it and why with Change. */
+    pick: FormPick? = null,
+    onChangePick: (() -> Unit)? = null,
 ) {
     val label = f.label + if (f.required && f.type != "bool") " *" else ""
     val str = (value as? JsonPrimitive)?.takeIf { it.isString }?.content ?: ""
@@ -819,7 +825,7 @@ internal fun FieldView(
                     else -> emptySet()
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for ((v, l) in f.options) {
+                    for ((v, l) in orderedOptions(f, pick)) {
                         FilterChip(
                             selected = v in picked,
                             enabled = canEdit,
@@ -892,11 +898,27 @@ internal fun FieldView(
             )
         }
         f.help?.let { Note(it) }
-        f.secretNote?.takeIf { f.type == "secret" }?.let { Note(it) }
+        if (f.type == "secret") Note(f.secretNote ?: SECRET_NOTE)
+        if (pick != null && str == pick.value) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    pickLine(pick),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f).testTag(FORM_PROPOSED + f.name),
+                )
+                if (onChangePick != null) TextButton(onClick = onChangePick, enabled = canEdit) { Text("Change") }
+            }
+        }
         if (f.draftedBy != null && f.draftedFrom != null && value == f.value) Note("Drafted by ${f.draftedBy} from ${f.draftedFrom}")
         f.disabledReason?.let { Note(it) }
     }
 }
+
+/** Where a secret goes when the form says nothing of it: the hub writes it to a file on the session's host. */
+internal const val SECRET_NOTE = "Stays on the hub and the session's host, never in the chat."
+
+internal const val FORM_PROPOSED = "form-proposed-"
 
 /** A review step (contract 15): the answers so far, label over value. */
 @Composable
