@@ -114,3 +114,59 @@ fun branchLine(b: BranchDiff): String? {
     val behind = b.behindBase?.takeIf { base != null && it > 0 }?.let { "$it behind $base" }
     return listOfNotNull(unpushed, ahead, behind).joinToString(" · ").ifEmpty { null }
 }
+
+/**
+ * A ticket named in a commit message: a tracker key (`FLEET-142`) or a GitHub
+ * issue number (`#88`), and where it sits in the text ([start] inclusive,
+ * [end] exclusive), so the commit screen can draw it as a link.
+ */
+data class TicketRef(val key: String, val start: Int, val end: Int)
+
+/**
+ * Tracker keys — a capital, one to nine more capitals or digits, a dash, a
+ * number — and `#N`. Whether one stands alone (not inside `abc-FOO-1` or
+ * `a#1`) is checked by hand in [ticketRefs], which keeps the pattern free of
+ * look-arounds every platform's regex engine reads alike.
+ */
+private val TICKET_REF = Regex("""(?:[A-Z][A-Z0-9]{1,9}-[0-9]+|#[0-9]+)""")
+
+/** What may not touch a ticket ref on either side for it to stand alone. */
+private fun joins(c: Char): Boolean = c.isLetterOrDigit() || c == '_' || c == '-' || c == '#' || c == '/'
+
+/** Every ticket named in [text], in order. Words like `UTF-8` or `SHA-256` are not tickets. */
+fun ticketRefs(text: String): List<TicketRef> =
+    TICKET_REF.findAll(text)
+        .filter { m ->
+            val before = m.range.first - 1
+            val after = m.range.last + 1
+            (before < 0 || !joins(text[before])) && (after >= text.length || !joins(text[after]))
+        }
+        .filter { m -> m.value.startsWith("#") || m.value.substringBefore('-') !in NOT_TICKETS }
+        .map { TicketRef(it.value, it.range.first, it.range.last + 1) }
+        .toList()
+
+/** Prefixes that look like a tracker key and are not one. */
+private val NOT_TICKETS = setOf("UTF", "SHA", "ISO", "RFC", "HTTP", "TLS", "CVE", "PEP", "MD", "AES", "RSA", "UUID", "IPV")
+
+/**
+ * Where a ticket named in a commit opens, or null when the phone does not
+ * know: the session's own ticket ([work]) opens at the tracker's link the hub
+ * stamped on it, and `#N` opens on the project's GitHub. Another tracker's key
+ * has no address the phone could build, so it stays plain text.
+ */
+fun ticketRefUrl(key: String, work: WorkSummary?, project: ProjectRow?): String? {
+    val workKey = work?.key
+    if (workKey != null && workKey.equals(key, ignoreCase = true)) return work?.url?.takeIf { it.isNotBlank() }
+    if (key.startsWith("#")) return githubRepoUrl(project)?.let { "$it/issues/${key.drop(1)}" }
+    return null
+}
+
+/** The project on GitHub, `https://github.com/owner/repo`; null without both halves. */
+fun githubRepoUrl(project: ProjectRow?): String? {
+    if (project == null || project.owner.isBlank() || project.repo.isBlank()) return null
+    return "https://github.com/${project.owner}/${project.repo}"
+}
+
+/** A commit on GitHub — **Open on GitHub** on the commit screen; null where the project's owner/repo is unknown. */
+fun githubCommitUrl(project: ProjectRow?, hash: String): String? =
+    githubRepoUrl(project)?.takeIf { hash.isNotBlank() }?.let { "$it/commit/$hash" }

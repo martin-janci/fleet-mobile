@@ -2,8 +2,11 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.notify.NotifyKind
 import dev.claudefleet.mobile.notify.NotifyKinds
+import dev.claudefleet.mobile.notify.PhoneQuiet
 import dev.claudefleet.mobile.notify.notifyKinds
+import dev.claudefleet.mobile.notify.phoneQuiet
 import dev.claudefleet.mobile.notify.writeNotifyKinds
+import dev.claudefleet.mobile.notify.writePhoneQuiet
 import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -50,8 +53,8 @@ private const val LOCK_PREF = "phone.lock"
 
 /**
  * The settings that belong to this phone alone (redesign 14.11, "This phone"):
- * which notifications it posts, which theme it draws in, how much it moves,
- * and whether the fingerprint lock is on. Kept on the device, never sent to the hub, and
+ * which notifications it posts and its quiet hours, which theme it draws in,
+ * how much it moves, and whether the fingerprint lock is on. Kept on the device, never sent to the hub, and
  * saved as they change; there is no Save.
  *
  * One instance for the app, held by `AppContainer`, so the theme switch
@@ -67,6 +70,10 @@ class PhoneSettings(private val prefs: Prefs) {
 
     private val _notifyKinds = MutableStateFlow(prefs.notifyKinds())
     val notifyKinds: StateFlow<NotifyKinds> = _notifyKinds.asStateFlow()
+
+    /** This phone's own quiet hours, on top of the fleet's; written through to [Prefs] for the service, like the kinds. */
+    private val _quiet = MutableStateFlow(prefs.phoneQuiet())
+    val quiet: StateFlow<PhoneQuiet> = _quiet.asStateFlow()
 
     /** The fingerprint lock: asked when the app opens and before an answer to a session's question. */
     private val _lock = MutableStateFlow(prefs.getStringList(LOCK_PREF).firstOrNull() == "on")
@@ -94,6 +101,11 @@ class PhoneSettings(private val prefs: Prefs) {
         val next = _notifyKinds.value.with(kind, on)
         prefs.writeNotifyKinds(next)
         _notifyKinds.value = next
+    }
+
+    fun setQuiet(quiet: PhoneQuiet) {
+        prefs.writePhoneQuiet(quiet)
+        _quiet.value = quiet
     }
 
     /**

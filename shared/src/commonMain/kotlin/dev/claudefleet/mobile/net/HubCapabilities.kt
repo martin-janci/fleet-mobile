@@ -130,6 +130,16 @@ data class HubCapabilities(
     val repairSession: Boolean get() = REPAIR_SESSION in tools
     val newBgSession: Boolean get() = NEW_BG_SESSION in tools
 
+    /**
+     * Jev may propose a host (claude-fleet N5, `propose_host_placement`):
+     * the New session wizard's Where step, and a host choice on a form in
+     * Control's chat. Listed to a phone only once the hub opens it to client
+     * tokens (gap plan G7.3). Absent on an older hub and wherever the hub
+     * does not serve it to a phone yet: then the Where step keeps its own
+     * default host, as before.
+     */
+    val proposeHost: Boolean get() = PROPOSE_HOST_PLACEMENT in tools
+
     /** A host's re-probe and its recovery after a reboot; a ghost's recreate or dismissal. */
     val probeHost: Boolean get() = PROBE_HOST in tools
     val restoreSessions: Boolean get() = RESTORE_HOST_SESSIONS in tools
@@ -328,6 +338,7 @@ data class HubCapabilities(
         const val MCP_CONFIRMS = "mcp_confirms"
         const val ANSWER_MCP_CONFIRM = "answer_mcp_confirm"
         const val CONTROL_HANDOFFS = "control_handoffs"
+        const val PROPOSE_HOST_PLACEMENT = "propose_host_placement"
         const val QUICK_REPLIES = "quick_replies"
         const val SESSION_TOOL_DETAIL = "session_tool_detail"
         const val LIST_PAGES = "list_pages"
@@ -406,7 +417,18 @@ data class HubCapabilities(
             "C-o", "C-p", "C-r", "C-t", "C-u", "C-v", "C-w", "C-x", "C-y",
         )
         val ARROW_KEYS: List<String> = listOf("Left", "Up", "Down", "Right")
-        val EXTENDED_PANE_KEYS: Set<String> = (ARROW_KEYS + "BTab" + CTRL_KEYS).toSet()
+
+        /**
+         * The Alt (Meta) chords the bar's ⌥ row offers, in tmux's names (gap
+         * plan G7.3/G7.16): the readline word moves and edits, `M-.` for the
+         * last argument and `M-Enter`, which is a new line in Claude Code's
+         * prompt. Hubs before G7.3 refuse every Meta chord and do not list
+         * one, so the ⌥ cap only appears on a hub whose `keys` enum names one.
+         */
+        val META_KEYS: List<String> = listOf(
+            "M-b", "M-f", "M-d", "M-BSpace", "M-u", "M-l", "M-c", "M-t", "M-y", "M-.", "M-Enter",
+        )
+        val EXTENDED_PANE_KEYS: Set<String> = (ARROW_KEYS + "BTab" + CTRL_KEYS + META_KEYS).toSet()
 
         fun of(catalog: ToolCatalog) =
             HubCapabilities(catalog.names, catalog.actions, params = catalog.params, paramValues = catalog.paramValues)

@@ -45,6 +45,7 @@ import dev.claudefleet.mobile.model.OperatorStatus
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
+import dev.claudefleet.mobile.ui.kit.Atom
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
 import kotlinx.coroutines.CancellationException
@@ -92,6 +93,8 @@ data class ControlUiState(
     val answering: Set<String> = emptySet(),
     /** What Control handed on, oldest first, as chips (redesign 9.3); empty on a hub without the receipts. */
     val handoffs: List<HandoffChip> = emptyList(),
+    /** "Watching CI on #476 and #477" ([watchingCiLine]); null while no handed-on PR's checks run. */
+    val watchingCi: String? = null,
     val error: Friendly? = null,
     /** The stream to the hub is up: while it is not, nothing here can be asked. */
     val connected: Boolean = true,
@@ -181,6 +184,7 @@ class ControlViewModel(
             confirms = if (caps.confirms) l.confirms else emptyList(),
             answering = l.answering,
             handoffs = if (caps.handoffs) handoffChips(l.handoffs, rows) else emptyList(),
+            watchingCi = if (caps.handoffs) watchingCiLine(l.handoffs, rows) else null,
             error = l.error,
             connected = status is ConnectionStatus.Connected,
             statusFailed = l.statusFailed,
@@ -491,6 +495,8 @@ fun ControlWaiting(
 class ControlChrome(
     val header: @Composable () -> Unit,
     val aboveComposer: @Composable () -> Unit,
+    /** What Control's chat lends its own forms ([FormContext]): the session an answer started, Jev's host. */
+    val formContext: FormContext? = null,
 )
 
 /**
@@ -556,10 +562,75 @@ fun handoffChip(h: ControlHandoff, rows: List<SessionRow>): HandoffChip = when (
 }
 
 const val HANDOFF_CHIP_TAG = "control.handoff."
+const val CONTROL_WATCHING_TAG = "control.watching"
+const val CONTROL_TODAY_TAG = "control.today"
+
+/**
+ * What Control watches, in words (MobileControl: "Watching CI on #476 and
+ * #477"): the pull requests of the sessions it handed work to whose checks
+ * still run (`ci_status` pending), lowest number first. Null when none runs:
+ * a green or red CI is the chip's to say, not a watch.
+ */
+fun watchingCiLine(handoffs: List<ControlHandoff>, rows: List<SessionRow>): String? {
+    val handed = handoffs.filter { it.kind == "session" }.mapNotNull { it.sessionId }.toSet()
+    val numbers = rows
+        .filter { it.id in handed && it.ciStatus == "pending" }
+        .mapNotNull { r -> r.prUrl?.substringAfterLast('/')?.takeIf { n -> n.isNotEmpty() && n.all { it.isDigit() } }?.toLongOrNull() }
+        .distinct()
+        .sorted()
+        .map { "#$it" }
+    if (numbers.isEmpty()) return null
+    val list = if (numbers.size == 1) numbers.single() else numbers.dropLast(1).joinToString(", ") + " and " + numbers.last()
+    return "Watching CI on $list"
+}
+
+private val TODAY_WORDS = Regex("""\b(today|this morning)\b""", RegexOption.IGNORE_CASE)
+private val RECAP_WORDS = Regex(
+    """\b(ship|shipped|merge|merged|land|landed|done|did|finish|finished|happen|happened|worked on|progress|recap|summary|summari[sz]e|standup)\b""",
+    RegexOption.IGNORE_CASE,
+)
+
+/**
+ * Whether what the person last asked Control is about their day ("what did
+ * I ship today?"), so the answer offers Open Today (MobileSessionsTools:
+ * "Today opens … from a Control answer"). The hub marks no answer as being
+ * about today, so this reads the question: a word for today and a word for
+ * what got done, both. "Run the tests today" is not a recap.
+ */
+fun asksAboutToday(prompt: String?): Boolean {
+    val p = prompt?.trim().orEmpty()
+    return p.isNotEmpty() && TODAY_WORDS.containsMatchIn(p) && RECAP_WORDS.containsMatchIn(p)
+}
+
+/** Open Today under Control's answer about the day: the same sheet as Inbox's Today. */
+@Composable
+fun TodayLink(onOpen: () -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)) {
+        OutlinedButton(
+            onClick = onOpen,
+            modifier = Modifier.heightIn(min = 36.dp).testTag(CONTROL_TODAY_TAG),
+        ) { Text("Open Today ›") }
+    }
+}
 
 /** Control's recent handoffs, above its confirms: "Sent to api · Working". A session's chip opens it. */
 @Composable
-fun HandoffChips(chips: List<HandoffChip>, onOpenSession: (Long) -> Unit) {
+fun HandoffChips(
+    chips: List<HandoffChip>,
+    onOpenSession: (Long) -> Unit,
+    /** What Control watches now ([watchingCiLine]), with the kit's Atom; null draws none. */
+    watching: String? = null,
+) {
+    if (watching != null) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag(CONTROL_WATCHING_TAG),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Atom(size = 18.dp)
+            Text(watching, style = Fleet.type.textSm, color = Fleet.colors.fgMuted)
+        }
+    }
     if (chips.isEmpty()) return
     val o = Fleet.colors
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {

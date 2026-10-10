@@ -13,7 +13,11 @@ import kotlinx.serialization.Serializable
  * that, so it can say why a box is dark rather than letting a tap be refused.
  */
 
-/** The three grantable levels, narrowest first. "own" is not one: it is never granted. */
+/**
+ * The three grantable levels, narrowest first. "own" is not one: it is never
+ * granted. The values are the hub's wire words; what a person reads is
+ * [word] — the top level is sent as `drive` and named **Steer** (MobileFormsWork).
+ */
 object GrantLevel {
     const val WATCH = "watch"
     const val ANSWER = "answer"
@@ -22,19 +26,23 @@ object GrantLevel {
     /** Every level a share may be made at, narrowest first. */
     val ALL: List<String> = listOf(WATCH, ANSWER, DRIVE)
 
-    /** The capitalised word a level is drawn as. */
+    /** The capitalised word a level is drawn as: Watch, Answer, Steer. */
     fun word(level: String): String = when (level) {
         WATCH -> "Watch"
         ANSWER -> "Answer"
-        DRIVE -> "Drive"
+        DRIVE -> "Steer"
         else -> level.replaceFirstChar { it.uppercase() }
     }
 
-    /** What each level lets the person do, as the share sheet offers it (the desktop's words). */
+    /** A level as the share sheet's "They can" offers it: Watch, Answer questions, Steer. */
+    fun choice(level: String): String = when (level) {
+        ANSWER -> "Answer questions"
+        else -> word(level)
+    }
+
+    /** What a level adds beyond its name, beside it in the share sheet ("Steer · send prompts"); empty when the name says it. */
     fun detail(level: String): String = when (level) {
-        WATCH -> "read only"
-        ANSWER -> "can answer its questions"
-        DRIVE -> "can send prompts"
+        DRIVE -> "send prompts"
         else -> ""
     }
 }
@@ -139,9 +147,9 @@ sealed interface ShareTo {
  */
 fun sharedSentence(level: String): String = when (level) {
     GrantLevel.ANSWER ->
-        "Shared with you to answer. You can answer the questions it asks; sending a prompt needs drive, which only its owner can grant."
+        "Shared with you to answer. You can answer the questions it asks; sending a prompt needs steer, which only its owner can grant."
     GrantLevel.DRIVE ->
-        "Shared with you to drive. You can send it prompts; renaming, moving, stopping or sharing it stays with its owner."
+        "Shared with you to steer. You can send it prompts; renaming, moving, stopping or sharing it stays with its owner."
     else ->
-        "Shared with you to watch. Watch is read-only: answering its questions needs answer, and sending a prompt needs drive, which only its owner can grant."
+        "Shared with you to watch. Watch is read-only: answering its questions needs answer, and sending a prompt needs steer, which only its owner can grant."
 }

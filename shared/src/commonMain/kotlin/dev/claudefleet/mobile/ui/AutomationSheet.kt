@@ -68,7 +68,7 @@ fun AutomationSheet(state: AutomationUiState, nowSeconds: Long, handlers: Automa
     val detail = state.detail
     BottomSheet(
         title = detail?.routine?.name ?: "Automation",
-        meta = if (detail == null) automationLine(state.routines, state.paused) else null,
+        meta = if (detail == null) automationLine(state.routines, state.paused, state.spentToday) else null,
         onDismiss = handlers.onClose,
         cancelLabel = "Close",
     ) {
@@ -102,19 +102,28 @@ fun AutomationSheet(state: AutomationUiState, nowSeconds: Long, handlers: Automa
         }
     }
     if (confirmPause) {
-        AlertDialog(
-            onDismissRequest = { confirmPause = false },
-            title = { Text("Pause all automation?") },
-            text = {
-                Text(
-                    "Routines stop starting runs, missions stop starting steps, and the background jobs that act on their own stand still. " +
-                        "Sessions already working finish their current turn. Resume here or on the desktop; nothing is lost.",
-                )
-            },
-            confirmButton = { DangerTextButton(onClick = { confirmPause = false; handlers.onSetPaused(true) }) { Text("Pause all") } },
-            dismissButton = { TextButton(onClick = { confirmPause = false }) { Text("Cancel") } },
-        )
+        PauseAllQuestion(onPause = { confirmPause = false; handlers.onSetPaused(true) }, onDismiss = { confirmPause = false })
     }
+}
+
+/**
+ * Pause all asks first, from the sheet and from More's Automation row alike:
+ * what stops, what finishes, and that nothing is lost.
+ */
+@Composable
+fun PauseAllQuestion(onPause: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Pause all automation?") },
+        text = {
+            Text(
+                "Routines stop starting runs, missions stop starting steps, and the background jobs that act on their own stand still. " +
+                    "Sessions already working finish their current turn. Resume here or on the desktop; nothing is lost.",
+            )
+        },
+        confirmButton = { DangerTextButton(onClick = onPause) { Text("Pause all") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable

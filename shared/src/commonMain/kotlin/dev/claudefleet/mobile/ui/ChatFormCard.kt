@@ -76,9 +76,11 @@ fun ChatFormCard(
      * Read once, when the card first reads the form.
      */
     seed: Map<String, JsonElement> = emptyMap(),
+    /** What Control's chat lends its forms ([FormContext]): the work an answer started, Jev's host; null lends none. */
+    formContext: FormContext? = null,
 ) {
     if (orbit && actions != null) {
-        OrbitChatFormCard(pending, sessionName, actions, canAnswer, open, onDismiss, onAskAgain, modifier, seed)
+        OrbitChatFormCard(pending, sessionName, actions, canAnswer, open, onDismiss, onAskAgain, modifier, seed, formContext)
         return
     }
     val colors = MaterialTheme.colorScheme

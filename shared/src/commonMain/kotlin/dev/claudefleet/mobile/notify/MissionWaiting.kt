@@ -16,9 +16,46 @@ const val MISSION_WAITING_REASON: String = "mission_waiting"
 /**
  * One "a mission waits for you" notification (board MobileControl: "Mission
  * waits for you to sign the autonomy grant"). It says what, never answers it:
- * a tap opens the app, where the grant is reviewed and signed.
+ * a tap, or its one button ([missionWaitActions]), opens the app on that
+ * mission, its grant card first, where the grant is reviewed and signed.
+ * [reason] is the hub's `waiting_on.reason`, which names the button.
  */
-data class MissionWaitAlert(val missionId: Long, val title: String, val text: String)
+data class MissionWaitAlert(val missionId: Long, val title: String, val text: String, val reason: String = "")
+
+/** Open the mission the notification is about, at what it waits for. */
+const val MISSION_ACTION_REVIEW: String = "review_mission"
+
+/** The categories a mission's notification is posted in (iOS fixes a button's word per category). */
+const val MISSION_CATEGORY: String = "mission_waiting"
+
+/** The category for a wait of [reason]: one per button word, so a question never reads Review grant. */
+fun missionCategory(reason: String): String = MISSION_CATEGORY + "_" + when (reason) {
+    "sign_grant" -> "grant"
+    "question" -> "question"
+    else -> "other"
+}
+
+/** Every mission category with its button — what iOS registers beside the "needs you" ones. */
+fun missionCategories(): Map<String, List<NotifyAction>> =
+    listOf("sign_grant", "question", "confirm").associate { r -> missionCategory(r) to missionWaitActions(MissionWaitAlert(0, "", "", r)) }
+
+/**
+ * The button on a mission's notification, named for what it waits on: Review
+ * grant for a grant to sign (MobileControl), Answer for its question, Review
+ * for commands to confirm. It only opens the app; nothing is signed or
+ * confirmed from the notification.
+ */
+fun missionWaitActions(alert: MissionWaitAlert): List<NotifyAction> = listOf(
+    NotifyAction(
+        MISSION_ACTION_REVIEW,
+        when (alert.reason) {
+            "sign_grant" -> "Review grant"
+            "question" -> "Answer"
+            else -> "Review"
+        },
+        NotifyActionKind.Open,
+    ),
+)
 
 /** What makes a wait news: why, and since when. A new wait on the same mission is news again. */
 private fun waitKey(m: Mission): String = m.waitingOn?.let { "${it.reason}:${it.since}" }.orEmpty()
@@ -39,6 +76,7 @@ fun missionWaitAlerts(seen: Map<Long, String>?, missions: List<Mission>): Pair<L
             missionId = m.id,
             title = m.name.ifBlank { "Mission ${m.id}" },
             text = "Mission waits for you to ${missionAskWords(m.waitingOn!!)}",
+            reason = m.waitingOn!!.reason,
         )
     }
     return alerts to now

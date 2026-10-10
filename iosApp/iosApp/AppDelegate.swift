@@ -55,13 +55,22 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         // "Later" only puts the notification away (redesign 14.8); everything
-        // else (the tap, Answer, Open) opens the session at its question.
+        // else (the tap, Answer, Open log) opens the session at its question,
+        // Retry opens it and the app retries there, and a mission's
+        // notification (its tap, Review grant) opens that mission.
         if response.actionIdentifier == "later" {
             completionHandler()
             return
         }
-        if let id = response.notification.request.content.userInfo["sessionId"] as? NSNumber {
-            MainViewControllerKt.onOpenSession(sessionId: id.int64Value)
+        let content = response.notification.request.content
+        if let id = content.userInfo["missionId"] as? NSNumber {
+            MainViewControllerKt.onOpenMission(missionId: id.int64Value)
+        } else if let id = content.userInfo["sessionId"] as? NSNumber {
+            if response.actionIdentifier == "retry" {
+                MainViewControllerKt.onRetrySession(sessionId: id.int64Value)
+            } else {
+                MainViewControllerKt.onOpenSession(sessionId: id.int64Value)
+            }
         }
         completionHandler()
     }

@@ -99,6 +99,9 @@ fun Prefs.writeFleetNotify(values: Map<String, String>) {
     putStringList(FLEET_NOTIFY_PREF, listOf(NOTIFY_PHONE, NOTIFY_QUIET_HOURS, NOTIFY_QUIET_EXCEPT).map { k -> "$k=${values[k].orEmpty()}" })
 }
 
-/** Whether an alert for [reason] is posted now: This phone's switch, then the fleet's matrix and quiet hours. */
+/**
+ * Whether an alert for [reason] is posted now: This phone's switch, then the
+ * fleet's matrix and quiet hours, then this phone's own quiet hours.
+ */
 fun Prefs.notifyAllows(reason: String?, minute: Int = localMinuteOfDay()): Boolean =
-    notifyKinds().allows(reason) && (fleetNotify()?.allows(reason, minute) ?: true)
+    notifyKinds().allows(reason) && (fleetNotify()?.allows(reason, minute) ?: true) && phoneQuiet().allows(reason, minute)

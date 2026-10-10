@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.fingerprint
 import dev.claudefleet.mobile.model.reasonLabel
+import dev.claudefleet.mobile.ui.inboxRowActions
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
@@ -36,6 +37,12 @@ data class NeedsYouAlert(
      * replaced without a second sound or buzz.
      */
     val quiet: Boolean = false,
+    /**
+     * A failure the Inbox's Retry would send again (its last prompt, the
+     * session not the controller's): the notification offers Retry beside
+     * Open log. Whether this device may write is the app's check, on arrival.
+     */
+    val retryable: Boolean = false,
 ) : NeedsYouEvent
 
 /** A session that needed you no longer does — answered here or elsewhere: its notification goes. */
@@ -74,6 +81,7 @@ fun needsYouAlerts(seen: Map<Long, String?>, rows: List<SessionRow>): Pair<List<
             reason,
             question = row.pendingInput?.question?.trim()?.takeIf { it.isNotEmpty() },
             quiet = quiet,
+            retryable = reason == "failed" && inboxRowActions(row, canWrite = true, switchAvailable = false, limit = null).retryPrompt != null,
         )
     }
     return alerts to now

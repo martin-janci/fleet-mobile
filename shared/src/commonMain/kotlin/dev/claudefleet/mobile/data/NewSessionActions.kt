@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.model.BackgroundOptions
 import dev.claudefleet.mobile.model.NewBgSessionResult
 import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.QueuePromptResult
+import dev.claudefleet.mobile.model.SuggestedHost
 
 /**
  * What the New session form sends: already trimmed, with every optional field
@@ -63,6 +64,12 @@ interface NewSessionActions {
      */
     suspend fun firstMessage(sessionId: Long, prompt: String): QueuePromptResult =
         throw UnsupportedOperationException("queue_prompt")
+
+    /**
+     * Jev's host for a new session of [projectId] (`propose_host_placement`),
+     * or null when it proposes none. A fake that does not care proposes none.
+     */
+    suspend fun proposeHost(projectId: Long): SuggestedHost? = null
 }
 
 /** [NewSessionActions] against the paired hub, through [AppSession.withClient]. */
@@ -90,6 +97,9 @@ class HubNewSessionActions(private val session: AppSession) : NewSessionActions 
 
     override suspend fun headroom(hostAlias: String): Headroom =
         session.withClient { it.checkAccountHeadroom(hostAlias, null) }
+
+    override suspend fun proposeHost(projectId: Long): SuggestedHost? =
+        session.withClient { it.proposeHostPlacement(projectId) }
 
     override suspend fun firstMessage(sessionId: Long, prompt: String): QueuePromptResult =
         session.withClient { it.queuePrompt(sessionId, prompt) }

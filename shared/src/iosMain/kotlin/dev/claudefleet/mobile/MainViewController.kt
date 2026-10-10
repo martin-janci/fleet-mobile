@@ -133,6 +133,16 @@ fun onOpenSession(sessionId: Long) {
     iosContainer.onOpenSession(sessionId)
 }
 
+/** A failure notification's Retry (MobileControl): open the session; the app retries it there. */
+fun onRetrySession(sessionId: Long) {
+    iosContainer.onRetrySession(sessionId)
+}
+
+/** A mission's notification, its tap or Review grant: open that mission, its grant card first. */
+fun onOpenMission(missionId: Long) {
+    iosContainer.onOpenMission(missionId)
+}
+
 /** A running background check; `AppDelegate` cancels it when iOS's time is up. */
 class NeedsYouRun internal constructor(private val job: Job) {
     fun cancel() {

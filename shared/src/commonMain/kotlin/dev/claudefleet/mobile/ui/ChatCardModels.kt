@@ -8,6 +8,9 @@ import dev.claudefleet.mobile.model.FormView
 import dev.claudefleet.mobile.model.ReplyForm
 import dev.claudefleet.mobile.model.SettingDescriptor
 import dev.claudefleet.mobile.model.SettingProposal
+import dev.claudefleet.mobile.model.SuggestedHost
+import dev.claudefleet.mobile.model.hostPick
+import dev.claudefleet.mobile.model.hostPlacementAsk
 import dev.claudefleet.mobile.model.carryDraftAnswers
 import dev.claudefleet.mobile.model.fieldMissing
 import dev.claudefleet.mobile.model.fieldProblems
@@ -71,15 +74,24 @@ data class AskFormState(
  * [seed] is what the person filled in while the agent was still writing the
  * form (`ask { draft }`, `model/FormDraft.kt`): it starts the form's answers
  * over the defaults, where it still fits ([carryDraftAnswers]).
+ *
+ * [proposeHost] asks Jev for a host (`propose_host_placement`) when the
+ * form asks for one for a project ([hostPlacementAsk]); null never asks. Its
+ * answer is a pick like any other — chosen while the field is empty, with
+ * Change — and a refusal or no answer shows nothing.
  */
 class AskFormModel(
     private val actions: ChatFormActions,
     private val formId: String,
     private val scope: CoroutineScope,
     private val seed: Map<String, JsonElement> = emptyMap(),
+    private val proposeHost: (suspend (Long) -> SuggestedHost?)? = null,
 ) {
     private val _state = MutableStateFlow(AskFormState())
     val state: StateFlow<AskFormState> = _state.asStateFlow()
+
+    /** The projects Jev was asked a host for, so a project is asked about once per card. */
+    private val hostAsked = mutableSetOf<Long>()
 
     fun load(): Job = scope.launch {
         _state.update { it.copy(loading = true, error = null, loadFailure = null) }
@@ -96,6 +108,7 @@ class AskFormModel(
                     error = if (spec == null && form.state == "pending") "This form cannot be drawn on the phone; answer it on the desktop." else null,
                 )
             }
+            askHost()
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -109,6 +122,39 @@ class AskFormModel(
                 values = if (value == null) it.values - name else it.values + (name to value),
                 problems = it.problems.filter { p -> p.field != name },
             )
+        }
+        askHost()
+    }
+
+    /**
+     * Ask Jev for the form's host once its project is known, once per
+     * project. The answer lands only while the field is still empty and
+     * unproposed: what the person chose meanwhile is never overridden.
+     */
+    private fun askHost() {
+        val propose = proposeHost ?: return
+        val s = _state.value
+        val spec = s.spec ?: return
+        if (!s.pending) return
+        val ask = hostPlacementAsk(spec, s.values, s.picks) ?: return
+        if (!hostAsked.add(ask.projectId)) return
+        scope.launch {
+            val suggested = try {
+                propose(ask.projectId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                // Refused (a token the hub does not serve it to) or unreachable: no proposal, nothing said.
+                null
+            }
+            val pick = suggested?.let { hostPick(spec, ask, it) } ?: return@launch
+            _state.update {
+                if (it.values[ask.field] != null || ask.field in it.picks) {
+                    it
+                } else {
+                    it.copy(picks = it.picks + (ask.field to pick), values = it.values + (ask.field to JsonPrimitive(pick.value)))
+                }
+            }
         }
     }
 

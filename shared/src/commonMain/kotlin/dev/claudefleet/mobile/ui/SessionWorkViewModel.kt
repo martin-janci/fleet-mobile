@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.TicketCard
 import dev.claudefleet.mobile.model.Ticket
+import dev.claudefleet.mobile.model.knownKeyPrefixes
 import dev.claudefleet.mobile.model.TrackerRow
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.withTicketsFrom
@@ -80,6 +81,8 @@ data class SessionWorkUiState(
      * [workTrouble]. Empty when all is well.
      */
     val workTrouble: List<String> = emptyList(),
+    /** The project keys ("FLEET") of tickets the phone has seen, for *Link a ticket*'s "Did you mean". */
+    val keyPrefixes: List<String> = emptyList(),
 ) {
     /** What the chip draws: the confirmed work, else the guess. */
     val chip: WorkSummary? get() = work ?: suggested
@@ -180,8 +183,9 @@ class SessionWorkViewModel(
         )
 
     /** What [assemble] needs to say what is wrong with a ticket: the ticket cache and the trackers' states. */
-    private class Trouble(cache: List<Ticket>, private val trackers: List<TrackerRow>) {
+    private class Trouble(private val cache: List<Ticket>, private val trackers: List<TrackerRow>) {
         private val byId = cache.associateBy { it.id }
+        val keyPrefixes: List<String> get() = knownKeyPrefixes(cache)
         fun of(work: WorkSummary): List<String> = workTrouble(work, work.itemId?.let(byId::get), trackers)
     }
 
@@ -457,6 +461,7 @@ class SessionWorkViewModel(
             canNameWork = work == null && allowed(caps, NAME),
             canRenameWork = work?.isLocal == true && allowed(caps, NAME),
             workTrouble = work?.let(trouble::of).orEmpty(),
+            keyPrefixes = if (allowed(caps, LINK)) trouble.keyPrefixes else emptyList(),
         )
     }
 

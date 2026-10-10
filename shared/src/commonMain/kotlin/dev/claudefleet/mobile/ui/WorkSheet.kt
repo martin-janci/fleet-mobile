@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -28,7 +27,16 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.ImeAction
 import dev.claudefleet.mobile.model.WorkSummary
+import dev.claudefleet.mobile.model.keyFixLine
+import dev.claudefleet.mobile.model.keyFixOnLink
+import dev.claudefleet.mobile.ui.kit.BottomSheet
+import dev.claudefleet.mobile.ui.kit.SheetAction
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.TicketCardBody
 import dev.claudefleet.mobile.ui.components.WorkStatusDot
@@ -194,25 +202,65 @@ private fun OpenTicketButton(work: WorkSummary) {
     TextButton(onClick = { runCatching { uri.openUri(url) } }) { Text("Open in browser") }
 }
 
-/** *Set work…*: a key such as `PAY-7`, or a pasted ticket URL. */
+/**
+ * *Link a ticket* (MobileFormsWork) — the session menu's *Set work…*: a key
+ * such as `PAY-7`, or a pasted ticket URL, in the kit's sheet with Cancel
+ * and **Link** at the bottom.
+ *
+ * Checked when Link is pressed, never on each key: a key that is almost
+ * right is answered under the field with the fix ([ticketKeyFix]), which is
+ * one tap; pressing Link again on the same text links it as typed
+ * ([keyFixOnLink]). [knownPrefixes] are the project keys the phone has seen.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SetWorkDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+fun SetWorkSheet(onConfirm: (String) -> Unit, onDismiss: () -> Unit, knownPrefixes: List<String> = emptyList()) {
     var text by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Set work") },
-        text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                label = { Text("Key or ticket URL") },
-                singleLine = true,
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) { Text("Set") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    // The fix on show, and the text it was offered for.
+    var fix by remember { mutableStateOf<String?>(null) }
+    var offeredFor by remember { mutableStateOf<String?>(null) }
+    fun link() {
+        if (text.isBlank()) return
+        val next = keyFixOnLink(text, offeredFor, knownPrefixes)
+        if (next == null) {
+            onConfirm(text)
+        } else {
+            fix = next
+            offeredFor = text.trim()
+        }
+    }
+    BottomSheet(
+        title = "Link a ticket",
+        onDismiss = onDismiss,
+        primary = SheetAction("Link", enabled = text.isNotBlank()) { link() },
+        scrollable = true,
+    ) {
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it; fix = null },
+            label = { Text("Key or ticket URL") },
+            singleLine = true,
+            isError = fix != null,
+            supportingText = fix?.let { f -> { KeyFixLine(f) { text = f; fix = null; offeredFor = null } } },
+            keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { link() }),
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/**
+ * The error under a key field with its fix: "Not a key. Did you mean
+ * FLEET-142?" The whole line is the button that puts [fix] in the field.
+ */
+@Composable
+internal fun KeyFixLine(fix: String, onUse: () -> Unit) {
+    Text(
+        keyFixLine(fix),
+        color = MaterialTheme.colorScheme.error,
+        style = MaterialTheme.typography.bodySmall,
+        textDecoration = TextDecoration.Underline,
+        modifier = Modifier.clickable(onClickLabel = "Use $fix", role = Role.Button, onClick = onUse),
     )
 }
 
@@ -222,6 +270,7 @@ fun SetWorkDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
  * The hub owns the rules; the view model checks the title first so a bad
  * one is said at once.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkTitleDialog(
     heading: String,
@@ -233,35 +282,31 @@ fun WorkTitleDialog(
 ) {
     var title by remember { mutableStateOf(initialTitle) }
     var key by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(heading) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("What is this work?") },
-                    singleLine = true,
-                    supportingText = { Text("${title.trim().length} / $WORK_TITLE_MAX") },
-                    isError = title.trim().length > WORK_TITLE_MAX,
-                )
-                if (askKey) {
-                    OutlinedTextField(
-                        value = key,
-                        onValueChange = { key = it },
-                        label = { Text("Key (optional), like OPS-1") },
-                        singleLine = true,
-                    )
-                }
-            }
+    BottomSheet(
+        title = heading,
+        onDismiss = onDismiss,
+        primary = SheetAction(confirmLabel, enabled = title.isNotBlank()) {
+            onConfirm(title, key.takeIf { askKey && it.isNotBlank() })
         },
-        confirmButton = {
-            TextButton(
-                onClick = { onConfirm(title, key.takeIf { askKey && it.isNotBlank() }) },
-                enabled = title.isNotBlank(),
-            ) { Text(confirmLabel) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+        scrollable = true,
+    ) {
+        OutlinedTextField(
+            value = title,
+            onValueChange = { title = it },
+            label = { Text("What is this work?") },
+            singleLine = true,
+            supportingText = { Text("${title.trim().length} / $WORK_TITLE_MAX") },
+            isError = title.trim().length > WORK_TITLE_MAX,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (askKey) {
+            OutlinedTextField(
+                value = key,
+                onValueChange = { key = it },
+                label = { Text("Key (optional), like OPS-1") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
 }

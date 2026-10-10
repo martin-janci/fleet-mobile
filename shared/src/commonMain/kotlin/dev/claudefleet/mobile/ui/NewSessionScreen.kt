@@ -1,6 +1,8 @@
 package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.model.BackgroundOptions
+import dev.claudefleet.mobile.model.BG_AGENT_CLAUDE
+import dev.claudefleet.mobile.model.backgroundAgentWord
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.semantics.heading
@@ -153,6 +155,7 @@ fun NewSessionScreen(
             onDismiss = { askingBackground = false },
             options = state.backgroundOptions,
             project = state.projectLabel.takeIf { state.projectId != null },
+            agents = state.backgroundAgents,
         )
     }
     Column(modifier = modifier.fillMaxSize()) {
@@ -471,9 +474,12 @@ internal fun BackgroundAgentSheet(
     options: Boolean = false,
     /** The project picked on the form, which the agent starts in. */
     project: String? = null,
+    /** The agents the hub runs in the background ([backgroundAgents]); a choice only when there are two. */
+    agents: List<String> = listOf(BG_AGENT_CLAUDE),
 ) {
     var name by remember { mutableStateOf("") }
     var prompt by remember { mutableStateOf("") }
+    var agent by remember { mutableStateOf(BG_AGENT_CLAUDE) }
     var readOnly by remember { mutableStateOf(false) }
     var stopAfter by remember { mutableStateOf<Long?>(null) }
     var spend by remember { mutableStateOf<Double?>(null) }
@@ -482,12 +488,14 @@ internal fun BackgroundAgentSheet(
         meta = BACKGROUND_AGENT_META,
         onDismiss = onDismiss,
         primary = SheetAction("Start", enabled = prompt.isNotBlank()) {
-            onStart(name, prompt, BackgroundOptions(readOnly = readOnly, stopAfterSecs = stopAfter, stopAfterUsd = spend))
+            // Claude is the hub's default and is never sent; Codex only where it was offered.
+            val picked = agent.takeIf { it != BG_AGENT_CLAUDE && it in agents }
+            onStart(name, prompt, BackgroundOptions(agent = picked, readOnly = readOnly, stopAfterSecs = stopAfter, stopAfterUsd = spend))
         },
         scrollable = true,
     ) {
         Text(
-            listOfNotNull("Claude", host.takeIf { it.isNotBlank() }?.let { "on $it" }, project?.takeIf { options }?.let { "in $it" })
+            listOfNotNull(backgroundAgentWord(agent), host.takeIf { it.isNotBlank() }?.let { "on $it" }, project?.takeIf { options }?.let { "in $it" })
                 .joinToString(" · "),
             style = MaterialTheme.typography.bodySmall,
         )
@@ -506,6 +514,13 @@ internal fun BackgroundAgentSheet(
             label = { Text("Name (optional)") },
             modifier = Modifier.fillMaxWidth(),
         )
+        // MobileMissions: the Agent choice, offered only when the hub runs more than Claude Code in the background.
+        if (agents.size > 1) {
+            Text("Agent", style = MaterialTheme.typography.labelMedium)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (a in agents) ChoiceChip(backgroundAgentWord(a), agent == a, { agent = a })
+            }
+        }
         if (options) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,

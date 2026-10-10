@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -36,6 +37,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import dev.claudefleet.mobile.data.ChatFormActions
 import dev.claudefleet.mobile.model.FieldProblem
 import dev.claudefleet.mobile.model.FormView
@@ -43,10 +46,14 @@ import dev.claudefleet.mobile.model.PendingForm
 import dev.claudefleet.mobile.model.ReplyField
 import dev.claudefleet.mobile.model.ReplyForm
 import dev.claudefleet.mobile.model.ReplyStep
+import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.SuggestedHost
 import dev.claudefleet.mobile.model.answerLines
 import dev.claudefleet.mobile.model.answerSummary
 import dev.claudefleet.mobile.model.fieldMissing
 import dev.claudefleet.mobile.model.reviewLines
+import dev.claudefleet.mobile.model.startedByForm
+import dev.claudefleet.mobile.model.startedWorkLine
 import dev.claudefleet.mobile.model.visibleFields
 import dev.claudefleet.mobile.ui.components.FieldView
 import dev.claudefleet.mobile.ui.components.Note
@@ -54,10 +61,14 @@ import dev.claudefleet.mobile.ui.components.ReviewLines
 import dev.claudefleet.mobile.ui.components.parseNumber
 import dev.claudefleet.mobile.ui.kit.Atom
 import dev.claudefleet.mobile.ui.kit.Comet
+import dev.claudefleet.mobile.ui.kit.PhoneRow
+import dev.claudefleet.mobile.ui.kit.PulseSequence
+import dev.claudefleet.mobile.ui.kit.StatusWord
 import dev.claudefleet.mobile.ui.kit.StepBars
 import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
+import dev.claudefleet.mobile.ui.theme.StatusTone
 import kotlinx.serialization.json.JsonElement
 
 /*
@@ -138,6 +149,22 @@ internal const val FORM_PAGE = "form-page"
 internal const val FORM_NEXT = "form-next"
 internal const val FORM_BACK = "form-back"
 internal const val FORM_ASK_AGAIN = "form-ask-again"
+internal const val FORM_FULL = "form-full"
+internal const val FORM_STARTED = "form-started"
+
+/**
+ * What Control's chat lends its forms. Answered, a form shows the session
+ * its answer started ([startedByForm], from [rows]) and opens it with
+ * [onOpenSession]. Waiting, a form that asks for a host for a project asks
+ * Jev for one through [proposeHost] (`propose_host_placement`; null where
+ * the hub does not list it to this device) and shows it as "Proposed by
+ * Jev" with Change. Elsewhere a form has none of this.
+ */
+class FormContext(
+    val rows: List<SessionRow>,
+    val onOpenSession: (Long) -> Unit,
+    val proposeHost: (suspend (Long) -> SuggestedHost?)? = null,
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -153,10 +180,13 @@ internal fun OrbitChatFormCard(
     modifier: Modifier = Modifier,
     /** The answers filled in while the form was written; see [ChatFormCard]. */
     seed: Map<String, JsonElement> = emptyMap(),
+    /** Control's help for its forms ([FormContext]): the work an answer started, Jev's host; null lends none. */
+    formContext: FormContext? = null,
 ) {
     val o = Fleet.colors
     val scope = rememberCoroutineScope()
-    val model = remember(pending.formId, actions) { AskFormModel(actions, pending.formId, scope, seed) }
+    val proposeHost = formContext?.proposeHost
+    val model = remember(pending.formId, actions, proposeHost != null) { AskFormModel(actions, pending.formId, scope, seed, proposeHost) }
     LaunchedEffect(model, open) { model.load() }
     val s by model.state.collectAsState()
     var numberText by remember(pending.formId) { mutableStateOf(mapOf<String, String>()) }
@@ -203,6 +233,10 @@ internal fun OrbitChatFormCard(
                         }
                         if (viewing) ReviewLines(answerLines(spec, form))
                     }
+                    // The work the answer started follows the line: its session's row, Pulse while it starts.
+                    if (formContext != null) {
+                        startedByForm(form, formContext.rows)?.let { row -> StartedWorkRow(row) { formContext.onOpenSession(row.id) } }
+                    }
                 }
                 else -> {
                     Text(form.title.ifBlank { pending.title }, style = Fleet.type.textMd, color = o.fg)
@@ -235,19 +269,36 @@ internal fun OrbitChatFormCard(
                                 ) { Text("Open form") }
                             }
                             if (paging && s.pending) {
-                                val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-                                ModalBottomSheet(onDismissRequest = { paging = false }, sheetState = sheetState) {
+                                val full = size == FormSize.Full
+                                val paged: @Composable () -> Unit = {
                                     PagedForm(
                                         spec = spec,
                                         s = s,
                                         model = model,
                                         numberText = numberText,
                                         onNumberText = { n, t -> numberText = numberText + (n to t) },
-                                        full = size == FormSize.Full,
+                                        full = full,
                                         askedBy = sessionName,
                                         why = form.why,
                                         onClose = { paging = false },
                                     )
+                                }
+                                if (full) {
+                                    // A long form, or one holding a secret, is a screen of its own
+                                    // (MobileChatForms "Full screen"), not a tall sheet: no grip to
+                                    // drag it half away, the whole window. Chat and the system back
+                                    // close it; the answers stay in the model, so it reopens where it was.
+                                    Dialog(
+                                        onDismissRequest = { paging = false },
+                                        properties = DialogProperties(usePlatformDefaultWidth = false),
+                                    ) {
+                                        Surface(color = o.bg, contentColor = o.fg, modifier = Modifier.fillMaxSize().testTag(FORM_FULL)) {
+                                            paged()
+                                        }
+                                    }
+                                } else {
+                                    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                                    ModalBottomSheet(onDismissRequest = { paging = false }, sheetState = sheetState) { paged() }
                                 }
                             }
                         }
@@ -288,6 +339,25 @@ private fun FormBuilding(title: String, from: String) {
             )
         }
     }
+}
+
+/**
+ * The session a form's answer started, under the answered line (the board's
+ * "papaya-receipts starting on mercury"): the kit's Pulse while its agent
+ * has said nothing yet, then the row's status dot. A tap opens the session.
+ */
+@Composable
+private fun StartedWorkRow(row: SessionRow, onOpen: () -> Unit) {
+    val starting = row.claudeStatus.isNullOrBlank()
+    PhoneRow(
+        title = row.displayName,
+        line = startedWorkLine(row),
+        word = if (starting) null else StatusWord.of(StatusTone.of(row)),
+        divider = false,
+        onClick = onOpen,
+        leading = if (starting) ({ PulseSequence(size = 24.dp) }) else null,
+        modifier = Modifier.testTag(FORM_STARTED),
+    )
 }
 
 /** A send in flight: the Comet beside "Sending…", as the board draws the button (MobileChatForms). */

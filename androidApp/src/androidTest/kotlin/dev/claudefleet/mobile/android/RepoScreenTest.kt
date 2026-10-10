@@ -1,11 +1,17 @@
 package dev.claudefleet.mobile.android
 
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performClick
 import dev.claudefleet.mobile.model.ChangedFile
+import dev.claudefleet.mobile.model.CommitDetail
 import dev.claudefleet.mobile.model.FileContent
 import dev.claudefleet.mobile.model.FileDiff
+import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.ui.RepoHandlers
 import dev.claudefleet.mobile.ui.RepoScreen
 import dev.claudefleet.mobile.ui.RepoTab
@@ -65,5 +71,33 @@ class RepoScreenTest {
         val file = RepoView.File("README.md", FileContent("README.md", "hello"))
         show(RepoUiState(tabs = tabs, views = listOf(file), canSendFile = false))
         compose.onNodeWithText("Send to Downloads").assertDoesNotExist()
+    }
+
+    @Test
+    fun a_not_pushed_commit_offers_ask_to_push_and_not_github() {
+        val asked = mutableListOf<String>()
+        val commit = RepoView.CommitView("9f3c2a1e", CommitDetail("9f3c2a1e", subject = "Hosts: show last ping", pushed = false))
+        show(
+            RepoUiState(
+                session = SessionRow(id = 1, projectId = 4),
+                project = ProjectRow(id = 4, owner = "acme", repo = "fleet-mobile"),
+                tabs = tabs,
+                views = listOf(commit),
+            ),
+            RepoHandlers(onAsk = { asked += it }),
+        )
+        compose.onNodeWithText("Open on GitHub").assertDoesNotExist()
+        compose.onNodeWithText("Ask to push").performClick()
+        assertEquals(listOf("Push this branch so commit 9f3c2a1 reaches the remote."), asked)
+    }
+
+    @Test
+    fun a_text_file_offers_share_and_find() {
+        val file = RepoView.File("Main.kt", FileContent("Main.kt", "val host = 1\nval hostName = host"))
+        show(RepoUiState(tabs = tabs, views = listOf(file)))
+        compose.onNodeWithText("Share").assertExists()
+        compose.onNodeWithContentDescription("Find in file").performClick()
+        compose.onNode(hasSetTextAction()).performTextInput("host")
+        compose.onNodeWithText("1 of 3").assertExists()
     }
 }
