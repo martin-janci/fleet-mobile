@@ -178,8 +178,17 @@ data class SessionRow(
             else -> null
         }
 
-    /** The rows the "needs attention" filter keeps. */
-    val needsAttention: Boolean get() = attentionReason != null
+    /**
+     * Jev proposes the session is waiting on a person (hub contract 15, gap
+     * plan G1.6): reason `probably_waiting`, state `proposed`. A proposal, not
+     * a fact: shown softly, never in Needs you, never counted by a badge, and
+     * never announced.
+     */
+    val isProposed: Boolean
+        get() = attention?.state == Attention.STATE_PROPOSED || attention?.reason == Attention.PROBABLY_WAITING
+
+    /** The rows the "needs attention" filter keeps, and every needs-you count counts. Never a [isProposed] row. */
+    val needsAttention: Boolean get() = attentionReason != null && !isProposed
 
     /**
      * The row's second line: the sanitised activity when there is one, else
@@ -207,4 +216,19 @@ data class Attention(
     val reason: String,
     /** Unix second the session entered this state, best effort. */
     val since: Long? = null,
-)
+    /**
+     * The hub's attention state (contract 11): `action_required`, `failed`,
+     * `blocked`, `proposed` (contract 15), `working`, `paused`, `done` or
+     * `idle`. Kept as the hub's word, like [reason], so a state a later hub
+     * adds never fails the row.
+     */
+    val state: String? = null,
+) {
+    companion object {
+        /** Jev read a silent turn's end as a question (contract 15): probably waiting. */
+        const val PROBABLY_WAITING = "probably_waiting"
+
+        /** The state of a proposal (contract 15): shown apart, never counted. */
+        const val STATE_PROPOSED = "proposed"
+    }
+}

@@ -33,7 +33,34 @@ data class Mission(
     @SerialName("cost_micros") val costMicros: Long? = null,
     /** The live grant's budget, in micro-USD, when it sets one (contract 14). */
     @SerialName("budget_micros") val budgetMicros: Long? = null,
+    /** Why it waits on a person, when it does (contract 15, gap plan G1.6); null from an older hub. */
+    @SerialName("waiting_on") val waitingOn: MissionWait? = null,
 )
+
+/**
+ * A mission waiting on a person, and since when (the hub's `MissionWait`,
+ * contract 15). [reason] is the hub's word — `question`, `sign_grant` or
+ * `confirm` — kept as text so a reason a later hub adds still reads.
+ */
+@Serializable
+data class MissionWait(
+    val reason: String = "",
+    /** Unix second it started waiting. */
+    val since: Long = 0,
+    /** Open cards in its confirm queue. */
+    @SerialName("open_cards") val openCards: Int = 0,
+)
+
+/** "Waits on you · a question": a waiting mission's line, in words. */
+fun missionWaitLabel(w: MissionWait): String {
+    val what = when (w.reason) {
+        "question" -> "a question"
+        "sign_grant" -> "a grant to sign"
+        "confirm" -> if (w.openCards == 1) "1 command to confirm" else "${w.openCards} commands to confirm"
+        else -> w.reason.replace('_', ' ')
+    }
+    return "Waits on you · $what"
+}
 
 /** A member of a mission (`WorkItemRow`, the fields a line needs). */
 @Serializable

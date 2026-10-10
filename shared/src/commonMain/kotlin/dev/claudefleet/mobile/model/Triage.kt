@@ -33,6 +33,8 @@ enum class TriageBucket(val label: String) {
     CONTEXT_FULL("Context full"),
     STALE_WORKING("Stalled"),
     CI_FAILING("CI failing"),
+    /** Jev's reading of a silent turn's end as a question (contract 15): a proposal, never in Needs you. */
+    PROBABLY_WAITING("Probably waiting"),
     DONE_UNREAD("Done · unread"),
     LIFECYCLE("Paused"),
     IDLE_LONG("Idle · a long time"),
@@ -40,8 +42,11 @@ enum class TriageBucket(val label: String) {
     IDLE("Idle"),
     ;
 
-    /** The buckets a person is asked to deal with — the desktop's `NEEDS_YOU_BUCKETS`. */
-    val needsYou: Boolean get() = ordinal <= IDLE_LONG.ordinal
+    /**
+     * The buckets a person is asked to deal with — the desktop's
+     * `NEEDS_YOU_BUCKETS`, which leaves Jev's [PROBABLY_WAITING] out (G1.6).
+     */
+    val needsYou: Boolean get() = ordinal <= IDLE_LONG.ordinal && this != PROBABLY_WAITING
 }
 
 /**
@@ -105,6 +110,7 @@ private fun bucketOfReason(reason: String): TriageBucket? = when (reason) {
     "context_full" -> TriageBucket.CONTEXT_FULL
     "stale_working" -> TriageBucket.STALE_WORKING
     "ci_failing" -> TriageBucket.CI_FAILING
+    Attention.PROBABLY_WAITING -> TriageBucket.PROBABLY_WAITING
     "lifecycle" -> TriageBucket.LIFECYCLE
     "done_unread" -> TriageBucket.DONE_UNREAD
     else -> null

@@ -2,7 +2,7 @@ package dev.claudefleet.mobile.net
 
 /**
  * The hub wire-contract revisions this build understands (up to claude-fleet
- * revision 12). A hub
+ * revision 15). A hub
  * outside the range is refused the way the desktop refuses it: the banner
  * says which side is behind, and no row event from that hub is applied.
  *
@@ -65,6 +65,15 @@ package dev.claudefleet.mobile.net
  * action, new_bg_session's project / agent / read-only / stop-after
  * arguments, a listed mission's spend and budget and a plan's run estimate;
  * all additive, so it is safe too.
+ * Revision 15 widens the fleet.form/1 spec (gap plan G1.1: option objects,
+ * step `name` and `kind: "review"`, field `other` / `disabled_reason` /
+ * `drafted` / `secret_note`, form `save_later`), which the phone's form
+ * reader now takes ([dev.claudefleet.mobile.model.readAskForm]), and adds
+ * the attention model's two classes (G1.6): `needs_attention.reason`
+ * `probably_waiting` in `state` `proposed`, shown softly and never counted
+ * ([dev.claudefleet.mobile.model.SessionRow.isProposed]), and a mission's
+ * `waiting_on`, Today's `missions` and a Today session's `proposed`, all
+ * optional here.
  *
  * [MIN_HUB_CONTRACT] does NOT mirror the desktop's minimum. The desktop
  * raised its own to 3 because a pre-3 hub would silently misperform
@@ -75,7 +84,7 @@ package dev.claudefleet.mobile.net
  * upgraded: this is the phone's own floor, not a copy of the desktop's.
  */
 const val MIN_HUB_CONTRACT: Int = 0
-const val MAX_HUB_CONTRACT: Int = 14
+const val MAX_HUB_CONTRACT: Int = 15
 
 /**
  * What a `contract` field that cannot be read as a revision counts as.

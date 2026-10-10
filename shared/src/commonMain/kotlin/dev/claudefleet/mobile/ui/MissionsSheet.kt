@@ -42,6 +42,7 @@ import dev.claudefleet.mobile.model.dollars
 import dev.claudefleet.mobile.model.isQuestion
 import dev.claudefleet.mobile.model.key
 import dev.claudefleet.mobile.model.line
+import dev.claudefleet.mobile.model.missionWaitLabel
 import dev.claudefleet.mobile.model.options
 import dev.claudefleet.mobile.model.pauseMove
 import dev.claudefleet.mobile.model.summary
@@ -153,6 +154,7 @@ private fun MissionRow(m: Mission, onClick: () -> Unit) {
     Column(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 24.dp, vertical = 10.dp)) {
         Text(m.name.ifBlank { "Mission ${m.id}" }, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(m.summary(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        m.waitingOn?.let { Text(missionWaitLabel(it), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
     }
 }
 

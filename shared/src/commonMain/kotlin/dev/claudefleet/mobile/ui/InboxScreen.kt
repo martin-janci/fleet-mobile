@@ -54,6 +54,16 @@ fun inboxRows(sessions: List<SessionRow>, access: MyAccess = MyAccess.UNKNOWN): 
     sessions.filter { it.needsAttention && access.levelFor(it) == null }
         .sortedWith(compareBy<SessionRow, Long?>(nullsLast()) { it.askedAt }.thenBy { it.id })
 
+/**
+ * Jev's "probably waiting" rows (hub contract 15, gap plan G1.6): a
+ * proposal, kept apart from [inboxRows] and never in its count — the Inbox
+ * header says "+N proposed" instead. The desktop's `proposedRows`, oldest
+ * first like the Inbox.
+ */
+fun proposedRows(sessions: List<SessionRow>, access: MyAccess = MyAccess.UNKNOWN): List<SessionRow> =
+    sessions.filter { it.isProposed && access.levelFor(it) == null }
+        .sortedWith(compareBy<SessionRow, Long?>(nullsLast()) { it.askedAt }.thenBy { it.id })
+
 /** One session someone else shared with this person, and at what level (redesign 11.10, the Watch board). */
 data class SharedRow(val row: SessionRow, val level: String)
 
@@ -105,8 +115,9 @@ fun doneTodayRows(sessions: List<SessionRow>, midnight: Long): List<SessionRow> 
             StatusWord.of(StatusTone.of(r.claudeStatus, r.stuckKind)).let { it == StatusWord.DONE || it == StatusWord.IDLE }
     }.sortedWith(compareByDescending<SessionRow, Long?>(nullsLast()) { it.lastActivityAt }.thenBy { it.id })
 
-/** "4 need you · 6 running": the Inbox header's line. */
-internal fun inboxSubtitle(needYou: Int, running: Int): String = "$needYou need${if (needYou == 1) "s" else ""} you · $running running"
+/** "4 need you · 6 running · +1 proposed": the Inbox header's line; Jev's proposals ([proposedRows]) never join the count. */
+internal fun inboxSubtitle(needYou: Int, running: Int, proposed: Int = 0): String =
+    "$needYou need${if (needYou == 1) "s" else ""} you · $running running" + if (proposed > 0) " · +$proposed proposed" else ""
 
 /**
  * What an empty Inbox says. "Nothing needs you" is a claim about the fleet,
@@ -147,12 +158,14 @@ fun InboxScreen(
     runningList: List<SessionRow> = emptyList(),
     /** The Done today view's rows ([doneTodayRows]). */
     doneTodayList: List<SessionRow> = emptyList(),
+    /** Jev's "probably waiting" rows ([proposedRows]): named in the header, never counted. */
+    proposed: Int = 0,
 ) {
     var view by rememberSaveable { mutableStateOf(InboxView.NeedsYou) }
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
             title = "Inbox",
-            subtitle = inboxSubtitle(rows.size, running),
+            subtitle = inboxSubtitle(rows.size, running, proposed),
             modifier = Modifier.tourAnchor(anchors, TourAnchor.Header),
             actions = {
                 onOpenToday?.let { TextButton(onClick = it, modifier = Modifier.tourAnchor(anchors, TourAnchor.Today)) { Text("Today") } }

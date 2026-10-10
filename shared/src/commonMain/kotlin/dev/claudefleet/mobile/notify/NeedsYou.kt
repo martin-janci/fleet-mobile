@@ -64,10 +64,11 @@ fun needsYouAlerts(seen: Map<Long, String?>, rows: List<SessionRow>): Pair<List<
 /**
  * What a session is announced for: the hub's attention reason, else
  * [DONE_REASON] for one that finished its task (`completed`, the hub's word
- * for a background agent done) — never for one running outside fleet.
+ * for a background agent done) — never for one running outside fleet, and
+ * never for Jev's proposal ([SessionRow.isProposed], contract 15).
  */
 internal val SessionRow.notifyReason: String?
-    get() = attentionReason ?: DONE_REASON.takeIf { claudeStatus == "completed" && kind != "external" }
+    get() = attentionReason?.takeUnless { isProposed } ?: DONE_REASON.takeIf { claudeStatus == "completed" && kind != "external" }
 
 /** The hub's attention reason as the notification says it — the app's one table, [reasonLabel]. */
 fun reasonWords(reason: String): String = reasonLabel(reason)

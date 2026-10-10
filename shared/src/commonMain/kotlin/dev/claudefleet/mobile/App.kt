@@ -217,6 +217,7 @@ import dev.claudefleet.mobile.ui.filesLine
 import dev.claudefleet.mobile.ui.moreFooter
 import dev.claudefleet.mobile.ui.moreSubtitle
 import dev.claudefleet.mobile.ui.inboxRows
+import dev.claudefleet.mobile.ui.proposedRows
 import dev.claudefleet.mobile.ui.runningRows
 import dev.claudefleet.mobile.ui.doneTodayRows
 import dev.claudefleet.mobile.model.localMidnight
@@ -1596,6 +1597,7 @@ private fun FleetRoute(
                     InboxScreen(
                         rows = rows,
                         running = all.count { it.claudeStatus == "working" },
+                        proposed = remember(all, access) { proposedRows(all, access).size },
                         runningList = remember(all) { runningRows(all) },
                         doneTodayList = remember(all, inboxList.nowSeconds / 60) {
                             doneTodayRows(all, localMidnight(inboxList.nowSeconds, utcOffsetSeconds(inboxList.nowSeconds)))
