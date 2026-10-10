@@ -84,7 +84,7 @@ data class WorkTreeFilters(
     val has: String? = null,
     /** Only tasks with something to review. */
     val review: Boolean? = null,
-    /** Case-insensitive substring of key or title. */
+    /** Words of the key or title: every one, any order, case and accents ignored. */
     val query: String? = null,
     /** One group only — a section being expanded. Never saved in a view. */
     val group: String? = null,
@@ -95,6 +95,14 @@ data class WorkTreeFilters(
      * tasks anyway. An older hub ignores it and hides nothing.
      */
     val archived: Boolean? = null,
+    /** The sprint: `current`, `none` or a sprint's name. An older hub ignores it. */
+    val iteration: String? = null,
+    /** Under one epic (its key or `item:<id>`), the epic itself too. */
+    val epic: String? = null,
+    /** The tracker's type name (Story, Bug …). */
+    @SerialName("item_type") val itemType: String? = null,
+    /** The order inside each section, one of [SORTS]; absent is `activity`. */
+    val sort: String? = null,
 ) {
     /**
      * "Any" spelled as absent, a blank query dropped, a `false` toggle
@@ -113,6 +121,10 @@ data class WorkTreeFilters(
         query = query?.trim()?.takeIf { it.isNotEmpty() },
         group = group?.takeIf { it.isNotBlank() },
         archived = archived?.takeIf { it },
+        iteration = iteration?.trim()?.takeIf { it.isNotEmpty() },
+        epic = epic?.trim()?.takeIf { it.isNotEmpty() },
+        itemType = itemType?.trim()?.takeIf { it.isNotEmpty() },
+        sort = sort?.takeIf { it in SORTS && it != "activity" },
     )
 
     /**
@@ -120,7 +132,7 @@ data class WorkTreeFilters(
      * *Show archived* (it widens the tree) are not counted.
      */
     val count: Int get() = with(normalized()) {
-        listOfNotNull(org, tracker, status, mine, has, review).size
+        listOfNotNull(org, tracker, status, mine, has, review, iteration, epic, itemType).size
     }
 
     /**
@@ -129,7 +141,7 @@ data class WorkTreeFilters(
      * review* are toggles on screen and show their own state.
      */
     val sheetCount: Int get() = with(normalized()) {
-        listOfNotNull(org, tracker, status, has).size
+        listOfNotNull(org, tracker, status, has, iteration, epic, itemType).size
     }
 
     /** Nothing narrows the tree (search included). Showing archived tasks is not a narrowing. */
@@ -139,6 +151,25 @@ data class WorkTreeFilters(
         const val ANY = "any"
         val STATUSES = listOf("open", "todo", "in_progress", "done")
         val HAS = listOf("active", "past_only", "none", "suggested")
+        /** The desktop's `WORK_SORTS`. */
+        val SORTS = listOf("activity", "updated", "key", "title", "due")
+
+        /** The desktop's `WORK_SORT_LABELS`. */
+        fun sortLabel(sort: String): String = when (sort) {
+            "activity" -> "Activity"
+            "updated" -> "Last updated"
+            "key" -> "Key"
+            "title" -> "Title"
+            "due" -> "Due date"
+            else -> sort
+        }
+
+        /** "Current sprint", "No sprint", "Sprint: Sprint 42" — the desktop's chip. */
+        fun iterationLabel(iteration: String): String = when (iteration) {
+            "current" -> "Current sprint"
+            "none" -> "No sprint"
+            else -> "Sprint: $iteration"
+        }
 
         /** The desktop's `STATUS_FILTER_LABELS` (`work_view.ts`). */
         fun statusLabel(status: String): String = when (status) {
@@ -426,7 +457,31 @@ data class WorkTreePage(
     @SerialName("next_cursor") val nextCursor: String? = null,
     /** Hub seconds: when the page was read. What "as of" says when the phone is offline. */
     @SerialName("generated_at") val generatedAt: Long? = null,
+    /** Every sprint, epic and type the caller sees, whatever the filters (absent from an older hub). */
+    val facets: WorkTreeFacets = WorkTreeFacets(),
 )
+
+/** [WorkTreePage.facets]: what the Sprint, Epic and Type chips offer. */
+@Serializable
+data class WorkTreeFacets(
+    val iterations: List<IterationFacet> = emptyList(),
+    val epics: List<EpicFacet> = emptyList(),
+    @SerialName("item_types") val itemTypes: List<String> = emptyList(),
+)
+
+@Serializable
+data class IterationFacet(val name: String = "", val active: Boolean = false, val count: Int = 0)
+
+@Serializable
+data class EpicFacet(
+    @SerialName("task_id") val taskId: String = "",
+    val key: String? = null,
+    val title: String = "",
+    val count: Int = 0,
+) {
+    /** What `filters.epic` names it by. */
+    val ref: String get() = key ?: taskId
+}
 
 /** What the last session on a task ended with. */
 @Serializable

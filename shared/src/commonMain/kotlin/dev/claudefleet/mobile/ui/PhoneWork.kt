@@ -270,11 +270,11 @@ fun PhoneMyWorkScreen(
             below = {
                 if (state.searchOpen) {
                     OutlinedTextField(
-                        value = state.filters.query.orEmpty(),
+                        value = state.queryText,
                         onValueChange = handlers.onSetQuery,
                         label = { Text("Key or title") },
                         singleLine = true,
-                        trailingIcon = if (state.filters.query.isNullOrEmpty()) null else {
+                        trailingIcon = if (state.queryText.isEmpty()) null else {
                             { IconButton(onClick = { handlers.onSetQuery("") }) { Icon(FleetIcons.Close, contentDescription = "Clear search") } }
                         },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),

@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.fold
 
 /**
  * What the Sessions search finds beyond the sessions themselves — the
@@ -22,9 +23,9 @@ data class SearchHits(
 private const val MAX_HITS = 5
 
 fun searchEverywhere(query: String, hosts: List<HostRow>, projects: List<ProjectRow>, ticketsAvailable: Boolean): SearchHits {
-    val words = query.lowercase().split(' ').filter { it.isNotBlank() }
+    val words = fold(query).split(' ').filter { it.isNotBlank() }
     if (words.isEmpty()) return SearchHits()
-    fun matches(text: String) = words.all { it in text.lowercase() }
+    fun matches(text: String) = fold(text).let { t -> words.all { it in t } }
     return SearchHits(
         query = query.trim(),
         hosts = hosts.filter { !it.hidden && matches(it.alias) }.take(MAX_HITS),

@@ -81,6 +81,10 @@ data class MyWorkHandlers(
     val onSetTracker: (IdOrWord?) -> Unit = {},
     val onSetStatus: (String?) -> Unit = {},
     val onSetHas: (String?) -> Unit = {},
+    val onSetIteration: (String?) -> Unit = {},
+    val onSetEpic: (String?) -> Unit = {},
+    val onSetItemType: (String?) -> Unit = {},
+    val onSetSort: (String?) -> Unit = {},
     val onToggleMine: () -> Unit = {},
     val onToggleReview: () -> Unit = {},
     val onClearFilters: () -> Unit = {},
@@ -143,10 +147,13 @@ fun MyWorkScreen(
             below = {
                 if (state.searchOpen) {
                     OutlinedTextField(
-                        value = state.filters.query.orEmpty(),
+                        value = state.queryText,
                         onValueChange = handlers.onSetQuery,
                         label = { Text("Key or title") },
                         singleLine = true,
+                        trailingIcon = if (state.queryText.isEmpty()) null else {
+                            { IconButton(onClick = { handlers.onSetQuery("") }) { Icon(FleetIcons.Close, contentDescription = "Clear search") } }
+                        },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                     )
                 }
@@ -460,6 +467,50 @@ internal fun WorkFiltersSheet(
                 ChipFlow {
                     ChoiceChip(WorkTreeFilters.statusLabel(WorkTreeFilters.ANY), f.status == null, { handlers.onClearFacet(WorkFacetId.STATUS) })
                     for (s in WorkTreeFilters.STATUSES) ChoiceChip(WorkTreeFilters.statusLabel(s), f.status == s, { handlers.onSetStatus(s) })
+                }
+            }
+            val planning = state.planning
+            if (planning.iterations.isNotEmpty() || f.iteration != null) {
+                FilterGroup("Sprint") {
+                    ChipFlow {
+                        ChoiceChip("Any", f.iteration == null, { handlers.onClearFacet(WorkFacetId.ITERATION) })
+                        ChoiceChip("Current sprint", f.iteration == "current", { handlers.onSetIteration("current") })
+                        for (sprint in planning.iterations) {
+                            ChoiceChip(sprint.name.ifBlank { "Sprint" }, f.iteration == sprint.name, { handlers.onSetIteration(sprint.name) })
+                        }
+                        val stale = f.iteration?.takeIf { v -> v != "current" && v != "none" && planning.iterations.none { it.name == v } }
+                        if (stale != null) ChoiceChip(stale, true, { handlers.onClearFacet(WorkFacetId.ITERATION) })
+                        ChoiceChip("No sprint", f.iteration == "none", { handlers.onSetIteration("none") })
+                    }
+                }
+            }
+            if (planning.epics.isNotEmpty() || f.epic != null) {
+                FilterGroup("Epic") {
+                    ChipFlow {
+                        ChoiceChip("Any", f.epic == null, { handlers.onClearFacet(WorkFacetId.EPIC) })
+                        for (e in planning.epics) {
+                            val label = listOfNotNull(e.key, e.title.ifBlank { null }).joinToString(" ")
+                            ChoiceChip(label, f.epic.equals(e.ref, ignoreCase = true), { handlers.onSetEpic(e.ref) })
+                        }
+                        val stale = f.epic?.takeIf { v -> planning.epics.none { it.ref.equals(v, ignoreCase = true) } }
+                        if (stale != null) ChoiceChip(stale, true, { handlers.onClearFacet(WorkFacetId.EPIC) })
+                    }
+                }
+            }
+            if (planning.itemTypes.isNotEmpty() || f.itemType != null) {
+                FilterGroup("Type") {
+                    ChipFlow {
+                        ChoiceChip("Any", f.itemType == null, { handlers.onClearFacet(WorkFacetId.ITEM_TYPE) })
+                        val types = planning.itemTypes + listOfNotNull(f.itemType?.takeIf { v -> planning.itemTypes.none { it.equals(v, ignoreCase = true) } })
+                        for (t in types) ChoiceChip(t, f.itemType.equals(t, ignoreCase = true), { handlers.onSetItemType(t) })
+                    }
+                }
+            }
+            FilterGroup("Sort") {
+                ChipFlow {
+                    for (s in WorkTreeFilters.SORTS) {
+                        ChoiceChip(WorkTreeFilters.sortLabel(s), (f.sort ?: "activity") == s, { handlers.onSetSort(s.takeIf { it != "activity" }) })
+                    }
                 }
             }
             FilterGroup("Sessions") {

@@ -91,14 +91,15 @@ data class TicketFilters(
 
 /**
  * The search field as a filter: [query] narrows the lists to tickets whose
- * key or title holds it, case-insensitively. A pasted URL narrows nothing —
+ * key or title holds it, case and accents ignored. A pasted URL narrows nothing —
  * no key or title contains one, and hiding every ticket while a person
  * pastes a link to look up would read as "nothing here".
  */
 fun ticketMatchesQuery(ticket: Ticket, query: String): Boolean {
     val q = query.trim()
     if (q.isEmpty() || isTicketUrl(q)) return true
-    return ticket.key?.contains(q, ignoreCase = true) == true || ticket.title.contains(q, ignoreCase = true)
+    val folded = fold(q)
+    return ticket.key.foldedContains(folded) || ticket.title.foldedContains(folded)
 }
 
 /** The search field holds a link, which only the hub's lookup can answer. */

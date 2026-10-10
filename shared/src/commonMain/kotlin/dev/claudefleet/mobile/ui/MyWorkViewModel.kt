@@ -12,6 +12,7 @@ import dev.claudefleet.mobile.model.TreeOrg
 import dev.claudefleet.mobile.model.TreeTracker
 import dev.claudefleet.mobile.model.WorkRule
 import dev.claudefleet.mobile.model.WorkTask
+import dev.claudefleet.mobile.model.WorkTreeFacets
 import dev.claudefleet.mobile.model.WorkTreeFilters
 import dev.claudefleet.mobile.model.WorkTreePage
 import dev.claudefleet.mobile.model.WorkView
@@ -81,11 +82,16 @@ data class MyWorkUiState(
     /** Tasks under the filters, across every section. */
     val total: Int = 0,
     val filters: WorkTreeFilters = WorkTreeFilters(),
+    /** The search box as typed: [filters] holds it trimmed, so a space
+     *  between two words survives until the next one is typed. */
+    val queryText: String = "",
     val searchOpen: Boolean = false,
     val filtersOpen: Boolean = false,
     /** What the filter sheet can offer, from the last page. */
     val filterOrgs: List<TreeOrg> = emptyList(),
     val filterTrackers: List<TreeTracker> = emptyList(),
+    /** Every sprint, epic and type the caller sees: the Planning chips. */
+    val planning: WorkTreeFacets = WorkTreeFacets(),
     val viewsAvailable: Boolean = false,
     val views: List<WorkView> = emptyList(),
     /** The saved view whose filters are the ones showing, if any. */
@@ -190,6 +196,7 @@ class MyWorkViewModel(
         /** When [page] was read, in unix seconds. */
         val asOf: Long? = null,
         val filters: WorkTreeFilters = WorkTreeFilters(),
+        val queryText: String = filters.query.orEmpty(),
         val loading: Boolean = false,
         val error: Friendly? = null,
         val conflict: Boolean = false,
@@ -389,7 +396,7 @@ class MyWorkViewModel(
         val next = filters.normalized().copy(group = null)
         if (next == local.value.filters) return
         remember(next)
-        local.update { it.copy(filters = next, sections = it.sections.forgettingCursors()) }
+        local.update { it.copy(filters = next, queryText = next.query.orEmpty(), sections = it.sections.forgettingCursors()) }
         if (fleet.status.value.isConnected()) reload()
     }
 
@@ -410,6 +417,10 @@ class MyWorkViewModel(
 
     /** Show archived tasks too, or hide them again (the default). Not a narrowing: it is not counted. */
     fun setArchived(on: Boolean) = setFilters(local.value.filters.copy(archived = on))
+    fun setIteration(iteration: String?) = setFilters(local.value.filters.copy(iteration = iteration))
+    fun setEpic(epic: String?) = setFilters(local.value.filters.copy(epic = epic))
+    fun setItemType(type: String?) = setFilters(local.value.filters.copy(itemType = type))
+    fun setSort(sort: String?) = setFilters(local.value.filters.copy(sort = sort))
     fun toggleArchived() = setArchived(local.value.filters.archived != true)
 
     /** One chip's ✕: that filter back to *Any*, the rest kept. */
@@ -432,8 +443,14 @@ class MyWorkViewModel(
     /** The search box: typed text narrows the tree after a short pause. */
     fun setQuery(text: String) {
         val next = local.value.filters.copy(query = text).normalized()
+        if (next == local.value.filters) {
+            // Only spacing changed ("login " on the way to "login bug"):
+            // the box keeps it, the tree has nothing new to read.
+            local.update { it.copy(queryText = text) }
+            return
+        }
         remember(next)
-        local.update { it.copy(filters = next, sections = it.sections.forgettingCursors()) }
+        local.update { it.copy(filters = next, queryText = text, sections = it.sections.forgettingCursors()) }
         queryJob?.cancel()
         queryJob = scope.launch {
             delay(QUERY_DEBOUNCE_MS)
@@ -589,10 +606,12 @@ class MyWorkViewModel(
             orgs = orgs,
             total = page?.total ?: 0,
             filters = l.filters,
+            queryText = l.queryText,
             searchOpen = l.searchOpen || l.filters.query != null,
             filtersOpen = l.filtersOpen,
             filterOrgs = page?.orgs.orEmpty(),
             filterTrackers = page?.trackers.orEmpty(),
+            planning = page?.facets ?: WorkTreeFacets(),
             viewsAvailable = caps.has(WORK, VIEWS),
             views = l.views,
             activeViewId = l.views.firstOrNull { it.filters.normalized().copy(group = null) == l.filters }?.id,
@@ -612,6 +631,7 @@ class MyWorkViewModel(
                 l.filters,
                 orgName = { id -> page?.orgs?.firstOrNull { it.id == id }?.name?.takeIf { it.isNotBlank() } },
                 trackerName = { id -> page?.trackers?.firstOrNull { it.id == id }?.name?.takeIf { it.isNotBlank() } },
+                epicTitle = { ref -> page?.facets?.epics?.firstOrNull { it.ref.equals(ref, ignoreCase = true) }?.title },
             ),
         )
     }

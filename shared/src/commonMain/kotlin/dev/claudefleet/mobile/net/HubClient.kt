@@ -1182,6 +1182,22 @@ class HubClient(
             json.decodeFromJsonElement(ListSerializer(Ticket.serializer()), it)
         }
 
+    /**
+     * Tickets in the hub's whole cache whose key, title or assignees hold
+     * every word of [query], then the caller's own tasks (an older hub
+     * ignores `include_local` and answers tickets alone).
+     */
+    suspend fun workSearch(query: String): List<Ticket> =
+        call(
+            "work",
+            buildJsonObject {
+                put("action", "tickets")
+                put("query", query.trim())
+                put("include_local", true)
+                put("limit", WORK_SEARCH_LIMIT)
+            },
+        ) { json.decodeFromJsonElement(ListSerializer(Ticket.serializer()), it) }
+
     /** The connected trackers — empty on a hub with the work graph and no tracker. */
     suspend fun workTrackers(): List<TrackerRow> =
         call("work", buildJsonObject { put("action", "trackers") }) {
@@ -2498,6 +2514,9 @@ internal const val SHA256_HEADER = "X-Fleet-Sha256"
 
 /** How much of a download is read per step: enough to keep a fast link busy, small enough for any heap. */
 private const val DOWNLOAD_CHUNK = 64 * 1024
+
+/** How many tickets a word search asks for (the hub caps a page at 200). */
+private const val WORK_SEARCH_LIMIT = 50
 
 internal const val HUB_CALL_TIMEOUT_MS = 45_000L
 internal const val HUB_CONNECT_TIMEOUT_MS = 15_000L

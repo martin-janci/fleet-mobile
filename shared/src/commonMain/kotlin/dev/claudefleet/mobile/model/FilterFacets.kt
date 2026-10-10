@@ -108,6 +108,9 @@ enum class WorkFacetId {
     MINE,
     HAS,
     REVIEW,
+    ITERATION,
+    EPIC,
+    ITEM_TYPE,
     QUERY,
     ;
 
@@ -119,6 +122,7 @@ fun workFacets(
     f: WorkTreeFilters,
     orgName: (Long) -> String? = { null },
     trackerName: (Long) -> String? = { null },
+    epicTitle: (String) -> String? = { null },
 ): List<Facet<WorkFacetId>> {
     val n = f.normalized()
     return buildList {
@@ -138,6 +142,9 @@ fun workFacets(
         if (n.mine == true) add(Facet(WorkFacetId.MINE, "Assigned to me"))
         n.has?.let { add(Facet(WorkFacetId.HAS, "Sessions: ${WorkTreeFilters.hasLabel(it)}")) }
         if (n.review == true) add(Facet(WorkFacetId.REVIEW, "To review"))
+        n.iteration?.let { add(Facet(WorkFacetId.ITERATION, WorkTreeFilters.iterationLabel(it))) }
+        n.epic?.let { e -> add(Facet(WorkFacetId.EPIC, "Epic: " + (epicTitle(e)?.let { "$e $it" } ?: e))) }
+        n.itemType?.let { add(Facet(WorkFacetId.ITEM_TYPE, "Type: $it")) }
         n.query?.let { add(Facet(WorkFacetId.QUERY, "Search: “$it”")) }
     }
 }
@@ -152,6 +159,9 @@ fun WorkTreeFilters.without(id: WorkFacetId): WorkTreeFilters {
         WorkFacetId.MINE -> n.copy(mine = null)
         WorkFacetId.HAS -> n.copy(has = null)
         WorkFacetId.REVIEW -> n.copy(review = null)
+        WorkFacetId.ITERATION -> n.copy(iteration = null)
+        WorkFacetId.EPIC -> n.copy(epic = null)
+        WorkFacetId.ITEM_TYPE -> n.copy(itemType = null)
         WorkFacetId.QUERY -> n.copy(query = null)
     }
 }

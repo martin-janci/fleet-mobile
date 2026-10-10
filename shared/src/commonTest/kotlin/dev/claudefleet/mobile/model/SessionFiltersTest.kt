@@ -182,6 +182,15 @@ class SessionFiltersTest {
         assertFalse(r.kept(SessionFilters(query = "nothing-like-this")))
     }
 
+    /** The desktop's rule: every word, each in any field, in any order, accents ignored. */
+    @Test
+    fun every_word_must_match_but_not_in_one_field_or_order() {
+        val r = row(tmuxName = "oprava-prihlásenia", host = "mefistos")
+        assertTrue(r.kept(SessionFilters(query = "mefistos prihlasenia")))
+        assertTrue(r.kept(SessionFilters(query = "login prihlasenia"), project = "acme/login"))
+        assertFalse(r.kept(SessionFilters(query = "prihlasenia gpu-box")))
+    }
+
     /** A row carries a `project_id` and no name, so the label has to be handed in. */
     @Test
     fun a_project_name_only_matches_when_the_label_is_supplied() {

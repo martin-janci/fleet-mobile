@@ -102,6 +102,9 @@ data class TicketsUiState(
     val query: String = "",
     /** What a search found — drawn above the sections. */
     val found: Ticket? = null,
+    /** What a search in words found in the hub's whole cache, beyond the
+     *  tickets the sections already list. */
+    val matches: List<Ticket> = emptyList(),
     val selected: TicketDetail? = null,
     val busy: Boolean = false,
     val error: Friendly? = null,
@@ -170,6 +173,7 @@ class TicketsViewModel(
         val loading: Boolean = false,
         val query: String = "",
         val found: Ticket? = null,
+        val matches: List<Ticket> = emptyList(),
         val selectedId: Long? = null,
         val selected: Ticket? = null,
         val plan: ResumePlan? = null,
@@ -270,12 +274,12 @@ class TicketsViewModel(
 
     /** One chip's ×: that filter back at its default. The search chip clears the field. */
     fun clearFacet(id: TicketFacetId) {
-        if (id == TicketFacetId.SEARCH) local.update { it.copy(query = "", found = null) } else setFilters { it.without(id) }
+        if (id == TicketFacetId.SEARCH) local.update { it.copy(query = "", found = null, matches = emptyList()) } else setFilters { it.without(id) }
     }
 
     /** Every filter off and the search field empty: every listed ticket back. */
     fun clearAll() {
-        local.update { it.copy(query = "", found = null) }
+        local.update { it.copy(query = "", found = null, matches = emptyList()) }
         setFilters { TicketFilters() }
     }
 
@@ -319,13 +323,20 @@ class TicketsViewModel(
     }
 
     fun onQuery(text: String) {
-        local.update { it.copy(query = text) }
+        // A search's matches were for the words it was given.
+        local.update { it.copy(query = text, matches = if (text.trim() == it.query.trim()) it.matches else emptyList()) }
     }
 
-    /** A key such as `PAY-9` or a pasted ticket URL: the hub's cache, else one live fetch. */
+    /**
+     * A key such as `PAY-9` or a pasted ticket URL: the hub's cache, else one
+     * live fetch. Anything else is words, searched for in the hub's whole
+     * cache (key, title, assignees; accents ignored) and the caller's tasks.
+     */
     fun search(): Job? {
         val reference = local.value.query.trim()
-        if (reference.isEmpty() || !fleet.capabilities.value.has(WORK, LOOKUP)) return null
+        if (reference.isEmpty()) return null
+        if (!isTicketReference(reference)) return searchWords(reference)
+        if (!fleet.capabilities.value.has(WORK, LOOKUP)) return null
         return scope.launch {
             local.update { it.copy(busy = true, error = null, found = null) }
             try {
@@ -337,6 +348,24 @@ class TicketsViewModel(
                 throw e
             } catch (t: Throwable) {
                 if (t is HubError.Tool && t.isUnknownAction()) fleet.actionMissing(WORK, LOOKUP)
+                local.update { it.copy(error = friendlyWork(t)) }
+            } finally {
+                local.update { it.copy(busy = false) }
+            }
+        }
+    }
+
+    private fun searchWords(words: String): Job? {
+        if (!fleet.capabilities.value.has(WORK, TICKETS)) return null
+        return scope.launch {
+            local.update { it.copy(busy = true, error = null, found = null, matches = emptyList()) }
+            try {
+                val found = actions.searchTickets(words)
+                fleet.rememberTickets(found)
+                local.update { it.copy(matches = found) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
                 local.update { it.copy(error = friendlyWork(t)) }
             } finally {
                 local.update { it.copy(busy = false) }
@@ -501,7 +530,9 @@ class TicketsViewModel(
                 trouble = ticketTrouble(ticket, trackers),
             )
         }
-        val shown = l.sections.flatMap { it.tickets } + listOfNotNull(l.found, l.selected)
+        val listedIds = l.sections.flatMapTo(HashSet()) { s -> s.tickets.map { it.id } }
+        val matches = l.matches.filter { it.id !in listedIds && it.id != l.found?.id }
+        val shown = l.sections.flatMap { it.tickets } + listOfNotNull(l.found, l.selected) + matches
         val ticketOrgs = if (orgs.orgs.size < 2) {
             emptyMap()
         } else {
@@ -541,6 +572,7 @@ class TicketsViewModel(
             loading = l.loading,
             query = l.query,
             found = l.found?.current(),
+            matches = matches.map { it.current() },
             selected = selected,
             busy = l.busy,
             error = l.error,
@@ -579,3 +611,15 @@ class TicketsViewModel(
 
 /** What a tracker chip reads: its name, else its provider. */
 internal fun trackerName(t: TrackerRow): String = t.name.ifBlank { t.provider.ifBlank { "Tracker #${t.id}" } }
+
+/**
+ * A tracker key (`PAY-9`), a GitHub `owner/repo#12` or a pasted URL: what
+ * `work lookup` resolves. Anything else typed in the search is words.
+ */
+internal fun isTicketReference(text: String): Boolean {
+    val t = text.trim()
+    return t.contains("://") || TICKET_KEY.matches(t) || GITHUB_ISSUE.matches(t)
+}
+
+private val TICKET_KEY = Regex("""^[A-Za-z][A-Za-z0-9_]{1,9}-\d{1,7}$""")
+private val GITHUB_ISSUE = Regex("""^[\w.-]+/[\w.-]+#\d{1,9}$""")

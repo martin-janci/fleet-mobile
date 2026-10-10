@@ -46,6 +46,9 @@ interface WorkActions {
     /** One ticket by key or pasted URL. */
     suspend fun lookup(keyOrUrl: String): Ticket
 
+    /** Tickets in the hub's cache, and the caller's own tasks, matching [query]'s words. */
+    suspend fun searchTickets(query: String): List<Ticket>
+
     /** What resuming [key] would do. */
     suspend fun resumePlan(key: String): ResumePlan
 
@@ -197,6 +200,8 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
     override suspend fun tickets(view: String): List<Ticket> = session.withClient { it.workTickets(view) }
 
     override suspend fun lookup(keyOrUrl: String): Ticket = session.withClient { it.workLookup(keyOrUrl) }
+
+    override suspend fun searchTickets(query: String): List<Ticket> = session.withClient { it.workSearch(query) }
 
     override suspend fun resumePlan(key: String): ResumePlan = session.withClient { it.workResumePlan(key) }
 

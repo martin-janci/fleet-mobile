@@ -138,6 +138,12 @@ internal class FakeWorkActions : WorkActions {
         return lookupAnswer
     }
 
+    var searchAnswer: List<Ticket> = emptyList()
+    override suspend fun searchTickets(query: String): List<Ticket> {
+        calls += "search $query"
+        return searchAnswer
+    }
+
     override suspend fun resumePlan(key: String): ResumePlan {
         calls += "resume_plan $key"
         return planAnswer ?: throw HubError.Tool("E_NOTFOUND", "no past work")

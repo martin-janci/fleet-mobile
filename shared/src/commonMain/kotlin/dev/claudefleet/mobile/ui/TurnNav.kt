@@ -2,6 +2,8 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
+import dev.claudefleet.mobile.model.fold
+import dev.claudefleet.mobile.model.foldedContains
 
 /**
  * One turn as the conversation list draws it: the turn, and the key the
@@ -87,9 +89,9 @@ enum class FindScope(val label: String) {
  * with no query lists every turn where something did.
  */
 internal fun findTurns(rows: List<TurnRow>, query: String, scope: FindScope = FindScope.Everything): List<Int> {
-    val q = query.trim().lowercase()
+    val q = fold(query.trim())
     if (q.isEmpty() && scope != FindScope.Errors) return emptyList()
-    fun has(text: String?) = text != null && text.lowercase().contains(q)
+    fun has(text: String?) = text.foldedContains(q)
     return rows.indices.filter { i ->
         val turn = rows[i].turn
         when (scope) {

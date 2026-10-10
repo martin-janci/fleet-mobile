@@ -10,6 +10,8 @@ import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.SessionTasks
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.WorkTaskLink
+import dev.claudefleet.mobile.model.fold
+import dev.claudefleet.mobile.model.foldedContains
 import dev.claudefleet.mobile.model.orgOf
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK
@@ -447,13 +449,13 @@ class SessionTasksViewModel(
             .sortedByDescending { it.endedAt ?: it.decidedAt ?: Long.MIN_VALUE }
         val linkedItems = links.filter { it.state == LinkState.Active || it.state == LinkState.Suggested }
             .mapNotNull { it.task?.taskId?.removePrefix(ITEM_PREFIX)?.toLongOrNull() }.toSet()
-        val query = l.addQuery.trim()
+        val query = fold(l.addQuery.trim())
         // Another org only when both sides are known and differ — the hub's
         // own rule (`check_cross_org`): unassigned on either side links.
         fun otherOrgOf(t: Ticket): Long? = o.directory.orgOf(t)?.takeIf { o.sessionOrg != null && it != o.sessionOrg }
         val candidates = (l.offered + cache).distinctBy { it.id }
             .filter { it.id !in linkedItems }
-            .filter { t -> query.isEmpty() || t.label.contains(query, ignoreCase = true) || t.title.contains(query, ignoreCase = true) }
+            .filter { t -> query.isEmpty() || t.label.foldedContains(query) || t.title.foldedContains(query) }
             .sortedBy { otherOrgOf(it) != null }
             .take(MAX_CANDIDATES)
         val otherOrg = candidates.mapNotNull { t -> otherOrgOf(t)?.let { t.id to o.directory.name(it) } }.toMap()

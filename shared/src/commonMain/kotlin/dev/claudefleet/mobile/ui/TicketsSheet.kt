@@ -116,7 +116,7 @@ fun TicketsSheet(
             OutlinedTextField(
                 value = state.query,
                 onValueChange = handlers.onQuery,
-                label = { Text("Filter, or look up a key or URL") },
+                label = { Text("Filter, or search for a key, URL or words") },
                 singleLine = true,
                 enabled = !state.busy,
                 trailingIcon = if (state.query.isNotEmpty()) {
@@ -129,7 +129,7 @@ fun TicketsSheet(
                     null
                 },
                 keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Characters,
+                    capitalization = KeyboardCapitalization.None,
                     autoCorrectEnabled = false,
                     imeAction = ImeAction.Search,
                 ),
@@ -154,6 +154,17 @@ fun TicketsSheet(
                     }
                     state.selected?.takeIf { it.ticket.id == found.id }?.let { detail ->
                         item(key = "found-actions-${found.id}") { TicketActions(detail, state.busy, handlers) }
+                    }
+                }
+                if (state.matches.isNotEmpty()) {
+                    item(key = "matches") { SectionTitle("In all tickets") }
+                    for (ticket in state.matches) {
+                        item(key = "match-${ticket.id}") {
+                            TicketRow(ticket, state.selected?.ticket?.id == ticket.id, state.ticketOrgs[ticket.id], handlers, rowOf)
+                        }
+                        state.selected?.takeIf { it.ticket.id == ticket.id }?.let { detail ->
+                            item(key = "match-actions-${ticket.id}") { TicketActions(detail, state.busy, handlers) }
+                        }
                     }
                 }
                 if (state.allFiltered) {
