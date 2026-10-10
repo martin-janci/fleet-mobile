@@ -13,6 +13,7 @@ import dev.claudefleet.mobile.model.SpendAsk
 import dev.claudefleet.mobile.model.key
 import dev.claudefleet.mobile.model.pauseMove
 import dev.claudefleet.mobile.net.HubCapabilities
+import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -170,7 +171,18 @@ class MissionsViewModel(
         if (!state.value.canAnswerSpend || id != ask.missionId) return@act
         val m = local.value.detail?.mission ?: return@act
         actions.regrant(id, ask.grant, budgetCents = ask.newLimitMicros / 10_000, hours = grantHoursLeft(ask.grant, nowSeconds))
-        actions.setState(id, "active", m.version)
+        // Three calls, not one step: the budget is raised by now, and the
+        // card leaves the screen with it (`spendAsk` no longer reads it as an
+        // ask). A resume that loses a version race must not leave the mission
+        // paused behind a raised budget with no button left to resume it, so
+        // it is tried once more against the version as it is now.
+        try {
+            actions.setState(id, "active", m.version)
+        } catch (e: HubError.Tool) {
+            if (e.code != "E_CONFLICT") throw e
+            val now = actions.mission(id).mission
+            if (now.state != "active") actions.setState(id, "active", now.version)
+        }
         actions.decideCard(ask.cardId, ok = true, note = "Approved ${dollars(ask.moreMicros)} more; the new limit is ${dollars(ask.newLimitMicros)}.")
         local.update { it.copy(notice = "Approved ${dollars(ask.moreMicros)} more. The mission runs again.") }
     }
