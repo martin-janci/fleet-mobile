@@ -14,6 +14,7 @@ import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.model.Attention
 import dev.claudefleet.mobile.model.QueuedPrompt
 import dev.claudefleet.mobile.model.QueuePromptResult
+import dev.claudefleet.mobile.model.SendLaterTiming
 import dev.claudefleet.mobile.model.HostLogin
 import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.ActivityProbe
@@ -310,8 +311,11 @@ private class FakeActions : SessionActions {
     val headroomAsked = mutableListOf<Pair<String, String?>>()
     val restartedUnder = mutableListOf<String>()
 
-    override suspend fun queuePrompt(sessionId: Long, prompt: String): QueuePromptResult {
+    val timings = mutableListOf<SendLaterTiming>()
+
+    override suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming): QueuePromptResult {
         queuedSent += prompt
+        timings += timing
         if (!queueDelivers) waiting += QueuedPrompt(id = waiting.size + 1L, sessionId = sessionId, body = prompt)
         return QueuePromptResult(sessionId, delivered = queueDelivers, queuedId = if (queueDelivers) null else waiting.size.toLong())
     }
@@ -3950,5 +3954,155 @@ class SessionViewModelTest {
         vm.proposeSwitch().join()
         runCurrent()
         assertTrue(actions.headroomAsked.isEmpty())
+    }
+
+    // ---- gap plan G5.5: timed Send later (claude-fleet G1.8) ----
+
+    private fun timedFleet(row: SessionRow = row()) = FakeFleetState(listOf(row)).apply {
+        capabilities.value = HubCapabilities(
+            tools = setOf("queue_prompt", "queued_prompts"),
+            params = mapOf("queue_prompt" to setOf("session_id", "prompt", "not_before", "until_limit_reset", "skip_if_archived")),
+        )
+    }
+
+    @Test
+    fun a_timed_send_later_carries_its_time_and_says_it_was_kept() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, timedFleet(), actions, backgroundScope)
+        runCurrent()
+        assertTrue(vm.state.value.sendLaterAtAvailable)
+        assertTrue(vm.state.value.sendLaterAfterLimitAvailable)
+        assertTrue(vm.state.value.sendLaterSkipAvailable)
+
+        val timing = SendLaterTiming(notBefore = 1_800_003_600L, skipIfArchived = true)
+        vm.sendLater("rebase on main", timing).join()
+        runCurrent()
+
+        assertEquals(listOf("rebase on main"), actions.queuedSent)
+        assertEquals(listOf(timing), actions.timings)
+        assertEquals("Kept: it goes in when its time comes and the session is idle.", vm.state.value.sendLaterNotice)
+
+        vm.sendLater("after the reset", SendLaterTiming(untilLimitReset = true)).join()
+        runCurrent()
+        assertEquals(SendLaterTiming(untilLimitReset = true), actions.timings.last())
+    }
+
+    @Test
+    fun an_older_hub_offers_no_time_and_is_never_sent_one() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(tools = setOf("queue_prompt", "queued_prompts")), actions, backgroundScope)
+        runCurrent()
+        assertTrue(vm.state.value.canSendLater)
+        assertFalse(vm.state.value.sendLaterAtAvailable)
+        assertFalse(vm.state.value.sendLaterAfterLimitAvailable)
+        assertFalse(vm.state.value.sendLaterSkipAvailable)
+
+        // It would ignore the time and type it at the next idle moment: not sent at all.
+        vm.sendLater("tomorrow", SendLaterTiming(notBefore = 1_800_000_000L)).join()
+        vm.sendLater("skip", SendLaterTiming(skipIfArchived = true)).join()
+        runCurrent()
+        assertTrue(actions.queuedSent.isEmpty())
+
+        vm.sendLater("when idle").join()
+        runCurrent()
+        assertEquals(listOf(SendLaterTiming()), actions.timings, "the plain call still goes")
+    }
+
+    // ---- gap plan G5.5: Details › Switch account… on any session ----
+
+    private val running = row(status = "idle").copy(accountUuid = "acc-a", claudeProfile = "work")
+
+    @Test
+    fun switch_account_from_details_lists_the_other_logins_and_restarts_only_on_switch() = runTest {
+        val actions = FakeActions().apply {
+            headroom = Headroom(
+                pauseAtPct = 95.0,
+                logins = listOf(HostLogin("work", "acc-a", 30.0), HostLogin(null, "acc-b", 40.0), HostLogin("spare", "acc-c", 20.0)),
+            )
+        }
+        val fleet = FakeFleetState(listOf(running)).apply {
+            capabilities.value = HubCapabilities(tools = switchTools, params = mapOf("restart_session" to setOf("session_id", "profile")))
+        }
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+        assertFalse(vm.state.value.canSwitchAccount, "not paused: no limit card")
+        assertTrue(vm.state.value.canSwitchAccountAnytime)
+
+        vm.openAccountSwitch().join()
+        runCurrent()
+        val open = assertNotNull(vm.state.value.accountSwitch)
+        assertEquals(listOf(HostLogin(null, "acc-b", 40.0), HostLogin("spare", "acc-c", 20.0)), open.logins, "every login but its own")
+        assertNull(open.picked, "under the line, nothing is proposed")
+        assertTrue(actions.restartedUnder.isEmpty())
+
+        vm.confirmAccountSwitch().join()
+        runCurrent()
+        assertTrue(actions.restartedUnder.isEmpty(), "nothing picked, nothing restarts")
+
+        vm.pickAccountSwitch(HostLogin(null, "acc-b", 40.0))
+        vm.confirmAccountSwitch { if (it == "acc-b") "me@home" else null }.join()
+        runCurrent()
+        assertEquals(listOf(""), actions.restartedUnder, "the host's own login is the empty profile")
+        assertNull(vm.state.value.accountSwitch)
+        assertEquals("Resumed under me@home.", vm.state.value.limitNotice)
+    }
+
+    @Test
+    fun switch_account_from_details_proposes_the_roomiest_login_when_over_the_line() = runTest {
+        val actions = FakeActions().apply {
+            headroom = Headroom(
+                pauseAtPct = 95.0,
+                logins = listOf(HostLogin("work", "acc-a", 99.0), HostLogin("spare", "acc-c", 20.0)),
+            )
+        }
+        val fleet = FakeFleetState(listOf(running)).apply {
+            capabilities.value = HubCapabilities(tools = switchTools, params = mapOf("restart_session" to setOf("session_id", "profile")))
+        }
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+        vm.openAccountSwitch().join()
+        runCurrent()
+        assertEquals(HostLogin("spare", "acc-c", 20.0), vm.state.value.accountSwitch?.picked)
+        vm.closeAccountSwitch()
+        runCurrent()
+        assertNull(vm.state.value.accountSwitch)
+        assertTrue(actions.restartedUnder.isEmpty())
+    }
+
+    @Test
+    fun switch_account_from_details_with_no_other_login_says_so() = runTest {
+        val actions = FakeActions().apply { headroom = Headroom(logins = listOf(HostLogin("work", "acc-a", 10.0))) }
+        val fleet = FakeFleetState(listOf(running)).apply {
+            capabilities.value = HubCapabilities(tools = switchTools, params = mapOf("restart_session" to setOf("session_id", "profile")))
+        }
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+        vm.openAccountSwitch().join()
+        runCurrent()
+        assertEquals("pine has no other login to switch to.", vm.state.value.accountSwitch?.notice)
+    }
+
+    @Test
+    fun switch_account_from_details_is_not_offered_on_an_older_hub() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(listOf(running), tools = switchTools), actions, backgroundScope)
+        runCurrent()
+        assertFalse(vm.state.value.canSwitchAccountAnytime)
+        vm.openAccountSwitch().join()
+        runCurrent()
+        assertNull(vm.state.value.accountSwitch)
+        assertTrue(actions.headroomAsked.isEmpty())
+    }
+
+    /** Details › Fork… forks the whole conversation: the latest turn's anchor is none. */
+    @Test
+    fun fork_from_details_keeps_the_whole_conversation() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(tools = rewindable), actions, backgroundScope)
+        var opened: Long? = null
+        vm.fork(null, "fork-of-api-work") { opened = it }.join()
+        runCurrent()
+        assertEquals(listOf(Triple<String?, String, String?>(null, "fork", "fork-of-api-work")), actions.rewound)
+        assertEquals(FORKED, opened)
     }
 }

@@ -30,6 +30,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -43,6 +47,7 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.SessionExtrasActions
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.FleetIcons
@@ -100,11 +105,27 @@ fun terminalLabel(index: Int): String = "shell · ${index + 1}"
 fun terminalsTabLabel(count: Int): String = if (count > 0) "Terminals $count" else "Terminals"
 
 /**
+ * The key bar's caps beyond [TerminalKey] (gap plan G5.5): ← and → for the
+ * shell's own line editing, and ⌃, which opens a row of Ctrl letters — each
+ * only where the hub's `send_prompt { keys }` enumerates it
+ * ([HubCapabilities.paneKeys]), as the agent's full-screen bar does. There is
+ * no Alt: the hub refuses every Meta chord (`M-x`), so it has no cap.
+ */
+fun terminalExtraKeys(paneKeys: Set<String>): List<AgentBarKey> = buildList {
+    if ("Left" in paneKeys) add(AgentBarKey("←", AgentPress.Key("Left")))
+    if ("Right" in paneKeys) add(AgentBarKey("→", AgentPress.Key("Right")))
+    if (HubCapabilities.CTRL_KEYS.any { it in paneKeys }) add(AgentBarKey("⌃", null))
+}
+
+const val TERMINALS_KEY_TAG = "terminals.key."
+
+/**
  * The key bar. Esc, Tab and ⌃C go to the shell's pane as keys (the hub's
  * `send_prompt { keys }` takes Enter, Escape, Tab, C-c and a digit, nothing
  * else); ↑ and ↓ walk back through what was typed here, into the line; | and
  * ~ go into the line, being what a phone keyboard hides furthest away.
- * There is no free Ctrl key: the hub does not take Ctrl chords beyond C-c.
+ * These are the caps every hub with keys takes; [terminalExtraKeys] adds
+ * ← → and the Ctrl letters where the hub lists them.
  */
 enum class TerminalKey(val label: String, val key: String? = null, val insert: String? = null) {
     Esc("Esc", key = "Escape"),
@@ -134,6 +155,8 @@ data class TerminalsUiState(
     val canCreate: Boolean = false,
     /** This pairing may type into a shell. */
     val canType: Boolean = false,
+    /** The keys the hub's `send_prompt` takes ([HubCapabilities.paneKeys]): what the bar's ←, → and ⌃ row may press. */
+    val paneKeys: Set<String> = HubCapabilities.BASE_PANE_KEYS,
     val connected: Boolean = false,
     val terminals: List<SessionRow> = emptyList(),
     val selected: Long? = null,
@@ -189,6 +212,7 @@ class SessionExtrasViewModel(
         TerminalsUiState(
             canCreate = canWrite && caps.shellSessions && parent?.projectId != null,
             canType = canWrite,
+            paneKeys = caps.paneKeys,
             connected = status is ConnectionStatus.Connected,
             terminals = terminals,
             selected = selected,
@@ -301,6 +325,21 @@ class SessionExtrasViewModel(
                     capture()
                 }
             }
+        }
+    }
+
+    /**
+     * A named key the hub lists for `send_prompt` (←, →, a Ctrl letter) into
+     * the selected shell's pane; nothing for a key this hub does not take.
+     */
+    fun pressKey(key: String): Job = scope.launch {
+        if (key !in fleet.capabilities.value.paneKeys) return@launch
+        val id = current() ?: return@launch
+        if (!canWrite) return@launch
+        guarded {
+            actions.press(id, key)
+            delay(AFTER_INPUT_MS)
+            capture()
         }
     }
 
@@ -422,6 +461,8 @@ class TerminalsHandlers(
     val onInput: (String) -> Unit = {},
     val onSubmit: () -> Unit = {},
     val onKey: (TerminalKey) -> Unit = {},
+    /** A hub-listed key beyond [TerminalKey]: ←, →, a Ctrl letter ([terminalExtraKeys]). */
+    val onPaneKey: (String) -> Unit = {},
     val onDismissError: () -> Unit = {},
     /** The pane went side by side (landscape, two shells or more) or back. */
     val onSplit: (Boolean) -> Unit = {},
@@ -514,6 +555,28 @@ private fun ColumnScope.TerminalScreen(state: TerminalsUiState, handlers: Termin
         )
     }
     if (state.canType) {
+        var ctrlOpen by remember { mutableStateOf(false) }
+        val ctrlRow = ctrlBarKeys(null, state.paneKeys)
+        if (ctrlOpen && ctrlRow.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                for (key in ctrlRow) {
+                    val press = key.press as? AgentPress.Key
+                    OutlinedButton(
+                        onClick = {
+                            if (press != null) handlers.onPaneKey(press.key)
+                            ctrlOpen = false
+                        },
+                        enabled = press != null && state.connected,
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        modifier = Modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp).widthIn(min = 44.dp)
+                            .testTag(TERMINALS_KEY_TAG + key.label),
+                    ) { Text(key.label, style = Fleet.type.code, modifier = Modifier.clearAndSetSemantics { contentDescription = key.spoken }) }
+                }
+            }
+        }
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -525,6 +588,17 @@ private fun ColumnScope.TerminalScreen(state: TerminalsUiState, handlers: Termin
                     // Narrow keys, so the whole bar fits a phone's width.
                     contentPadding = PaddingValues(horizontal = 8.dp),
                     modifier = Modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp).widthIn(min = 44.dp),
+                ) { Text(key.label, style = Fleet.type.code, modifier = Modifier.clearAndSetSemantics { contentDescription = key.spoken }) }
+            }
+            for (key in terminalExtraKeys(state.paneKeys)) {
+                val press = key.press as? AgentPress.Key
+                val opensCtrl = key.label == "⌃"
+                OutlinedButton(
+                    onClick = { if (opensCtrl) ctrlOpen = !ctrlOpen else if (press != null) handlers.onPaneKey(press.key) },
+                    enabled = state.connected,
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    modifier = Modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp).widthIn(min = 44.dp)
+                        .testTag(TERMINALS_KEY_TAG + key.label),
                 ) { Text(key.label, style = Fleet.type.code, modifier = Modifier.clearAndSetSemantics { contentDescription = key.spoken }) }
             }
         }

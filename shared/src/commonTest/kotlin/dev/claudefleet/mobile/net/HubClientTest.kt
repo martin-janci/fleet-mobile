@@ -672,6 +672,23 @@ class HubClientTest {
         assertEquals(3L, client.sendKeys(7, "Escape").turnSeqBefore)
     }
 
+    /** Send later's timing (gap plan G5.5 on claude-fleet G1.8): only what is set goes on the wire. */
+    @Test
+    fun queue_prompt_sends_a_timing_only_when_one_is_chosen() = runTest {
+        val seen = mutableListOf<JsonObject>()
+        val client = clientAnswering { body ->
+            assertEquals("queue_prompt", body.tool())
+            seen += body.args()
+            """{"session_id":7,"delivered":false,"queued_id":4}"""
+        }
+        assertEquals(4L, client.queuePrompt(7, "status?").queuedId)
+        client.queuePrompt(7, "rebase", dev.claudefleet.mobile.model.SendLaterTiming(notBefore = 1_800_003_600L, untilLimitReset = true, skipIfArchived = true))
+        assertEquals(setOf("session_id", "prompt"), seen[0].keys, "an older hub reads the call it knows")
+        assertEquals("1800003600", seen[1]["not_before"]?.jsonPrimitive?.content)
+        assertEquals("true", seen[1]["until_limit_reset"]?.jsonPrimitive?.content)
+        assertEquals("true", seen[1]["skip_if_archived"]?.jsonPrimitive?.content)
+    }
+
     /** A dialog's option is a digit key — never the text "2", which the hub refuses into a blocked session. */
     @Test
     fun a_digit_is_sent_as_a_key() = runTest {

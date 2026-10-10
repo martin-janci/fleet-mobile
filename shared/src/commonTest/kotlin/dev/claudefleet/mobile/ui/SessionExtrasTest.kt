@@ -172,6 +172,42 @@ class SessionExtrasTest {
         assertTrue(TerminalKey.entries.mapNotNull { it.key }.all { it in accepted })
     }
 
+    /** Gap plan G5.5: ← → and the Ctrl letters, where the hub's `send_prompt { keys }` lists them. */
+    @Test
+    fun the_bar_offers_arrows_and_ctrl_only_where_the_hub_lists_them() {
+        val listed = HubCapabilities(
+            tools = setOf(HubCapabilities.SEND_PROMPT),
+            paramValues = mapOf(HubCapabilities.SEND_PROMPT to mapOf(HubCapabilities.KEYS to setOf("Enter", "Escape", "Tab", "C-c", "Left", "Right", "C-r", "C-d"))),
+        )
+        assertEquals(listOf("←", "→", "⌃"), terminalExtraKeys(listed.paneKeys).map { it.label })
+        assertEquals(listOf("⌃D", "⌃R"), ctrlBarKeys(null, listed.paneKeys).map { it.label })
+        assertEquals(emptyList(), terminalExtraKeys(HubCapabilities.BASE_PANE_KEYS), "an older hub: no extra caps, and no Alt on any hub")
+    }
+
+    @Test
+    fun a_ctrl_letter_goes_to_the_shell_only_where_the_hub_takes_it() = runTest {
+        val fleet = ExtrasFleet(listOf(PARENT, shell(9, "hosts-polish-sh1")), SHELLS + HubCapabilities.SEND_PROMPT)
+        val extras = Extras(fleet)
+        val vm = SessionExtrasViewModel(7, fleet, extras, backgroundScope, canWrite = true)
+        runCurrent()
+
+        vm.pressKey("C-r").join()
+        runCurrent()
+        assertTrue(extras.calls.none { it.startsWith("press") }, "an older hub refuses C-r: not sent")
+
+        fleet.capabilities.value = HubCapabilities(
+            tools = SHELLS + HubCapabilities.SEND_PROMPT,
+            paramValues = mapOf(HubCapabilities.SEND_PROMPT to mapOf(HubCapabilities.KEYS to setOf("C-r", "Left"))),
+        )
+        runCurrent()
+        assertTrue("C-r" in vm.state.value.paneKeys)
+        vm.pressKey("C-r").join()
+        vm.pressKey("Left").join()
+        vm.pressKey("M-x").join()
+        runCurrent()
+        assertEquals(listOf("press 9 C-r", "press 9 Left"), extras.calls.filter { it.startsWith("press") })
+    }
+
     @Test
     fun the_shell_is_read_while_shown_and_not_after() = runTest {
         val fleet = ExtrasFleet(listOf(PARENT, shell(9, "hosts-polish-sh1")), SHELLS)

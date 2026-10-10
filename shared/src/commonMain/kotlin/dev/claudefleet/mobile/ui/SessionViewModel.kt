@@ -17,6 +17,7 @@ import dev.claudefleet.mobile.model.loginLabel
 import dev.claudefleet.mobile.model.forAccount
 import dev.claudefleet.mobile.model.QueuedPrompt
 import dev.claudefleet.mobile.model.HostLogin
+import dev.claudefleet.mobile.model.SendLaterTiming
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.GrantLevel
@@ -237,6 +238,14 @@ data class SessionUiState(
     val queued: List<QueuedPrompt> = emptyList(),
     /** What the last Send later did, in words ("Sent now: the session was idle."). */
     val sendLaterNotice: String? = null,
+    /**
+     * Send later's time choices the hub takes (claude-fleet M15 G1.8): a
+     * clock time, the account's limit reset, and skip-if-archived. All false
+     * on an older hub, whose sheet offers only "when idle".
+     */
+    val sendLaterAtAvailable: Boolean = false,
+    val sendLaterAfterLimitAvailable: Boolean = false,
+    val sendLaterSkipAvailable: Boolean = false,
     /** The hub can say which login has room and restart under it (Switch account, step 4.10). */
     val switchAccountAvailable: Boolean = false,
     /** The login Switch account proposes, waiting for the second tap; null when none is proposed. */
@@ -245,6 +254,8 @@ data class SessionUiState(
     val waitingUntil: Long? = null,
     /** What the last Switch account said when it had nowhere to go or went. */
     val limitNotice: String? = null,
+    /** Details › Switch account…'s sheet (gap plan G5.5); null while it is closed. */
+    val accountSwitch: AccountSwitch? = null,
 ) {
     /** Send later is offered: the hub keeps prompts and this person may drive the session. */
     val canSendLater: Boolean
@@ -256,6 +267,14 @@ data class SessionUiState(
      */
     val canSwitchAccount: Boolean
         get() = switchAccountAvailable && canRestart && session?.attention?.reason == "account_limit"
+
+    /**
+     * Details › Switch account… (gap plan G5.5, the desktop's G1.11 action):
+     * resume this conversation under another login on its host, paused or
+     * not. The same hub calls as the paused card's, so the same gate.
+     */
+    val canSwitchAccountAnytime: Boolean
+        get() = switchAccountAvailable && canRestart && session != null && !ghost
 
     /** A working agent can be stopped (Escape) — Send's place while there is nothing to send. */
     val canStop: Boolean
@@ -521,6 +540,7 @@ class SessionViewModel(
         val switchTarget: HostLogin? = null,
         val waitingUntil: Long? = null,
         val limitNotice: String? = null,
+        val accountSwitch: AccountSwitch? = null,
     )
 
     private val local = MutableStateFlow(Local(draft = drafts.recall(sessionId)))
@@ -1248,15 +1268,29 @@ class SessionViewModel(
      * whether or not this phone is still running; it is never typed into a
      * dialog. Only where the hub serves `queue_prompt` and this person may
      * drive the session.
+     *
+     * [timing] holds it until a time, until the account's limit resets, or
+     * drops it if the session is archived first (gap plan G5.5 on G1.8).
+     * Each part goes only to a hub whose `queue_prompt` names it: an older
+     * hub would ignore it and type a "tomorrow" prompt at the next idle
+     * moment, so a timing it cannot keep is not sent at all.
      */
-    fun sendLater(text: String): Job = scope.launch {
+    fun sendLater(text: String, timing: SendLaterTiming = SendLaterTiming()): Job = scope.launch {
         val body = text.trim()
-        if (body.isEmpty() || !fleet.capabilities.value.sendLater || readOnly || row() == null || !connected()) return@launch
+        val caps = fleet.capabilities.value
+        if (body.isEmpty() || !caps.sendLater || readOnly || row() == null || !connected()) return@launch
+        if (timing.notBefore != null && !caps.sendLaterAt) return@launch
+        if (timing.untilLimitReset && !caps.sendLaterAfterLimit) return@launch
+        if (timing.skipIfArchived && !caps.sendLaterSkipArchived) return@launch
         if (!idle(local.value.sending, local.value.answering, local.value.busy)) return@launch
         local.update { it.copy(busy = true, error = null, sendLaterNotice = null) }
         try {
-            val r = actions.queuePrompt(sessionId, body)
-            val notice = if (r.delivered) "Sent now: the session was idle." else "It goes in when the session is next idle."
+            val r = actions.queuePrompt(sessionId, body, timing)
+            val notice = when {
+                r.delivered -> "Sent now: the session was idle."
+                timing.notBefore != null || timing.untilLimitReset -> "Kept: it goes in when its time comes and the session is idle."
+                else -> "It goes in when the session is next idle."
+            }
             val queued = runCatching { actions.queuedPrompts(sessionId) }.getOrNull()
             local.update { it.copy(sendLaterNotice = notice, queued = queued?.filter { q -> q.waiting } ?: it.queued) }
             if (r.delivered) requestRead(first = false)
@@ -1356,6 +1390,59 @@ class SessionViewModel(
     /** Wait: fold the buttons into "Waiting until <reset>" — nothing is sent; the session resumes on its own after the reset. */
     fun waitForReset(resetsAt: Long) {
         local.update { it.copy(waitingUntil = resetsAt, switchTarget = null) }
+    }
+
+    // ---- Details › Switch account… (gap plan G5.5, the desktop's G1.11) ----
+
+    /**
+     * Open Switch account… on any session, paused or not: read the logins on
+     * its host (`check_account_headroom`) and list each one but the login it
+     * runs under, the one with the most room on another account picked only
+     * when the session is over the line — a proposal, nothing moves until
+     * [confirmAccountSwitch].
+     */
+    fun openAccountSwitch(): Job = scope.launch {
+        val r = row() ?: return@launch
+        if (!fleet.capabilities.value.switchAccount || !canRestartNow() || !connected()) return@launch
+        local.update { it.copy(accountSwitch = AccountSwitch(loading = true), error = null, limitNotice = null) }
+        try {
+            val h = actions.accountHeadroom(r.hostAlias, r.claudeProfile).forAccount(r.accountUuid)
+            val choices = otherLogins(h, r.claudeProfile)
+            local.update { l ->
+                val open = l.accountSwitch ?: return@update l
+                l.copy(
+                    accountSwitch = open.copy(
+                        loading = false,
+                        logins = choices,
+                        picked = open.picked ?: h.suggestion?.takeIf { it in choices },
+                        notice = if (choices.isEmpty()) "${r.hostAlias} has no other login to switch to." else null,
+                    ),
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(accountSwitch = null, error = friendly(t)) }
+        }
+    }
+
+    fun pickAccountSwitch(login: HostLogin) {
+        local.update { l -> l.copy(accountSwitch = l.accountSwitch?.copy(picked = login)) }
+    }
+
+    fun closeAccountSwitch() {
+        local.update { it.copy(accountSwitch = null) }
+    }
+
+    /** Restart the session under the picked login, resuming its conversation. */
+    fun confirmAccountSwitch(accountName: (String) -> String? = { null }): Job {
+        val picked = local.value.accountSwitch?.picked
+        return runManagedThen({ picked != null && canRestartNow() && fleet.capabilities.value.switchAccount }) {
+            val t = picked ?: return@runManagedThen null
+            actions.restartUnder(sessionId, t.profile ?: "")
+            local.update { it.copy(accountSwitch = null, limitNotice = "Resumed under ${loginLabel(t, accountName)}.") }
+            null
+        }
     }
 
     /**
@@ -1932,12 +2019,16 @@ class SessionViewModel(
         sendLaterAvailable = fleet.capabilities.value.sendLater,
         queued = l.queued,
         sendLaterNotice = l.sendLaterNotice,
+        sendLaterAtAvailable = fleet.capabilities.value.sendLaterAt,
+        sendLaterAfterLimitAvailable = fleet.capabilities.value.sendLaterAfterLimit,
+        sendLaterSkipAvailable = fleet.capabilities.value.sendLaterSkipArchived,
         switchAccountAvailable = fleet.capabilities.value.switchAccount,
         switchTarget = l.switchTarget,
         // A wait holds for the limit it was chosen for: while its reset is
         // ahead. A later limit asks afresh rather than "Waiting until <past>".
         waitingUntil = l.waitingUntil?.takeIf { it > nowSeconds },
         limitNotice = l.limitNotice,
+        accountSwitch = l.accountSwitch,
     )
 }
 

@@ -58,6 +58,7 @@ import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.RunsPage
 import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.QueuePromptResult
+import dev.claudefleet.mobile.model.SendLaterTiming
 import dev.claudefleet.mobile.model.QueuedPrompt
 import dev.claudefleet.mobile.model.MissionCard
 import dev.claudefleet.mobile.model.MissionGrant
@@ -546,14 +547,19 @@ class HubClient(
      * Send later (redesign 14.14 on claude-fleet's 5.10 deferred prompts):
      * typed now when the session is idle, else kept by the hub and typed once
      * its turn ends — never into a dialog. The hub holds it, so it is sent
-     * whether or not this phone is still running.
+     * whether or not this phone is still running. [timing] holds it for
+     * later (claude-fleet M15 G1.8); only what is set is sent, so a plain
+     * call is the one an older hub knows.
      */
-    suspend fun queuePrompt(sessionId: Long, prompt: String): QueuePromptResult =
+    suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming = SendLaterTiming()): QueuePromptResult =
         call(
             "queue_prompt",
             buildJsonObject {
                 put("session_id", sessionId)
                 put("prompt", prompt)
+                timing.notBefore?.let { put("not_before", it) }
+                if (timing.untilLimitReset) put("until_limit_reset", true)
+                if (timing.skipIfArchived) put("skip_if_archived", true)
             },
         ) { json.decodeFromJsonElement(QueuePromptResult.serializer(), it) }
 

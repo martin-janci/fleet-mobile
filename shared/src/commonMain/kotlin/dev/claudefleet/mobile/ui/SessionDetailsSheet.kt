@@ -1,6 +1,19 @@
 package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.model.relativeAgo
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.liveRegion
+import dev.claudefleet.mobile.model.AccountUsageSnapshot
+import dev.claudefleet.mobile.model.LOW_BELOW_PCT
+import dev.claudefleet.mobile.model.UsageWindow
+import dev.claudefleet.mobile.model.checksLabel
+import dev.claudefleet.mobile.model.limitAt
+import dev.claudefleet.mobile.model.relativeWithin
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -74,6 +87,47 @@ fun SessionDetailsSheet(state: SessionDetailsUiState, handlers: SessionDetailsHa
 data class DetailsAction(val label: String, val onClick: () -> Unit)
 
 /**
+ * Details' Account row (MobileSession, gap plan G5.5): the account the
+ * session bills, and how much of its 5-hour and weekly windows is left, as
+ * the hub's last `account_usage` reading has it. [leftFraction] is the
+ * tighter window's, for the meter; null without a reading.
+ */
+data class AccountMeter(val name: String, val line: String?, val leftFraction: Float?, val low: Boolean)
+
+/**
+ * The Account row for a session on [accountUuid], named [name] (from
+ * `list_accounts`), with [usage] its last reading; null when the row names
+ * no account (an older hub, a host login fleet has not read). A window whose
+ * reset has passed counts as whole again.
+ */
+fun accountMeter(accountUuid: String?, name: String?, usage: AccountUsageSnapshot?, now: Long): AccountMeter? {
+    val uuid = accountUuid ?: return null
+    val label = name ?: uuid.take(8)
+    usage?.limitAt(now)?.let { limit ->
+        val window = if (limit.weekly) "weekly" else "5-hour"
+        val resets = relativeWithin(limit.resetsAt, now)?.let { " · resets in $it" }.orEmpty()
+        return AccountMeter(label, "At its $window limit$resets", 0f, low = true)
+    }
+    fun left(w: UsageWindow?): Double? = w?.let {
+        if (it.resetsAt != null && it.resetsAt <= now) 100.0 else (100.0 - it.utilization).coerceIn(0.0, 100.0)
+    }
+    val five = left(usage?.usage?.fiveHour)
+    val week = left(usage?.usage?.sevenDay)
+    val line = listOfNotNull(
+        five?.let { "${it.roundToInt()}% left" },
+        week?.let { "week ${it.roundToInt()}% left" },
+    ).joinToString(" · ").ifEmpty { null }
+    val tight = listOfNotNull(five, week).minOrNull()
+    return AccountMeter(label, line, tight?.let { (it / 100.0).toFloat() }, low = tight != null && tight < LOW_BELOW_PCT)
+}
+
+/** Details' CI fact: the hub's word, and the check count when the PR probe counted them ("passing · 15/15 checks"). */
+fun ciFact(row: SessionRow): String? {
+    val checks = row.prEvidence?.checks?.let(::checksLabel)
+    return listOfNotNull(row.ciStatus, checks).joinToString(" · ").ifEmpty { null }
+}
+
+/**
  * The Details sheet's content — on the New bar (redesign 14.4) it is the
  * session's Details tab instead of a sheet, with the session's [actions]
  * (Move to host…, Tasks, the ticket) as a row of buttons under the facts.
@@ -87,6 +141,10 @@ fun SessionDetailsList(
     sessions: List<SessionRow>,
     actions: List<DetailsAction> = emptyList(),
     modifier: Modifier = Modifier,
+    /** The Account row and its meter; null draws none. */
+    account: AccountMeter? = null,
+    /** What the last action said ("Resumed under spare."), under the facts; null for none. */
+    notice: String? = null,
 ) {
     val row = state.session
     LazyColumn(modifier = modifier.fillMaxWidth()) {
@@ -111,7 +169,16 @@ fun SessionDetailsList(
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
         }
         if (row != null) {
-            item { Facts(row, state.nowSeconds, sessions, handlers.onOpenSession) }
+            item { Facts(row, state.nowSeconds, sessions, handlers.onOpenSession, account) }
+        }
+        if (notice != null) {
+            item {
+                Text(
+                    notice,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            }
         }
         if (actions.isNotEmpty()) {
             item {
@@ -165,7 +232,7 @@ fun SessionDetailsList(
 }
 
 @Composable
-private fun Facts(row: SessionRow, now: Long, sessions: List<SessionRow>, onOpenSession: (Long) -> Unit) {
+private fun Facts(row: SessionRow, now: Long, sessions: List<SessionRow>, onOpenSession: (Long) -> Unit, account: AccountMeter?) {
     val uri = LocalUriHandler.current
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
         Fact("Host", row.hostAlias)
@@ -174,11 +241,26 @@ private fun Facts(row: SessionRow, now: Long, sessions: List<SessionRow>, onOpen
         relativeAgo(row.lastActivityAt, now)?.let { Fact("Last activity", it) }
         val usage = listOfNotNull(row.usageModel, row.usageCostMicros?.let(::formatUsd)).joinToString(" · ")
         if (usage.isNotEmpty()) Fact("Model", usage)
+        account?.let { a ->
+            Fact("Account", listOfNotNull(a.name, a.line).joinToString(" · "))
+            a.leftFraction?.let { left ->
+                // The line says it in words; the bar is for the eye.
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp).height(4.dp)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh).clearAndSetSemantics {},
+                ) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth(left.coerceIn(0f, 1f)).fillMaxHeight()
+                            .background(if (a.low) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary),
+                    )
+                }
+            }
+        }
         row.contextPct?.let { Fact("Context", "${it.toInt()} %") }
         row.prUrl?.let { url ->
             Fact("Pull request", url, onClick = { runCatching { uri.openUri(url) } })
         }
-        row.ciStatus?.let { Fact("CI", it) }
+        ciFact(row)?.let { Fact("CI", it) }
         if (row.tags.isNotEmpty()) Fact("Tags", row.tags.joinToString(", "))
         row.parentSessionId?.let { parent ->
             val name = sessions.firstOrNull { it.id == parent }?.displayName ?: "an earlier session"

@@ -249,6 +249,11 @@ import dev.claudefleet.mobile.ui.SessionDetailsHandlers
 import dev.claudefleet.mobile.ui.SessionDetailsSheet
 import dev.claudefleet.mobile.ui.SessionDetailsList
 import dev.claudefleet.mobile.ui.DetailsAction
+import dev.claudefleet.mobile.ui.ForkSheet
+import dev.claudefleet.mobile.ui.SwitchAccountSheet
+import dev.claudefleet.mobile.ui.accountMeter
+import dev.claudefleet.mobile.ui.forkTurnChoices
+import dev.claudefleet.mobile.ui.forkWorktreeName
 import dev.claudefleet.mobile.ui.KillConfirmDialog
 import dev.claudefleet.mobile.ui.ReviewDialog
 import dev.claudefleet.mobile.ui.SessionTab
@@ -2649,7 +2654,7 @@ private fun SessionRoute(
             val names by repository.accountNames.collectAsState()
             val usage by repository.accountUsage.collectAsState()
             SessionLaterHost(
-                onSendLater = { vm.sendLater(it) },
+                onSendLater = { text, timing -> vm.sendLater(text, timing) },
                 onLoadQueued = { vm.loadQueued() },
                 onCancelQueued = { vm.cancelQueued(it) },
                 onDismissNotice = vm::dismissSendLaterNotice,
@@ -2682,6 +2687,7 @@ private fun SessionRoute(
                             onInput = extrasVm::setInput,
                             onSubmit = { extrasVm.submit() },
                             onKey = { extrasVm.press(it) },
+                            onPaneKey = { extrasVm.pressKey(it) },
                             onDismissError = extrasVm::dismissError,
                             onSplit = extrasVm::setSplit,
                         ),
@@ -2715,9 +2721,17 @@ private fun SessionRoute(
                 },
                 details = {
                     val rows by repository.sessions.collectAsState()
+                    val names by repository.accountNames.collectAsState()
+                    val usage by repository.accountUsage.collectAsState()
                     SessionDetailsList(
                         state = details,
                         sessions = rows,
+                        // The Account row and its meter (MobileSession, gap plan G5.5).
+                        account = details.session?.accountUuid?.let { uuid ->
+                            accountMeter(uuid, names[uuid], usage[uuid], details.nowSeconds)
+                        },
+                        // What Switch account… did; the paused card says it itself.
+                        notice = state.limitNotice?.takeIf { !state.canSwitchAccount },
                         handlers = SessionDetailsHandlers(
                             onReload = { detailsVm.reload() },
                             onToggle = detailsVm::toggle,
@@ -2730,6 +2744,10 @@ private fun SessionRoute(
                             DetailsAction("Move to host…", { moveVm.open(fresh = true) }).takeIf { move.available && state.canManage },
                             DetailsAction("Share…", { shareVm.open(sessionId) }).takeIf { canShare },
                             DetailsAction(if (tasks.count > 0) "Tasks ${tasks.count}" else "Tasks", tasksVm::openSheet).takeIf { tasks.available },
+                            // Gap plan G5.5, the desktop's G1.11 registry: Fork the whole
+                            // conversation (or any turn, in the sheet) and Switch account.
+                            DetailsAction("Fork…", { detailsAsk = DetailsAsk.Fork }).takeIf { state.canRewind && state.connected },
+                            DetailsAction("Switch account…", { vm.openAccountSwitch() }).takeIf { state.canSwitchAccountAnytime && state.connected },
                             work.chip?.key?.let { key -> DetailsAction("Ticket $key", workVm::openSheet) },
                             // r09 B18: the board's Review, Archive and Force kill, as in ⋮.
                             DetailsAction("Review…", { detailsAsk = DetailsAsk.Review }).takeIf { state.canReview && state.connected },
@@ -2747,7 +2765,33 @@ private fun SessionRoute(
             onDismiss = { detailsAsk = null },
         )
         DetailsAsk.Kill -> KillConfirmDialog(onConfirm = { detailsAsk = null; vm.kill() }, onDismiss = { detailsAsk = null })
+        DetailsAsk.Fork -> {
+            val turns = state.conversation.turns
+            ForkSheet(
+                choices = remember(turns, state.conversation.truncated, state.canRewind) {
+                    forkTurnChoices(turns, state.conversation.truncated, state.canRewind)
+                },
+                // Opened on the latest turn: the whole conversation.
+                initialIndex = turns.lastIndex,
+                suggestedName = forkWorktreeName(state.session?.displayName ?: "session"),
+                onFork = { anchor, worktree -> detailsAsk = null; vm.fork(anchor, worktree, onOpenSession) },
+                onDismiss = { detailsAsk = null },
+            )
+        }
         null -> Unit
+    }
+    state.accountSwitch?.let { sw ->
+        val names by repository.accountNames.collectAsState()
+        SwitchAccountSheet(
+            switch = sw,
+            session = state.session,
+            busy = state.busy,
+            connected = state.connected,
+            accountName = { uuid -> names[uuid] },
+            onPick = vm::pickAccountSwitch,
+            onConfirm = { vm.confirmAccountSwitch { uuid -> names[uuid] } },
+            onDismiss = vm::closeAccountSwitch,
+        )
     }
     if (shareState.open) {
         ShareSheet(
@@ -2851,4 +2895,4 @@ private fun RepoRoute(
 }
 
 /** What the Details tab's buttons put up over the session (r09 B18). */
-private enum class DetailsAsk { Review, Kill }
+private enum class DetailsAsk { Review, Kill, Fork }
