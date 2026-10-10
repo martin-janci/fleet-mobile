@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.ui.theme.LocalStatusColors
 import dev.claudefleet.mobile.ui.theme.StatusTone
 import dev.claudefleet.mobile.ui.theme.statusLabel
+import dev.claudefleet.mobile.model.Attention
 import dev.claudefleet.mobile.model.reasonLabel
 
 /**
@@ -41,6 +42,8 @@ fun StatusChip(
     val tone = when {
         // An account at its limit is paused by the fleet, not waiting on a person.
         reason == "account_limit" -> StatusTone.PAUSED
+        // Jev's proposal (contract 15) is shown softly, in the row's own tone.
+        reason == Attention.PROBABLY_WAITING -> StatusTone.of(claudeStatus, stuckKind)
         shown != null && StatusTone.of(claudeStatus, stuckKind) !in URGENT_TONES -> StatusTone.BLOCKED
         else -> StatusTone.of(claudeStatus, stuckKind)
     }

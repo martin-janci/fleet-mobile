@@ -17,6 +17,21 @@ data class Today(
     val now: Long = 0,
     val groups: List<TodayGroup> = emptyList(),
     val shipped: List<TodayShipped> = emptyList(),
+    /**
+     * Missions waiting on a person (hub contract 15, gap plan G1.6), listed
+     * beside the sessions in Needs you on the desktop. Absent from an older
+     * hub, and when none waits.
+     */
+    val missions: List<TodayMission> = emptyList(),
+)
+
+/** A mission that waits on a person, as Today lists it (the hub's `TodayMission`). */
+@Serializable
+data class TodayMission(
+    val id: Long,
+    val name: String = "",
+    @SerialName("org_id") val orgId: Long? = null,
+    @SerialName("waiting_on") val waitingOn: MissionWait? = null,
 )
 
 @Serializable
@@ -44,6 +59,12 @@ data class TodaySession(
     @SerialName("org_id") val orgId: Long? = null,
     /** Why it needs a person: `waiting` | `stuck` | `failed` | `lifecycle`; null when nobody is needed. */
     val attention: String? = null,
+    /**
+     * `probably_waiting` when Jev proposes the session waits on a person
+     * (contract 15). Kept apart from [attention], so it never puts its group
+     * in Waiting.
+     */
+    val proposed: String? = null,
     /** `idle` (quiet for days) or `done` (its ticket is done, the session still running). */
     val stale: String? = null,
     @SerialName("claude_status") val claudeStatus: String? = null,

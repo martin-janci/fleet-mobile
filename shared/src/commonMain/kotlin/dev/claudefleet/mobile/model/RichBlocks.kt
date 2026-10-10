@@ -85,11 +85,38 @@ data class ReplyField(
     val min: Double?,
     val max: Double?,
     val integer: Boolean,
+    /** select, multiselect: an option's detail line by its value, from a `{value, label, detail}` option (contract 15). */
+    val optionDetails: Map<String, String> = emptyMap(),
+    /** select: "Another…", free text beside the options (contract 15). */
+    val other: Boolean = false,
+    /** Shown but not answerable, with this reason under it (contract 15); never required, never in the answers. */
+    val disabledReason: String? = null,
+    /** The default was drafted by an AI: "Drafted by [draftedBy] from [draftedFrom]" (contract 15). */
+    val draftedBy: String? = null,
+    val draftedFrom: String? = null,
+    /** secret: where the value goes, shown under the field (contract 15). */
+    val secretNote: String? = null,
 )
 
-data class ReplyStep(val title: String, val intro: String?, val whenCond: JsonElement?, val fields: List<ReplyField>)
+data class ReplyStep(
+    val title: String,
+    val intro: String?,
+    val whenCond: JsonElement?,
+    val fields: List<ReplyField>,
+    /** The step's short name for its chip (contract 15); the title when null. */
+    val name: String? = null,
+    /** `kind: "review"` (contract 15): no fields of its own, a summary of the answers so far ([reviewLines]). */
+    val review: Boolean = false,
+)
 
-data class ReplyForm(val title: String, val intro: String?, val submit: String?, val steps: List<ReplyStep>)
+data class ReplyForm(
+    val title: String,
+    val intro: String?,
+    val submit: String?,
+    val steps: List<ReplyStep>,
+    /** "Save and finish later" (contract 15). The phone keeps no draft, so it is read and not offered. */
+    val saveLater: Boolean = false,
+)
 
 data class ProgressStep(val title: String, val state: String)
 
@@ -399,6 +426,15 @@ private fun <T> each(items: List<JsonElement>, p: Problems, where: String, f: (J
 private val FIELD_TYPES_SHOWN = setOf("text", "textarea", "number", "bool", "select", "multiselect")
 private val NAME_RE = Regex("^[a-z][a-z0-9_]{0,39}$")
 
+/** An optional bool: absent or null is false. */
+private fun optBool(o: JsonObject, key: String, p: Problems, where: String): Boolean {
+    val v = o[key]
+    if (v == null || v is JsonNull) return false
+    val b = (v as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
+    if (b == null) p.add(where, "`$key` must be true or false")
+    return b == true
+}
+
 private fun number(o: JsonObject, key: String, p: Problems, where: String): Double? {
     val v = o[key] ?: return null
     val d = (v as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull
@@ -541,10 +577,18 @@ private fun checkForm(v: JsonElement?, p: Problems, ask: Boolean = false): Reply
     val submit = str(v, "submit", p, where, 40)
     val names = mutableSetOf<String>()
     var fields = 0
+    val saveLater = optBool(v, "save_later", p, where)
     val steps = each(arr(v, "steps", p, where, 1, 12), p, "form › step") { s, at ->
         val stitle = str(s, "title", p, at, 120, required = true) ?: ""
         val sintro = str(s, "intro", p, at, 500)
-        val fs = each(arr(s, "fields", p, at, 1, 40), p, "$at › field") { f, fat ->
+        val sname = str(s, "name", p, at, 24)
+        val kind = str(s, "kind", p, at, 20)
+        if (kind != null && kind != "fields" && kind != "review") p.add(at, "`kind` must be fields or review")
+        // A review step (contract 15) has no fields: it summarises the steps before it.
+        val review = kind == "review"
+        val rawFields = if (review && (s["fields"] == null || s["fields"] is JsonNull)) emptyList<JsonElement>() else arr(s, "fields", p, at, if (review) 0 else 1, 40)
+        if (review && rawFields.isNotEmpty()) p.add(at, "a review step has no fields")
+        val fs = each(rawFields, p, "$at › field") { f, fat ->
             fields++
             val name = str(f, "name", p, fat, 40, required = true)
             if (name != null) {
@@ -563,21 +607,26 @@ private fun checkForm(v: JsonElement?, p: Problems, ask: Boolean = false): Reply
             } else if (type == null || type !in FIELD_TYPES_SHOWN) {
                 p.add(fat, "type ${f["type"] ?: "undefined"} is not a field type")
             }
+            val details = mutableMapOf<String, String>()
             val options = if (type == "select" || type == "multiselect") {
                 arr(f, "options", p, fat, 1, 50).mapIndexedNotNull { k, o ->
+                    // `[value, label]`, or `{value, label, detail?, proposed?}` (contract 15).
                     val pair = (o as? JsonArray)?.takeIf { it.size == 2 }
-                    val a = pair?.get(0).stringOrNull()
-                    val b = pair?.get(1).stringOrNull()
+                    val obj = o as? JsonObject
+                    val a = if (obj != null) obj["value"].stringOrNull() else pair?.get(0).stringOrNull()
+                    val b = if (obj != null) obj["label"].stringOrNull() else pair?.get(1).stringOrNull()
                     if (a == null || b == null) {
                         p.add("$fat › option ${k + 1}", "must be [value, label]")
                         null
                     } else {
+                        if (obj != null) str(obj, "detail", p, "$fat › option ${k + 1}", 200)?.let { details[a] = it }
                         a to b
                     }
                 }
             } else {
                 emptyList()
             }
+            val drafted = f["drafted"] as? JsonObject
             val min = number(f, "min", p, fat)
             val max = number(f, "max", p, fat)
             number(f, "max_len", p, fat)
@@ -594,12 +643,18 @@ private fun checkForm(v: JsonElement?, p: Problems, ask: Boolean = false): Reply
                 min = min,
                 max = max,
                 integer = (f["integer"] as? JsonPrimitive)?.booleanOrNull == true,
+                optionDetails = details,
+                other = optBool(f, "other", p, fat),
+                disabledReason = str(f, "disabled_reason", p, fat, 500),
+                draftedBy = drafted?.let { str(it, "by", p, "$fat › drafted", 200) },
+                draftedFrom = drafted?.let { str(it, "from", p, "$fat › drafted", 200) },
+                secretNote = str(f, "secret_note", p, fat, 500),
             )
         }
-        ReplyStep(stitle, sintro, s["when"], fs)
+        ReplyStep(stitle, sintro, s["when"], fs, name = sname, review = review)
     }
     if (fields > 40) p.add(where, "has more than 40 fields")
-    return if (p.list.isEmpty()) ReplyForm(title, intro, submit, steps) else null
+    return if (p.list.isEmpty()) ReplyForm(title, intro, submit, steps, saveLater = saveLater) else null
 }
 
 /** A fleet.ui/1 block from its JSON text, or every problem with it. */
@@ -738,6 +793,8 @@ fun visibleFields(form: ReplyForm, values: Map<String, JsonElement>): List<Pair<
         for (f in step.fields) {
             if (!fieldHolds(f.whenCond, shown)) continue
             fs += f
+            // A disabled field (contract 15) is shown with its reason, never answered.
+            if (f.disabledReason != null) continue
             values[f.name]?.let { shown[f.name] = it }
         }
         out += step to fs
@@ -753,7 +810,7 @@ fun visibleFields(form: ReplyForm, values: Map<String, JsonElement>): List<Pair<
  * whatever default the agent wrote. A person ticks those.
  */
 fun formDefaults(form: ReplyForm): Map<String, JsonElement> =
-    form.steps.flatMap { it.fields }.mapNotNull { f ->
+    form.steps.flatMap { it.fields }.filter { it.disabledReason == null }.mapNotNull { f ->
         f.value?.takeIf { it !is JsonNull }?.let { agentDefault(f, it) }?.let { f.name to it }
     }.toMap()
 
@@ -788,7 +845,7 @@ private fun agentDefault(f: ReplyField, v: JsonElement): JsonElement? {
 
 /** Whether a shown field still needs an answer before the form can be sent. */
 fun fieldMissing(f: ReplyField, v: JsonElement?): Boolean {
-    if (!f.required) return false
+    if (!f.required || f.disabledReason != null) return false
     return when {
         v == null || v is JsonNull -> true
         f.type == "bool" -> (v as? JsonPrimitive)?.booleanOrNull != true
@@ -802,10 +859,43 @@ fun fieldMissing(f: ReplyField, v: JsonElement?): Boolean {
  *  the answers of the shown fields, in form order, as one JSON block. The
  *  desktop's `formAnswerPrompt` in shape. */
 fun formAnswerPrompt(form: ReplyForm, values: Map<String, JsonElement>): String {
-    val answers = JsonObject(
-        visibleFields(form, values).flatMap { it.second }.mapNotNull { f -> values[f.name]?.let { f.name to it } }.toMap(),
-    )
+    val answers = JsonObject(answerable(form, values).mapNotNull { f -> values[f.name]?.let { f.name to it } }.toMap())
     return "Answers to the form \"${form.title}\":\n\n```json\n${pretty.encodeToString(JsonElement.serializer(), answers)}\n```"
+}
+
+/** The shown fields a person answers, in form order: never a disabled one (contract 15). */
+fun answerable(form: ReplyForm, values: Map<String, JsonElement>): List<ReplyField> =
+    visibleFields(form, values).flatMap { it.second }.filter { it.disabledReason == null }
+
+/**
+ * What a review step (contract 15) shows: each answered field of the shown
+ * steps before [reviewStep], as label and value in words — an option's
+ * label, "Yes"/"No", a list joined, a secret hidden. The desktop's review
+ * step, without its Edit links (the phone's Back walks there).
+ */
+fun reviewLines(form: ReplyForm, values: Map<String, JsonElement>, reviewStep: ReplyStep): List<Pair<String, String>> {
+    val out = mutableListOf<Pair<String, String>>()
+    for ((step, fields) in visibleFields(form, values)) {
+        if (step === reviewStep) break
+        for (f in fields) {
+            if (f.disabledReason != null) continue
+            val v = values[f.name] ?: continue
+            if (v is JsonNull) continue
+            out += f.label to answerWords(f, v)
+        }
+    }
+    return out
+}
+
+private fun answerWords(f: ReplyField, v: JsonElement): String {
+    fun option(x: String) = f.options.firstOrNull { it.first == x }?.second ?: x
+    return when {
+        f.type == "secret" -> "••••••"
+        v is JsonArray -> v.mapNotNull { (it as? JsonPrimitive)?.content?.let(::option) }.joinToString(", ")
+        f.type == "bool" -> if ((v as? JsonPrimitive)?.booleanOrNull == true) "Yes" else "No"
+        v is JsonPrimitive -> option(v.content)
+        else -> v.toString()
+    }
 }
 
 /** Two-space indent, as the desktop's `JSON.stringify(values, null, 2)`. */

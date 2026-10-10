@@ -129,6 +129,22 @@ class PhoneSessionsTest {
         assertEquals("4 need you · 6 running", inboxSubtitle(4, 6))
     }
 
+    /**
+     * Contract 15 (G1.6): Jev's "probably waiting" is listed apart, softly —
+     * never in the Inbox, its count or the Needs you word — and the header
+     * names it as "+N proposed".
+     */
+    @Test
+    fun a_proposed_row_is_named_apart_and_never_counted() {
+        val proposed = row(3, status = "idle", attention = Attention("probably_waiting", since = 60, state = "proposed"))
+        val waiting = row(4, status = "blocked", attention = Attention("waiting", since = 50, state = "action_required"))
+        val rows = listOf(proposed, waiting)
+        assertEquals(listOf(4L), inboxRows(rows).map { it.id })
+        assertEquals(listOf(3L), proposedRows(rows).map { it.id })
+        assertEquals(StatusWord.IDLE, phoneWord(proposed), "shown in its own tone, not as Needs you")
+        assertEquals("1 needs you · 0 running · +1 proposed", inboxSubtitle(1, 0, proposed = 1))
+    }
+
     @Test
     fun the_header_and_the_outcome_say_it_in_words() {
         assertEquals("22 on 5 hosts", sessionsOnHosts(22, 5))

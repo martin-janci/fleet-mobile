@@ -78,6 +78,7 @@ import dev.claudefleet.mobile.model.fieldMissing
 import dev.claudefleet.mobile.model.formAnswerPrompt
 import dev.claudefleet.mobile.model.formDefaults
 import dev.claudefleet.mobile.model.splitRich
+import dev.claudefleet.mobile.model.reviewLines
 import dev.claudefleet.mobile.model.visibleFields
 import dev.claudefleet.mobile.ui.theme.LocalStatusColors
 import dev.claudefleet.mobile.ui.theme.StatusTone
@@ -746,6 +747,7 @@ private fun FormCard(form: ReplyForm, raw: String) {
         for ((step, fields) in shown) {
             if (form.steps.size > 1) Label(step.title)
             step.intro?.let { Note(it) }
+            if (step.review) ReviewLines(reviewLines(form, values, step))
             for (f in fields) {
                 FieldView(
                     f,
@@ -794,18 +796,20 @@ internal fun FieldView(
 ) {
     val label = f.label + if (f.required && f.type != "bool") " *" else ""
     val str = (value as? JsonPrimitive)?.takeIf { it.isString }?.content ?: ""
+    // A disabled field (contract 15) is shown, not answerable; its reason is under it.
+    val canEdit = enabled && f.disabledReason == null
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         when (f.type) {
             "bool" -> Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth().toggleable(
                     value = (value as? JsonPrimitive)?.booleanOrNull == true,
-                    enabled = enabled,
+                    enabled = canEdit,
                     role = Role.Switch,
                 ) { onChange(JsonPrimitive(it)) },
             ) {
                 Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                Switch(checked = (value as? JsonPrimitive)?.booleanOrNull == true, enabled = enabled, onCheckedChange = null)
+                Switch(checked = (value as? JsonPrimitive)?.booleanOrNull == true, enabled = canEdit, onCheckedChange = null)
             }
             "select", "multiselect" -> {
                 Text(label, style = MaterialTheme.typography.bodyLarge)
@@ -818,7 +822,7 @@ internal fun FieldView(
                     for ((v, l) in f.options) {
                         FilterChip(
                             selected = v in picked,
-                            enabled = enabled,
+                            enabled = canEdit,
                             onClick = {
                                 if (f.type == "select") {
                                     onChange(JsonPrimitive(v))
@@ -828,9 +832,31 @@ internal fun FieldView(
                                     onChange(JsonArray(f.options.map { it.first }.filter { it in next }.map { JsonPrimitive(it) }))
                                 }
                             },
-                            label = { Text(l) },
+                            label = {
+                                val detail = f.optionDetails[v]
+                                if (detail == null) {
+                                    Text(l)
+                                } else {
+                                    Column {
+                                        Text(l)
+                                        Text(detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            },
                         )
                     }
+                }
+                // "Another…" (contract 15): any text beside the options.
+                if (f.type == "select" && f.other) {
+                    val own = str.takeIf { s -> f.options.none { it.first == s } }.orEmpty()
+                    OutlinedTextField(
+                        value = own,
+                        onValueChange = { onChange(if (it.isEmpty()) null else JsonPrimitive(it)) },
+                        label = { Text("Another…") },
+                        singleLine = true,
+                        enabled = canEdit,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
             "number" -> OutlinedTextField(
@@ -838,7 +864,7 @@ internal fun FieldView(
                 onValueChange = onNumberText,
                 label = { Text(label) },
                 singleLine = true,
-                enabled = enabled,
+                enabled = canEdit,
                 isError = typed != null && typed.isNotBlank() && parseNumber(f, typed) == null,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -849,7 +875,7 @@ internal fun FieldView(
                 onValueChange = { onChange(if (it.isEmpty()) null else JsonPrimitive(it)) },
                 label = { Text(label) },
                 singleLine = true,
-                enabled = enabled,
+                enabled = canEdit,
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
                 modifier = Modifier.fillMaxWidth(),
@@ -861,10 +887,28 @@ internal fun FieldView(
                 placeholder = if (f.placeholder != null) ({ Text(f.placeholder) }) else null,
                 singleLine = f.type != "textarea",
                 minLines = if (f.type == "textarea") 3 else 1,
-                enabled = enabled,
+                enabled = canEdit,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
         f.help?.let { Note(it) }
+        f.secretNote?.takeIf { f.type == "secret" }?.let { Note(it) }
+        if (f.draftedBy != null && f.draftedFrom != null && value == f.value) Note("Drafted by ${f.draftedBy} from ${f.draftedFrom}")
+        f.disabledReason?.let { Note(it) }
+    }
+}
+
+/** A review step (contract 15): the answers so far, label over value. */
+@Composable
+internal fun ReviewLines(lines: List<Pair<String, String>>) {
+    if (lines.isEmpty()) {
+        Note("Nothing answered yet.")
+        return
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        for ((label, answer) in lines) {
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(answer, style = MaterialTheme.typography.bodyMedium)
+        }
     }
 }

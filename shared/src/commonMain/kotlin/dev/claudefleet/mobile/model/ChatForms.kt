@@ -67,6 +67,6 @@ fun formOutcome(form: FormView): String {
     return "${form.title}: ${OUTCOME[form.state] ?: form.state}" + (by?.let { " by $it" } ?: "")
 }
 
-/** The answers to send: the shown fields' values, in form order. */
+/** The answers to send: the shown fields' values, in form order, never a disabled field's. */
 fun formAnswers(form: ReplyForm, values: Map<String, JsonElement>): Map<String, JsonElement> =
-    visibleFields(form, values).flatMap { it.second }.mapNotNull { f -> values[f.name]?.let { f.name to it } }.toMap()
+    answerable(form, values).mapNotNull { f -> values[f.name]?.let { f.name to it } }.toMap()

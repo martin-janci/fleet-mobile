@@ -43,9 +43,11 @@ import dev.claudefleet.mobile.model.ReplyField
 import dev.claudefleet.mobile.model.ReplyForm
 import dev.claudefleet.mobile.model.ReplyStep
 import dev.claudefleet.mobile.model.fieldMissing
+import dev.claudefleet.mobile.model.reviewLines
 import dev.claudefleet.mobile.model.visibleFields
 import dev.claudefleet.mobile.ui.components.FieldView
 import dev.claudefleet.mobile.ui.components.Note
+import dev.claudefleet.mobile.ui.components.ReviewLines
 import dev.claudefleet.mobile.ui.components.parseNumber
 import dev.claudefleet.mobile.ui.kit.Atom
 import dev.claudefleet.mobile.ui.kit.StepBars
@@ -82,7 +84,7 @@ fun formSize(spec: ReplyForm): FormSize {
 
 /** The pages a paged form walks: its shown steps, given the answers so far. */
 fun formPages(spec: ReplyForm, values: Map<String, JsonElement>): List<Pair<ReplyStep, List<ReplyField>>> =
-    visibleFields(spec, values).filter { (step, fields) -> fields.isNotEmpty() || step.intro != null }
+    visibleFields(spec, values).filter { (step, fields) -> fields.isNotEmpty() || step.intro != null || step.review }
 
 /** The first field on a page that still needs an answer. */
 fun firstMissing(fields: List<ReplyField>, values: Map<String, JsonElement>): ReplyField? =
@@ -348,6 +350,7 @@ private fun PagedForm(
             if (page != null) {
                 Text(page.first.title, style = Fleet.type.textSm, color = o.fg2)
                 page.first.intro?.let { Note(it) }
+                if (page.first.review) ReviewLines(reviewLines(spec, s.values, page.first))
                 FormFields(page.second, s, numberText, enabled = !s.busy, onNumberText = onNumberText, model = model)
             }
         }

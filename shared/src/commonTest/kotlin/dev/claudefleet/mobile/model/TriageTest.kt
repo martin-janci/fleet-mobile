@@ -42,7 +42,7 @@ class TriageTest {
         assertEquals(
             listOf(
                 "WAITING", "STUCK", "HOST_DOWN", "ACCOUNT_LIMIT", "NO_CREDENTIALS", "STOP_FAILED", "FAILED", "CONTEXT_FULL", "STALE_WORKING", "CI_FAILING",
-                "DONE_UNREAD", "LIFECYCLE", "IDLE_LONG", "WORKING", "IDLE",
+                "PROBABLY_WAITING", "DONE_UNREAD", "LIFECYCLE", "IDLE_LONG", "WORKING", "IDLE",
             ),
             TriageBucket.entries.map { it.name },
         )
