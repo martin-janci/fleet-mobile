@@ -252,6 +252,8 @@ data class SessionUiState(
     val sendLaterSkipAvailable: Boolean = false,
     /** The hub can say which login has room and restart under it (Switch account, step 4.10). */
     val switchAccountAvailable: Boolean = false,
+    /** The hub relaunches a session under a model / effort pick (`restart_session { model }`). */
+    val relaunchModelAvailable: Boolean = false,
     /** The login Switch account proposes, waiting for the second tap; null when none is proposed. */
     val switchTarget: HostLogin? = null,
     /** A Wait chosen for this limit: unix seconds of the reset it waits for. */
@@ -279,6 +281,14 @@ data class SessionUiState(
      */
     val canSwitchAccountAnytime: Boolean
         get() = switchAccountAvailable && canRestart && session != null && !ghost
+
+    /**
+     * The model / effort pickers may relaunch this session under a pick —
+     * the switch for an agent whose `/model` takes no argument (Codex).
+     * A restart, so the same gate as Restart.
+     */
+    val canRelaunchModel: Boolean
+        get() = relaunchModelAvailable && canRestart && session != null && !ghost
 
     /** A working agent can be stopped (Escape) — Send's place while there is nothing to send. */
     val canStop: Boolean
@@ -1434,6 +1444,17 @@ class SessionViewModel(
         }
     }
 
+    /**
+     * Relaunch the session on its conversation under [model] and/or
+     * [effort] (null = keep): a Codex session's model / effort pick. The
+     * screen confirms first — a turn in progress is lost.
+     */
+    fun relaunchWith(model: String?, effort: String?): Job =
+        runManagedThen({ canRestartNow() && fleet.capabilities.value.relaunchWithModel }) {
+            actions.restartWith(sessionId, model, effort)
+            null
+        }
+
     fun cancelSwitch() {
         local.update { it.copy(switchTarget = null) }
     }
@@ -2074,6 +2095,7 @@ class SessionViewModel(
         sendLaterAfterLimitAvailable = fleet.capabilities.value.sendLaterAfterLimit,
         sendLaterSkipAvailable = fleet.capabilities.value.sendLaterSkipArchived,
         switchAccountAvailable = fleet.capabilities.value.switchAccount,
+        relaunchModelAvailable = fleet.capabilities.value.relaunchWithModel,
         switchTarget = l.switchTarget,
         // A wait holds for the limit it was chosen for: while its reset is
         // ahead. A later limit asks afresh rather than "Waiting until <past>".

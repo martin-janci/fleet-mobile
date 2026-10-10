@@ -215,6 +215,8 @@ fun SessionScreen(
     /** ⋮ Background agent…'s Start ([SessionViewModel.startBackground]). */
     onStartBackground: (String, String, BackgroundOptions) -> Unit = { _, _, _ -> },
     onSendCommand: (String) -> Unit,
+    /** A model / effort pick that relaunches the session ([SessionViewModel.relaunchWith]). */
+    onRelaunchWith: (model: String?, effort: String?) -> Unit = { _, _ -> },
     /** The chip row's own content — the fleet's list, see `ui/QuickReplies.kt`. */
     quickReplies: List<QuickReply>,
     /**
@@ -632,6 +634,7 @@ fun SessionScreen(
                         onEdit = onEdit,
                         onStartBackground = onStartBackground,
                         onSendCommand = onSendCommand,
+                        onRelaunchWith = onRelaunchWith,
                         work = work,
                         workHandlers = workHandlers,
                         tasks = tasks,
@@ -1017,7 +1020,7 @@ fun SessionScreen(
                             Chrome.Full -> Column {
                                 // The desktop's slash menu: while the draft is one
                                 // `/word`, the commands it could be; a tap fills it in.
-                                val slash = if (state.readOnly) emptyList() else matchSlashCommands(state.draft)
+                                val slash = if (state.readOnly) emptyList() else matchSlashCommands(state.draft, state.session?.agent)
                                 if (slash.isNotEmpty()) SlashSuggestions(slash, onPick = { onDraftChange(completeSlashCommand(it)) })
                                 // Hidden outright, not merely dimmed, in the same two cases
                                 // the card itself takes over the space for: while it is up
@@ -1363,6 +1366,7 @@ private fun SessionBar(
     /** ⋮ Background agent…'s Start ([SessionViewModel.startBackground]). */
     onStartBackground: (String, String, BackgroundOptions) -> Unit = { _, _, _ -> },
     onSendCommand: (String) -> Unit,
+    onRelaunchWith: (model: String?, effort: String?) -> Unit = { _, _ -> },
     work: SessionWorkUiState,
     workHandlers: SessionWorkHandlers,
     tasks: SessionTasksUiState,
@@ -1456,6 +1460,7 @@ private fun SessionBar(
                     onReview = onReview,
                     onRepair = onRepair,
                     onSendCommand = onSendCommand,
+                    onRelaunchWith = onRelaunchWith,
                     onMove = onMove,
                     orbit = orbit,
                 )
@@ -1607,12 +1612,15 @@ private fun SessionOverflowMenu(
     onReview: (String) -> Unit = {},
     onRepair: () -> Unit = {},
     onSendCommand: (String) -> Unit = {},
+    onRelaunchWith: (model: String?, effort: String?) -> Unit = { _, _ -> },
     onMove: (() -> Unit)? = null,
     /** The New bar's written-out menu (redesign 14.14); null keeps the Classic one. */
     orbit: OrbitMenu? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     var picking by remember { mutableStateOf<String?>(null) }
+    // A Codex pick waiting on its confirm: (command, option).
+    var relaunchPick by remember { mutableStateOf<Pair<String, PickerOption>?>(null) }
     var showReview by remember { mutableStateOf(false) }
     var showRepairConfirm by remember { mutableStateOf(false) }
     var showRecreateConfirm by remember { mutableStateOf(false) }
@@ -1800,24 +1808,63 @@ private fun SessionOverflowMenu(
     }
 
     picking?.let { command ->
+        val agent = state.session?.agent
+        val relaunch = switchesByRelaunch(agent)
         AlertDialog(
             onDismissRequest = { picking = null },
             title = { Text(if (command == "model") "Switch the model" else "Set the effort") },
             text = {
                 Column(modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
-                    for (option in if (command == "model") MODEL_OPTIONS else EFFORT_OPTIONS) {
+                    if (relaunch && !state.canRelaunchModel) {
+                        // Codex's `/model` takes no argument and this hub cannot
+                        // relaunch under a pick: open Codex's own picker instead,
+                        // answered on the agent tab.
                         Text(
-                            option.label,
-                            style = MaterialTheme.typography.bodyLarge,
-                            modifier = Modifier.fillMaxWidth().clickable {
-                                picking = null
-                                pickerCommand(command, option.value)?.let(onSendCommand)
-                            }.padding(vertical = 12.dp),
+                            "${agentName(state.session)} picks its model in its own menu. Open it, then choose on the agent tab.",
+                            style = MaterialTheme.typography.bodyMedium,
                         )
+                    } else {
+                        for (option in pickerOptionsFor(agent, command)) {
+                            Text(
+                                option.label,
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    picking = null
+                                    if (relaunch) relaunchPick = command to option
+                                    else pickerCommand(command, option.value)?.let(onSendCommand)
+                                }.padding(vertical = 12.dp),
+                            )
+                        }
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { picking = null }) { Text("Cancel") } },
+            confirmButton = {
+                if (relaunch && !state.canRelaunchModel) {
+                    TextButton(onClick = { picking = null; onSendCommand("/model") }) { Text("Open /model") }
+                } else {
+                    TextButton(onClick = { picking = null }) { Text("Cancel") }
+                }
+            },
+            dismissButton = if (relaunch && !state.canRelaunchModel) {
+                { TextButton(onClick = { picking = null }) { Text("Cancel") } }
+            } else null,
+        )
+    }
+    relaunchPick?.let { (command, option) ->
+        val name = agentName(state.session)
+        AlertDialog(
+            onDismissRequest = { relaunchPick = null },
+            title = { Text(if (command == "model") "Switch $name to ${option.label}?" else "Set $name's effort to ${option.label}?") },
+            text = {
+                Text("$name picks its ${if (command == "model") "model" else "reasoning effort"} when it starts, so this relaunches the session on the same conversation. A turn in progress is lost.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    relaunchPick = null
+                    if (command == "model") onRelaunchWith(option.value, null) else onRelaunchWith(null, option.value)
+                }) { Text("Relaunch") }
+            },
+            dismissButton = { TextButton(onClick = { relaunchPick = null }) { Text("Cancel") } },
         )
     }
     if (showReview) {

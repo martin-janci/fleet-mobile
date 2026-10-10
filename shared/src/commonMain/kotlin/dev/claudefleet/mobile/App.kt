@@ -2691,6 +2691,7 @@ private fun SessionRoute(
         onEdit = { vm.edit(it.name, it.tags) },
         onStartBackground = { name, prompt, options -> vm.startBackground(name, prompt, options) },
         onSendCommand = { vm.sendCommand(it) },
+        onRelaunchWith = { model, effort -> vm.relaunchWith(model, effort) },
         quickReplies = chips,
         quickRepliesEditable = caps.quickReplies,
         onSendQuick = { vm.sendQuick(it) },
