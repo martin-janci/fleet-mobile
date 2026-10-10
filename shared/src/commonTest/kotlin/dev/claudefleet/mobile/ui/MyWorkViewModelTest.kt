@@ -572,6 +572,8 @@ class MyWorkViewModelTest {
 
         assertEquals(listOf("Payments", "Ops"), vm.knownGroups().map { it.title })
         assertEquals(listOf("Payments", "Ops"), placeableGroups(vm.knownGroups()))
+        // Place work's rows say how many tasks each holds ("1 task").
+        assertEquals(mapOf("Payments" to 1, "Ops" to 1), vm.groupCounts())
         assertEquals(
             emptyList(),
             placeableGroups(listOf(GroupRef("tracker:1:ABC", "ABC", GroupSource.Tracker), GroupRef("repo:acme/api", "acme/api", GroupSource.Repo), GroupRef("key:OLD", "OLD", GroupSource.Key))),

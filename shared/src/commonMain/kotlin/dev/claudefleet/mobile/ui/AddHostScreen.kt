@@ -1,14 +1,25 @@
 package dev.claudefleet.mobile.ui
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -28,6 +39,8 @@ data class AddHostHandlers(
     val onRescan: () -> Unit = {},
     /** Install agent on a host just added, by its fleet alias: opens the install's review, which installs nothing yet. */
     val onInstallAgent: (String) -> Unit = {},
+    /** Add a host by the name or address typed by hand. */
+    val onAddAddress: (String) -> Unit = {},
 )
 
 /**
@@ -64,6 +77,7 @@ fun AddHostScreen(state: AddHostUiState, handlers: AddHostHandlers) {
                     }
                 }
             }
+            ByHand(enabled = state.adding == null, onAdd = handlers.onAddAddress)
             Text(
                 "From the hub's ~/.ssh/config. A host the hub cannot reach is added from the desktop as an agent host.",
                 color = Fleet.colors.fgMuted,
@@ -74,6 +88,52 @@ fun AddHostScreen(state: AddHostUiState, handlers: AddHostHandlers) {
             )
         },
     )
+}
+
+/**
+ * "Enter an address by hand": a quiet button that opens one field. What is
+ * typed goes to the hub as the host's SSH alias, so the hub probes it the
+ * way it probes a host from its SSH config, and keeps it only if it answers.
+ */
+@Composable
+private fun ByHand(enabled: Boolean, onAdd: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    var address by remember { mutableStateOf("") }
+    if (!open) {
+        TextButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) {
+            Text("Enter an address by hand", color = Fleet.colors.accent)
+        }
+        return
+    }
+    val blocker = addressBlocker(address).takeIf { address.isNotBlank() }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = address,
+                onValueChange = { address = it },
+                singleLine = true,
+                label = { Text("Host name or address") },
+                placeholder = { Text("nas.local") },
+                isError = blocker != null,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = KeyboardType.Uri),
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(
+                onClick = {
+                    onAdd(address.trim())
+                    address = ""
+                },
+                enabled = enabled && address.isNotBlank() && blocker == null,
+            ) { Text("Add") }
+        }
+        Text(
+            blocker ?: "The hub connects over SSH as its own user, checks the host answers, then adds it.",
+            color = if (blocker != null) Fleet.colors.statusFailed else Fleet.colors.fgMuted,
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
 }
 
 /**

@@ -1,6 +1,8 @@
 package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.notify.NotifyKind
+import dev.claudefleet.mobile.notify.PhoneQuiet
+import dev.claudefleet.mobile.notify.phoneQuiet
 import dev.claudefleet.mobile.notify.notifyKinds
 import dev.claudefleet.mobile.store.FakePrefs
 import kotlin.test.Test
@@ -106,8 +108,20 @@ class PhoneSettingsTest {
 
     @Test
     fun this_phones_row_names_the_lock_where_the_phone_has_one() {
-        assertEquals("Notifications, theme", thisPhoneLine(updates = false, lock = false))
-        assertEquals("Notifications, theme, updates, lock", thisPhoneLine(updates = true, lock = true))
+        assertEquals("Notifications, quiet hours, theme", thisPhoneLine(updates = false, lock = false))
+        assertEquals("Notifications, quiet hours, theme, updates, lock", thisPhoneLine(updates = true, lock = true))
+    }
+
+    @Test
+    fun quiet_hours_on_this_phone_say_what_they_hold_back_and_reach_the_service() {
+        assertEquals("Off. The fleet's own quiet hours still apply.", quietLine(PhoneQuiet()))
+        assertEquals("22:00 – 07:00 · nothing comes through", quietLine(PhoneQuiet(PhoneQuiet.NIGHT)))
+        assertEquals("22:00 – 07:00 · Needs you still comes through", quietLine(PhoneQuiet(PhoneQuiet.NIGHT, needsYouThrough = true)))
+        val prefs = FakePrefs()
+        val phone = PhoneSettings(prefs)
+        phone.setQuiet(PhoneQuiet(PhoneQuiet.NIGHT, needsYouThrough = true))
+        assertEquals(PhoneQuiet(PhoneQuiet.NIGHT, needsYouThrough = true), phone.quiet.value)
+        assertEquals(phone.quiet.value, prefs.phoneQuiet())
     }
 
     @Test

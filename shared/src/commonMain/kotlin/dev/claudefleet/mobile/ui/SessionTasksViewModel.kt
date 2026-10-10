@@ -9,6 +9,7 @@ import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.SessionTasks
 import dev.claudefleet.mobile.model.Ticket
+import dev.claudefleet.mobile.model.knownKeyPrefixes
 import dev.claudefleet.mobile.model.WorkTaskLink
 import dev.claudefleet.mobile.model.orgOf
 import dev.claudefleet.mobile.net.HubCapabilities
@@ -63,6 +64,8 @@ data class SessionTasksUiState(
      * linked are left out, and ones of another organisation come last.
      */
     val addCandidates: List<Ticket> = emptyList(),
+    /** The project keys ("FLEET") of tickets the phone has seen, for the typed key's "Did you mean". */
+    val keyPrefixes: List<String> = emptyList(),
     /**
      * Ticket id → the name of its organisation, for a candidate known to
      * belong to a different organisation than this session. The hub refuses
@@ -475,6 +478,7 @@ class SessionTasksViewModel(
             addOpen = l.addOpen,
             addQuery = l.addQuery,
             addCandidates = candidates,
+            keyPrefixes = if (l.addOpen) knownKeyPrefixes(l.offered + cache) else emptyList(),
             otherOrg = otherOrg,
             sessionOrgName = o.sessionOrg?.let(o.directory::name),
             crossOrg = l.crossOrg?.let { p ->

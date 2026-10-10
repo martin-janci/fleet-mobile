@@ -37,6 +37,24 @@ class PhoneStatesR13Test {
         assertEquals(ColdStart.Unreachable("too new"), coldStartBody(PhoneConnection.Refused("too new")))
     }
 
+    /**
+     * G7.18 (MobileStates, Reconnecting on the New layout): a list with rows
+     * gives way to the Gravity well once a reconnect is past its first try,
+     * until the person asks for the last known list. Offline keeps the rows.
+     */
+    @Test
+    fun a_list_with_rows_shows_the_reconnecting_panel_until_the_last_known_list_is_asked_for() {
+        assertTrue(showReconnectingPanel(PhoneConnection.Reconnecting(2), hasRows = true, lastKnownShown = false))
+        assertFalse(showReconnectingPanel(PhoneConnection.Reconnecting(2), hasRows = true, lastKnownShown = true))
+        // The first attempt is a blip: the banner covers it.
+        assertFalse(showReconnectingPanel(PhoneConnection.Reconnecting(1), hasRows = true, lastKnownShown = false))
+        // An empty list has its own cold start.
+        assertFalse(showReconnectingPanel(PhoneConnection.Reconnecting(3), hasRows = false, lastKnownShown = false))
+        for (c in listOf(PhoneConnection.Live, PhoneConnection.Offline(null), PhoneConnection.Refused("old hub"))) {
+            assertFalse(showReconnectingPanel(c, hasRows = true, lastKnownShown = false), "$c")
+        }
+    }
+
     /** P13-4: the banner's sentence names no exception class and no status; those are Details'. */
     @Test
     fun a_connection_reason_is_a_sentence() {

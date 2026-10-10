@@ -529,6 +529,42 @@ object FleetIcons {
         }
     }
 
+    /** A microphone on its stand: the composer's voice input (MobileSession). */
+    val Mic: ImageVector by lazy {
+        strokeIcon("Mic") {
+            // the capsule, x 9–15, y 3–14
+            moveTo(9f, 6f)
+            arcTo(3f, 3f, 0f, isMoreThanHalf = false, isPositiveArc = true, x1 = 15f, y1 = 6f)
+            lineTo(15f, 11f)
+            arcTo(3f, 3f, 0f, isMoreThanHalf = false, isPositiveArc = true, x1 = 9f, y1 = 11f)
+            close()
+            // the cradle and the stand
+            moveTo(5.5f, 11f)
+            arcTo(6.5f, 6.5f, 0f, isMoreThanHalf = false, isPositiveArc = false, x1 = 18.5f, y1 = 11f)
+            moveTo(12f, 17.5f); lineTo(12f, 21f)
+        }
+    }
+
+    /**
+     * An alarm clock — a face with two bells — for Send later in the
+     * composer. Not [History]'s plain clock, which sits in the same field
+     * and means something else.
+     */
+    val SendLater: ImageVector by lazy {
+        strokeIcon("SendLater") {
+            // the face: four quarter arcs, centred on (12,13), r=7.5
+            moveTo(19.5f, 13f)
+            arcTo(7.5f, 7.5f, 0f, isMoreThanHalf = false, isPositiveArc = true, x1 = 12f, y1 = 20.5f)
+            arcTo(7.5f, 7.5f, 0f, isMoreThanHalf = false, isPositiveArc = true, x1 = 4.5f, y1 = 13f)
+            arcTo(7.5f, 7.5f, 0f, isMoreThanHalf = false, isPositiveArc = true, x1 = 12f, y1 = 5.5f)
+            arcTo(7.5f, 7.5f, 0f, isMoreThanHalf = false, isPositiveArc = true, x1 = 19.5f, y1 = 13f)
+            // the hands, and the two bells
+            moveTo(12f, 9.5f); lineTo(12f, 13f); lineTo(14.5f, 14.5f)
+            moveTo(3.5f, 6.5f); lineTo(6.5f, 3.5f)
+            moveTo(20.5f, 6.5f); lineTo(17.5f, 3.5f)
+        }
+    }
+
     private fun strokeIcon(
         name: String,
         block: androidx.compose.ui.graphics.vector.PathBuilder.() -> Unit,

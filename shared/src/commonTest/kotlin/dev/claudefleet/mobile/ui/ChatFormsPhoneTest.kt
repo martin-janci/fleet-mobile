@@ -12,6 +12,10 @@ import dev.claudefleet.mobile.model.formPicks
 import dev.claudefleet.mobile.model.orderedOptions
 import dev.claudefleet.mobile.model.pickLine
 import dev.claudefleet.mobile.model.readAskForm
+import dev.claudefleet.mobile.model.startedByForm
+import dev.claudefleet.mobile.model.SuggestedHost
+import dev.claudefleet.mobile.model.hostPlacementAsk
+import dev.claudefleet.mobile.model.startedWorkLine
 import dev.claudefleet.mobile.net.json
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonElement
@@ -139,5 +143,72 @@ class ChatFormsPhoneTest {
         m.set("host", JsonPrimitive("mars"))
         m.changePick("host")
         assertEquals(JsonPrimitive("mars"), m.state.value.values["host"])
+    }
+
+    // The work a form started follows its answered line (MobileChatForms).
+    private val answered = FormView(formId = "f_s", sessionId = 5, title = "Start Papaya receipts", state = "answered", decidedAt = 1_000)
+
+    @Test
+    fun the_session_an_answer_started_is_the_askers_first_start_after_the_answer() {
+        val before = SessionRow(id = 10, origin = "operator", originRef = "5", startedAt = 900)
+        val other = SessionRow(id = 11, origin = "operator", originRef = "6", startedAt = 1_010)
+        val person = SessionRow(id = 12, origin = "person", originRef = "5", startedAt = 1_010)
+        val second = SessionRow(id = 14, origin = "token", originRef = "5", startedAt = 1_200)
+        val first = SessionRow(id = 13, origin = "operator", originRef = "5", startedAt = 1_005, hostAlias = "mercury")
+        assertEquals(13L, startedByForm(answered, listOf(before, other, person, second, first))?.id)
+        assertNull(startedByForm(answered, listOf(before, other, person)), "nothing started yet: no row")
+        assertNull(startedByForm(answered.copy(state = "declined"), listOf(first)), "only an answer starts work")
+        assertNull(startedByForm(answered.copy(decidedAt = null), listOf(first)))
+    }
+
+    @Test
+    fun the_started_row_says_starting_until_its_agent_speaks() {
+        assertEquals("starting on mercury", startedWorkLine(SessionRow(id = 1, hostAlias = "mercury")))
+        assertEquals("on mercury", startedWorkLine(SessionRow(id = 1, hostAlias = "mercury", claudeStatus = "working")))
+    }
+
+    // MobileControl's plan: "Proposed by Jev · mercury … · Change" on a host choice for a project.
+    private val placement = """{
+        "spec": "fleet.form/1", "title": "New session",
+        "steps": [
+          { "title": "Where", "fields": [
+            { "name": "project_id", "type": "text", "label": "Project", "value": "12" },
+            { "name": "host", "type": "select", "label": "Host", "options": [["mercury", "mercury"], ["mac", "mac"], ["oci-arm", "oci-arm"]] }
+          ] }
+        ]
+      }"""
+
+    @Test
+    fun a_host_choice_for_a_project_asks_jev_once_and_never_overrides_the_person() = runTest {
+        val view = FormView(formId = "f_h", title = "New session", spec = json.parseToJsonElement(placement), state = "pending")
+        val asked = mutableListOf<Long>()
+        val m = AskFormModel(Forms(view), "f_h", this, proposeHost = { id -> asked += id; SuggestedHost("mercury", confidencePct = 82) })
+        m.load().join()
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf(12L), asked)
+        assertEquals(JsonPrimitive("mercury"), m.state.value.values["host"])
+        assertEquals("Proposed by Jev · 82% sure", pickLine(assertNotNull(m.state.value.picks["host"])))
+
+        // Change hands it back, and the same project is not asked again.
+        m.changePick("host")
+        testScheduler.advanceUntilIdle()
+        assertNull(m.state.value.values["host"])
+        assertEquals(listOf(12L), asked)
+    }
+
+    @Test
+    fun no_proposal_for_a_host_the_form_does_not_offer_or_on_refusal() = runTest {
+        val view = FormView(formId = "f_h", title = "New session", spec = json.parseToJsonElement(placement), state = "pending")
+        val elsewhere = AskFormModel(Forms(view), "f_h", this, proposeHost = { SuggestedHost("venus") })
+        elsewhere.load().join()
+        testScheduler.advanceUntilIdle()
+        assertNull(elsewhere.state.value.values["host"])
+        val refused = AskFormModel(Forms(view), "f_h", this, proposeHost = { throw IllegalStateException("E_FORBIDDEN") })
+        refused.load().join()
+        testScheduler.advanceUntilIdle()
+        assertNull(refused.state.value.picks["host"], "a refusal shows nothing")
+        // A form without a project names nothing to ask about.
+        val spec = assertNotNull(readAskForm(json.parseToJsonElement(placement.replace("project_id", "note"))))
+        assertNull(hostPlacementAsk(spec, emptyMap(), emptyMap()))
     }
 }

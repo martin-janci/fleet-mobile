@@ -80,3 +80,15 @@ fun pickerCommand(command: String, value: String): String? {
     if (v.isEmpty() || v.any { it.isWhitespace() }) return null
     return "/$command $v"
 }
+
+/**
+ * What the mic's words do to the box: added after what is typed, a space
+ * between, never over it — dictating the second half of a sentence must not
+ * wipe the first. Words that heard nothing leave the draft as it was.
+ */
+fun withDictation(draft: String, heard: String): String {
+    val words = heard.trim()
+    if (words.isEmpty()) return draft
+    val typed = draft.trimEnd()
+    return if (typed.isEmpty()) words else "$typed $words"
+}

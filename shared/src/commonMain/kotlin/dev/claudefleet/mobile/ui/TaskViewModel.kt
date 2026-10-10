@@ -4,7 +4,9 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.epochSeconds
+import dev.claudefleet.mobile.model.Criterion
 import dev.claudefleet.mobile.model.GroupRef
+import dev.claudefleet.mobile.model.acceptanceCriteria
 import dev.claudefleet.mobile.model.GroupSource
 import dev.claudefleet.mobile.model.LinkState
 import dev.claudefleet.mobile.model.OrgDirectory
@@ -71,6 +73,8 @@ data class TaskUiState(
      * person's or a rule's), never a derived one — see [placeableGroups].
      */
     val knownGroups: List<String> = emptyList(),
+    /** How many tasks each of [knownGroups] holds, by label ("4 tasks"); a group missing here has no count. */
+    val groupCounts: Map<String, Int> = emptyMap(),
     /** The placement's note, kept by a placement unless the person edits it. */
     val placementNote: String = "",
     val busy: Boolean = false,
@@ -108,6 +112,12 @@ data class TaskUiState(
     val notesLocked: Boolean = false,
     /** What the Edit sheet starts from. */
     val editFields: TaskEditFields = TaskEditFields(),
+    /**
+     * The acceptance criteria the description names (MobileWork), read the
+     * way the hub reads a ticket card's ([acceptanceCriteria]) — with what
+     * is ticked, for "1 of 3 done". Empty when it names none.
+     */
+    val criteria: List<Criterion> = emptyList(),
 ) {
     val task get() = detail?.task
 }
@@ -146,6 +156,8 @@ class TaskViewModel(
     private val canWrite: Boolean,
     /** The groups the Work tree knows, for *Place in group…*. */
     private val knownGroups: () -> List<GroupRef> = { emptyList() },
+    /** Tasks per placeable group label, for the rows of *Place in group…* ("4 tasks"). */
+    private val groupCounts: () -> Map<String, Int> = { emptyMap() },
     private val onOpenSession: (Long) -> Unit = {},
     /** The New session form in ticket mode, for this key. */
     private val onStartHere: (String) -> Unit = {},
@@ -473,6 +485,7 @@ class TaskViewModel(
             canStart = key != null && !hasLive && allowed(caps, status, START),
             placeOpen = l.placeOpen,
             knownGroups = placeableGroups(knownGroups()),
+            groupCounts = groupCounts(),
             placementNote = detail?.placement?.note.orEmpty(),
             busy = l.busy,
             error = l.error,
@@ -493,6 +506,7 @@ class TaskViewModel(
             editFields = detail?.let {
                 TaskEditFields(title = it.task.title, notes = it.notes.orEmpty(), assignees = it.task.assignees, dueAt = it.task.dueAt.orEmpty())
             } ?: TaskEditFields(),
+            criteria = acceptanceCriteria(detail?.description?.takeIf { it.isNotBlank() } ?: detail?.notes.orEmpty()),
         )
     }
 

@@ -4,6 +4,7 @@ import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.RepairReport
+import dev.claudefleet.mobile.model.RestorePlanEntry
 import dev.claudefleet.mobile.model.SessionRow
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -87,7 +88,21 @@ class RecoveryTest {
 
     @Test
     fun each_host_option_states_its_facts() {
-        assertEquals("1 running", moveHostFacts(HostRow("hetzner-1", reachable = true), 1))
-        assertEquals("agent · 0 running", moveHostFacts(HostRow("nas", reachable = true, transport = "agent"), 0))
+        assertEquals("1 running · toolchain not checked", moveHostFacts(HostRow("hetzner-1", reachable = true), 1))
+        assertEquals("agent · 0 running · toolchain not checked", moveHostFacts(HostRow("nas", reachable = true, transport = "agent"), 0))
+        // Free disk only when the hub sampled it.
+        assertEquals(
+            "2 running · 22 GB free · toolchain not checked",
+            moveHostFacts(HostRow("hetzner-1", reachable = true, diskHomeFreeKb = 22_000_000L), 2),
+        )
+    }
+
+    @Test
+    fun each_plan_entry_carries_its_verdict_as_a_word() {
+        assertEquals("Resume", planVerdict(RestorePlanEntry(sessionId = 1, action = "restore")))
+        assertEquals("Skip", planVerdict(RestorePlanEntry(sessionId = 2, action = "skip", reason = "a controller session")))
+        assertEquals("Unknown", planVerdict(RestorePlanEntry(sessionId = 3)))
+        // A word the hub adds later is shown as it comes, not dropped.
+        assertEquals("Recreate fresh", planVerdict(RestorePlanEntry(sessionId = 4, action = "recreate_fresh")))
     }
 }

@@ -249,6 +249,11 @@ class ToolsTheAppMayCallTest {
         "queue_prompt",
         "queued_prompts",
         "runs",
+        // Jev's host for the New session wizard and a host choice in
+        // Control's chat (claude-fleet N5, redesign 4.11): `propose_host_placement`, a read that may ask the decision
+        // model once. Called only when `tools/list` names it to this token
+        // (`HubCapabilities.proposeHost`); a refusal hides the proposal.
+        "propose_host_placement",
     )
 
     @Test

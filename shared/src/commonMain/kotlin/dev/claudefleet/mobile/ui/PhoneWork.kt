@@ -71,6 +71,7 @@ import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.MarkdownText
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.kit.BottomSheet
+import dev.claudefleet.mobile.ui.kit.Comet
 import dev.claudefleet.mobile.ui.kit.DotWave
 import dev.claudefleet.mobile.ui.kit.HubBanner
 import dev.claudefleet.mobile.ui.kit.OrbitChip
@@ -648,6 +649,7 @@ fun PhoneTaskScreen(
                         Text("The tracker decides this group; placing it changes only fleet's view.", color = o.fgMuted, fontSize = 13.sp)
                     }
                     state.detail?.placement?.note?.takeIf { it.isNotBlank() }?.let { Text("Note: $it", color = o.fgMuted, fontSize = 13.sp) }
+                    AcceptanceChecklist(state.criteria)
                     state.detail?.description?.takeIf { it.isNotBlank() }?.let { MarkdownText(it) }
                     state.detail?.notes?.takeIf { it.isNotBlank() && task.editable }?.let { MarkdownText(it) }
                     OwnTaskControls(state, h)
@@ -840,7 +842,8 @@ private fun PastCard(link: WorkTaskLink, state: TaskUiState, handlers: PhoneTask
                 }
             }
             summarizing -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (rememberLoaderVisible(true)) DotWave()
+                // The kit's Comet (MobileWork: "Comet while summarising"), after the loaders' 400 ms.
+                if (rememberLoaderVisible(true)) Comet()
                 Text("Summarizing", color = o.fgMuted, fontSize = 13.sp)
             }
         }

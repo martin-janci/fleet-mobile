@@ -34,4 +34,12 @@ class ComposerTest {
         assertNull(pickerCommand("model", ""))
         assertNull(pickerCommand("model", "two words"))
     }
+
+    @Test
+    fun dictated_words_go_after_what_is_typed() {
+        assertEquals("Run the tests", withDictation("", " Run the tests "))
+        assertEquals("Run the tests and push", withDictation("Run the tests ", "and push"))
+        assertEquals("Line one and two", withDictation("Line one\n", "and two"))
+        assertEquals("keep this", withDictation("keep this", "   "))
+    }
 }

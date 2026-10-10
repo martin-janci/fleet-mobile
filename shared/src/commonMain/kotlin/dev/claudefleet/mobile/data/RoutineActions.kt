@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.data
 import dev.claudefleet.mobile.model.FleetRun
 import dev.claudefleet.mobile.model.HubHealth
 import dev.claudefleet.mobile.model.Routine
+import dev.claudefleet.mobile.model.RoutineBudget
 import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineRun
 
@@ -42,6 +43,12 @@ interface RoutineActions {
 
     /** Pause all automation, or let it run again. */
     suspend fun setPaused(paused: Boolean)
+
+    /**
+     * What the routines spent today (`routines { budget }`). The default is
+     * a hub without the action: no reading, and the line names no spend.
+     */
+    suspend fun budget(): RoutineBudget? = null
 }
 
 /** [RoutineActions] against the paired hub, through [AppSession.withClient]. */
@@ -65,6 +72,8 @@ class HubRoutineActions(private val session: AppSession) : RoutineActions {
     override suspend fun setPaused(paused: Boolean) {
         session.withClient { it.setSetting(AUTOMATION_PAUSED, paused.toString()) }
     }
+
+    override suspend fun budget(): RoutineBudget? = session.withClient { it.routineBudget() }
 
     private companion object {
         const val AUTOMATION_PAUSED = "automation.paused"

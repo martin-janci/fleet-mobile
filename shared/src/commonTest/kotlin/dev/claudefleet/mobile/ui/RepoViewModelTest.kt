@@ -159,6 +159,22 @@ class RepoViewModelTest {
     }
 
     @Test
+    fun a_read_tree_is_kept_under_the_sessions_project_for_search() = runTest {
+        val fleet = RepoFleet(ALL_REPO)
+        fleet.sessions.value = listOf(SessionRow(id = S, tmuxName = "s", hostAlias = "pine", projectId = 7))
+        fleet.projects.value = listOf(ProjectRow(id = 7, owner = "acme", repo = "billing"))
+        val names = ProjectFileNames()
+        val vm = RepoViewModel(S, fleet, Repo(), Downloads(), backgroundScope, canWrite = true, fileNames = names)
+        runCurrent()
+        vm.select(RepoTab.Files).join()
+        runCurrent()
+
+        assertEquals(listOf("src/Main.kt", "src/test/MainTest.kt", "README.md"), names.byProject.value[7L])
+        // The project is what Open on GitHub and `#N` links are built from.
+        assertEquals("acme", vm.state.value.project?.owner)
+    }
+
+    @Test
     fun send_to_downloads_needs_a_token_that_may_write() = runTest {
         val readonly = Downloads()
         val ro = RepoViewModel(S, RepoFleet(ALL_REPO), Repo(), readonly, backgroundScope, canWrite = false)

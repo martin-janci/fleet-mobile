@@ -49,6 +49,8 @@ import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.TidyReport
 import dev.claudefleet.mobile.model.Mission
 import dev.claudefleet.mobile.model.FailingRoutine
+import dev.claudefleet.mobile.model.RoutineBudget
+import dev.claudefleet.mobile.model.SuggestedHost
 import dev.claudefleet.mobile.model.BranchDiff
 import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.DebugDevice
@@ -58,6 +60,7 @@ import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.RunsPage
 import dev.claudefleet.mobile.model.Headroom
+import dev.claudefleet.mobile.model.suggestedHostOf
 import dev.claudefleet.mobile.model.QueuePromptResult
 import dev.claudefleet.mobile.model.SendLaterTiming
 import dev.claudefleet.mobile.model.QueuedPrompt
@@ -547,6 +550,14 @@ class HubClient(
         ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
 
     /**
+     * Jev's host for a new session of [projectId] (claude-fleet N5,
+     * `propose_host_placement`): null when the hub has none to offer. Called
+     * only when `tools/list` names it (`HubCapabilities.proposeHost`).
+     */
+    suspend fun proposeHostPlacement(projectId: Long): SuggestedHost? =
+        call("propose_host_placement", buildJsonObject { put("project_id", projectId) }) { suggestedHostOf(it) }
+
+    /**
      * Which login on [hostAlias] has room left (`check_account_headroom`, hub
      * contract 14): [profile] is the session's own, null for the host's login.
      * From the usage the hub already keeps; never a fresh fetch.
@@ -730,6 +741,7 @@ class HubClient(
                 put("prompt", prompt)
                 // Contract 14; each only when set, so an older hub sees the call it knew.
                 options.projectId?.let { put("project_id", it) }
+                options.agent?.let { put("agent", it) }
                 if (options.readOnly) put("read_only", true)
                 options.stopAfterSecs?.let { put("stop_after_secs", it) }
                 options.stopAfterUsd?.let { put("stop_after_usd", it) }
@@ -1471,6 +1483,12 @@ class HubClient(
     suspend fun routines(): List<Routine> =
         call("routines", buildJsonObject { put("action", "list") }) {
             json.decodeFromJsonElement(ListSerializer(Routine.serializer()), it)
+        }
+
+    /** The fleet's routine spend today and its budget (`routines { budget }`): More's Automation line. */
+    suspend fun routineBudget(): RoutineBudget =
+        call("routines", buildJsonObject { put("action", "budget") }) {
+            json.decodeFromJsonElement(RoutineBudget.serializer(), it)
         }
 
     /** Each routine whose newest run failed, newest failure first: the background watcher's Routine failed. */

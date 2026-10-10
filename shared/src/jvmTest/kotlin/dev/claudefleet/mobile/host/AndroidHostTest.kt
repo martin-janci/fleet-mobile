@@ -51,11 +51,24 @@ class TheCameraIsAskedForOnlyWhenTheScannerOpensTest {
     @Test
     fun only_the_scanner_launches_a_permission_request() {
         val offenders = Repo.shipped
-            .filterNot { it.isScanner() || it.name == "NotificationPermission.android.kt" }
+            .filterNot { it.isScanner() || it.name == "NotificationPermission.android.kt" || it.name == "Dictation.android.kt" }
             .filter { "rememberLauncherForActivityResult" in it.readText() }
             .map { it.name }
 
         assertEquals(emptyList(), offenders, "a permission launcher outside the scanner")
+    }
+
+    /**
+     * The composer's mic launches an activity too, but not a permission
+     * request: it hands the listening to the system's recogniser, which asks
+     * for the microphone itself. So it may name no permission at all.
+     */
+    @Test
+    fun the_composers_mic_asks_for_no_permission() {
+        val mic = Repo.shipped.single { it.name == "Dictation.android.kt" }.readText()
+        assertTrue("RequestPermission" !in mic, "the mic must not ask for a permission")
+        assertTrue("RECORD_AUDIO" !in mic, "the system recogniser records, not this app")
+        assertTrue("RecognizerIntent.ACTION_RECOGNIZE_SPEECH" in mic)
     }
 
     /**

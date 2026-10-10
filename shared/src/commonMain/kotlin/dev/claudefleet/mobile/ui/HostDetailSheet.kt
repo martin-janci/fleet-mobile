@@ -31,8 +31,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.LostCandidate
+import dev.claudefleet.mobile.model.RestorePlanEntry
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.components.ErrorBanner
+import dev.claudefleet.mobile.ui.kit.OrbitChip
+import dev.claudefleet.mobile.ui.kit.StatusWord
 
 data class HostDetailHandlers(
     val onClose: () -> Unit = {},
@@ -112,12 +115,7 @@ fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowS
                             plan.plan.isEmpty() -> Text("No lost sessions to restore.", style = MaterialTheme.typography.bodySmall)
                             else -> {
                                 for (entry in plan.plan) {
-                                    Text(
-                                        entry.name + if (entry.restores) "" else " — ${entry.action}" + (entry.reason?.let { ": $it" } ?: ""),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
+                                    PlanEntryRow(entry)
                                 }
                                 if (state.restorable > 0) {
                                     OutlinedButton(
@@ -207,5 +205,39 @@ fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowS
             confirmButton = { TextButton(onClick = { confirmingBack = false; handlers.onRunWhenBack() }) { Text("Run when back") } },
             dismissButton = { TextButton(onClick = { confirmingBack = false }) { Text("Cancel") } },
         )
+    }
+}
+
+/**
+ * The verdict a restore plan gives one lost session (MobileMore: "Resume /
+ * Recreate / Skip with the reason"), as the word on its chip. The hub plans
+ * `restore` (the conversation resumes in its own worktree) or `skip` (with
+ * its reason); any other word it adds later is shown as it comes.
+ */
+internal fun planVerdict(entry: RestorePlanEntry): String = when (entry.action) {
+    "restore" -> "Resume"
+    "skip" -> "Skip"
+    "" -> "Unknown"
+    else -> entry.action.replace('_', ' ').replaceFirstChar { it.uppercaseChar() }
+}
+
+/** One lost session in the plan: its name, why the hub decided so, and the verdict as a chip. */
+@Composable
+private fun PlanEntryRow(entry: RestorePlanEntry) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(entry.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            entry.reason?.takeIf { it.isNotBlank() }?.let { reason ->
+                Text(
+                    reason,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        // The word carries the verdict; the colour only repeats it.
+        OrbitChip(planVerdict(entry), modifier = Modifier.padding(start = 8.dp), word = if (entry.restores) StatusWord.WORKING else StatusWord.IDLE)
     }
 }

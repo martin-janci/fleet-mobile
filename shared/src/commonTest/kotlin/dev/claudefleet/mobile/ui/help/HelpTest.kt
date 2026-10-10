@@ -1,6 +1,12 @@
 package dev.claudefleet.mobile.ui.help
 
+import dev.claudefleet.mobile.model.AccountUsageSnapshot
+import dev.claudefleet.mobile.model.AccountUsageWindows
+import dev.claudefleet.mobile.model.Section
+import dev.claudefleet.mobile.model.UsageWindow
 import dev.claudefleet.mobile.store.FakePrefs
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import dev.claudefleet.mobile.ui.Navigator
 import dev.claudefleet.mobile.ui.PhoneLayout
 import dev.claudefleet.mobile.ui.Screen
@@ -210,5 +216,28 @@ class HelpTest {
         assertEquals(Screen.Learn, nav.screen.value)
         assertTrue(nav.back())
         assertEquals(Screen.More, nav.screen.value)
+    }
+
+    /** G7.18 (MobileTutorialModes · Guide): a step about usage limits shows the real meters. */
+    @Test
+    fun a_guide_step_about_account_limits_shows_every_accounts_meter() {
+        fun field(key: String) = buildJsonObject {
+            put("type", "field")
+            put("key", key)
+        }
+        assertTrue(guideStepShowsUsage(Section("Pause new work", items = listOf(field("accounts.pause_at")))))
+        assertFalse(guideStepShowsUsage(Section("Tidy up", items = listOf(field("gc.enabled")))))
+        assertFalse(guideStepShowsUsage(Section("What it does", items = listOf(buildJsonObject { put("type", "notice"); put("text", "accounts.x") }))))
+
+        val now = 1_000L
+        val usage = mapOf(
+            "b" to AccountUsageSnapshot("b", AccountUsageWindows(sevenDay = UsageWindow(15.0))),
+            "a" to AccountUsageSnapshot("a", AccountUsageWindows(sevenDay = UsageWindow(100.0, resetsAt = now + 3600))),
+            "c" to AccountUsageSnapshot("c"),
+        )
+        val meters = guideMeters(mapOf("a" to "tech.silvester", "b" to "m.janci"), usage, now)
+        assertEquals(listOf("m.janci", "tech.silvester"), meters.map { it.name }, "no reading, no meter; in name order")
+        assertEquals("week 85% left", meters[0].line)
+        assertTrue(meters[1].low)
     }
 }

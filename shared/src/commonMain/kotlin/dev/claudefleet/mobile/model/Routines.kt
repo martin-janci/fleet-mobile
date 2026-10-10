@@ -49,6 +49,19 @@ data class RoutineDetail(
     @SerialName("may_change") val mayChange: Boolean = false,
 )
 
+/**
+ * `routines { budget }` (claude-fleet 8.6, `FleetBudget`): what every
+ * routine's runs cost since the UTC day began, and the fleet's daily budget
+ * when one is set — More's "3 active · $4.10 today".
+ */
+@Serializable
+data class RoutineBudget(
+    @SerialName("spent_micros") val spentMicros: Long = 0,
+    @SerialName("budget_micros") val budgetMicros: Long? = null,
+    /** The UTC day's start, unix seconds. */
+    val since: Long = 0,
+)
+
 /** `routines { failing }`: a routine whose newest run failed, with that run (claude-fleet 8.6). */
 @Serializable
 data class FailingRoutine(

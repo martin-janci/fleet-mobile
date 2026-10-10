@@ -149,4 +149,23 @@ class LandscapeTest {
         assertEquals(listOf("Esc", "Tab", "⏎", "⌃C", "1", "2", "3"), agentBarKeys(null, HubCapabilities.BASE_PANE_KEYS).map { it.label })
         assertTrue(ctrlBarKeys(null, HubCapabilities.BASE_PANE_KEYS).isEmpty())
     }
+
+    /** G7.16: ⌥ and its row of Alt chords, only on a hub whose `keys` enum names one (G7.3). */
+    @Test
+    fun a_hub_that_lists_alt_chords_gets_the_alt_cap_and_row() {
+        val listed = HubCapabilities.BASE_PANE_KEYS + setOf("C-r", "M-b", "M-f", "M-Enter", "M-BSpace", "M-z")
+        val keys = agentBarKeys(null, listed)
+        assertEquals(listOf("⌃", "⌥"), keys.map { it.label }.takeLast(2))
+        assertNull(keys.last().press, "the ⌥ cap opens the chords' row; it presses nothing itself")
+        val row = altBarKeys(null, listed)
+        assertEquals(listOf("⌥B", "⌥F", "⌥⌫", "⌥⏎"), row.map { it.label }, "in the bar's order; a chord the bar has no cap for is left out")
+        assertEquals(AgentPress.Key("M-Enter"), row.last().press)
+        assertEquals(listOf("Alt B", "Alt Backspace", "Alt Enter"), listOf(row[0], row[2], row[3]).map { it.spoken })
+        assertEquals(row, modifierRowKeys("⌥", null, listed))
+        assertEquals(ctrlBarKeys(null, listed), modifierRowKeys("⌃", null, listed))
+        assertTrue(modifierRowKeys(null, null, listed).isEmpty())
+        val card = BlockedCard(headline = "Bash command", answers = listOf(Answer.Enter))
+        assertTrue(altBarKeys(card, listed).isEmpty(), "an Alt chord drives the session; it answers nothing")
+        assertTrue(altBarKeys(null, HubCapabilities.BASE_PANE_KEYS).isEmpty(), "an older hub lists no Meta chord")
+    }
 }

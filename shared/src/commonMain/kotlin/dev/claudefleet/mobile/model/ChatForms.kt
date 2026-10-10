@@ -175,3 +175,64 @@ fun answerSummary(form: ReplyForm, view: FormView): String? {
     val more = parts.size - SUMMARY_PARTS
     return parts.take(SUMMARY_PARTS).joinToString(" · ") + if (more > 0) " · +$more more" else ""
 }
+
+/** The origins a session started by an agent's own call carries (hub contract 11): Control's, or a per-host token's. */
+private val AGENT_STARTS = setOf("operator", "token")
+
+/**
+ * The session an answered form's answer started, for the line under it
+ * (MobileChatForms: "the work it started follows"). The hub links no form to
+ * a session, so this reads the rows: the first session the asking session
+ * started (`origin` operator or token, `origin_ref` its id, which is what
+ * the hub stamps on an agent's `new_session`) at or after the answer. Null
+ * for a form not answered, or before such a row arrives.
+ */
+fun startedByForm(form: FormView, rows: List<SessionRow>): SessionRow? {
+    if (form.state != "answered" || form.sessionId == 0L) return null
+    val decided = form.decidedAt ?: return null
+    val asker = form.sessionId.toString()
+    return rows
+        .filter { it.id != form.sessionId && it.origin in AGENT_STARTS && it.originRef == asker }
+        .filter { (it.startedAt ?: it.createdAt ?: 0L) >= decided }
+        .minByOrNull { it.startedAt ?: it.createdAt ?: 0L }
+}
+
+/** The started session's line: "starting on mercury" until its agent says anything, then "on mercury". */
+fun startedWorkLine(row: SessionRow): String {
+    val on = row.hostAlias.takeIf { it.isNotBlank() }?.let { " on $it" }.orEmpty()
+    return if (row.claudeStatus.isNullOrBlank()) "starting$on" else on.trimStart()
+}
+
+/** The field names a form asks for a host with, and those naming the project it is for. */
+private val HOST_FIELDS = setOf("host", "host_alias")
+private val PROJECT_FIELDS = setOf("project_id", "project")
+
+/** A form's host question, and the project to ask Jev about for it. */
+data class HostAsk(val field: String, val projectId: Long)
+
+/**
+ * Whether to ask Jev for a host (MobileControl's plan: "Proposed by Jev
+ * mercury for the probe … · Change"): a shown host choice (a select named
+ * `host` or `host_alias` with two or more hosts) that nothing has chosen or
+ * proposed yet, on a form that names its project by id (`project_id` or
+ * `project`). Null otherwise: the hub's question is about one project.
+ */
+fun hostPlacementAsk(form: ReplyForm, values: Map<String, JsonElement>, picks: Map<String, FormPick>): HostAsk? {
+    val shown = visibleFields(form, values).flatMap { it.second }
+    val host = shown.firstOrNull { it.type == "select" && it.name in HOST_FIELDS && it.options.size >= 2 && it.disabledReason == null } ?: return null
+    if (host.name in picks || values[host.name] != null) return null
+    val project = form.steps.flatMap { it.fields }.firstOrNull { it.name in PROJECT_FIELDS } ?: return null
+    val id = (values[project.name] as? JsonPrimitive)?.content?.trim()?.toLongOrNull() ?: return null
+    return HostAsk(host.name, id)
+}
+
+/**
+ * Jev's host as the card's pick, "Proposed by Jev · <reason>" (or "· 82%
+ * sure" where the hub gives no reason): only a host the field offers.
+ */
+fun hostPick(form: ReplyForm, ask: HostAsk, suggested: SuggestedHost): FormPick? {
+    val f = form.steps.flatMap { it.fields }.firstOrNull { it.name == ask.field } ?: return null
+    if (f.options.none { it.first == suggested.hostAlias }) return null
+    val why = suggested.reason?.trim()?.takeIf { it.isNotEmpty() } ?: suggested.confidencePct?.let { "$it% sure" }
+    return FormPick(ask.field, suggested.hostAlias, "jev", why)
+}

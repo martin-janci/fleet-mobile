@@ -71,7 +71,9 @@ import dev.claudefleet.mobile.ui.kit.BottomSheet
 import dev.claudefleet.mobile.ui.kit.HubBanner
 import dev.claudefleet.mobile.ui.kit.OrbitChip
 import dev.claudefleet.mobile.ui.kit.OrbitPullToRefresh
+import dev.claudefleet.mobile.ui.kit.PhoneConnection
 import dev.claudefleet.mobile.ui.kit.PhoneRow
+import dev.claudefleet.mobile.ui.kit.ReconnectingPanel
 import dev.claudefleet.mobile.ui.kit.SheetAction
 import dev.claudefleet.mobile.ui.kit.StatusWord
 import dev.claudefleet.mobile.ui.kit.rememberPhoneConnection
@@ -320,6 +322,8 @@ fun SessionsTab(
     bulk: BulkUiState = BulkUiState(),
     bulkHandlers: BulkHandlers = BulkHandlers(),
     hits: SearchHits = SearchHits(),
+    /** The hub as a person reads it ("fleet.example.com"), for the Reconnecting panel. */
+    hub: String = "the hub",
 ) {
     val live = state.status is ConnectionStatus.Connected
     val rows = state.shownRows()
@@ -348,11 +352,20 @@ fun SessionsTab(
             else -> TabHeader(state, handlers, canSelect = bulk.enabled, hostCount = rows.mapTo(HashSet()) { it.hostAlias }.size)
         }
         HiddenAttentionBanner(count = state.hiddenAttention, onClearAll = handlers.onClearAll)
-        HubBanner(rememberPhoneConnection(state.status), asOf = state.staleAt, onRetry = handlers.onRefresh)
+        val connection = rememberPhoneConnection(state.status)
+        HubBanner(connection, asOf = state.staleAt, onRetry = handlers.onRefresh)
         ErrorBanner(state.error, onDismiss = handlers.onDismissError)
+        // Back on the network and still finding the hub (MobileStates:
+        // Reconnecting): the Gravity well in place of rows that may be
+        // stale, with the last known list one tap away. Asked again on the
+        // next reconnect.
+        var lastKnown by remember(connection is PhoneConnection.Reconnecting) { mutableStateOf(false) }
+        val reconnecting = showReconnectingPanel(connection, hasRows = !state.isEmpty, lastKnownShown = lastKnown || bulk.active || state.searchOpen)
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            OrbitPullToRefresh(
+            if (reconnecting) {
+                ReconnectingPanel(hub = hub, onShowLastKnown = { lastKnown = true })
+            } else OrbitPullToRefresh(
                 isRefreshing = state.refreshing,
                 onRefresh = handlers.onRefresh,
                 modifier = Modifier.fillMaxSize(),
@@ -489,6 +502,16 @@ fun SessionsTab(
         )
     }
 }
+
+/**
+ * Whether the list gives way to the Reconnecting panel: past the first
+ * attempt (the first is a blip the banner covers), with rows to fall back on
+ * (an empty list has its own cold start), and only until the person asks for
+ * the last known list. Offline is not Reconnecting: it keeps the rows under
+ * Signal lost.
+ */
+internal fun showReconnectingPanel(connection: PhoneConnection, hasRows: Boolean, lastKnownShown: Boolean): Boolean =
+    connection is PhoneConnection.Reconnecting && connection.attempt > 1 && hasRows && !lastKnownShown
 
 /** What the bulk outcome and selection bar report beyond [SessionsHandlers]. */
 data class BulkHandlers(
@@ -751,7 +774,7 @@ private fun LazyListScope.searchSections(
         items(hits.projects, key = { "search-project-${it.id}" }) { project ->
             PhoneRow(
                 title = project.label,
-                line = if (handlers.onNewSession != null) "New session in this project" else "Project",
+                line = hits.projectLine(project, if (handlers.onNewSession != null) "New session in this project" else "Project"),
                 dot = false,
                 lead = null,
                 onClick = if (handlers.onNewSession != null) ({ handlers.onSearchProject(project.id) }) else null,

@@ -18,11 +18,13 @@ import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.notify.BackgroundNotifier
 import dev.claudefleet.mobile.notify.NeedsYouAlert
 import dev.claudefleet.mobile.notify.NeedsYouResolved
+import dev.claudefleet.mobile.notify.NotifyAction
 import dev.claudefleet.mobile.notify.NotifyActionKind
 import dev.claudefleet.mobile.notify.MISSION_WAITING_REASON
 import dev.claudefleet.mobile.notify.MissionWaitAlert
 import dev.claudefleet.mobile.notify.ROUTINE_FAILED_REASON
 import dev.claudefleet.mobile.notify.RoutineFailedAlert
+import dev.claudefleet.mobile.notify.missionWaitActions
 import dev.claudefleet.mobile.notify.missionWaitAlerts
 import dev.claudefleet.mobile.notify.routineFailedAlerts
 import dev.claudefleet.mobile.notify.needsYouContent
@@ -176,8 +178,11 @@ class NeedsYouService : Service() {
 
     /**
      * One "needs you" notification (redesign 14.8): the question, Answer (or
-     * Open) and Later — never an action that answers. The lock screen shows
-     * only the session and why until the phone is unlocked.
+     * Open log, or Open) and Later — never an action that answers. A failure
+     * that can be tried again offers Retry in Later's place: an activity
+     * intent like the tap, so it brings the app up (unlocked) and the app
+     * retries there. The lock screen shows only the session and why until
+     * the phone is unlocked.
      */
     private fun post(alert: NeedsYouAlert) {
         val c = needsYouContent(alert)
@@ -188,6 +193,14 @@ class NeedsYouService : Service() {
             this,
             alert.sessionId.toInt(),
             open,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        // Its own action, so the system keeps it apart from the tap's intent
+        // (extras alone do not make two PendingIntents different).
+        val retry = PendingIntent.getActivity(
+            this,
+            alert.sessionId.toInt(),
+            Intent(open).setAction(ACTION_RETRY),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val later = PendingIntent.getForegroundService(
@@ -222,8 +235,9 @@ class NeedsYouService : Service() {
             val intent = when (action.kind) {
                 NotifyActionKind.Open -> tap
                 NotifyActionKind.Later -> later
+                NotifyActionKind.Retry -> retry
             }
-            builder.addAction(0, action.label, intent)
+            button(builder, action, intent)
         }
         val n = builder.build()
         // One per session: a session that needs you again replaces its own.
@@ -285,10 +299,21 @@ class NeedsYouService : Service() {
         }
     }
 
-    /** One "a mission waits for you" notification; a tap opens the app, where it is answered. */
+    /**
+     * One "a mission waits for you" notification: the tap and its one button
+     * (Review grant, for a grant) open the app on that mission, its grant card
+     * first, where it is answered (MobileControl).
+     */
     private fun postMission(alert: MissionWaitAlert) {
-        val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        val n = NotificationCompat.Builder(this, ALERTS)
+        val open = PendingIntent.getActivity(
+            this,
+            MISSION_BASE + (alert.missionId % 100_000).toInt(),
+            Intent(this, MainActivity::class.java)
+                .putExtra(EXTRA_MISSION_ID, alert.missionId)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val builder = NotificationCompat.Builder(this, ALERTS)
             .setSmallIcon(R.drawable.ic_notify)
             .setContentTitle(alert.title)
             .setContentText(alert.text)
@@ -297,8 +322,13 @@ class NeedsYouService : Service() {
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-            .build()
-        manager(this).notify(MISSION_BASE + (alert.missionId % 100_000).toInt(), n)
+        for (action in missionWaitActions(alert)) button(builder, action, open)
+        manager(this).notify(MISSION_BASE + (alert.missionId % 100_000).toInt(), builder.build())
+    }
+
+    /** The one place a notification gets a button; every button comes from the shared action lists. */
+    private fun button(builder: NotificationCompat.Builder, action: NotifyAction, intent: PendingIntent) {
+        builder.addAction(0, action.label, intent)
     }
 
     /** One "a routine run failed" notification; a tap opens the app. */
@@ -338,6 +368,10 @@ class NeedsYouService : Service() {
 
     companion object {
         const val EXTRA_SESSION_ID = "dev.claudefleet.mobile.SESSION_ID"
+        /** The mission a mission's notification opens. */
+        const val EXTRA_MISSION_ID = "dev.claudefleet.mobile.MISSION_ID"
+        /** A failure notification's Retry: open the session and retry it in the app. */
+        const val ACTION_RETRY = "dev.claudefleet.mobile.NEEDS_YOU_RETRY"
         /** The service's own intent for a notification's Later. */
         const val ACTION_LATER = "dev.claudefleet.mobile.NEEDS_YOU_LATER"
         private const val WATCHING = "watching"

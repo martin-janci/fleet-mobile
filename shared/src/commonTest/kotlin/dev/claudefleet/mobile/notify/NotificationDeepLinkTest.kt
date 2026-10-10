@@ -75,4 +75,28 @@ class NotificationDeepLinkTest {
         assertNull(c.consumeOpenSession())
         assertFalse(c.consumeQuestionFocus(42))
     }
+
+    /** MobileControl: a failure's Retry opens the session and parks the retry for the app to make there. */
+    @Test
+    fun retry_opens_the_session_and_parks_the_retry_once() {
+        val c = container()
+        c.onRetrySession(42)
+        assertEquals(42L, c.consumeOpenSession(), "Retry lands on the session, as Open log does")
+        assertEquals(42L, c.consumeRetrySession())
+        assertNull(c.consumeRetrySession(), "taken exactly once")
+    }
+
+    /** MobileControl: a mission's Review grant opens that mission, once; a new pairing drops it. */
+    @Test
+    fun review_grant_opens_the_mission_once_and_a_new_pairing_drops_it() {
+        val c = container()
+        c.onOpenMission(5)
+        assertEquals(5L, c.consumeOpenMission())
+        assertNull(c.consumeOpenMission())
+        c.onOpenMission(6)
+        c.onRetrySession(7)
+        c.dropOpenRequests()
+        assertNull(c.consumeOpenMission())
+        assertNull(c.consumeRetrySession())
+    }
 }

@@ -19,10 +19,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -49,6 +47,20 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.AlertDialog
 import dev.claudefleet.mobile.ui.kit.InlineLoading
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import dev.claudefleet.mobile.model.Criterion
+import dev.claudefleet.mobile.model.acceptanceProgress
+import dev.claudefleet.mobile.ui.kit.BottomSheet
+import dev.claudefleet.mobile.ui.kit.SheetAction
+import dev.claudefleet.mobile.ui.theme.Fleet
+import dev.claudefleet.mobile.ui.theme.OrbitTokens
 
 /** Everything a task's screen reports. */
 data class TaskHandlers(
@@ -260,54 +272,142 @@ private fun kindWords(task: dev.claudefleet.mobile.model.WorkTask): String = whe
 }
 
 /**
- * *Place in group…*: a list of the groups people and rules made, or a new
- * label — never a tracker's or a repository's group, which is where a task
- * sits by itself. The placement's note comes along unless edited here.
- * Never drag and drop.
+ * *Place in group…* (MobileFormsWork, "Place work"): the ticket on top — its
+ * key, title and how far its acceptance criteria are — then the Group field
+ * that filters the groups people and rules made, each with how many tasks it
+ * holds, and an explicit **+ New group** row for a label none has. Never a
+ * tracker's or a repository's group, which is where a task sits by itself.
+ * The placement's note comes along unless edited here. Cancel and Place at
+ * the bottom; never drag and drop.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun PlaceSheet(state: TaskUiState, handlers: TaskHandlers) {
     var label by remember { mutableStateOf("") }
     var note by remember { mutableStateOf(state.placementNote) }
-    val choices = state.knownGroups.filter { label.isBlank() || it.contains(label.trim(), ignoreCase = true) }
-    ModalBottomSheet(onDismissRequest = handlers.onClosePlace) {
-        Column(modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Place in group", style = MaterialTheme.typography.titleLarge)
-            if (state.trackerControlled) {
-                Text("Only fleet's view changes; the tracker keeps its own project.", style = MaterialTheme.typography.bodySmall)
-            }
-            ErrorBanner(state.error, onDismiss = handlers.onDismissError)
-            if (state.error != null && state.conflict) ReloadRow(handlers.onRefresh)
-            OutlinedTextField(
-                value = label,
-                onValueChange = { label = it },
-                label = { Text("Group") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+    val typed = label.trim()
+    val choices = state.knownGroups.filter { typed.isEmpty() || it.contains(typed, ignoreCase = true) }.take(PLACE_CHOICES_MAX)
+    val isNew = typed.isNotEmpty() && state.knownGroups.none { it.equals(typed, ignoreCase = true) }
+    val enabled = !state.busy && state.connected
+    BottomSheet(
+        title = "Place ${state.task?.label?.takeIf { it.isNotBlank() } ?: "this task"}",
+        onDismiss = handlers.onClosePlace,
+        meta = if (state.trackerControlled) "Only fleet's view changes; the tracker keeps its own project." else null,
+        primary = SheetAction(
+            label = if (typed.isEmpty()) "Choose a group" else "Place",
+            enabled = typed.isNotEmpty() && enabled,
+        ) { handlers.onPlace(typed, note) },
+        scrollable = true,
+    ) {
+        PlaceTicketHeader(state)
+        ErrorBanner(state.error, onDismiss = handlers.onDismissError)
+        if (state.error != null && state.conflict) ReloadRow(handlers.onRefresh)
+        OutlinedTextField(
+            value = label,
+            onValueChange = { label = it },
+            label = { Text("Group") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        // A plain column, not a lazy list: the sheet's form already scrolls.
+        for (g in choices) {
+            PlaceGroupRow(
+                title = g,
+                count = state.groupCounts[g]?.let { "$it task${if (it == 1) "" else "s"}" },
+                selected = g == typed,
+                enabled = enabled,
+                onClick = { label = g },
             )
-            OutlinedTextField(
-                value = note,
-                onValueChange = { note = it },
-                label = { Text("Note (optional)") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (!state.connected) {
-                Text("Offline — nothing can be placed until the hub is back; nothing is queued.", style = MaterialTheme.typography.bodySmall)
-            }
-            Button(onClick = { handlers.onPlace(label, note) }, enabled = label.isNotBlank() && !state.busy && state.connected) {
-                Text("Place in “${label.trim()}”")
-            }
-            Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
-                LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                    items(choices, key = { it }) { g ->
-                        ListItem(
-                            modifier = Modifier.clickable(enabled = !state.busy && state.connected) { handlers.onPlace(g, note) },
-                            headlineContent = { Text(g) },
-                        )
-                    }
-                }
+        }
+        if (isNew) {
+            PlaceGroupRow(title = "+ New group “$typed”", count = null, selected = false, enabled = enabled, onClick = { label = typed })
+        }
+        OutlinedTextField(
+            value = note,
+            onValueChange = { note = it },
+            label = { Text("Note") },
+            placeholder = { Text("Why it goes here (optional)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (!state.connected) {
+            Text("Offline — nothing can be placed until the hub is back; nothing is queued.", color = Fleet.colors.fgMuted, fontSize = 13.sp)
+        }
+    }
+}
+
+/** At most this many groups are listed; typing narrows the rest. */
+private const val PLACE_CHOICES_MAX = 40
+
+/** The ticket being placed: key and title, and "Acceptance · 1 of 3 done" with the next open criterion. */
+@Composable
+private fun PlaceTicketHeader(state: TaskUiState) {
+    val task = state.task ?: return
+    val o = Fleet.colors
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(task.label, color = o.fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (task.key != null && task.title.isNotBlank()) {
+            Text(task.title, color = o.fg2, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        acceptanceProgress(state.criteria)?.let { Text("Acceptance · $it", color = o.fgMuted, fontSize = 13.sp) }
+        state.criteria.firstOrNull { it.checkbox && !it.done }?.let {
+            Text("○ ${it.text}", color = o.fgMuted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/** One group in *Place in group…*: its label, and how many tasks it holds at the end of the row. */
+@Composable
+private fun PlaceGroupRow(title: String, count: String?, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val o = Fleet.colors
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .background(if (selected) o.accentSoft else Color.Transparent, RoundedCornerShape(OrbitTokens.radius("radius-md").dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(title, color = if (selected) o.fg else o.fg2, fontSize = 15.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (count != null) Text(count, color = o.fgMuted, fontSize = 13.sp)
+    }
+}
+
+/**
+ * A task's acceptance criteria as a checklist (MobileWork's task detail):
+ * the heading with how far along they are, then each criterion, ticked or
+ * not. Nothing when the description names none. Tracker text, drawn plain.
+ */
+@Composable
+internal fun AcceptanceChecklist(criteria: List<Criterion>, modifier: Modifier = Modifier) {
+    if (criteria.isEmpty()) return
+    val o = Fleet.colors
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            listOfNotNull("Acceptance criteria", acceptanceProgress(criteria)).joinToString(" · "),
+            color = o.fg,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.semantics { heading() },
+        )
+        for (c in criteria) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    if (c.done) "✓" else "○",
+                    color = if (c.done) o.statusDone else o.fgMuted,
+                    fontSize = 14.sp,
+                    modifier = Modifier.semantics { contentDescription = if (c.done) "Done" else "Not done" },
+                )
+                Text(
+                    c.text,
+                    color = if (c.done) o.fgMuted else o.fg2,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    textDecoration = if (c.done) TextDecoration.LineThrough else null,
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
     }

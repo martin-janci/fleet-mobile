@@ -578,6 +578,17 @@ class MyWorkViewModel(
         local.value.page?.groups.orEmpty().map { it.group }.filter { it.isPlaceable }.distinctBy { it.title }
 
     /**
+     * How many tasks each of [knownGroups] holds on the last page, by the
+     * label *Place in group…* shows ("Orbit tokens · 4 tasks"). A label in
+     * several organisations adds up.
+     */
+    fun groupCounts(): Map<String, Int> =
+        local.value.page?.groups.orEmpty()
+            .filter { it.group.isPlaceable }
+            .groupBy { it.group.label.ifBlank { it.group.id.removePrefix(LABEL_GROUP_PREFIX) } }
+            .mapValues { (_, groups) -> groups.sumOf { it.count } }
+
+    /**
      * One write, never shown as saved before the hub answers. Gated again
      * here on the live sources, so a tap in the frame before a button goes
      * cannot reach a tool the token may not call.

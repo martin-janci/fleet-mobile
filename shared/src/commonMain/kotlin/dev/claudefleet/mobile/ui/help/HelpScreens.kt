@@ -53,6 +53,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -60,7 +61,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.model.Page
 import dev.claudefleet.mobile.model.PageItem
+import dev.claudefleet.mobile.model.Section
 import dev.claudefleet.mobile.model.holds
+import dev.claudefleet.mobile.model.AccountUsageSnapshot
+import dev.claudefleet.mobile.ui.AccountMeter
+import dev.claudefleet.mobile.ui.accountMeter
 import dev.claudefleet.mobile.ui.FieldRow
 import dev.claudefleet.mobile.ui.FleetSettingsUiState
 import dev.claudefleet.mobile.ui.PhoneSessionRow
@@ -596,6 +601,44 @@ fun List<GuideChange>.record(change: GuideChange): List<GuideChange> {
 }
 
 /**
+ * Whether a guide step is about usage limits, so it shows the real meters
+ * above its fields (MobileTutorialModes · Guide: "real meters, one setting
+ * per step"): it edits an `accounts.` setting, the fleet's limits and pauses.
+ */
+internal fun guideStepShowsUsage(section: Section): Boolean =
+    section.items.any { raw -> (PageItem.of(raw) as? PageItem.Field)?.key?.startsWith("accounts.") == true }
+
+/**
+ * Every account the hub has a usage reading for, as a guide step's meters,
+ * named as `list_accounts` names them and in name order. An account with no
+ * reading is left out: a meter with nothing in it says nothing.
+ */
+fun guideMeters(names: Map<String, String>, usage: Map<String, AccountUsageSnapshot>, now: Long): List<AccountMeter> =
+    usage.values.mapNotNull { u -> accountMeter(u.accountUuid, names[u.accountUuid], u, now)?.takeIf { it.line != null } }
+        .sortedBy { it.name.lowercase() }
+
+/** One account's meter in a guide step: its name, what is left in words, and the bar of what is used. */
+@Composable
+private fun UsageMeterRow(m: AccountMeter) {
+    val o = Fleet.colors
+    Column(Modifier.fillMaxWidth().padding(horizontal = gutter, vertical = 6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(m.name, color = o.fg, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            Text(m.line ?: "no reading yet", color = if (m.low) o.statusFailed else o.fgMuted, fontSize = 13.sp)
+        }
+        m.leftFraction?.let { left ->
+            // The words say it; the bar, filled by what is used, is for the eye.
+            Box(Modifier.fillMaxWidth().padding(top = 4.dp).height(4.dp).background(o.chipBg).clearAndSetSemantics {}) {
+                Box(
+                    Modifier.fillMaxWidth((1f - left).coerceIn(0f, 1f)).height(4.dp)
+                        .background(if (m.low) o.statusFailed else o.accent),
+                )
+            }
+        }
+    }
+}
+
+/**
  * A guide from the desktop (MobileTutorialModes · Guide): the hub's approved
  * guide page, one section per step, with the person's own settings controls.
  * Every change it makes is listed with Undo. Only an approved guide reaches
@@ -611,6 +654,8 @@ fun GuideScreen(
     onDecide: (Long, Boolean) -> Unit,
     onConfirm: () -> Unit,
     onCancelConfirm: () -> Unit,
+    /** Every account's meter from the hub's last usage reading, for a step about usage limits. */
+    usage: List<AccountMeter> = emptyList(),
 ) {
     val o = Fleet.colors
     val steps = page.allSections.filter { it.condition.holds(state.values) }
@@ -634,6 +679,9 @@ fun GuideScreen(
             steps.getOrNull(at)?.let { section ->
                 Text(section.title, color = o.fg, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = gutter, vertical = 8.dp))
                 section.intro?.let { Text(it, color = o.fg2, fontSize = 14.sp, modifier = Modifier.padding(horizontal = gutter)) }
+                if (guideStepShowsUsage(section)) {
+                    for (m in usage) UsageMeterRow(m)
+                }
                 for (raw in section.items) {
                     when (val item = PageItem.of(raw)) {
                         is PageItem.Field -> {

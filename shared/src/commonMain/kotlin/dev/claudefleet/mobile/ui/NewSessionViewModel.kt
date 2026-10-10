@@ -6,6 +6,8 @@ import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.NewSessionRequest
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.model.BackgroundOptions
+import dev.claudefleet.mobile.model.BG_AGENT_CLAUDE
+import dev.claudefleet.mobile.model.backgroundAgents
 import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.HostLogin
 import dev.claudefleet.mobile.model.loginLabel
@@ -21,6 +23,8 @@ import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.StartSkip
 import dev.claudefleet.mobile.model.Ticket
+import dev.claudefleet.mobile.model.SuggestedHost
+import dev.claudefleet.mobile.model.hostProposalLine
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK_LINK
 import dev.claudefleet.mobile.net.HubError
@@ -69,6 +73,11 @@ data class NewSessionUiState(
     val backgroundAvailable: Boolean = false,
     /** The hub takes a background agent's project, read-only and stop-after (contract 14, redesign 14.16). */
     val backgroundOptions: Boolean = false,
+    /**
+     * The agents a background agent may run (MobileMissions): Claude Code,
+     * and Codex only when the hub's `new_bg_session` enumerates it.
+     */
+    val backgroundAgents: List<String> = listOf(BG_AGENT_CLAUDE),
     val hosts: List<HostChoice> = emptyList(),
     /** The host the session will go to: the person's pick, or the form's guess. */
     val host: String? = null,
@@ -150,7 +159,16 @@ data class NewSessionUiState(
      * the Starting panel lists the steps without ticking them.
      */
     val startSteps: Map<String, StartStepState>? = null,
+    /**
+     * Jev's host, while it is the one picked (MobileNewSession, Step 1):
+     * "Proposed by Jev · why" under it, with Change. Null when the hub
+     * proposed none, the person picked a host, or the hub cannot propose.
+     */
+    val hostProposal: HostProposal? = null,
 )
+
+/** Jev's pre-selected host and the line said under it ([hostProposalLine]). */
+data class HostProposal(val host: String, val line: String)
 
 /** Where a plain (non-ticket) session starts from: the Where step's chips. */
 enum class StartFrom { Project, Branch }
@@ -290,6 +308,9 @@ class NewSessionViewModel(
         /** This start's `start_token`, and its steps as the frames reported them. */
         val startToken: String? = null,
         val startSteps: Map<String, StartStepState>? = null,
+        /** Jev's host (`propose_host_placement`) and the project it was proposed for. */
+        val proposal: SuggestedHost? = null,
+        val proposalFor: Long? = null,
     )
 
     /** What ticket mode reads beyond the form: the hub's gates, and the ticket's org. */
@@ -330,6 +351,14 @@ class NewSessionViewModel(
                 if (host != null) readHeadroom(host)
             }
         }
+        // Jev's host for the project (claude-fleet N5): asked when a project
+        // is known and nobody has chosen a host — not the person, not the
+        // Sessions list's filter. A refusal or an older hub proposes nothing.
+        scope.launch {
+            state.map { s -> s.projectId?.takeIf { proposeGate() } }.distinctUntilChanged().collect { projectId ->
+                if (projectId != null && local.value.pickedHost == null) readProposal(projectId)
+            }
+        }
         // Ticket mode: the branch the hub would name, shown as drafted.
         if (ticketKey != null) scope.launch {
             state.map { s -> s.host?.let { h -> Triple(h, s.projectId, draftGate()) } }.distinctUntilChanged().collect { at ->
@@ -342,6 +371,20 @@ class NewSessionViewModel(
         val caps = fleet.capabilities.value
         return ticketKey == null && canWrite &&
             HubCapabilities.CHECK_ACCOUNT_HEADROOM in caps.tools && caps.accepts(HubCapabilities.NEW_SESSION, PROFILE)
+    }
+
+    private fun proposeGate(): Boolean = initialHost == null && fleet.capabilities.value.proposeHost
+
+    private suspend fun readProposal(projectId: Long) {
+        val answer = try {
+            actions.proposeHost(projectId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            // Hidden on a refusal: the Where step keeps its own default host.
+            null
+        }
+        local.update { it.copy(proposal = answer, proposalFor = projectId) }
     }
 
     private fun draftGate(): Boolean =
@@ -396,6 +439,30 @@ class NewSessionViewModel(
     /** Ticket mode: the person's own branch name; from the first keystroke the draft is theirs. */
     fun onTicketBranchChange(text: String) {
         local.update { it.copy(ticketBranch = text, ticketBranchEdited = true) }
+    }
+
+    /**
+     * Ticket mode's **Regenerate**: ask the hub for the branch again, with
+     * the same call that drafted it (`preview_start`), and show its answer
+     * as drafted. Null when there is nothing to ask — no host, or a hub
+     * that drafts none.
+     */
+    fun regenerateBranchDraft(): Job? {
+        val key = ticketKey ?: return null
+        val s = current()
+        val host = s.host ?: return null
+        if (!draftGate() || s.creating) return null
+        local.update { it.copy(ticketBranch = "", ticketBranchEdited = false) }
+        return scope.launch { readDraft(key, host, s.projectId) }
+    }
+
+    /**
+     * **Change** under Jev's host: the proposal goes and the host is the
+     * person's to pick, as if none had been proposed. Not asked again for
+     * this project.
+     */
+    fun changeProposedHost() {
+        local.update { it.copy(proposal = null) }
     }
 
     /** Ticket mode's Clear: the drafted branch goes, the field is the person's to fill or leave to the hub. */
@@ -585,7 +652,8 @@ class NewSessionViewModel(
             try {
                 val shownName = name.trim().ifEmpty { prompt.trim().take(40) }
                 // In the project picked on the form, when the hub takes one (contract 14).
-                val result = if (s.backgroundOptions) {
+                // A Codex agent is sent only where the hub listed it, which is a hub that takes the options.
+                val result = if (s.backgroundOptions || options.agent != null) {
                     actions.newBackground(host, shownName, prompt.trim(), options.copy(projectId = options.projectId ?: s.projectId))
                 } else {
                     actions.newBackground(host, shownName, prompt.trim())
@@ -683,10 +751,16 @@ class NewSessionViewModel(
             .filter { !it.hidden || it.alias == initialHost }
             .sortedWith(BY_ALIAS)
         val reachable = offered.filter { it.reachable }.map { it.alias }
+        // Jev's host, only for the project it was asked about, only while
+        // nobody chose one, and never one that cannot be reached now.
+        val proposed = l.proposal?.takeIf {
+            l.pickedHost == null && initialHost == null && l.proposalFor != null && l.proposalFor == l.projectId && it.hostAlias in reachable
+        }
         val host = when {
             l.pickedHost != null && l.pickedHost in reachable -> l.pickedHost
             l.pickedHost != null -> null
             initialHost != null -> initialHost.takeIf { it in reachable }
+            proposed != null -> proposed.hostAlias
             else -> reachable.singleOrNull()
         }
 
@@ -795,6 +869,7 @@ class NewSessionViewModel(
             result = l.result,
             backgroundAvailable = canWrite && ticketKey == null && caps.newBgSession,
             backgroundOptions = caps.accepts(HubCapabilities.NEW_BG_SESSION, "read_only"),
+            backgroundAgents = backgroundAgents(caps.paramValues[HubCapabilities.NEW_BG_SESSION]?.get(AGENT)),
             worktreeId = l.worktreeId,
             startFrom = if (ticketKey == null) l.startFrom else StartFrom.Project,
             firstMessage = l.firstMessage,
@@ -807,6 +882,7 @@ class NewSessionViewModel(
             ticketBranchEdited = ownBranch,
             ticketBranchEditable = ticketBranchEditable && ticked.isEmpty(),
             startSteps = l.startSteps,
+            hostProposal = proposed?.let { HostProposal(it.hostAlias, hostProposalLine(it)) },
         )
     }
 
@@ -846,6 +922,7 @@ private const val PREVIEW_START = "preview_start"
 private const val WORKTREE = "worktree"
 private const val PROFILE = "profile"
 private const val START_TOKEN = "start_token"
+private const val AGENT = "agent"
 
 /** The names the hub refuses for a new worktree: they are the project's own checkout. */
 private val DEFAULT_BRANCHES = setOf("main", "master")
