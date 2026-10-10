@@ -350,6 +350,44 @@ class TicketsViewModelTest {
     }
 
     /**
+     * Words are not a key: they were sent to `lookup` as one and always
+     * failed. They search the hub's whole cache, and what the sections
+     * already list is not repeated.
+     */
+    @Test
+    fun search_in_words_searches_the_whole_cache() = runTest {
+        val old = Ticket(id = 30, key = "PAY-3", title = "Oprava prihlásenia")
+        val actions = FakeWorkActions().apply {
+            ticketsAnswer = mapOf("mine" to listOf(PAY9))
+            searchAnswer = listOf(PAY9, old)
+        }
+        val tickets = vm(WorkFleet(), actions, backgroundScope, Nav())
+        tickets.open()
+        runCurrent()
+        tickets.onQuery("prihlasenia ")
+        tickets.search()
+        runCurrent()
+
+        assertEquals("search prihlasenia", actions.calls.last())
+        assertEquals(listOf("PAY-3"), tickets.state.value.matches.map { it.key })
+        assertNull(tickets.state.value.found)
+
+        tickets.onQuery("something else")
+        runCurrent()
+        assertTrue(tickets.state.value.matches.isEmpty(), "matches belong to the words searched")
+    }
+
+    @Test
+    fun a_key_a_url_or_an_issue_is_a_reference_and_words_are_not() {
+        assertTrue(isTicketReference("PAY-9"))
+        assertTrue(isTicketReference(" pay-9 "))
+        assertTrue(isTicketReference("acme/api#12"))
+        assertTrue(isTicketReference("https://acme.atlassian.net/browse/PAY-9"))
+        assertFalse(isTicketReference("login bug"))
+        assertFalse(isTicketReference("PAY"))
+    }
+
+    /**
      * The listing's `live_session_ids` and the plan's `live` are snapshots
      * from when the sheet read them. A session killed while the sheet is open
      * leaves the fleet, and the ticket must stop offering Open on it.

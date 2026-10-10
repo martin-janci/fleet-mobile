@@ -673,7 +673,7 @@ private fun SearchHeader(
                     value = query,
                     onValueChange = onSetQuery,
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("Search sessions, projects, tickets…") },
+                    placeholder = { Text("Search sessions, projects, branches, tickets…") },
                     singleLine = true,
                     leadingIcon = { Icon(FleetIcons.Search, contentDescription = null) },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
