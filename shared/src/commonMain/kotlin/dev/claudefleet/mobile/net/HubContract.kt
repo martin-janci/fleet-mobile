@@ -2,7 +2,7 @@ package dev.claudefleet.mobile.net
 
 /**
  * The hub wire-contract revisions this build understands (up to claude-fleet
- * revision 16). A hub
+ * revision 17). A hub
  * outside the range is refused the way the desktop refuses it: the banner
  * says which side is behind, and no row event from that hub is applied.
  *
@@ -80,6 +80,12 @@ package dev.claudefleet.mobile.net
  * tool or an optional field: nothing this app already reads is renamed or
  * changes meaning, and an unknown key is ignored, so a revision-16 hub is
  * safe here. The phone rises first, before the hub sends 16.
+ * Revision 17 (gap plan M15, batch 3) adds start rules naming a host,
+ * account, model and agent, a resumable `wizard_state`, repair progress
+ * frames, Meta chords in `send_prompt` keys, a Codex background agent,
+ * playbook run counts, Jev's host proposal for phone tokens and the hub's
+ * sync facts. New tools and optional fields only, each read behind
+ * `tools/list`, so a revision-17 hub is safe here. The phone rises first.
  *
  * [MIN_HUB_CONTRACT] does NOT mirror the desktop's minimum. The desktop
  * raised its own to 3 because a pre-3 hub would silently misperform
@@ -90,7 +96,7 @@ package dev.claudefleet.mobile.net
  * upgraded: this is the phone's own floor, not a copy of the desktop's.
  */
 const val MIN_HUB_CONTRACT: Int = 0
-const val MAX_HUB_CONTRACT: Int = 16
+const val MAX_HUB_CONTRACT: Int = 17
 
 /**
  * What a `contract` field that cannot be read as a revision counts as.
