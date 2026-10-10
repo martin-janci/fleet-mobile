@@ -1362,6 +1362,10 @@ private fun FleetRoute(
                         onOpenRules = if (workState.rulesAvailable) ({ myWork.openRules() }) else null,
                         onCloseRules = myWork::closeRules,
                         onDismissError = myWork::dismissError,
+                        onOpenNewTask = myWork::openNewTask,
+                        onCloseNewTask = myWork::closeNewTask,
+                        onCreateTask = { title, notes, due -> myWork.createTask(title, notes, due, onCreated = nav::openTask) },
+                        onDismissNewTaskError = myWork::dismissNewTaskError,
                     )
                     // The New bar's Work (redesign 14.9): rows say what their
                     // sessions are doing, and To review sits beside Mine.
@@ -2425,6 +2429,10 @@ private fun TaskRoute(
         onDismissError = vm::dismissError,
         onSummarize = { vm.summarize(it) },
         onDismissSummary = vm::dismissSummary,
+        onOpenEdit = vm::openEdit,
+        onCloseEdit = vm::closeEdit,
+        onSaveEdit = { vm.saveEdit(it) },
+        onSetStatus = { vm.setStatus(it) },
     )
     if (newLayout) {
         val rows by repository.sessions.collectAsState()

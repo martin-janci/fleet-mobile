@@ -423,4 +423,82 @@ class TaskViewModelTest {
         assertTrue(actions.workArgs.none { it.startsWith("confirm") })
         assertEquals(OFFLINE_WRITE, vm.state.value.error)
     }
+
+    // ---- fleet's own task: its status and Edit (claude-fleet task editing) ----
+
+    private val local: TaskDetail = DETAIL.copy(
+        task = DETAIL.task.copy(
+            kind = dev.claudefleet.mobile.model.TaskKind.Local,
+            origin = "manual",
+            dueAt = "2026-10-16",
+            assignees = listOf("Ana"),
+            statusCategory = dev.claudefleet.mobile.model.StatusCategory.Todo,
+        ),
+        notes = "old",
+    )
+
+    /** A ticket is its tracker's: no status chips, no Edit. Fleet's own task gets both. */
+    @Test
+    fun only_fleets_own_task_offers_status_and_edit() = runTest {
+        val ticket = taskVm()
+        runCurrent()
+        assertFalse(ticket.state.value.canEdit || ticket.state.value.canSetStatus)
+
+        val own = taskVm(actions = FakeWorkActions().apply { taskAnswer = local })
+        runCurrent()
+        val s = own.state.value
+        assertTrue(s.canEdit && s.canSetStatus)
+        assertEquals(TaskEditFields(title = "Login fails", notes = "old", assignees = listOf("Ana"), dueAt = "2026-10-16"), s.editFields)
+
+        val readonly = taskVm(actions = FakeWorkActions().apply { taskAnswer = local }, canWrite = false)
+        runCurrent()
+        assertFalse(readonly.state.value.canEdit || readonly.state.value.canSetStatus)
+    }
+
+    /** Save sends only what changed, closes the sheet once the hub answered, and re-reads. */
+    @Test
+    fun saving_an_edit_sends_only_the_changed_fields() = runTest {
+        val actions = FakeWorkActions().apply { taskAnswer = local }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        vm.openEdit()
+        runCurrent()
+        assertTrue(vm.state.value.editOpen)
+
+        val edit = taskEditOf("Login fails", "old", "Ana, Bo", "", vm.state.value.editFields, notesLocked = false)
+        vm.saveEdit(edit)
+        runCurrent()
+
+        assertEquals(listOf("edit 12 title=null notes=null assignees=[Ana, Bo] due="), actions.calls)
+        assertFalse(vm.state.value.editOpen)
+        assertEquals(2, actions.taskCalls, "the answer is followed by a re-read")
+    }
+
+    /** A refused edit keeps the sheet open, with the hub's reason in it. */
+    @Test
+    fun a_refused_edit_stays_in_the_sheet() = runTest {
+        val actions = FakeWorkActions().apply {
+            taskAnswer = local
+            failWrite = HubError.Tool("E_INVALID", "a due date is YYYY-MM-DD")
+        }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        vm.openEdit()
+        vm.saveEdit(TaskEdit(dueAt = "soon"))
+        runCurrent()
+        assertTrue(vm.state.value.editOpen)
+        assertTrue(vm.state.value.error != null)
+    }
+
+    /** A status chip sets fleet's own status; the one showing is not sent again. */
+    @Test
+    fun a_status_chip_sets_the_status() = runTest {
+        val actions = FakeWorkActions().apply { taskAnswer = local }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        vm.setStatus(dev.claudefleet.mobile.model.StatusCategory.Todo)
+        vm.setStatus(dev.claudefleet.mobile.model.StatusCategory.Done)
+        runCurrent()
+        assertEquals(listOf("set_status 12 done"), actions.calls)
+    }
 }

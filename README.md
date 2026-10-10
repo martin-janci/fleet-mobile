@@ -392,7 +392,15 @@ costs one reconnect.
     the version it was read at, so a change another device made first comes
     back as *Changed on another device* with **Reload** — never overwritten,
     and never queued offline. Placement rules are read-only here; they are
-    made on the desktop.
+    made on the desktop. Fleet's own tasks (local items, never a tracker's
+    ticket) are made and kept here too: **+** in the Work header opens
+    **New task** (a title, a description, a due date; a phone bound to one
+    organisation is refused top-level work by the hub, and says so), and a
+    task's page offers its status as **To do / In progress / Done** chips
+    (`work_link set_status`) and **Edit…** (title, description, assignees,
+    due date; `work_link edit`), each a bottom sheet with Cancel and the verb
+    at the thumb, offered only when the hub lists the action and the token
+    can write.
 
   A ticket card is read-only (claude-fleet decision D15): **Copy** puts the
   key, title, status, link and criteria on the clipboard as plain text; the

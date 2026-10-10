@@ -263,6 +263,9 @@ fun PhoneMyWorkScreen(
                 if (!state.filters.query.isNullOrBlank()) "${state.total} match “${state.filters.query}”" else myWorkSubtitle(state.total, needYou)
             } else null,
             actions = {
+                if (state.canCreateTask) {
+                    IconButton(onClick = handlers.onOpenNewTask) { Icon(FleetIcons.Add, contentDescription = "New task") }
+                }
                 IconButton(onClick = handlers.onToggleSearch) {
                     Icon(if (state.searchOpen) FleetIcons.Close else FleetIcons.Search, contentDescription = if (state.searchOpen) "Close search" else "Search tasks")
                 }
@@ -413,6 +416,7 @@ fun PhoneMyWorkScreen(
     }
     if (state.filtersOpen) WorkFiltersSheet(state, handlers, quickToggles = true)
     if (state.rulesOpen) RulesSheet(state.rules, handlers.onCloseRules)
+    NewTaskSheetFor(state, handlers)
 }
 
 /** One task as a [PhoneRow]: key and title, its sessions' words, its age, and Start when nothing works on it. */
@@ -634,6 +638,7 @@ fun PhoneTaskScreen(
                             OrbitChip(listOfNotNull(g.title, groupChipWords(g.source)).joinToString(" · "))
                         }
                         for (a in task.assignees.take(2)) OrbitChip(a)
+                        task.dueAt?.takeIf { it.isNotBlank() }?.let { OrbitChip("Due $it") }
                         task.trackerName?.takeIf { it.isNotBlank() }?.let { OrbitChip(it) }
                     }
                     if (task.unavailable) Text("The tracker no longer answers for this ticket.", color = o.statusFailed, fontSize = 13.sp)
@@ -644,6 +649,8 @@ fun PhoneTaskScreen(
                     }
                     state.detail?.placement?.note?.takeIf { it.isNotBlank() }?.let { Text("Note: $it", color = o.fgMuted, fontSize = 13.sp) }
                     state.detail?.description?.takeIf { it.isNotBlank() }?.let { MarkdownText(it) }
+                    state.detail?.notes?.takeIf { it.isNotBlank() && task.editable }?.let { MarkdownText(it) }
+                    OwnTaskControls(state, h)
                     task.url?.takeIf { it.isNotBlank() }?.let { url ->
                         val uri = LocalUriHandler.current
                         Text(
@@ -728,6 +735,7 @@ fun PhoneTaskScreen(
         }
     }
     if (state.placeOpen) PlaceSheet(state, h)
+    if (state.editOpen) TaskEditSheetFor(state, h)
 }
 
 @Composable

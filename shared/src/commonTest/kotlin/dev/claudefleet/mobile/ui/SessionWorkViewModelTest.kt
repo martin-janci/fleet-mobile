@@ -292,6 +292,30 @@ internal class FakeWorkActions : WorkActions {
         return treeAnswer(filters, cursor)
     }
 
+    // ---- fleet's own tasks ----
+    var createdId = 31L
+
+    override suspend fun createTask(title: String, notes: String?, dueAt: String?): dev.claudefleet.mobile.model.WorkItem {
+        write("create \"$title\" notes=$notes due=$dueAt")
+        return dev.claudefleet.mobile.model.WorkItem(id = createdId, key = "TASK-$createdId", title = title)
+    }
+
+    override suspend fun setStatus(itemId: Long, status: String): dev.claudefleet.mobile.model.WorkItem {
+        write("set_status $itemId $status")
+        return dev.claudefleet.mobile.model.WorkItem(id = itemId)
+    }
+
+    override suspend fun editItem(
+        itemId: Long,
+        title: String?,
+        notes: String?,
+        assignees: List<String>?,
+        dueAt: String?,
+    ): dev.claudefleet.mobile.model.WorkItem {
+        write("edit $itemId title=$title notes=$notes assignees=$assignees due=$dueAt")
+        return dev.claudefleet.mobile.model.WorkItem(id = itemId)
+    }
+
     override suspend fun task(taskId: String): TaskDetail {
         taskCalls += 1
         failTask?.let { throw it }

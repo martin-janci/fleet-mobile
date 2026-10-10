@@ -112,6 +112,12 @@ data class MyWorkUiState(
     val archivedHidden: Int = 0,
     /** Every filter that narrows the tree, in the desktop's words ([workFacets]). */
     val facets: List<Facet<WorkFacetId>> = emptyList(),
+    /** **New task**: a full token, a hub that serves `work_link create`, a connection. */
+    val canCreateTask: Boolean = false,
+    val newTaskOpen: Boolean = false,
+    val newTaskBusy: Boolean = false,
+    /** Why the hub refused the new task: said in its sheet, which stays open. */
+    val newTaskError: Friendly? = null,
 ) {
     val isEmpty: Boolean get() = loaded && orgs.isEmpty()
 
@@ -202,6 +208,9 @@ class MyWorkViewModel(
         val collapsed: Set<String> = emptySet(),
         /** Bumped by every re-read that replaces the list; what a *Load more* answer is checked against. */
         val generation: Long = 0,
+        val newTaskOpen: Boolean = false,
+        val newTaskBusy: Boolean = false,
+        val newTaskError: Friendly? = null,
     )
 
     private val local = MutableStateFlow(
@@ -515,6 +524,51 @@ class MyWorkViewModel(
         local.update { it.copy(error = null, conflict = false) }
     }
 
+    // ---- a new task (claude-fleet: shared work context) ----
+
+    fun openNewTask() {
+        if (state.value.canCreateTask) local.update { it.copy(newTaskOpen = true, newTaskError = null) }
+    }
+
+    fun closeNewTask() {
+        local.update { it.copy(newTaskOpen = false, newTaskError = null) }
+    }
+
+    fun dismissNewTaskError() {
+        local.update { it.copy(newTaskError = null) }
+    }
+
+    /**
+     * **Create** in the New task sheet. The sheet closes only once the hub
+     * has made it, and [onCreated] gets its `item:<id>` so the screen can
+     * open it; a refusal (a token bound to one organisation may not add
+     * top-level work) stays in the sheet with the hub's reason.
+     */
+    fun createTask(title: String, notes: String, dueAt: String, onCreated: (String) -> Unit = {}): Job? {
+        if (local.value.newTaskBusy) return null
+        if (!allowed(CREATE)) {
+            refuseOffline(CREATE)
+            if (!fleet.status.value.isConnected()) local.update { it.copy(newTaskError = OFFLINE_WRITE) }
+            return null
+        }
+        local.update { it.copy(newTaskBusy = true, newTaskError = null) }
+        return scope.launch {
+            try {
+                val made = actions.createTask(title.trim(), notes.trim().ifBlank { null }, dueAt.trim().ifBlank { null })
+                local.update { it.copy(newTaskOpen = false) }
+                reload()
+                onCreated(made.taskId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                if (t is HubError.Tool && t.isUnknownAction()) fleet.actionMissing(WORK_LINK, CREATE)
+                local.update { it.copy(newTaskError = friendlyWorkWrite(t)) }
+            } finally {
+                local.update { it.copy(newTaskBusy = false) }
+            }
+        }
+    }
+
     /**
      * The groups of the last page a placement may name — what *Place in
      * group…* lists: `label:` groups a person or a rule made, never a
@@ -608,6 +662,10 @@ class MyWorkViewModel(
             rulesOpen = l.rulesOpen,
             rules = l.rules,
             archivedHidden = page?.archivedHidden ?: 0,
+            canCreateTask = canWrite && connected && caps.has(WORK_LINK, CREATE),
+            newTaskOpen = l.newTaskOpen,
+            newTaskBusy = l.newTaskBusy,
+            newTaskError = l.newTaskError,
             facets = workFacets(
                 l.filters,
                 orgName = { id -> page?.orgs?.firstOrNull { it.id == id }?.name?.takeIf { it.isNotBlank() } },
@@ -660,6 +718,7 @@ class MyWorkViewModel(
         const val REVIEW = "review"
         const val RULES = "rules"
         const val VIEW_SAVE = "view_save"
+        const val CREATE = "create"
         const val VIEW_DELETE = "view_delete"
 
         /** Tasks per page — the hub's default. */
