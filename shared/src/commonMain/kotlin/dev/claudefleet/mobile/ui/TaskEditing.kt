@@ -207,6 +207,9 @@ internal fun TaskEditSheet(
 @Composable
 internal fun NewTaskSheet(
     busy: Boolean,
+    /** "New task", or "Add subtask" under a named parent. */
+    heading: String = "New task",
+    blurb: String = "Fleet's own work: no ticket is made in a tracker.",
     connected: Boolean,
     error: Friendly?,
     onDismissError: () -> Unit,
@@ -226,8 +229,8 @@ internal fun NewTaskSheet(
                 .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("New task", style = MaterialTheme.typography.titleLarge)
-            Text("Fleet's own work: no ticket is made in a tracker.", style = MaterialTheme.typography.bodySmall)
+            Text(heading, style = MaterialTheme.typography.titleLarge)
+            Text(blurb, style = MaterialTheme.typography.bodySmall)
             ErrorBanner(error, onDismiss = onDismissError)
             OutlinedTextField(
                 value = title,
