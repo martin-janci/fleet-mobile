@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.fold
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -58,16 +59,16 @@ private const val MAX_HITS = 5
 
 /**
  * The first file name (the last part of a path) in [paths] holding every one
- * of [words], the shortest when several do — the closest to what was typed.
- * Null when none does.
+ * of [words] (already [fold]ed), case and accents ignored, the shortest when
+ * several do — the closest to what was typed. Null when none does.
  */
 internal fun fileNameMatch(words: List<String>, paths: List<String>): String? {
     if (words.isEmpty()) return null
     var best: String? = null
     for (path in paths) {
         val name = path.substringAfterLast('/')
-        val lower = name.lowercase()
-        if (words.all { it in lower } && (best == null || name.length < best.length)) best = name
+        val folded = fold(name)
+        if (words.all { it in folded } && (best == null || name.length < best.length)) best = name
     }
     return best
 }
@@ -80,9 +81,9 @@ fun searchEverywhere(
     /** [ProjectFileNames.byProject]: the file names the phone holds, by project id. */
     projectFiles: Map<Long, List<String>> = emptyMap(),
 ): SearchHits {
-    val words = query.lowercase().split(' ').filter { it.isNotBlank() }
+    val words = fold(query).split(' ').filter { it.isNotBlank() }
     if (words.isEmpty()) return SearchHits()
-    fun matches(text: String) = words.all { it in text.lowercase() }
+    fun matches(text: String) = fold(text).let { t -> words.all { it in t } }
     val byName = projects.filter { matches(it.label) || matches("${it.owner}/${it.repo}") }
         .sortedByDescending { it.lastSessionAt ?: 0 }
     // A project found by its name says nothing more; one found by a file

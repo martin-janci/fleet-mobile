@@ -12,6 +12,7 @@ import dev.claudefleet.mobile.model.FileDiff
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.RepoTree
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.fold
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -68,9 +69,9 @@ data class RepoUiState(
     /** The tree's entries narrowed by [query] — every word must appear in the path. */
     val shownEntries: List<String>
         get() {
-            val words = query.lowercase().split(' ').filter { it.isNotBlank() }
+            val words = fold(query).split(' ').filter { it.isNotBlank() }
             val all = tree?.entries.orEmpty()
-            return if (words.isEmpty()) all else all.filter { p -> words.all { it in p.lowercase() } }
+            return if (words.isEmpty()) all else all.filter { p -> fold(p).let { f -> words.all { it in f } } }
         }
 }
 

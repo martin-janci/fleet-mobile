@@ -274,11 +274,11 @@ fun PhoneMyWorkScreen(
             below = {
                 if (state.searchOpen) {
                     OutlinedTextField(
-                        value = state.filters.query.orEmpty(),
+                        value = state.queryText,
                         onValueChange = handlers.onSetQuery,
                         label = { Text("Key or title") },
                         singleLine = true,
-                        trailingIcon = if (state.filters.query.isNullOrEmpty()) null else {
+                        trailingIcon = if (state.queryText.isEmpty()) null else {
                             { IconButton(onClick = { handlers.onSetQuery("") }) { Icon(FleetIcons.Close, contentDescription = "Clear search") } }
                         },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
@@ -652,6 +652,7 @@ fun PhoneTaskScreen(
                     AcceptanceChecklist(state.criteria)
                     state.detail?.description?.takeIf { it.isNotBlank() }?.let { MarkdownText(it) }
                     state.detail?.notes?.takeIf { it.isNotBlank() && task.editable }?.let { MarkdownText(it) }
+                    TaskHierarchy(state, h)
                     OwnTaskControls(state, h)
                     task.url?.takeIf { it.isNotBlank() }?.let { url ->
                         val uri = LocalUriHandler.current
@@ -738,6 +739,7 @@ fun PhoneTaskScreen(
     }
     if (state.placeOpen) PlaceSheet(state, h)
     if (state.editOpen) TaskEditSheetFor(state, h)
+    if (state.subtaskOpen) SubtaskSheetFor(state, h)
 }
 
 @Composable

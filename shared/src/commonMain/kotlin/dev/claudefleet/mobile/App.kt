@@ -1438,6 +1438,10 @@ private fun FleetRoute(
                         onSetTracker = myWork::setTracker,
                         onSetStatus = myWork::setStatus,
                         onSetHas = myWork::setHas,
+                        onSetIteration = myWork::setIteration,
+                        onSetEpic = myWork::setEpic,
+                        onSetItemType = myWork::setItemType,
+                        onSetSort = myWork::setSort,
                         onToggleMine = myWork::toggleMine,
                         onToggleReview = myWork::toggleReview,
                         onClearFilters = myWork::clearFilters,
@@ -1606,6 +1610,7 @@ private fun FleetRoute(
                         callScope = scope,
                         onOpenSession = nav::open,
                         onStartHere = { nav.newSession(ticketKey = it) },
+                        onOpenTask = nav::openTask,
                         onBack = { nav.back() },
                         newLayout = layout == PhoneLayout.New,
                     )
@@ -2542,6 +2547,7 @@ private fun TaskRoute(
     callScope: CoroutineScope,
     onOpenSession: (Long) -> Unit,
     onStartHere: (String) -> Unit,
+    onOpenTask: (String) -> Unit,
     onBack: () -> Unit,
     newLayout: Boolean = false,
 ) {
@@ -2559,6 +2565,7 @@ private fun TaskRoute(
             groupCounts = groupCounts,
             onOpenSession = onOpenSession,
             onStartHere = onStartHere,
+            onOpenTask = onOpenTask,
             callScope = callScope,
         )
     }
@@ -2581,6 +2588,10 @@ private fun TaskRoute(
         onCloseEdit = vm::closeEdit,
         onSaveEdit = { vm.saveEdit(it) },
         onSetStatus = { vm.setStatus(it) },
+        onOpenParent = vm::openParent,
+        onOpenSubtask = vm::openSubtask,
+        onCloseSubtask = vm::closeSubtask,
+        onAddSubtask = { title, notes, due -> vm.addSubtask(title, notes, due) },
     )
     if (newLayout) {
         val rows by repository.sessions.collectAsState()

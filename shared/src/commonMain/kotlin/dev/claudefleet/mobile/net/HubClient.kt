@@ -1195,6 +1195,22 @@ class HubClient(
             json.decodeFromJsonElement(ListSerializer(Ticket.serializer()), it)
         }
 
+    /**
+     * Tickets in the hub's whole cache whose key, title or assignees hold
+     * every word of [query], then the caller's own tasks (an older hub
+     * ignores `include_local` and answers tickets alone).
+     */
+    suspend fun workSearch(query: String): List<Ticket> =
+        call(
+            "work",
+            buildJsonObject {
+                put("action", "tickets")
+                put("query", query.trim())
+                put("include_local", true)
+                put("limit", WORK_SEARCH_LIMIT)
+            },
+        ) { json.decodeFromJsonElement(ListSerializer(Ticket.serializer()), it) }
+
     /** The connected trackers — empty on a hub with the work graph and no tracker. */
     suspend fun workTrackers(): List<TrackerRow> =
         call("work", buildJsonObject { put("action", "trackers") }) {
@@ -1966,14 +1982,22 @@ class HubClient(
      * A new task in fleet (`work_link { create }`, claude-fleet's shared work
      * context): a title, and optionally its description and due date
      * (`YYYY-MM-DD`). A token bound to one organisation is refused a
-     * standalone task (`E_FORBIDDEN`): the hub says so.
+     * standalone task (`E_FORBIDDEN`): the hub says so. With [parent]
+     * (`item:<id>`) it is a subtask, filed under that epic or task and in its
+     * organisation; one past the deepest level is refused, naming why.
      */
-    suspend fun createWorkTask(title: String, notes: String? = null, dueAt: String? = null): WorkItem =
+    suspend fun createWorkTask(
+        title: String,
+        notes: String? = null,
+        dueAt: String? = null,
+        parent: String? = null,
+    ): WorkItem =
         call(
             "work_link",
             buildJsonObject {
                 put("action", "create")
                 put("title", title)
+                parent?.takeIf { it.isNotBlank() }?.let { put("parent", it) }
                 notes?.takeIf { it.isNotBlank() }?.let { put("notes", it) }
                 dueAt?.takeIf { it.isNotBlank() }?.let { put("due_at", it) }
             },
@@ -2572,6 +2596,9 @@ internal const val SHA256_HEADER = "X-Fleet-Sha256"
 
 /** How much of a download is read per step: enough to keep a fast link busy, small enough for any heap. */
 private const val DOWNLOAD_CHUNK = 64 * 1024
+
+/** How many tickets a word search asks for (the hub caps a page at 200). */
+private const val WORK_SEARCH_LIMIT = 50
 
 internal const val HUB_CALL_TIMEOUT_MS = 45_000L
 internal const val HUB_CONNECT_TIMEOUT_MS = 15_000L

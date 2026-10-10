@@ -39,6 +39,7 @@ private val PAST_ONLY: TaskDetail = DETAIL.copy(
 private class TaskNav {
     val opened = mutableListOf<Long>()
     val started = mutableListOf<String>()
+    val tasks = mutableListOf<String>()
 }
 
 private fun TestScope.taskVm(
@@ -65,6 +66,7 @@ private fun TestScope.taskVm(
     },
     onOpenSession = { nav.opened += it },
     onStartHere = { nav.started += it },
+    onOpenTask = { nav.tasks += it },
     clock = { 1_790_000_000 },
     utcOffset = { 0 },
     refreshDebounceMs = 500,
@@ -500,5 +502,86 @@ class TaskViewModelTest {
         vm.setStatus(dev.claudefleet.mobile.model.StatusCategory.Done)
         runCurrent()
         assertEquals(listOf("set_status 12 done"), actions.calls)
+    }
+
+    // ---- epics: epic → task → subtask (claude-fleet: local work three levels deep) ----
+
+    private fun own(level: Int, parent: String? = null, epic: Boolean = false, total: Int = 0, done: Int = 0) = local.copy(
+        task = local.task.copy(level = level, parentTaskId = parent, epic = epic, childrenTotal = total, childrenDone = done),
+    )
+
+    /** An epic says so, with its roll-up; a task under it names its parent, and a tap opens it. */
+    @Test
+    fun a_task_names_its_parent_and_an_epic_rolls_up_its_subtasks() = runTest {
+        val epic = taskVm(actions = FakeWorkActions().apply { taskAnswer = own(level = 1, epic = true, total = 5, done = 2) })
+        runCurrent()
+        assertEquals("2 of 5 subtasks done", epic.state.value.subtaskRollup)
+        assertNull(epic.state.value.parentTaskId)
+
+        val parent = own(level = 1, epic = true).let { it.copy(task = it.task.copy(title = "Checkout revamp", key = null)) }
+        val actions = FakeWorkActions().apply {
+            taskAnswer = own(level = 2, parent = "item:7")
+            taskAnswers = mapOf("item:7" to parent)
+        }
+        val nav = TaskNav()
+        val child = taskVm(actions = actions, nav = nav)
+        runCurrent()
+        assertEquals(listOf("item:12", "item:7"), actions.taskIds, "the parent is read once, for its name")
+        assertEquals("item:7", child.state.value.parentTaskId)
+        assertEquals("Checkout revamp", child.state.value.parentLabel)
+        child.openParent()
+        assertEquals(listOf("item:7"), nav.tasks)
+    }
+
+    /** Three levels: an epic and a task take a subtask, a subtask does not; an older hub nests one level. */
+    @Test
+    fun add_subtask_is_offered_above_the_deepest_level_only() = runTest {
+        fun offered(detail: TaskDetail, canWrite: Boolean = true): Boolean {
+            val vm = taskVm(actions = FakeWorkActions().apply { taskAnswer = detail }, canWrite = canWrite)
+            runCurrent()
+            return vm.state.value.canAddSubtask
+        }
+        assertTrue(offered(own(level = 1)))
+        assertTrue(offered(own(level = 2, parent = "item:7")))
+        assertFalse(offered(own(level = 3, parent = "item:8")))
+        // A hub that reports no level: a top-level item takes one, a child does not.
+        assertTrue(offered(own(level = 0)))
+        assertFalse(offered(own(level = 0, parent = "item:7")))
+        // Never a ticket, never a readonly token.
+        assertFalse(offered(DETAIL))
+        assertFalse(offered(own(level = 1), canWrite = false))
+    }
+
+    /** Create files the subtask under this task, closes the sheet and re-reads, so the roll-up counts it. */
+    @Test
+    fun a_subtask_is_created_under_this_task() = runTest {
+        val actions = FakeWorkActions().apply { taskAnswer = own(level = 1, epic = true) }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        vm.openSubtask()
+        runCurrent()
+        assertTrue(vm.state.value.subtaskOpen)
+        vm.addSubtask(" Pay by card ", "", "2026-10-30")
+        runCurrent()
+        assertEquals(listOf("create \"Pay by card\" parent=item:12 notes=null due=2026-10-30"), actions.calls)
+        assertFalse(vm.state.value.subtaskOpen)
+        assertEquals(2, actions.taskCalls, "the answer is followed by a re-read")
+    }
+
+    /** A refusal (past the deepest level, say) stays in the sheet with the hub's reason. */
+    @Test
+    fun a_refused_subtask_stays_in_the_sheet() = runTest {
+        val actions = FakeWorkActions().apply {
+            taskAnswer = own(level = 2, parent = "item:7")
+            taskAnswers = mapOf("item:7" to own(level = 1))
+            failWrite = HubError.Tool("E_INVALID", "local work nests three levels deep at most")
+        }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        vm.openSubtask()
+        vm.addSubtask("Too deep", "", "")
+        runCurrent()
+        assertTrue(vm.state.value.subtaskOpen)
+        assertTrue(vm.state.value.error != null)
     }
 }

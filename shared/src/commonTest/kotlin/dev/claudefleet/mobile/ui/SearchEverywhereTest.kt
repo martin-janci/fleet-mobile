@@ -62,4 +62,12 @@ class SearchEverywhereTest {
         assertEquals(null, fileNameMatch(listOf("hosts"), listOf("hosts/", "hosts/Main.kt")))
         assertEquals("Hosts.kt", fileNameMatch(listOf("hosts"), listOf("a/HostsScreen.kt", "b/Hosts.kt")), "the shortest name wins")
     }
+
+    /** File names are matched the way every other search box matches: case and accents ignored. */
+    @Test
+    fun a_file_name_matches_with_accents_ignored() {
+        val hits = searchEverywhere("uloha", hosts, projects, ticketsAvailable = false, projectFiles = mapOf(3L to listOf("docs/Úloha.md")))
+        assertEquals(listOf(3L), hits.projects.map { it.id })
+        assertEquals("matches Úloha.md", hits.projectLine(projects[2], "New session in this project"))
+    }
 }
