@@ -23,7 +23,8 @@ internal fun DiscardSheet(onKeep: () -> Unit, onDiscard: () -> Unit) {
 
 /** Whether leaving New session from its first step would drop something typed. */
 internal fun newSessionTyped(s: NewSessionUiState): Boolean =
-    s.branch.isNotBlank() || s.baseBranch.isNotBlank() || s.friendlyName.isNotBlank()
+    s.branch.isNotBlank() || s.baseBranch.isNotBlank() || s.friendlyName.isNotBlank() ||
+        s.firstMessage.isNotBlank() || (s.ticketBranchEdited && s.ticketBranch.isNotBlank())
 
 /** Whether closing Add a project would drop something typed. */
 internal fun addProjectTyped(url: String, folder: String, owner: String, repo: String): Boolean =

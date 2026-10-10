@@ -56,3 +56,25 @@ data class StartFailure(
     val message: String = "",
     @SerialName("cross_org") val crossOrg: Boolean = false,
 )
+
+/**
+ * What `work_link { action: preview_start }` answers, the part the phone
+ * reads (claude-fleet task → session spec P-1): where a start of the key
+ * would land, nothing made. [plan] is null while [missing] names what the
+ * hub still needs (`project`, `host`).
+ */
+@Serializable
+data class StartPreview(
+    val key: String = "",
+    val title: String = "",
+    val plan: StartPlan? = null,
+    val missing: String? = null,
+)
+
+/** The planned start: the repository, the host, and the branch the hub would name from the ticket. */
+@Serializable
+data class StartPlan(
+    @SerialName("project_id") val projectId: Long = 0,
+    @SerialName("host_alias") val hostAlias: String = "",
+    val branch: String = "",
+)

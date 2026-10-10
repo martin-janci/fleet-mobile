@@ -1,7 +1,7 @@
 package dev.claudefleet.mobile.net
 
 import dev.claudefleet.mobile.data.STREAM_EVENT_KINDS
-import dev.claudefleet.mobile.data.SNAPSHOT_PAYLOAD_FIELDS
+import dev.claudefleet.mobile.data.STREAM_PAYLOAD_FIELDS
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.client.plugins.timeout
@@ -384,12 +384,12 @@ class HubEventStream(
     private val kinds: List<String> = STREAM_EVENT_KINDS,
     /**
      * The `?fields=` projection, for the same reason and with the same
-     * mechanism as [kinds]: [SNAPSHOT_PAYLOAD_FIELDS] is derived from what the
+     * mechanism as [kinds]: [STREAM_PAYLOAD_FIELDS] is derived from what the
      * snapshot's serializers declare, so it cannot ask for less than the
      * applier reads. A hub too old to know the parameter ignores it and sends
      * whole rows.
      */
-    private val fields: List<String> = SNAPSHOT_PAYLOAD_FIELDS,
+    private val fields: List<String> = STREAM_PAYLOAD_FIELDS,
 ) : EventStream {
 
     /** The hub's base URL, without a trailing slash. */

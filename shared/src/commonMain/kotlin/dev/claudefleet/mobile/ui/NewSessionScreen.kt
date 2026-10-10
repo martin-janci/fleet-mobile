@@ -103,6 +103,8 @@ fun NewSessionScreen(
     addHandlers: AddProjectHandlers = AddProjectHandlers(),
     /** The wizard's "Start from: A ticket" (r09 B14); null hides it. */
     onFromTicket: (() -> Unit)? = null,
+    /** The wizard's start from a branch, drafted branch, Account row and first message (G5.6). */
+    extras: NewSessionExtras = NewSessionExtras(),
 ) {
     if (wizard) {
         NewSessionWizard(
@@ -128,6 +130,7 @@ fun NewSessionScreen(
             addStep = addStep,
             addHandlers = addHandlers,
             onFromTicket = onFromTicket,
+            extras = extras,
         )
         return
     }

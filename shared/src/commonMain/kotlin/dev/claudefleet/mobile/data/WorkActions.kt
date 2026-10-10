@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.model.MultiStart
+import dev.claudefleet.mobile.model.StartPreview
 import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
@@ -93,6 +94,18 @@ interface WorkActions {
 
     /** Start work on [key] on [hostAlias]; [projectId] null lets the hub pick. */
     suspend fun start(key: String, hostAlias: String, projectId: Long? = null): SessionRow
+
+    /**
+     * [start] under the person's own branch name [worktree] (`work_link start
+     * { worktree }`); null lets the hub name it from the ticket. A fake that
+     * does not care about the name drops it.
+     */
+    suspend fun start(key: String, hostAlias: String, projectId: Long?, worktree: String?): SessionRow =
+        start(key, hostAlias, projectId)
+
+    /** Where starting [key] would land, nothing made (`work_link preview_start`). */
+    suspend fun previewStart(key: String, hostAlias: String, projectId: Long? = null): StartPreview =
+        throw UnsupportedOperationException("preview_start")
 
     /**
      * Start work on [key] in each of [projectIds] on [hostAlias]: one sibling
@@ -215,6 +228,12 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
 
     override suspend fun start(key: String, hostAlias: String, projectId: Long?): SessionRow =
         session.withClient { it.startWork(key, hostAlias, projectId) }
+
+    override suspend fun start(key: String, hostAlias: String, projectId: Long?, worktree: String?): SessionRow =
+        session.withClient { it.startWork(key, hostAlias, projectId, worktree) }
+
+    override suspend fun previewStart(key: String, hostAlias: String, projectId: Long?): StartPreview =
+        session.withClient { it.previewStartWork(key, hostAlias, projectId) }
 
     override suspend fun startMany(key: String, hostAlias: String, projectIds: List<Long>): MultiStart =
         session.withClient { it.startWorkMany(key, hostAlias, projectIds) }

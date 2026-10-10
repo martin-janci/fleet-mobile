@@ -339,6 +339,7 @@ data class HubCapabilities(
         const val SPAWN_REVIEW = "spawn_review"
         const val REPAIR_SESSION = "repair_session"
         const val NEW_BG_SESSION = "new_bg_session"
+        const val NEW_SESSION = "new_session"
         const val RESTORE_HOST_SESSIONS = "restore_host_sessions"
         const val DISCOVER_LOST_SESSIONS = "discover_lost_sessions"
         const val RECREATE_SESSION = "recreate_session"

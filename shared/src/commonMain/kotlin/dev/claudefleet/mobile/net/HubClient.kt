@@ -35,6 +35,7 @@ import dev.claudefleet.mobile.model.HostWorktrees
 import dev.claudefleet.mobile.model.RestoreReport
 import dev.claudefleet.mobile.model.LostCandidate
 import dev.claudefleet.mobile.model.MultiStart
+import dev.claudefleet.mobile.model.StartPreview
 import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.MemberGrants
 import dev.claudefleet.mobile.model.MemberRemoved
@@ -1089,6 +1090,12 @@ class HubClient(
         resumeClaudeSessionId: String? = null,
         /** The tmux name to ask for; blank lets the hub pick one. */
         name: String = "",
+        /** The login to start under: a credential profile's name; null is the host's own login. */
+        profile: String? = null,
+        /** The person chose a login past `accounts.pause_at` (step 4.4); without it the hub refuses `E_ACCOUNT_LIMIT`. */
+        overLimitOk: Boolean = false,
+        /** The opaque id the start's `start:progress` frames carry (redesign 5.13); null asks for none. */
+        startToken: String? = null,
     ): SessionRow =
         call(
             "new_session",
@@ -1101,6 +1108,9 @@ class HubClient(
                 newWorktree?.takeIf { it.isNotBlank() }?.let { put("new_worktree", it) }
                 baseBranch?.takeIf { it.isNotBlank() }?.let { put("base_branch", it) }
                 friendlyName?.takeIf { it.isNotBlank() }?.let { put("friendly_name", it) }
+                profile?.takeIf { it.isNotBlank() }?.let { put("profile", it) }
+                if (overLimitOk) put("over_limit_ok", true)
+                startToken?.takeIf { it.isNotBlank() }?.let { put("start_token", it) }
             },
         ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
 
@@ -1920,7 +1930,7 @@ class HubClient(
      * session. [projectId] null lets the hub pick the project that last worked
      * on the key's prefix. No brief: the phone never edits one.
      */
-    suspend fun startWork(key: String, hostAlias: String, projectId: Long? = null): SessionRow =
+    suspend fun startWork(key: String, hostAlias: String, projectId: Long? = null, worktree: String? = null): SessionRow =
         call(
             "work_link",
             buildJsonObject {
@@ -1928,8 +1938,27 @@ class HubClient(
                 put("key", key)
                 put("host_alias", hostAlias)
                 projectId?.let { put("project_id", it) }
+                // The person's own branch name; absent, the hub names it from the ticket.
+                worktree?.takeIf { it.isNotBlank() }?.let { put("worktree", it) }
             },
         ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
+
+    /**
+     * Where starting [key] on [hostAlias] would land, nothing made
+     * (`work_link { action: preview_start }`): the branch the hub would name
+     * from the ticket is what the New session form shows as drafted. Never
+     * with `draft_brief`, which spends a model call.
+     */
+    suspend fun previewStartWork(key: String, hostAlias: String, projectId: Long? = null): StartPreview =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "preview_start")
+                put("key", key)
+                put("host_alias", hostAlias)
+                projectId?.let { put("project_id", it) }
+            },
+        ) { json.decodeFromJsonElement(StartPreview.serializer(), it) }
 
     /**
      * Start work on [key] in several repositories at once (claude-fleet M9.6,

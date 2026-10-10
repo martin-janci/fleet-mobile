@@ -6,6 +6,14 @@ import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.NewSessionRequest
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.model.BackgroundOptions
+import dev.claudefleet.mobile.model.Headroom
+import dev.claudefleet.mobile.model.HostLogin
+import dev.claudefleet.mobile.model.loginLabel
+import dev.claudefleet.mobile.model.NO_START_STEPS
+import dev.claudefleet.mobile.model.StartStepState
+import dev.claudefleet.mobile.model.folding
+import dev.claudefleet.mobile.model.newStartToken
+import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.MultiStart
 import dev.claudefleet.mobile.model.OrgDirectory
@@ -26,6 +34,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -104,6 +114,53 @@ data class NewSessionUiState(
     val confirm: MultiStartConfirm? = null,
     /** What the last multi-start answered, project by project. */
     val result: MultiStartResult? = null,
+    /** Start from a project (its checkout, a worktree, or a new branch) or from an existing branch. */
+    val startFrom: StartFrom = StartFrom.Project,
+    /** The optional first message, typed once the session's Claude is idle (`queue_prompt`). */
+    val firstMessage: String = "",
+    /** The hub keeps a first message for the new session (`queue_prompt`): the field is offered. */
+    val firstMessageAvailable: Boolean = false,
+    /**
+     * The Review step's Account row: the login the session starts under and
+     * its room, from `check_account_headroom`. Null while there is nothing
+     * to say — ticket mode, an older hub, no host yet, or no answer.
+     */
+    val account: AccountChoice? = null,
+    /** The logins on the host the person may pick instead, the chosen one included. */
+    val logins: List<AccountChoice> = emptyList(),
+    /**
+     * Ticket mode: the branch the hub plans for the ticket (`preview_start`),
+     * shown as drafted until the person edits or clears it. Null when there
+     * is no draft to show.
+     */
+    val branchDraft: String? = null,
+    /** Ticket mode: what the Branch field holds — the draft, or the person's own edit. */
+    val ticketBranch: String = "",
+    /** The person edited or cleared the drafted branch: it is theirs now, and it is what is sent. */
+    val ticketBranchEdited: Boolean = false,
+    /** The hub takes the person's own branch name for a ticket start (`work_link start { worktree }`). */
+    val ticketBranchEditable: Boolean = false,
+    /**
+     * The start's real steps as the hub reports them (`start:progress`), or
+     * null when this start asked for none — ticket mode, an older hub — and
+     * the Starting panel lists the steps without ticking them.
+     */
+    val startSteps: Map<String, StartStepState>? = null,
+)
+
+/** Where a plain (non-ticket) session starts from: the Where step's chips. */
+enum class StartFrom { Project, Branch }
+
+/** One login on the host, as the Account row and its picker say it. */
+data class AccountChoice(
+    /** Null is the host's own login; else the credential profile's name. */
+    val profile: String?,
+    /** "m.janci@32bit.sk", or "work (m.janci@…)" for a profile. */
+    val label: String,
+    /** "75% left", or "no reading". */
+    val room: String,
+    /** At or past the hub's pause line: starting under it takes the person's say-so. */
+    val over: Boolean,
 )
 
 /** The confirm sheet: what will start, how many, and in which organisation. */
@@ -180,6 +237,14 @@ class NewSessionViewModel(
     private val ticketKey: String? = null,
     /** How ticket mode starts work; required with [ticketKey]. */
     private val workActions: WorkActions? = null,
+    /**
+     * Where a first message the hub would not keep goes instead: the new
+     * session's own box, unsent, so it is never lost. Null drops nothing
+     * because nothing can be kept — the error then says so.
+     */
+    private val drafts: DraftMemory? = null,
+    /** This device's clock, for the start token. */
+    private val now: () -> Long = { epochSeconds() },
 ) {
     private data class Local(
         val pickedHost: String? = null,
@@ -205,6 +270,22 @@ class NewSessionViewModel(
         val alsoIn: List<Long> = emptyList(),
         val confirming: Boolean = false,
         val result: MultiStartResult? = null,
+        val startFrom: StartFrom = StartFrom.Project,
+        val firstMessage: String = "",
+        /** `check_account_headroom` for [headroomHost]; null until it answered. */
+        val headroom: Headroom? = null,
+        val headroomHost: String? = null,
+        /** The person tapped a login; [pickedProfile] is it (null = the host's own). */
+        val loginPicked: Boolean = false,
+        val pickedProfile: String? = null,
+        /** Ticket mode: the hub's planned branch, and what it was planned for (`key|host|project`). */
+        val draft: String? = null,
+        val draftFor: String? = null,
+        val ticketBranch: String = "",
+        val ticketBranchEdited: Boolean = false,
+        /** This start's `start_token`, and its steps as the frames reported them. */
+        val startToken: String? = null,
+        val startSteps: Map<String, StartStepState>? = null,
     )
 
     /** What ticket mode reads beyond the form: the hub's gates, and the ticket's org. */
@@ -226,6 +307,97 @@ class NewSessionViewModel(
         ) { (hosts, sessions), projects, status, l, work ->
             assemble(hosts, projects, status, l, work, sessions)
         }.stateIn(scope, SharingStarted.Eagerly, current())
+
+    init {
+        // The steps of this form's own start, by its token; anyone else's
+        // frame (another device's start) is not this form's business.
+        scope.launch {
+            fleet.startProgress.collect { p ->
+                local.update { l ->
+                    val steps = l.startSteps
+                    if (steps == null || p.token != l.startToken) l else l.copy(startSteps = steps.folding(p.step, p.state))
+                }
+            }
+        }
+        // The Account row: the host's logins and their room, read again when
+        // the host changes. Readonly, from usage the hub already keeps.
+        scope.launch {
+            state.map { s -> s.host.takeIf { accountGate() } }.distinctUntilChanged().collect { host ->
+                if (host != null) readHeadroom(host)
+            }
+        }
+        // Ticket mode: the branch the hub would name, shown as drafted.
+        if (ticketKey != null) scope.launch {
+            state.map { s -> s.host?.let { h -> Triple(h, s.projectId, draftGate()) } }.distinctUntilChanged().collect { at ->
+                if (at != null && at.third) readDraft(ticketKey, at.first, at.second)
+            }
+        }
+    }
+
+    private fun accountGate(): Boolean {
+        val caps = fleet.capabilities.value
+        return ticketKey == null && canWrite &&
+            HubCapabilities.CHECK_ACCOUNT_HEADROOM in caps.tools && caps.accepts(HubCapabilities.NEW_SESSION, PROFILE)
+    }
+
+    private fun draftGate(): Boolean =
+        ticketKey != null && canWrite && workActions != null && fleet.capabilities.value.has(WORK_LINK, PREVIEW_START)
+
+    private suspend fun readHeadroom(host: String) {
+        val answer = try {
+            actions.headroom(host)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            // No row rather than a wrong one: the hub picks its own login as before.
+            null
+        }
+        local.update { l ->
+            if (l.headroomHost == host && answer == null) l
+            else l.copy(headroom = answer, headroomHost = host, loginPicked = false, pickedProfile = null)
+        }
+    }
+
+    private suspend fun readDraft(key: String, host: String, projectId: Long?) {
+        val at = "$key|$host|${projectId ?: "-"}"
+        val plan = try {
+            workActions?.previewStart(key, host, projectId)?.plan
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            val tool = t as? HubError.Tool
+            if (tool != null && tool.isUnknownAction()) fleet.actionMissing(WORK_LINK, PREVIEW_START)
+            null
+        }
+        local.update { it.copy(draft = plan?.branch?.trim()?.ifEmpty { null }, draftFor = at) }
+    }
+
+    /** Start from a project or from an existing branch (the Where step's chips). */
+    fun setStartFrom(from: StartFrom) {
+        if (ticketKey != null) return
+        local.update { it.copy(startFrom = from, worktreeId = if (from == StartFrom.Branch) null else it.worktreeId) }
+    }
+
+    fun onFirstMessageChange(text: String) {
+        local.update { it.copy(firstMessage = text) }
+    }
+
+    /** Pick the login to start under; [profile] null is the host's own. One the host does not have is ignored. */
+    fun pickLogin(profile: String?) {
+        val logins = local.value.headroom?.logins.orEmpty()
+        if (logins.none { it.profile == profile }) return
+        local.update { it.copy(loginPicked = true, pickedProfile = profile) }
+    }
+
+    /** Ticket mode: the person's own branch name; from the first keystroke the draft is theirs. */
+    fun onTicketBranchChange(text: String) {
+        local.update { it.copy(ticketBranch = text, ticketBranchEdited = true) }
+    }
+
+    /** Ticket mode's Clear: the drafted branch goes, the field is the person's to fill or leave to the hub. */
+    fun clearBranchDraft() {
+        local.update { it.copy(ticketBranch = "", ticketBranchEdited = true) }
+    }
 
     /** Pick a host. One the hub cannot reach is ignored — the row is greyed for that reason. */
     fun selectHost(alias: String) {
@@ -353,11 +525,17 @@ class NewSessionViewModel(
         }
         // `canCreate` is false while a create is in flight, so a second tap
         // stops here.
-        val request = requestFrom(current()) ?: return null
-        local.update { it.copy(creating = true, error = null) }
+        val s = current()
+        val base = requestFrom(s) ?: return null
+        // The real steps, when the hub reports them: a fresh token per start.
+        val token = if (fleet.capabilities.value.accepts(HubCapabilities.NEW_SESSION, START_TOKEN)) newStartToken(now()) else null
+        val request = base.copy(startToken = token)
+        val message = s.firstMessage.trim().takeIf { s.firstMessageAvailable && it.isNotEmpty() }
+        local.update { it.copy(creating = true, error = null, startToken = token, startSteps = token?.let { NO_START_STEPS }) }
         return callScope.launch {
             try {
                 val row = actions.newSession(request)
+                if (message != null) sendFirstMessage(row.id, message)
                 local.update { it.copy(creating = false) }
                 onCreated(row.id)
             } catch (e: CancellationException) {
@@ -365,6 +543,21 @@ class NewSessionViewModel(
             } catch (t: Throwable) {
                 local.update { it.copy(creating = false, error = explainCreateFailure(t)) }
             }
+        }
+    }
+
+    /**
+     * The first message, once the session exists. The session is made either
+     * way; a message the hub would not keep goes into the session's own box,
+     * unsent, so the person finds it there rather than losing it.
+     */
+    private suspend fun sendFirstMessage(sessionId: Long, message: String) {
+        try {
+            actions.firstMessage(sessionId, message)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            drafts?.fill(sessionId, message)
         }
     }
 
@@ -419,10 +612,15 @@ class NewSessionViewModel(
         val actions = workActions ?: return null
         if (!s.canCreate) return null
         val host = s.host ?: return null
-        local.update { it.copy(creating = true, error = null) }
+        // The person's own branch, only when they edited the draft: the
+        // draft itself is what the hub would name anyway, never sent as theirs.
+        val worktree = s.ticketBranch.trim().takeIf { s.ticketBranchEditable && s.ticketBranchEdited && it.isNotEmpty() }
+        val message = s.firstMessage.trim().takeIf { s.firstMessageAvailable && it.isNotEmpty() }
+        local.update { it.copy(creating = true, error = null, startToken = null, startSteps = null) }
         return callScope.launch {
             try {
-                val row = actions.start(key, host, s.projectId)
+                val row = if (worktree != null) actions.start(key, host, s.projectId, worktree) else actions.start(key, host, s.projectId)
+                if (message != null) sendFirstMessage(row.id, message)
                 local.update { it.copy(creating = false) }
                 onCreated(row.id)
             } catch (e: CancellationException) {
@@ -496,11 +694,21 @@ class NewSessionViewModel(
             .filter { query.isEmpty() || it.label.contains(query, ignoreCase = true) }
             .map { ProjectChoice(it.id, it.label) }
 
-        val branchOk = !l.newWorktree || isBranchName(l.branch.trim())
+        val fromBranch = ticketKey == null && l.startFrom == StartFrom.Branch
+        val branchOk = when {
+            fromBranch -> isBranchName(l.branch.trim()) && l.branch.trim() !in DEFAULT_BRANCHES
+            else -> !l.newWorktree || isBranchName(l.branch.trim())
+        }
+        val ticketBranchEditable = ticketKey != null && caps.accepts(WORK_LINK, WORKTREE)
+        // A multi-start names one branch for every project: the hub's, never an edit.
+        val ownBranch = l.ticketBranchEdited && l.alsoIn.isEmpty()
+        val ticketBranch = if (ownBranch) l.ticketBranch else l.draft.orEmpty()
+        val ticketBranchOk = !ticketBranchEditable || !ownBranch || ticketBranch.isBlank() ||
+            (isBranchName(ticketBranch.trim()) && ticketBranch.trim() !in DEFAULT_BRANCHES)
         val ready = if (ticketKey != null) {
             // The project is the hub's to pick unless the person chose one —
             // or the hub already said it cannot.
-            workActions != null && caps.has(WORK_LINK, START) && (!l.mustPickProject || chosen != null)
+            workActions != null && caps.has(WORK_LINK, START) && (!l.mustPickProject || chosen != null) && ticketBranchOk
         } else {
             chosen != null && branchOk
         }
@@ -523,15 +731,28 @@ class NewSessionViewModel(
             work.tickets.firstOrNull { it.key == key }?.let(work.orgs::orgOf)?.let(work.orgs::name)
         }
         val canCreate = canWrite && !l.creating && host != null && ready
-        val branchInvalid = l.newWorktree && l.branch.isNotBlank() && !branchOk
+        val branchInvalid = (l.newWorktree || fromBranch) && l.branch.isNotBlank() && !branchOk
         val missing = when {
             !canWrite || l.creating || canCreate -> null
             host == null -> if (reachable.isEmpty()) "No host is reachable right now." else "Pick a host."
             ticketKey == null && chosen == null -> "Pick a project."
             ticketKey != null && l.mustPickProject && chosen == null -> "Pick a project — the hub could not choose one."
+            fromBranch && !branchOk -> branchProblem(l.branch.trim(), "Name the branch to start from.")
             ticketKey == null && !branchOk -> if (l.branch.isBlank()) "Name the new branch." else "A branch name has no spaces."
+            ticketKey != null && !ticketBranchOk -> branchProblem(ticketBranch.trim(), "Name the branch.")
             else -> null
         }
+        val names = fleet.accountNames.value
+        val headroom = l.headroom?.takeIf { l.headroomHost == host && host != null && ticketKey == null }
+        val pauseAt = headroom?.pauseAtPct ?: 100.0
+        val logins = headroom?.logins.orEmpty().map { accountChoice(it, pauseAt, names) }
+        val account = headroom?.let { h ->
+            if (l.loginPicked) logins.firstOrNull { it.profile == l.pickedProfile }
+            else h.chosen?.let { accountChoice(it, h.pauseAtPct, names) }
+        }
+        // A draft is shown only for what it was planned for: a changed host
+        // or project waits for its own.
+        val draftHere = l.draft?.takeIf { ticketKey != null && l.draftFor == "$ticketKey|$host|${l.projectId ?: "-"}" }
         val byId = projects.associateBy { it.id }
         val confirm = if (l.confirming && canCreate && host != null && ticketKey != null && chosen != null && ticked.isNotEmpty()) {
             MultiStartConfirm(
@@ -570,11 +791,38 @@ class NewSessionViewModel(
             backgroundAvailable = canWrite && ticketKey == null && caps.newBgSession,
             backgroundOptions = caps.accepts(HubCapabilities.NEW_BG_SESSION, "read_only"),
             worktreeId = l.worktreeId,
+            startFrom = if (ticketKey == null) l.startFrom else StartFrom.Project,
+            firstMessage = l.firstMessage,
+            // One session gets the message: never on a multi-start.
+            firstMessageAvailable = canWrite && HubCapabilities.QUEUE_PROMPT in caps.tools && ticked.isEmpty(),
+            account = account,
+            logins = logins,
+            branchDraft = draftHere,
+            ticketBranch = if (ownBranch) l.ticketBranch else draftHere.orEmpty(),
+            ticketBranchEdited = ownBranch,
+            ticketBranchEditable = ticketBranchEditable && ticked.isEmpty(),
+            startSteps = l.startSteps,
         )
     }
 
     private fun requestFrom(s: NewSessionUiState): NewSessionRequest? {
         if (!s.canCreate) return null
+        val l = local.value
+        val login = s.account?.takeIf { l.loginPicked }
+        if (s.startFrom == StartFrom.Branch) {
+            // An existing branch: its own worktree, checked out rather than
+            // forked — the hub's script takes `base == name` as "this branch".
+            val branch = s.branch.trim()
+            return NewSessionRequest(
+                hostAlias = s.host ?: return null,
+                projectId = s.projectId ?: return null,
+                newWorktree = branch,
+                baseBranch = branch,
+                friendlyName = s.friendlyName.trim().ifEmpty { null },
+                profile = login?.profile,
+                overLimitOk = login?.over == true,
+            )
+        }
         return NewSessionRequest(
             hostAlias = s.host ?: return null,
             projectId = s.projectId ?: return null,
@@ -582,11 +830,38 @@ class NewSessionViewModel(
             baseBranch = s.baseBranch.trim().takeIf { s.newWorktree && it.isNotEmpty() },
             friendlyName = s.friendlyName.trim().ifEmpty { null },
             worktreeId = s.worktreeId.takeIf { !s.newWorktree },
+            profile = login?.profile,
+            overLimitOk = login?.over == true,
         )
     }
 }
 
 private const val START = "start"
+private const val PREVIEW_START = "preview_start"
+private const val WORKTREE = "worktree"
+private const val PROFILE = "profile"
+private const val START_TOKEN = "start_token"
+
+/** The names the hub refuses for a new worktree: they are the project's own checkout. */
+private val DEFAULT_BRANCHES = setOf("main", "master")
+
+/** Why a branch name will not do, in words; [empty] when there is none. */
+private fun branchProblem(name: String, empty: String): String = when {
+    name.isEmpty() -> empty
+    name in DEFAULT_BRANCHES -> "$name is the project's own checkout: start from A project to work there."
+    else -> "A branch name has no spaces."
+}
+
+/** One login as the Account row says it: who, and the room left under the tighter window. */
+internal fun accountChoice(l: HostLogin, pauseAtPct: Double, names: Map<String, String>): AccountChoice {
+    val used = l.usedPct
+    return AccountChoice(
+        profile = l.profile,
+        label = loginLabel(l) { names[it] },
+        room = used?.let { "${(100 - kotlin.math.round(it).toInt()).coerceAtLeast(0)}% left" } ?: "no reading",
+        over = used != null && used >= pauseAtPct,
+    )
+}
 
 /** [host] with its load: the live sessions on it, by status word. A lost row is not load. */
 private fun hostChoice(host: HostRow, sessions: List<SessionRow>): HostChoice {

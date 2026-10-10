@@ -233,6 +233,7 @@ import dev.claudefleet.mobile.ui.kit.HubBanner
 import dev.claudefleet.mobile.ui.kit.LocalHubReconnect
 import dev.claudefleet.mobile.ui.kit.LocalReducedMotion
 import dev.claudefleet.mobile.ui.NewSessionScreen
+import dev.claudefleet.mobile.ui.NewSessionExtras
 import dev.claudefleet.mobile.ui.DiscardSheet
 import dev.claudefleet.mobile.ui.newSessionTyped
 import dev.claudefleet.mobile.ui.NewSessionViewModel
@@ -2189,6 +2190,8 @@ private fun NewSessionRoute(
             callScope = callScope,
             ticketKey = ticketKey,
             workActions = container.workActions,
+            // A first message the hub would not keep waits in the new session's box.
+            drafts = container.drafts,
         )
     }
     val state by vm.state.collectAsState()
@@ -2267,6 +2270,13 @@ private fun NewSessionRoute(
             onTyped = { addTyped = it },
         ),
         onFromTicket = onFromTicket,
+        extras = NewSessionExtras(
+            onStartFrom = vm::setStartFrom,
+            onFirstMessage = vm::onFirstMessageChange,
+            onPickLogin = vm::pickLogin,
+            onTicketBranch = vm::onTicketBranchChange,
+            onClearDraft = vm::clearBranchDraft,
+        ),
     )
     if (askDiscard) {
         DiscardSheet(onKeep = { askDiscard = false }, onDiscard = { askDiscard = false; onBack() })

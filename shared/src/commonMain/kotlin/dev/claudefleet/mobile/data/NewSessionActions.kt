@@ -3,6 +3,8 @@ package dev.claudefleet.mobile.data
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.BackgroundOptions
 import dev.claudefleet.mobile.model.NewBgSessionResult
+import dev.claudefleet.mobile.model.Headroom
+import dev.claudefleet.mobile.model.QueuePromptResult
 
 /**
  * What the New session form sends: already trimmed, with every optional field
@@ -19,6 +21,12 @@ data class NewSessionRequest(
     val friendlyName: String? = null,
     /** An existing worktree of the project to start in, rather than its main checkout. */
     val worktreeId: Long? = null,
+    /** The login the person picked on Review: a credential profile; `null` is the host's own login. */
+    val profile: String? = null,
+    /** The person picked a login past the pause line, knowing it (`over_limit_ok`). */
+    val overLimitOk: Boolean = false,
+    /** The id this start's `start:progress` frames carry; `null` asks the hub for none. */
+    val startToken: String? = null,
 )
 
 /**
@@ -40,6 +48,21 @@ interface NewSessionActions {
     /** The same with contract 14's [options]; a fake that does not care drops them. */
     suspend fun newBackground(hostAlias: String, name: String, prompt: String, options: BackgroundOptions): NewBgSessionResult =
         newBackground(hostAlias, name, prompt)
+
+    /**
+     * The logins on [hostAlias] and the room each has (`check_account_headroom`,
+     * readonly): what the Review step's Account row reads. A fake that does
+     * not care has none.
+     */
+    suspend fun headroom(hostAlias: String): Headroom = throw UnsupportedOperationException("check_account_headroom")
+
+    /**
+     * The optional first message, once the session exists (`queue_prompt`):
+     * typed as soon as Claude is idle, kept by the hub until then. `new_session`
+     * takes no prompt of its own.
+     */
+    suspend fun firstMessage(sessionId: Long, prompt: String): QueuePromptResult =
+        throw UnsupportedOperationException("queue_prompt")
 }
 
 /** [NewSessionActions] against the paired hub, through [AppSession.withClient]. */
@@ -59,6 +82,15 @@ class HubNewSessionActions(private val session: AppSession) : NewSessionActions 
                 baseBranch = request.baseBranch,
                 friendlyName = request.friendlyName,
                 worktreeId = request.worktreeId,
+                profile = request.profile,
+                overLimitOk = request.overLimitOk,
+                startToken = request.startToken,
             )
         }
+
+    override suspend fun headroom(hostAlias: String): Headroom =
+        session.withClient { it.checkAccountHeadroom(hostAlias, null) }
+
+    override suspend fun firstMessage(sessionId: Long, prompt: String): QueuePromptResult =
+        session.withClient { it.queuePrompt(sessionId, prompt) }
 }

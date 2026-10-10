@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.data
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.StartProgress
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.net.HubEvent
 import dev.claudefleet.mobile.net.json
@@ -58,8 +59,18 @@ val SNAPSHOT_EVENT_KINDS: List<String> = listOf("session", "host", "project", "w
  */
 val SIGNAL_EVENT_KINDS: List<String> = listOf("download", "account_usage", "grant", "account", "update")
 
+/**
+ * Kinds that carry a fact a screen waits on and the snapshot does not keep:
+ * `start` (`start:progress`, claude-fleet redesign step 5.13), the steps of a
+ * `new_session` this phone started with a `start_token`. The frame carries
+ * the token, the step and its state, nothing else; the New session form
+ * reads it from [FleetState.startProgress]. A hub that does not know the
+ * kind ignores it in `?kinds=`.
+ */
+val PROGRESS_EVENT_KINDS: List<String> = listOf("start")
+
 /** Everything the stream asks the hub for with `?kinds=`. */
-val STREAM_EVENT_KINDS: List<String> = SNAPSHOT_EVENT_KINDS + SIGNAL_EVENT_KINDS
+val STREAM_EVENT_KINDS: List<String> = SNAPSHOT_EVENT_KINDS + SIGNAL_EVENT_KINDS + PROGRESS_EVENT_KINDS
 
 /**
  * The payload keys the snapshot decodes, and therefore what the stream asks
@@ -89,6 +100,17 @@ val SNAPSHOT_PAYLOAD_FIELDS: List<String> =
         Ticket.serializer().descriptor,
     )
         .flatMap { d -> (0 until d.elementsCount).map { d.getElementName(it) } }
+        .distinct()
+        .sorted()
+
+/**
+ * What the stream asks the hub for with `?fields=`: [SNAPSHOT_PAYLOAD_FIELDS]
+ * and the keys of a `start:progress` frame ([StartProgress]), derived the
+ * same way. `?fields=` is one list for every frame, so a progress frame
+ * projected to the row fields alone would arrive as `{}`.
+ */
+val STREAM_PAYLOAD_FIELDS: List<String> =
+    (SNAPSHOT_PAYLOAD_FIELDS + StartProgress.serializer().descriptor.let { d -> (0 until d.elementsCount).map { d.getElementName(it) } })
         .distinct()
         .sorted()
 
@@ -175,6 +197,10 @@ fun HubEvent.Row.isGrantFrame(): Boolean = name.startsWith("grant:")
 
 /** `update:decision`: a decision moved (a pin, a new channel, a policy); which client's does not matter. */
 fun HubEvent.Row.isUpdateDecisionFrame(): Boolean = name == "update:decision"
+
+/** The step a `start:progress` frame reports, or null for any other frame and for one that does not decode. */
+fun HubEvent.Row.startProgress(): StartProgress? =
+    if (name == "start:progress") decode(StartProgress.serializer(), payload) else null
 
 /** The download a `download:changed` frame names, or null for any other frame. */
 fun HubEvent.Row.downloadId(): Long? =
