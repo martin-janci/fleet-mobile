@@ -361,6 +361,7 @@ fun otherLogins(h: Headroom, currentProfile: String?): List<HostLogin> =
 
 const val SWITCH_ACCOUNT_SHEET_TAG = "session.switchAccount"
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SwitchAccountSheet(
     switch: AccountSwitch,
