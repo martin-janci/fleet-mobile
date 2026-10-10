@@ -15,8 +15,16 @@ sealed interface Answer {
      * A dialog's numbered option, pressed as the digit key [n] — never typed
      * as text (see [HUB_VERSION_DIGIT_KEYS] for why text cannot answer it).
      */
-    data class Option(val n: Int, val label: String) : Answer
+    data class Option(val n: Int, val label: String, val checked: Boolean = false) : Answer
     data object Enter : Answer
+
+    /**
+     * `Tab` on a multi-select question: keeps the ticks and moves on (to the
+     * next question, or to the review step's `1. Submit answers`). A digit
+     * there only TOGGLES a box, so without this the phone could never finish
+     * one.
+     */
+    data object Continue : Answer
     data object Escape : Answer
     data object Interrupt : Answer
     data class Text(val text: String) : Answer
@@ -26,7 +34,7 @@ sealed interface Answer {
      * digit, Enter, Escape) rather than typed or interrupting: what tells an
      * answer a person shared at answer may give from one that needs drive.
      */
-    val isKey: Boolean get() = this is Option || this == Enter || this == Escape
+    val isKey: Boolean get() = this is Option || this == Enter || this == Escape || this == Continue
 }
 
 /**
@@ -40,6 +48,10 @@ data class BlockedCard(
     val explain: String? = null,
     val offerRestart: Boolean = false,
     val terminalAvailable: Boolean = true,
+    /** The tool call a permission dialog asks about (`Bash(git push)`), as the hub read it off the pane. */
+    val detail: String? = null,
+    /** A multi-select question: an option's chip toggles its box, [Answer.Continue] moves on. */
+    val multi: Boolean = false,
 )
 
 /**
@@ -83,12 +95,15 @@ fun blockedCard(row: SessionRow, hubVersion: String?): BlockedCard? {
         null -> {
             val p = row.pendingInput
             val headline = p?.question ?: Activity.pending(row.currentActivity) ?: "Waiting for input"
-            val options = if (semverAtLeast(hubVersion, HUB_VERSION_DIGIT_KEYS)) {
-                p?.options.orEmpty().filter { it.n in 1..ANSWER_MAX_DIGIT }.map { Answer.Option(it.n, it.label) }
+            val digits = semverAtLeast(hubVersion, HUB_VERSION_DIGIT_KEYS)
+            val options = if (digits) {
+                p?.options.orEmpty().filter { it.n in 1..ANSWER_MAX_DIGIT }.map { Answer.Option(it.n, it.label, it.checked) }
             } else {
                 emptyList()
             }
-            BlockedCard(headline, options + keyAnswers)
+            val multi = p?.multi == true
+            val continueKey = if (multi && digits) listOf(Answer.Continue) else emptyList()
+            BlockedCard(headline, options + continueKey + keyAnswers, detail = p?.detail, multi = multi)
         }
         else -> BlockedCard(stuck.replace('_', ' '), keyAnswers, offerRestart = true)
     }

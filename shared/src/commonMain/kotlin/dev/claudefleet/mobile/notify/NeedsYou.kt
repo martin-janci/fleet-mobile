@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.notify
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.fingerprint
 import dev.claudefleet.mobile.model.reasonLabel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -29,6 +30,12 @@ data class NeedsYouAlert(
      * it (redesign 14.8). Null when it asks nothing in words.
      */
     val question: String? = null,
+    /**
+     * An update of the alert already up for this session — its question
+     * arrived after the status did — rather than news: the notification is
+     * replaced without a second sound or buzz.
+     */
+    val quiet: Boolean = false,
 ) : NeedsYouEvent
 
 /** A session that needed you no longer does — answered here or elsewhere: its notification goes. */
@@ -45,10 +52,20 @@ data class NeedsYouResolved(val sessionId: Long) : NeedsYouEvent
  * nothing); the answer carries the reasons as of [rows], for the next look.
  */
 fun needsYouAlerts(seen: Map<Long, String?>, rows: List<SessionRow>): Pair<List<NeedsYouAlert>, Map<Long, String?>> {
-    val now = rows.associate { it.id to it.notifyReason }
+    val now = rows.associate { it.id to it.notifyKey }
     val alerts = rows.mapNotNull { row ->
         val reason = row.notifyReason ?: return@mapNotNull null
-        if (seen[row.id] == reason) return@mapNotNull null
+        val key = row.notifyKey
+        val before = seen[row.id]
+        if (before == key) return@mapNotNull null
+        val sameReason = before != null && reasonOf(before) == reason
+        // Same reason, and before knew no question: the dialog's question
+        // arrived after the status (the hub reads the pane a moment after
+        // the hook). The notification is updated, not announced again.
+        // Same reason with a DIFFERENT question is a new question: a session
+        // that asks again while still waiting is news, and used to be silent.
+        val quiet = sameReason && questionOf(before) == null
+        if (sameReason && questionOf(key) == null) return@mapNotNull null
         NeedsYouAlert(
             row.id,
             row.displayName,
@@ -56,10 +73,26 @@ fun needsYouAlerts(seen: Map<Long, String?>, rows: List<SessionRow>): Pair<List<
             row.supportingLine,
             reason,
             question = row.pendingInput?.question?.trim()?.takeIf { it.isNotEmpty() },
+            quiet = quiet,
         )
     }
     return alerts to now
 }
+
+/**
+ * What [needsYouAlerts] remembers per session: the reason, and — when the
+ * session shows a dialog — which dialog (`reason#<fingerprint hash>`), so a
+ * second question while still `waiting` is told apart from the first.
+ */
+internal val SessionRow.notifyKey: String?
+    get() {
+        val reason = notifyReason ?: return null
+        val dialog = pendingInput ?: return reason
+        return "$reason#${dialog.fingerprint().hashCode().toUInt().toString(16)}"
+    }
+
+private fun reasonOf(key: String): String = key.substringBefore('#')
+private fun questionOf(key: String?): String? = key?.substringAfter('#', "")?.ifEmpty { null }
 
 /**
  * What a session is announced for: the hub's attention reason, else
@@ -97,7 +130,7 @@ fun needsYouEvents(
             val before = seen
             val (alerts, after) = needsYouAlerts(before.orEmpty(), rows)
             seen = after
-            // Once, then only when a reason moved: `onSeen` persists the whole
+            // Once, then only when a reason (or its dialog) moved: `onSeen` persists the whole
             // map, and most session frames change none (review r16).
             if (after != persisted) {
                 onSeen(after)
@@ -105,7 +138,7 @@ fun needsYouEvents(
             }
             if (before != null) {
                 alerts.forEach { emit(it) }
-                before.filter { (id, reason) -> reason != null && after[id] == null }.keys.forEach { emit(NeedsYouResolved(it)) }
+                before.filter { (id, key) -> key != null && after[id] == null }.keys.forEach { emit(NeedsYouResolved(it)) }
             }
         }
 }

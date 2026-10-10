@@ -211,6 +211,9 @@ class NeedsYouService : Service() {
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            // The question arriving a moment after the status updates the
+            // notification already up; it does not ring a second time.
+            .setOnlyAlertOnce(alert.quiet)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(locked)
         for (action in c.actions) {
@@ -265,6 +268,9 @@ class NeedsYouService : Service() {
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            // The question arriving a moment after the status updates the
+            // notification already up; it does not ring a second time.
+            .setOnlyAlertOnce(alert.quiet)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .build()
         manager(this).notify(ROUTINE_BASE + (alert.runId % 100_000).toInt(), n)

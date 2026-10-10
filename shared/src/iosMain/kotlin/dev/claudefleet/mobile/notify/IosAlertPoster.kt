@@ -34,7 +34,9 @@ class IosAlertPoster : AlertPoster {
             setThreadIdentifier(c.thread)
             setCategoryIdentifier(c.category)
             setUserInfo(mapOf<Any?, Any?>(NEEDS_YOU_SESSION_KEY to NSNumber.numberWithLongLong(c.sessionId)))
-            setSound(UNNotificationSound.defaultSound)
+            // An update (the question arriving after the status) replaces the
+            // notification without a second sound.
+            if (!alert.quiet) setSound(UNNotificationSound.defaultSound)
         }
         center.addNotificationRequest(UNNotificationRequest.requestWithIdentifier(c.id, content, null), withCompletionHandler = null)
     }
@@ -65,7 +67,9 @@ class IosAlertPoster : AlertPoster {
             setTitle(alert.title)
             setBody(alert.text)
             setThreadIdentifier(NEEDS_YOU_THREAD)
-            setSound(UNNotificationSound.defaultSound)
+            // An update (the question arriving after the status) replaces the
+            // notification without a second sound.
+            if (!alert.quiet) setSound(UNNotificationSound.defaultSound)
         }
         center.addNotificationRequest(
             UNNotificationRequest.requestWithIdentifier("${NEEDS_YOU_ID_PREFIX}routine-${alert.runId}", content, null),

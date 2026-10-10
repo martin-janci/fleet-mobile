@@ -51,7 +51,11 @@ data class QuestionAnswer(val answer: Answer, val label: String)
  */
 fun questionAnswers(card: BlockedCard, stuckKind: String?): List<QuestionAnswer> {
     val options = card.answers.filterIsInstance<Answer.Option>()
-    if (options.isNotEmpty()) return options.map { QuestionAnswer(it, "${it.n}  ${it.label}") }
+    if (options.isNotEmpty()) {
+        val rows = options.map { QuestionAnswer(it, "${it.n}  ${if (card.multi) (if (it.checked) "☑ " else "☐ ") else ""}${it.label}") }
+        // A multi-select is finished by moving on, never by a digit.
+        return if (Answer.Continue in card.answers) rows + QuestionAnswer(Answer.Continue, "Continue with these · Tab") else rows
+    }
     return card.answers.mapNotNull { answer ->
         when (answer) {
             Answer.Enter -> QuestionAnswer(answer, "${keyAnswerWords(stuckKind, enter = true)} · Enter")

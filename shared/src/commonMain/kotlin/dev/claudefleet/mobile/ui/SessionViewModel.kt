@@ -34,6 +34,10 @@ import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.store.Prefs
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -914,6 +918,7 @@ class SessionViewModel(
                 is Answer.Option -> a.n.toString()
                 Answer.Enter -> "Enter"
                 Answer.Escape -> "Escape"
+                Answer.Continue -> "Tab"
                 // Drawn by no card (`blockedCard` never offers it), so it
                 // cannot be pressed from a stale one; C-c interrupts rather
                 // than approving anything.
@@ -934,21 +939,52 @@ class SessionViewModel(
                     return@launch
                 }
             }
+            val asked = row()
             val receipt = when (a) {
                 is Answer.Option -> actions.sendKeys(sessionId, a.n.toString())
                 is Answer.Text -> actions.sendPrompt(sessionId, a.text)
                 Answer.Enter -> actions.sendKeys(sessionId, "Enter")
                 Answer.Escape -> actions.sendKeys(sessionId, "Escape")
+                Answer.Continue -> actions.sendKeys(sessionId, "Tab")
                 Answer.Interrupt -> actions.sendKeys(sessionId, "C-c")
             }
-            val wait = actions.waitForTurn(sessionId, receipt.turnSeqBefore, timeoutS = ANSWER_WAIT_SECONDS)
-            local.update { it.copy(answering = false, stillWaiting = wait.status != WAIT_SATISFIED) }
+            val landed = awaitAnswerLanded(asked, receipt.turnSeqBefore)
+            local.update { it.copy(answering = false, stillWaiting = !landed) }
             requestRead(first = false)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
             local.update { it.copy(answering = false, error = friendly(t)) }
         }
+    }
+
+    /**
+     * Whether the answer just sent has landed: the session's turn counter
+     * moved past [turnBefore] (the hub's long poll), OR the row moved on from
+     * the dialog the answer was for — no longer blocked, or showing another
+     * dialog or other ticks ([answerLanded]). Whichever comes first, within
+     * [ANSWER_WAIT_SECONDS].
+     *
+     * The turn alone was the wrong thing to wait for: it moves only when the
+     * whole TURN ends (Stop), so approving a tool call mid-turn held the card
+     * in "sending" for the full 30 s and then said "still waiting", and a
+     * second dialog in that window could not be answered. The hub now writes
+     * a dialog's answer through within a second, which the row shows.
+     */
+    private suspend fun awaitAnswerLanded(asked: SessionRow?, turnBefore: Long): Boolean = coroutineScope {
+        val turn = async {
+            actions.waitForTurn(sessionId, turnBefore, timeoutS = ANSWER_WAIT_SECONDS).status == WAIT_SATISFIED
+        }
+        val moved = async {
+            withTimeoutOrNull(ANSWER_WAIT_SECONDS.seconds) {
+                fleet.sessions.map { rows -> rows.firstOrNull { it.id == sessionId } }.first { answerLanded(asked, it) }
+            } != null || answerLanded(asked, row())
+        }
+        val first = select { turn.onAwait { it }; moved.onAwait { it } }
+        val landed = first || (if (turn.isCompleted) moved.await() else turn.await())
+        turn.cancel()
+        moved.cancel()
+        landed
     }
 
     /**
@@ -976,8 +1012,7 @@ class SessionViewModel(
                 return@launch
             }
             val receipt = actions.sendKeys(sessionId, no.n.toString())
-            val wait = actions.waitForTurn(sessionId, receipt.turnSeqBefore, timeoutS = ANSWER_WAIT_SECONDS)
-            if (wait.status != WAIT_SATISFIED) {
+            if (!awaitAnswerLanded(asked, receipt.turnSeqBefore)) {
                 local.update { it.copy(answering = false, stillWaiting = true) }
                 requestRead(first = false)
                 return@launch
@@ -2068,6 +2103,20 @@ internal fun dialogMoved(
         enter && onScreen.options.firstOrNull { it.selected }?.n != asked.options.firstOrNull { it.selected }?.n -> changed
         else -> null
     }
+}
+
+/**
+ * Whether [now] has moved on from the dialog [asked] showed when an answer
+ * went out: the row is gone or no longer blocked, its stuck kind changed, or
+ * it shows a different dialog — another question, or other ticks on the
+ * same multi-select (a digit there toggles a box). PURE, for the tests.
+ */
+internal fun answerLanded(asked: SessionRow?, now: SessionRow?): Boolean = when {
+    now == null -> true
+    now.claudeStatus != "blocked" -> true
+    asked == null -> false
+    now.stuckKind != asked.stuckKind -> true
+    else -> now.pendingInput != asked.pendingInput
 }
 
 /** What `wait_for_session` answers when the turn actually moved. */

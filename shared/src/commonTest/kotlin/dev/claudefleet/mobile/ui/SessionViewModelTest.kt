@@ -2483,6 +2483,42 @@ class SessionViewModelTest {
         assertFalse(vm.state.value.answering)
     }
 
+    /**
+     * Approving a tool call mid-turn ends no turn: the turn wait times out.
+     * The row moving off the dialog is what says the answer landed — not
+     * 30 s of "sending" and then "still waiting".
+     */
+    @Test
+    fun an_answer_mid_turn_lands_when_the_row_leaves_the_dialog() = runTest {
+        val actions = FakeActions()
+        actions.waitAnswer = WaitResult(status = "timeout")
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        val job = vm.answer(Answer.Option(1, "Yes"))
+        runCurrent()
+        assertTrue(vm.state.value.answering)
+        fleet.sessions.value = listOf(row(status = "working"))
+        job.join()
+        runCurrent()
+
+        assertFalse(vm.state.value.answering)
+        assertFalse(vm.state.value.stillWaiting)
+    }
+
+    @Test
+    fun answer_landed_reads_the_row_against_the_dialog_answered() {
+        val asked = blockedRow()
+        assertFalse(answerLanded(asked, asked), "the same dialog still up")
+        assertTrue(answerLanded(asked, row(status = "working")))
+        assertTrue(answerLanded(asked, null))
+        assertTrue(
+            answerLanded(asked, blockedRow(PendingInput("permission", "Next?", listOf(PendingOption(1, "Yes"))))),
+            "the next dialog came up",
+        )
+    }
+
     /** A second answer while the first is still out would race the turn counter. */
     @Test
     fun a_second_answer_while_one_is_in_flight_is_ignored() = runTest {
