@@ -266,6 +266,14 @@ private class FakeActions : SessionActions {
         return SendPromptResult(delivered = true, sessionId = sessionId, turnSeqBefore = 3)
     }
 
+    /** The dialog each hub-checked key went out with, in order. */
+    val expected = mutableListOf<PendingInput>()
+
+    override suspend fun sendKeysExpecting(sessionId: Long, key: String, expect: PendingInput): SendPromptResult {
+        expected += expect
+        return sendKeys(sessionId, key)
+    }
+
     override suspend fun capture(sessionId: Long, maxLines: Int): String {
         captures += 1
         captureFails?.let { throw it }
@@ -2465,6 +2473,42 @@ class SessionViewModelTest {
 
         assertTrue(actions.sentKeys.isEmpty(), "${actions.sentKeys}")
         assertEquals("The question changed", vm.state.value.error?.title)
+    }
+
+    /**
+     * A hub that checks the dialog itself gets the key WITH the dialog the
+     * card was drawn from, and no pane read is made here first.
+     */
+    @Test
+    fun a_hub_that_checks_the_dialog_gets_it_with_the_key_and_no_read_is_made() = runTest {
+        val actions = FakeActions()
+        val fleet = FakeFleetState(listOf(blockedRow()), tools = setOf("send_prompt"))
+        fleet.capabilities.value = HubCapabilities(tools = setOf("send_prompt"), params = mapOf("send_prompt" to setOf("keys", "expect")))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Option(1, "Yes")).join()
+        runCurrent()
+
+        assertEquals(0, actions.probes, "the hub reads the pane; the phone does not")
+        assertEquals(listOf("1"), actions.sentKeys)
+        assertEquals(listOf(blockedRow().pendingInput!!), actions.expected)
+    }
+
+    @Test
+    fun the_hubs_conflict_reads_as_a_changed_question() = runTest {
+        val actions = FakeActions()
+        actions.sendFails = HubError.Tool("E_CONFLICT", "The dialog changed — nothing was sent.")
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.capabilities.value = HubCapabilities(tools = setOf("send_prompt"), params = mapOf("send_prompt" to setOf("keys", "expect")))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Option(1, "Yes")).join()
+        runCurrent()
+
+        assertEquals("The question changed", vm.state.value.error?.title)
+        assertFalse(vm.state.value.answering)
     }
 
     @Test

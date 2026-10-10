@@ -4,6 +4,7 @@ import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.QueuePromptResult
 import dev.claudefleet.mobile.model.QueuedPrompt
 import dev.claudefleet.mobile.model.ActivityProbe
+import dev.claudefleet.mobile.model.PendingInput
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.ConversationSummary
 import dev.claudefleet.mobile.model.RepairReport
@@ -65,6 +66,14 @@ interface SessionActions {
      * that picks a dialog's option) instead of typing text.
      */
     suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult
+
+    /**
+     * [sendKeys] for a dialog's answer, with the dialog it is for: a hub that
+     * knows `expect` re-reads the pane and presses only while it still shows
+     * [expect] (`E_CONFLICT` otherwise). Falls back to the bare key.
+     */
+    suspend fun sendKeysExpecting(sessionId: Long, key: String, expect: PendingInput): SendPromptResult =
+        sendKeys(sessionId, key)
 
     /** The pane as it is right now (`session_activity`), to re-check a dialog before answering it. */
     suspend fun activity(sessionId: Long): ActivityProbe
@@ -169,6 +178,9 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
 
     override suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult =
         session.withClient { it.sendKeys(sessionId, key) }
+
+    override suspend fun sendKeysExpecting(sessionId: Long, key: String, expect: PendingInput): SendPromptResult =
+        session.withClient { it.sendKeys(sessionId, key, expect) }
 
     override suspend fun activity(sessionId: Long): ActivityProbe =
         session.withClient { it.activity(sessionId) }

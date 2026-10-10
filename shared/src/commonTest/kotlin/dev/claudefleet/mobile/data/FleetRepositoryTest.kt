@@ -991,6 +991,8 @@ class FleetRepositoryTest {
         val repository = repo(hub, stream, backgroundScope)
         repository.start()
         repository.sessions.first { it.size == 2 }
+        // Sessions are published before hosts (they carry what needs a person).
+        repository.hosts.first { it.isNotEmpty() }
         repository.stop()
 
         // Sessions would now answer differently, but hosts refuses.

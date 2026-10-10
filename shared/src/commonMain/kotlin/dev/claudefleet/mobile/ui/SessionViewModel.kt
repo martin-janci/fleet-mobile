@@ -925,7 +925,13 @@ class SessionViewModel(
                 Answer.Interrupt -> null
                 is Answer.Text -> null
             }
-            if (keyToPress != null) {
+            // A dialog card on a hub that checks the dialog itself: the key
+            // goes out WITH the dialog it answers, and the hub re-reads the
+            // pane and presses in one step — no read here first, one round
+            // trip less, and no window between the check and the press.
+            val dialogAsked = row()?.takeIf { it.stuckKind == null }?.pendingInput
+            val hubChecks = keyToPress != null && dialogAsked != null && fleet.capabilities.value.answerExpects
+            if (keyToPress != null && !hubChecks) {
                 val asked = row()
                 val moved = dialogMoved(
                     asked?.pendingInput,
@@ -940,13 +946,22 @@ class SessionViewModel(
                 }
             }
             val asked = row()
-            val receipt = when (a) {
+            val receipt = when {
+                hubChecks -> try {
+                    actions.sendKeysExpecting(sessionId, keyToPress!!, dialogAsked!!)
+                } catch (e: HubError.Tool) {
+                    if (e.code != "E_CONFLICT") throw e
+                    local.update { it.copy(answering = false, error = movedOnHub(e.message)) }
+                    return@launch
+                }
+                else -> when (a) {
                 is Answer.Option -> actions.sendKeys(sessionId, a.n.toString())
                 is Answer.Text -> actions.sendPrompt(sessionId, a.text)
                 Answer.Enter -> actions.sendKeys(sessionId, "Enter")
                 Answer.Escape -> actions.sendKeys(sessionId, "Escape")
                 Answer.Continue -> actions.sendKeys(sessionId, "Tab")
                 Answer.Interrupt -> actions.sendKeys(sessionId, "C-c")
+                }
             }
             val landed = awaitAnswerLanded(asked, receipt.turnSeqBefore)
             local.update { it.copy(answering = false, stillWaiting = !landed) }
@@ -2118,6 +2133,17 @@ internal fun answerLanded(asked: SessionRow?, now: SessionRow?): Boolean = when 
     now.stuckKind != asked.stuckKind -> true
     else -> now.pendingInput != asked.pendingInput
 }
+
+/**
+ * The hub's `E_CONFLICT` for an answer whose dialog moved, as the card says
+ * it — the same two sentences [dialogMoved] uses for the phone's own check.
+ */
+internal fun movedOnHub(message: String): Friendly =
+    if (message.contains("gone", ignoreCase = true)) {
+        Friendly("That question is gone", "Nothing was sent — it was answered or dismissed already.", isError = false)
+    } else {
+        Friendly("The question changed", "Nothing was sent — read it again and choose.", isError = false)
+    }
 
 /** What `wait_for_session` answers when the turn actually moved. */
 internal const val WAIT_SATISFIED: String = "satisfied"
