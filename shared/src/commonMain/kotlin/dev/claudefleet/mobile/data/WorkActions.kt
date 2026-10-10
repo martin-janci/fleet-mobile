@@ -137,6 +137,10 @@ interface WorkActions {
     suspend fun createTask(title: String, notes: String? = null, dueAt: String? = null): WorkItem =
         throw UnsupportedOperationException("create")
 
+    /** **Add subtask**: a new task filed under [parentTaskId] (`item:<id>`). */
+    suspend fun createSubtask(parentTaskId: String, title: String, notes: String? = null, dueAt: String? = null): WorkItem =
+        throw UnsupportedOperationException("create")
+
     /** A person's status for local item [itemId]: `todo`, `in_progress` or `done`. */
     suspend fun setStatus(itemId: Long, status: String): WorkItem =
         throw UnsupportedOperationException("set_status")
@@ -285,6 +289,9 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
 
     override suspend fun createTask(title: String, notes: String?, dueAt: String?): WorkItem =
         session.withClient { it.createWorkTask(title, notes, dueAt) }
+
+    override suspend fun createSubtask(parentTaskId: String, title: String, notes: String?, dueAt: String?): WorkItem =
+        session.withClient { it.createWorkTask(title, notes, dueAt, parent = parentTaskId) }
 
     override suspend fun setStatus(itemId: Long, status: String): WorkItem =
         session.withClient { it.setWorkStatus(itemId, status) }

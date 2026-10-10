@@ -650,6 +650,7 @@ fun PhoneTaskScreen(
                     state.detail?.placement?.note?.takeIf { it.isNotBlank() }?.let { Text("Note: $it", color = o.fgMuted, fontSize = 13.sp) }
                     state.detail?.description?.takeIf { it.isNotBlank() }?.let { MarkdownText(it) }
                     state.detail?.notes?.takeIf { it.isNotBlank() && task.editable }?.let { MarkdownText(it) }
+                    TaskHierarchy(state, h)
                     OwnTaskControls(state, h)
                     task.url?.takeIf { it.isNotBlank() }?.let { url ->
                         val uri = LocalUriHandler.current
@@ -736,6 +737,7 @@ fun PhoneTaskScreen(
     }
     if (state.placeOpen) PlaceSheet(state, h)
     if (state.editOpen) TaskEditSheetFor(state, h)
+    if (state.subtaskOpen) SubtaskSheetFor(state, h)
 }
 
 @Composable

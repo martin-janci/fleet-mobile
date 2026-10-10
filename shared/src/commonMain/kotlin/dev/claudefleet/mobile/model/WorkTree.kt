@@ -395,6 +395,13 @@ data class WorkTask(
     /** Its children and how many are done: an epic's roll-up. */
     @SerialName("children_total") val childrenTotal: Int = 0,
     @SerialName("children_done") val childrenDone: Int = 0,
+    /**
+     * How deep a local item sits: 1 at the top, at most [LOCAL_DEPTH_MAX]
+     * (claude-fleet: epic → task → subtask). 0 from a hub that does not say,
+     * which nests one level: there a top-level item takes children and a
+     * child does not.
+     */
+    val level: Int = 0,
 ) {
     /**
      * Fleet's own work, which a person edits here: a local item (never a
@@ -407,6 +414,20 @@ data class WorkTask(
     /** The tracker is failing — said as such, never as "no sessions". */
     val trackerDown: Boolean get() = trackerId != null && !trackerState.isNullOrBlank() && trackerState != "ok"
 }
+
+/** The deepest a local item nests on a hub that reports [WorkTask.level]. */
+const val LOCAL_DEPTH_MAX = 3
+
+/**
+ * May [task] take a subtask? Fleet's own task only, above the deepest level;
+ * on a hub that reports no level (one level deep), only a top-level item.
+ */
+fun takesSubtask(task: WorkTask): Boolean =
+    task.editable && if (task.level > 0) task.level < LOCAL_DEPTH_MAX else task.parentTaskId == null
+
+/** An epic's or a task's roll-up: "2 of 5 subtasks done", or null with none. */
+fun subtaskRollup(task: WorkTask): String? =
+    task.childrenTotal.takeIf { it > 0 }?.let { "${task.childrenDone} of $it subtask${if (it == 1) "" else "s"} done" }
 
 /** One section header of a tree: every group of the filtered result, with its count. */
 @Serializable

@@ -71,6 +71,11 @@ data class TaskHandlers(
     val onCloseEdit: () -> Unit = {},
     val onSaveEdit: (TaskEdit) -> Unit = {},
     val onSetStatus: (dev.claudefleet.mobile.model.StatusCategory) -> Unit = {},
+    /** Epics: the task this one is filed under, and **Add subtask** with its sheet. */
+    val onOpenParent: () -> Unit = {},
+    val onOpenSubtask: () -> Unit = {},
+    val onCloseSubtask: () -> Unit = {},
+    val onAddSubtask: (title: String, notes: String, dueAt: String) -> Unit = { _, _, _ -> },
 )
 
 /**
@@ -150,6 +155,7 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
                     state.detail?.notes?.takeIf { it.isNotBlank() && task.editable }?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 8, overflow = TextOverflow.Ellipsis)
                     }
+                    TaskHierarchy(state, handlers)
                     OwnTaskControls(state, handlers)
                     state.detail?.lastOutcome?.let { o ->
                         val line = listOfNotNull(o.name, o.host?.let { "on $it" }, o.branch, o.prUrl?.let { "PR $it" }).joinToString(" · ")
@@ -182,6 +188,7 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
     }
     if (state.placeOpen) PlaceSheet(state, handlers)
     if (state.editOpen) TaskEditSheetFor(state, handlers)
+    if (state.subtaskOpen) SubtaskSheetFor(state, handlers)
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.linkSection(
@@ -349,16 +356,59 @@ internal fun TaskEditSheetFor(state: TaskUiState, handlers: TaskHandlers) {
     )
 }
 
+/** **Add subtask**: the New task sheet, filed under this task. */
+@Composable
+internal fun SubtaskSheetFor(state: TaskUiState, handlers: TaskHandlers) {
+    NewTaskSheet(
+        busy = state.busy,
+        heading = "Add subtask",
+        blurb = "Filed under ${state.task?.label ?: "this task"}, in its organisation.",
+        connected = state.connected,
+        error = state.error,
+        onDismissError = handlers.onDismissError,
+        onCancel = handlers.onCloseSubtask,
+        onCreate = handlers.onAddSubtask,
+    )
+}
+
+/**
+ * Where a task sits among fleet's own work: *Epic*, the task it is filed
+ * under (a tap opens it), and its subtasks' roll-up.
+ */
+@Composable
+internal fun TaskHierarchy(state: TaskUiState, handlers: TaskHandlers, modifier: Modifier = Modifier) {
+    val task = state.task ?: return
+    val parent = state.parentTaskId
+    if (!task.epic && parent == null && state.subtaskRollup == null) return
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        if (task.epic) Text("Epic", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        if (parent != null) {
+            Text(
+                "Under ${state.parentLabel ?: "its parent task"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.heightIn(min = 32.dp).clickable(onClick = handlers.onOpenParent).padding(vertical = 6.dp),
+            )
+        }
+        state.subtaskRollup?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+    }
+}
+
 /** Fleet's own task: its status chips and **Edit…**, where the person may. */
 @Composable
 internal fun OwnTaskControls(state: TaskUiState, handlers: TaskHandlers, modifier: Modifier = Modifier) {
-    if (!state.canSetStatus && !state.canEdit) return
+    if (!state.canSetStatus && !state.canEdit && !state.canAddSubtask) return
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (state.canSetStatus) {
             TaskStatusChips(current = state.task?.statusCategory, enabled = !state.busy, onPick = handlers.onSetStatus)
         }
-        if (state.canEdit) {
-            TextButton(onClick = handlers.onOpenEdit, enabled = !state.busy) { Text("Edit…") }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (state.canEdit) {
+                TextButton(onClick = handlers.onOpenEdit, enabled = !state.busy) { Text("Edit…") }
+            }
+            if (state.canAddSubtask) {
+                TextButton(onClick = handlers.onOpenSubtask, enabled = !state.busy) { Text("Add subtask") }
+            }
         }
     }
 }

@@ -1948,14 +1948,22 @@ class HubClient(
      * A new task in fleet (`work_link { create }`, claude-fleet's shared work
      * context): a title, and optionally its description and due date
      * (`YYYY-MM-DD`). A token bound to one organisation is refused a
-     * standalone task (`E_FORBIDDEN`): the hub says so.
+     * standalone task (`E_FORBIDDEN`): the hub says so. With [parent]
+     * (`item:<id>`) it is a subtask, filed under that epic or task and in its
+     * organisation; one past the deepest level is refused, naming why.
      */
-    suspend fun createWorkTask(title: String, notes: String? = null, dueAt: String? = null): WorkItem =
+    suspend fun createWorkTask(
+        title: String,
+        notes: String? = null,
+        dueAt: String? = null,
+        parent: String? = null,
+    ): WorkItem =
         call(
             "work_link",
             buildJsonObject {
                 put("action", "create")
                 put("title", title)
+                parent?.takeIf { it.isNotBlank() }?.let { put("parent", it) }
                 notes?.takeIf { it.isNotBlank() }?.let { put("notes", it) }
                 dueAt?.takeIf { it.isNotBlank() }?.let { put("due_at", it) }
             },
