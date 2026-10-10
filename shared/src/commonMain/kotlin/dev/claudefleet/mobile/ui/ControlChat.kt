@@ -19,7 +19,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -29,6 +34,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.data.AgentActions
+import dev.claudefleet.mobile.data.ChatFormActions
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.ControlActions
 import dev.claudefleet.mobile.data.FleetState
@@ -564,6 +570,80 @@ fun HandoffChips(chips: List<HandoffChip>, onOpenSession: (Long) -> Unit) {
                     }
                 }
             }
+        }
+    }
+}
+
+/** How many other sessions' forms Control's chat lists before "+N more". */
+const val CONTROL_FORMS_SHOWN = 3
+
+/**
+ * The forms other sessions wait on, for Control's chat (MobileChatForms:
+ * "Asked by PD-3012 …"): every row with a pending form but Control's own,
+ * whose form its own conversation already carries.
+ */
+fun controlForms(rows: List<SessionRow>, controlSessionId: Long?): List<SessionRow> =
+    rows.filter { it.pendingForm != null && it.id != controlSessionId }
+
+const val CONTROL_FORM_TAG = "control.form."
+
+/**
+ * Other sessions' waiting forms in Control's chat: who asks and what, with
+ * Answer here (the form opens in place, as in its own session) and Open
+ * session. The hub checks every answer again; [canAnswer] only hides the
+ * buttons a device could not use.
+ */
+@Composable
+fun ControlForms(
+    rows: List<SessionRow>,
+    actions: ChatFormActions,
+    canAnswer: Boolean,
+    onOpenSession: (Long) -> Unit,
+) {
+    if (rows.isEmpty()) return
+    val o = Fleet.colors
+    var answering by remember { mutableStateOf<String?>(null) }
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        for (row in rows.take(CONTROL_FORMS_SHOWN)) {
+            val pending = row.pendingForm
+            if (pending != null && answering == pending.formId) {
+                OrbitChatFormCard(
+                    pending = pending,
+                    sessionName = row.displayName,
+                    actions = actions,
+                    canAnswer = canAnswer,
+                    open = true,
+                    onDismiss = { answering = null },
+                    onAskAgain = null,
+                )
+            } else if (pending != null) {
+                Surface(
+                    color = o.bgPane,
+                    border = BorderStroke(1.dp, o.statusWaiting),
+                    shape = RoundedCornerShape(OrbitTokens.radius("radius-phone-card").dp),
+                    modifier = Modifier.fillMaxWidth().testTag(CONTROL_FORM_TAG + pending.formId),
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Asked by ${row.displayName}", style = Fleet.type.textSm, color = o.statusWaiting)
+                        Text(pending.title.ifBlank { "A form" }, style = Fleet.type.textMd, color = o.fg)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (canAnswer) {
+                                OutlinedButton(onClick = { answering = pending.formId }) { Text("Answer here") }
+                            }
+                            TextButton(onClick = { onOpenSession(row.id) }) { Text("Open session") }
+                        }
+                    }
+                }
+            }
+        }
+        val more = rows.size - CONTROL_FORMS_SHOWN
+        if (more > 0) {
+            Text(
+                if (more == 1) "1 more form waits in Inbox" else "$more more forms wait in Inbox",
+                style = Fleet.type.textSm,
+                color = o.fgMuted,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
         }
     }
 }

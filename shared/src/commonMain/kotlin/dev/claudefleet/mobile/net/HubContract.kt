@@ -2,7 +2,7 @@ package dev.claudefleet.mobile.net
 
 /**
  * The hub wire-contract revisions this build understands (up to claude-fleet
- * revision 15). A hub
+ * revision 16). A hub
  * outside the range is refused the way the desktop refuses it: the banner
  * says which side is behind, and no row event from that hub is applied.
  *
@@ -74,6 +74,12 @@ package dev.claudefleet.mobile.net
  * ([dev.claudefleet.mobile.model.SessionRow.isProposed]), and a mission's
  * `waiting_on`, Today's `missions` and a Today session's `proposed`, all
  * optional here.
+ * Revision 16 (gap plan M15, batch 2) adds routine triggers and guards,
+ * named Control API tokens with a scope, org switches and `org_projects`,
+ * access requests for a shared session and wizard resume. Every one is a new
+ * tool or an optional field: nothing this app already reads is renamed or
+ * changes meaning, and an unknown key is ignored, so a revision-16 hub is
+ * safe here. The phone rises first, before the hub sends 16.
  *
  * [MIN_HUB_CONTRACT] does NOT mirror the desktop's minimum. The desktop
  * raised its own to 3 because a pre-3 hub would silently misperform
@@ -84,7 +90,7 @@ package dev.claudefleet.mobile.net
  * upgraded: this is the phone's own floor, not a copy of the desktop's.
  */
 const val MIN_HUB_CONTRACT: Int = 0
-const val MAX_HUB_CONTRACT: Int = 15
+const val MAX_HUB_CONTRACT: Int = 16
 
 /**
  * What a `contract` field that cannot be read as a revision counts as.

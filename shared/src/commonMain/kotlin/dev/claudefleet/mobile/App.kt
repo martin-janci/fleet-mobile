@@ -3,13 +3,17 @@ package dev.claudefleet.mobile
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
@@ -115,10 +119,12 @@ import dev.claudefleet.mobile.ui.AddProjectStep
 import dev.claudefleet.mobile.ui.AgentViewModel
 import dev.claudefleet.mobile.ui.ConfirmCards
 import dev.claudefleet.mobile.ui.ControlChrome
+import dev.claudefleet.mobile.ui.ControlForms
 import dev.claudefleet.mobile.ui.ControlHeader
 import dev.claudefleet.mobile.ui.ControlViewModel
 import dev.claudefleet.mobile.ui.ControlViews
 import dev.claudefleet.mobile.ui.ControlWaiting
+import dev.claudefleet.mobile.ui.controlForms
 import dev.claudefleet.mobile.ui.HandoffChips
 import dev.claudefleet.mobile.ui.FilesHandlers
 import dev.claudefleet.mobile.ui.FilesScreen
@@ -229,6 +235,7 @@ import dev.claudefleet.mobile.model.localMidnight
 import dev.claudefleet.mobile.ui.sharedRows
 import dev.claudefleet.mobile.ui.loadPhoneLayout
 import dev.claudefleet.mobile.ui.savePhoneLayout
+import dev.claudefleet.mobile.ui.kit.Assemble
 import dev.claudefleet.mobile.ui.kit.BottomBar
 import dev.claudefleet.mobile.ui.kit.BottomBarBadge
 import dev.claudefleet.mobile.ui.kit.BottomBarItem
@@ -355,6 +362,7 @@ import dev.claudefleet.mobile.ui.TodayHandlers
 import dev.claudefleet.mobile.ui.TodaySheet
 import dev.claudefleet.mobile.ui.TodayViewModel
 import dev.claudefleet.mobile.ui.scan.qrScannerSupported
+import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.FleetTheme
 import dev.claudefleet.mobile.ui.PhoneSettings
@@ -713,12 +721,24 @@ fun App(container: AppContainer) {
     }
 }
 
+/**
+ * The cold start (manual: Startup; MobileInstall's first launch): Assemble
+ * while the pairing is read, the particles flying into the orbit, and the
+ * name under it. Reduced motion holds them on the ring.
+ */
 @Composable
 private fun Splash() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("Orbit Fleet", style = MaterialTheme.typography.titleLarge)
+    Box(modifier = Modifier.fillMaxSize().background(Fleet.colors.bg), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Assemble(count = SPLASH_PARTICLES, size = 160.dp)
+            Spacer(Modifier.height(16.dp))
+            Text("Orbit Fleet", style = MaterialTheme.typography.titleLarge, color = Fleet.colors.fg)
+        }
     }
 }
+
+/** The splash knows no fleet yet: a fixed swarm, the manual's "22 sessions" board. */
+private const val SPLASH_PARTICLES = 22
 
 /**
  * A scope for view models and the repository: composition-lived, but **not**
@@ -1727,6 +1747,18 @@ private fun FleetRoute(
                     val controlAccess by repository.access.collectAsState()
                     val subtitle = "${remember(controlRows, controlAccess) { inboxRows(controlRows, controlAccess).size }} need you"
                     val controlPrs by pullRequests.state.collectAsState()
+                    val controlStatus by repository.status.collectAsState()
+                    // Other sessions' waiting forms, answered from Control's chat (G5.2).
+                    val otherForms: @Composable () -> Unit = {
+                        if (settingsCaps.ask) {
+                            ControlForms(
+                                rows = remember(controlRows, controlState.sessionId) { controlForms(controlRows, controlState.sessionId) },
+                                actions = container.chatFormActions,
+                                canAnswer = credentials.canWrite && controlStatus is ConnectionStatus.Connected,
+                                onOpenSession = nav::open,
+                            )
+                        }
+                    }
                     val views: @Composable () -> Unit = {
                         ControlViews(
                             sessions = attention.total,
@@ -1759,6 +1791,7 @@ private fun FleetRoute(
                                     },
                                     aboveComposer = {
                                         HandoffChips(controlState.handoffs, onOpenSession = nav::open)
+                                        otherForms()
                                         ConfirmCards(controlState) { nonce, ok -> control.answer(nonce, ok) }
                                     },
                                 ),
@@ -1772,7 +1805,10 @@ private fun FleetRoute(
                             onWake = { control.wake() },
                             onAnswer = { nonce, ok -> control.answer(nonce, ok) },
                             onDismissError = control::dismissError,
-                            below = { TipFor(Tip.CONTROL, help, helpSettings) },
+                            below = {
+                                otherForms()
+                                TipFor(Tip.CONTROL, help, helpSettings)
+                            },
                             onRetry = { control.refresh() },
                         )
                     }

@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.ChatFormActions
 import dev.claudefleet.mobile.data.FleetSettingsActions
 import dev.claudefleet.mobile.model.FieldProblem
+import dev.claudefleet.mobile.model.FormPick
 import dev.claudefleet.mobile.model.FormView
 import dev.claudefleet.mobile.model.ReplyForm
 import dev.claudefleet.mobile.model.SettingDescriptor
@@ -12,6 +13,7 @@ import dev.claudefleet.mobile.model.fieldMissing
 import dev.claudefleet.mobile.model.fieldProblems
 import dev.claudefleet.mobile.model.formAnswers
 import dev.claudefleet.mobile.model.formDefaults
+import dev.claudefleet.mobile.model.formPicks
 import dev.claudefleet.mobile.model.inWords
 import dev.claudefleet.mobile.model.readAskForm
 import dev.claudefleet.mobile.model.visibleFields
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
 
 /*
  * The state behind two cards that act on the hub rather than on the composer
@@ -48,6 +51,8 @@ data class AskFormState(
     val loadFailure: Friendly? = null,
     val declining: Boolean = false,
     val note: String = "",
+    /** Each select's proposed option ([formPicks]), until the person changes it. */
+    val picks: Map<String, FormPick> = emptyMap(),
 ) {
     val pending: Boolean get() = form?.state == "pending"
 
@@ -86,7 +91,8 @@ class AskFormModel(
                     loading = false,
                     form = form,
                     spec = spec,
-                    values = spec?.let { sp -> formDefaults(sp) + carryDraftAnswers(sp, seed) }.orEmpty(),
+                    picks = spec?.let { sp -> formPicks(sp, form.proposal) }.orEmpty(),
+                    values = spec?.let { sp -> startValues(sp, formPicks(sp, form.proposal)) }.orEmpty(),
                     error = if (spec == null && form.state == "pending") "This form cannot be drawn on the phone; answer it on the desktop." else null,
                 )
             }
@@ -130,6 +136,25 @@ class AskFormModel(
                 }
             }
         }
+    }
+
+    /**
+     * Change on a proposed choice: the proposal goes, and with it the pick
+     * it made, so the person chooses. It does not come back for this card.
+     */
+    fun changePick(name: String) {
+        _state.update {
+            val pick = it.picks[name] ?: return@update it
+            val chosen = (it.values[name] as? JsonPrimitive)?.content == pick.value
+            it.copy(picks = it.picks - name, values = if (chosen) it.values - name else it.values)
+        }
+    }
+
+    /** The defaults, then each proposal where the field has none, then what was typed while the form was drafted. */
+    private fun startValues(spec: ReplyForm, picks: Map<String, FormPick>): Map<String, JsonElement> {
+        val defaults = formDefaults(spec)
+        val proposed = picks.values.filter { it.field !in defaults }.associate { it.field to (JsonPrimitive(it.value) as JsonElement) }
+        return defaults + proposed + carryDraftAnswers(spec, seed)
     }
 
     fun startDecline() = _state.update { it.copy(declining = true) }

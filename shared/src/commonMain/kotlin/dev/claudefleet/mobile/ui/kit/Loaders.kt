@@ -59,6 +59,12 @@ enum class MarkMotion(val description: String) {
 
     /** The hub or a host is offline: a broken ring and drifting hosts, never a spin. */
     SignalLost("Signal lost"),
+
+    /** The splash and pairing: the ring draws itself, then the hub and the hosts pop in. Reduced motion shows the finished mark. */
+    DrawOn("Starting"),
+
+    /** Waiting on a person, or a pairing that landed: a ring pulses out from the orbit. */
+    Halo("Waiting on you"),
 }
 
 /** The mark's geometry on its 108-unit grid (manual: OrbitMark), shared by every motion. */
@@ -107,6 +113,8 @@ fun OrbitMarkLoader(
         MarkMotion.Chase -> 1_200
         MarkMotion.GravityWell -> 1_800
         MarkMotion.SignalLost -> 2_400
+        MarkMotion.DrawOn -> 3_000
+        MarkMotion.Halo -> 2_000
     }
     val clock = if (motion == MarkMotion.Still || pull != null || frozen) null else rememberLoaderClock(period)
     val t = clock?.phase ?: 0f
@@ -140,6 +148,43 @@ fun OrbitMarkLoader(
                     drawCircle(light, Mark.HOST, hostAt(Mark.TOP), alpha = alpha * dim(t))
                     drawCircle(light, Mark.HOST, hostAt(Mark.LEFT), alpha = alpha * dim(t - 0.33f))
                     drawCircle(amber, Mark.HOST, hostAt(Mark.AMBER + 360f * t), alpha = alpha)
+                }
+                motion == MarkMotion.DrawOn -> {
+                    // The finished mark when reduced: Draw-on never fades a half-drawn ring.
+                    val u = if (clock == null || clock.reduced) DRAW_ON_DONE else t
+                    val fade = alpha * if (u > 0.85f) 1f - (u - 0.85f) / 0.15f else 1f
+                    drawArc(
+                        light.copy(alpha = 0.5f * fade),
+                        startAngle = -90f,
+                        sweepAngle = 360f * (u / 0.25f).coerceIn(0f, 1f),
+                        useCenter = false,
+                        topLeft = Offset(Mark.CENTRE - Mark.ORBIT, Mark.CENTRE - Mark.ORBIT),
+                        size = Size(Mark.ORBIT * 2, Mark.ORBIT * 2),
+                        style = Stroke(5f),
+                    )
+                    val hub = pop((u - 0.08f) / 0.14f)
+                    val hosts = pop((u - 0.25f) / 0.13f)
+                    drawCircle(light, Mark.HUB * hub, c, alpha = fade)
+                    drawCircle(light, Mark.HOST * hosts, hostAt(Mark.TOP), alpha = fade)
+                    drawCircle(amber, Mark.HOST * hosts, hostAt(Mark.AMBER), alpha = fade)
+                    drawCircle(light, Mark.HOST * hosts, hostAt(Mark.LEFT), alpha = fade)
+                }
+                motion == MarkMotion.Halo -> {
+                    drawCircle(light.copy(alpha = 0.5f * alpha), Mark.ORBIT, c, style = Stroke(5f))
+                    drawCircle(light, Mark.HUB, c, alpha = alpha)
+                    drawCircle(light, Mark.HOST, hostAt(Mark.TOP), alpha = alpha)
+                    drawCircle(amber, Mark.HOST, hostAt(Mark.AMBER), alpha = alpha)
+                    drawCircle(light, Mark.HOST, hostAt(Mark.LEFT), alpha = alpha)
+                    // Out from just past the hosts to the tile's edge, fading; held half way when reduced.
+                    val u = if (clock == null || clock.reduced) 0.5f else t
+                    val inner = Mark.ORBIT + Mark.HOST + 2f
+                    drawCircle(
+                        amber,
+                        inner + (Mark.CENTRE - 4f - inner) * u,
+                        c,
+                        alpha = alpha * 0.9f * (1f - u),
+                        style = Stroke(3f),
+                    )
                 }
                 motion == MarkMotion.SignalLost -> {
                     rotate(360f * t / 7.5f, pivot = c) {
@@ -179,6 +224,14 @@ fun OrbitMarkLoader(
         }
     }
 }
+
+/** Where a reduced-motion Draw-on rests: drawn in full, before the fade. */
+private const val DRAW_ON_DONE = 0.5f
+
+/** Draw-on's pop: 0 to full with a small overshoot, as the manual's `cubic-bezier(.3,1.6,.5,1)`. */
+private val popEasing = CubicBezierEasing(0.3f, 1.6f, 0.5f, 1f)
+
+private fun pop(x: Float): Float = popEasing.transform(x.coerceIn(0f, 1f))
 
 /** Chase's dimming hosts: full, down to 0.35 half way through, full again. */
 private fun dim(t: Float): Float {
@@ -486,5 +539,99 @@ fun Comet(modifier: Modifier = Modifier, size: Dp = 16.dp) {
         }
         val a = clock.phase * 2f * PI.toFloat()
         drawCircle(head, dot, Offset(c.x + r * cos(a), c.y + r * sin(a)), alpha = clock.alpha)
+    }
+}
+
+/**
+ * Assemble, the startup loader (manual: Startup at 1.3 s): one particle per
+ * session flies in from the edge to its place on the orbit, holds, and
+ * streams on. The first [needYou] particles are amber. Drawn on the mark's
+ * dark tile in both themes; with reduced motion the particles rest on the
+ * ring and fade.
+ */
+@Composable
+fun Assemble(count: Int, modifier: Modifier = Modifier, size: Dp = 160.dp, needYou: Int = 0) {
+    val o = Fleet.colors
+    val ink = o.brandInk
+    val light = o.brandLight
+    val amber = o.brandAmber
+    val clock = rememberLoaderClock(3_600)
+    val n = count.coerceIn(ASSEMBLE_MIN, ASSEMBLE_MAX)
+    Canvas(modifier.size(size).semantics { contentDescription = "Loading the fleet" }) {
+        val w = this.size.minDimension
+        val c = Offset(w / 2f, w / 2f)
+        drawRoundRect(ink, size = Size(w, w), cornerRadius = CornerRadius(w * 0.22f))
+        val ring = w * 0.3f
+        val local = if (clock.reduced) 0.55f else clock.phase
+        // The ring fades in as the particles arrive and out as they leave.
+        val ringIn = when {
+            local < 0.3f -> 0f
+            local < 0.5f -> (local - 0.3f) / 0.2f
+            local < 0.72f -> 1f
+            local < 0.9f -> 1f - (local - 0.72f) / 0.18f
+            else -> 0f
+        }
+        drawCircle(light, ring, c, alpha = clock.alpha * 0.45f * ringIn, style = Stroke(w * 0.012f))
+        for (i in 0 until n) {
+            val p = assembleAt(i, n, local)
+            val from = 0.5f * w
+            val home = 2f * PI.toFloat() * i / n - PI.toFloat() / 2f
+            val start = i * GOLDEN
+            val end = start + 0.9f
+            fun at(angle: Float, r: Float) = Offset(c.x + r * cos(angle), c.y + r * sin(angle))
+            val pos = when {
+                p.leg == 0 -> lerp(at(start, from), at(home, ring), p.k)
+                p.leg == 1 -> at(home, ring)
+                else -> lerp(at(home, ring), at(end, from), p.k)
+            }
+            drawCircle(if (i < needYou) amber else light, w * 0.014f, pos, alpha = clock.alpha * p.alpha)
+        }
+    }
+}
+
+private const val ASSEMBLE_MIN = 6
+private const val ASSEMBLE_MAX = 60
+
+/** The golden angle, so the particles start spread round the edge whatever their count. */
+private const val GOLDEN = 2.399963f
+
+/** Where one particle is in Assemble's loop: flying in (leg 0), held on the ring (1), or streaming on (2). */
+internal data class AssembleStep(val leg: Int, val k: Float, val alpha: Float)
+
+/**
+ * Assemble's timeline for particle [i] of [n] at [phase] (0 to 1 over 3.6 s,
+ * the manual's `ofl-conv`): in by 45 %, held to 72 %, out by the end; each
+ * particle a little after the one before, so they arrive as a stream.
+ */
+internal fun assembleAt(i: Int, n: Int, phase: Float): AssembleStep {
+    val delay = 0.1f * i / n.coerceAtLeast(1)
+    val t = (phase - delay).coerceIn(0f, 1f)
+    return when {
+        t < 0.45f -> AssembleStep(0, FastOutSlowInEasing.transform(t / 0.45f), (t / 0.12f).coerceAtMost(1f) * 0.9f)
+        t < 0.72f -> AssembleStep(1, 1f, 1f)
+        else -> {
+            val k = (t - 0.72f) / 0.28f
+            AssembleStep(2, k, 1f - k)
+        }
+    }
+}
+
+private fun lerp(a: Offset, b: Offset, k: Float): Offset = Offset(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k)
+
+/**
+ * A halo pulsing out round whatever it sits behind: the paired mark (manual:
+ * Halo "on success"), anything that waits on a person. Held half way and
+ * fading with reduced motion.
+ */
+@Composable
+fun HaloRing(modifier: Modifier = Modifier) {
+    val accent = Fleet.colors.accent
+    val clock = rememberLoaderClock(2_000)
+    Canvas(modifier.semantics { contentDescription = "Paired" }) {
+        val c = Offset(this.size.width / 2f, this.size.height / 2f)
+        val r = this.size.minDimension / 2f
+        val u = if (clock.reduced) 0.5f else clock.phase
+        // The manual's `ofl-halo`: scale .6 to 1, stroke from .9 to nothing.
+        drawCircle(accent, r * (0.6f + 0.4f * u), c, alpha = clock.alpha * 0.9f * (1f - u), style = Stroke(r * 0.04f))
     }
 }
