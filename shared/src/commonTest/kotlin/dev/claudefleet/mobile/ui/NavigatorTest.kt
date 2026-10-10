@@ -292,6 +292,19 @@ class NavigatorTest {
         assertFalse(nav.back(), "a tab: the platform's to handle")
     }
 
+    /** The Work view's Start chip opens the form in ticket mode; back returns to Work. */
+    @Test
+    fun start_from_the_work_view_opens_the_form_for_its_ticket() {
+        val nav = Navigator()
+        nav.select(Tab.Work)
+
+        nav.newSession(ticketKey = "FLEET-12")
+
+        assertEquals(Screen.NewSession(hostAlias = null, ticketKey = "FLEET-12"), nav.screen.value)
+        assertTrue(nav.back())
+        assertEquals(Screen.Work, nav.screen.value)
+    }
+
     /** Task → session → back lands on the task, and back again on the Work view — with the Work tab lit throughout. */
     @Test
     fun task_then_session_then_back_returns_to_the_task_then_to_work() {

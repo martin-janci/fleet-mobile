@@ -1742,6 +1742,12 @@ class HubClient(
             expectedVersion?.let { put("expected_version", it) }
         }
 
+    /**
+     * Un-archive a session's links (Tidy's Undo). `tidy_apply` has no
+     * `unarchive`: the hub takes it as a `work_link` action, as the desktop does.
+     */
+    suspend fun unarchiveWork(sessionId: Long): SessionRow = workLink("unarchive", sessionId) {}
+
     /** Clear a live link. Answers the updated row. */
     suspend fun unlinkWork(sessionId: Long, linkId: Long, expectedVersion: Long? = null): SessionRow =
         workLink("unlink", sessionId) {

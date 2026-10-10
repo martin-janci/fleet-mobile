@@ -939,8 +939,9 @@ class HubClientTest {
         client.unlinkWork(5, 13)
         client.linkWork(5, itemId = 70)
         client.linkWork(5, key = "billing migration")
+        client.unarchiveWork(5)
 
-        assertEquals(listOf("confirm", "reject", "unlink", "link", "link"), sent.map { it["action"]!!.jsonPrimitive.content })
+        assertEquals(listOf("confirm", "reject", "unlink", "link", "link", "unarchive"), sent.map { it["action"]!!.jsonPrimitive.content })
         assertEquals(listOf(11, 12, 13), sent.take(3).map { it["link_id"]!!.jsonPrimitive.int })
         assertTrue(sent.all { it["session_id"]!!.jsonPrimitive.int == 5 })
         assertEquals(70, sent[3]["item_id"]!!.jsonPrimitive.int)
