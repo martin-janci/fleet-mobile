@@ -9,6 +9,7 @@ import dev.claudefleet.mobile.model.Commit
 import dev.claudefleet.mobile.model.CommitDetail
 import dev.claudefleet.mobile.model.FileContent
 import dev.claudefleet.mobile.model.FileDiff
+import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.RepoTree
 import dev.claudefleet.mobile.model.SessionRow
 import kotlinx.coroutines.CancellationException
@@ -39,6 +40,8 @@ sealed interface RepoView {
 
 data class RepoUiState(
     val session: SessionRow? = null,
+    /** The session's project, for its GitHub address (Open on GitHub, `#N` links); null when unknown. */
+    val project: ProjectRow? = null,
     val tab: RepoTab = RepoTab.Changes,
     /** Which tabs the hub serves (`HubCapabilities.repo` / `repoLog` / `repoFiles`). */
     val tabs: List<RepoTab> = emptyList(),
@@ -84,6 +87,11 @@ class RepoViewModel(
     private val downloads: DownloadActions,
     private val scope: CoroutineScope,
     private val canWrite: Boolean,
+    /**
+     * Where a read of the Files tab leaves the project's file names, for
+     * Search everywhere's "matches <file>"; null keeps them to this screen.
+     */
+    private val fileNames: ProjectFileNames? = null,
 ) {
     private data class Local(
         val tab: RepoTab? = null,
@@ -103,14 +111,16 @@ class RepoViewModel(
     private val local = MutableStateFlow(Local())
 
     val state: StateFlow<RepoUiState> =
-        combine(local, fleet.sessions, fleet.capabilities) { l, rows, caps ->
+        combine(local, fleet.sessions, fleet.capabilities, fleet.projects) { l, rows, caps, projects ->
             val tabs = buildList {
                 if (caps.repo) add(RepoTab.Changes)
                 if (caps.repoLog) add(RepoTab.History)
                 if (caps.repoFiles) add(RepoTab.Files)
             }
+            val session = rows.firstOrNull { it.id == sessionId }
             RepoUiState(
-                session = rows.firstOrNull { it.id == sessionId },
+                session = session,
+                project = session?.projectId?.let { id -> projects.firstOrNull { it.id == id } },
                 tab = l.tab?.takeIf { it in tabs } ?: tabs.firstOrNull() ?: RepoTab.Changes,
                 tabs = tabs,
                 changes = l.changes,
@@ -242,6 +252,7 @@ class RepoViewModel(
             RepoTab.Files -> {
                 val tree = actions.tree(sessionId)
                 local.update { it.copy(tree = tree) }
+                fleet.sessions.value.firstOrNull { it.id == sessionId }?.projectId?.let { fileNames?.record(it, tree.entries) }
             }
         }
     }

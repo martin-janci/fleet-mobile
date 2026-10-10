@@ -11,6 +11,7 @@ import dev.claudefleet.mobile.model.dollars
 import dev.claudefleet.mobile.model.relativeAgo
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.model.relativeWithin
+import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.ui.kit.StatusWord
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -56,6 +57,8 @@ data class AutomationUiState(
     val paused: Boolean? = null,
     /** The hub's built-in routines (8.1's loops), read-only; empty from an older hub. */
     val loops: List<LoopHealth> = emptyList(),
+    /** What the routines spent today, micro-USD (`routines { budget }`); null from a hub that does not say. */
+    val spentToday: Long? = null,
     /** What is being sent: `routine:<id>` or `pause`. */
     val busy: String? = null,
     val notice: String? = null,
@@ -89,6 +92,7 @@ class AutomationViewModel(
         val detail: RoutineDetail? = null,
         val paused: Boolean? = null,
         val loops: List<LoopHealth> = emptyList(),
+        val spentToday: Long? = null,
         val busy: String? = null,
         val notice: String? = null,
         val error: Friendly? = null,
@@ -110,6 +114,7 @@ class AutomationViewModel(
             detail = l.detail,
             paused = l.paused,
             loops = l.loops,
+            spentToday = l.spentToday,
             busy = l.busy,
             notice = l.notice,
             error = l.error,
@@ -190,7 +195,16 @@ class AutomationViewModel(
         try {
             val routines = actions.routines()
             val health = runCatching { actions.health() }.getOrNull()
-            local.update { it.copy(routines = routines, paused = health?.automationPaused ?: it.paused, loops = health?.loops ?: it.loops) }
+            // Today's spend, for More's line; a hub without `budget` says nothing and the line names none.
+            val budget = if (fleet.capabilities.value.has(HubCapabilities.ROUTINES, "budget")) runCatching { actions.budget() }.getOrNull() else null
+            local.update {
+                it.copy(
+                    routines = routines,
+                    paused = health?.automationPaused ?: it.paused,
+                    loops = health?.loops ?: it.loops,
+                    spentToday = budget?.spentMicros ?: it.spentToday,
+                )
+            }
             if (fleet.capabilities.value.runs) {
                 val all = actions.fleetRuns(RUNS_SHOWN)
                 local.update { it.copy(loading = false, fleetRuns = all, runs = emptyList()) }
@@ -241,14 +255,26 @@ class AutomationViewModel(
     }
 }
 
-/** The More row: "3 of 5 routines on", "Paused · 3 of 5 routines on", "No routines yet". */
-fun automationLine(routines: List<Routine>, paused: Boolean?): String {
-    val on = routines.count { it.enabled }
-    val count = when {
-        routines.isEmpty() -> "No routines yet"
-        else -> "$on of ${routines.size} routine${if (routines.size == 1) "" else "s"} on"
-    }
-    return if (paused == true) "Paused · $count" else "$count · Pause all"
+/**
+ * The More row's live line (MobileNav): "3 active · $4.10 today", "Paused ·
+ * 3 active", "No routines yet". Today's spend only where the hub said it
+ * ([spentMicros]); Pause all is the row's own button, not words in the line.
+ */
+fun automationLine(routines: List<Routine>, paused: Boolean?, spentMicros: Long? = null): String {
+    val count = if (routines.isEmpty()) "No routines yet" else "${routines.count { it.enabled }} active"
+    val parts = listOfNotNull("Paused".takeIf { paused == true }, count, spentMicros?.let { "${dollars(it)} today" })
+    return parts.joinToString(" · ")
+}
+
+/**
+ * The More row's inline button (MobileNav): Pause all while automation runs,
+ * Resume while it stands still; none before the state is read, for a device
+ * that may not write `automation.paused`, or while a change is on the wire.
+ */
+fun automationRowAction(state: AutomationUiState): String? = when {
+    !state.canPause || state.paused == null || state.busy != null -> null
+    state.paused == true -> "Resume"
+    else -> "Pause all"
 }
 
 /** A routine's line: when it runs next, or why it does not. */

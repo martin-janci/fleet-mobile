@@ -751,7 +751,7 @@ private fun LazyListScope.searchSections(
         items(hits.projects, key = { "search-project-${it.id}" }) { project ->
             PhoneRow(
                 title = project.label,
-                line = if (handlers.onNewSession != null) "New session in this project" else "Project",
+                line = hits.projectLine(project, if (handlers.onNewSession != null) "New session in this project" else "Project"),
                 dot = false,
                 lead = null,
                 onClick = if (handlers.onNewSession != null) ({ handlers.onSearchProject(project.id) }) else null,

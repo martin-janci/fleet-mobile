@@ -181,7 +181,13 @@ class SessionExtrasTest {
         )
         assertEquals(listOf("←", "→", "⌃"), terminalExtraKeys(listed.paneKeys).map { it.label })
         assertEquals(listOf("⌃D", "⌃R"), ctrlBarKeys(null, listed.paneKeys).map { it.label })
-        assertEquals(emptyList(), terminalExtraKeys(HubCapabilities.BASE_PANE_KEYS), "an older hub: no extra caps, and no Alt on any hub")
+        assertEquals(emptyList(), terminalExtraKeys(HubCapabilities.BASE_PANE_KEYS), "an older hub: no extra caps")
+        val withAlt = HubCapabilities(
+            tools = setOf(HubCapabilities.SEND_PROMPT),
+            paramValues = mapOf(HubCapabilities.SEND_PROMPT to mapOf(HubCapabilities.KEYS to setOf("Enter", "Escape", "Tab", "C-c", "M-b", "M-d"))),
+        )
+        assertEquals(listOf("⌥"), terminalExtraKeys(withAlt.paneKeys).map { it.label }, "G7.16: ⌥ where the hub lists a Meta chord")
+        assertEquals(listOf("⌥B", "⌥D"), altBarKeys(null, withAlt.paneKeys).map { it.label })
     }
 
     @Test

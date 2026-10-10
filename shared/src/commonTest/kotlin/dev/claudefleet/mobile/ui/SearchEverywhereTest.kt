@@ -38,4 +38,28 @@ class SearchEverywhereTest {
         assertTrue(hits.ticket)
         assertEquals("PAY-12", hits.query)
     }
+
+    @Test
+    fun a_project_holding_a_matching_file_name_says_which_file() {
+        val names = ProjectFileNames()
+        names.record(3, listOf("shared/", "shared/ui/HostsScreen.kt", "shared/ui/HostsViewModel.kt", "README.md"))
+        val hits = searchEverywhere("hosts", hosts, projects, ticketsAvailable = false, projectFiles = names.byProject.value)
+        assertEquals(listOf(3L), hits.projects.map { it.id })
+        assertEquals("matches HostsScreen.kt", hits.projectLine(projects[2], "New session in this project"))
+    }
+
+    @Test
+    fun a_project_found_by_its_name_comes_first_and_says_nothing_more() {
+        val files = mapOf(1L to listOf("src/Docs.kt"), 3L to listOf("guide/docs-index.md"))
+        val hits = searchEverywhere("docs", hosts, projects, ticketsAvailable = false, projectFiles = files)
+        assertEquals(listOf(3L, 1L), hits.projects.map { it.id })
+        assertEquals("New session in this project", hits.projectLine(projects[2], "New session in this project"))
+        assertEquals("matches Docs.kt", hits.projectLine(projects[0], "New session in this project"))
+    }
+
+    @Test
+    fun folder_names_and_whole_paths_do_not_count_as_a_file_match() {
+        assertEquals(null, fileNameMatch(listOf("hosts"), listOf("hosts/", "hosts/Main.kt")))
+        assertEquals("Hosts.kt", fileNameMatch(listOf("hosts"), listOf("a/HostsScreen.kt", "b/Hosts.kt")), "the shortest name wins")
+    }
 }

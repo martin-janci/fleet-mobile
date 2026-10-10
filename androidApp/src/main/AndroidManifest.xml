@@ -49,6 +49,19 @@
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
     <!--
+      The composer's mic (MobileSession): the system's speech recogniser,
+      started as an activity that asks for the microphone itself — so no
+      RECORD_AUDIO here. Android 11+ hides other apps' activities from a
+      lookup unless they are named, and the mic is drawn only when a
+      recogniser is found. See `Dictation.android.kt`.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
+    </queries>
+
+    <!--
       The credential must not leave the device it was issued to, and cannot
       survive being restored onto another one anyway: the Keystore master key
       that decrypts `EncryptedSharedPreferences` is not restorable with the file.

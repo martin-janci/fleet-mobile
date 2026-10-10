@@ -119,6 +119,7 @@ import dev.claudefleet.mobile.ui.AddProjectStep
 import dev.claudefleet.mobile.ui.AgentViewModel
 import dev.claudefleet.mobile.ui.ConfirmCards
 import dev.claudefleet.mobile.ui.ControlChrome
+import dev.claudefleet.mobile.ui.FormContext
 import dev.claudefleet.mobile.ui.ControlForms
 import dev.claudefleet.mobile.ui.ControlHeader
 import dev.claudefleet.mobile.ui.ControlViewModel
@@ -126,6 +127,8 @@ import dev.claudefleet.mobile.ui.ControlViews
 import dev.claudefleet.mobile.ui.ControlWaiting
 import dev.claudefleet.mobile.ui.controlForms
 import dev.claudefleet.mobile.ui.HandoffChips
+import dev.claudefleet.mobile.ui.TodayLink
+import dev.claudefleet.mobile.ui.asksAboutToday
 import dev.claudefleet.mobile.ui.FilesHandlers
 import dev.claudefleet.mobile.ui.FilesScreen
 import dev.claudefleet.mobile.ui.FilesViewModel
@@ -305,6 +308,9 @@ import dev.claudefleet.mobile.ui.AutomationHandlers
 import dev.claudefleet.mobile.ui.AutomationSheet
 import dev.claudefleet.mobile.ui.AutomationViewModel
 import dev.claudefleet.mobile.ui.automationLine
+import dev.claudefleet.mobile.ui.automationRowAction
+import dev.claudefleet.mobile.ui.MoreAction
+import dev.claudefleet.mobile.ui.PauseAllQuestion
 import dev.claudefleet.mobile.ui.DebugDevicesHandlers
 import dev.claudefleet.mobile.ui.DebugDevicesSheet
 import dev.claudefleet.mobile.ui.DebugDevicesViewModel
@@ -373,6 +379,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -460,10 +468,41 @@ class AppContainer(
     /** Taken exactly once. */
     fun consumeOpenSession(): Long? = _openSession.getAndUpdate { null }
 
+    /**
+     * A failed session's notification Retry (MobileControl): parked like
+     * [openSession], and taken by the paired screens, which open the session
+     * and send its last prompt again through the Inbox's own Retry — the
+     * same checks, on a device that may write, once the app is up.
+     */
+    private val _retrySession = MutableStateFlow<Long?>(null)
+    val retrySession: StateFlow<Long?> = _retrySession.asStateFlow()
+
+    /** The platform's entry point for a failure notification's Retry: open the session, then retry it there. */
+    fun onRetrySession(sessionId: Long) {
+        onOpenSession(sessionId)
+        _retrySession.value = sessionId
+    }
+
+    /** Taken exactly once. */
+    fun consumeRetrySession(): Long? = _retrySession.getAndUpdate { null }
+
+    /** A mission's notification (its tap or Review grant): open that mission, its grant card first. Parked like [openSession]. */
+    private val _openMission = MutableStateFlow<Long?>(null)
+    val openMission: StateFlow<Long?> = _openMission.asStateFlow()
+
+    fun onOpenMission(missionId: Long) {
+        _openMission.value = missionId
+    }
+
+    /** Taken exactly once. */
+    fun consumeOpenMission(): Long? = _openMission.getAndUpdate { null }
+
     /** Forget a parked notification tap: a new pairing may be another hub, where its id is another session. */
     fun dropOpenRequests() {
         _openSession.value = null
         _questionFocus.value = null
+        _retrySession.value = null
+        _openMission.value = null
     }
 
     /**
@@ -740,6 +779,9 @@ private fun Splash() {
 /** The splash knows no fleet yet: a fixed swarm, the manual's "22 sessions" board. */
 private const val SPLASH_PARTICLES = 22
 
+/** How long a notification's Retry waits for its session's row (a cold start connects first) before it gives up. */
+private const val RETRY_WAIT_MS = 30_000L
+
 /**
  * A scope for view models and the repository: composition-lived, but **not**
  * the UI dispatcher.
@@ -982,6 +1024,31 @@ private fun FleetRoute(
             }
         }
     }
+    // A failure notification's Retry: the session is opened above; once its
+    // row is here, the Inbox's own Retry sends its last prompt again (it
+    // checks the row still failed and this device may write).
+    val retryRequest by container.retrySession.collectAsState()
+    LaunchedEffect(retryRequest) {
+        if (retryRequest != null) {
+            container.consumeRetrySession()?.let { id ->
+                val row = withTimeoutOrNull(RETRY_WAIT_MS) { repository.sessions.first { rows -> rows.any { it.id == id } }.first { it.id == id } }
+                row?.let { inboxActions.retry(it, repository.capabilities.value.switchAccount) }
+            }
+        }
+    }
+    // A mission's notification: the mission's detail, its grant card first, over nothing else.
+    val missionRequest by container.openMission.collectAsState()
+    LaunchedEffect(missionRequest) {
+        if (missionRequest != null) {
+            container.consumeOpenMission()?.let { id ->
+                openOverSheets(
+                    id,
+                    closers = listOf({ today.close() }, { tidy.close() }, { tickets.close() }, { automation.close() }, { debugDevices.close() }, { pullRequests.close() }),
+                    open = { missions.openOne(it) },
+                )
+            }
+        }
+    }
     val workState by myWork.state.collectAsState()
     // The hub stopped serving the Work view (or a reconnect found an older
     // hub): the tab leaves the bar, and the app leaves the tab.
@@ -1167,8 +1234,9 @@ private fun FleetRoute(
                     val bulkState by bulk.state.collectAsState()
                     val searchHosts by repository.hosts.collectAsState()
                     val searchProjects by repository.projects.collectAsState()
-                    val hits = remember(state.filters.query, searchHosts, searchProjects, ticketsState.available) {
-                        searchEverywhere(state.filters.query, searchHosts, searchProjects, ticketsState.available)
+                    val searchFiles by repository.projectFiles.byProject.collectAsState()
+                    val hits = remember(state.filters.query, searchHosts, searchProjects, ticketsState.available, searchFiles) {
+                        searchEverywhere(state.filters.query, searchHosts, searchProjects, ticketsState.available, searchFiles)
                     }
                     val sessionsHandlers = SessionsHandlers(
                         onOpenSession = nav::open,
@@ -1708,7 +1776,7 @@ private fun FleetRoute(
                             if (missionsState.available) missions.refresh()
                         },
                         onOpenSession = nav::open,
-                        // Today is an Inbox view until Control grows its own.
+                        // Today opens here, and from Control when asked about the day (TodayLink).
                         onOpenToday = if (todayInbox.available) ({ today.open() }) else null,
                         anchors = tourAnchors,
                         accountNames = inboxList.accountNames,
@@ -1752,6 +1820,7 @@ private fun FleetRoute(
                     val subtitle = "${remember(controlRows, controlAccess) { inboxRows(controlRows, controlAccess).size }} need you"
                     val controlPrs by pullRequests.state.collectAsState()
                     val controlStatus by repository.status.collectAsState()
+                    val controlToday by today.state.collectAsState()
                     // Other sessions' waiting forms, answered from Control's chat (G5.2).
                     val otherForms: @Composable () -> Unit = {
                         if (settingsCaps.ask) {
@@ -1794,10 +1863,18 @@ private fun FleetRoute(
                                         ErrorBanner(controlState.error, onDismiss = control::dismissError)
                                     },
                                     aboveComposer = {
-                                        HandoffChips(controlState.handoffs, onOpenSession = nav::open)
+                                        HandoffChips(controlState.handoffs, onOpenSession = nav::open, watching = controlState.watchingCi)
+                                        // Asked about the day ("what did I ship today?"): the answer offers Today.
+                                        val asked = controlRows.firstOrNull { it.id == sessionId }?.lastPrompt
+                                        if (controlToday.available && asksAboutToday(asked)) TodayLink { today.open() }
                                         otherForms()
                                         ConfirmCards(controlState) { nonce, ok -> control.answer(nonce, ok) }
                                     },
+                                    formContext = FormContext(
+                                        rows = controlRows,
+                                        onOpenSession = nav::open,
+                                        proposeHost = (container.chatFormActions::proposeHost).takeIf { settingsCaps.hostPlacement },
+                                    ),
                                 ),
                             )
                         }
@@ -1824,6 +1901,10 @@ private fun FleetRoute(
                     val moreStatus by repository.status.collectAsState()
                     LaunchedEffect(automationState.available) { if (automationState.available) automation.refresh() }
                     LaunchedEffect(debugDevicesState.available) { if (debugDevicesState.available) debugDevices.refresh() }
+                    var askPauseAll by remember { mutableStateOf(false) }
+                    if (askPauseAll) {
+                        PauseAllQuestion(onPause = { askPauseAll = false; automation.setPaused(true) }, onDismiss = { askPauseAll = false })
+                    }
                     MoreScreen(
                         subtitle = moreSubtitle(hubLabel(credentials.hub), credentials.canWrite),
                         footer = moreFooter(container.appVersion, moreHubVersion, hostRows, moreStatus is ConnectionStatus.Connected),
@@ -1836,7 +1917,24 @@ private fun FleetRoute(
                             }
                             if (automationState.available) {
                                 // Routines, their runs and Pause all (8.9); Missions open from inside.
-                                add(MoreEntry("Automation", automationLine(automationState.routines, automationState.paused)) { automation.open() })
+                                // Pause all is the row's own button (MobileNav), and asks first.
+                                val pauseWord = automationRowAction(automationState)
+                                add(
+                                    MoreEntry(
+                                        "Automation",
+                                        automationLine(automationState.routines, automationState.paused, automationState.spentToday),
+                                        action = pauseWord?.let { word ->
+                                            MoreAction(word) {
+                                                if (automationState.paused == true) {
+                                                    automation.setPaused(false)
+                                                } else {
+                                                    askPauseAll = true
+                                                }
+                                                Unit
+                                            }
+                                        },
+                                    ) { automation.open() },
+                                )
                             } else if (missionsState.available) {
                                 add(MoreEntry("Automation", "Missions, and Pause all") { nav.openMissions() })
                             }
@@ -2624,6 +2722,7 @@ private fun SessionRoute(
                 downloads = container.downloadActions,
                 scope = scope,
                 canWrite = credentials.canWrite,
+                fileNames = repository.projectFiles,
             )
         }
     } else {
@@ -2998,6 +3097,7 @@ private fun RepoRoute(
             downloads = container.downloadActions,
             scope = scope,
             canWrite = credentials.canWrite,
+            fileNames = repository.projectFiles,
         )
     }
     LaunchedEffect(vm) { vm.load() }

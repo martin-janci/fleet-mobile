@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.epochSeconds
+import dev.claudefleet.mobile.ui.ProjectFileNames
 import dev.claudefleet.mobile.ui.explain
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.HostRow
@@ -139,6 +140,13 @@ class FleetRepository(
 
     private val _projects = MutableStateFlow<List<ProjectRow>>(emptyList())
     override val projects: StateFlow<List<ProjectRow>> = _projects.asStateFlow()
+
+    /**
+     * The project file names a session's Files tab read this run, which
+     * Search everywhere matches (gap plan G7.17); this hub's only, so they go
+     * with the repository on a re-pair.
+     */
+    val projectFiles: ProjectFileNames = ProjectFileNames()
 
     private val _status = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Offline(NOT_STARTED))
     override val status: StateFlow<ConnectionStatus> = _status.asStateFlow()

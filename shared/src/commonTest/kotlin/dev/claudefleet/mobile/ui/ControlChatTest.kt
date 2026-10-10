@@ -374,4 +374,39 @@ class OrbitChatFormTest {
         assertEquals("◷ Deploy · expired", formOutcomeLine(f.copy(state = "expired")))
         assertEquals("✕ Deploy · withdrawn by the agent", formOutcomeLine(f.copy(state = "cancelled")))
     }
+
+    /** MobileControl: "Watching CI on #476 and #477", the Atom's line, from the handed-on sessions' PRs. */
+    @Test
+    fun control_watches_ci_on_the_prs_of_the_sessions_it_handed_work_to() {
+        val handoffs = listOf(
+            ControlHandoff(id = 1, kind = "session", sessionId = 5),
+            ControlHandoff(id = 2, kind = "session", sessionId = 6),
+            ControlHandoff(id = 3, kind = "session", sessionId = 7),
+            ControlHandoff(id = 4, kind = "mission", missionId = 2),
+        )
+        val rows = listOf(
+            SessionRow(id = 5, prUrl = "https://github.com/o/r/pull/477", ciStatus = "pending"),
+            SessionRow(id = 6, prUrl = "https://github.com/o/r/pull/476", ciStatus = "pending"),
+            SessionRow(id = 7, prUrl = "https://github.com/o/r/pull/478", ciStatus = "passing"),
+            SessionRow(id = 8, prUrl = "https://github.com/o/r/pull/479", ciStatus = "pending"),
+        )
+        assertEquals("Watching CI on #476 and #477", watchingCiLine(handoffs, rows))
+        assertEquals("Watching CI on #477", watchingCiLine(handoffs.take(1), rows))
+        val three = rows + SessionRow(id = 9, prUrl = "https://github.com/o/r/pull/12", ciStatus = "pending")
+        assertEquals("Watching CI on #12, #476 and #477", watchingCiLine(handoffs + ControlHandoff(id = 5, kind = "session", sessionId = 9), three))
+        assertNull(watchingCiLine(handoffs, rows.map { it.copy(ciStatus = "passing") }), "nothing runs: no watch")
+        assertNull(watchingCiLine(emptyList(), rows), "a session Control did not hand work to is not its watch")
+    }
+
+    /** MobileSessionsTools: Today opens from a Control answer ("what did I ship today?"). */
+    @Test
+    fun a_question_about_the_day_offers_today() {
+        assertTrue(asksAboutToday("what did I ship today?"))
+        assertTrue(asksAboutToday("What got merged this morning"))
+        assertTrue(asksAboutToday("Give me a recap of today"))
+        assertFalse(asksAboutToday("Run the tests today"), "a plan for today is not a recap")
+        assertFalse(asksAboutToday("what did I ship yesterday?"))
+        assertFalse(asksAboutToday(null))
+        assertFalse(asksAboutToday("  "))
+    }
 }

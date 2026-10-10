@@ -49,6 +49,8 @@ import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.TidyReport
 import dev.claudefleet.mobile.model.Mission
 import dev.claudefleet.mobile.model.FailingRoutine
+import dev.claudefleet.mobile.model.RoutineBudget
+import dev.claudefleet.mobile.model.SuggestedHost
 import dev.claudefleet.mobile.model.BranchDiff
 import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.DebugDevice
@@ -1048,6 +1050,16 @@ class HubClient(
 
     // ---- chat forms (claude-fleet contract revision 9, `ask`) ----
 
+    /**
+     * Jev's host for a new session of [projectId] (`propose_host_placement`),
+     * or null when the hub has none to propose (outside `assist`, one host
+     * left, the model unsure).
+     */
+    suspend fun proposeHostPlacement(projectId: Long): SuggestedHost? =
+        call("propose_host_placement", buildJsonObject { put("project_id", projectId) }) {
+            if (it is JsonNull) null else json.decodeFromJsonElement(SuggestedHost.serializer(), it)
+        }
+
     /** One form: its spec, why the agent asks, and its state. */
     suspend fun askGet(formId: String): FormView =
         call("ask", buildJsonObject { put("get", formId) }) { json.decodeFromJsonElement(FormView.serializer(), it) }
@@ -1471,6 +1483,12 @@ class HubClient(
     suspend fun routines(): List<Routine> =
         call("routines", buildJsonObject { put("action", "list") }) {
             json.decodeFromJsonElement(ListSerializer(Routine.serializer()), it)
+        }
+
+    /** The fleet's routine spend today and its budget (`routines { budget }`): More's Automation line. */
+    suspend fun routineBudget(): RoutineBudget =
+        call("routines", buildJsonObject { put("action", "budget") }) {
+            json.decodeFromJsonElement(RoutineBudget.serializer(), it)
         }
 
     /** Each routine whose newest run failed, newest failure first: the background watcher's Routine failed. */

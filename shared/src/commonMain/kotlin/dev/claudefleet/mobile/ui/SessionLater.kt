@@ -237,6 +237,10 @@ const val SEND_LATER_SKIP_TAG = "session.sendLater.skip"
  * limit again, and can drop it if the session is archived first. A hub
  * without those offers "when idle" only. Lists what is still waiting, each
  * with when it goes and Take back.
+ *
+ * Opened from ⋮ Send later… with an empty prompt, or from the composer's
+ * clock with what is typed there ([initialText]); [onQueued] hears each
+ * prompt handed to the hub, so the composer can let go of the one it gave.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -246,8 +250,10 @@ internal fun SendLaterSheet(
     onDismiss: () -> Unit,
     now: () -> Long = { epochSeconds() },
     utcOffset: (Long) -> Int = { utcOffsetSeconds(it) },
+    initialText: String = "",
+    onQueued: (String) -> Unit = {},
 ) {
-    var text by remember { mutableStateOf("") }
+    var text by remember { mutableStateOf(initialText) }
     var choice by remember { mutableStateOf(SendLaterWhen.Idle) }
     var clock by remember { mutableStateOf("") }
     var skip by remember { mutableStateOf(false) }
@@ -277,6 +283,7 @@ internal fun SendLaterSheet(
             val timing = sendLaterTiming(choice, now(), utcOffset, clock, skip && state.sendLaterSkipAvailable)
             if (timing != null) {
                 host.onSendLater(text, timing)
+                onQueued(text)
                 text = ""
             }
         },

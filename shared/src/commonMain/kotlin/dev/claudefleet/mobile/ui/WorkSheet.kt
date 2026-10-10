@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -32,6 +31,8 @@ import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.TicketCardBody
 import dev.claudefleet.mobile.ui.components.WorkStatusDot
+import dev.claudefleet.mobile.ui.kit.BottomSheet
+import dev.claudefleet.mobile.ui.kit.SheetAction
 
 /** What the session screen can do about its work — every one a no-op until wired. */
 data class SessionWorkHandlers(
@@ -194,26 +195,25 @@ private fun OpenTicketButton(work: WorkSummary) {
     TextButton(onClick = { runCatching { uri.openUri(url) } }) { Text("Open in browser") }
 }
 
-/** *Set work…*: a key such as `PAY-7`, or a pasted ticket URL. */
+/** *Set work…*: a key such as `PAY-7`, or a pasted ticket URL. A sheet, not a dialog (MobileFormsSession). */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SetWorkDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
     var text by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Set work") },
-        text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                label = { Text("Key or ticket URL") },
-                singleLine = true,
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) { Text("Set") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    BottomSheet(
+        title = "Set work",
+        onDismiss = onDismiss,
+        primary = SheetAction("Set", enabled = text.isNotBlank()) { onConfirm(text) },
+        scrollable = true,
+    ) {
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            label = { Text("Key or ticket URL") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 /**
@@ -222,6 +222,7 @@ fun SetWorkDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
  * The hub owns the rules; the view model checks the title first so a bad
  * one is said at once.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkTitleDialog(
     heading: String,
@@ -233,35 +234,31 @@ fun WorkTitleDialog(
 ) {
     var title by remember { mutableStateOf(initialTitle) }
     var key by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(heading) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("What is this work?") },
-                    singleLine = true,
-                    supportingText = { Text("${title.trim().length} / $WORK_TITLE_MAX") },
-                    isError = title.trim().length > WORK_TITLE_MAX,
-                )
-                if (askKey) {
-                    OutlinedTextField(
-                        value = key,
-                        onValueChange = { key = it },
-                        label = { Text("Key (optional), like OPS-1") },
-                        singleLine = true,
-                    )
-                }
-            }
+    BottomSheet(
+        title = heading,
+        onDismiss = onDismiss,
+        primary = SheetAction(confirmLabel, enabled = title.isNotBlank()) {
+            onConfirm(title, key.takeIf { askKey && it.isNotBlank() })
         },
-        confirmButton = {
-            TextButton(
-                onClick = { onConfirm(title, key.takeIf { askKey && it.isNotBlank() }) },
-                enabled = title.isNotBlank(),
-            ) { Text(confirmLabel) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+        scrollable = true,
+    ) {
+        OutlinedTextField(
+            value = title,
+            onValueChange = { title = it },
+            label = { Text("What is this work?") },
+            singleLine = true,
+            supportingText = { Text("${title.trim().length} / $WORK_TITLE_MAX") },
+            isError = title.trim().length > WORK_TITLE_MAX,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (askKey) {
+            OutlinedTextField(
+                value = key,
+                onValueChange = { key = it },
+                label = { Text("Key (optional), like OPS-1") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
 }

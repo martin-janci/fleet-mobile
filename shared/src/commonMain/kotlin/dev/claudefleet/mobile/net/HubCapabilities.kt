@@ -69,6 +69,14 @@ data class HubCapabilities(
     val handoffs: Boolean get() = CONTROL_HANDOFFS in tools
 
     /**
+     * Jev's host for a project's next session (`propose_host_placement`, N5
+     * `host_placement`): "Proposed by Jev" on a form's host choice in
+     * Control's chat. Listed to a phone only once the hub opens it to client
+     * tokens; until then the choice simply has no proposal.
+     */
+    val hostPlacement: Boolean get() = PROPOSE_HOST_PLACEMENT in tools
+
+    /**
      * The hub keeps the composer's chip row (`quick_replies`). Absent on a hub
      * older than that tool — the app then draws its cached chips and never
      * tries to sync them — and absent for a `readonly` token, which the hub
@@ -328,6 +336,7 @@ data class HubCapabilities(
         const val MCP_CONFIRMS = "mcp_confirms"
         const val ANSWER_MCP_CONFIRM = "answer_mcp_confirm"
         const val CONTROL_HANDOFFS = "control_handoffs"
+        const val PROPOSE_HOST_PLACEMENT = "propose_host_placement"
         const val QUICK_REPLIES = "quick_replies"
         const val SESSION_TOOL_DETAIL = "session_tool_detail"
         const val LIST_PAGES = "list_pages"
@@ -406,7 +415,18 @@ data class HubCapabilities(
             "C-o", "C-p", "C-r", "C-t", "C-u", "C-v", "C-w", "C-x", "C-y",
         )
         val ARROW_KEYS: List<String> = listOf("Left", "Up", "Down", "Right")
-        val EXTENDED_PANE_KEYS: Set<String> = (ARROW_KEYS + "BTab" + CTRL_KEYS).toSet()
+
+        /**
+         * The Alt (Meta) chords the bar's ⌥ row offers, in tmux's names (gap
+         * plan G7.3/G7.16): the readline word moves and edits, `M-.` for the
+         * last argument and `M-Enter`, which is a new line in Claude Code's
+         * prompt. Hubs before G7.3 refuse every Meta chord and do not list
+         * one, so the ⌥ cap only appears on a hub whose `keys` enum names one.
+         */
+        val META_KEYS: List<String> = listOf(
+            "M-b", "M-f", "M-d", "M-BSpace", "M-u", "M-l", "M-c", "M-t", "M-y", "M-.", "M-Enter",
+        )
+        val EXTENDED_PANE_KEYS: Set<String> = (ARROW_KEYS + "BTab" + CTRL_KEYS + META_KEYS).toSet()
 
         fun of(catalog: ToolCatalog) =
             HubCapabilities(catalog.names, catalog.actions, params = catalog.params, paramValues = catalog.paramValues)

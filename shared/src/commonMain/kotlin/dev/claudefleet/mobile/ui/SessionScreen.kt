@@ -74,13 +74,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
@@ -90,6 +90,7 @@ import androidx.compose.material3.InputChip
 import androidx.compose.material3.InputChipDefaults
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -132,6 +133,7 @@ import dev.claudefleet.mobile.model.RepairReport
 import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.tailMarker
+import dev.claudefleet.mobile.model.thinkingLine
 import dev.claudefleet.mobile.ui.components.BlockedCardView
 import dev.claudefleet.mobile.ui.components.CompactChip
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
@@ -167,8 +169,12 @@ import kotlin.time.Duration.Companion.milliseconds
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.IconButtonDefaults
+import dev.claudefleet.mobile.ui.kit.Atom
+import dev.claudefleet.mobile.ui.kit.BottomSheet
 import dev.claudefleet.mobile.ui.kit.Comet
 import dev.claudefleet.mobile.ui.kit.InlineLoading
+import dev.claudefleet.mobile.ui.kit.SheetAction
+import dev.claudefleet.mobile.ui.kit.SheetOption
 import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 
 /** The conversation list, for the device test that checks it follows new output. */
@@ -404,6 +410,18 @@ fun SessionScreen(
     val agentFull = tabs != null && full == SessionFull.Agent
     var promptFocused by remember { mutableStateOf(false) }
     var focusPrompt by remember { mutableStateOf(false) }
+    // The composer's clock (MobileSessionExtras): Send later's sheet, opened
+    // on what was typed. Once that prompt is with the hub the box lets go of it.
+    var laterDraft by remember { mutableStateOf<String?>(null) }
+    laterDraft?.let { typed ->
+        SendLaterSheet(
+            state,
+            later,
+            onDismiss = { laterDraft = null },
+            initialText = typed,
+            onQueued = { sent -> if (state.draft.trim() == sent.trim()) onDraftChange("") },
+        )
+    }
     val focusManager = LocalFocusManager.current
     val readingWatch = remember(direction) {
         object : NestedScrollConnection {
@@ -892,6 +910,7 @@ fun SessionScreen(
                         closedForm = null
                     }.takeIf { !state.readOnly && state.connected },
                     seed = draftAnswers,
+                    formContext = control?.formContext,
                 )
             }
             control?.aboveComposer?.invoke()
@@ -1072,6 +1091,8 @@ fun SessionScreen(
                                     onAnswerInWords = { scrollToNewest(); onAnswerInWords() },
                                     // The New bar names what Send does while Claude works: Queue.
                                     queueLabel = tabs != null && state.session?.claudeStatus == "working",
+                                    // New bar only, like ⋮ Send later… whose sheet it opens.
+                                    onSendLater = { laterDraft = state.draft }.takeIf { tabs != null && state.canSendLater },
                                 )
                             }
                             // The pill a folded footer leaves. A tap is someone
@@ -1179,19 +1200,51 @@ private fun LazyListScope.turnItems(rows: List<TurnRow>, working: Boolean, repli
         // width is too long to follow back to its start.
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
             Box(modifier = Modifier.widthIn(max = READING_WIDTH)) {
-                Turn(
-                    row.turn,
-                    live = live,
-                    // Not on the live turn: it is still being written, and the
-                    // hub refuses a rewind of a session that is not quiet.
-                    footer = if (replies != null && !live) {
-                        { ReplyMenu(row.turn, chronological = rows.size - 1 - index, host = replies) }
-                    } else {
-                        null
-                    },
-                )
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Turn(
+                        row.turn,
+                        live = live,
+                        // Not on the live turn: it is still being written, and the
+                        // hub refuses a rewind of a session that is not quiet.
+                        footer = if (replies != null && !live) {
+                            { ReplyMenu(row.turn, chronological = rows.size - 1 - index, host = replies) }
+                        } else {
+                            null
+                        },
+                    )
+                    // Inside the live turn's own item, not an item of its
+                    // own: index 0 stays the newest turn for the follow,
+                    // the jump pill and the remembered scroll position.
+                    if (live) ThinkingLine(thinkingLine(row.turn))
+                }
             }
         }
+    }
+}
+
+/**
+ * The tail of a working session's conversation (MobileSession): a small Atom
+ * and what Claude is doing — "Thinking", or "Thinking · reading
+ * HostsViewModel.kt" ([thinkingLine]). Read out as the line alone; the
+ * Atom's own "Building" would say nothing more.
+ */
+@Composable
+private fun ThinkingLine(line: String) {
+    Row(
+        modifier = Modifier
+            .padding(start = 12.dp, end = 12.dp, top = 4.dp)
+            .clearAndSetSemantics { contentDescription = line },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Atom(size = 20.dp)
+        Text(
+            line,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -1800,54 +1853,40 @@ private fun SessionOverflowMenu(
     }
 
     picking?.let { command ->
-        AlertDialog(
-            onDismissRequest = { picking = null },
-            title = { Text(if (command == "model") "Switch the model" else "Set the effort") },
-            text = {
-                Column(modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
-                    for (option in if (command == "model") MODEL_OPTIONS else EFFORT_OPTIONS) {
-                        Text(
-                            option.label,
-                            style = MaterialTheme.typography.bodyLarge,
-                            modifier = Modifier.fillMaxWidth().clickable {
-                                picking = null
-                                pickerCommand(command, option.value)?.let(onSendCommand)
-                            }.padding(vertical = 12.dp),
-                        )
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { picking = null }) { Text("Cancel") } },
+        PickerSheet(
+            command = command,
+            onPick = { value -> picking = null; pickerCommand(command, value)?.let(onSendCommand) },
+            onDismiss = { picking = null },
         )
     }
     if (showReview) {
         ReviewDialog(onStart = { showReview = false; onReview(it) }, onDismiss = { showReview = false })
     }
     if (showRepairConfirm) {
-        AlertDialog(
-            onDismissRequest = { showRepairConfirm = false },
-            title = { Text("Repair the workspace?") },
-            text = { Text("Makes the session's directory a healthy git worktree on its branch, with its pane running there. Nothing happens to a healthy one.") },
-            confirmButton = { TextButton(onClick = { showRepairConfirm = false; onRepair() }) { Text("Repair") } },
-            dismissButton = { TextButton(onClick = { showRepairConfirm = false }) { Text("Cancel") } },
+        ConfirmSheet(
+            title = "Repair the workspace?",
+            body = "Makes the session's directory a healthy git worktree on its branch, with its pane running there. Nothing happens to a healthy one.",
+            confirm = "Repair",
+            onConfirm = { showRepairConfirm = false; onRepair() },
+            onDismiss = { showRepairConfirm = false },
         )
     }
     if (showRecreateConfirm) {
-        AlertDialog(
-            onDismissRequest = { showRecreateConfirm = false },
-            title = { Text("Recreate this session?") },
-            text = { Text("Its tmux session is killed and rebuilt in the same worktree, resuming the same conversation. The process does not survive; the conversation does.") },
-            confirmButton = { TextButton(onClick = { showRecreateConfirm = false; onRecreate() }) { Text("Recreate") } },
-            dismissButton = { TextButton(onClick = { showRecreateConfirm = false }) { Text("Cancel") } },
+        ConfirmSheet(
+            title = "Recreate this session?",
+            body = "Its tmux session is killed and rebuilt in the same worktree, resuming the same conversation. The process does not survive; the conversation does.",
+            confirm = "Recreate",
+            onConfirm = { showRecreateConfirm = false; onRecreate() },
+            onDismiss = { showRecreateConfirm = false },
         )
     }
     if (showDismissGhostConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDismissGhostConfirm = false },
-            title = { Text("Dismiss this lost session?") },
-            text = { Text("Its row is deleted for good. Its conversation stays on the host, and can still be found from the host's sheet.") },
-            confirmButton = { TextButton(onClick = { showDismissGhostConfirm = false; onDismissGhost() }) { Text("Dismiss") } },
-            dismissButton = { TextButton(onClick = { showDismissGhostConfirm = false }) { Text("Cancel") } },
+        ConfirmSheet(
+            title = "Dismiss this lost session?",
+            body = "Its row is deleted for good. Its conversation stays on the host, and can still be found from the host's sheet.",
+            confirm = "Dismiss",
+            onConfirm = { showDismissGhostConfirm = false; onDismissGhost() },
+            onDismiss = { showDismissGhostConfirm = false },
         )
     }
     if (showSetWork && onSetWork != null) {
@@ -1914,32 +1953,24 @@ private fun ManageDialogs(
         )
     }
     if (showRestartConfirm) {
-        AlertDialog(
-            onDismissRequest = hideRestartConfirm,
-            title = { Text("Restart this session?") },
-            text = { Text("This kills and recreates the tmux session in place — for a wedged REPL.") },
-            confirmButton = {
-                TextButton(onClick = { hideRestartConfirm(); onRestart() }) { Text("Restart") }
-            },
-            dismissButton = { TextButton(onClick = hideRestartConfirm) { Text("Cancel") } },
+        ConfirmSheet(
+            title = "Restart this session?",
+            body = "This kills and recreates the tmux session in place — for a wedged REPL.",
+            confirm = "Restart",
+            onConfirm = { hideRestartConfirm(); onRestart() },
+            onDismiss = hideRestartConfirm,
         )
     }
     // Retiring ends the session once its work is saved: asked first, like
     // Restart. No delayed enable — that is Kill now's, which cannot wait.
     if (showSafeKillConfirm) {
-        AlertDialog(
-            onDismissRequest = hideSafeKillConfirm,
-            title = { Text("Retire this session?") },
-            text = {
-                Text(
-                    "Claude is asked to commit and push its work. Once the tree is clean, " +
-                        "the session and its worktree are removed.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { hideSafeKillConfirm(); onSafeKill() }) { Text("Retire") }
-            },
-            dismissButton = { TextButton(onClick = hideSafeKillConfirm) { Text("Cancel") } },
+        ConfirmSheet(
+            title = "Retire this session?",
+            body = "Claude is asked to commit and push its work. Once the tree is clean, " +
+                "the session and its worktree are removed.",
+            confirm = "Retire",
+            onConfirm = { hideSafeKillConfirm(); onSafeKill() },
+            onDismiss = hideSafeKillConfirm,
         )
     }
     if (showKillConfirm) {
@@ -1950,28 +1981,66 @@ private fun ManageDialogs(
     }
 }
 
-/** ⋮ Review…'s prompt, and the Details tab's Review… (r09 B18). */
+/** ⋮ Review…'s prompt, and the Details tab's Review… (r09 B18). A sheet, not a dialog (MobileFormsSession). */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ReviewDialog(onStart: (String) -> Unit, onDismiss: () -> Unit) {
     var prompt by remember { mutableStateOf(DEFAULT_REVIEW_PROMPT) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Review this worktree") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("A new session in this session's worktree, seeded with the prompt below. It reviews the worktree as it is now.")
-                TextField(
-                    value = prompt,
-                    onValueChange = { prompt = it },
-                    minLines = 4,
-                    maxLines = 10,
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = { onStart(prompt) }, enabled = prompt.isNotBlank()) { Text("Start review") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    BottomSheet(
+        title = "Review this worktree",
+        meta = "A new session in this session's worktree, seeded with the prompt below. It reviews the worktree as it is now.",
+        onDismiss = onDismiss,
+        primary = SheetAction("Start review", enabled = prompt.isNotBlank()) { onStart(prompt) },
+        scrollable = true,
+    ) {
+        OutlinedTextField(
+            value = prompt,
+            onValueChange = { prompt = it },
+            label = { Text("Prompt") },
+            minLines = 4,
+            maxLines = 10,
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
+        )
+    }
+}
+
+/**
+ * ⋮ Model… and ⋮ Effort…: the choices as the kit's radio rows, nothing
+ * picked until the person picks, then Switch / Set at the thumb. What it
+ * sends is [pickerCommand]'s `/model <alias>` or `/effort <level>`.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PickerSheet(command: String, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    val model = command == "model"
+    var chosen by remember(command) { mutableStateOf<String?>(null) }
+    BottomSheet(
+        title = if (model) "Switch the model" else "Set the effort",
+        meta = if (model) "Sent to the session as /model." else "Sent to the session as /effort.",
+        onDismiss = onDismiss,
+        primary = SheetAction(if (model) "Switch" else "Set", enabled = chosen != null) { chosen?.let(onPick) },
+        scrollable = true,
+    ) {
+        for (option in if (model) MODEL_OPTIONS else EFFORT_OPTIONS) {
+            SheetOption(
+                title = option.label,
+                selected = option.value == chosen,
+                onSelect = { chosen = option.value },
+            )
+        }
+    }
+}
+
+/**
+ * A question before something that cannot be taken back (MobileFormsSession:
+ * a sheet, not a dialog): the title asks, [body] says what happens, and
+ * Cancel and [confirm] sit at the thumb.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ConfirmSheet(title: String, body: String, confirm: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    BottomSheet(title = title, meta = body, onDismiss = onDismiss, primary = SheetAction(confirm, onClick = onConfirm)) {}
 }
 
 /**
@@ -1981,6 +2050,7 @@ internal fun ReviewDialog(onStart: (String) -> Unit, onDismiss: () -> Unit) {
  * [KILL_CONFIRM_DELAY] after the dialog opens, which is long enough that a
  * dialog dismissed by a stray tap cannot also kill the session.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun KillConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
     var enabled by remember { mutableStateOf(false) }
@@ -1988,22 +2058,13 @@ internal fun KillConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
         delay(KILL_CONFIRM_DELAY)
         enabled = true
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Kill this session now?") },
-        text = {
-            Text(
-                "This kills it immediately, without waiting for it to persist anything. " +
-                    "This cannot be undone.",
-            )
-        },
-        confirmButton = {
-            DangerTextButton(onClick = onConfirm, enabled = enabled) {
-                Text("Kill now")
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    BottomSheet(
+        title = "Kill this session now?",
+        meta = "This kills it immediately, without waiting for it to persist anything. " +
+            "This cannot be undone.",
+        onDismiss = onDismiss,
+        primary = SheetAction("Kill now", enabled = enabled, onClick = onConfirm),
+    ) {}
 }
 
 /**
@@ -2136,14 +2197,14 @@ private fun ReplyMenu(turn: ConvTurn, chronological: Int, host: ReplyHost) {
         }
     }
     when (asking) {
-        ReplyAsk.Rewind -> ConfirmRewind(
+        ReplyAsk.Rewind -> ConfirmSheet(
             title = "Rewind here?",
             body = "This prompt and everything after it leave the session's conversation, and the session restarts on what is left. The original transcript is kept.",
             confirm = "Rewind",
             onConfirm = { view.rewindAnchor?.let(host.onRewind); asking = null },
             onDismiss = { asking = null },
         )
-        ReplyAsk.Retry -> ConfirmRewind(
+        ReplyAsk.Retry -> ConfirmSheet(
             title = "Retry this prompt?",
             body = "The session rewinds to before this prompt, then the same prompt is sent again. The original transcript is kept.",
             confirm = "Retry",
@@ -2170,17 +2231,6 @@ private fun ReplyMenu(turn: ConvTurn, chronological: Int, host: ReplyHost) {
 }
 
 private enum class ReplyAsk { Rewind, Retry, Fork }
-
-@Composable
-private fun ConfirmRewind(title: String, body: String, confirm: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = { Text(body) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(confirm) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
 
 /**
  * What the person sent, folded to [PROMPT_FOLD_LINES] when it is longer: a
@@ -2628,6 +2678,7 @@ internal fun conversationCaption(c: ConversationSummary, nowSeconds: Long): Stri
         relativeAgo(c.startedAt, nowSeconds),
     ).joinToString(" · ")
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ConversationsDialog(
     conversations: List<ConversationSummary>,
@@ -2636,35 +2687,31 @@ private fun ConversationsDialog(
     onPick: (ConversationSummary) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Conversations") },
-        text = {
-            Column(modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                for ((index, c) in conversations.withIndex()) {
-                    val shown = if (viewing == null) c.current else c.claudeSessionId == viewing.claudeSessionId
-                    Column(
-                        modifier = Modifier.fillMaxWidth().clickable { onPick(c) }.padding(vertical = 10.dp),
-                    ) {
-                        Text(
-                            (if (c.current) "Current · " else "") + (c.firstPrompt?.takeIf { it.isNotBlank() } ?: "(no prompt)"),
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = if (shown) FontWeight.Bold else null,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            conversationCaption(c, nowSeconds),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    if (index != conversations.lastIndex) HorizontalDivider()
+    // A list to pick from, so no verb: a tap picks, Close backs out.
+    BottomSheet(title = "Conversations", onDismiss = onDismiss, cancelLabel = "Close", scrollable = true) {
+        Column {
+            for ((index, c) in conversations.withIndex()) {
+                val shown = if (viewing == null) c.current else c.claudeSessionId == viewing.claudeSessionId
+                Column(
+                    modifier = Modifier.fillMaxWidth().clickable { onPick(c) }.padding(vertical = 10.dp),
+                ) {
+                    Text(
+                        (if (c.current) "Current · " else "") + (c.firstPrompt?.takeIf { it.isNotBlank() } ?: "(no prompt)"),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (shown) FontWeight.Bold else null,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        conversationCaption(c, nowSeconds),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
+                if (index != conversations.lastIndex) HorizontalDivider()
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
+        }
+    }
 }
 
 @Composable
@@ -2696,9 +2743,17 @@ private fun PromptBox(
     agent: String? = null,
     /** New bar while Claude works: Send is a "Queue" button, since the message waits its turn. */
     queueLabel: Boolean = false,
+    /**
+     * The composer's clock (MobileSessionExtras: "the clock in the composer
+     * opens this"): Send later with what is typed. Null where the hub keeps
+     * no prompts for later or this person may not drive the session.
+     */
+    onSendLater: (() -> Unit)? = null,
 ) {
     val haptics = LocalHapticFeedback.current
     var showHistory by remember { mutableStateOf(false) }
+    // The mic (MobileSession): what it hears goes after what is typed, unsent.
+    val dictate = rememberDictation { heard -> onDraftChange(withDictation(state.draft, heard)) }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(focusNow) {
         if (focusNow) {
@@ -2720,6 +2775,18 @@ private fun PromptBox(
             state.session == null -> if (state.streaming) "This session is gone." else "Reading the fleet…"
             else -> null
         }
+        // Typing is open: no read-only pairing, and no question up that only its buttons answer.
+        val typing = !state.readOnly && (state.card == null || wordsMode)
+        // The desktop's ⏎ chip, where it costs no room: inside an empty
+        // field, gone the moment there is a draft to send. Never while the
+        // card is up: on a permission dialog Enter picks the highlighted
+        // option — it approves. The card's own Enter is the one that checks
+        // the dialog first.
+        val enterKey = state.draft.isEmpty() && state.canSendQuick && state.card == null
+        // The clock takes the ⏎'s place once there is a draft: it carries the
+        // typed words to the sheet. An empty box still has ⋮ Send later….
+        val laterKey = onSendLater.takeIf { state.draft.isNotBlank() && state.card == null }
+        val micKey = dictate.takeIf { typing }
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextField(
                 value = state.draft,
@@ -2730,7 +2797,7 @@ private fun PromptBox(
                     .onFocusChanged { onFocusChange(it.isFocused) },
                 // Not disabled while a prompt is out: that dropped the
                 // keyboard on every send. The next one waits on Send instead.
-                enabled = !state.readOnly && (state.card == null || wordsMode),
+                enabled = typing,
                 // One line: a long session name wrapped the placeholder
                 // onto a second row and made an empty field look filled.
                 placeholder = {
@@ -2752,15 +2819,25 @@ private fun PromptBox(
                         Icon(FleetIcons.History, contentDescription = "Draft history")
                     }
                 },
-                // The desktop's ⏎ chip, where it costs no room: inside an
-                // empty field, gone the moment there is a draft to send.
-                // Never while the card is up: on a permission dialog Enter
-                // picks the highlighted option — it approves. The card's own
-                // Enter is the one that checks the dialog first.
-                trailingIcon = if (state.draft.isEmpty() && state.canSendQuick && state.card == null) {
+                // At most two at once: the mic, and ⏎ or the clock.
+                trailingIcon = if (enterKey || laterKey != null || micKey != null) {
                     {
-                        IconButton(onClick = onPressEnter) {
-                            Text("⏎", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { contentDescription = "Press Enter" })
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (micKey != null) {
+                                IconButton(onClick = micKey) {
+                                    Icon(FleetIcons.Mic, contentDescription = "Voice input")
+                                }
+                            }
+                            if (laterKey != null) {
+                                IconButton(onClick = laterKey) {
+                                    Icon(FleetIcons.SendLater, contentDescription = "Send later")
+                                }
+                            }
+                            if (enterKey) {
+                                IconButton(onClick = onPressEnter) {
+                                    Text("⏎", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { contentDescription = "Press Enter" })
+                                }
+                            }
                         }
                     }
                 } else {
@@ -2875,30 +2952,27 @@ internal fun appendToDraft(draft: String, text: String): String {
 internal fun withHistoryEntry(draft: String, entry: String): String =
     if (draft.isBlank()) entry else draft.trimEnd() + "\n" + entry
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HistoryDialog(entries: List<String>, onPick: (String) -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Draft history") },
-        text = {
-            if (entries.isEmpty()) {
-                Text("Nothing sent yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                Column(modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-                    for ((index, entry) in entries.withIndex()) {
-                        Text(
-                            text = entry,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.fillMaxWidth().clickable { onPick(entry) }.padding(vertical = 10.dp),
-                        )
-                        if (index != entries.lastIndex) HorizontalDivider()
-                    }
+    // A list to pick from, so no verb: a tap puts the entry in the box, Close backs out.
+    BottomSheet(title = "Draft history", onDismiss = onDismiss, cancelLabel = "Close", scrollable = true) {
+        if (entries.isEmpty()) {
+            Text("Nothing sent yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            Column {
+                for ((index, entry) in entries.withIndex()) {
+                    Text(
+                        text = entry,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth().clickable { onPick(entry) }.padding(vertical = 10.dp),
+                    )
+                    if (index != entries.lastIndex) HorizontalDivider()
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
+        }
+    }
 }
 
 /**
@@ -3063,11 +3137,12 @@ private fun QuickReplyChip(
  * and a way to write a new one. Tapping a chip's text opens its editor; the
  * arrows move it one place, which is the order the row draws on every device.
  *
- * A dialog rather than a settings screen because this is where the chips are
+ * A sheet rather than a settings screen because this is where the chips are
  * — the row is on the session screen and nowhere else, and a list of buttons
  * is easiest to edit while looking at them. The list is the fleet's (the hub
  * stores it), so an edit here shows up on the desktop and on any other phone.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ManageQuickRepliesDialog(
     chips: List<QuickReply>,
@@ -3077,77 +3152,74 @@ private fun ManageQuickRepliesDialog(
     onAdd: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Quick replies") },
-        text = {
-            Column(modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
-                Text(
-                    "Shared with the desktop and your other devices.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(8.dp))
-                if (chips.isEmpty()) {
-                    Text("No chips yet.", style = MaterialTheme.typography.bodyMedium)
-                }
-                chips.forEachIndexed { i, chip ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f).clickable { onEdit(chip) }.padding(vertical = 8.dp)) {
-                            Text(chip.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            // Only when it says something the caption does not:
-                            // a chip whose label IS its prompt would otherwise
-                            // draw the same line twice.
-                            if (chip.label.isNotBlank() && chip.label != chip.text) {
-                                Text(
-                                    chip.text,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
+    BottomSheet(
+        title = "Quick replies",
+        meta = "Shared with the desktop and your other devices.",
+        onDismiss = onDismiss,
+        primary = SheetAction("New chip", onClick = onAdd),
+        cancelLabel = "Close",
+        scrollable = true,
+    ) {
+        Column {
+            if (chips.isEmpty()) {
+                Text("No chips yet.", style = MaterialTheme.typography.bodyMedium)
+            }
+            chips.forEachIndexed { i, chip ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f).clickable { onEdit(chip) }.padding(vertical = 8.dp)) {
+                        Text(chip.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        // Only when it says something the caption does not:
+                        // a chip whose label IS its prompt would otherwise
+                        // draw the same line twice.
+                        if (chip.label.isNotBlank() && chip.label != chip.text) {
                             Text(
-                                if (chip.sendsOnTap) "Sends on tap" else "Fills the box",
-                                style = MaterialTheme.typography.labelSmall,
+                                chip.text,
+                                style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        IconButton(onClick = { onMove(chip, -1) }, enabled = i > 0) {
-                            Text("↑", modifier = Modifier.clearAndSetSemantics { contentDescription = "Move ${chip.label.ifBlank { chip.text }} up" })
-                        }
-                        IconButton(onClick = { onMove(chip, 1) }, enabled = i < chips.lastIndex) {
-                            Text("↓", modifier = Modifier.clearAndSetSemantics { contentDescription = "Move ${chip.label.ifBlank { chip.text }} down" })
-                        }
-                        DangerTextButton(onClick = { onRemove(chip) }) {
-                            Text("Remove")
-                        }
+                        Text(
+                            if (chip.sendsOnTap) "Sends on tap" else "Fills the box",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    HorizontalDivider()
+                    IconButton(onClick = { onMove(chip, -1) }, enabled = i > 0) {
+                        Text("↑", modifier = Modifier.clearAndSetSemantics { contentDescription = "Move ${chip.label.ifBlank { chip.text }} up" })
+                    }
+                    IconButton(onClick = { onMove(chip, 1) }, enabled = i < chips.lastIndex) {
+                        Text("↓", modifier = Modifier.clearAndSetSemantics { contentDescription = "Move ${chip.label.ifBlank { chip.text }} down" })
+                    }
+                    DangerTextButton(onClick = { onRemove(chip) }) {
+                        Text("Remove")
+                    }
                 }
+                HorizontalDivider()
             }
-        },
-        confirmButton = { TextButton(onClick = onAdd) { Text("New chip") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
+        }
+    }
 }
 
 /** What a repair found and did: healthy or not, its actions, its warnings, what it left for a person. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RepairReportDialog(report: RepairReport, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (report.healthy) "The workspace is healthy" else "The workspace still needs attention") },
-        text = {
-            Column(modifier = Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (report.actions.isEmpty()) Text("Nothing needed doing.", style = MaterialTheme.typography.bodySmall)
-                for (a in report.actions) Text("• $a", style = MaterialTheme.typography.bodySmall)
-                for (w in report.warnings) Text("⚠ $w", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                for (d in report.deferred) Text("Left for you: $d", style = MaterialTheme.typography.bodySmall)
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
-    )
+    // A report, nothing to decide: one button, at the thumb, closes it.
+    BottomSheet(
+        title = if (report.healthy) "The workspace is healthy" else "The workspace still needs attention",
+        onDismiss = onDismiss,
+        cancelLabel = "OK",
+        scrollable = true,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (report.actions.isEmpty()) Text("Nothing needed doing.", style = MaterialTheme.typography.bodySmall)
+            for (a in report.actions) Text("• $a", style = MaterialTheme.typography.bodySmall)
+            for (w in report.warnings) Text("⚠ $w", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            for (d in report.deferred) Text("Left for you: $d", style = MaterialTheme.typography.bodySmall)
+        }
+    }
 }
 
 /** The slash commands the draft could be, each with what it does; a tap fills it in. */
@@ -3166,9 +3238,13 @@ private fun SlashSuggestions(commands: List<SlashCommand>, onPick: (SlashCommand
     }
 }
 
-/** Find in the conversation: the query, which match of how many, and the way to the older and newer ones. */
+/**
+ * Find in the conversation: the query, which match of how many, and the way to
+ * the older and newer ones. A file in the Files tab finds with the same bar,
+ * in its own words ([placeholder], [olderLabel], [newerLabel]).
+ */
 @Composable
-private fun FindBar(
+internal fun FindBar(
     query: String,
     at: Int,
     count: Int,
@@ -3179,6 +3255,11 @@ private fun FindBar(
     /** The chosen scope on the New bar, whose chips sit under the field; null on the Classic bar. */
     scope: FindScope? = null,
     onScope: (FindScope) -> Unit = {},
+    placeholder: String = "Find in conversation",
+    /** The up arrow's words. */
+    olderLabel: String = "Older match",
+    /** The down arrow's words. */
+    newerLabel: String = "Newer match",
 ) {
     // Opened to type into: the cursor is in the field, the keyboard up.
     val focus = remember { FocusRequester() }
@@ -3190,7 +3271,7 @@ private fun FindBar(
                     value = query,
                     onValueChange = onQuery,
                     singleLine = true,
-                    placeholder = { Text("Find in conversation") },
+                    placeholder = { Text(placeholder) },
                     modifier = Modifier.weight(1f).focusRequester(focus),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
                     colors = TextFieldDefaults.colors(
@@ -3204,10 +3285,10 @@ private fun FindBar(
                     Text(if (count == 0) "none" else "$at of $count", style = MaterialTheme.typography.labelMedium)
                 }
                 IconButton(onClick = onOlder, enabled = count > 1) {
-                    Icon(FleetIcons.ArrowBack, contentDescription = "Older match", modifier = Modifier.rotate(90f))
+                    Icon(FleetIcons.ArrowBack, contentDescription = olderLabel, modifier = Modifier.rotate(90f))
                 }
                 IconButton(onClick = onNewer, enabled = count > 1) {
-                    Icon(FleetIcons.ArrowBack, contentDescription = "Newer match", modifier = Modifier.rotate(-90f))
+                    Icon(FleetIcons.ArrowBack, contentDescription = newerLabel, modifier = Modifier.rotate(-90f))
                 }
                 IconButton(onClick = onClose) { Icon(FleetIcons.Close, contentDescription = "Close find") }
             }

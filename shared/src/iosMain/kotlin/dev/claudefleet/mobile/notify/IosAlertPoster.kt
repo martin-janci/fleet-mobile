@@ -13,6 +13,9 @@ import platform.UserNotifications.UNNotificationRequest
 import platform.UserNotifications.UNNotificationSound
 import platform.UserNotifications.UNUserNotificationCenter
 
+/** Where a mission's notification carries its mission, for the tap (`AppDelegate` reads it). */
+const val MISSION_ID_KEY: String = "missionId"
+
 /**
  * "Needs you" notifications through `UNUserNotificationCenter`: one per
  * session (its identifier replaces an older one), all in one thread so iOS
@@ -42,18 +45,21 @@ class IosAlertPoster : AlertPoster {
     }
 
     /**
-     * The category's buttons (redesign 14.8): Answer (or Open) brings the app
-     * up at the question; Later only puts the notification away. Neither runs
-     * without the app, and neither answers — iOS has no Approve here.
-     * Every category at once, since a registration replaces the last.
+     * The category's buttons (redesign 14.8, MobileControl): Answer (or Open
+     * log, or Open) brings the app up at the question; a failure's Retry
+     * brings it up and the app retries there; a mission's Review grant opens
+     * that mission; Later only puts the notification away. None runs without
+     * the app, and none answers — iOS has no Approve here. Every category at
+     * once, since a registration replaces the last.
      */
     private fun registerCategories() {
-        val categories = needsYouCategories().map { (id, buttons) ->
+        val all = needsYouCategories() + missionCategories()
+        val categories = all.map { (id, buttons) ->
             val actions = buttons.map { a ->
                 UNNotificationAction.actionWithIdentifier(
                     a.id,
                     a.label,
-                    if (a.kind == NotifyActionKind.Open) UNNotificationActionOptionForeground else UNNotificationActionOptionNone,
+                    if (a.kind == NotifyActionKind.Later) UNNotificationActionOptionNone else UNNotificationActionOptionForeground,
                 )
             }
             UNNotificationCategory.categoryWithIdentifier(id, actions, emptyList<String>(), UNNotificationCategoryOptionNone)
@@ -75,12 +81,15 @@ class IosAlertPoster : AlertPoster {
         )
     }
 
-    /** A mission waits on a person (G5.7): one per wait, in the same thread; a tap opens the app. */
+    /** A mission waits on a person (G5.7): one per wait, in the same thread; a tap or Review grant opens that mission. */
     override fun postMission(alert: MissionWaitAlert) {
+        registerCategories()
         val content = UNMutableNotificationContent().apply {
             setTitle(alert.title)
             setBody(alert.text)
             setThreadIdentifier(NEEDS_YOU_THREAD)
+            setCategoryIdentifier(missionCategory(alert.reason))
+            setUserInfo(mapOf<Any?, Any?>(MISSION_ID_KEY to NSNumber.numberWithLongLong(alert.missionId)))
             setSound(UNNotificationSound.defaultSound)
         }
         center.addNotificationRequest(

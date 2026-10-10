@@ -1085,7 +1085,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.searchHits(hits: Sear
     }
     if (handlers.onNewSession != null) {
         items(hits.projects, key = { "search-project-${it.id}" }) { project ->
-            SearchHitRow(project.label, "New session in this project") { handlers.onSearchProject(project.id) }
+            SearchHitRow(project.label, hits.projectLine(project, "New session in this project")) { handlers.onSearchProject(project.id) }
         }
     }
 }
