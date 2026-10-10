@@ -231,6 +231,7 @@ class HostsInstallWizardsTest {
         val vm = AddHostViewModel(fleet, AddsHosts(tmux = null), backgroundScope, canWrite = true)
         runCurrent()
         vm.open().join()
+        runCurrent()
         val pine = vm.state.value.candidates.first { it.alias == "pine.lan" }
         assertNull(vm.state.value.installTarget("pine.lan"), "nothing to install on before it is added")
 
@@ -248,6 +249,7 @@ class HostsInstallWizardsTest {
         val vm = AddHostViewModel(fleet, AddsHosts(tmux = "3.4"), backgroundScope, canWrite = true)
         runCurrent()
         vm.open().join()
+        runCurrent()
         vm.add(vm.state.value.candidates.first()).join()
         runCurrent()
         assertNull(vm.state.value.installTarget("pine.lan"))
