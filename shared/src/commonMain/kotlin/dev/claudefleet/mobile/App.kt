@@ -201,6 +201,10 @@ import dev.claudefleet.mobile.ui.help.GuideScreen
 import dev.claudefleet.mobile.ui.help.guideMeters
 import dev.claudefleet.mobile.ui.help.HelpPicker
 import dev.claudefleet.mobile.ui.help.HelpSettings
+import dev.claudefleet.mobile.update.UpdateState
+import dev.claudefleet.mobile.model.OrgDirectory
+import dev.claudefleet.mobile.net.HubCapabilities
+import dev.claudefleet.mobile.ui.help.HelpState
 import dev.claudefleet.mobile.ui.help.HelpSettingsSection
 import dev.claudefleet.mobile.ui.help.LESSONS
 import dev.claudefleet.mobile.ui.help.LearnScreen
@@ -2077,151 +2081,24 @@ private fun FleetRoute(
                         onReset = updates::reset,
                     ),
                 )
-                Screen.Settings -> {
-                    val state by settings.state.collectAsState()
-                    val fleet by fleetSettings.state.collectAsState()
-                    // On opening, not at construction: this view model lives
-                    // as long as the paired UI does, and a hub upgraded in
-                    // the meantime would otherwise be reported at whatever
-                    // version it ran when the app started.
-                    LaunchedEffect(settings) { settings.load() }
-                    val fleetPageOpen = settingsCaps.fleetSettings && fleet.openPage != null
-                    val fleetSection: @Composable () -> Unit = {
-                        if (settingsCaps.fleetSettings) {
-                            FleetSettingsSection(
-                                state = fleet,
-                                clientName = state.clientName,
-                                onOpen = fleetSettings::open,
-                                onBack = { fleetSettings.back() },
-                                onSet = fleetSettings::set,
-                                onRefuse = fleetSettings::refuse,
-                                onDecide = { id, apply -> fleetSettings.decide(id, apply) },
-                                onConfirm = fleetSettings::confirm,
-                                onCancelConfirm = fleetSettings::cancelConfirm,
-                                onHistory = { fleetSettings.showHistory(it) },
-                                onCloseHistory = fleetSettings::closeHistory,
-                                onRetry = { fleetSettings.load() },
-                                onDismissError = fleetSettings::dismissLoadError,
-                                batch = FieldBatch(
-                                    onStage = fleetSettings::stage,
-                                    onType = fleetSettings::type,
-                                    onReset = fleetSettings::reset,
-                                ),
-                                pageHead = { pageId ->
-                                    // Decisions (Jev) opens with who opted in and what Jev may do (14.17).
-                                    if (layout == PhoneLayout.New && pageId == DECISIONS_PAGE) {
-                                        val jevOrgs = remember(repository, scope) { CompanyViewModel(repository, container.companyActions, scope) }
-                                        LaunchedEffect(jevOrgs) { jevOrgs.load() }
-                                        val orgsState by jevOrgs.state.collectAsState()
-                                        DecisionsHead(orgsState.orgs)
-                                    }
-                                },
-                            )
-                        }
-                    }
-                    val fleetSaveBar: @Composable () -> Unit = {
-                        if (settingsCaps.fleetSettings) {
-                            FleetSaveBar(
-                                state = fleet,
-                                onSave = { fleetSettings.save() },
-                                onDiscard = fleetSettings::discard,
-                                onUndo = fleetSettings::undo,
-                                onDismissUndo = fleetSettings::dismissUndo,
-                            )
-                        }
-                    }
-                    val onSetLayout: (PhoneLayout) -> Unit = { chosen ->
-                        savePhoneLayout(container.prefs, chosen)
-                        nav.setLayout(chosen)
-                    }
-                    val onOpenUsage = nav::openUsage.takeIf { settingsCaps.usage || settingsCaps.accounts }
-                    val onOpenCompany = nav::openCompany.takeIf { orgDirectory.orgs.isNotEmpty() }
-                    if (layout == PhoneLayout.New) {
-                        // The Orbit settings (redesign 14.11): This phone and the
-                        // desktop's groups over the hub's pages. Back closes an
-                        // open page first, then the group, then leaves Settings.
-                        val place by settings.place.collectAsState()
-                        val theme by container.phone.theme.collectAsState()
-                        val motion by container.phone.motion.collectAsState()
-                        val notifyKinds by container.phone.notifyKinds.collectAsState()
-                        val quiet by container.phone.quiet.collectAsState()
-                        val lockOn by container.phone.lock.collectAsState()
-                        val gate = rememberBiometricGate()
-                        BackHandler(enabled = fleetPageOpen || place != SettingsPlace.Home) {
-                            if (!fleetSettings.back()) settings.back()
-                        }
-                        OrbitSettingsScreen(
-                            place = place,
-                            input = OrbitSettingsInput(
-                                settings = state,
-                                fleet = fleet.takeIf { settingsCaps.fleetSettings },
-                                theme = theme,
-                                notifyKinds = notifyKinds,
-                                updateMode = updateState.mode.takeIf { updateState.supported },
-                                lock = lockOn,
-                                motion = motion,
-                                quiet = quiet,
-                            ),
-                            handlers = OrbitSettingsHandlers(
-                                onOpen = settings::open,
-                                onBack = { if (!fleetSettings.back()) settings.back() },
-                                onOpenPage = fleetSettings::open,
-                                onSetTheme = container.phone::setTheme,
-                                onSetMotion = container.phone::setMotion,
-                                onSetNotify = container.phone::setNotify,
-                                onSetQuiet = container.phone::setQuiet,
-                                onSetUpdateMode = updates::setMode,
-                                // Either way, only once the check has passed.
-                                onSetLock = if (gate.available) {
-                                    { on: Boolean -> gate.ask(if (on) "Turn on the lock" else "Turn off the lock") { ok -> if (ok) container.phone.setLock(on) } }
-                                } else {
-                                    null
-                                },
-                                onForget = { settings.forget() },
-                                onDismissError = settings::dismissError,
-                                onOpenUsage = onOpenUsage,
-                                onOpenCompany = onOpenCompany,
-                                onRetryFleet = { fleetSettings.load() },
-                                onDismissFleetError = fleetSettings::dismissLoadError,
-                            ),
-                            fleetPageOpen = fleetPageOpen,
-                            fleetPage = fleetSection,
-                            notifier = container.notifier,
-                            homeExtras = { LayoutRow(layout, onSetLayout) },
-                            fleetSaveBar = fleetSaveBar,
-                            thisPhoneExtras = {
-                                HelpSettingsSection(
-                                    help = help,
-                                    settings = helpSettings,
-                                    tourAvailable = layout == PhoneLayout.New,
-                                    onTour = { helpSettings.startTour(); nav.select(Tab.Inbox) },
-                                    onPractice = { practice.reset(); nav.openPractice() },
-                                )
-                            },
-                        )
-                    } else {
-                        // A fleet settings page is drawn inside the Settings tab:
-                        // back closes the page, not the app.
-                        BackHandler(enabled = fleetPageOpen) { fleetSettings.back() }
-                        // Classic has no More: Update ready sits at the top of Settings.
-                        Column(Modifier.fillMaxSize()) {
-                            updateState.available?.let { UpdateCard(it, container.appVersion, onOpen = nav::openUpdate) }
-                            SettingsScreen(
-                                state = state,
-                                onForget = { settings.forget() },
-                                onDismissError = settings::dismissError,
-                                fleetPageOpen = fleetPageOpen,
-                                onOpenUsage = onOpenUsage,
-                                onOpenCompany = onOpenCompany,
-                                notifier = container.notifier,
-                                layout = layout,
-                                onSetLayout = onSetLayout,
-                                fleetSettings = fleetSection,
-                                fleetSaveBar = fleetSaveBar,
-                            )
-                        }
-                    }
-                }
+                // Its own function: inline, it pushed FleetRoute's content lambda
+                // past the JVM's 64 KB method limit ("Method too large").
+                Screen.Settings -> SettingsRoute(
+                    container = container,
+                    repository = repository,
+                    scope = scope,
+                    nav = nav,
+                    layout = layout,
+                    settings = settings,
+                    fleetSettings = fleetSettings,
+                    settingsCaps = settingsCaps,
+                    orgDirectory = orgDirectory,
+                    updates = updates,
+                    updateState = updateState,
+                    help = help,
+                    helpSettings = helpSettings,
+                    practice = practice,
+                )
             }
             help.lesson?.let { (lesson, step) ->
                 val lessonAgent by agent.state.collectAsState()
@@ -2399,6 +2276,169 @@ private fun FleetRoute(
     // fleet and close only through their own buttons: back under them would
     // pop a screen nobody can see (review r09 F8).
     BackHandler(enabled = fleetCheck || importing || (help.mode == null && whatsNew == null)) {}
+}
+
+/** The Settings tab: This phone, the hub's pages, and Classic's own screen. */
+@Composable
+private fun SettingsRoute(
+    container: AppContainer,
+    repository: FleetRepository,
+    scope: CoroutineScope,
+    nav: Navigator,
+    layout: PhoneLayout,
+    settings: SettingsViewModel,
+    fleetSettings: FleetSettingsViewModel,
+    settingsCaps: HubCapabilities,
+    orgDirectory: OrgDirectory,
+    updates: UpdateViewModel,
+    updateState: UpdateState,
+    help: HelpState,
+    helpSettings: HelpSettings,
+    practice: PracticeFleet,
+) {
+    val state by settings.state.collectAsState()
+    val fleet by fleetSettings.state.collectAsState()
+    // On opening, not at construction: this view model lives
+    // as long as the paired UI does, and a hub upgraded in
+    // the meantime would otherwise be reported at whatever
+    // version it ran when the app started.
+    LaunchedEffect(settings) { settings.load() }
+    val fleetPageOpen = settingsCaps.fleetSettings && fleet.openPage != null
+    val fleetSection: @Composable () -> Unit = {
+        if (settingsCaps.fleetSettings) {
+            FleetSettingsSection(
+                state = fleet,
+                clientName = state.clientName,
+                onOpen = fleetSettings::open,
+                onBack = { fleetSettings.back() },
+                onSet = fleetSettings::set,
+                onRefuse = fleetSettings::refuse,
+                onDecide = { id, apply -> fleetSettings.decide(id, apply) },
+                onConfirm = fleetSettings::confirm,
+                onCancelConfirm = fleetSettings::cancelConfirm,
+                onHistory = { fleetSettings.showHistory(it) },
+                onCloseHistory = fleetSettings::closeHistory,
+                onRetry = { fleetSettings.load() },
+                onDismissError = fleetSettings::dismissLoadError,
+                batch = FieldBatch(
+                    onStage = fleetSettings::stage,
+                    onType = fleetSettings::type,
+                    onReset = fleetSettings::reset,
+                ),
+                pageHead = { pageId ->
+                    // Decisions (Jev) opens with who opted in and what Jev may do (14.17).
+                    if (layout == PhoneLayout.New && pageId == DECISIONS_PAGE) {
+                        val jevOrgs = remember(repository, scope) { CompanyViewModel(repository, container.companyActions, scope) }
+                        LaunchedEffect(jevOrgs) { jevOrgs.load() }
+                        val orgsState by jevOrgs.state.collectAsState()
+                        DecisionsHead(orgsState.orgs)
+                    }
+                },
+            )
+        }
+    }
+    val fleetSaveBar: @Composable () -> Unit = {
+        if (settingsCaps.fleetSettings) {
+            FleetSaveBar(
+                state = fleet,
+                onSave = { fleetSettings.save() },
+                onDiscard = fleetSettings::discard,
+                onUndo = fleetSettings::undo,
+                onDismissUndo = fleetSettings::dismissUndo,
+            )
+        }
+    }
+    val onSetLayout: (PhoneLayout) -> Unit = { chosen ->
+        savePhoneLayout(container.prefs, chosen)
+        nav.setLayout(chosen)
+    }
+    val onOpenUsage = nav::openUsage.takeIf { settingsCaps.usage || settingsCaps.accounts }
+    val onOpenCompany = nav::openCompany.takeIf { orgDirectory.orgs.isNotEmpty() }
+    if (layout == PhoneLayout.New) {
+        // The Orbit settings (redesign 14.11): This phone and the
+        // desktop's groups over the hub's pages. Back closes an
+        // open page first, then the group, then leaves Settings.
+        val place by settings.place.collectAsState()
+        val theme by container.phone.theme.collectAsState()
+        val motion by container.phone.motion.collectAsState()
+        val notifyKinds by container.phone.notifyKinds.collectAsState()
+        val quiet by container.phone.quiet.collectAsState()
+        val lockOn by container.phone.lock.collectAsState()
+        val gate = rememberBiometricGate()
+        BackHandler(enabled = fleetPageOpen || place != SettingsPlace.Home) {
+            if (!fleetSettings.back()) settings.back()
+        }
+        OrbitSettingsScreen(
+            place = place,
+            input = OrbitSettingsInput(
+                settings = state,
+                fleet = fleet.takeIf { settingsCaps.fleetSettings },
+                theme = theme,
+                notifyKinds = notifyKinds,
+                updateMode = updateState.mode.takeIf { updateState.supported },
+                lock = lockOn,
+                motion = motion,
+                quiet = quiet,
+            ),
+            handlers = OrbitSettingsHandlers(
+                onOpen = settings::open,
+                onBack = { if (!fleetSettings.back()) settings.back() },
+                onOpenPage = fleetSettings::open,
+                onSetTheme = container.phone::setTheme,
+                onSetMotion = container.phone::setMotion,
+                onSetNotify = container.phone::setNotify,
+                onSetQuiet = container.phone::setQuiet,
+                onSetUpdateMode = updates::setMode,
+                // Either way, only once the check has passed.
+                onSetLock = if (gate.available) {
+                    { on: Boolean -> gate.ask(if (on) "Turn on the lock" else "Turn off the lock") { ok -> if (ok) container.phone.setLock(on) } }
+                } else {
+                    null
+                },
+                onForget = { settings.forget() },
+                onDismissError = settings::dismissError,
+                onOpenUsage = onOpenUsage,
+                onOpenCompany = onOpenCompany,
+                onRetryFleet = { fleetSettings.load() },
+                onDismissFleetError = fleetSettings::dismissLoadError,
+            ),
+            fleetPageOpen = fleetPageOpen,
+            fleetPage = fleetSection,
+            notifier = container.notifier,
+            homeExtras = { LayoutRow(layout, onSetLayout) },
+            fleetSaveBar = fleetSaveBar,
+            thisPhoneExtras = {
+                HelpSettingsSection(
+                    help = help,
+                    settings = helpSettings,
+                    tourAvailable = layout == PhoneLayout.New,
+                    onTour = { helpSettings.startTour(); nav.select(Tab.Inbox) },
+                    onPractice = { practice.reset(); nav.openPractice() },
+                )
+            },
+        )
+    } else {
+        // A fleet settings page is drawn inside the Settings tab:
+        // back closes the page, not the app.
+        BackHandler(enabled = fleetPageOpen) { fleetSettings.back() }
+        // Classic has no More: Update ready sits at the top of Settings.
+        Column(Modifier.fillMaxSize()) {
+            updateState.available?.let { UpdateCard(it, container.appVersion, onOpen = nav::openUpdate) }
+            SettingsScreen(
+                state = state,
+                onForget = { settings.forget() },
+                onDismissError = settings::dismissError,
+                fleetPageOpen = fleetPageOpen,
+                onOpenUsage = onOpenUsage,
+                onOpenCompany = onOpenCompany,
+                notifier = container.notifier,
+                layout = layout,
+                onSetLayout = onSetLayout,
+                fleetSettings = fleetSection,
+                fleetSaveBar = fleetSaveBar,
+            )
+        }
+    }
 }
 
 /** A destination on the New bar, keyed by its [Tab] name so `Navigator.select` can take it back. */
