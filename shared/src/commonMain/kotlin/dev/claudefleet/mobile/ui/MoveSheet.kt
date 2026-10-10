@@ -150,11 +150,22 @@ private fun Toggle(title: String, help: String, on: Boolean, onChange: (Boolean)
     }
 }
 
-/** One host's facts for the New bar's Move sheet: how it is reached and what runs there. */
+/**
+ * One host's facts for the New bar's Move sheet (MobileRecovery): how it is
+ * reached, what runs there, its free disk when the hub sampled it, and that
+ * its toolchain is not checked. The hub probes no build tools (a JDK, an
+ * Android SDK), so the sheet says so rather than letting silence read as
+ * "has everything".
+ */
 internal fun moveHostFacts(host: HostRow, running: Int): String = buildList {
     if (host.transport == "agent") add("agent")
     add("$running running")
+    host.diskHomeFreeKb?.takeIf { it >= 0 }?.let { add("${gigabytes(it)} free") }
+    add(TOOLCHAIN_UNCHECKED)
 }.joinToString(" · ")
+
+/** What every host option says about build tools: the hub never looks for them. */
+internal const val TOOLCHAIN_UNCHECKED = "toolchain not checked"
 
 /** Why an offline host is listed but cannot be picked. */
 internal const val MOVE_OFFLINE = "Signal lost · cannot move there now"

@@ -198,6 +198,7 @@ import dev.claudefleet.mobile.ui.SessionInboxActions
 import dev.claudefleet.mobile.ui.inboxRowActions
 import dev.claudefleet.mobile.ui.missionWaits
 import dev.claudefleet.mobile.ui.help.GuideScreen
+import dev.claudefleet.mobile.ui.help.guideMeters
 import dev.claudefleet.mobile.ui.help.HelpPicker
 import dev.claudefleet.mobile.ui.help.HelpSettings
 import dev.claudefleet.mobile.ui.help.HelpSettingsSection
@@ -1295,6 +1296,7 @@ private fun FleetRoute(
                                 onRetryAll = { bulk.retryFailed() },
                                 onArchive = { bulk.archive(); Unit },
                             ),
+                            hub = hubLabel(credentials.hub),
                         )
                     } else {
                         SessionsScreen(
@@ -1705,6 +1707,7 @@ private fun FleetRoute(
                                 onRescan = { addHost.rescan() },
                                 // "tmux is missing" → Install agent (MobileInstall): the Radar gives way to the review.
                                 onInstallAgent = { alias -> addHost.close(); installs.open(alias) },
+                                onAddAddress = { addHost.addAddress(it) },
                             ),
                         )
                     }
@@ -2037,6 +2040,8 @@ private fun FleetRoute(
                 }
                 is Screen.Guide -> {
                     val fleet by fleetSettings.state.collectAsState()
+                    val guideNames by repository.accountNames.collectAsState()
+                    val guideUsage by repository.accountUsage.collectAsState()
                     val page = fleet.pages.firstOrNull { it.id == current.pageId }
                     if (page == null) {
                         LaunchedEffect(current) { nav.back() }
@@ -2050,6 +2055,7 @@ private fun FleetRoute(
                             onDecide = { id, apply -> fleetSettings.decide(id, apply) },
                             onConfirm = fleetSettings::confirm,
                             onCancelConfirm = fleetSettings::cancelConfirm,
+                            usage = guideMeters(guideNames, guideUsage, epochSeconds()),
                         )
                     }
                 }
@@ -2133,6 +2139,7 @@ private fun FleetRoute(
                         val theme by container.phone.theme.collectAsState()
                         val motion by container.phone.motion.collectAsState()
                         val notifyKinds by container.phone.notifyKinds.collectAsState()
+                        val quiet by container.phone.quiet.collectAsState()
                         val lockOn by container.phone.lock.collectAsState()
                         val gate = rememberBiometricGate()
                         BackHandler(enabled = fleetPageOpen || place != SettingsPlace.Home) {
@@ -2148,6 +2155,7 @@ private fun FleetRoute(
                                 updateMode = updateState.mode.takeIf { updateState.supported },
                                 lock = lockOn,
                                 motion = motion,
+                                quiet = quiet,
                             ),
                             handlers = OrbitSettingsHandlers(
                                 onOpen = settings::open,
@@ -2156,6 +2164,7 @@ private fun FleetRoute(
                                 onSetTheme = container.phone::setTheme,
                                 onSetMotion = container.phone::setMotion,
                                 onSetNotify = container.phone::setNotify,
+                                onSetQuiet = container.phone::setQuiet,
                                 onSetUpdateMode = updates::setMode,
                                 // Either way, only once the check has passed.
                                 onSetLock = if (gate.available) {

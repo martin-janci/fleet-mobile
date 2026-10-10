@@ -125,6 +125,19 @@ class AddHostViewModel(
         local.update { it.copy(error = null) }
     }
 
+    /**
+     * Add a host typed by hand (MobileFullscreenLoaders: "Enter an address
+     * by hand"): it joins the found rows, so it reads Adding…, then Added or
+     * the hub's refusal, like one from the SSH config.
+     */
+    fun addAddress(address: String): Job? {
+        val a = address.trim()
+        if (addressBlocker(a) != null) return null
+        val host = SshHost(alias = a, hostname = a)
+        local.update { l -> if (l.found.any { it.alias == a }) l else l.copy(found = l.found + host) }
+        return add(host)
+    }
+
     /** Add [host] under a fleet alias made from its SSH alias; the fleet is read again so it lists it. */
     fun add(host: SshHost): Job = scope.launch {
         if (!state.value.available || local.value.adding != null || host.alias in local.value.added) return@launch
@@ -138,6 +151,26 @@ class AddHostViewModel(
         } catch (t: Throwable) {
             local.update { it.copy(adding = null, error = friendly(t)) }
         }
+    }
+}
+
+/**
+ * Why a typed address cannot be added, in words; null when it can. The hub
+ * hands it to `ssh` as the host's SSH alias, which takes letters, digits,
+ * '.', '_' and '-' (claude-fleet `validate::host_alias_syntax`): a host name
+ * or an IPv4 address. A user or a port goes in the hub's `~/.ssh/config`.
+ */
+internal fun addressBlocker(address: String): String? {
+    val a = address.trim()
+    return when {
+        a.isEmpty() -> "Type the host's name or address."
+        '@' in a -> "The hub connects as its own user. To use another, add the host to the hub's ~/.ssh/config."
+        ':' in a -> "A port goes in the hub's ~/.ssh/config, not here."
+        a.startsWith("-") -> "An address cannot start with a dash."
+        !a.all { it.isLetterOrDigit() && it.code < 128 || it == '.' || it == '_' || it == '-' } ->
+            "Use letters, digits, dots and dashes only."
+        a.length > 255 -> "That address is too long."
+        else -> null
     }
 }
 
