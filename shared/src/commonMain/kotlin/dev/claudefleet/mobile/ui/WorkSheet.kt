@@ -27,12 +27,19 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.ImeAction
 import dev.claudefleet.mobile.model.WorkSummary
+import dev.claudefleet.mobile.model.keyFixLine
+import dev.claudefleet.mobile.model.keyFixOnLink
+import dev.claudefleet.mobile.ui.kit.BottomSheet
+import dev.claudefleet.mobile.ui.kit.SheetAction
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.TicketCardBody
 import dev.claudefleet.mobile.ui.components.WorkStatusDot
-import dev.claudefleet.mobile.ui.kit.BottomSheet
-import dev.claudefleet.mobile.ui.kit.SheetAction
 
 /** What the session screen can do about its work — every one a no-op until wired. */
 data class SessionWorkHandlers(
@@ -195,25 +202,66 @@ private fun OpenTicketButton(work: WorkSummary) {
     TextButton(onClick = { runCatching { uri.openUri(url) } }) { Text("Open in browser") }
 }
 
-/** *Set work…*: a key such as `PAY-7`, or a pasted ticket URL. A sheet, not a dialog (MobileFormsSession). */
+/**
+ * *Link a ticket* (MobileFormsWork) — the session menu's *Set work…*: a key
+ * such as `PAY-7`, or a pasted ticket URL, in the kit's sheet with Cancel
+ * and **Link** at the bottom.
+ *
+ * Checked when Link is pressed, never on each key: a key that is almost
+ * right is answered under the field with the fix ([ticketKeyFix]), which is
+ * one tap; pressing Link again on the same text links it as typed
+ * ([keyFixOnLink]). [knownPrefixes] are the project keys the phone has seen.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SetWorkDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+fun SetWorkSheet(onConfirm: (String) -> Unit, onDismiss: () -> Unit, knownPrefixes: List<String> = emptyList()) {
     var text by remember { mutableStateOf("") }
+    // The fix on show, and the text it was offered for.
+    var fix by remember { mutableStateOf<String?>(null) }
+    var offeredFor by remember { mutableStateOf<String?>(null) }
+    fun link() {
+        if (text.isBlank()) return
+        val next = keyFixOnLink(text, offeredFor, knownPrefixes)
+        if (next == null) {
+            onConfirm(text)
+        } else {
+            fix = next
+            offeredFor = text.trim()
+        }
+    }
     BottomSheet(
-        title = "Set work",
+        title = "Link a ticket",
         onDismiss = onDismiss,
-        primary = SheetAction("Set", enabled = text.isNotBlank()) { onConfirm(text) },
+        primary = SheetAction("Link", enabled = text.isNotBlank()) { link() },
         scrollable = true,
     ) {
         OutlinedTextField(
             value = text,
-            onValueChange = { text = it },
+            onValueChange = { text = it; fix = null },
             label = { Text("Key or ticket URL") },
             singleLine = true,
+            isError = fix != null,
+            supportingText = fix?.let { f -> { KeyFixLine(f) { text = f; fix = null; offeredFor = null } } },
+            keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { link() }),
             modifier = Modifier.fillMaxWidth(),
         )
     }
+}
+
+/**
+ * The error under a key field with its fix: "Not a key. Did you mean
+ * FLEET-142?" The whole line is the button that puts [fix] in the field.
+ */
+@Composable
+internal fun KeyFixLine(fix: String, onUse: () -> Unit) {
+    Text(
+        keyFixLine(fix),
+        color = MaterialTheme.colorScheme.error,
+        style = MaterialTheme.typography.bodySmall,
+        textDecoration = TextDecoration.Underline,
+        modifier = Modifier.clickable(onClickLabel = "Use $fix", role = Role.Button, onClick = onUse),
+    )
 }
 
 /**

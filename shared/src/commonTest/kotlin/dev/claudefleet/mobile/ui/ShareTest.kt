@@ -8,6 +8,8 @@ import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.MemberGrants
 import dev.claudefleet.mobile.model.MyAccess
 import dev.claudefleet.mobile.model.MyGrants
+import dev.claudefleet.mobile.model.OrgDirectory
+import dev.claudefleet.mobile.model.OrgInfo
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionGrant
 import dev.claudefleet.mobile.model.SessionRow
@@ -35,6 +37,7 @@ private class ShareFleet(
     rows: List<SessionRow>,
     access: MyAccess,
     contract: Int? = 12,
+    orgs: OrgDirectory = OrgDirectory.EMPTY,
 ) : FleetState {
     override val sessions = MutableStateFlow(rows)
     override val hosts = MutableStateFlow(emptyList<HostRow>())
@@ -46,6 +49,7 @@ private class ShareFleet(
     override val capabilities = MutableStateFlow(caps)
     override val access = MutableStateFlow(access)
     override val hubContract = MutableStateFlow(contract)
+    override val orgs = MutableStateFlow(orgs)
     override suspend fun refresh() = Unit
 }
 
@@ -91,7 +95,9 @@ class ShareTest {
         canWrite: Boolean = true,
         contract: Int? = 12,
         access: MyAccess = ACCESS,
-    ) = ShareViewModel(ShareFleet(caps, listOf(MINE, THEIRS, UNCLAIMED), access, contract), actions, backgroundScope, canWrite)
+        orgs: OrgDirectory = OrgDirectory.EMPTY,
+        rows: List<SessionRow> = listOf(MINE, THEIRS, UNCLAIMED),
+    ) = ShareViewModel(ShareFleet(caps, rows, access, contract, orgs), actions, backgroundScope, canWrite)
 
     @Test
     fun access_tells_mine_from_shared_and_says_nothing_it_does_not_know() {
@@ -173,7 +179,8 @@ class ShareTest {
         runCurrent()
         assertEquals(listOf("access 10", "share 10 Person(name=eva) drive", "access 10"), actions.calls)
         assertEquals("", vm.state.value.recipient)
-        assertEquals("Shared with eva to drive.", vm.state.value.notice)
+        // `drive` on the wire, Steer in words (MobileFormsWork).
+        assertEquals("Shared with eva to steer.", vm.state.value.notice)
 
         vm.setKind(ShareKind.Org)
         vm.setRecipient("acme")
@@ -181,6 +188,48 @@ class ShareTest {
         vm.share()
         runCurrent()
         assertEquals("share 10 Org(name=acme) drive", actions.calls[3])
+    }
+
+    /** MobileFormsWork: the top level reads "Steer · send prompts"; the hub still gets `drive`. */
+    @Test
+    fun the_top_level_is_named_steer_and_sent_as_drive() {
+        assertEquals("drive", GrantLevel.DRIVE)
+        assertEquals(listOf("Watch", "Answer questions", "Steer"), GrantLevel.ALL.map(GrantLevel::choice))
+        assertEquals(listOf("", "", "send prompts"), GrantLevel.ALL.map(GrantLevel::detail))
+        assertEquals("Steer", GrantLevel.word(GrantLevel.DRIVE))
+        assertTrue(dev.claudefleet.mobile.model.sharedSentence(GrantLevel.DRIVE).startsWith("Shared with you to steer."))
+    }
+
+    /**
+     * "The whole org" needs no field when the phone knows which org that is
+     * — the session's, else the only one it sees — and asks for it otherwise.
+     */
+    @Test
+    fun the_whole_org_hides_the_field_when_the_phone_knows_the_org() = runTest {
+        val acme = OrgInfo(7, "acme")
+        val two = OrgDirectory(orgs = mapOf(7L to acme, 8L to OrgInfo(8, "side")))
+        assertEquals("acme", wholeOrgName(7, two))
+        assertNull(wholeOrgName(null, two), "two orgs and no org on the row: the field asks")
+        assertEquals("acme", wholeOrgName(null, OrgDirectory(orgs = mapOf(7L to acme))), "a phone that sees one org")
+        assertNull(wholeOrgName(null, OrgDirectory.EMPTY))
+
+        val actions = FakeShareActions()
+        val vm = share(actions = actions, orgs = two, rows = listOf(MINE.copy(orgId = 7)))
+        vm.open(MINE.id)
+        vm.setKind(ShareKind.Org)
+        runCurrent()
+        assertTrue(vm.state.value.orgKnown)
+        assertTrue(vm.state.value.canShare, "nothing to type")
+        vm.share()
+        runCurrent()
+        assertEquals("share 10 Org(name=acme) watch", actions.calls[1])
+
+        val unknown = share(orgs = two)
+        unknown.open(MINE.id)
+        unknown.setKind(ShareKind.Org)
+        runCurrent()
+        assertFalse(unknown.state.value.orgKnown)
+        assertFalse(unknown.state.value.canShare, "the field must name the org")
     }
 
     @Test

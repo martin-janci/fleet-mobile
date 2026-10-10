@@ -69,14 +69,6 @@ data class HubCapabilities(
     val handoffs: Boolean get() = CONTROL_HANDOFFS in tools
 
     /**
-     * Jev's host for a project's next session (`propose_host_placement`, N5
-     * `host_placement`): "Proposed by Jev" on a form's host choice in
-     * Control's chat. Listed to a phone only once the hub opens it to client
-     * tokens; until then the choice simply has no proposal.
-     */
-    val hostPlacement: Boolean get() = PROPOSE_HOST_PLACEMENT in tools
-
-    /**
      * The hub keeps the composer's chip row (`quick_replies`). Absent on a hub
      * older than that tool — the app then draws its cached chips and never
      * tries to sync them — and absent for a `readonly` token, which the hub
@@ -137,6 +129,16 @@ data class HubCapabilities(
     val spawnReview: Boolean get() = SPAWN_REVIEW in tools
     val repairSession: Boolean get() = REPAIR_SESSION in tools
     val newBgSession: Boolean get() = NEW_BG_SESSION in tools
+
+    /**
+     * Jev may propose a host (claude-fleet N5, `propose_host_placement`):
+     * the New session wizard's Where step, and a host choice on a form in
+     * Control's chat. Listed to a phone only once the hub opens it to client
+     * tokens (gap plan G7.3). Absent on an older hub and wherever the hub
+     * does not serve it to a phone yet: then the Where step keeps its own
+     * default host, as before.
+     */
+    val proposeHost: Boolean get() = PROPOSE_HOST_PLACEMENT in tools
 
     /** A host's re-probe and its recovery after a reboot; a ghost's recreate or dismissal. */
     val probeHost: Boolean get() = PROBE_HOST in tools

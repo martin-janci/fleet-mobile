@@ -203,20 +203,6 @@ fun startedWorkLine(row: SessionRow): String {
     return if (row.claudeStatus.isNullOrBlank()) "starting$on" else on.trimStart()
 }
 
-/**
- * The hub's `SuggestedHost` (`propose_host_placement`, Jev N5
- * `host_placement`): the host Jev would start a project's next session on.
- * The hub answers null when no host is clearly the one, outside `assist`, or
- * with one host or none left after the limits.
- */
-@Serializable
-data class SuggestedHost(
-    @SerialName("host_alias") val hostAlias: String,
-    /** The model's confidence, in whole percent. */
-    @SerialName("confidence_pct") val confidencePct: Int? = null,
-    @SerialName("run_id") val runId: Long? = null,
-)
-
 /** The field names a form asks for a host with, and those naming the project it is for. */
 private val HOST_FIELDS = setOf("host", "host_alias")
 private val PROJECT_FIELDS = setOf("project_id", "project")
@@ -240,9 +226,13 @@ fun hostPlacementAsk(form: ReplyForm, values: Map<String, JsonElement>, picks: M
     return HostAsk(host.name, id)
 }
 
-/** Jev's host as the card's pick, "Proposed by Jev · 82% sure": only a host the field offers. */
+/**
+ * Jev's host as the card's pick, "Proposed by Jev · <reason>" (or "· 82%
+ * sure" where the hub gives no reason): only a host the field offers.
+ */
 fun hostPick(form: ReplyForm, ask: HostAsk, suggested: SuggestedHost): FormPick? {
     val f = form.steps.flatMap { it.fields }.firstOrNull { it.name == ask.field } ?: return null
     if (f.options.none { it.first == suggested.hostAlias }) return null
-    return FormPick(ask.field, suggested.hostAlias, "jev", suggested.confidencePct?.let { "$it% sure" })
+    val why = suggested.reason?.trim()?.takeIf { it.isNotEmpty() } ?: suggested.confidencePct?.let { "$it% sure" }
+    return FormPick(ask.field, suggested.hostAlias, "jev", why)
 }

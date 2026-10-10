@@ -60,6 +60,7 @@ import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.RunsPage
 import dev.claudefleet.mobile.model.Headroom
+import dev.claudefleet.mobile.model.suggestedHostOf
 import dev.claudefleet.mobile.model.QueuePromptResult
 import dev.claudefleet.mobile.model.SendLaterTiming
 import dev.claudefleet.mobile.model.QueuedPrompt
@@ -549,6 +550,14 @@ class HubClient(
         ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
 
     /**
+     * Jev's host for a new session of [projectId] (claude-fleet N5,
+     * `propose_host_placement`): null when the hub has none to offer. Called
+     * only when `tools/list` names it (`HubCapabilities.proposeHost`).
+     */
+    suspend fun proposeHostPlacement(projectId: Long): SuggestedHost? =
+        call("propose_host_placement", buildJsonObject { put("project_id", projectId) }) { suggestedHostOf(it) }
+
+    /**
      * Which login on [hostAlias] has room left (`check_account_headroom`, hub
      * contract 14): [profile] is the session's own, null for the host's login.
      * From the usage the hub already keeps; never a fresh fetch.
@@ -732,6 +741,7 @@ class HubClient(
                 put("prompt", prompt)
                 // Contract 14; each only when set, so an older hub sees the call it knew.
                 options.projectId?.let { put("project_id", it) }
+                options.agent?.let { put("agent", it) }
                 if (options.readOnly) put("read_only", true)
                 options.stopAfterSecs?.let { put("stop_after_secs", it) }
                 options.stopAfterUsd?.let { put("stop_after_usd", it) }
@@ -1049,16 +1059,6 @@ class HubClient(
         ) { json.decodeFromJsonElement(SettingsDecided.serializer(), it) }
 
     // ---- chat forms (claude-fleet contract revision 9, `ask`) ----
-
-    /**
-     * Jev's host for a new session of [projectId] (`propose_host_placement`),
-     * or null when the hub has none to propose (outside `assist`, one host
-     * left, the model unsure).
-     */
-    suspend fun proposeHostPlacement(projectId: Long): SuggestedHost? =
-        call("propose_host_placement", buildJsonObject { put("project_id", projectId) }) {
-            if (it is JsonNull) null else json.decodeFromJsonElement(SuggestedHost.serializer(), it)
-        }
 
     /** One form: its spec, why the agent asks, and its state. */
     suspend fun askGet(formId: String): FormView =

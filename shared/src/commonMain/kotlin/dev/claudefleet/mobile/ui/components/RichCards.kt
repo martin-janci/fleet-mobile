@@ -900,18 +900,29 @@ internal fun FieldView(
         f.help?.let { Note(it) }
         if (f.type == "secret") Note(f.secretNote ?: SECRET_NOTE)
         if (pick != null && str == pick.value) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    pickLine(pick),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f).testTag(FORM_PROPOSED + f.name),
-                )
-                if (onChangePick != null) TextButton(onClick = onChangePick, enabled = canEdit) { Text("Change") }
-            }
+            ProposedByLine(pickLine(pick), onChange = onChangePick, enabled = canEdit, tag = FORM_PROPOSED + f.name)
         }
         if (f.draftedBy != null && f.draftedFrom != null && value == f.value) Note("Drafted by ${f.draftedBy} from ${f.draftedFrom}")
         f.disabledReason?.let { Note(it) }
+    }
+}
+
+/**
+ * A proposed choice's line — "Proposed by Jev · you used it for the last
+ * three deploys" — and its **Change**, under the choice it pre-selected: a
+ * chat form's select, and the New session wizard's host (Jev's
+ * `propose_host_placement`). [onChange] null draws no Change.
+ */
+@Composable
+internal fun ProposedByLine(line: String, onChange: (() -> Unit)?, enabled: Boolean, tag: String? = null) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            line,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.weight(1f).then(if (tag != null) Modifier.testTag(tag) else Modifier),
+        )
+        if (onChange != null) TextButton(onClick = onChange, enabled = enabled) { Text("Change") }
     }
 }
 

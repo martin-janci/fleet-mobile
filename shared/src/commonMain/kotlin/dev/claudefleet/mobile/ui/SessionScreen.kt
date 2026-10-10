@@ -1501,6 +1501,7 @@ private fun SessionBar(
                     onEdit = onEdit,
                     onStartBackground = onStartBackground,
                     onSetWork = workHandlers.onSetWork.takeIf { work.canSetWork },
+                    keyPrefixes = work.keyPrefixes,
                     onNameWork = workHandlers.onNameWork.takeIf { work.canNameWork },
                     onDetails = onOpenDetails,
                     onRepo = onOpenRepo,
@@ -1651,6 +1652,8 @@ private fun SessionOverflowMenu(
     onStartBackground: (String, String, BackgroundOptions) -> Unit = { _, _, _ -> },
     /** *Set work…*; null when this token or this hub cannot link work. */
     onSetWork: ((String) -> Unit)? = null,
+    /** The project keys *Link a ticket* may offer a fix with. */
+    keyPrefixes: List<String> = emptyList(),
     /** *Name this work…*; null unless the session has no work and this token and hub may name it. */
     onNameWork: ((String, String?) -> Unit)? = null,
     onDetails: () -> Unit = {},
@@ -1890,9 +1893,10 @@ private fun SessionOverflowMenu(
         )
     }
     if (showSetWork && onSetWork != null) {
-        SetWorkDialog(
+        SetWorkSheet(
             onConfirm = { showSetWork = false; onSetWork(it) },
             onDismiss = { showSetWork = false },
+            knownPrefixes = keyPrefixes,
         )
     }
     if (showNameWork && onNameWork != null) {

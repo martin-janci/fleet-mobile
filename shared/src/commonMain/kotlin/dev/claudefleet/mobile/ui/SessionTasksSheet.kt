@@ -26,6 +26,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import dev.claudefleet.mobile.model.keyFixOnLink
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -175,26 +180,46 @@ private fun TaskLinkRow(link: WorkTaskLink, state: SessionTasksUiState, handlers
     }
 }
 
+/**
+ * **Add task…**: search the tickets the phone knows, or type a key. A typed
+ * key is checked when Link is pressed, as *Link a ticket* checks it: one
+ * that is almost right gets "Not a key. Did you mean FLEET-142?" under the
+ * field, the fix one tap, and a second Link on the same text links it as typed.
+ */
 @Composable
 internal fun AddTask(state: SessionTasksUiState, handlers: SessionTasksHandlers) {
+    var fix by remember { mutableStateOf<String?>(null) }
+    var offeredFor by remember { mutableStateOf<String?>(null) }
+    fun linkTyped() {
+        if (state.addQuery.isBlank()) return
+        val next = keyFixOnLink(state.addQuery, offeredFor, state.keyPrefixes)
+        if (next == null) {
+            handlers.onAddTyped()
+        } else {
+            fix = next
+            offeredFor = state.addQuery.trim()
+        }
+    }
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(
             value = state.addQuery,
-            onValueChange = handlers.onAddQuery,
+            onValueChange = { fix = null; handlers.onAddQuery(it) },
             label = { Text("Search, or type a key") },
             singleLine = true,
+            isError = fix != null,
+            supportingText = fix?.let { f -> { KeyFixLine(f) { fix = null; offeredFor = null; handlers.onAddQuery(f) } } },
             keyboardOptions = KeyboardOptions(
                 capitalization = KeyboardCapitalization.Characters,
                 autoCorrectEnabled = false,
                 imeAction = ImeAction.Done,
             ),
-            keyboardActions = KeyboardActions(onDone = { handlers.onAddTyped() }),
+            keyboardActions = KeyboardActions(onDone = { linkTyped() }),
             modifier = Modifier.fillMaxWidth(),
         )
         androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val typed = state.addQuery.trim()
             if (typed.isNotEmpty()) {
-                Button(onClick = handlers.onAddTyped, enabled = !state.busy && state.connected) { Text("Link “$typed”") }
+                Button(onClick = { linkTyped() }, enabled = !state.busy && state.connected) { Text("Link “$typed”") }
             }
             TextButton(onClick = handlers.onCloseAdd) { Text("Cancel") }
         }

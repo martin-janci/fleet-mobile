@@ -93,10 +93,6 @@ class ToolsTheAppMayCallTest {
         // What Control's agent handed on, for its chips (redesign 9.3):
         // readonly, `Access::PersonDevice` (a receipt quotes its prompt).
         "control_handoffs",
-        // Jev's host for a project's next session (N5 `host_placement`),
-        // "Proposed by Jev" on a host choice in Control's chat: called only
-        // where `tools/list` names it to this token (`HubCapabilities.hostPlacement`).
-        "propose_host_placement",
         // The composer's shared chip row. `Access::Client` and not readonly
         // (one tool both reads and replaces the list), so a `full` client may
         // and a `readonly` one is never shown it — which is also the token
@@ -253,6 +249,11 @@ class ToolsTheAppMayCallTest {
         "queue_prompt",
         "queued_prompts",
         "runs",
+        // Jev's host for the New session wizard and a host choice in
+        // Control's chat (claude-fleet N5, redesign 4.11): `propose_host_placement`, a read that may ask the decision
+        // model once. Called only when `tools/list` names it to this token
+        // (`HubCapabilities.proposeHost`); a refusal hides the proposal.
+        "propose_host_placement",
     )
 
     @Test

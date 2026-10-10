@@ -1598,6 +1598,7 @@ private fun FleetRoute(
                         repository = repository,
                         credentials = credentials,
                         knownGroups = myWork::knownGroups,
+                        groupCounts = myWork::groupCounts,
                         // The fleet's scope: a placement or a resume is not
                         // cancelled by backing out of the task.
                         callScope = scope,
@@ -1873,7 +1874,7 @@ private fun FleetRoute(
                                     formContext = FormContext(
                                         rows = controlRows,
                                         onOpenSession = nav::open,
-                                        proposeHost = (container.chatFormActions::proposeHost).takeIf { settingsCaps.hostPlacement },
+                                        proposeHost = (container.chatFormActions::proposeHost).takeIf { settingsCaps.proposeHost },
                                     ),
                                 ),
                             )
@@ -2509,6 +2510,8 @@ private fun NewSessionRoute(
             onPickLogin = vm::pickLogin,
             onTicketBranch = vm::onTicketBranchChange,
             onClearDraft = vm::clearBranchDraft,
+            onRegenerateDraft = { vm.regenerateBranchDraft() },
+            onChangeProposedHost = vm::changeProposedHost,
         ),
     )
     if (askDiscard) {
@@ -2526,6 +2529,7 @@ private fun TaskRoute(
     repository: FleetRepository,
     credentials: Credentials,
     knownGroups: () -> List<GroupRef>,
+    groupCounts: () -> Map<String, Int>,
     callScope: CoroutineScope,
     onOpenSession: (Long) -> Unit,
     onStartHere: (String) -> Unit,
@@ -2543,6 +2547,7 @@ private fun TaskRoute(
             // list of actions as well.
             canWrite = credentials.canWrite,
             knownGroups = knownGroups,
+            groupCounts = groupCounts,
             onOpenSession = onOpenSession,
             onStartHere = onStartHere,
             callScope = callScope,
