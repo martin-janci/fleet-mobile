@@ -16,6 +16,9 @@ interface AlertPoster {
 
     /** A routine run failed (the matrix's Routine failed row); a platform that cannot say it says nothing. */
     fun postRoutine(alert: RoutineFailedAlert) {}
+
+    /** A mission waits on a person (gap plan G5.7); a platform that cannot say it says nothing. */
+    fun postMission(alert: MissionWaitAlert) {}
 }
 
 /** The seen set the background check and the open app share, in [Prefs]. */
@@ -78,6 +81,7 @@ class NeedsYouCheck(
         }
         prefs.writeSeen(after)
         routines()
+        missions()
     }
 
     /**
@@ -96,6 +100,25 @@ class NeedsYouCheck(
         val (alerts, after) = routineFailedAlerts(prefs.readRoutineSeen(), failing)
         if (prefs.notifyAllows(ROUTINE_FAILED_REASON)) alerts.forEach(poster::postRoutine)
         prefs.writeRoutineSeen(after)
+    }
+
+    /**
+     * A mission that waits on a person (contract 15's `waiting_on`, gap plan
+     * G5.7): the session list carries no missions, so one more look, at
+     * `work_missions`. A hub or token without it answers an error, and the
+     * check says nothing.
+     */
+    private suspend fun missions() {
+        val missions = try {
+            withTimeoutOrNull(timeout) { session.withClient { it.workMissions() } }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        } ?: return
+        val (alerts, after) = missionWaitAlerts(prefs.readMissionSeen(), missions)
+        if (prefs.notifyAllows(MISSION_WAITING_REASON)) alerts.forEach(poster::postMission)
+        prefs.writeMissionSeen(after)
     }
 }
 

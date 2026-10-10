@@ -64,6 +64,10 @@ data class MissionsHandlers(
     /** The spend ask's two answers (redesign 14.16); each only ever from a tap. */
     val onApproveSpend: (SpendAsk) -> Unit = {},
     val onDenySpend: (SpendAsk) -> Unit = {},
+    /** Sign the grant the mission waits on: level, hours, budget in dollars (null: no cap). Only from the review sheet's Sign (G5.7). */
+    val onSignGrant: (Int, Int, Long?) -> Unit = { _, _, _ -> },
+    /** Try a failed task again (G5.7). */
+    val onRetryItem: (Long) -> Unit = {},
 )
 
 /**

@@ -40,6 +40,10 @@ data class MissionsUiState(
      * (`mission_grant`), resume (`mission_state`) and answer its card.
      */
     val canAnswerSpend: Boolean = false,
+    /** A person may sign a mission's grant here (`mission_grant`, gap plan G5.7). */
+    val canSignGrant: Boolean = false,
+    /** A person may try a failed task again (`work_link { retry }`, G5.7). */
+    val canRetry: Boolean = false,
     val open: Boolean = false,
     val loading: Boolean = false,
     val missions: List<Mission> = emptyList(),
@@ -66,9 +70,9 @@ data class MissionsUiState(
  * the list, and one mission's next steps, its confirm queue and the autonomy
  * that applies — each step pressed by a person (Go), each card applied or
  * dismissed, a question answered in words; Pause and Resume for one mission,
- * Pause all for every one. Planning, grants and editing a mission stay on the
- * desktop: a grant is a signature, and a phone is where it is easiest to sign
- * something unread.
+ * Pause all for every one. A grant is signed here only from its review sheet,
+ * which spells every term out and pre-selects none (gap plan G5.7); planning
+ * and editing a mission stay on the desktop.
  */
 class MissionsViewModel(
     private val fleet: FleetState,
@@ -100,6 +104,8 @@ class MissionsViewModel(
             canPause = link("mission_state"),
             canPauseAll = link("missions_pause_all"),
             canAnswerSpend = link("mission_grant") && link("mission_state") && link("card_decide"),
+            canSignGrant = link("mission_grant"),
+            canRetry = link("retry"),
             open = l.open,
             loading = l.loading,
             missions = l.missions,
@@ -185,6 +191,27 @@ class MissionsViewModel(
         local.update { it.copy(notice = "Denied. The budget stays at ${dollars(ask.budgetMicros)}.") }
     }
 
+    /**
+     * Sign the grant the open mission waits on (gap plan G5.7), from the
+     * review sheet's Sign only: [level] is what the mission asked for, and
+     * [hours] and [budgetDollars] (null: no cap) are what the person picked.
+     */
+    fun signGrant(level: Int, hours: Int, budgetDollars: Long?): Job = act("grant") { id ->
+        if (!state.value.canSignGrant) return@act
+        if (level !in 1..3 || hours !in 1..GRANT_MAX_HOURS || (budgetDollars != null && budgetDollars <= 0)) return@act
+        actions.signGrant(id, level, hours, budgetDollars?.let { it * 100 })
+        local.update {
+            it.copy(notice = "Signed: level $level for $hours h" + (budgetDollars?.let { d -> ", up to \$$d." } ?: ", no spend cap."))
+        }
+    }
+
+    /** Another attempt at the open mission's failed task (G5.7); the outcome is the step's line. */
+    fun retryItem(itemId: Long): Job = act("retry:$itemId") {
+        if (!state.value.canRetry) return@act
+        val r = actions.retryItem(itemId)
+        local.update { it.copy(results = listOf(r)) }
+    }
+
     /** Pause an active mission, resume a paused one. */
     fun togglePause(): Job = act("state") { id ->
         val m = local.value.detail?.mission ?: return@act
@@ -268,3 +295,6 @@ class MissionsViewModel(
         }
     }
 }
+
+/** A grant runs at most a week (the hub's `GRANT_MAX_SECS`). */
+const val GRANT_MAX_HOURS: Int = 168

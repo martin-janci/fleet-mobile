@@ -73,6 +73,20 @@ class IosAlertPoster : AlertPoster {
         )
     }
 
+    /** A mission waits on a person (G5.7): one per wait, in the same thread; a tap opens the app. */
+    override fun postMission(alert: MissionWaitAlert) {
+        val content = UNMutableNotificationContent().apply {
+            setTitle(alert.title)
+            setBody(alert.text)
+            setThreadIdentifier(NEEDS_YOU_THREAD)
+            setSound(UNNotificationSound.defaultSound)
+        }
+        center.addNotificationRequest(
+            UNNotificationRequest.requestWithIdentifier("${NEEDS_YOU_ID_PREFIX}mission-${alert.missionId}", content, null),
+            withCompletionHandler = null,
+        )
+    }
+
     override fun withdraw(sessionId: Long) {
         center.removeDeliveredNotificationsWithIdentifiers(listOf(needsYouId(sessionId)))
     }

@@ -62,6 +62,7 @@ import dev.claudefleet.mobile.model.SendLaterTiming
 import dev.claudefleet.mobile.model.QueuedPrompt
 import dev.claudefleet.mobile.model.MissionCard
 import dev.claudefleet.mobile.model.MissionGrant
+import dev.claudefleet.mobile.model.StepResult
 import dev.claudefleet.mobile.model.MissionDetail
 import dev.claudefleet.mobile.model.StartOutcome
 import dev.claudefleet.mobile.model.TidyApplyItem
@@ -1394,6 +1395,33 @@ class HubClient(
                 grant.profile?.let { put("profile", it) }
             },
         ) { json.decodeFromJsonElement(MissionGrant.serializer(), it) }
+
+    /**
+     * Sign a mission's first grant (gap plan G5.7): `work_link { mission_grant }`
+     * with the level, the hours and, when the person set one, the budget. A
+     * person's call only; the hub refuses anything else.
+     */
+    suspend fun grantMission(missionId: Long, level: Int, hours: Int, budgetCents: Long?): MissionGrant =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "mission_grant")
+                put("mission_id", missionId)
+                put("level", level)
+                put("hours", hours)
+                budgetCents?.let { put("budget_cents", it) }
+            },
+        ) { json.decodeFromJsonElement(MissionGrant.serializer(), it) }
+
+    /** Another attempt at a mission's task (`work_link { retry, item_id }`): the hub hands it the last attempt's error. */
+    suspend fun retryMissionItem(itemId: Long): StepResult =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "retry")
+                put("item_id", itemId)
+            },
+        ) { json.decodeFromJsonElement(StepResult.serializer(), it) }
 
     /** Pause every active mission this token may change and end their grants; answers their ids. */
     suspend fun pauseAllMissions(): List<Long> =

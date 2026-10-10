@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.model.MissionCard
 import dev.claudefleet.mobile.model.MissionDetail
 import dev.claudefleet.mobile.model.MissionGrant
 import dev.claudefleet.mobile.model.StartOutcome
+import dev.claudefleet.mobile.model.StepResult
 
 /**
  * The missions calls the Missions sheet may make (claude-fleet orchestration).
@@ -40,6 +41,17 @@ interface MissionActions {
      */
     suspend fun regrant(missionId: Long, grant: MissionGrant, budgetCents: Long, hours: Int): MissionGrant =
         throw UnsupportedOperationException("mission_grant")
+
+    /**
+     * Sign a first grant (gap plan G5.7): what the loop may do by itself at
+     * [level], for [hours], within [budgetCents] when one is set. A person's
+     * call only; the sheet checks `mission_grant` first.
+     */
+    suspend fun signGrant(missionId: Long, level: Int, hours: Int, budgetCents: Long?): MissionGrant =
+        throw UnsupportedOperationException("mission_grant")
+
+    /** Another attempt at a mission's failed task (`work_link { retry }`); the sheet checks `retry` first. */
+    suspend fun retryItem(itemId: Long): StepResult = throw UnsupportedOperationException("retry")
 }
 
 /** [MissionActions] against the paired hub, through [AppSession.withClient]. */
@@ -61,4 +73,9 @@ class HubMissionActions(private val session: AppSession) : MissionActions {
 
     override suspend fun regrant(missionId: Long, grant: MissionGrant, budgetCents: Long, hours: Int): MissionGrant =
         session.withClient { it.regrantMission(missionId, grant, budgetCents, hours) }
+
+    override suspend fun signGrant(missionId: Long, level: Int, hours: Int, budgetCents: Long?): MissionGrant =
+        session.withClient { it.grantMission(missionId, level, hours, budgetCents) }
+
+    override suspend fun retryItem(itemId: Long): StepResult = session.withClient { it.retryMissionItem(itemId) }
 }

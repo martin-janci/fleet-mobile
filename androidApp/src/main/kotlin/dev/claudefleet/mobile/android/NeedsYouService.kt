@@ -19,8 +19,11 @@ import dev.claudefleet.mobile.notify.BackgroundNotifier
 import dev.claudefleet.mobile.notify.NeedsYouAlert
 import dev.claudefleet.mobile.notify.NeedsYouResolved
 import dev.claudefleet.mobile.notify.NotifyActionKind
+import dev.claudefleet.mobile.notify.MISSION_WAITING_REASON
+import dev.claudefleet.mobile.notify.MissionWaitAlert
 import dev.claudefleet.mobile.notify.ROUTINE_FAILED_REASON
 import dev.claudefleet.mobile.notify.RoutineFailedAlert
+import dev.claudefleet.mobile.notify.missionWaitAlerts
 import dev.claudefleet.mobile.notify.routineFailedAlerts
 import dev.claudefleet.mobile.notify.needsYouContent
 import dev.claudefleet.mobile.notify.decodeSeen
@@ -111,6 +114,7 @@ class NeedsYouService : Service() {
         val fleet = container.repository(credentials, scope)
         fleet.start()
         scope.launch { watchRoutines(HubClient(http, credentials.hub, credentials.token), container) }
+        scope.launch { watchMissions(HubClient(http, credentials.hub, credentials.token), container) }
         // What the last run saw, so a session that began waiting while the
         // service was down is still news when it comes back.
         val memory = getSharedPreferences("notifications", MODE_PRIVATE)
@@ -254,6 +258,48 @@ class NeedsYouService : Service() {
         }
     }
 
+    /**
+     * A mission that waits on a person (gap plan G5.7): the event stream
+     * carries sessions, not missions, so ask `work { missions }` every
+     * [ROUTINE_POLL_MS], as for routines. The first answer is the baseline; a
+     * hub that answers with an error (no missions, a token without work) is
+     * asked again less often.
+     */
+    private suspend fun watchMissions(client: HubClient, container: AppContainer) {
+        var seen: Map<Long, String>? = null
+        while (true) {
+            val missions = try {
+                client.workMissions()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+            if (missions != null) {
+                val (alerts, now) = missionWaitAlerts(seen, missions)
+                seen = now
+                if (!AppVisibility.foreground && container.prefs.notifyAllows(MISSION_WAITING_REASON)) alerts.forEach(::postMission)
+            }
+            delay(if (missions != null) ROUTINE_POLL_MS else ROUTINE_RETRY_MS)
+        }
+    }
+
+    /** One "a mission waits for you" notification; a tap opens the app, where it is answered. */
+    private fun postMission(alert: MissionWaitAlert) {
+        val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        val n = NotificationCompat.Builder(this, ALERTS)
+            .setSmallIcon(R.drawable.ic_notify)
+            .setContentTitle(alert.title)
+            .setContentText(alert.text)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .build()
+        manager(this).notify(MISSION_BASE + (alert.missionId % 100_000).toInt(), n)
+    }
+
     /** One "a routine run failed" notification; a tap opens the app. */
     private fun postRoutine(alert: RoutineFailedAlert) {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
@@ -299,6 +345,7 @@ class NeedsYouService : Service() {
         private const val ALERT_BASE = 1_000
         private const val SUMMARY_ID = 2
         private const val ROUTINE_BASE = 200_000
+        private const val MISSION_BASE = 300_000
         private const val ROUTINE_POLL_MS = 60_000L
         private const val ROUTINE_RETRY_MS = 5 * 60_000L
         private const val GROUP = "needs_you"

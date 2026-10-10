@@ -37,6 +37,12 @@ import dev.claudefleet.mobile.ui.theme.OrbitTokens
 import dev.claudefleet.mobile.ui.kit.ListBody
 import dev.claudefleet.mobile.ui.kit.LoadFailed
 import dev.claudefleet.mobile.ui.kit.listBody
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 
 /*
  * Missions as a screen in the New layout (redesign 14.16, board
@@ -47,9 +53,9 @@ import dev.claudefleet.mobile.ui.kit.listBody
  *
  * The spend ask (Approve and Deny, neither pre-selected) is the mission
  * detail's first card ([SpendAskCard]), derived from the budget brake's ask
- * card and the grant ([spendAsk]). "Waits on you" with 9.8's handoffs and
- * 8.6's routines, and the background agent screen, come with the steps they
- * need.
+ * card and the grant ([spendAsk]). The missions that wait on a person
+ * (contract 15's `waiting_on`) come first, under "Waits on you" (gap plan
+ * G5.7); each row says its autonomy and draws its spend against its budget.
  */
 
 /** A week, for "Done this week". */
@@ -57,18 +63,23 @@ private const val WEEK = 7 * 86_400L
 
 /** The list's groups, each newest first. */
 data class MissionGroups(
+    /** Active missions that wait on a person, the longest waiting first ([missionWaits]). */
+    val waiting: List<Mission> = emptyList(),
     val running: List<Mission>,
     val paused: List<Mission>,
     val drafts: List<Mission>,
     val doneThisWeek: List<Mission>,
 ) {
-    val isEmpty: Boolean get() = running.isEmpty() && paused.isEmpty() && drafts.isEmpty() && doneThisWeek.isEmpty()
+    val isEmpty: Boolean get() = waiting.isEmpty() && running.isEmpty() && paused.isEmpty() && drafts.isEmpty() && doneThisWeek.isEmpty()
 }
 
 internal fun missionGroups(missions: List<Mission>, nowSeconds: Long): MissionGroups {
     val newest = missions.sortedByDescending { it.updatedAt }
+    val waiting = missionWaits(missions)
+    val waitingIds = waiting.map { it.id }.toSet()
     return MissionGroups(
-        running = newest.filter { it.state == "active" },
+        waiting = waiting,
+        running = newest.filter { it.state == "active" && it.id !in waitingIds },
         paused = newest.filter { it.state == "paused" },
         drafts = newest.filter { it.state == "draft" },
         doneThisWeek = newest.filter { it.state in FINISHED && nowSeconds - it.updatedAt < WEEK },
@@ -79,7 +90,10 @@ private val FINISHED = setOf("completed", "failed", "cancelled")
 
 /** "3 running · 1 paused", "No missions running". */
 internal fun missionsHeadline(g: MissionGroups): String = buildList {
-    if (g.running.isNotEmpty()) add("${g.running.size} running")
+    // A waiting mission is still running: it is counted in both, as the board says "3 running · 1 waits on you".
+    val active = g.running.size + g.waiting.size
+    if (active > 0) add("$active running")
+    if (g.waiting.isNotEmpty()) add("${g.waiting.size} ${if (g.waiting.size == 1) "waits" else "wait"} on you")
     if (g.paused.isNotEmpty()) add("${g.paused.size} paused")
     if (g.drafts.isNotEmpty()) add("${g.drafts.size} ${if (g.drafts.size == 1) "draft" else "drafts"}")
 }.joinToString(" · ").ifEmpty { "No missions running" }
@@ -118,8 +132,27 @@ internal fun missionSpend(m: Mission): String? {
     return if (cost > 0) "${dollars(cost)} spent" else null
 }
 
-/** A row's second line with its spend. */
-internal fun missionRowLine(m: Mission): String = listOfNotNull(missionLine(m), missionSpend(m)).joinToString(" · ")
+/**
+ * The autonomy a mission asked for, short, for its row (board MobileMissions:
+ * "autonomy: ask before push"). Null at level 0, which keeps the cards only
+ * and so says nothing a row needs.
+ */
+internal fun missionAutonomy(m: Mission): String? = when {
+    m.level <= 0 -> null
+    m.level == 1 -> "autonomy: ask before each step"
+    m.level == 2 -> "autonomy: runs ready work"
+    else -> "autonomy: runs and closes work"
+}
+
+/** A row's second line with its spend and its autonomy. */
+internal fun missionRowLine(m: Mission): String =
+    listOfNotNull(missionLine(m), missionSpend(m), missionAutonomy(m)).joinToString(" · ")
+
+/** How much of its budget a mission spent, 0 to 1, for the row's meter; null with no budget. */
+internal fun missionSpendFraction(m: Mission): Float? {
+    val budget = m.budgetMicros?.takeIf { it > 0 } ?: return null
+    return ((m.costMicros ?: 0).toDouble() / budget).toFloat().coerceIn(0f, 1f)
+}
 
 /** What Pause all says it stops, before it stops it. */
 internal fun pauseAllMeta(running: Int): String =
@@ -178,6 +211,7 @@ fun OrbitMissionsScreen(
                     )
                 }
             }
+            group("Waits on you", groups.waiting, nowSeconds, handlers.onOpen)
             group("Working", groups.running, nowSeconds, handlers.onOpen)
             group("Paused", groups.paused, nowSeconds, handlers.onOpen)
             group("Drafts", groups.drafts, nowSeconds, handlers.onOpen)
@@ -223,13 +257,41 @@ private fun androidx.compose.foundation.lazy.LazyListScope.group(
     if (missions.isEmpty()) return
     item(key = "h-$title") { GroupHeading(title, missions.size) }
     items(missions, key = { "m-$title-${it.id}" }) { m ->
-        PhoneRow(
-            title = m.name.ifBlank { "Mission ${m.id}" },
-            line = missionRowLine(m),
-            word = missionWord(m),
-            age = relativeTime(m.updatedAt.takeIf { it > 0 }, nowSeconds),
-            onClick = { onOpen(m.id) },
-        )
+        val wait = m.waitingOn
+        Column {
+            PhoneRow(
+                title = m.name.ifBlank { "Mission ${m.id}" },
+                // A waiting mission leads with what it waits on, then how far it got.
+                line = if (wait != null) "${missionAskWords(wait)} · ${missionRowLine(m)}" else missionRowLine(m),
+                word = if (wait != null) StatusWord.NEEDS_YOU else missionWord(m),
+                lead = if (wait != null) "Waiting for you" else missionWord(m)?.label,
+                age = relativeTime((wait?.since ?: m.updatedAt).takeIf { it > 0 }, nowSeconds),
+                onClick = { onOpen(m.id) },
+                divider = missionSpendFraction(m) == null,
+            )
+            missionSpendFraction(m)?.let { SpendMeter(it) }
+        }
+    }
+}
+
+/** A mission's spend against its budget, as a thin bar under its row; amber near it, red at it. */
+@Composable
+private fun SpendMeter(fraction: Float) {
+    val o = Fleet.colors
+    val bar = when {
+        fraction >= 1f -> o.statusFailed
+        fraction >= 0.8f -> o.statusWaiting
+        else -> o.accent
+    }
+    Box(
+        Modifier
+            .padding(start = gutter(), end = gutter(), bottom = 10.dp)
+            .fillMaxWidth()
+            .height(4.dp)
+            .background(o.track, RoundedCornerShape(2.dp))
+            .semantics { contentDescription = "${(fraction * 100).toInt()} percent of the budget spent" },
+    ) {
+        Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().background(bar, RoundedCornerShape(2.dp)))
     }
 }
 

@@ -78,8 +78,10 @@ internal class RecordingPoster : AlertPoster {
     val posted = mutableListOf<Long>()
     val withdrawn = mutableListOf<Long>()
     val routines = mutableListOf<Long>()
+    val missions = mutableListOf<String>()
     override fun post(alert: NeedsYouAlert) { posted += alert.sessionId }
     override fun postRoutine(alert: RoutineFailedAlert) { routines += alert.runId }
+    override fun postMission(alert: MissionWaitAlert) { missions += "${alert.missionId} ${alert.text}" }
     override fun withdraw(sessionId: Long) { withdrawn += sessionId }
 }
 
@@ -88,6 +90,8 @@ private class Hub {
     var reply: suspend () -> Pair<String, HttpStatusCode> = { sse(okResult("[]")) to HttpStatusCode.OK }
     /** The answer to `routines { failing }`; null: the same as every other call. */
     var failing: String? = null
+    /** The answer to `work { missions }`; null: the same as every other call. */
+    var missions: String? = null
 }
 
 private fun check(
@@ -101,6 +105,7 @@ private fun check(
         hub.requests++
         val text = (it.body as? TextContent)?.text.orEmpty()
         val routines = hub.failing?.takeIf { "\"failing\"" in text }
+            ?: hub.missions?.takeIf { "\"missions\"" in text }
         val (body, status) = routines?.let { sse(okResult(it)) to HttpStatusCode.OK } ?: hub.reply()
         val type = if (body.startsWith("event:")) "text/event-stream" else "application/json"
         respond(body, status, headersOf(HttpHeaders.ContentType, type))
@@ -314,5 +319,25 @@ class KeepSeenWhileOpenTest {
         c.once()
 
         assertEquals(listOf(42L), poster.routines)
+    }
+
+    /** A mission that comes to wait on a person (gap plan G5.7) is posted once; the first look is the baseline. */
+    @Test
+    fun a_mission_that_comes_to_wait_on_you_is_posted_once() = realTime {
+        val hub = Hub().apply {
+            reply = { sse(okResult(rows(1L to null))) to HttpStatusCode.OK }
+            missions = """[{"id":5,"name":"Ship 1.4","state":"active"}]"""
+        }
+        val prefs = FakePrefs().apply { writeSeen(mapOf(1L to null)) }
+        val poster = RecordingPoster()
+        val c = check(hub, prefs = prefs, poster = poster)
+
+        c.once()
+        assertEquals(emptyList(), poster.missions, "the first look at missions is the baseline")
+        hub.missions = """[{"id":5,"name":"Ship 1.4","state":"active","waiting_on":{"reason":"sign_grant","since":100}}]"""
+        c.once()
+        c.once()
+
+        assertEquals(listOf("5 Mission waits for you to sign the autonomy grant"), poster.missions)
     }
 }

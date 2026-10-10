@@ -4,6 +4,7 @@ import dev.claudefleet.mobile.model.Mission
 import dev.claudefleet.mobile.model.RunEstimate
 import dev.claudefleet.mobile.model.runEstimateLine
 import dev.claudefleet.mobile.ui.kit.StatusWord
+import dev.claudefleet.mobile.model.MissionWait
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -106,5 +107,43 @@ class OrbitMissionsTest {
         assertTrue(BACKGROUND_SPEND.mapNotNull { it.first }.all { it > 0 && it <= 1000 })
         assertNull(BACKGROUND_STOP_AFTER.first().first, "no limit is the default")
         assertNull(BACKGROUND_SPEND.first().first, "no limit is the default")
+    }
+
+    /** Gap plan G5.7 (board MobileMissions): the missions that wait on a person come first, counted in the headline. */
+    @Test
+    fun missions_that_wait_on_you_come_first_and_the_headline_says_so() {
+        val g = missionGroups(
+            listOf(
+                mission(1, "active", ago = 60),
+                mission(2, "active", ago = 120).copy(waitingOn = MissionWait("sign_grant", since = NOW - 600)),
+                mission(3, "active", ago = 30).copy(waitingOn = MissionWait("question", since = NOW - 3_600)),
+                mission(4, "paused").copy(waitingOn = MissionWait("question", since = NOW - 60)),
+            ),
+            NOW,
+        )
+        assertEquals(listOf(3L, 2L), g.waiting.map { it.id }, "the longest waiting first")
+        assertEquals(listOf(1L), g.running.map { it.id }, "a waiting mission is not listed twice")
+        assertEquals(listOf(4L), g.paused.map { it.id }, "a paused mission waits on no one")
+        assertEquals("3 running · 2 wait on you · 1 paused", missionsHeadline(g))
+        assertEquals(
+            "1 running · 1 waits on you",
+            missionsHeadline(missionGroups(listOf(mission(2, "active").copy(waitingOn = MissionWait("confirm", openCards = 1))), NOW)),
+        )
+    }
+
+    /** Gap plan G5.7: a row says its autonomy, and its meter is its spend against its budget. */
+    @Test
+    fun a_row_says_its_autonomy_and_meters_its_spend() {
+        val m = mission(1, "active", done = 1, total = 5)
+        assertNull(missionAutonomy(m), "level 0 keeps the cards only")
+        assertEquals("autonomy: ask before each step", missionAutonomy(m.copy(level = 1)))
+        assertEquals("autonomy: runs ready work", missionAutonomy(m.copy(level = 2)))
+        assertEquals("autonomy: runs and closes work", missionAutonomy(m.copy(level = 3)))
+        assertEquals("step 2 of 5 · $1.20 spent · autonomy: runs ready work", missionRowLine(m.copy(level = 2, costMicros = 1_200_000)))
+
+        assertNull(missionSpendFraction(m.copy(costMicros = 1_000_000)), "no budget, no meter")
+        assertEquals(0.25f, missionSpendFraction(m.copy(costMicros = 1_250_000, budgetMicros = 5_000_000)))
+        assertEquals(0f, missionSpendFraction(m.copy(budgetMicros = 5_000_000)))
+        assertEquals(1f, missionSpendFraction(m.copy(costMicros = 9_000_000, budgetMicros = 5_000_000)), "over budget fills the bar, no further")
     }
 }

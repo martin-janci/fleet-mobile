@@ -2187,6 +2187,8 @@ private fun FleetRoute(
                         onDismissError = missions::dismissError,
                         onApproveSpend = { missions.approveSpend(it, epochSeconds()) },
                         onDenySpend = { missions.denySpend(it) },
+                        onSignGrant = { level, hours, budget -> missions.signGrant(level, hours, budget) },
+                        onRetryItem = { missions.retryItem(it) },
                     ),
                     orbit = layout == PhoneLayout.New,
                 )
