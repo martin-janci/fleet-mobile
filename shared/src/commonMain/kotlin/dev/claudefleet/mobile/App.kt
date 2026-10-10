@@ -2279,6 +2279,8 @@ private fun FleetRoute(
 }
 
 /** The Settings tab: This phone, the hub's pages, and Classic's own screen. */
+// Opted in here for BackHandler, as FleetRoute is.
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun SettingsRoute(
     container: AppContainer,
