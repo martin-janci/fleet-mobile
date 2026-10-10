@@ -49,6 +49,8 @@ import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.TidyReport
 import dev.claudefleet.mobile.model.Mission
 import dev.claudefleet.mobile.model.FailingRoutine
+import dev.claudefleet.mobile.model.RoutineBudget
+import dev.claudefleet.mobile.model.SuggestedHost
 import dev.claudefleet.mobile.model.BranchDiff
 import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.DebugDevice
@@ -58,6 +60,7 @@ import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.RunsPage
 import dev.claudefleet.mobile.model.Headroom
+import dev.claudefleet.mobile.model.suggestedHostOf
 import dev.claudefleet.mobile.model.QueuePromptResult
 import dev.claudefleet.mobile.model.SendLaterTiming
 import dev.claudefleet.mobile.model.QueuedPrompt
@@ -547,6 +550,14 @@ class HubClient(
         ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
 
     /**
+     * Jev's host for a new session of [projectId] (claude-fleet N5,
+     * `propose_host_placement`): null when the hub has none to offer. Called
+     * only when `tools/list` names it (`HubCapabilities.proposeHost`).
+     */
+    suspend fun proposeHostPlacement(projectId: Long): SuggestedHost? =
+        call("propose_host_placement", buildJsonObject { put("project_id", projectId) }) { suggestedHostOf(it) }
+
+    /**
      * Relaunch the session on its conversation under another [model] and/or
      * [effort] (`restart_session { model, effort }`; "" = the host's
      * default, null = keep). Codex picks both at launch only.
@@ -745,6 +756,7 @@ class HubClient(
                 put("prompt", prompt)
                 // Contract 14; each only when set, so an older hub sees the call it knew.
                 options.projectId?.let { put("project_id", it) }
+                options.agent?.let { put("agent", it) }
                 if (options.readOnly) put("read_only", true)
                 options.stopAfterSecs?.let { put("stop_after_secs", it) }
                 options.stopAfterUsd?.let { put("stop_after_usd", it) }
@@ -1198,6 +1210,22 @@ class HubClient(
             json.decodeFromJsonElement(ListSerializer(Ticket.serializer()), it)
         }
 
+    /**
+     * Tickets in the hub's whole cache whose key, title or assignees hold
+     * every word of [query], then the caller's own tasks (an older hub
+     * ignores `include_local` and answers tickets alone).
+     */
+    suspend fun workSearch(query: String): List<Ticket> =
+        call(
+            "work",
+            buildJsonObject {
+                put("action", "tickets")
+                put("query", query.trim())
+                put("include_local", true)
+                put("limit", WORK_SEARCH_LIMIT)
+            },
+        ) { json.decodeFromJsonElement(ListSerializer(Ticket.serializer()), it) }
+
     /** The connected trackers — empty on a hub with the work graph and no tracker. */
     suspend fun workTrackers(): List<TrackerRow> =
         call("work", buildJsonObject { put("action", "trackers") }) {
@@ -1486,6 +1514,12 @@ class HubClient(
     suspend fun routines(): List<Routine> =
         call("routines", buildJsonObject { put("action", "list") }) {
             json.decodeFromJsonElement(ListSerializer(Routine.serializer()), it)
+        }
+
+    /** The fleet's routine spend today and its budget (`routines { budget }`): More's Automation line. */
+    suspend fun routineBudget(): RoutineBudget =
+        call("routines", buildJsonObject { put("action", "budget") }) {
+            json.decodeFromJsonElement(RoutineBudget.serializer(), it)
         }
 
     /** Each routine whose newest run failed, newest failure first: the background watcher's Routine failed. */
@@ -1963,14 +1997,22 @@ class HubClient(
      * A new task in fleet (`work_link { create }`, claude-fleet's shared work
      * context): a title, and optionally its description and due date
      * (`YYYY-MM-DD`). A token bound to one organisation is refused a
-     * standalone task (`E_FORBIDDEN`): the hub says so.
+     * standalone task (`E_FORBIDDEN`): the hub says so. With [parent]
+     * (`item:<id>`) it is a subtask, filed under that epic or task and in its
+     * organisation; one past the deepest level is refused, naming why.
      */
-    suspend fun createWorkTask(title: String, notes: String? = null, dueAt: String? = null): WorkItem =
+    suspend fun createWorkTask(
+        title: String,
+        notes: String? = null,
+        dueAt: String? = null,
+        parent: String? = null,
+    ): WorkItem =
         call(
             "work_link",
             buildJsonObject {
                 put("action", "create")
                 put("title", title)
+                parent?.takeIf { it.isNotBlank() }?.let { put("parent", it) }
                 notes?.takeIf { it.isNotBlank() }?.let { put("notes", it) }
                 dueAt?.takeIf { it.isNotBlank() }?.let { put("due_at", it) }
             },
@@ -2569,6 +2611,9 @@ internal const val SHA256_HEADER = "X-Fleet-Sha256"
 
 /** How much of a download is read per step: enough to keep a fast link busy, small enough for any heap. */
 private const val DOWNLOAD_CHUNK = 64 * 1024
+
+/** How many tickets a word search asks for (the hub caps a page at 200). */
+private const val WORK_SEARCH_LIMIT = 50
 
 internal const val HUB_CALL_TIMEOUT_MS = 45_000L
 internal const val HUB_CONNECT_TIMEOUT_MS = 15_000L

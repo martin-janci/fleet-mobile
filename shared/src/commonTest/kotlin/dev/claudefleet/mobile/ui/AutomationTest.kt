@@ -8,6 +8,7 @@ import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.HubHealth
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.Routine
+import dev.claudefleet.mobile.model.RoutineBudget
 import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.SessionRow
@@ -85,6 +86,11 @@ private class FakeRoutineActions : RoutineActions {
         calls += "pause $paused"
         this.paused = paused
     }
+
+    /** Today's spend, micro-USD; null answers as a hub without `budget`. */
+    var spent: Long? = null
+
+    override suspend fun budget(): RoutineBudget? = spent?.let { calls += "budget"; RoutineBudget(spentMicros = it) }
 }
 
 private val WITH_ROUTINES = HubCapabilities(tools = setOf("routines", "set_setting", "fleet_health"))
@@ -241,11 +247,42 @@ class AutomationTest {
 
     @Test
     fun the_more_row_says_how_many_are_on_and_whether_all_is_paused() {
+        // MobileNav: "3 active · $4.10 today"; Pause all is the row's own button, not words in the line.
         val list = listOf(Routine(id = 1, enabled = true), Routine(id = 2), Routine(id = 3, enabled = true))
-        assertEquals("2 of 3 routines on · Pause all", automationLine(list, false))
-        assertEquals("Paused · 2 of 3 routines on", automationLine(list, true))
-        assertEquals("No routines yet · Pause all", automationLine(emptyList(), null))
-        assertEquals("1 of 1 routine on · Pause all", automationLine(listOf(Routine(id = 1, enabled = true)), null))
+        assertEquals("2 active", automationLine(list, false))
+        assertEquals("2 active · \$4.10 today", automationLine(list, false, 4_100_000))
+        assertEquals("Paused · 2 active · \$0.00 today", automationLine(list, true, 0))
+        assertEquals("No routines yet", automationLine(emptyList(), null))
+    }
+
+    @Test
+    fun the_more_row_button_pauses_or_resumes_only_where_it_may() {
+        val s = AutomationUiState(available = true, canPause = true, paused = false)
+        assertEquals("Pause all", automationRowAction(s))
+        assertEquals("Resume", automationRowAction(s.copy(paused = true)))
+        assertNull(automationRowAction(s.copy(paused = null)), "not read yet: no button")
+        assertNull(automationRowAction(s.copy(canPause = false)), "a device that may not write the setting")
+        assertNull(automationRowAction(s.copy(busy = "pause")), "a change on the wire")
+    }
+
+    @Test
+    fun the_spend_today_is_read_with_the_routines() = runTest {
+        val actions = FakeRoutineActions().apply { spent = 4_100_000 }
+        val vm = automation(actions = actions)
+        runCurrent()
+        vm.refresh()
+        runCurrent()
+        assertEquals(4_100_000L, vm.state.value.spentToday)
+        assertTrue("budget" in actions.calls)
+
+        // A hub that refused `budget` once is not asked again, and the line names no spend.
+        val older = FakeRoutineActions().apply { spent = 1 }
+        val vm2 = automation(caps = WITH_ROUTINES.forgetting("routines", "budget"), actions = older)
+        runCurrent()
+        vm2.refresh()
+        runCurrent()
+        assertNull(vm2.state.value.spentToday)
+        assertFalse("budget" in older.calls)
     }
 
     @Test

@@ -43,8 +43,12 @@ class MainActivity : ComponentActivity() {
      */
     private fun deliver(intent: Intent?) {
         if (intent == null || intent.getBooleanExtra(EXTRA_DELIVERED, false)) return
-        // A tapped "needs you" notification: open that session.
-        intent.getLongExtra(NeedsYouService.EXTRA_SESSION_ID, -1L).takeIf { it >= 0 }?.let(container::onOpenSession)
+        // A tapped "needs you" notification: open that session; its Retry
+        // opens it and retries there; a mission's opens that mission.
+        intent.getLongExtra(NeedsYouService.EXTRA_SESSION_ID, -1L).takeIf { it >= 0 }?.let { id ->
+            if (intent.action == NeedsYouService.ACTION_RETRY) container.onRetrySession(id) else container.onOpenSession(id)
+        }
+        intent.getLongExtra(NeedsYouService.EXTRA_MISSION_ID, -1L).takeIf { it >= 0 }?.let(container::onOpenMission)
         intent.takeIf { it.action == Intent.ACTION_VIEW }?.data?.let {
             container.onPairLink(it.toString())
         }
@@ -54,6 +58,7 @@ class MainActivity : ComponentActivity() {
     /** [intent] with what [deliver] reads spent, so it cannot be delivered twice. */
     private fun consumed(intent: Intent): Intent = Intent(intent).apply {
         removeExtra(NeedsYouService.EXTRA_SESSION_ID)
+        removeExtra(NeedsYouService.EXTRA_MISSION_ID)
         putExtra(EXTRA_DELIVERED, true)
     }
 

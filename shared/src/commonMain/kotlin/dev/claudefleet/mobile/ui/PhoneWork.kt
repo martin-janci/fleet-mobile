@@ -71,6 +71,7 @@ import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.MarkdownText
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.kit.BottomSheet
+import dev.claudefleet.mobile.ui.kit.Comet
 import dev.claudefleet.mobile.ui.kit.DotWave
 import dev.claudefleet.mobile.ui.kit.HubBanner
 import dev.claudefleet.mobile.ui.kit.OrbitChip
@@ -273,11 +274,11 @@ fun PhoneMyWorkScreen(
             below = {
                 if (state.searchOpen) {
                     OutlinedTextField(
-                        value = state.filters.query.orEmpty(),
+                        value = state.queryText,
                         onValueChange = handlers.onSetQuery,
                         label = { Text("Key or title") },
                         singleLine = true,
-                        trailingIcon = if (state.filters.query.isNullOrEmpty()) null else {
+                        trailingIcon = if (state.queryText.isEmpty()) null else {
                             { IconButton(onClick = { handlers.onSetQuery("") }) { Icon(FleetIcons.Close, contentDescription = "Clear search") } }
                         },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
@@ -648,8 +649,10 @@ fun PhoneTaskScreen(
                         Text("The tracker decides this group; placing it changes only fleet's view.", color = o.fgMuted, fontSize = 13.sp)
                     }
                     state.detail?.placement?.note?.takeIf { it.isNotBlank() }?.let { Text("Note: $it", color = o.fgMuted, fontSize = 13.sp) }
+                    AcceptanceChecklist(state.criteria)
                     state.detail?.description?.takeIf { it.isNotBlank() }?.let { MarkdownText(it) }
                     state.detail?.notes?.takeIf { it.isNotBlank() && task.editable }?.let { MarkdownText(it) }
+                    TaskHierarchy(state, h)
                     OwnTaskControls(state, h)
                     task.url?.takeIf { it.isNotBlank() }?.let { url ->
                         val uri = LocalUriHandler.current
@@ -736,6 +739,7 @@ fun PhoneTaskScreen(
     }
     if (state.placeOpen) PlaceSheet(state, h)
     if (state.editOpen) TaskEditSheetFor(state, h)
+    if (state.subtaskOpen) SubtaskSheetFor(state, h)
 }
 
 @Composable
@@ -840,7 +844,8 @@ private fun PastCard(link: WorkTaskLink, state: TaskUiState, handlers: PhoneTask
                 }
             }
             summarizing -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (rememberLoaderVisible(true)) DotWave()
+                // The kit's Comet (MobileWork: "Comet while summarising"), after the loaders' 400 ms.
+                if (rememberLoaderVisible(true)) Comet()
                 Text("Summarizing", color = o.fgMuted, fontSize = 13.sp)
             }
         }

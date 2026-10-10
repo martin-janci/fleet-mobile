@@ -106,15 +106,17 @@ fun terminalsTabLabel(count: Int): String = if (count > 0) "Terminals $count" el
 
 /**
  * The key bar's caps beyond [TerminalKey] (gap plan G5.5): ← and → for the
- * shell's own line editing, and ⌃, which opens a row of Ctrl letters — each
- * only where the hub's `send_prompt { keys }` enumerates it
- * ([HubCapabilities.paneKeys]), as the agent's full-screen bar does. There is
- * no Alt: the hub refuses every Meta chord (`M-x`), so it has no cap.
+ * shell's own line editing, ⌃, which opens a row of Ctrl letters, and ⌥,
+ * which opens a row of Alt chords (G7.16) — each only where the hub's
+ * `send_prompt { keys }` enumerates it ([HubCapabilities.paneKeys]), as the
+ * agent's full-screen bar does. A hub before G7.3 refuses every Meta chord
+ * and lists none, so it shows no ⌥.
  */
 fun terminalExtraKeys(paneKeys: Set<String>): List<AgentBarKey> = buildList {
     if ("Left" in paneKeys) add(AgentBarKey("←", AgentPress.Key("Left")))
     if ("Right" in paneKeys) add(AgentBarKey("→", AgentPress.Key("Right")))
     if (HubCapabilities.CTRL_KEYS.any { it in paneKeys }) add(AgentBarKey("⌃", null))
+    if (HubCapabilities.META_KEYS.any { it in paneKeys }) add(AgentBarKey("⌥", null))
 }
 
 const val TERMINALS_KEY_TAG = "terminals.key."
@@ -461,7 +463,7 @@ class TerminalsHandlers(
     val onInput: (String) -> Unit = {},
     val onSubmit: () -> Unit = {},
     val onKey: (TerminalKey) -> Unit = {},
-    /** A hub-listed key beyond [TerminalKey]: ←, →, a Ctrl letter ([terminalExtraKeys]). */
+    /** A hub-listed key beyond [TerminalKey]: ←, →, a Ctrl letter or an Alt chord ([terminalExtraKeys]). */
     val onPaneKey: (String) -> Unit = {},
     val onDismissError: () -> Unit = {},
     /** The pane went side by side (landscape, two shells or more) or back. */
@@ -555,9 +557,9 @@ private fun ColumnScope.TerminalScreen(state: TerminalsUiState, handlers: Termin
         )
     }
     if (state.canType) {
-        var ctrlOpen by remember { mutableStateOf(false) }
-        val ctrlRow = ctrlBarKeys(null, state.paneKeys)
-        if (ctrlOpen && ctrlRow.isNotEmpty()) {
+        var openRow by remember { mutableStateOf<String?>(null) }
+        val ctrlRow = modifierRowKeys(openRow, null, state.paneKeys)
+        if (ctrlRow.isNotEmpty()) {
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -567,7 +569,7 @@ private fun ColumnScope.TerminalScreen(state: TerminalsUiState, handlers: Termin
                     OutlinedButton(
                         onClick = {
                             if (press != null) handlers.onPaneKey(press.key)
-                            ctrlOpen = false
+                            openRow = null
                         },
                         enabled = press != null && state.connected,
                         contentPadding = PaddingValues(horizontal = 8.dp),
@@ -592,9 +594,11 @@ private fun ColumnScope.TerminalScreen(state: TerminalsUiState, handlers: Termin
             }
             for (key in terminalExtraKeys(state.paneKeys)) {
                 val press = key.press as? AgentPress.Key
-                val opensCtrl = key.label == "⌃"
+                val opensRow = key.label in MODIFIER_CAPS
                 OutlinedButton(
-                    onClick = { if (opensCtrl) ctrlOpen = !ctrlOpen else if (press != null) handlers.onPaneKey(press.key) },
+                    onClick = {
+                        if (opensRow) openRow = key.label.takeIf { it != openRow } else if (press != null) handlers.onPaneKey(press.key)
+                    },
                     enabled = state.connected,
                     contentPadding = PaddingValues(horizontal = 8.dp),
                     modifier = Modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp).widthIn(min = 44.dp)

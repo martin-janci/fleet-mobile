@@ -196,4 +196,37 @@ class AddHostTest {
         assertNull(hosts[1].user)
         assertEquals("martin@10.0.0.5", sshHostLine(hosts[0]))
     }
+
+    /** G7.18 (MobileFullscreenLoaders, Radar): an address typed by hand is added like a found host. */
+    @Test
+    fun an_address_typed_by_hand_is_added_and_listed_like_a_found_host() = runTest {
+        val actions = FakeAddHost()
+        val fleet = AddHostFleet(WITH_ADD_HOST)
+        val v = vm(actions = actions, fleet = fleet)
+        runCurrent()
+        v.open()
+        runCurrent()
+        v.addAddress("  nas.local ")?.join()
+        runCurrent()
+        assertTrue("add nas-local nas.local" in actions.calls, "${actions.calls}")
+        assertTrue("nas.local" in v.state.value.added)
+        assertTrue(v.state.value.candidates.any { it.alias == "nas.local" })
+        assertEquals(1, fleet.refreshed)
+    }
+
+    @Test
+    fun an_address_the_hub_would_refuse_is_never_sent() = runTest {
+        val actions = FakeAddHost()
+        val v = vm(actions = actions)
+        runCurrent()
+        v.open()
+        runCurrent()
+        for (bad in listOf("", "martin@nas", "nas:2222", "-oProxyCommand=x", "nas local")) {
+            assertNull(v.addAddress(bad), bad)
+        }
+        assertEquals(listOf("discover"), actions.calls)
+        assertNull(addressBlocker("192.168.1.20"))
+        assertNull(addressBlocker("pi-garage.lan"))
+        assertTrue(addressBlocker("martin@nas")!!.contains("ssh/config"))
+    }
 }

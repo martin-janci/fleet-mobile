@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.ShareActions
 import dev.claudefleet.mobile.model.GrantLevel
+import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.SessionGrant
 import dev.claudefleet.mobile.model.ShareTo
 import kotlinx.coroutines.CancellationException
@@ -34,6 +35,12 @@ data class ShareUiState(
     val grants: List<SessionGrant>? = null,
     val kind: ShareKind = ShareKind.Person,
     val recipient: String = "",
+    /**
+     * The org **The whole org** means, when the phone knows it without
+     * asking: the session's own org, else the one org this phone sees (a
+     * phone bound to one). Null leaves the Org field to name it.
+     */
+    val wholeOrg: String? = null,
     val level: String = GrantLevel.WATCH,
     /** What a share may be made at against this hub: Answer only from revision 13. */
     val levels: List<String> = listOf(GrantLevel.WATCH, GrantLevel.DRIVE),
@@ -47,8 +54,22 @@ data class ShareUiState(
 
     val canAct: Boolean get() = available && owner && !busy
 
-    val canShare: Boolean get() = canAct && recipient.isNotBlank() && level in levels
+    /** The org share needs no field: The whole org is chosen and [wholeOrg] names it. */
+    val orgKnown: Boolean get() = kind == ShareKind.Org && wholeOrg != null
+
+    /** Who a share goes to: [wholeOrg] when it needs no field, else what was typed. */
+    val target: String get() = if (orgKnown) wholeOrg.orEmpty() else recipient.trim()
+
+    val canShare: Boolean get() = canAct && target.isNotBlank() && level in levels
 }
+
+/**
+ * PURE: the org **The whole org** shares with, when there is nothing to ask
+ * — the session's org ([sessionOrg], the row's `org_id`), else the only org
+ * in [orgs]. Null when the phone cannot tell, and the field asks.
+ */
+fun wholeOrgName(sessionOrg: Long?, orgs: OrgDirectory): String? =
+    (sessionOrg?.let { orgs.orgs[it] } ?: orgs.orgs.values.singleOrNull())?.name?.takeIf { it.isNotBlank() }
 
 /**
  * The share sheet on the phone (redesign 11.10, "share and watch"): the
@@ -78,7 +99,7 @@ class ShareViewModel(
     private val local = MutableStateFlow(Local())
 
     val state: StateFlow<ShareUiState> =
-        combine(local, fleet.capabilities, fleet.access, fleet.sessions, fleet.hubContract) { l, caps, access, rows, contract ->
+        combine(local, fleet.capabilities, fleet.access, fleet.sessions, combine(fleet.hubContract, fleet.orgs, ::Pair)) { l, caps, access, rows, (contract, orgs) ->
             val row = l.sessionId?.let { id -> rows.firstOrNull { it.id == id } }
             ShareUiState(
                 available = canWrite && caps.share,
@@ -89,6 +110,7 @@ class ShareViewModel(
                 grants = l.grants,
                 kind = l.kind,
                 recipient = l.recipient,
+                wholeOrg = wholeOrgName(row?.orgId, orgs),
                 level = l.level,
                 levels = shareLevels(contract),
                 confirming = l.confirming,
@@ -125,9 +147,9 @@ class ShareViewModel(
         val s = state.value
         val id = s.sessionId ?: return@launch
         if (!s.canShare) return@launch
-        val name = s.recipient.trim()
+        val name = s.target
         val to = if (s.kind == ShareKind.Org) ShareTo.Org(name) else ShareTo.Person(name)
-        perform(id, "Shared with ${toLabel(to)} to ${s.level}.") {
+        perform(id, "Shared with ${toLabel(to)} to ${GrantLevel.word(s.level).lowercase()}.") {
             actions.share(id, to, s.level)
             local.update { it.copy(recipient = "") }
         }

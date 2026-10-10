@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,12 +21,19 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -64,6 +72,10 @@ import dev.claudefleet.mobile.model.Commit
 import dev.claudefleet.mobile.model.CommitDetail
 import dev.claudefleet.mobile.model.FileContent
 import dev.claudefleet.mobile.model.FileDiff
+import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.githubCommitUrl
+import dev.claudefleet.mobile.model.ticketRefUrl
+import dev.claudefleet.mobile.model.ticketRefs
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.MarkdownText
 import dev.claudefleet.mobile.ui.components.ScreenHeader
@@ -182,11 +194,11 @@ fun RepoBody(
         when (val top = state.top) {
             is RepoView.Diff -> DiffPane(top.path, top.diff, handlers, openFile = { handlers.onOpenFile(top.path) }, split = split)
             is RepoView.CommitDiff -> DiffPane(top.path, top.diff, handlers, openFile = null, split = split)
-            is RepoView.CommitView -> CommitPane(top.hash, top.detail, handlers)
+            is RepoView.CommitView -> CommitPane(top.hash, top.detail, state, handlers)
             is RepoView.File -> FilePane(top.path, top.content, state, handlers)
             null -> when {
                 state.tabs.isEmpty() -> Quiet("This hub does not serve a session's worktree.")
-                state.tab == RepoTab.Changes -> ChangesList(state.changes, handlers)
+                state.tab == RepoTab.Changes -> ChangesList(state.changes, askToCommitLabel(state.session), handlers)
                 state.tab == RepoTab.History -> HistoryList(state, handlers)
                 else -> FilesList(state, handlers)
             }
@@ -217,8 +229,16 @@ private fun Quiet(text: String) {
 /** What the Files tab's commit button puts in the composer. */
 internal const val ASK_TO_COMMIT: String = "Commit the changes in this worktree with a clear message."
 
+/**
+ * The commit button's words, after the session's agent as its tabs name it
+ * ([agentName]): "Ask Codex to commit" in a Codex session, and "Ask Claude
+ * Code to commit" where the hub does not say.
+ */
+internal fun askToCommitLabel(row: SessionRow?): String = "Ask ${agentName(row)} to commit"
+
+/** What changed, not committed then staged, and the one action: ask the agent to commit ([askLabel]). */
 @Composable
-private fun ChangesList(changes: List<ChangedFile>?, handlers: RepoHandlers) {
+private fun ChangesList(changes: List<ChangedFile>?, askLabel: String, handlers: RepoHandlers) {
     if (changes == null) return
     if (changes.isEmpty()) {
         Quiet("No uncommitted changes.")
@@ -246,7 +266,7 @@ private fun ChangesList(changes: List<ChangedFile>?, handlers: RepoHandlers) {
                 OutlinedButton(
                     onClick = { ask(ASK_TO_COMMIT) },
                     modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 48.dp),
-                ) { Text("Ask $DEFAULT_AGENT_NAME to commit") }
+                ) { Text(askLabel) }
             }
         }
     }
@@ -645,35 +665,85 @@ internal fun askAboutLine(path: String, line: CodeLine): String {
     return "About $path" + (number?.let { " line $it" } ?: "") + ":\n```\n${line.text}\n```\n"
 }
 
+/**
+ * [text] with each ticket it names ([ticketRefs]) a link where the phone knows
+ * the ticket's address ([ticketRefUrl]); a ticket without one stays plain.
+ */
 @Composable
-private fun CommitPane(hash: String, detail: CommitDetail?, handlers: RepoHandlers) {
+private fun withTicketLinks(text: String, state: RepoUiState): AnnotatedString {
+    val color = MaterialTheme.colorScheme.primary
+    val work = state.session?.work
+    val project = state.project
+    return remember(text, work, project, color) {
+        val styles = TextLinkStyles(style = SpanStyle(color = color, textDecoration = TextDecoration.Underline))
+        buildAnnotatedString {
+            var at = 0
+            for (ref in ticketRefs(text)) {
+                val url = ticketRefUrl(ref.key, work, project) ?: continue
+                append(text.substring(at, ref.start))
+                pushLink(LinkAnnotation.Url(url, styles))
+                append(ref.key)
+                pop()
+                at = ref.end
+            }
+            append(text.substring(at))
+        }
+    }
+}
+
+/**
+ * One commit (MobileSessionFiles › Commit): its message with ticket refs as
+ * links, the copyable hash, pushed or not, its files with counts, and Open on
+ * GitHub and Ask to push at the thumb. Open on GitHub needs the project's
+ * owner/repo and a commit GitHub has (not one still only here); Ask to push
+ * puts the words in the composer for a commit no remote has.
+ */
+@Composable
+private fun CommitPane(hash: String, detail: CommitDetail?, state: RepoUiState, handlers: RepoHandlers) {
     if (detail == null) {
         PathBar(hash.take(12))
         return
     }
     val clipboard = LocalClipboardManager.current
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
-        item {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(detail.subject, style = MaterialTheme.typography.titleMedium)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        // Pushed / Not pushed (claude-fleet M15 G1.10); an older hub says neither.
-                        listOfNotNull(detail.hash.take(12), detail.author, shortDate(detail.date), pushedLabel(detail))
-                            .filter { it.isNotBlank() }.joinToString(" · "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = { clipboard.setText(AnnotatedString(detail.hash)) }) { Text("Copy hash") }
+    val uri = LocalUriHandler.current
+    val githubUrl = githubCommitUrl(state.project, detail.hash)?.takeIf { detail.pushed != false }
+    val ask = handlers.onAsk?.takeIf { detail.pushed == false }
+    Column(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f)) {
+            item {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(withTicketLinks(detail.subject, state), style = MaterialTheme.typography.titleMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            // Pushed / Not pushed (claude-fleet M15 G1.10); an older hub says neither.
+                            listOfNotNull(detail.hash.take(12), detail.author, shortDate(detail.date), pushedLabel(detail))
+                                .filter { it.isNotBlank() }.joinToString(" · "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = { clipboard.setText(AnnotatedString(detail.hash)) }) { Text("Copy hash") }
+                    }
+                    if (detail.body.isNotBlank()) {
+                        Text(withTicketLinks(detail.body.trim(), state), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+                    }
                 }
-                if (detail.body.isNotBlank()) Text(detail.body.trim(), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+                HorizontalDivider()
+                if (detail.files.isNotEmpty()) GroupTitle("${detail.files.size} ${if (detail.files.size == 1) "file" else "files"}")
             }
-            HorizontalDivider()
-            if (detail.files.isNotEmpty()) GroupTitle("${detail.files.size} ${if (detail.files.size == 1) "file" else "files"}")
+            items(detail.files, key = { "${it.status}:${it.path}" }) { file ->
+                FileRow(status = file.status, path = file.path, counts = file, onClick = { handlers.onOpenCommitDiff(detail.hash, file.path) })
+            }
         }
-        items(detail.files, key = { "${it.status}:${it.path}" }) { file ->
-            FileRow(status = file.status, path = file.path, counts = file, onClick = { handlers.onOpenCommitDiff(detail.hash, file.path) })
+        if (githubUrl != null || ask != null) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (githubUrl != null) {
+                    OutlinedButton(onClick = { runCatching { uri.openUri(githubUrl) } }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Open on GitHub") }
+                }
+                if (ask != null) {
+                    OutlinedButton(onClick = { ask(askToPush(detail.hash.take(7))) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Ask to push") }
+                }
+            }
         }
     }
 }
@@ -682,36 +752,123 @@ private fun CommitPane(hash: String, detail: CommitDetail?, handlers: RepoHandle
 internal fun isMarkdown(path: String): Boolean =
     path.substringAfterLast('/').substringAfterLast('.', "").lowercase() in setOf("md", "markdown", "mdx")
 
+/**
+ * One file (MobileSessionFiles › File): Markdown rendered with a Source
+ * switch, Find in the file, Send to Downloads, and Share, which hands the
+ * text the hub sent to the platform's share sheet.
+ *
+ * Find steps through the lines, so on a Markdown file it shows the Source,
+ * where each match has a line to scroll to; closing Find leaves the switch
+ * where Find put it.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FilePane(path: String, content: FileContent?, state: RepoUiState, handlers: RepoHandlers) {
+private fun ColumnScope.FilePane(path: String, content: FileContent?, state: RepoUiState, handlers: RepoHandlers) {
     var source by remember(path) { mutableStateOf(false) }
+    var findOpen by remember(path) { mutableStateOf(false) }
+    var findQuery by remember(path) { mutableStateOf("") }
+    var findAt by remember(path) { mutableStateOf(0) }
+    val text = content?.takeIf { !it.binary && !it.isDir }?.content
+    val share = rememberShareText()
     PathBar(path, subtitle = content?.size?.let { sizeLabel(it) }) {
-        if (state.canSendFile) {
-            TextButton(onClick = { handlers.onSendToDownloads(path) }, enabled = !state.sending) { Text("Send to Downloads") }
+        if (text != null && !findOpen) {
+            IconButton(onClick = { findOpen = true; source = true }) { Icon(FleetIcons.Search, contentDescription = "Find in file") }
         }
     }
     if (content == null) return
     val markdown = isMarkdown(path) && !content.binary && !content.isDir
+    val rawLines = remember(content) { content.content.split('\n') }
+    val matches = remember(rawLines, findQuery, findOpen) { if (findOpen) findInLines(rawLines, findQuery) else emptyList() }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    fun showMatch(at: Int) {
+        if (matches.isEmpty()) return
+        findAt = at.mod(matches.size)
+        scope.launch { listState.animateScrollToItem(matches[findAt].line) }
+    }
+    if (findOpen) {
+        FindBar(
+            query = findQuery,
+            at = if (matches.isEmpty()) 0 else findAt + 1,
+            count = matches.size,
+            // The new query's matches are not computed yet; the first one is shown once they are.
+            onQuery = { findQuery = it; findAt = 0 },
+            // Up the file, then down it, as the arrows point.
+            onOlder = { showMatch(findAt - 1) },
+            onNewer = { showMatch(findAt + 1) },
+            onClose = { findOpen = false; findQuery = ""; findAt = 0 },
+            placeholder = "Find in file",
+            olderLabel = "Previous match",
+            newerLabel = "Next match",
+        )
+        LaunchedEffect(matches) { if (matches.isNotEmpty()) showMatch(0) }
+    }
     if (markdown) {
         SingleChoiceSegmentedButtonRow(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
             SegmentedButton(selected = !source, onClick = { source = false }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("Rendered") }
             SegmentedButton(selected = source, onClick = { source = true }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("Source") }
         }
     }
-    when {
-        content.isDir -> Quiet("A folder.")
-        content.binary -> Quiet("A binary file" + (content.size?.let { " ($it bytes)" } ?: "") + " — send it to Downloads to open it on the phone.")
-        markdown && !source -> LazyColumn(modifier = Modifier.fillMaxSize()) {
-            item { MarkdownText(content.content, modifier = Modifier.padding(16.dp)) }
-            if (content.truncated) item { Quiet("Cut short by the hub — the rest is not shown.") }
+    Column(modifier = Modifier.fillMaxWidth().weight(1f)) {
+        when {
+            content.isDir -> Quiet("A folder.")
+            content.binary -> Quiet("A binary file" + (content.size?.let { " ($it bytes)" } ?: "") + " — send it to Downloads to open it on the phone.")
+            markdown && !source -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                item { MarkdownText(content.content, modifier = Modifier.padding(16.dp)) }
+                if (content.truncated) item { Quiet("Cut short by the hub — the rest is not shown.") }
+            }
+            else -> {
+                val lines = remember(rawLines) { rawLines.mapIndexed { i, line -> CodeLine(line, LineKind.Plain, new = i + 1) } }
+                val marks = remember(matches, findAt, findQuery) { marksByLine(matches, findQuery.length, findAt) }
+                CodeLines(lines, truncated = content.truncated, listState = listState, marks = marks)
+            }
         }
-        else -> CodeLines(
-            content.content.split('\n').mapIndexed { i, text -> CodeLine(text, LineKind.Plain, new = i + 1) },
-            truncated = content.truncated,
-        )
+    }
+    // Save and Share at the thumb, as the board draws them.
+    if (state.canSendFile || text != null) {
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (state.canSendFile) {
+                OutlinedButton(onClick = { handlers.onSendToDownloads(path) }, enabled = !state.sending, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) {
+                    Text("Send to Downloads", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (text != null) {
+                OutlinedButton(onClick = { share(text) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Share") }
+            }
+        }
     }
 }
+
+/** One place [findInLines] found the query: the line (0-based, the list's own index) and where on it the match starts. */
+internal data class FileMatch(val line: Int, val start: Int)
+
+/**
+ * Every place [query] occurs in [lines], top to bottom and left to right,
+ * ignoring case; occurrences on one line do not overlap. A blank query finds
+ * nothing. The query is taken as typed — in code a leading space can matter.
+ */
+internal fun findInLines(lines: List<String>, query: String): List<FileMatch> {
+    if (query.isBlank()) return emptyList()
+    val found = mutableListOf<FileMatch>()
+    lines.forEachIndexed { n, line ->
+        var i = line.indexOf(query, ignoreCase = true)
+        while (i >= 0) {
+            found += FileMatch(n, i)
+            i = line.indexOf(query, i + query.length, ignoreCase = true)
+        }
+    }
+    return found
+}
+
+/** One stretch of a line to mark: [start] until [end], [current] for the match Find is on. */
+internal data class LineMark(val start: Int, val end: Int, val current: Boolean)
+
+/** [matches] as marks per line, each [length] long, the one at [at] (an index into [matches]) the current one. */
+internal fun marksByLine(matches: List<FileMatch>, length: Int, at: Int): Map<Int, List<LineMark>> =
+    matches.withIndex().groupBy({ it.value.line }, { LineMark(it.value.start, it.value.start + length, it.index == at) })
+
+/** What a not-pushed commit's **Ask to push** puts in the composer. */
+internal fun askToPush(shortHash: String): String = "Push this branch so commit $shortHash reaches the remote."
 
 /** A byte count in the words a person reads: `812 B`, `2.1 KB`, `3.4 MB`. */
 internal fun sizeLabel(bytes: Long): String = when {
@@ -767,14 +924,19 @@ private fun CodeLines(
     truncated: Boolean,
     listState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
     onLongPress: ((CodeLine) -> Unit)? = null,
+    /** What a file's Find marks, by line index; none outside Find. */
+    marks: Map<Int, List<LineMark>> = emptyMap(),
 ) {
+    val markColor = MaterialTheme.colorScheme.tertiaryContainer
+    val currentColor = MaterialTheme.colorScheme.tertiary
+    val onCurrentColor = MaterialTheme.colorScheme.onTertiary
     val numbers = lines.any { it.old != null || it.new != null }
     val gutter = (lines.maxOfOrNull { maxOf(it.old ?: 0, it.new ?: 0) } ?: 0).toString().length.coerceAtLeast(2)
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val width = maxWidth
         Column(modifier = Modifier.fillMaxSize().horizontalScroll(rememberScrollState())) {
             LazyColumn(state = listState, modifier = Modifier.fillMaxSize().widthIn(min = width)) {
-                itemsIndexed(lines) { _, line ->
+                itemsIndexed(lines) { index, line ->
                     val diff = diffColors()
                     val (bg, fg) = when (line.kind) {
                         LineKind.Added -> diff.addedBg to MaterialTheme.colorScheme.onSurface
@@ -805,8 +967,19 @@ private fun CodeLines(
                                     modifier = Modifier.padding(start = 4.dp, end = 8.dp, top = 1.dp, bottom = 1.dp),
                                 )
                             }
+                            val lineMarks = marks[index]
                             Text(
-                                line.text.ifEmpty { " " },
+                                if (lineMarks.isNullOrEmpty()) {
+                                    AnnotatedString(line.text.ifEmpty { " " })
+                                } else {
+                                    buildAnnotatedString {
+                                        append(line.text)
+                                        for (m in lineMarks) {
+                                            val style = if (m.current) SpanStyle(background = currentColor, color = onCurrentColor) else SpanStyle(background = markColor)
+                                            addStyle(style, m.start.coerceIn(0, line.text.length), m.end.coerceIn(0, line.text.length))
+                                        }
+                                    }
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace,
                                 softWrap = false,

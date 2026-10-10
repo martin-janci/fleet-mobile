@@ -36,6 +36,14 @@ class ComposerTest {
     }
 
     @Test
+    fun dictated_words_go_after_what_is_typed() {
+        assertEquals("Run the tests", withDictation("", " Run the tests "))
+        assertEquals("Run the tests and push", withDictation("Run the tests ", "and push"))
+        assertEquals("Line one and two", withDictation("Line one\n", "and two"))
+        assertEquals("keep this", withDictation("keep this", "   "))
+    }
+
+    @Test
     fun a_codex_session_suggests_codex_commands_not_claudes() {
         assertEquals(listOf("compact", "copy"), matchSlashCommands("/c", AGENT_CODEX).map { it.name })
         assertTrue(matchSlashCommands("/context", AGENT_CODEX).isEmpty())

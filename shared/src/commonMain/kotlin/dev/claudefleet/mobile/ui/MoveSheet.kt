@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -40,7 +39,9 @@ import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.MovePreview
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.components.ErrorBanner
+import dev.claudefleet.mobile.ui.kit.BottomSheet
 import dev.claudefleet.mobile.ui.kit.InlineLoading
+import dev.claudefleet.mobile.ui.kit.SheetAction
 
 data class MoveHandlers(
     val onClose: () -> Unit = {},
@@ -102,18 +103,14 @@ fun MoveSheet(state: MoveUiState, handlers: MoveHandlers, nowSeconds: Long, orbi
         }
     }
     if (confirming) {
-        AlertDialog(
-            onDismissRequest = { confirming = false },
-            title = { Text("Move to ${state.target}?") },
-            text = {
-                Text(
-                    if (state.keepSource) "A copy starts on ${state.target}; this session keeps running."
-                    else "The session starts on ${state.target} and this one stops once the new one is confirmed.",
-                )
-            },
-            confirmButton = { TextButton(onClick = { confirming = false; handlers.onMove() }) { Text("Move") } },
-            dismissButton = { TextButton(onClick = { confirming = false }) { Text("Cancel") } },
-        )
+        // A sheet, not a dialog (MobileFormsSession): Cancel and Move at the thumb.
+        BottomSheet(
+            title = "Move to ${state.target}?",
+            meta = if (state.keepSource) "A copy starts on ${state.target}; this session keeps running."
+            else "The session starts on ${state.target} and this one stops once the new one is confirmed.",
+            onDismiss = { confirming = false },
+            primary = SheetAction("Move") { confirming = false; handlers.onMove() },
+        ) {}
     }
 }
 
@@ -153,11 +150,22 @@ private fun Toggle(title: String, help: String, on: Boolean, onChange: (Boolean)
     }
 }
 
-/** One host's facts for the New bar's Move sheet: how it is reached and what runs there. */
+/**
+ * One host's facts for the New bar's Move sheet (MobileRecovery): how it is
+ * reached, what runs there, its free disk when the hub sampled it, and that
+ * its toolchain is not checked. The hub probes no build tools (a JDK, an
+ * Android SDK), so the sheet says so rather than letting silence read as
+ * "has everything".
+ */
 internal fun moveHostFacts(host: HostRow, running: Int): String = buildList {
     if (host.transport == "agent") add("agent")
     add("$running running")
+    host.diskHomeFreeKb?.takeIf { it >= 0 }?.let { add("${gigabytes(it)} free") }
+    add(TOOLCHAIN_UNCHECKED)
 }.joinToString(" · ")
+
+/** What every host option says about build tools: the hub never looks for them. */
+internal const val TOOLCHAIN_UNCHECKED = "toolchain not checked"
 
 /** Why an offline host is listed but cannot be picked. */
 internal const val MOVE_OFFLINE = "Signal lost · cannot move there now"

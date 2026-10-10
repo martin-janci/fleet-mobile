@@ -484,7 +484,7 @@ private fun SearchField(query: String, onSetQuery: (String) -> Unit) {
         value = query,
         onValueChange = onSetQuery,
         modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 4.dp),
-        placeholder = { Text("Search sessions, branches, projects…") },
+        placeholder = { Text("Search sessions, projects, branches, tickets…") },
         singleLine = true,
         leadingIcon = { Icon(FleetIcons.Search, contentDescription = null) },
         trailingIcon = if (query.isNotEmpty()) {
@@ -1085,7 +1085,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.searchHits(hits: Sear
     }
     if (handlers.onNewSession != null) {
         items(hits.projects, key = { "search-project-${it.id}" }) { project ->
-            SearchHitRow(project.label, "New session in this project") { handlers.onSearchProject(project.id) }
+            SearchHitRow(project.label, hits.projectLine(project, "New session in this project")) { handlers.onSearchProject(project.id) }
         }
     }
 }

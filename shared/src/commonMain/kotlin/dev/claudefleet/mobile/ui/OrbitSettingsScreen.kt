@@ -18,11 +18,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -39,6 +41,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -52,6 +55,9 @@ import dev.claudefleet.mobile.notify.BackgroundNotifier
 import dev.claudefleet.mobile.notify.NoBackgroundNotifier
 import dev.claudefleet.mobile.notify.NotifyKind
 import dev.claudefleet.mobile.notify.NotifyKinds
+import dev.claudefleet.mobile.notify.PhoneQuiet
+import dev.claudefleet.mobile.notify.clockText
+import dev.claudefleet.mobile.notify.parseClock
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
@@ -76,6 +82,8 @@ data class OrbitSettingsInput(
     val lock: Boolean = false,
     /** How much the app moves (review r11). */
     val motion: MotionChoice = MotionChoice.SYSTEM,
+    /** This phone's own quiet hours (MobileSettings · This phone). */
+    val quiet: PhoneQuiet = PhoneQuiet(),
 )
 
 /** Every tap the New layout's Settings reports. */
@@ -86,6 +94,7 @@ class OrbitSettingsHandlers(
     val onSetTheme: (ThemeChoice) -> Unit = {},
     val onSetMotion: (MotionChoice) -> Unit = {},
     val onSetNotify: (NotifyKind, Boolean) -> Unit = { _, _ -> },
+    val onSetQuiet: (PhoneQuiet) -> Unit = {},
     val onSetUpdateMode: (UpdateMode) -> Unit = {},
     /** The fingerprint lock's switch; null where the phone cannot ask for one, and the row is not drawn. */
     val onSetLock: ((Boolean) -> Unit)? = null,
@@ -246,7 +255,7 @@ private fun HubSummary(s: SettingsUiState) {
 
 /** What This phone's row on the home says it holds. */
 internal fun thisPhoneLine(updates: Boolean, lock: Boolean): String =
-    listOfNotNull("Notifications", "theme", "updates".takeIf { updates }, "lock".takeIf { lock }).joinToString(", ")
+    listOfNotNull("Notifications", "quiet hours", "theme", "updates".takeIf { updates }, "lock".takeIf { lock }).joinToString(", ")
 
 /**
  * What the fleet's notifications matrix and quiet hours add to This phone's
@@ -290,6 +299,7 @@ private fun ColumnScope.ThisPhone(input: OrbitSettingsInput, handlers: OrbitSett
             onChange = { handlers.onSetNotify(kind, it) },
         )
     }
+    QuietHours(input.quiet, enabled = kindsLive, onSet = handlers.onSetQuiet)
     input.fleet?.let { f -> fleetNotifyLine(f) }?.let { line ->
         Text(line, color = o.fgMuted, fontSize = 13.sp, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = gutter, vertical = 6.dp))
     }
@@ -440,6 +450,77 @@ private fun SwitchRow(title: String, line: String, on: Boolean, enabled: Boolean
         }
         Switch(checked = on, onCheckedChange = null, enabled = enabled)
     }
+}
+
+/** Quiet hours's line on This phone: "22:00 – 07:00 · Needs you still comes through", or what Off means. */
+internal fun quietLine(q: PhoneQuiet): String {
+    val (from, until) = q.range ?: return "Off. The fleet's own quiet hours still apply."
+    return "${clockText(from)} – ${clockText(until)}" + if (q.needsYouThrough) " · Needs you still comes through" else " · nothing comes through"
+}
+
+/**
+ * This phone's quiet hours: a switch, the two ends as times, and whether a
+ * session waiting on you still comes through. Each end is kept as soon as it
+ * reads as a time; what does not stays in the field, marked, and changes
+ * nothing.
+ */
+@Composable
+private fun QuietHours(quiet: PhoneQuiet, enabled: Boolean, onSet: (PhoneQuiet) -> Unit) {
+    val o = Fleet.colors
+    val gutter = OrbitTokens.spacing("phone-gutter").dp
+    val range = quiet.range
+    SwitchRow(
+        title = "Quiet hours",
+        line = quietLine(quiet),
+        on = range != null,
+        enabled = enabled,
+        onChange = { on -> onSet(quiet.copy(range = if (on) PhoneQuiet.NIGHT else null)) },
+    )
+    if (range == null) return
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = gutter, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        ClockField("From", range.first, enabled, Modifier.weight(1f)) { from ->
+            if (from != range.second) onSet(quiet.copy(range = from to range.second))
+        }
+        ClockField("Until", range.second, enabled, Modifier.weight(1f)) { until ->
+            if (until != range.first) onSet(quiet.copy(range = range.first to until))
+        }
+    }
+    SwitchRow(
+        title = "Needs you still comes through",
+        line = "A session waiting for your answer is announced even in quiet hours",
+        on = quiet.needsYouThrough,
+        enabled = enabled,
+        onChange = { onSet(quiet.copy(needsYouThrough = it)) },
+    )
+    Text(
+        "Quiet hours here hold back this phone only, on its own clock.",
+        color = o.fgMuted,
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
+        modifier = Modifier.padding(horizontal = gutter, vertical = 4.dp),
+    )
+}
+
+/** One end of quiet hours, typed as "22:00". */
+@Composable
+private fun ClockField(label: String, minute: Int, enabled: Boolean, modifier: Modifier, onTime: (Int) -> Unit) {
+    var text by remember(minute) { mutableStateOf(clockText(minute)) }
+    OutlinedTextField(
+        value = text,
+        onValueChange = { v ->
+            text = v
+            parseClock(v)?.let(onTime)
+        },
+        singleLine = true,
+        enabled = enabled,
+        label = { Text(label) },
+        isError = parseClock(text) == null,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = modifier,
+    )
 }
 
 /** Dark, Light, System as one segmented control; dark first, as the manual is. */

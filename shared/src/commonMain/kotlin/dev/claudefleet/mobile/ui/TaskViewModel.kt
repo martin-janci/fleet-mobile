@@ -4,7 +4,9 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.epochSeconds
+import dev.claudefleet.mobile.model.Criterion
 import dev.claudefleet.mobile.model.GroupRef
+import dev.claudefleet.mobile.model.acceptanceCriteria
 import dev.claudefleet.mobile.model.GroupSource
 import dev.claudefleet.mobile.model.LinkState
 import dev.claudefleet.mobile.model.OrgDirectory
@@ -12,6 +14,8 @@ import dev.claudefleet.mobile.model.OrgSource
 import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.model.TaskDetail
 import dev.claudefleet.mobile.model.WorkTaskLink
+import dev.claudefleet.mobile.model.subtaskRollup
+import dev.claudefleet.mobile.model.takesSubtask
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK
 import dev.claudefleet.mobile.net.HubCapabilities.Companion.WORK_LINK
@@ -71,6 +75,8 @@ data class TaskUiState(
      * person's or a rule's), never a derived one — see [placeableGroups].
      */
     val knownGroups: List<String> = emptyList(),
+    /** How many tasks each of [knownGroups] holds, by label ("4 tasks"); a group missing here has no count. */
+    val groupCounts: Map<String, Int> = emptyMap(),
     /** The placement's note, kept by a placement unless the person edits it. */
     val placementNote: String = "",
     val busy: Boolean = false,
@@ -108,6 +114,23 @@ data class TaskUiState(
     val notesLocked: Boolean = false,
     /** What the Edit sheet starts from. */
     val editFields: TaskEditFields = TaskEditFields(),
+    /**
+     * The acceptance criteria the description names (MobileWork), read the
+     * way the hub reads a ticket card's ([acceptanceCriteria]) — with what
+     * is ticked, for "1 of 3 done". Empty when it names none.
+     */
+    val criteria: List<Criterion> = emptyList(),
+    /** The epic or task this one is filed under (`item:<id>`), and its label once read. */
+    val parentTaskId: String? = null,
+    val parentLabel: String? = null,
+    /** "2 of 5 subtasks done", or null with none. */
+    val subtaskRollup: String? = null,
+    /**
+     * **Add subtask**: fleet's own task above the deepest level (epic → task
+     * → subtask), a full token, `work_link create`, a connection.
+     */
+    val canAddSubtask: Boolean = false,
+    val subtaskOpen: Boolean = false,
 ) {
     val task get() = detail?.task
 }
@@ -146,9 +169,13 @@ class TaskViewModel(
     private val canWrite: Boolean,
     /** The groups the Work tree knows, for *Place in group…*. */
     private val knownGroups: () -> List<GroupRef> = { emptyList() },
+    /** Tasks per placeable group label, for the rows of *Place in group…* ("4 tasks"). */
+    private val groupCounts: () -> Map<String, Int> = { emptyMap() },
     private val onOpenSession: (Long) -> Unit = {},
     /** The New session form in ticket mode, for this key. */
     private val onStartHere: (String) -> Unit = {},
+    /** Another task's page: the one this task is filed under. */
+    private val onOpenTask: (String) -> Unit = {},
     private val clock: () -> Long = { epochSeconds() },
     private val utcOffset: (Long) -> Int = ::utcOffsetSeconds,
     private val refreshDebounceMs: Long = 2_000,
@@ -168,6 +195,8 @@ class TaskViewModel(
         val summary: PastWorkSummary? = null,
         val summaries: Map<Long, PastWorkSummary> = emptyMap(),
         val editOpen: Boolean = false,
+        val parentLabel: String? = null,
+        val subtaskOpen: Boolean = false,
     )
 
     private val local = MutableStateFlow(Local())
@@ -198,6 +227,19 @@ class TaskViewModel(
         try {
             val detail = actions.task(taskId)
             local.update { it.copy(loading = false, detail = detail, asOf = clock(), gone = false, error = null, conflict = false) }
+            // The parent's name, for "Under …": a second read, and a parent
+            // this token may not see (or one that is gone) just stays unnamed.
+            val parent = detail.task.parentTaskId
+            val label = parent?.let {
+                try {
+                    actions.task(it).task.label
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Throwable) {
+                    null
+                }
+            }
+            local.update { it.copy(parentLabel = label) }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -402,6 +444,35 @@ class TaskViewModel(
         }
     }
 
+    /** **Under …**: the epic or task this one is filed under. */
+    fun openParent() {
+        state.value.parentTaskId?.let(onOpenTask)
+    }
+
+    fun openSubtask() {
+        if (state.value.canAddSubtask) local.update { it.copy(subtaskOpen = true, error = null, conflict = false) }
+    }
+
+    fun closeSubtask() {
+        local.update { it.copy(subtaskOpen = false) }
+    }
+
+    /**
+     * **Create** in the Add subtask sheet: a new task filed under this one.
+     * The sheet closes once the hub has made it and this page re-reads, so
+     * the roll-up counts it; a refusal stays in the sheet with the hub's
+     * reason (one past the deepest level, say).
+     */
+    fun addSubtask(title: String, notes: String, dueAt: String): Job? {
+        val s = state.value
+        val parent = s.task?.takeIf { it.editable }?.taskId ?: return null
+        if (!s.canAddSubtask) return null.also { refuseOffline(CREATE) }
+        return itemWrite(CREATE) {
+            actions.createSubtask(parent, title.trim(), notes.trim().ifBlank { null }, dueAt.trim().ifBlank { null })
+            local.update { it.copy(subtaskOpen = false) }
+        }
+    }
+
     /** A status chip: a person's status for fleet's own task, final over the derived one. */
     fun setStatus(status: StatusCategory): Job? {
         val s = state.value
@@ -473,6 +544,7 @@ class TaskViewModel(
             canStart = key != null && !hasLive && allowed(caps, status, START),
             placeOpen = l.placeOpen,
             knownGroups = placeableGroups(knownGroups()),
+            groupCounts = groupCounts(),
             placementNote = detail?.placement?.note.orEmpty(),
             busy = l.busy,
             error = l.error,
@@ -490,9 +562,15 @@ class TaskViewModel(
             canSetStatus = task?.editable == true && allowed(caps, status, SET_STATUS),
             editOpen = l.editOpen,
             notesLocked = task?.origin == "agent",
+            parentTaskId = task?.parentTaskId,
+            parentLabel = l.parentLabel,
+            subtaskRollup = task?.let(::subtaskRollup),
+            canAddSubtask = task != null && takesSubtask(task) && allowed(caps, status, CREATE),
+            subtaskOpen = l.subtaskOpen,
             editFields = detail?.let {
                 TaskEditFields(title = it.task.title, notes = it.notes.orEmpty(), assignees = it.task.assignees, dueAt = it.task.dueAt.orEmpty())
             } ?: TaskEditFields(),
+            criteria = acceptanceCriteria(detail?.description?.takeIf { it.isNotBlank() } ?: detail?.notes.orEmpty()),
         )
     }
 
@@ -524,5 +602,6 @@ class TaskViewModel(
         const val REJECT = "reject"
         const val EDIT = "edit"
         const val SET_STATUS = "set_status"
+        const val CREATE = "create"
     }
 }

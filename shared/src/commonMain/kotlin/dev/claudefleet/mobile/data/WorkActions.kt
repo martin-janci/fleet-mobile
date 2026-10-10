@@ -47,6 +47,9 @@ interface WorkActions {
     /** One ticket by key or pasted URL. */
     suspend fun lookup(keyOrUrl: String): Ticket
 
+    /** Tickets in the hub's cache, and the caller's own tasks, matching [query]'s words. */
+    suspend fun searchTickets(query: String): List<Ticket>
+
     /** What resuming [key] would do. */
     suspend fun resumePlan(key: String): ResumePlan
 
@@ -137,6 +140,10 @@ interface WorkActions {
     suspend fun createTask(title: String, notes: String? = null, dueAt: String? = null): WorkItem =
         throw UnsupportedOperationException("create")
 
+    /** **Add subtask**: a new task filed under [parentTaskId] (`item:<id>`). */
+    suspend fun createSubtask(parentTaskId: String, title: String, notes: String? = null, dueAt: String? = null): WorkItem =
+        throw UnsupportedOperationException("create")
+
     /** A person's status for local item [itemId]: `todo`, `in_progress` or `done`. */
     suspend fun setStatus(itemId: Long, status: String): WorkItem =
         throw UnsupportedOperationException("set_status")
@@ -218,6 +225,8 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
 
     override suspend fun lookup(keyOrUrl: String): Ticket = session.withClient { it.workLookup(keyOrUrl) }
 
+    override suspend fun searchTickets(query: String): List<Ticket> = session.withClient { it.workSearch(query) }
+
     override suspend fun resumePlan(key: String): ResumePlan = session.withClient { it.workResumePlan(key) }
 
     override suspend fun tidy(): TidyReport = session.withClient { it.workTidy() }
@@ -285,6 +294,9 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
 
     override suspend fun createTask(title: String, notes: String?, dueAt: String?): WorkItem =
         session.withClient { it.createWorkTask(title, notes, dueAt) }
+
+    override suspend fun createSubtask(parentTaskId: String, title: String, notes: String?, dueAt: String?): WorkItem =
+        session.withClient { it.createWorkTask(title, notes, dueAt, parent = parentTaskId) }
 
     override suspend fun setStatus(itemId: Long, status: String): WorkItem =
         session.withClient { it.setWorkStatus(itemId, status) }

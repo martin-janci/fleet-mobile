@@ -216,7 +216,7 @@ class MobileRecoveryTest {
         compose.waitForIdle()
 
         compose.onNodeWithText("Choose a host").assertIsNotEnabled()
-        compose.onNodeWithText("agent · 1 running").assertExists()
+        compose.onNodeWithText("agent · 1 running · toolchain not checked").assertExists()
         compose.onNodeWithText("Signal lost · cannot move there now").assertExists()
 
         compose.onNodeWithText("oci-arm").performClick()

@@ -131,6 +131,11 @@ data class AgentBarKey(val label: String, val press: AgentPress?) {
             label == "→" -> "Right arrow"
             label == "⌃" -> "Control keys"
             label.startsWith("⌃") -> "Control " + label.removePrefix("⌃")
+            label == "⌥" -> "Alt keys"
+            label == "⌥⏎" -> "Alt Enter"
+            label == "⌥⌫" -> "Alt Backspace"
+            label == "⌥." -> "Alt period"
+            label.startsWith("⌥") -> "Alt " + label.removePrefix("⌥")
             else -> label
         }
 }
@@ -141,12 +146,22 @@ private val ARROW_CAPS = listOf("←" to "Left", "↑" to "Up", "↓" to "Down",
 /** "C-r" → "⌃R": a Ctrl key's cap. */
 internal fun ctrlCap(key: String): String = "⌃" + key.removePrefix("C-").uppercase()
 
+/** "M-b" → "⌥B", "M-Enter" → "⌥⏎", "M-BSpace" → "⌥⌫": an Alt chord's cap. */
+internal fun altCap(key: String): String = "⌥" + when (val rest = key.removePrefix("M-")) {
+    "Enter" -> "⏎"
+    "BSpace" -> "⌫"
+    else -> rest.uppercase()
+}
+
+/** The caps that open a row of chords instead of pressing a key: ⌃ and ⌥. */
+val MODIFIER_CAPS: Set<String> = setOf("⌃", "⌥")
+
 /**
  * The full-screen agent's key bar, always the same caps in the same places:
  * Esc, Tab, ⏎, ⌃C and 1, 2, 3 for a question's numbered answers; then, where
  * the hub takes them ([paneKeys], from `send_prompt`'s `keys` enum), ⇧Tab,
- * the four arrows and ⌃, which opens a row of the Ctrl letters
- * ([ctrlBarKeys]).
+ * the four arrows, ⌃, which opens a row of the Ctrl letters
+ * ([ctrlBarKeys]), and ⌥, which opens a row of the Alt chords ([altBarKeys]).
  *
  * While a question is up every key goes through its card, as the card's own
  * buttons do — the pane is re-read before a key is pressed, since Enter on a
@@ -159,8 +174,9 @@ fun agentBarKeys(card: BlockedCard?, paneKeys: Set<String> = HubCapabilities.BAS
     val extra = buildList {
         if ("BTab" in paneKeys) add(AgentBarKey("⇧Tab", AgentPress.Key("BTab").takeIf { idle }))
         for ((cap, key) in ARROW_CAPS) if (key in paneKeys) add(AgentBarKey(cap, AgentPress.Key(key).takeIf { idle }))
-        // The ⌃ cap itself presses nothing; the bar opens the letters' row.
+        // The ⌃ and ⌥ caps press nothing themselves; the bar opens their row.
         if (HubCapabilities.CTRL_KEYS.any { it in paneKeys }) add(AgentBarKey("⌃", null))
+        if (HubCapabilities.META_KEYS.any { it in paneKeys }) add(AgentBarKey("⌥", null))
     }
     if (card == null) {
         return listOf(
@@ -192,6 +208,21 @@ fun agentBarKeys(card: BlockedCard?, paneKeys: Set<String> = HubCapabilities.BAS
 fun ctrlBarKeys(card: BlockedCard?, paneKeys: Set<String>): List<AgentBarKey> =
     if (card != null) emptyList()
     else HubCapabilities.CTRL_KEYS.filter { it in paneKeys }.map { AgentBarKey(ctrlCap(it), AgentPress.Key(it)) }
+
+/**
+ * The row the ⌥ cap opens: each Alt chord the hub takes, as "⌥B". Never while
+ * a question is up, for the same reason as [ctrlBarKeys].
+ */
+fun altBarKeys(card: BlockedCard?, paneKeys: Set<String>): List<AgentBarKey> =
+    if (card != null) emptyList()
+    else HubCapabilities.META_KEYS.filter { it in paneKeys }.map { AgentBarKey(altCap(it), AgentPress.Key(it)) }
+
+/** The row a modifier cap ([MODIFIER_CAPS]) opens; empty for any other cap. */
+fun modifierRowKeys(cap: String?, card: BlockedCard?, paneKeys: Set<String>): List<AgentBarKey> = when (cap) {
+    "⌃" -> ctrlBarKeys(card, paneKeys)
+    "⌥" -> altBarKeys(card, paneKeys)
+    else -> emptyList()
+}
 
 const val AGENT_FULLSCREEN_TAG = "agent.fullscreen"
 const val AGENT_FULLSCREEN_KEY_TAG = "agent.fullscreen.key."
@@ -256,9 +287,9 @@ internal fun AgentFullscreen(
             )
             if (!state.readOnly) {
                 val keys = agentBarKeys(state.card, state.paneKeys)
-                var ctrlOpen by remember { mutableStateOf(false) }
-                val ctrlRow = ctrlBarKeys(state.card, state.paneKeys)
-                if (ctrlOpen && ctrlRow.isNotEmpty()) {
+                var openRow by remember { mutableStateOf<String?>(null) }
+                val ctrlRow = modifierRowKeys(openRow, state.card, state.paneKeys)
+                if (ctrlRow.isNotEmpty()) {
                     Row(
                         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -269,7 +300,7 @@ internal fun AgentFullscreen(
                             OutlinedButton(
                                 onClick = {
                                     if (press != null) onPress(press)
-                                    ctrlOpen = false
+                                    openRow = null
                                 },
                                 enabled = press != null && can,
                                 contentPadding = PaddingValues(horizontal = 8.dp),
@@ -288,10 +319,12 @@ internal fun AgentFullscreen(
                     val can = if (state.card != null) state.canAnswer else state.connected && !state.sending
                     for (key in keys) {
                         val press = key.press
-                        val opensCtrl = key.label == "⌃"
+                        val opensRow = key.label in MODIFIER_CAPS
                         OutlinedButton(
-                            onClick = { if (opensCtrl) ctrlOpen = !ctrlOpen else if (press != null) onPress(press) },
-                            enabled = if (opensCtrl) ctrlRow.isNotEmpty() && can else press != null && can,
+                            onClick = {
+                                if (opensRow) openRow = key.label.takeIf { it != openRow } else if (press != null) onPress(press)
+                            },
+                            enabled = if (opensRow) modifierRowKeys(key.label, state.card, state.paneKeys).isNotEmpty() && can else press != null && can,
                             contentPadding = PaddingValues(horizontal = 8.dp),
                             modifier = Modifier
                                 .heightIn(min = OrbitTokens.spacing("touch-min").dp)

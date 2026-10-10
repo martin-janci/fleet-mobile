@@ -268,8 +268,10 @@ private fun SessionRow.matchesTime(filters: SessionFilters, nowSeconds: Long): B
 /**
  * Free-text match, case-insensitive, across everything the row shows or is
  * filed under: its name, the branch, its tags, the host, the project, its
- * work's key and title, the prompt it was given, and what it is doing. Blank
- * matches everything.
+ * work's key and title, the prompt it was given, and what it is doing. Every
+ * word of the query must be in one of them, in any order, case and accents
+ * ignored — the desktop's rule (`src/lib/search.ts`), so "api login" finds
+ * the login session in acme/api on both. Blank matches everything.
  *
  * Two of those fields are not taken as the hub sent them, and both reasons are
  * the same one — **a search may only match what somebody could have read.**
@@ -290,8 +292,8 @@ private fun SessionRow.matchesTime(filters: SessionFilters, nowSeconds: Long): B
  *    nowhere and matched it nowhere either.
  */
 private fun SessionRow.matchesQuery(query: String, projectLabel: String?): Boolean {
-    val q = query.trim()
-    if (q.isEmpty()) return true
+    val words = fold(query).split(' ').filter { it.isNotBlank() }
+    if (words.isEmpty()) return true
     val fields = sequence {
         yield(displayName)
         yield(tmuxName)
@@ -304,5 +306,6 @@ private fun SessionRow.matchesQuery(query: String, projectLabel: String?): Boole
         lastPrompt?.let { yield(it) }
         Activity.sanitize(currentActivity)?.let { yield(it) }
     }
-    return fields.any { it.contains(q, ignoreCase = true) }
+    val hay = fields.map(::fold).toList()
+    return words.all { w -> hay.any { it.contains(w) } }
 }

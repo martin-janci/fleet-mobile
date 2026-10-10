@@ -22,7 +22,7 @@ class MissionWaitingTest {
     @Test
     fun a_new_wait_is_news_once_and_a_later_wait_on_the_same_mission_again() {
         val (alerts, seen) = missionWaitAlerts(emptyMap(), listOf(waiting(1)))
-        assertEquals(listOf(MissionWaitAlert(1, "Ship 1.4", "Mission waits for you to sign the autonomy grant")), alerts)
+        assertEquals(listOf(MissionWaitAlert(1, "Ship 1.4", "Mission waits for you to sign the autonomy grant", "sign_grant")), alerts)
         assertEquals(emptyList(), missionWaitAlerts(seen, listOf(waiting(1))).first, "still waiting is not news")
         val again = missionWaitAlerts(seen, listOf(waiting(1, reason = "question", since = 500))).first
         assertEquals(listOf("Mission waits for you to answer its question"), again.map { it.text })
@@ -52,5 +52,22 @@ class MissionWaitingTest {
     fun a_waiting_mission_is_a_needs_you_notification() {
         assertEquals(NotifyKind.NEEDS_YOU, notifyKindOf(MISSION_WAITING_REASON))
         assertEquals("needs_you", notifyStateOf(MISSION_WAITING_REASON))
+    }
+
+    /** MobileControl: "Hub federation v2 · Mission waits for you to sign the autonomy grant · Review grant". */
+    @Test
+    fun the_button_is_named_for_what_the_mission_waits_on_and_only_opens() {
+        val grant = missionWaitAlerts(emptyMap(), listOf(waiting(1))).first.single()
+        assertEquals(listOf("Review grant"), missionWaitActions(grant).map { it.label })
+        assertEquals(listOf(NotifyActionKind.Open), missionWaitActions(grant).map { it.kind })
+        assertEquals(listOf(MISSION_ACTION_REVIEW), missionWaitActions(grant).map { it.id })
+        val question = missionWaitAlerts(emptyMap(), listOf(waiting(2, reason = "question"))).first.single()
+        assertEquals(listOf("Answer"), missionWaitActions(question).map { it.label })
+        val confirm = missionWaitAlerts(emptyMap(), listOf(waiting(3, reason = "confirm"))).first.single()
+        assertEquals(listOf("Review"), missionWaitActions(confirm).map { it.label })
+        // iOS fixes a button's word per category: one category per word.
+        assertEquals(3, missionCategories().size)
+        assertEquals(listOf("Review grant"), missionCategories().getValue(missionCategory("sign_grant")).map { it.label })
+        assertEquals(listOf("Answer"), missionCategories().getValue(missionCategory("question")).map { it.label })
     }
 }

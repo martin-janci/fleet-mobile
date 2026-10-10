@@ -200,6 +200,69 @@ class MyWorkViewModelTest {
         assertEquals(4, vm.state.value.archivedHidden)
     }
 
+    /** Sprint, epic and type come from the page's facets and go to the hub as the desktop sends them. */
+    @Test
+    fun a_sprint_an_epic_and_a_type_narrow_the_tree_and_name_their_chips() = runTest {
+        val actions = FakeWorkActions().apply {
+            treeAnswer = { _, _ ->
+                page(
+                    """{"tasks":[],"groups":[],"orgs":[],"trackers":[],"total":0,
+                       "facets":{"iterations":[{"name":"Sprint 42","active":true,"count":3}],
+                                 "epics":[{"task_id":"item:10","key":"PAY-10","title":"Checkout","count":2}],
+                                 "item_types":["Bug"]}}""",
+                )
+            }
+        }
+        val vm = myWork(actions = actions)
+        vm.attach()
+        runCurrent()
+        assertEquals(listOf("Sprint 42"), vm.state.value.planning.iterations.map { it.name })
+
+        vm.setIteration("current")
+        vm.setEpic("PAY-10")
+        vm.setItemType("Bug")
+        vm.setSort("key")
+        runCurrent()
+        val sent = actions.treeCalls.last().filters
+        assertEquals(WorkTreeFilters(iteration = "current", epic = "PAY-10", itemType = "Bug", sort = "key"), sent)
+        assertEquals(
+            listOf("Current sprint", "Epic: PAY-10 Checkout", "Type: Bug"),
+            vm.state.value.facets.map { it.label },
+        )
+        assertEquals(3, vm.state.value.filters.sheetCount, "sort orders, it does not narrow")
+        assertEquals(
+            """{"iteration":"current","epic":"PAY-10","item_type":"Bug","sort":"key"}""",
+            json.encodeToString(WorkTreeFilters.serializer(), sent),
+        )
+    }
+
+    /**
+     * The box shows what was typed: the filters hold it trimmed, and showing
+     * those ate the space after a word, so "login bug" could not be typed.
+     */
+    @Test
+    fun a_space_typed_between_two_words_stays_in_the_box() = runTest {
+        val actions = FakeWorkActions().answeringTree()
+        val vm = myWork(actions = actions)
+        vm.attach()
+        runCurrent()
+
+        vm.setQuery("login")
+        vm.setQuery("login ")
+        runCurrent()
+        assertEquals("login ", vm.state.value.queryText)
+        assertEquals("login", vm.state.value.filters.query)
+        vm.setQuery("login bug")
+        advanceTimeBy(MyWorkViewModel.QUERY_DEBOUNCE_MS + 1)
+        runCurrent()
+        assertEquals("login bug", vm.state.value.queryText)
+        assertEquals("login bug", actions.treeCalls.last().filters.query)
+
+        vm.clearFilters()
+        runCurrent()
+        assertEquals("", vm.state.value.queryText)
+    }
+
     /**
      * *Clear filters* clears the search too — it kept it, so on a tree
      * emptied by a search alone the empty state's button did nothing.
@@ -572,6 +635,8 @@ class MyWorkViewModelTest {
 
         assertEquals(listOf("Payments", "Ops"), vm.knownGroups().map { it.title })
         assertEquals(listOf("Payments", "Ops"), placeableGroups(vm.knownGroups()))
+        // Place work's rows say how many tasks each holds ("1 task").
+        assertEquals(mapOf("Payments" to 1, "Ops" to 1), vm.groupCounts())
         assertEquals(
             emptyList(),
             placeableGroups(listOf(GroupRef("tracker:1:ABC", "ABC", GroupSource.Tracker), GroupRef("repo:acme/api", "acme/api", GroupSource.Repo), GroupRef("key:OLD", "OLD", GroupSource.Key))),

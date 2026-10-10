@@ -6,7 +6,13 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.NewSessionRequest
+import dev.claudefleet.mobile.model.BackgroundOptions
 import dev.claudefleet.mobile.model.Headroom
+import dev.claudefleet.mobile.model.SuggestedHost
+import dev.claudefleet.mobile.model.hostProposalLine
+import dev.claudefleet.mobile.model.suggestedHostOf
+import dev.claudefleet.mobile.net.json
+import kotlinx.serialization.json.JsonNull
 import dev.claudefleet.mobile.model.HostLogin
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.NewBgSessionResult
@@ -17,6 +23,8 @@ import dev.claudefleet.mobile.model.StartPlan
 import dev.claudefleet.mobile.model.StartPreview
 import dev.claudefleet.mobile.model.StartProgress
 import dev.claudefleet.mobile.model.StartStepState
+import dev.claudefleet.mobile.model.backgroundAgentWord
+import dev.claudefleet.mobile.model.backgroundAgents
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CompletableDeferred
@@ -66,6 +74,10 @@ private class StartActions : NewSessionActions {
     val headroomFor = mutableListOf<String>()
     var gate: CompletableDeferred<Unit>? = null
     var failMessage: Throwable? = null
+    val proposedFor = mutableListOf<Long>()
+    var proposal: SuggestedHost? = null
+    var refuseProposal: Throwable? = null
+    val backgrounds = mutableListOf<BackgroundOptions>()
     var headroomAnswer = Headroom(
         pauseAtPct = 90.0,
         chosen = HostLogin(profile = null, accountUuid = "acc-1", usedPct = 25.0),
@@ -83,6 +95,17 @@ private class StartActions : NewSessionActions {
 
     override suspend fun newBackground(hostAlias: String, name: String, prompt: String) =
         NewBgSessionResult(claudeSessionId = "c", session = null)
+
+    override suspend fun proposeHost(projectId: Long): SuggestedHost? {
+        proposedFor += projectId
+        refuseProposal?.let { throw it }
+        return proposal
+    }
+
+    override suspend fun newBackground(hostAlias: String, name: String, prompt: String, options: BackgroundOptions): NewBgSessionResult {
+        backgrounds += options
+        return NewBgSessionResult(claudeSessionId = "c", session = null)
+    }
 
     override suspend fun headroom(hostAlias: String): Headroom {
         headroomFor += hostAlias
@@ -390,6 +413,108 @@ class NewSessionStartTest {
         vm.selectProject(3)
         runCurrent()
         assertEquals(listOf("preview FLEET-151 pine -", "preview FLEET-151 pine 3"), work.previewCalls)
+    }
+
+    @Test
+    fun regenerate_asks_for_the_draft_again_and_shows_it_as_drafted() = runTest {
+        val work = FakeWorkActions().apply {
+            previewAnswer = StartPreview(plan = StartPlan(projectId = 3, hostAlias = "pine", branch = "fleet-151-orbit"))
+        }
+        val vm = ticketVm(StartFleet(), work, backgroundScope)
+        runCurrent()
+        work.previewAnswer = StartPreview(plan = StartPlan(projectId = 3, hostAlias = "pine", branch = "fleet-151-orbit-tokens"))
+        assertNotNull(vm.regenerateBranchDraft())
+        runCurrent()
+
+        assertEquals(listOf("preview FLEET-151 pine -", "preview FLEET-151 pine -"), work.previewCalls, "the same draft call, again")
+        assertEquals("fleet-151-orbit-tokens", vm.state.value.ticketBranch)
+        assertEquals("Drafted from FLEET-151", draftedFrom(vm.state.value))
+    }
+
+    // ---- Jev's host (MobileNewSession, Step 1) ----
+
+    private val proposing = MAIN_HUB.copy(tools = MAIN_HUB.tools + HubCapabilities.PROPOSE_HOST_PLACEMENT)
+
+    private fun unfiltered(fleet: FleetState, actions: NewSessionActions, scope: kotlinx.coroutines.CoroutineScope) =
+        NewSessionViewModel(fleet, actions, scope, canWrite = true, initialHost = null, onCreated = {})
+
+    @Test
+    fun jevs_host_is_preselected_with_why_and_change_hands_the_choice_back() = runTest {
+        val actions = StartActions().apply { proposal = SuggestedHost("box", confidencePct = 80, reason = "last 4 sessions on repo ran here") }
+        val vm = unfiltered(StartFleet(proposing), actions, backgroundScope)
+        vm.selectProject(3)
+        runCurrent()
+
+        assertEquals(listOf(3L), actions.proposedFor)
+        assertEquals("box", vm.state.value.host)
+        assertEquals(HostProposal("box", "Proposed by Jev · last 4 sessions on repo ran here"), vm.state.value.hostProposal)
+
+        vm.changeProposedHost()
+        runCurrent()
+        assertNull(vm.state.value.hostProposal)
+        assertNull(vm.state.value.host, "two hosts and no proposal: the person picks")
+        assertEquals(listOf(3L), actions.proposedFor, "not asked again for the same project")
+    }
+
+    @Test
+    fun no_proposal_from_an_older_hub_after_a_pick_or_on_a_refusal() = runTest {
+        val actions = StartActions().apply { proposal = SuggestedHost("box") }
+        val older = unfiltered(StartFleet(), actions, backgroundScope)
+        older.selectProject(3)
+        runCurrent()
+        assertTrue(actions.proposedFor.isEmpty(), "never a tool the hub does not list")
+
+        val picked = unfiltered(StartFleet(proposing), actions, backgroundScope)
+        picked.selectHost("pine")
+        picked.selectProject(3)
+        runCurrent()
+        assertTrue(actions.proposedFor.isEmpty(), "the person chose already")
+        assertEquals("pine", picked.state.value.host)
+
+        val refusing = StartActions().apply { refuseProposal = HubError.Tool("E_FORBIDDEN", "not for this device") }
+        val vm = unfiltered(StartFleet(proposing), refusing, backgroundScope)
+        vm.selectProject(3)
+        runCurrent()
+        assertEquals(listOf(3L), refusing.proposedFor)
+        assertNull(vm.state.value.hostProposal, "hidden on a refusal")
+        assertNull(vm.state.value.host)
+    }
+
+    @Test
+    fun the_proposal_reads_the_hubs_answer_or_its_null() {
+        assertEquals(
+            SuggestedHost("mercury", confidencePct = 72, runId = 9),
+            suggestedHostOf(json.parseToJsonElement("""{"host_alias":"mercury","confidence_pct":72,"run_id":9}""")),
+        )
+        assertEquals("mercury", suggestedHostOf(json.parseToJsonElement("""{"suggestion":{"host_alias":"mercury"}}"""))?.hostAlias)
+        assertNull(suggestedHostOf(JsonNull))
+        assertNull(suggestedHostOf(json.parseToJsonElement("""{"suggestion":null}""")))
+        assertEquals("Proposed by Jev", hostProposalLine(SuggestedHost("mercury", reason = " ")))
+    }
+
+    // ---- the background agent's Agent (MobileMissions) ----
+
+    @Test
+    fun codex_is_offered_only_where_the_hub_lists_it_and_claude_is_never_sent() = runTest {
+        assertEquals(listOf("claude"), backgroundAgents(null))
+        assertEquals(listOf("claude"), backgroundAgents(setOf("claude")))
+        assertEquals(listOf("claude", "codex"), backgroundAgents(setOf("claude", "codex")))
+        assertEquals(listOf("Claude Code", "Codex"), listOf("claude", "codex").map(::backgroundAgentWord))
+
+        val bg = MAIN_HUB.copy(
+            tools = MAIN_HUB.tools + HubCapabilities.NEW_BG_SESSION,
+            params = MAIN_HUB.params + (HubCapabilities.NEW_BG_SESSION to setOf("host_alias", "name", "prompt", "agent", "read_only")),
+            paramValues = mapOf(HubCapabilities.NEW_BG_SESSION to mapOf("agent" to setOf("claude", "codex"))),
+        )
+        val claudeOnly = vm(StartFleet(MAIN_HUB.copy(tools = MAIN_HUB.tools + HubCapabilities.NEW_BG_SESSION)), StartActions(), backgroundScope)
+        val actions = StartActions()
+        val vm = vm(StartFleet(bg), actions, backgroundScope)
+        runCurrent()
+        assertEquals(listOf("claude"), claudeOnly.state.value.backgroundAgents, "a hub that enumerates no agent runs Claude alone")
+        assertEquals(listOf("claude", "codex"), vm.state.value.backgroundAgents)
+        vm.startBackground("", "find every Command::new", BackgroundOptions(agent = "codex"), onUntracked = {})
+        runCurrent()
+        assertEquals("codex", actions.backgrounds.single().agent)
     }
 
     // ---- the words ----

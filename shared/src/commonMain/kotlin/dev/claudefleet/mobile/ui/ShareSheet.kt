@@ -54,9 +54,10 @@ data class ShareHandlers(
 /**
  * Share a session from the phone (redesign 11.10): the desktop's Share
  * sheet in the phone's sheet. Who holds a grant, with Narrow to watch and a
- * two-step Revoke; a share to a person or an org at Watch, Answer (from
- * contract 13) or Drive; and the two things a sharer is deciding without
- * being told, said out loud.
+ * two-step Revoke; a share to a person or the whole org at Watch, Answer
+ * (from contract 13) or Steer (`drive` on the wire); and the two things a
+ * sharer is deciding without being told, said out loud. The whole org asks
+ * for no name when the phone knows which org that is ([ShareUiState.wholeOrg]).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -93,14 +94,15 @@ fun ShareSheet(state: ShareUiState, handlers: ShareHandlers) {
             Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 SheetOption(title = "A person", selected = state.kind == ShareKind.Person, onSelect = { handlers.onKind(ShareKind.Person) }, enabled = !state.busy)
                 SheetOption(
-                    title = "An org",
-                    sub = "its members and admins in it now, never a later joiner or a viewer",
+                    title = "The whole org",
+                    sub = listOfNotNull(state.wholeOrg, "its members and admins in it now, never a later joiner or a viewer").joinToString(" · "),
                     selected = state.kind == ShareKind.Org,
                     onSelect = { handlers.onKind(ShareKind.Org) },
                     enabled = !state.busy,
                 )
             }
-            OutlinedTextField(
+            // MobileFormsWork: the whole org needs no field when the phone knows which org that is.
+            if (!state.orgKnown) OutlinedTextField(
                 value = state.recipient,
                 onValueChange = handlers.onRecipient,
                 singleLine = true,
@@ -110,12 +112,12 @@ fun ShareSheet(state: ShareUiState, handlers: ShareHandlers) {
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
                 modifier = Modifier.fillMaxWidth().testTag(SHARE_TAG + "recipient"),
             )
-            Heading("Level")
+            Heading("They can")
             Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (level in state.levels) {
                     SheetOption(
-                        title = GrantLevel.word(level),
-                        sub = GrantLevel.detail(level),
+                        title = GrantLevel.choice(level),
+                        sub = GrantLevel.detail(level).takeIf { it.isNotEmpty() },
                         selected = state.level == level,
                         onSelect = { handlers.onLevel(level) },
                         enabled = !state.busy,
@@ -146,7 +148,7 @@ fun ShareSheet(state: ShareUiState, handlers: ShareHandlers) {
                 fontSize = 13.sp,
             )
             Text(
-                "Watch, answer and drive are enforced by Fleet, not by SSH. A share never gives a terminal, and anyone who " +
+                "Watch, answer and steer are enforced by Fleet, not by SSH. A share never gives a terminal, and anyone who " +
                     "independently has SSH to ${state.hostAlias.ifBlank { "its host" }} can still attach.",
                 color = o.fg2,
                 fontSize = 13.sp,

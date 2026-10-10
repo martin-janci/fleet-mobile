@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.BorderStroke
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import dev.claudefleet.mobile.ui.components.ErrorBanner
+import dev.claudefleet.mobile.ui.components.ProposedByLine
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.kit.HubBanner
 import dev.claudefleet.mobile.ui.kit.pastLoaderDelay
@@ -152,6 +153,7 @@ internal fun NewSessionWizard(
             onDismiss = { askingBackground = false },
             options = state.backgroundOptions,
             project = state.projectLabel.takeIf { state.projectId != null },
+            agents = state.backgroundAgents,
         )
     }
 
@@ -232,6 +234,7 @@ private fun ColumnScope.WizardBody(
                 state, editable, onSelectHost, onBackground = onBackground,
                 onFromTicket = onFromTicket.takeIf { state.ticketKey == null },
                 onStartFrom = extras.onStartFrom,
+                onChangeProposedHost = extras.onChangeProposedHost,
             )
             WizardStep.Project -> ProjectStep(
                 state, editable, onProjectQuery, onSelectProject, onNewWorktree, onBranchChange, onBaseBranchChange,
@@ -387,6 +390,10 @@ data class NewSessionExtras(
     val onPickLogin: (String?) -> Unit = {},
     val onTicketBranch: (String) -> Unit = {},
     val onClearDraft: () -> Unit = {},
+    /** The drafted branch's **Regenerate**: the same draft call again. */
+    val onRegenerateDraft: () -> Unit = {},
+    /** **Change** under Jev's proposed host: the host is the person's to pick. */
+    val onChangeProposedHost: () -> Unit = {},
 )
 
 /** "Starting orbit-redesign", "Starting FLEET-151 in 2 projects". */
@@ -405,6 +412,7 @@ private fun WhereStep(
     onBackground: () -> Unit,
     onFromTicket: (() -> Unit)? = null,
     onStartFrom: (StartFrom) -> Unit = {},
+    onChangeProposedHost: () -> Unit = {},
 ) {
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = gutterPadding()) {
         // A project or a branch is this wizard; a ticket is picked from the
@@ -424,14 +432,19 @@ private fun WhereStep(
             item(key = "no-hosts") { StepHint("No hosts yet. They appear once the hub has listed them.") }
         }
         items(s.hosts, key = { "host-${it.alias}" }) { h ->
-            SheetOption(
-                title = h.alias,
-                selected = h.alias == s.host,
-                onSelect = { onSelectHost(h.alias) },
-                sub = hostLoad(h),
-                enabled = editable && h.reachable,
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
+            val proposal = s.hostProposal?.takeIf { it.host == h.alias && it.host == s.host }
+            Column(modifier = Modifier.padding(bottom = 8.dp)) {
+                SheetOption(
+                    title = h.alias,
+                    selected = h.alias == s.host,
+                    onSelect = { onSelectHost(h.alias) },
+                    sub = hostLoad(h),
+                    enabled = editable && h.reachable,
+                )
+                // Jev's pick (MobileNewSession): said under it, as a chat
+                // form's proposed choice is, with Change.
+                if (proposal != null) ProposedByLine(proposal.line, onChange = onChangeProposedHost, enabled = editable)
+            }
         }
         // The desktop's other kind: headless, supervised, given its task up
         // front. It needs a host and nothing else, so it is offered here.
@@ -540,6 +553,7 @@ private fun ProjectStep(
                 if (drafted != null) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("✎ $drafted", color = Fleet.colors.fgMuted, style = Fleet.type.textSm, modifier = Modifier.weight(1f))
+                        TextButton(onClick = extras.onRegenerateDraft, enabled = editable) { Text("Regenerate") }
                         if (s.ticketBranchEditable) TextButton(onClick = extras.onClearDraft, enabled = editable) { Text("Clear") }
                     }
                 } else if (s.ticketBranch.isBlank()) {

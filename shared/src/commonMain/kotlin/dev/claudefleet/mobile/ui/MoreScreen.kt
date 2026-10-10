@@ -1,15 +1,20 @@
 package dev.claudefleet.mobile.ui
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.limitAt
@@ -18,8 +23,17 @@ import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.kit.PhoneRow
 import dev.claudefleet.mobile.ui.theme.Fleet
 
-/** One row on More or Control: where it goes, its live line, and whether it is there at all. */
-data class MoreEntry(val title: String, val line: String, val onOpen: () -> Unit)
+/**
+ * One row on More or Control: where it goes, its live line, and whether it
+ * is there at all. [action] is a button of the row's own beside the tap that
+ * opens it (Automation's Pause all, MobileNav); null draws none.
+ */
+data class MoreEntry(val title: String, val line: String, val action: MoreAction? = null, val onOpen: () -> Unit)
+
+/** A row's inline button: its word and what it does — a separate tap from opening the row. */
+data class MoreAction(val label: String, val onClick: () -> Unit)
+
+internal const val MORE_ACTION_TAG = "more.action."
 
 /** "5 hosts · oci-arm offline", or "2 offline" when more than one is: the Hosts row's live line. */
 fun hostsLine(hosts: List<HostRow>): String {
@@ -106,6 +120,7 @@ fun MoreScreen(
 @Composable
 internal fun EntryRows(entries: List<MoreEntry>) {
     entries.forEachIndexed { i, entry ->
+        val action = entry.action
         PhoneRow(
             title = entry.title,
             line = entry.line,
@@ -114,6 +129,13 @@ internal fun EntryRows(entries: List<MoreEntry>) {
             divider = i < entries.lastIndex,
             dot = false,
             onClick = entry.onOpen,
+            chips = if (action != null) ({
+                OutlinedButton(
+                    onClick = action.onClick,
+                    modifier = Modifier.heightIn(min = 32.dp).testTag(MORE_ACTION_TAG + entry.title),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                ) { Text(action.label, fontSize = 13.sp) }
+            }) else null,
         )
     }
 }
