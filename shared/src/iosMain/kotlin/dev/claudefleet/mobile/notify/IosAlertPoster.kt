@@ -67,9 +67,7 @@ class IosAlertPoster : AlertPoster {
             setTitle(alert.title)
             setBody(alert.text)
             setThreadIdentifier(NEEDS_YOU_THREAD)
-            // An update (the question arriving after the status) replaces the
-            // notification without a second sound.
-            if (!alert.quiet) setSound(UNNotificationSound.defaultSound)
+            setSound(UNNotificationSound.defaultSound)
         }
         center.addNotificationRequest(
             UNNotificationRequest.requestWithIdentifier("${NEEDS_YOU_ID_PREFIX}routine-${alert.runId}", content, null),
