@@ -39,6 +39,17 @@ import dev.claudefleet.mobile.ui.kit.PhoneConnection
 import dev.claudefleet.mobile.ui.kit.StatusWord
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.StatusTone
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.OutlinedButton
+import dev.claudefleet.mobile.model.Mission
+import dev.claudefleet.mobile.model.missionWaitLabel
+import dev.claudefleet.mobile.model.loginLabel
+import dev.claudefleet.mobile.model.relativeTime
+import dev.claudefleet.mobile.model.relativeWithin
+import dev.claudefleet.mobile.model.usedText
+import dev.claudefleet.mobile.ui.kit.OrbitChip
+import dev.claudefleet.mobile.ui.kit.PhoneRow
 
 /**
  * What needs a person, fleet-wide, oldest ask first: the New layout's first
@@ -60,8 +71,13 @@ fun inboxRows(sessions: List<SessionRow>, access: MyAccess = MyAccess.UNKNOWN): 
  * header says "+N proposed" instead. The desktop's `proposedRows`, oldest
  * first like the Inbox.
  */
-fun proposedRows(sessions: List<SessionRow>, access: MyAccess = MyAccess.UNKNOWN): List<SessionRow> =
-    sessions.filter { it.isProposed && access.levelFor(it) == null }
+fun proposedRows(
+    sessions: List<SessionRow>,
+    access: MyAccess = MyAccess.UNKNOWN,
+    /** Readings set aside with Not waiting on this phone ([proposalKey]), left out (G5.4). */
+    setAside: Set<String> = emptySet(),
+): List<SessionRow> =
+    sessions.filter { it.isProposed && access.levelFor(it) == null && proposalKey(it) !in setAside }
         .sortedWith(compareBy<SessionRow, Long?>(nullsLast()) { it.askedAt }.thenBy { it.id })
 
 /** One session someone else shared with this person, and at what level (redesign 11.10, the Watch board). */
@@ -160,12 +176,23 @@ fun InboxScreen(
     doneTodayList: List<SessionRow> = emptyList(),
     /** Jev's "probably waiting" rows ([proposedRows]): named in the header, never counted. */
     proposed: Int = 0,
+    /** Those rows themselves (G5.4), drawn under Needs you with Not waiting. */
+    proposedList: List<SessionRow> = emptyList(),
+    /** Missions that wait on a person ([missionWaits]), rows of their own under the sessions (G5.4). */
+    missionRows: List<Mission> = emptyList(),
+    onOpenMission: (Long) -> Unit = {},
+    /** The rows' inline answers (G5.4): what each row offers, and what was pressed. */
+    inbox: InboxUiState = InboxUiState(),
+    rowActions: (SessionRow) -> InboxRowActions = { InboxRowActions() },
+    rowHandlers: InboxRowHandlers = InboxRowHandlers(),
 ) {
     var view by rememberSaveable { mutableStateOf(InboxView.NeedsYou) }
+    // A mission waiting on a person is one more thing that needs you (G5.4).
+    val needYou = rows.size + missionRows.size
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
             title = "Inbox",
-            subtitle = inboxSubtitle(rows.size, running, proposed),
+            subtitle = inboxSubtitle(needYou, running, proposed),
             modifier = Modifier.tourAnchor(anchors, TourAnchor.Header),
             actions = {
                 onOpenToday?.let { TextButton(onClick = it, modifier = Modifier.tourAnchor(anchors, TourAnchor.Today)) { Text("Today") } }
@@ -178,7 +205,7 @@ fun InboxScreen(
         ) {
             for (v in InboxView.entries) {
                 val n = when (v) {
-                    InboxView.NeedsYou -> rows.size
+                    InboxView.NeedsYou -> needYou
                     InboxView.Running -> runningList.size
                     InboxView.DoneToday -> doneTodayList.size
                 }
@@ -214,13 +241,13 @@ fun InboxScreen(
             }
         } else OrbitPullToRefresh(isRefreshing = refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                if (rows.isEmpty() && shared.isEmpty()) {
+                if (rows.isEmpty() && shared.isEmpty() && missionRows.isEmpty() && proposedList.isEmpty()) {
                     item(key = "empty") {
                         Box(modifier = Modifier.fillParentMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                             Text(inboxEmptyText(connection), color = Fleet.colors.fgMuted, fontSize = 15.sp, textAlign = TextAlign.Center)
                         }
                     }
-                } else if (rows.isNotEmpty()) {
+                } else if (needYou > 0) {
                     item(key = "heading") {
                         Text(
                             "Needs you · oldest first",
@@ -231,17 +258,73 @@ fun InboxScreen(
                     }
                 }
                 items(rows, key = { it.id }) { row ->
-                    PhoneSessionRow(
-                        modifier = if (row.id == rows.first().id) Modifier.tourAnchor(anchors, TourAnchor.FirstRow) else Modifier,
-                        row = row,
-                        nowSeconds = nowSeconds,
-                        live = live,
-                        showHost = true,
-                        since = row.askedAt,
-                        accountName = row.accountUuid?.let(accountNames::get),
-                        limit = row.accountUuid?.let(accountUsage::get)?.limitAt(nowSeconds),
-                        onClick = { onOpenSession(row.id) },
+                    Column {
+                        PhoneSessionRow(
+                            modifier = if (row.id == rows.first().id) Modifier.tourAnchor(anchors, TourAnchor.FirstRow) else Modifier,
+                            row = row,
+                            nowSeconds = nowSeconds,
+                            live = live,
+                            showHost = true,
+                            since = row.askedAt,
+                            accountName = row.accountUuid?.let(accountNames::get),
+                            limit = row.accountUuid?.let(accountUsage::get)?.limitAt(nowSeconds),
+                            onClick = { onOpenSession(row.id) },
+                        )
+                        InboxRowButtons(
+                            row = row,
+                            a = rowActions(row),
+                            inbox = inbox,
+                            nowSeconds = nowSeconds,
+                            handlers = rowHandlers,
+                            onOpenLog = { onOpenSession(row.id) },
+                            accountName = { accountNames[it] },
+                        )
+                    }
+                }
+                items(missionRows, key = { "mission-${it.id}" }) { m ->
+                    PhoneRow(
+                        title = m.name.ifBlank { "Mission ${m.id}" },
+                        line = m.waitingOn?.let(::missionWaitLabel).orEmpty(),
+                        word = StatusWord.NEEDS_YOU,
+                        lead = phoneLead(StatusWord.NEEDS_YOU, live),
+                        age = relativeTime(m.waitingOn?.since?.takeIf { it > 0 }, nowSeconds),
+                        onClick = { onOpenMission(m.id) },
+                        chips = { OrbitChip("Mission") },
                     )
+                }
+                if (proposedList.isNotEmpty()) {
+                    item(key = "proposed-heading") {
+                        Text(
+                            "Proposed by Jev · not counted",
+                            color = Fleet.colors.fgMuted,
+                            fontSize = 13.sp,
+                            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
+                        )
+                    }
+                    items(proposedList, key = { "proposed-${it.id}" }) { row ->
+                        Column {
+                            PhoneSessionRow(
+                                row = row,
+                                nowSeconds = nowSeconds,
+                                live = live,
+                                showHost = true,
+                                accountName = row.accountUuid?.let(accountNames::get),
+                                onClick = { onOpenSession(row.id) },
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, bottom = 4.dp),
+                            ) {
+                                Text(
+                                    "Proposed by Jev · $PROPOSED_LINE",
+                                    color = Fleet.colors.fg2,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(onClick = { rowHandlers.onNotWaiting(row) }) { Text("Not waiting") }
+                            }
+                        }
+                    }
                 }
                 if (shared.isNotEmpty()) {
                     item(key = "shared-heading") {
@@ -273,5 +356,67 @@ fun InboxScreen(
                 }
             }
         }
+    }
+}
+
+/** What the Inbox's inline answers call (G5.4); the defaults do nothing. */
+class InboxRowHandlers(
+    val onRetry: (SessionRow) -> Unit = {},
+    val onProposeSwitch: (SessionRow) -> Unit = {},
+    val onConfirmSwitch: (SessionRow) -> Unit = {},
+    val onCancelSwitch: (Long) -> Unit = {},
+    val onWait: (Long, Long) -> Unit = { _, _ -> },
+    val onNotWaiting: (SessionRow) -> Unit = {},
+)
+
+/**
+ * A Needs you row's fix, under it (board MobileNav): Open log and Retry on a
+ * failed row; Switch account and Wait on one paused at its account's limit.
+ * Switch account asks first and moves only on Switch; Wait folds the buttons
+ * into "Waiting for the reset". Neither is pre-selected.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun InboxRowButtons(
+    row: SessionRow,
+    a: InboxRowActions,
+    inbox: InboxUiState,
+    nowSeconds: Long,
+    handlers: InboxRowHandlers,
+    onOpenLog: () -> Unit,
+    accountName: (String) -> String?,
+) {
+    val notice = inbox.notices[row.id]
+    val target = inbox.switchTargets[row.id]
+    val waiting = inbox.waiting[row.id]?.takeIf { it > nowSeconds }
+    if (!a.any && notice == null) return
+    val busy = row.id in inbox.busy
+    val o = Fleet.colors
+    Column(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp)) {
+        when {
+            target != null -> {
+                Text("Resume under ${loginLabel(target, accountName)} · ${usedText(target)}?", color = o.fg2, fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { handlers.onConfirmSwitch(row) }, enabled = !busy) { Text("Switch") }
+                    TextButton(onClick = { handlers.onCancelSwitch(row.id) }, enabled = !busy) { Text("Cancel") }
+                }
+            }
+            waiting != null -> Text(
+                relativeWithin(waiting, nowSeconds)?.let { "Waiting for the reset · in $it" } ?: "Waiting for the reset",
+                color = o.fg2,
+                fontSize = 13.sp,
+            )
+            a.any -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (a.openLog) TextButton(onClick = onOpenLog) { Text("Open log") }
+                if (a.retryPrompt != null) OutlinedButton(onClick = { handlers.onRetry(row) }, enabled = !busy) { Text("Retry") }
+                if (a.switchAccount) OutlinedButton(onClick = { handlers.onProposeSwitch(row) }, enabled = !busy) { Text("Switch account") }
+                a.waitUntil?.let { resets ->
+                    waitLabel(resets, nowSeconds)?.let { label ->
+                        TextButton(onClick = { handlers.onWait(row.id, resets) }, enabled = !busy) { Text(label) }
+                    }
+                }
+            }
+        }
+        notice?.let { Text(it, color = o.fg2, fontSize = 12.sp) }
     }
 }

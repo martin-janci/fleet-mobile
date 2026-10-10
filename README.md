@@ -244,7 +244,7 @@ costs one reconnect.
 ## What it does
 
 - **Layout** — Classic or New, like the desktop's layout switch: *New
-  navigation* in Settings, off until turned on. Classic's bottom bar is
+  navigation* in Settings, on unless a phone chose Classic. Classic's bottom bar is
   Sessions, Work, Files, Hosts and Settings. New's is Inbox, Sessions,
   Control, Work and More; Hosts, Files, Settings and the places below move
   under More, and a session opens in tabs (Conversation, the agent, Terminals,

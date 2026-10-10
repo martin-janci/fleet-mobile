@@ -182,7 +182,12 @@ import dev.claudefleet.mobile.ui.ProposedChangeCard
 import dev.claudefleet.mobile.ui.HostsViewModel
 import dev.claudefleet.mobile.ui.MultiStartHandlers
 import dev.claudefleet.mobile.ui.components.ErrorBanner
+import dev.claudefleet.mobile.ui.InboxRowHandlers
 import dev.claudefleet.mobile.ui.InboxScreen
+import dev.claudefleet.mobile.ui.InboxViewModel
+import dev.claudefleet.mobile.ui.SessionInboxActions
+import dev.claudefleet.mobile.ui.inboxRowActions
+import dev.claudefleet.mobile.ui.missionWaits
 import dev.claudefleet.mobile.ui.help.GuideScreen
 import dev.claudefleet.mobile.ui.help.HelpPicker
 import dev.claudefleet.mobile.ui.help.HelpSettings
@@ -870,6 +875,16 @@ private fun FleetRoute(
     val tidyState by tidy.state.collectAsState()
     val missions = remember(repository, scope) { MissionsViewModel(repository, container.missionActions, scope, credentials.canWrite) }
     val missionsState by missions.state.collectAsState()
+    // The Inbox rows' inline answers (G5.4): the session screen's own calls.
+    // Here, not under the Inbox, so a Not waiting outlives a tab switch.
+    val inboxActions = remember(repository, scope) {
+        InboxViewModel(
+            SessionInboxActions(container.sessionActions),
+            scope,
+            credentials.canWrite,
+            accountName = { uuid -> repository.accountNames.value[uuid] },
+        )
+    }
     val trackers = remember(repository, scope) { TrackersViewModel(repository, container.trackerActions, scope, credentials.canWrite) }
     val trackersState by trackers.state.collectAsState()
     val automation = remember(repository, scope) { AutomationViewModel(repository, container.routineActions, scope, credentials.canWrite) }
@@ -1042,7 +1057,11 @@ private fun FleetRoute(
                     val barRows by repository.sessions.collectAsState()
                     val barAccess by repository.access.collectAsState()
                     // The Inbox's own rows, so the badge, the Inbox and Today agree (review r09 B1).
-                    val needYou = remember(barRows, barAccess) { inboxRows(barRows, barAccess).size }
+                    // A mission waiting on a person counts too (G5.4), as the Inbox's header does.
+                    val needYou = remember(barRows, barAccess, missionsState.missions, missionsState.available) {
+                        inboxRows(barRows, barAccess).size +
+                            (if (missionsState.available) missionWaits(missionsState.missions).size else 0)
+                    }
                     // The Orbit Fleet bar: one badge, the Needs you count, on
                     // Inbox. Work's To review count stays on the Work screen.
                     val items = PhoneLayout.New.tabs
@@ -1614,10 +1633,38 @@ private fun FleetRoute(
                     val hubVersion by repository.hubVersion.collectAsState()
                     val mismatch = remember(hubVersion) { hubMismatch(container.appVersion, hubVersion) }
                     val inboxConnection = rememberPhoneConnection(inboxList.status)
+                    val inboxState by inboxActions.state.collectAsState()
+                    val inboxCaps by repository.capabilities.collectAsState()
+                    val proposedList = remember(all, access, inboxState.setAside) { proposedRows(all, access, inboxState.setAside) }
+                    // A mission that waits on a person is an Inbox row (G5.4): read the missions when the Inbox shows.
+                    LaunchedEffect(missionsState.available) { if (missionsState.available) missions.refresh() }
+                    val missionRows = remember(missionsState.missions, missionsState.available) {
+                        if (missionsState.available) missionWaits(missionsState.missions) else emptyList()
+                    }
                     InboxScreen(
                         rows = rows,
                         running = all.count { it.claudeStatus == "working" },
-                        proposed = remember(all, access) { proposedRows(all, access).size },
+                        proposed = proposedList.size,
+                        proposedList = proposedList,
+                        missionRows = missionRows,
+                        onOpenMission = { missions.openOne(it) },
+                        inbox = inboxState,
+                        rowActions = { row ->
+                            inboxRowActions(
+                                row,
+                                credentials.canWrite,
+                                inboxCaps.switchAccount,
+                                row.accountUuid?.let(inboxList.accountUsage::get)?.limitAt(inboxList.nowSeconds),
+                            )
+                        },
+                        rowHandlers = InboxRowHandlers(
+                            onRetry = { inboxActions.retry(it, inboxCaps.switchAccount) },
+                            onProposeSwitch = { inboxActions.proposeSwitch(it, inboxCaps.switchAccount) },
+                            onConfirmSwitch = { inboxActions.confirmSwitch(it, inboxCaps.switchAccount) },
+                            onCancelSwitch = inboxActions::cancelSwitch,
+                            onWait = inboxActions::waitForReset,
+                            onNotWaiting = inboxActions::notWaiting,
+                        ),
                         runningList = remember(all) { runningRows(all) },
                         doneTodayList = remember(all, inboxList.nowSeconds / 60) {
                             doneTodayRows(all, localMidnight(inboxList.nowSeconds, utcOffsetSeconds(inboxList.nowSeconds)))
@@ -1626,7 +1673,10 @@ private fun FleetRoute(
                         live = inboxList.status is ConnectionStatus.Connected,
                         connection = inboxConnection,
                         refreshing = inboxList.refreshing,
-                        onRefresh = { sessions.refresh() },
+                        onRefresh = {
+                            sessions.refresh()
+                            if (missionsState.available) missions.refresh()
+                        },
                         onOpenSession = nav::open,
                         // Today is an Inbox view until Control grows its own.
                         onOpenToday = if (todayInbox.available) ({ today.open() }) else null,
