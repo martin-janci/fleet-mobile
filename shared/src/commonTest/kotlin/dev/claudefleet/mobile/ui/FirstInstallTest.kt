@@ -73,6 +73,10 @@ class FirstInstallTest {
         assertFalse(showWelcome(PhoneLayout.New, welcomed = true, signedOut = false))
         assertFalse(showWelcome(PhoneLayout.New, welcomed = false, signedOut = true))
         assertFalse(showWelcome(PhoneLayout.Classic, welcomed = false, signedOut = false))
+        assertFalse(
+            showWelcome(PhoneLayout.New, welcomed = false, signedOut = false, pairLink = true),
+            "a pair link opens on Pair, filled, even on a first run now that New is the default",
+        )
     }
 
     @Test

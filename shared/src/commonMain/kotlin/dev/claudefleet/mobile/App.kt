@@ -655,13 +655,19 @@ fun App(container: AppContainer) {
                         // The New layout's first run (14.19): a welcome once
                         // per phone, and the "no hub yet" steps, before Pair.
                         val unpairReason by container.session.unpairReason.collectAsState()
+                        val pairLinkPending by container.pairLink.collectAsState()
                         var firstRun by remember(container) {
                             val welcome = showWelcome(
                                 layout = loadPhoneLayout(container.prefs),
                                 welcomed = container.hints.shown(WELCOME_HINT),
                                 signedOut = unpairReason != null,
+                                pairLink = pairLinkPending != null,
                             )
                             mutableStateOf(if (welcome) FirstRun.Welcome else FirstRun.Pair)
+                        }
+                        // A pair link that lands on the welcome goes straight to Pair, filled.
+                        LaunchedEffect(pairLinkPending) {
+                            if (pairLinkPending != null) firstRun = FirstRun.Pair
                         }
                         val share = rememberShareText()
                         val toPair = {
