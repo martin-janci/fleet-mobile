@@ -2873,8 +2873,8 @@ private fun SessionRoute(
             onDismiss = vm::closeAccountSwitch,
         )
     }
+    BackHandler(enabled = repairWait != null) { repairWait = null }
     repairWait?.let { wait ->
-        BackHandler(enabled = true) { repairWait = null }
         RepairWaitScreen(wait, state.session?.displayName) { repairWait = null }
     }
     if (shareState.open) {
