@@ -3,13 +3,17 @@ package dev.claudefleet.mobile
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
@@ -231,6 +235,7 @@ import dev.claudefleet.mobile.model.localMidnight
 import dev.claudefleet.mobile.ui.sharedRows
 import dev.claudefleet.mobile.ui.loadPhoneLayout
 import dev.claudefleet.mobile.ui.savePhoneLayout
+import dev.claudefleet.mobile.ui.kit.Assemble
 import dev.claudefleet.mobile.ui.kit.BottomBar
 import dev.claudefleet.mobile.ui.kit.BottomBarBadge
 import dev.claudefleet.mobile.ui.kit.BottomBarItem
@@ -357,6 +362,7 @@ import dev.claudefleet.mobile.ui.TodayHandlers
 import dev.claudefleet.mobile.ui.TodaySheet
 import dev.claudefleet.mobile.ui.TodayViewModel
 import dev.claudefleet.mobile.ui.scan.qrScannerSupported
+import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.FleetTheme
 import dev.claudefleet.mobile.ui.PhoneSettings
@@ -715,12 +721,24 @@ fun App(container: AppContainer) {
     }
 }
 
+/**
+ * The cold start (manual: Startup; MobileInstall's first launch): Assemble
+ * while the pairing is read, the particles flying into the orbit, and the
+ * name under it. Reduced motion holds them on the ring.
+ */
 @Composable
 private fun Splash() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("Orbit Fleet", style = MaterialTheme.typography.titleLarge)
+    Box(modifier = Modifier.fillMaxSize().background(Fleet.colors.bg), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Assemble(count = SPLASH_PARTICLES, size = 160.dp)
+            Spacer(Modifier.height(16.dp))
+            Text("Orbit Fleet", style = MaterialTheme.typography.titleLarge, color = Fleet.colors.fg)
+        }
     }
 }
+
+/** The splash knows no fleet yet: a fixed swarm, the manual's "22 sessions" board. */
+private const val SPLASH_PARTICLES = 22
 
 /**
  * A scope for view models and the repository: composition-lived, but **not**

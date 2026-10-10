@@ -58,7 +58,9 @@ import dev.claudefleet.mobile.ui.scan.QrScannerView
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
 import kotlinx.coroutines.delay
-import dev.claudefleet.mobile.ui.kit.Comet
+import dev.claudefleet.mobile.ui.kit.HaloRing
+import dev.claudefleet.mobile.ui.kit.MarkMotion
+import dev.claudefleet.mobile.ui.kit.OrbitMarkLoader
 
 /**
  * Pairing, QR first (redesign 14.11, board MobileSettings › Pairing): the
@@ -262,7 +264,8 @@ private fun PairingProgress(contacting: String?, onCancel: () -> Unit) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (late) {
-                Comet(size = 16.dp)
+                // The pairing's own loader (MobileSettings): the mark draws itself while the hub answers.
+                OrbitMarkLoader(MarkMotion.DrawOn, size = 28.dp)
                 Spacer(Modifier.width(8.dp))
             }
             Text(
@@ -376,6 +379,8 @@ fun PairedScreen(
                 modifier = Modifier.size(120.dp).background(o.accentSoft, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
+                // Halo on success (MobileSettings › Paired): a ring pulses out round the mark.
+                HaloRing(Modifier.matchParentSize())
                 OrbitMark(OrbitMarkLarge)
             }
             Spacer(Modifier.height(20.dp))
