@@ -99,6 +99,13 @@ data class HubCapabilities(
     val downloads: Boolean get() = LIST_DOWNLOADS in tools
 
     /**
+     * The hub's full-text index (`search`, readonly): Search everywhere's
+     * Text rows. Absent on an older hub, where the search finds what the
+     * phone already holds and no more.
+     */
+    val search: Boolean get() = SEARCH in tools
+
+    /**
      * Pull requests (claude-fleet redesign 6.4, contract revision 12): every
      * PR a session's branch has had, kept past the session (`prs { list }`,
      * readonly). What draws Work's Pull requests sheet; an older hub has no
@@ -344,6 +351,7 @@ data class HubCapabilities(
         const val LIST_PAGES = "list_pages"
         const val GET_SETTINGS = "get_settings"
         const val LIST_DOWNLOADS = "list_downloads"
+        const val SEARCH = "search"
         const val PRS = "prs"
         const val PRS_LIST = "list"
         const val SEND_FILE = "send_file"

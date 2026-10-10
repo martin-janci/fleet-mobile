@@ -63,6 +63,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.model.SearchHit
 import dev.claudefleet.mobile.model.SessionFacetId
 import dev.claudefleet.mobile.model.facetSentence
 import dev.claudefleet.mobile.model.SessionRow
@@ -169,6 +170,8 @@ data class SessionsHandlers(
     val onSearchHost: (String) -> Unit = {},
     val onSearchProject: (Long) -> Unit = {},
     val onSearchTicket: (String) -> Unit = {},
+    /** A hit of the hub's full-text index: its task, else its session (Find on the query). */
+    val onSearchFound: (SearchHit) -> Unit = {},
 )
 
 /**
@@ -1083,6 +1086,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.searchHits(hits: Sear
     items(hits.hosts, key = { "search-host-${it.alias}" }) { host ->
         SearchHitRow(host.alias, if (host.reachable) "Host · its sessions" else "Host · unreachable") { handlers.onSearchHost(host.alias) }
     }
+    items(hits.found, key = { "search-text-${it.kind}-${it.ref}" }) { hit ->
+        SearchHitRow(hit.title, "${hit.kindLabel()} · ${hit.line()}", onClick = if (hit.opens()) ({ handlers.onSearchFound(hit) }) else null)
+    }
     if (handlers.onNewSession != null) {
         items(hits.projects, key = { "search-project-${it.id}" }) { project ->
             SearchHitRow(project.label, hits.projectLine(project, "New session in this project")) { handlers.onSearchProject(project.id) }
@@ -1091,9 +1097,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.searchHits(hits: Sear
 }
 
 @Composable
-private fun SearchHitRow(title: String, subtitle: String, onClick: () -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp)) {
+private fun SearchHitRow(title: String, subtitle: String, onClick: (() -> Unit)?) {
+    val tap = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+    Column(modifier = Modifier.fillMaxWidth().then(tap).padding(horizontal = 16.dp, vertical = 10.dp)) {
         Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
