@@ -195,6 +195,14 @@ class ControlViewModel(
                     .drop(1)
                     .collect { (_, up) -> if (up) readStatus() }
             }
+            // A call waiting for a person is read the moment the hub says so,
+            // not up to a poll later; the poll below stays as the net for a
+            // hub that sends no `confirm:changed`, and for a lost frame.
+            launch {
+                fleet.confirmChanges.collect {
+                    if (fleet.capabilities.value.confirms && fleet.status.value is ConnectionStatus.Connected) readConfirms()
+                }
+            }
             readStatus()
             while (isActive && (fleet.capabilities.value.confirms || fleet.capabilities.value.handoffs)) {
                 // Offline or stopped (the app went to the background): no call

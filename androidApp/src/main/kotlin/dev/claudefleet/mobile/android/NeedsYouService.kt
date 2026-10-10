@@ -29,8 +29,6 @@ import dev.claudefleet.mobile.notify.needsYouEvents
 import dev.claudefleet.mobile.notify.notifyAllows
 import dev.claudefleet.mobile.store.AndroidPrefs
 import dev.claudefleet.mobile.store.AndroidSecrets
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -96,7 +94,7 @@ class NeedsYouService : Service() {
     }
 
     private suspend fun watch() {
-        val http = HttpClient(OkHttp)
+        val http = hubHttpClient()
         val container = AppContainer(
             secrets = AndroidSecrets(applicationContext),
             prefs = AndroidPrefs(getSharedPreferences("quick_replies", MODE_PRIVATE)),

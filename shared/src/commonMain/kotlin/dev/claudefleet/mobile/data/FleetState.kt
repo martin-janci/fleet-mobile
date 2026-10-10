@@ -178,6 +178,13 @@ interface FleetState {
     val updateDecisions: Flow<Unit> get() = emptyFlow()
 
     /**
+     * One per `confirm:changed` frame: a call is waiting for a person, or one
+     * was answered or expired. Hot and lossy like [sessionChanges]; Control
+     * reads `mcp_confirms` on it.
+     */
+    val confirmChanges: Flow<Unit> get() = emptyFlow()
+
+    /**
      * `start:progress` frames as they arrive (claude-fleet redesign 5.13):
      * the worktree, tmux and agent steps of a `new_session` some client
      * started with a `start_token`. The New session form keeps the ones that

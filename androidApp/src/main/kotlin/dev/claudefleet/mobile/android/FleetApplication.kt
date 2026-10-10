@@ -6,8 +6,6 @@ import dev.claudefleet.mobile.AppContainer
 import dev.claudefleet.mobile.net.ClientPlatform
 import dev.claudefleet.mobile.store.AndroidPrefs
 import dev.claudefleet.mobile.store.AndroidSecrets
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.okhttp.OkHttp
 
 /**
  * The process, which owns the one [AppContainer] — as iOS's
@@ -27,7 +25,7 @@ class FleetApplication : Application() {
         AppContainer(
             secrets = AndroidSecrets(this),
             prefs = AndroidPrefs(getSharedPreferences("quick_replies", MODE_PRIVATE)),
-            http = HttpClient(OkHttp),
+            http = hubHttpClient(),
             appVersion = BuildConfig.VERSION_NAME,
             // The build decides, not the link. A release build fills the Pair
             // screen's fields and waits for a tap; a debug build submits, so a

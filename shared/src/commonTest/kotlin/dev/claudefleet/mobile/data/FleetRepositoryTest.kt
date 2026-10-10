@@ -496,18 +496,24 @@ class FleetRepositoryTest {
         repository.stop()
     }
 
-    /** Same rule for a `lagged` resync as for a `ready` one. */
+    /**
+     * Same rule for a `lagged` resync as for a `ready` one. The hub closes
+     * the stream after `lagged` (its `Phase::Done`), and the resync is the
+     * reconnect's own.
+     */
     @Test
     fun a_lagged_frame_also_publishes_the_resync_sentinel() = runTest {
         val hub = FakeHub(sessionsJson = sessionRows(1))
         val refetched = CompletableDeferred<Unit>()
         val stream = FakeStream { attempt ->
-            if (attempt > 1) awaitCancellation()
+            if (attempt > 2) awaitCancellation()
             emit(READY)
+            if (attempt == 2) {
+                refetched.complete(Unit)
+                awaitCancellation()
+            }
             hub.sessionsJson = sessionRows(1, 2)
             emit(HubEvent.Lagged(3))
-            refetched.complete(Unit)
-            awaitCancellation()
         }
         val repository = repo(hub, stream, backgroundScope)
         val seen = mutableListOf<Long>()
@@ -518,32 +524,41 @@ class FleetRepositoryTest {
         refetched.await()
         runCurrent()
 
-        assertEquals(listOf(ALL_SESSIONS_CHANGED, ALL_SESSIONS_CHANGED), seen, "once for ready, once for the lag")
+        assertEquals(listOf(ALL_SESSIONS_CHANGED, ALL_SESSIONS_CHANGED), seen, "once for ready, once for the reconnect after the lag")
         collector.cancel()
         repository.stop()
     }
 
-    /** The hub says the picture has a hole in it; the only honest fix is to refetch. */
+    /**
+     * The hub says the picture has a hole in it and closes the stream; the
+     * reconnect refetches — at once, with no backoff, and ONCE: re-listing
+     * on the `lagged` frame as well paid for the whole fleet twice.
+     */
     @Test
     fun a_lagged_frame_triggers_a_refetch() = runTest {
         val hub = FakeHub(sessionsJson = sessionRows(1))
         val refetched = CompletableDeferred<Unit>()
         val stream = FakeStream { attempt ->
-            if (attempt > 1) awaitCancellation()
+            if (attempt > 2) awaitCancellation()
             emit(READY)
+            if (attempt == 2) {
+                refetched.complete(Unit)
+                awaitCancellation()
+            }
             // The rows the hub is about to tell us we missed.
             hub.sessionsJson = sessionRows(1, 2, 3)
             emit(HubEvent.Lagged(17))
-            refetched.complete(Unit)
-            awaitCancellation()
         }
+        stream.clock = this
         val repository = repo(hub, stream, backgroundScope)
 
         repository.start()
         refetched.await()
+        runCurrent()
 
         assertEquals(listOf(1L, 2L, 3L), repository.sessions.value.map { it.id })
-        assertEquals(2, hub.sessionCalls, "once for ready, once for the lag")
+        assertEquals(2, hub.sessionCalls, "once for the first ready, once for the reconnect")
+        assertEquals(stream.openedAt[0], stream.openedAt[1], "no backoff after a lag")
         repository.stop()
     }
 
@@ -1493,11 +1508,13 @@ class FleetRepositoryTest {
         val hub = accountsHub()
         val lagged = CompletableDeferred<Unit>()
         val stream = FakeStream { attempt ->
-            if (attempt > 1) awaitCancellation()
+            if (attempt > 1) {
+                emit(READY)
+                awaitCancellation()
+            }
             emit(READY)
             lagged.await()
             emit(HubEvent.Lagged(5))
-            awaitCancellation()
         }
         val repository = repo(hub, stream, backgroundScope)
 

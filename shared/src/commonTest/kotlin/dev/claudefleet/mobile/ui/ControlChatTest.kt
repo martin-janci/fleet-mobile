@@ -46,6 +46,8 @@ private class ControlFleet(tools: Set<String>) : FleetState {
     override val clockSkewSeconds = MutableStateFlow(0L)
     override val sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16)
     override val capabilities = MutableStateFlow(HubCapabilities(tools = tools))
+    val confirmFrames = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
+    override val confirmChanges = confirmFrames
     override suspend fun refresh() = Unit
 }
 
@@ -184,6 +186,23 @@ class ControlChatTest {
         advanceTimeBy(101)
         runCurrent()
         assertTrue(fake.confirmReads >= 1)
+        vm.detach()
+    }
+
+    /** A `confirm:changed` frame reads the queue at once, not a poll later. */
+    @Test
+    fun a_confirm_frame_reads_the_queue_at_once() = runTest {
+        val fake = FakeControl(OperatorStatus(ready = true, session = SessionRow(id = 5)))
+        val fleet = ControlFleet(CONTROL_TOOLS)
+        val vm = ControlViewModel(fleet, fake, fake, backgroundScope, canWrite = true, pollMs = 600_000)
+        vm.attach()
+        runCurrent()
+        val before = fake.confirmReads
+
+        fleet.confirmFrames.emit(Unit)
+        runCurrent()
+
+        assertEquals(before + 1, fake.confirmReads)
         vm.detach()
     }
 
