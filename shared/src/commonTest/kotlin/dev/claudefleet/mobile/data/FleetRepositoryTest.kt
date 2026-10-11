@@ -110,6 +110,9 @@ private class FakeHub(
     var sessionsGate: CompletableDeferred<Unit>? = null
     val sessionsRead = CompletableDeferred<Unit>()
 
+    /** When set, `list_hosts` waits on this before replying, so `list_sessions` answers first. */
+    var hostsGate: CompletableDeferred<Unit>? = null
+
     val client: HubClient = HubClient(
         HttpClient(
             MockEngine { request ->
@@ -135,7 +138,11 @@ private class FakeHub(
                         }
                         rows
                     }
-                    "list_hosts" in body -> { hostCalls += 1; hostsJson }
+                    "list_hosts" in body -> {
+                        hostCalls += 1
+                        hostsGate?.await()
+                        hostsJson
+                    }
                     "list_projects" in body -> { projectCalls += 1; projectsJson }
                     else -> "[]"
                 }
@@ -1004,6 +1011,37 @@ class FleetRepositoryTest {
             // expected
         }
 
+        assertEquals(listOf(1L, 2L), repository.sessions.value.map { it.id })
+        assertEquals(listOf("box"), repository.hosts.value.map { it.alias })
+    }
+
+    /**
+     * The same contract when the order is forced: sessions answer and are
+     * published early (they carry what needs a person), THEN hosts fails. The
+     * early publish must be taken back. Before, whether it was depended on
+     * which call the dispatcher finished first, and the test above failed now
+     * and then in CI.
+     */
+    @Test
+    fun a_refresh_whose_hosts_fail_after_sessions_answered_puts_the_old_sessions_back() = runTest {
+        val hub = FakeHub(sessionsJson = sessionRows(1, 2), hostsJson = """[{"alias":"box"}]""")
+        val stream = FakeStream { emit(READY); awaitCancellation() }
+        val repository = repo(hub, stream, backgroundScope)
+        repository.start()
+        repository.sessions.first { it.size == 2 }
+        repository.hosts.first { it.isNotEmpty() }
+        repository.stop()
+
+        hub.sessionsJson = sessionRows(9)
+        hub.failHosts = true
+        val gate = CompletableDeferred<Unit>()
+        hub.hostsGate = gate
+        val refresh = async { runCatching { repository.refresh() } }
+        // The early publish happened: the new sessions are on screen.
+        repository.sessions.first { rows -> rows.map { it.id } == listOf(9L) }
+        gate.complete(Unit)
+
+        assertTrue(refresh.await().exceptionOrNull() is HubError, "the refresh says it failed")
         assertEquals(listOf(1L, 2L), repository.sessions.value.map { it.id })
         assertEquals(listOf("box"), repository.hosts.value.map { it.alias })
     }

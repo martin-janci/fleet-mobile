@@ -142,13 +142,21 @@
               A link never pairs a release build on its own — it fills the two
               fields on the Pair screen and somebody taps. A link is something
               anyone can send, and a silent pair would re-point the app at a hub
-              of the sender's choosing. `BROWSABLE` is deliberately absent: this
-              is for tooling and for a tap on a link the operator already has,
-              not for arbitrary web pages to launch.
+              of the sender's choosing.
+
+              `BROWSABLE` is there for one reason: single sign-on. The hub's
+              Keycloak sign-in ends on a page whose "Open in the Orbit Fleet
+              app" link is this scheme, and a browser can only follow it into an
+              app whose filter is browsable. Because that also lets any web page
+              open the app with a link, `MainActivity` marks a browser's intent
+              (`CATEGORY_BROWSABLE`) and the Pair screen accepts such a link only
+              as the answer to a sign-in this phone started, with that hub
+              (`data/SsoSignIn.kt`); every other one is refused on the screen.
             -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="claudefleet" />
             </intent-filter>
         </activity>

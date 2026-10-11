@@ -38,8 +38,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.backhandler.BackHandler
 import androidx.lifecycle.compose.LifecycleStartEffect
+import dev.claudefleet.mobile.data.SsoSignIn
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.AgentActions
 import dev.claudefleet.mobile.data.ControlActions
@@ -127,6 +129,7 @@ import dev.claudefleet.mobile.ui.FormContext
 import dev.claudefleet.mobile.ui.ControlForms
 import dev.claudefleet.mobile.ui.ControlHeader
 import dev.claudefleet.mobile.ui.ControlViewModel
+import dev.claudefleet.mobile.ui.MissionsUiState
 import dev.claudefleet.mobile.ui.ControlViews
 import dev.claudefleet.mobile.ui.ControlWaiting
 import dev.claudefleet.mobile.ui.controlForms
@@ -552,13 +555,36 @@ class AppContainer(
     private val _pairLink = MutableStateFlow<String?>(null)
     val pairLink: StateFlow<String?> = _pairLink.asStateFlow()
 
+    /**
+     * Whether the waiting [pairLink] came from a web page — on Android, an
+     * intent carrying `CATEGORY_BROWSABLE`, which is what a browser adds. Such
+     * a link is accepted only as the answer to a sign-in this phone started
+     * ([sso]); iOS cannot tell, and leaves it false.
+     */
+    private var pairLinkFromBrowser = false
+
     /** The platform's entry point for an incoming URL. */
-    fun onPairLink(uri: String) {
+    fun onPairLink(uri: String, fromBrowser: Boolean = false) {
+        pairLinkFromBrowser = fromBrowser
         _pairLink.value = uri
     }
 
     /** Taken exactly once, so a link cannot be re-applied on every recomposition. */
-    fun consumePairLink(): String? = _pairLink.getAndUpdate { null }
+    fun consumePairLink(): String? = consumeIncomingPairLink()?.uri
+
+    /** [consumePairLink], with where the link came from. */
+    fun consumeIncomingPairLink(): IncomingPairLink? {
+        val fromBrowser = pairLinkFromBrowser
+        pairLinkFromBrowser = false
+        return _pairLink.getAndUpdate { null }?.let { IncomingPairLink(it, fromBrowser) }
+    }
+
+    /**
+     * The single-sign-on sign-in in flight, if any. Here rather than in the
+     * Pair screen's view model, which is rebuilt each time the app lands back
+     * on Pair — and coming back from the browser is exactly such a landing.
+     */
+    val sso: SsoSignIn = SsoSignIn()
 
     // The platform hands in a bare engine (`HttpClient(OkHttp)` on Android,
     // `HttpClient(Darwin)` on iOS); this is the one shared place that gives
@@ -848,8 +874,9 @@ private fun rememberWorkScope(): CoroutineScope = rememberCoroutineScope { Dispa
 private fun PairRoute(container: AppContainer, onPaired: (PairedHub) -> Unit) {
     val scope = rememberWorkScope()
     val vm = remember(container, scope) {
-        PairViewModel(container.session, scope, cameraAvailable = qrScannerSupported())
+        PairViewModel(container.session, scope, cameraAvailable = qrScannerSupported(), sso = container.sso)
     }
+    val uriHandler = LocalUriHandler.current
     val state by vm.state.collectAsState()
 
     // The view model publishes `paired` a beat before `AuthState` reaches this
@@ -861,7 +888,9 @@ private fun PairRoute(container: AppContainer, onPaired: (PairedHub) -> Unit) {
     // one that arrived before it existed. `consumePairLink` takes it once.
     val pending by container.pairLink.collectAsState()
     LaunchedEffect(pending) {
-        container.consumePairLink()?.let { vm.onPairLink(it, container.autoPairFromLink) }
+        container.consumeIncomingPairLink()?.let {
+            vm.onPairLink(it.uri, container.autoPairFromLink, fromBrowser = it.fromBrowser)
+        }
     }
 
     PairScreen(
@@ -877,8 +906,130 @@ private fun PairRoute(container: AppContainer, onPaired: (PairedHub) -> Unit) {
         onManualChange = vm::setManual,
         onPaste = vm::paste,
         onCancel = vm::cancel,
+        onSignInWithSso = {
+            vm.signInWithSso()?.let { url ->
+                // No browser to hand it to is the one way this fails; the
+                // screen says so rather than the tap doing nothing.
+                runCatching { uriHandler.openUri(url) }.onFailure { vm.onSsoBrowserUnavailable() }
+            }
+        },
     )
 }
+
+/**
+ * The Control tab (redesign 9.8, 14.7), out of [FleetRoute]'s body: that one
+ * lambda had grown past the JVM's 64 KB method limit ("Method too large"),
+ * which broke the JVM and Android builds. Nothing here differs from when it
+ * sat inline.
+ */
+@Composable
+private fun ControlTab(
+    control: ControlViewModel,
+    sessions: SessionsViewModel,
+    repository: FleetRepository,
+    pullRequests: PullRequestsViewModel,
+    today: TodayViewModel,
+    settingsCaps: HubCapabilities,
+    container: AppContainer,
+    credentials: Credentials,
+    nav: Navigator,
+    missionsState: MissionsUiState,
+    scope: CoroutineScope,
+    help: HelpState,
+    helpSettings: HelpSettings,
+) {
+    // The Control tab is Control's conversation (redesign 9.8,
+    // 14.7). New bar only: the Classic bar has no Control tab.
+    val controlState by control.state.collectAsState()
+    val attention by sessions.state.collectAsState()
+    // The lifecycle, not the composition: a pocketed phone on
+    // this tab must not poll every 4 s (review r16).
+    LifecycleStartEffect(control) {
+        control.attach()
+        onStopOrDispose { control.detach() }
+    }
+    val controlRows by repository.sessions.collectAsState()
+    val controlAccess by repository.access.collectAsState()
+    val subtitle = "${remember(controlRows, controlAccess) { inboxRows(controlRows, controlAccess).size }} need you"
+    val controlPrs by pullRequests.state.collectAsState()
+    val controlStatus by repository.status.collectAsState()
+    val controlToday by today.state.collectAsState()
+    // Other sessions' waiting forms, answered from Control's chat (G5.2).
+    val otherForms: @Composable () -> Unit = {
+        if (settingsCaps.ask) {
+            ControlForms(
+                rows = remember(controlRows, controlState.sessionId) { controlForms(controlRows, controlState.sessionId) },
+                actions = container.chatFormActions,
+                canAnswer = credentials.canWrite && controlStatus is ConnectionStatus.Connected,
+                onOpenSession = nav::open,
+            )
+        }
+    }
+    val views: @Composable () -> Unit = {
+        ControlViews(
+            sessions = attention.total,
+            missions = missionsState.missions.size.takeIf { missionsState.available },
+            onSessions = { nav.select(Tab.Sessions) },
+            // The New layout's Missions screen (14.16).
+            onMissions = { nav.openMissions() }.takeIf { missionsState.available },
+            // The list lives on Work; the pill opens it there.
+            pullRequests = controlPrs.total.takeIf { controlPrs.loaded },
+            onPullRequests = { nav.select(Tab.Work); pullRequests.open(); Unit }.takeIf { controlPrs.available },
+        )
+    }
+    val sessionId = controlState.sessionId
+    if (sessionId != null) {
+        key(sessionId) {
+            SessionRoute(
+                sessionId = sessionId,
+                container = container,
+                repository = repository,
+                credentials = credentials,
+                onBack = { nav.back() },
+                onOpenTask = nav::openTask,
+                onOpenSession = nav::open,
+                onOpenRepo = nav::openRepo,
+                callScope = scope,
+                control = ControlChrome(
+                    header = {
+                        ControlHeader(subtitle, views)
+                        ErrorBanner(controlState.error, onDismiss = control::dismissError)
+                    },
+                    aboveComposer = {
+                        HandoffChips(controlState.handoffs, onOpenSession = nav::open, watching = controlState.watchingCi)
+                        // Asked about the day ("what did I ship today?"): the answer offers Today.
+                        val asked = controlRows.firstOrNull { it.id == sessionId }?.lastPrompt
+                        if (controlToday.available && asksAboutToday(asked)) TodayLink { today.open() }
+                        otherForms()
+                        ConfirmCards(controlState) { nonce, ok -> control.answer(nonce, ok) }
+                    },
+                    formContext = FormContext(
+                        rows = controlRows,
+                        onOpenSession = nav::open,
+                        proposeHost = (container.chatFormActions::proposeHost).takeIf { settingsCaps.proposeHost },
+                    ),
+                ),
+            )
+        }
+    } else {
+        ControlWaiting(
+            state = controlState,
+            subtitle = subtitle,
+            views = views,
+            onWake = { control.wake() },
+            onAnswer = { nonce, ok -> control.answer(nonce, ok) },
+            onDismissError = control::dismissError,
+            below = {
+                otherForms()
+                TipFor(Tip.CONTROL, help, helpSettings)
+            },
+            onRetry = { control.refresh() },
+        )
+    }
+}
+
+/** A `claudefleet:` link as the platform delivered it. */
+data class IncomingPairLink(val uri: String, val fromBrowser: Boolean)
 
 /**
  * The paired app: three tabs, and a session pushed over the first.
@@ -1778,96 +1929,21 @@ private fun FleetRoute(
                         },
                     )
                 }
-                Screen.Control -> {
-                    // The Control tab is Control's conversation (redesign 9.8,
-                    // 14.7). New bar only: the Classic bar has no Control tab.
-                    val controlState by control.state.collectAsState()
-                    val attention by sessions.state.collectAsState()
-                    // The lifecycle, not the composition: a pocketed phone on
-                    // this tab must not poll every 4 s (review r16).
-                    LifecycleStartEffect(control) {
-                        control.attach()
-                        onStopOrDispose { control.detach() }
-                    }
-                    val controlRows by repository.sessions.collectAsState()
-                    val controlAccess by repository.access.collectAsState()
-                    val subtitle = "${remember(controlRows, controlAccess) { inboxRows(controlRows, controlAccess).size }} need you"
-                    val controlPrs by pullRequests.state.collectAsState()
-                    val controlStatus by repository.status.collectAsState()
-                    val controlToday by today.state.collectAsState()
-                    // Other sessions' waiting forms, answered from Control's chat (G5.2).
-                    val otherForms: @Composable () -> Unit = {
-                        if (settingsCaps.ask) {
-                            ControlForms(
-                                rows = remember(controlRows, controlState.sessionId) { controlForms(controlRows, controlState.sessionId) },
-                                actions = container.chatFormActions,
-                                canAnswer = credentials.canWrite && controlStatus is ConnectionStatus.Connected,
-                                onOpenSession = nav::open,
-                            )
-                        }
-                    }
-                    val views: @Composable () -> Unit = {
-                        ControlViews(
-                            sessions = attention.total,
-                            missions = missionsState.missions.size.takeIf { missionsState.available },
-                            onSessions = { nav.select(Tab.Sessions) },
-                            // The New layout's Missions screen (14.16).
-                            onMissions = { nav.openMissions() }.takeIf { missionsState.available },
-                            // The list lives on Work; the pill opens it there.
-                            pullRequests = controlPrs.total.takeIf { controlPrs.loaded },
-                            onPullRequests = { nav.select(Tab.Work); pullRequests.open(); Unit }.takeIf { controlPrs.available },
-                        )
-                    }
-                    val sessionId = controlState.sessionId
-                    if (sessionId != null) {
-                        key(sessionId) {
-                            SessionRoute(
-                                sessionId = sessionId,
-                                container = container,
-                                repository = repository,
-                                credentials = credentials,
-                                onBack = { nav.back() },
-                                onOpenTask = nav::openTask,
-                                onOpenSession = nav::open,
-                                onOpenRepo = nav::openRepo,
-                                callScope = scope,
-                                control = ControlChrome(
-                                    header = {
-                                        ControlHeader(subtitle, views)
-                                        ErrorBanner(controlState.error, onDismiss = control::dismissError)
-                                    },
-                                    aboveComposer = {
-                                        HandoffChips(controlState.handoffs, onOpenSession = nav::open, watching = controlState.watchingCi)
-                                        // Asked about the day ("what did I ship today?"): the answer offers Today.
-                                        val asked = controlRows.firstOrNull { it.id == sessionId }?.lastPrompt
-                                        if (controlToday.available && asksAboutToday(asked)) TodayLink { today.open() }
-                                        otherForms()
-                                        ConfirmCards(controlState) { nonce, ok -> control.answer(nonce, ok) }
-                                    },
-                                    formContext = FormContext(
-                                        rows = controlRows,
-                                        onOpenSession = nav::open,
-                                        proposeHost = (container.chatFormActions::proposeHost).takeIf { settingsCaps.proposeHost },
-                                    ),
-                                ),
-                            )
-                        }
-                    } else {
-                        ControlWaiting(
-                            state = controlState,
-                            subtitle = subtitle,
-                            views = views,
-                            onWake = { control.wake() },
-                            onAnswer = { nonce, ok -> control.answer(nonce, ok) },
-                            onDismissError = control::dismissError,
-                            below = {
-                                otherForms()
-                                TipFor(Tip.CONTROL, help, helpSettings)
-                            },
-                            onRetry = { control.refresh() },
-                        )
-                    }
-                }
+                Screen.Control -> ControlTab(
+                    control = control,
+                    sessions = sessions,
+                    repository = repository,
+                    pullRequests = pullRequests,
+                    today = today,
+                    settingsCaps = settingsCaps,
+                    container = container,
+                    credentials = credentials,
+                    nav = nav,
+                    missionsState = missionsState,
+                    scope = scope,
+                    help = help,
+                    helpSettings = helpSettings,
+                )
                 Screen.More -> {
                     val hostRows by repository.hosts.collectAsState()
                     val moreList by sessions.state.collectAsState()
