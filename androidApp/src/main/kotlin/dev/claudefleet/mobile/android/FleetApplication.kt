@@ -21,6 +21,12 @@ import dev.claudefleet.mobile.store.AndroidSecrets
 class FleetApplication : Application() {
     val notifier: AndroidBackgroundNotifier by lazy { AndroidBackgroundNotifier(this) }
 
+    override fun onCreate() {
+        super.onCreate()
+        // The automatic update's periodic check while the app is away (14.18).
+        AppUpdateJob.schedule(this)
+    }
+
     val container: AppContainer by lazy {
         AppContainer(
             secrets = AndroidSecrets(this),
@@ -32,7 +38,7 @@ class FleetApplication : Application() {
             // dev machine can be set up with no hands. See `data/PairLink.kt`.
             autoPairFromLink = BuildConfig.DEBUG,
             notifier = notifier,
-            // The app's own update from GitHub releases (14.18). A debug build
+            // The app's own update, as the paired hub decides it (14.18). A debug build
             // has its own application id, so the signature check refuses a
             // release on it and says why.
             installer = AndroidAppInstaller(this, bearerFor = { url -> container.session.bearerFor(url) }),

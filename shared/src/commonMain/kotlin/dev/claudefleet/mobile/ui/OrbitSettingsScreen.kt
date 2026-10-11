@@ -325,13 +325,22 @@ private fun ColumnScope.ThisPhone(input: OrbitSettingsInput, handlers: OrbitSett
 
     input.updateMode?.let { mode ->
         SectionLabel("Updates")
-        // Offered, never forced: there is no "install on my own" to pick.
         SwitchRow(
-            title = "Tell me when an update is ready",
-            line = "A card in More. It never installs on its own.",
-            on = mode == UpdateMode.TELL,
+            title = "Check for updates",
+            line = "Asks the hub for a newer version of this app.",
+            on = mode != UpdateMode.OFF,
             enabled = true,
-            onChange = { handlers.onSetUpdateMode(if (it) UpdateMode.TELL else UpdateMode.OFF) },
+            onChange = { handlers.onSetUpdateMode(if (it) UpdateMode.AUTO else UpdateMode.OFF) },
+        )
+        // On: downloaded, checked against the app's own signing key and
+        // installed once the app is off screen. Off: a card in More, and a tap
+        // at every step.
+        SwitchRow(
+            title = "Install updates on my own",
+            line = "When the app is not on screen. Off: a card in More, and you install.",
+            on = mode == UpdateMode.AUTO,
+            enabled = mode != UpdateMode.OFF,
+            onChange = { handlers.onSetUpdateMode(if (it) UpdateMode.AUTO else UpdateMode.TELL) },
         )
     }
 
