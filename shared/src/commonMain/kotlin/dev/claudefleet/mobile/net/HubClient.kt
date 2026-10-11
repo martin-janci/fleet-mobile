@@ -30,6 +30,7 @@ import dev.claudefleet.mobile.model.FleetTask
 import dev.claudefleet.mobile.model.GithubRepo
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.HubHealth
+import dev.claudefleet.mobile.model.WizardState
 import dev.claudefleet.mobile.model.MoveOutcome
 import dev.claudefleet.mobile.model.moveOutcomeOf
 import dev.claudefleet.mobile.model.HostWorktrees
@@ -736,10 +737,42 @@ class HubClient(
         ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
 
     /** Make a session's directory a healthy worktree with its pane running there (`repair_session`). */
-    suspend fun repairSession(sessionId: Long): RepairReport =
-        call("repair_session", buildJsonObject { put("session_id", sessionId) }) {
+    suspend fun repairSession(sessionId: Long, progressToken: String? = null): RepairReport =
+        call(
+            "repair_session",
+            buildJsonObject {
+                put("session_id", sessionId)
+                // Its steps then arrive as `repair:progress` frames (contract 17).
+                progressToken?.takeIf { it.isNotBlank() }?.let { put("progress_token", it) }
+            },
+        ) {
             json.decodeFromJsonElement(RepairReport.serializer(), it)
         }
+
+    /** The [kind] wizard this person left half-way, or null (`wizard_state { get }`, contract 17). */
+    suspend fun wizardGet(kind: String): WizardState? =
+        call("wizard_state", buildJsonObject { put("action", "get"); put("kind", kind) }) {
+            if (it !is JsonObject) null else json.decodeFromJsonElement(WizardState.serializer(), it).takeIf { w -> w.kind.isNotBlank() }
+        }
+
+    /** Keep where the [kind] wizard is, for this person's other devices (`wizard_state { save }`). */
+    suspend fun wizardSave(kind: String, step: Int, answers: JsonObject, label: String?) {
+        call(
+            "wizard_state",
+            buildJsonObject {
+                put("action", "save")
+                put("kind", kind)
+                put("step", step)
+                put("answers", answers)
+                label?.takeIf { it.isNotBlank() }?.let { put("label", it) }
+            },
+        ) { }
+    }
+
+    /** Forget the [kind] wizard: added, or started over (`wizard_state { clear }`). */
+    suspend fun wizardClear(kind: String) {
+        call("wizard_state", buildJsonObject { put("action", "clear"); put("kind", kind) }) { }
+    }
 
     /** A supervised headless Claude session on [hostAlias] with [prompt] (`new_bg_session`). */
     suspend fun newBgSession(

@@ -44,6 +44,8 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.AgentActions
 import dev.claudefleet.mobile.data.ControlActions
 import dev.claudefleet.mobile.data.AppSession
+import dev.claudefleet.mobile.data.HubWizardDrafts
+import dev.claudefleet.mobile.data.WizardDrafts
 import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.model.limitAt
 import dev.claudefleet.mobile.ui.SessionLaterHost
@@ -619,6 +621,7 @@ class AppContainer(
 
     /** The fleet's settings pages' calls (claude-fleet declarative pages P6). */
     val fleetSettingsActions: FleetSettingsActions = HubFleetSettingsActions(session)
+    val wizardDrafts: WizardDrafts = HubWizardDrafts(session)
 
     /** A session's chat form (`ask`): read, answer, decline. */
     val chatFormActions: ChatFormActions = HubChatFormActions(session)
@@ -2333,7 +2336,7 @@ private fun SettingsRoute(
                         val jevOrgs = remember(repository, scope) { CompanyViewModel(repository, container.companyActions, scope) }
                         LaunchedEffect(jevOrgs) { jevOrgs.load() }
                         val orgsState by jevOrgs.state.collectAsState()
-                        DecisionsHead(orgsState.orgs)
+                        DecisionsHead(orgsState.orgs, fleet.decideWeek)
                     }
                 },
             )
@@ -2498,6 +2501,8 @@ private fun NewSessionRoute(
     val tools = remember(repository, scope) { ProjectToolsViewModel(repository, container.projectActions, scope, credentials.canWrite) }
     val toolsState by tools.state.collectAsState()
     LaunchedEffect(tools, state.host, state.projectId) { tools.loadWorktrees(state.host, state.projectId) }
+    // Add a project resumes on the person's other device where the hub keeps wizards.
+    val addDraftsListed = repository.capabilities.collectAsState().value.wizardState
     // Add a project's own steps (redesign 14.20), over the wizard: back on
     // Where goes to Source, on Source closes it, and while a clone runs it
     // leaves the clone running in the background.
@@ -2558,6 +2563,7 @@ private fun NewSessionRoute(
             onClose = closeAdd,
             onDismissError = tools::dismissError,
             onTyped = { addTyped = it },
+            drafts = container.wizardDrafts.takeIf { addDraftsListed },
         ),
         onFromTicket = onFromTicket,
         extras = NewSessionExtras(
@@ -3086,7 +3092,7 @@ private fun SessionRoute(
     }
     BackHandler(enabled = repairWait != null) { repairWait = null }
     repairWait?.let { wait ->
-        RepairWaitScreen(wait, state.session?.displayName) { repairWait = null }
+        RepairWaitScreen(wait, state.session?.displayName, reported = state.repairSteps) { repairWait = null }
     }
     if (shareState.open) {
         ShareSheet(

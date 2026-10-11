@@ -26,18 +26,37 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import dev.claudefleet.mobile.data.WizardDrafts
+import dev.claudefleet.mobile.data.quietly
+import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.GithubRepo
+import dev.claudefleet.mobile.model.WIZARD_ADD_PROJECT
+import dev.claudefleet.mobile.model.WizardState
+import dev.claudefleet.mobile.model.startedWhere
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.OrgRule
 import dev.claudefleet.mobile.ui.components.ErrorBanner
@@ -176,6 +195,78 @@ internal fun sourceOwnerRepo(source: ProjectSource?): Pair<String, String>? = wh
     is ProjectSource.Folder, null -> null
 }
 
+/**
+ * What the wizard holds, as `wizard_state` keeps it for the person's other
+ * device (gap plan G7.2). The answers are the desktop dialog's own shape —
+ * `mode` (`github` | `clone` | `folder` | `new`), `host`, `gh_selected`,
+ * `url`, `owner`, `repo`, `create_remote` — plus `folder`, the path a
+ * folder source names, which the desktop leaves alone.
+ */
+internal data class AddProjectDraft(
+    val source: ProjectSource? = null,
+    val url: String = "",
+    val folder: String = "",
+    val owner: String = "",
+    val repo: String = "",
+    val onGithub: Boolean = false,
+    val host: String? = null,
+) {
+    /** The answers to keep, or null when nothing worth resuming was picked or typed. */
+    fun answers(): JsonObject? {
+        val mode = when (source) {
+            is ProjectSource.Github -> "github"
+            is ProjectSource.Url -> "clone"
+            is ProjectSource.Folder -> "folder"
+            is ProjectSource.New -> "new"
+            null -> return null
+        }
+        val worth = source is ProjectSource.Github || addProjectTyped(url, folder, owner, repo)
+        if (!worth) return null
+        return buildJsonObject {
+            put("mode", mode)
+            host?.takeIf { it.isNotBlank() }?.let { put("host", it) }
+            if (source is ProjectSource.Github) put("gh_selected", buildJsonArray { add(source.nameWithOwner) })
+            url.trim().takeIf { it.isNotEmpty() }?.let { put("url", it) }
+            folder.trim().takeIf { it.isNotEmpty() }?.let { put("folder", it) }
+            owner.trim().takeIf { it.isNotEmpty() }?.let { put("owner", it) }
+            repo.trim().takeIf { it.isNotEmpty() }?.let { put("repo", it) }
+            if (onGithub) put("create_remote", true)
+        }
+    }
+
+    /** What the resume line names: `owner/repo`, or a folder's name. */
+    fun label(): String? =
+        sourceOwnerRepo(source)?.let { (o, r) -> "$o/$r" } ?: (source as? ProjectSource.Folder)?.let { folderName(it.path) }
+}
+
+/** A kept draft read back, whichever device wrote it; an unknown mode reads as nothing picked. */
+internal fun addProjectDraftOf(answers: JsonObject): AddProjectDraft {
+    fun str(k: String): String = (answers[k] as? JsonPrimitive)?.takeIf { it.isString }?.content.orEmpty()
+    val url = str("url")
+    val folder = str("folder")
+    val owner = str("owner")
+    val repo = str("repo")
+    val onGithub = (answers["create_remote"] as? JsonPrimitive)?.booleanOrNull == true
+    val picked = (answers["gh_selected"] as? JsonArray)
+        ?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+        ?.firstOrNull { it.isNotBlank() }
+    val source = when (str("mode")) {
+        "github" -> picked?.let { ProjectSource.Github(it) }
+        "clone" -> url.takeIf { it.isNotBlank() }?.let { ProjectSource.Url(it) }
+        "folder" -> folder.takeIf { it.isNotBlank() }?.let { ProjectSource.Folder(it) }
+        "new" -> ProjectSource.New(owner, repo, onGithub).takeIf { owner.isNotBlank() || repo.isNotBlank() }
+        else -> null
+    }
+    return AddProjectDraft(source, url, folder, owner, repo, onGithub, str("host").ifBlank { null })
+}
+
+/** The offer to carry on: "You started adding acme/api on Ada's Mac 5 min ago." */
+internal fun addProjectResumeLine(w: WizardState, nowSeconds: Long): String =
+    "You started adding ${w.label?.takeIf { it.isNotBlank() } ?: "a project"} ${startedWhere(w, nowSeconds)}."
+
+/** How long typing settles before the draft is kept on the hub. */
+internal const val DRAFT_SAVE_DELAY_MS: Long = 1_500
+
 /** Which org a new project's sessions land in, and why, in words. */
 internal data class ProjectOrg(val orgId: Long, val name: String, val why: String)
 
@@ -245,6 +336,8 @@ data class AddProjectHandlers(
     val onDismissError: () -> Unit = {},
     /** Whether something is typed, so closing can ask first (the wizard rules). */
     val onTyped: (Boolean) -> Unit = {},
+    /** Where the wizard keeps its place for the person's other device; null where the hub keeps none. */
+    val drafts: WizardDrafts? = null,
 )
 
 @Composable
@@ -272,6 +365,49 @@ internal fun AddProjectWizard(
     val adopting = source is ProjectSource.Folder
     val host = tools.addingOn.orEmpty()
 
+    // Resume on another device (gap plan G7.2): the half-way wizard the hub
+    // keeps is offered first, and nothing is saved until the offer is
+    // answered, so opening here never overwrites what the other device kept.
+    // The draft goes once the add is sent, or on Start over.
+    val drafts = handlers.drafts
+    val draftScope = rememberCoroutineScope()
+    var resumable by remember { mutableStateOf<WizardState?>(null) }
+    var settled by remember { mutableStateOf(drafts == null) }
+    LaunchedEffect(drafts) {
+        if (drafts == null) return@LaunchedEffect
+        val kept = drafts.quietly { get(WIZARD_ADD_PROJECT) }
+        if (kept != null && addProjectDraftOf(kept.answers).answers() != null) resumable = kept else settled = true
+    }
+    val draft = AddProjectDraft(source, url, folder, owner, repo, onGithub, host)
+    val answers = draft.answers()
+    LaunchedEffect(answers, step, settled, tools.adding) {
+        if (drafts == null || !settled) return@LaunchedEffect
+        if (tools.adding) {
+            drafts.quietly { clear(WIZARD_ADD_PROJECT) }
+            return@LaunchedEffect
+        }
+        if (answers == null) return@LaunchedEffect
+        delay(DRAFT_SAVE_DELAY_MS)
+        drafts.quietly { save(WIZARD_ADD_PROJECT, step.number, answers, draft.label()) }
+    }
+    val resume: (WizardState) -> Unit = { w ->
+        val d = addProjectDraftOf(w.answers)
+        source = d.source
+        url = d.url
+        folder = d.folder
+        owner = d.owner
+        repo = d.repo
+        onGithub = d.onGithub
+        d.host?.takeIf { h -> hosts.any { it.alias == h } }?.let(handlers.onChooseHost)
+        resumable = null
+        settled = true
+    }
+    val startOver: () -> Unit = {
+        resumable = null
+        settled = true
+        drafts?.let { d -> draftScope.launch { d.quietly { clear(WIZARD_ADD_PROJECT) } } }
+    }
+
     Column(modifier = modifier.fillMaxSize().background(Fleet.colors.bg)) {
         if (tools.adding) {
             ScreenHeader(
@@ -283,6 +419,7 @@ internal fun AddProjectWizard(
             )
             AddingPanel(creating, (source as? ProjectSource.New)?.onGithub == true, handlers.onClose, Modifier.weight(1f), adopting)
         } else {
+            resumable?.let { w -> ResumeOffer(addProjectResumeLine(w, epochSeconds()), onResume = { resume(w) }, onStartOver = startOver) }
             AskingSteps(
                 tools, step, hosts, host, projects, handlers, source, url, owner, repo, onGithub,
                 folder = folder,
@@ -299,6 +436,28 @@ internal fun AddProjectWizard(
         }
     }
 }
+
+/** The offer to carry on a wizard another device left half-way: Resume, or Start over. */
+@Composable
+private fun ResumeOffer(line: String, onResume: () -> Unit, onStartOver: () -> Unit) {
+    val o = Fleet.colors
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = OrbitTokens.spacing("phone-gutter").dp, vertical = 8.dp)
+            .border(1.dp, o.border, RoundedCornerShape(12.dp))
+            .padding(12.dp)
+            .testTag(ADD_RESUME_TAG),
+    ) {
+        Text(line, color = o.fg, style = Fleet.type.textMd)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+            OutlinedButton(onClick = onResume) { Text("Resume") }
+            TextButton(onClick = onStartOver) { Text("Start over") }
+        }
+    }
+}
+
+const val ADD_RESUME_TAG = "addProject.resume"
 
 @Composable
 private fun ColumnScope.AskingSteps(

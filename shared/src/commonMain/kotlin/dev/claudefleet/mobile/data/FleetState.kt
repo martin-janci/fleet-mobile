@@ -194,6 +194,14 @@ interface FleetState {
     val startProgress: Flow<StartProgress> get() = emptyFlow()
 
     /**
+     * `repair:progress` frames (hub contract 17): the check, fix, verify and
+     * pane steps of a `repair_session` some client sent with a
+     * `progress_token`. The session screen keeps its own token's. Hot and
+     * lossy like [startProgress].
+     */
+    val repairProgress: Flow<StartProgress> get() = emptyFlow()
+
+    /**
      * Who this device's person is and what is shared with them, read with
      * `my_grants` when the hub lists it, again on every `grant:changed`
      * frame, and per connection; [MyAccess.UNKNOWN] otherwise, which gates

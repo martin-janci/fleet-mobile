@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.model.DecideWeek
 import dev.claudefleet.mobile.data.FleetSettingsActions
 import dev.claudefleet.mobile.model.Page
 import dev.claudefleet.mobile.model.SettingDescriptor
@@ -92,6 +93,10 @@ data class FleetSettingsUiState(
     val fieldEpoch: Map<String, Int> = emptyMap(),
     /** The toggle just written, with Undo. */
     val undo: SettingUndo? = null,
+    /** Playbook runs over the last seven days, by stuck kind (`fleet_health`, contract 17). */
+    val playbooksWeek: Map<String, Int> = emptyMap(),
+    /** Jev's last seven days (`fleet_health.decide.week`); null when the hub does not say. */
+    val decideWeek: DecideWeek? = null,
 ) {
     val page: Page? get() = pages.firstOrNull { it.id == openPage }
 
@@ -210,6 +215,16 @@ class FleetSettingsViewModel(
                 )
             }
             onValues(_state.value.values)
+            // The week's playbook runs and Jev's answers ride on
+            // `fleet_health`; a hub that refuses it costs only those lines.
+            val health = try {
+                actions.health()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                null
+            }
+            _state.update { it.copy(playbooksWeek = health?.playbooksWeek.orEmpty(), decideWeek = health?.decide?.week) }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {

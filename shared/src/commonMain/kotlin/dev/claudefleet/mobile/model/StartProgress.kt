@@ -24,6 +24,17 @@ data class StartProgress(
 /** The three steps a start reports, in order — `StartStep::ALL` on the hub. */
 val START_STEPS: List<String> = listOf("worktree", "tmux", "agent")
 
+/**
+ * The four steps an explicit `repair_session` reports with a
+ * `progress_token` (hub contract 17, gap plan G7.3): `RepairStep::ALL` on
+ * the hub. Its `repair:progress` frames have a start frame's shape, so they
+ * decode as a [StartProgress] and fold the same way.
+ */
+val REPAIR_STEPS: List<String> = listOf("check", "fix", "verify", "pane")
+
+/** A repair that was sent, before any step answered. */
+val NO_REPAIR_STEPS: Map<String, StartStepState> = REPAIR_STEPS.associateWith { StartStepState.PENDING }
+
 /** Where one start step stands, as the phone draws it. */
 enum class StartStepState { PENDING, STARTED, DONE, FAILED }
 
@@ -42,8 +53,12 @@ private fun rank(s: StartStepState): Int = when (s) {
  * never undoes its `done`), a failed step stays failed, a step that starts
  * closes the ones before it, and an unknown step or state changes nothing.
  */
-fun Map<String, StartStepState>.folding(step: String, state: String): Map<String, StartStepState> {
-    val i = START_STEPS.indexOf(step)
+fun Map<String, StartStepState>.folding(
+    step: String,
+    state: String,
+    order: List<String> = START_STEPS,
+): Map<String, StartStepState> {
+    val i = order.indexOf(step)
     if (i < 0) return this
     val next = when (state) {
         "started" -> StartStepState.STARTED
@@ -55,7 +70,7 @@ fun Map<String, StartStepState>.folding(step: String, state: String): Map<String
     if (now == StartStepState.FAILED || rank(next) < rank(now)) return this
     val out = this.toMutableMap()
     out[step] = next
-    for (before in START_STEPS.take(i)) if (out[before] != StartStepState.FAILED) out[before] = StartStepState.DONE
+    for (before in order.take(i)) if (out[before] != StartStepState.FAILED) out[before] = StartStepState.DONE
     return out
 }
 

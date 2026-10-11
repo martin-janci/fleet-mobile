@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.model.DecideWeek
+import dev.claudefleet.mobile.model.line
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -316,7 +318,7 @@ internal const val JEV_MAY =
  * switch, the model, each feature's mode) follow it unchanged.
  */
 @Composable
-fun DecisionsHead(orgs: List<OrgDetail>) {
+fun DecisionsHead(orgs: List<OrgDetail>, week: DecideWeek? = null) {
     val o = Fleet.colors
     val gutter = OrbitTokens.spacing("phone-gutter").dp
     Column(Modifier.fillMaxWidth().padding(horizontal = gutter, vertical = 8.dp)) {
@@ -326,6 +328,8 @@ fun DecisionsHead(orgs: List<OrgDetail>) {
             HeadLine("Opted in", inOrgs.joinToString(", ") { it.name }.ifBlank { "None" })
             HeadLine("Not opted in", out.joinToString(", ") { it.name }.ifBlank { "None" })
         }
+        // How people met Jev's proposals over the last seven days (contract 17).
+        week?.let { Text(it.line(), color = o.fg2, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp)) }
         Text("What Jev may do", color = o.fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 10.dp))
         Text(JEV_MAY, color = o.fg2, fontSize = 14.sp, lineHeight = 20.sp)
         Text(
