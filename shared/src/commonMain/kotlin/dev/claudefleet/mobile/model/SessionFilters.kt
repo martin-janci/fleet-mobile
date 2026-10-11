@@ -302,7 +302,11 @@ private fun SessionRow.matchesQuery(query: String, projectLabel: String?): Boole
         yield(hostAlias)
         projectLabel?.let { yield(it) }
         yieldAll(tags)
-        work?.let { yield(it.label); yield(it.title) }
+        work?.let { w ->
+            yield(w.label)
+            w.displayKey?.let { yield(it) }
+            yield(w.title)
+        }
         lastPrompt?.let { yield(it) }
         Activity.sanitize(currentActivity)?.let { yield(it) }
     }

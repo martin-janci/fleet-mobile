@@ -114,7 +114,7 @@ private val DECIDED_SOURCES = setOf("manual", "agent", "started")
 
 /** What the chip draws: the key (with its title when asked), and `?` on a guess. */
 fun workChipText(work: WorkSummary, suggested: Boolean, showTitle: Boolean = false): String {
-    val base = if (showTitle && work.title.isNotBlank() && work.key != null) "${work.label} · ${work.title}" else work.label
+    val base = if (showTitle && work.title.isNotBlank() && work.key != null) "${work.shownLabel} · ${work.title}" else work.shownLabel
     return if (suggested) "$base?" else base
 }
 
@@ -123,7 +123,7 @@ fun workChipText(work: WorkSummary, suggested: Boolean, showTitle: Boolean = fal
  * dash, a ring, a dot and a strike-through, in words.
  */
 fun workChipDescription(work: WorkSummary, suggested: Boolean, showTitle: Boolean = false): String = buildList {
-    add(if (suggested) "Suggested work ${work.label}, not confirmed" else "Work ${work.label}")
+    add(if (suggested) "Suggested work ${work.shownLabel}, not confirmed" else "Work ${work.shownLabel}")
     if (showTitle && work.key != null && work.title.isNotBlank()) add(work.title)
     if (!suggested && isAutoLinked(work)) add("linked automatically")
     (work.statusName ?: work.statusCategory?.spoken())?.let { add(it) }
