@@ -63,6 +63,7 @@ fun agentActionTitle(a: AgentAction): String {
                 return "Label ${f("repo")}#${f("number")}: ${changes.joinToString(" ")}"
             }
             "pr_description" -> return "Describe ${f("repo")}#${f("number")}"
+            "debate_reply" -> return "Answer the test debate on ${f("repo")}#${f("number")}: ${f("decision")}"
             "jira_comment" -> return "Comment on ${f("key")}"
             "jira_create_bug" -> return "File a bug in ${f("project")} for ${f("source_key")}: ${f("summary")}"
             "jira_link" -> return "Link ${f("bug_key")} to ${f("source_key")} (${f("link_type").lowercase()})"

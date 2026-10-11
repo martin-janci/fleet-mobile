@@ -72,6 +72,10 @@ class AgentActionsTest {
             "Label o/r#4: +core −lgtm",
             agentActionTitle(AgentAction(id = 1, kind = "pr_labels", payload = """{"repo":"o/r","number":4,"add":["core"],"remove":["lgtm"]}""")),
         )
+        assertEquals(
+            "Answer the test debate on o/r#4: hold",
+            agentActionTitle(AgentAction(id = 1, kind = "debate_reply", payload = """{"repo":"o/r","number":4,"decision":"hold"}""")),
+        )
         assertEquals("Describe o/r#4", agentActionTitle(AgentAction(id = 1, kind = "pr_description", payload = """{"repo":"o/r","number":4}""")))
         assertEquals("Comment on L2S-7", agentActionTitle(AgentAction(id = 1, kind = "jira_comment", payload = """{"key":"L2S-7"}""")))
         assertEquals(
