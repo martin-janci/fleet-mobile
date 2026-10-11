@@ -4,6 +4,8 @@ import dev.claudefleet.mobile.data.AuthActions
 import dev.claudefleet.mobile.data.FORGOTTEN_CREDENTIAL_REASON
 import dev.claudefleet.mobile.data.NotAPairingCode
 import dev.claudefleet.mobile.data.PairTarget
+import dev.claudefleet.mobile.data.SsoSignIn
+import dev.claudefleet.mobile.data.hubBase
 import dev.claudefleet.mobile.data.pairLinkPayload
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -56,6 +58,11 @@ data class PairUiState(
     val manual: Boolean = false,
     /** The hub a pair in flight is talking to, for "Contacting …"; null when none is. */
     val contacting: String? = null,
+    /**
+     * The hub a single-sign-on sign-in was started with, as a person reads it,
+     * while the browser has it; null when none is. See [SsoSignIn].
+     */
+    val signingIn: String? = null,
 ) {
     /** Whether the manual-entry button does anything. */
     val canSubmit: Boolean get() = !pairing && paired == null && code.isNotBlank()
@@ -111,6 +118,7 @@ class PairViewModel(
     private val auth: AuthActions,
     private val scope: CoroutineScope,
     cameraAvailable: Boolean = false,
+    private val sso: SsoSignIn = SsoSignIn(),
 ) {
     // A snapshot, not a live `combine` with `auth.unpairReason`: this view model
     // is recreated fresh each time the app lands back on Pair (`App.kt` keys it
@@ -125,8 +133,11 @@ class PairViewModel(
             PairUiState(
                 cameraAvailable = cameraAvailable,
                 reason = auth.unpairReason.value,
-                address = keptHub,
-                manual = !cameraAvailable || keptHub.isNotBlank(),
+                // Back from the browser mid-sign-in: the hub it was started
+                // with stays on screen, and so does the note about it.
+                address = sso.pendingHub ?: keptHub,
+                manual = !cameraAvailable || keptHub.isNotBlank() || sso.pendingHub != null,
+                signingIn = sso.pendingHub?.let(::hubLabel),
             )
         },
     )
@@ -250,6 +261,33 @@ class PairViewModel(
         }
     }
 
+    /**
+     * "Sign in with single sign-on": the page to open in the browser, or null
+     * when there is no usable hub address to sign in at — the screen then says
+     * so, with the address field open.
+     *
+     * Nothing is sent from here. The browser signs in; the hub's last page
+     * links back with a pairing code, which [onPairLink] fills in for a tap.
+     */
+    fun signInWithSso(): String? {
+        val base = hubBase(_state.value.address)
+        if (base == null) {
+            _state.update { it.copy(errorDetails = null, error = SSO_NEEDS_HUB, manual = true, scanning = false) }
+            return null
+        }
+        val url = sso.start(base)
+        _state.update {
+            it.copy(address = base, error = null, errorDetails = null, scanning = false, signingIn = hubLabel(base))
+        }
+        return url
+    }
+
+    /** The platform had no browser to open the sign-in page in. */
+    fun onSsoBrowserUnavailable() {
+        sso.clear()
+        _state.update { it.copy(signingIn = null, errorDetails = null, error = SSO_NO_BROWSER) }
+    }
+
     /** The manual-entry button. Deliberately bypasses the per-frame dedupe. */
     fun submit(): Job? = redeem(_state.value.code)
 
@@ -274,7 +312,7 @@ class PairViewModel(
      * scan is, rather than silently ignored: an agent that built the URL wrong
      * should be able to see that from the screen.
      */
-    fun onPairLink(uri: String, autoSubmit: Boolean = false): Job? {
+    fun onPairLink(uri: String, autoSubmit: Boolean = false, fromBrowser: Boolean = false): Job? {
         val payload = pairLinkPayload(uri) ?: return null
         val target = try {
             PairTarget.require(payload)
@@ -282,6 +320,14 @@ class PairViewModel(
             _state.update { it.copy(errorDetails = null, error = explain(e)) }
             return null
         }
+        // A link a web page opened answers a sign-in this phone started, with
+        // that hub, or nothing — see [SsoSignIn]. Refused on the screen, so a
+        // page that tried is visible rather than silently ignored.
+        if (fromBrowser && !sso.accepts(target.base)) {
+            _state.update { it.copy(errorDetails = null, error = SSO_LINK_REFUSED) }
+            return null
+        }
+        if (fromBrowser) sso.clear()
         _state.update {
             it.copy(
                 // A link that names no hub leaves whatever was typed alone,
@@ -293,6 +339,7 @@ class PairViewModel(
                 scanning = false,
                 // What it filled in is on screen to be checked before Pair.
                 manual = true,
+                signingIn = if (fromBrowser) null else it.signingIn,
             )
         }
         return if (autoSubmit) submit() else null
@@ -349,9 +396,13 @@ class PairViewModel(
                 // cheaper than two places that disagree about what a code is,
                 // and `AppSession` is where the "which base wins" rule lives.
                 val credentials = auth.pair(input, typed)
+                // Paired, by whatever route: a sign-in still waiting in the
+                // browser is no longer something a web page may answer.
+                sso.clear()
                 _state.update { it.copy(
                     pairing = false,
                     contacting = null,
+                    signingIn = null,
                     code = "",
                     paired = PairedHub(credentials.hub, credentials.name, credentials.mode),
                 ) }
@@ -375,6 +426,19 @@ class PairViewModel(
         }
     }
 }
+
+/** What "Sign in with single sign-on" says with no usable hub address typed. */
+internal const val SSO_NEEDS_HUB =
+    "type your hub's address first (starting https://), then sign in with single sign-on."
+
+/** What it says when the phone has no browser to sign in with. */
+internal const val SSO_NO_BROWSER =
+    "this phone has no browser to sign in with. Ask for a pairing code instead."
+
+/** What a web page's link that answers no sign-in of ours draws. */
+internal const val SSO_LINK_REFUSED =
+    "a web page tried to fill in a pairing code, but this phone was not signing in to that hub. " +
+        "Start with Sign in with single sign-on here, or scan the hub's QR."
 
 /** What Paste says when the clipboard holds nothing. */
 internal const val NOTHING_TO_PASTE = "There is no pairing link on the clipboard. Copy the link the desktop shows, then paste."

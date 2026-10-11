@@ -53,8 +53,9 @@ class PairLinkRoutingTest {
     /**
      * And nothing else is claimed.
      *
-     * `BROWSABLE` is deliberately absent so an arbitrary web page cannot launch
-     * the app with a URL of its choosing, and the app must not have quietly
+     * The scheme is `BROWSABLE` only so the hub's single-sign-on page can hand
+     * a code back (and a browser's link is gated on a sign-in this phone
+     * started — `SsoPairTest`); the app must not have quietly
      * become the handler for `http`/`https` — which is what an over-broad
      * `<data>` element does, and which would put this app in the chooser for
      * every link on the phone.

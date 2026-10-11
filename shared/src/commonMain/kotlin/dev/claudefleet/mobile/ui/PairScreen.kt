@@ -96,6 +96,8 @@ fun PairScreen(
     onManualChange: (Boolean) -> Unit = {},
     onPaste: (String?) -> Unit = {},
     onCancel: () -> Unit = {},
+    /** "Sign in with single sign-on": the route opens the hub's sign-in page in the browser. */
+    onSignInWithSso: () -> Unit = {},
     /** Draws the camera in place of the real one; previews pass one, where there is no camera. */
     scanner: (@Composable (Modifier) -> Unit)? = null,
 ) {
@@ -180,11 +182,27 @@ fun PairScreen(
                 ManualFields(state, onAddressChange, onCodeChange, onSubmit)
             }
 
+            state.signingIn?.let { hub ->
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "Signing in to $hub in the browser. When it shows the code, tap " +
+                        "Open in the Orbit Fleet app, then Pair.",
+                    style = Fleet.type.textSm,
+                    color = o.fg2,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            }
+
             Spacer(Modifier.height(8.dp))
             // The quiet options: text buttons, full width, at touch height.
             QuietOption("Paste a pairing link", enabled = !state.pairing) {
                 onPaste(clipboard.getText()?.text)
             }
+            // A hub with single sign-on (Keycloak): sign in in the browser
+            // instead of carrying a code. Needs the hub's address, so with
+            // none typed the tap opens the field and says so.
+            QuietOption("Sign in with single sign-on", enabled = !state.pairing, onClick = onSignInWithSso)
             if (state.cameraAvailable) {
                 QuietOption(
                     if (state.manual) "Hide the typed code" else "Enter the code by hand",
