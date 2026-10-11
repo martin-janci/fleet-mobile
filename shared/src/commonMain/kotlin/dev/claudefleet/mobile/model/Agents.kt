@@ -65,7 +65,11 @@ fun agentActionTitle(a: AgentAction): String {
             "pr_description" -> return "Describe ${f("repo")}#${f("number")}"
             "debate_reply" -> return "Answer the test debate on ${f("repo")}#${f("number")}: ${f("decision")}"
             "jira_comment" -> return "Comment on ${f("key")}"
-            "jira_create_bug" -> return "File a bug in ${f("project")} for ${f("source_key")}: ${f("summary")}"
+            "jira_create_bug" -> {
+                val source = (p["source_key"] as? JsonPrimitive)?.contentOrNull
+                return "File a bug in ${f("project")} for ${source ?: "a logged error"}: ${f("summary")}"
+            }
+            "kb_learn" -> return "Teach the support KB: ${f("path")}"
             "jira_link" -> return "Link ${f("bug_key")} to ${f("source_key")} (${f("link_type").lowercase()})"
         }
     }

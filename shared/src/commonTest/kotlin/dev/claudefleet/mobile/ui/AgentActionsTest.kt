@@ -77,6 +77,11 @@ class AgentActionsTest {
             agentActionTitle(AgentAction(id = 1, kind = "debate_reply", payload = """{"repo":"o/r","number":4,"decision":"hold"}""")),
         )
         assertEquals("Describe o/r#4", agentActionTitle(AgentAction(id = 1, kind = "pr_description", payload = """{"repo":"o/r","number":4}""")))
+        assertEquals("Teach the support KB: errors/a.yaml", agentActionTitle(AgentAction(id = 1, kind = "kb_learn", payload = """{"path":"errors/a.yaml"}""")))
+        assertEquals(
+            "File a bug in PD for a logged error: x",
+            agentActionTitle(AgentAction(id = 1, kind = "jira_create_bug", payload = """{"project":"PD","source_key":null,"summary":"x"}""")),
+        )
         assertEquals("Comment on L2S-7", agentActionTitle(AgentAction(id = 1, kind = "jira_comment", payload = """{"key":"L2S-7"}""")))
         assertEquals(
             "File a bug in PD for L2S-7: [pay] NPE",
