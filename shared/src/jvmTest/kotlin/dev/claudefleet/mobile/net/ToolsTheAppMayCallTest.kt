@@ -79,6 +79,10 @@ class ToolsTheAppMayCallTest {
         // offers what it decides; see `HubCapabilities`.
         "work",
         "work_link",
+        // The hub's full-text index (claude-fleet search phase 3): readonly
+        // and `Access::Client`, fenced for the caller's person; only called
+        // when `tools/list` names it (`HubCapabilities.search`).
+        "search",
         // The fleet's agent: `Access::Client` in `guard.rs`, not readonly
         // (it may start the agent's session), so only a `full` pairing is
         // offered it — see `AgentViewModel`.

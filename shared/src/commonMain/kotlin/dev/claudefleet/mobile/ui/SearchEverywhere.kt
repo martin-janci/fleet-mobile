@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.SearchHit
 import dev.claudefleet.mobile.model.fold
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,9 +26,50 @@ data class SearchHits(
     val fileMatches: Map<Long, String> = emptyMap(),
     /** Offer "Find ticket “query”" — tickets search by key, URL or words. */
     val ticket: Boolean = false,
+    /** The hub's full-text index ([TextSearchViewModel]): tasks, conversations, pull requests, the journal. */
+    val found: List<SearchHit> = emptyList(),
+    /** The hub has the index (`search`); an older one finds nothing more. */
+    val textAvailable: Boolean = false,
+    /** The index is still being asked about this query. */
+    val textLoading: Boolean = false,
 ) {
-    val isEmpty: Boolean get() = hosts.isEmpty() && projects.isEmpty() && !ticket
+    val isEmpty: Boolean get() = hosts.isEmpty() && projects.isEmpty() && !ticket && found.isEmpty()
 }
+
+/**
+ * [hits] with what the hub's index found, when it answers [hits]' own query
+ * — never an older query's rows under a newer one.
+ */
+fun withText(hits: SearchHits, text: TextSearchState, available: Boolean): SearchHits {
+    if (!available || hits.query.isEmpty()) return hits
+    val current = text.query == hits.query
+    return hits.copy(
+        found = if (current) text.hits else emptyList(),
+        textAvailable = true,
+        textLoading = hits.query.length >= TEXT_SEARCH_MIN && (!current || text.loading),
+    )
+}
+
+/** What a text hit is, in a word: the row's lead. */
+fun SearchHit.kindLabel(): String = when (kind) {
+    "item" -> key ?: "Task"
+    "session" -> "Session"
+    "conversation" -> "Conversation"
+    "pr" -> "Pull request"
+    "journal" -> "Journal"
+    "transcript" -> "Said"
+    else -> kind.replaceFirstChar { it.uppercase() }
+}
+
+/** A text hit's second line: where the words were found, else its session and host. */
+fun SearchHit.line(): String {
+    val snippet = snippet.replace(Regex("\\s+"), " ").trim()
+    if (snippet.isNotEmpty() && snippet != title) return snippet
+    return listOfNotNull(sessionName, hostAlias).joinToString(" · ")
+}
+
+/** A text hit opens its task, else its session; a pull request or entry with neither does not open. */
+fun SearchHit.opens(): Boolean = !taskId.isNullOrBlank() || sessionId != null
 
 /** A project hit's second line: the file that matched, else [otherwise]. */
 fun SearchHits.projectLine(project: ProjectRow, otherwise: String): String =

@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.net
 
 import dev.claudefleet.mobile.model.MyGrants
+import dev.claudefleet.mobile.model.SearchPage
 import dev.claudefleet.mobile.model.SessionGrant
 import dev.claudefleet.mobile.model.ShareTo
 import dev.claudefleet.mobile.model.ActivityProbe
@@ -1225,6 +1226,20 @@ class HubClient(
                 put("limit", WORK_SEARCH_LIMIT)
             },
         ) { json.decodeFromJsonElement(ListSerializer(Ticket.serializer()), it) }
+
+    /**
+     * The hub's full-text index (`search`, readonly): tasks and tickets,
+     * sessions, first prompts, pull requests, the journal and — when the hub
+     * indexes them — transcripts, each word a prefix, best first.
+     */
+    suspend fun search(query: String): SearchPage =
+        call(
+            "search",
+            buildJsonObject {
+                put("query", query.trim())
+                put("limit", SEARCH_LIMIT)
+            },
+        ) { json.decodeFromJsonElement(SearchPage.serializer(), it) }
 
     /** The connected trackers — empty on a hub with the work graph and no tracker. */
     suspend fun workTrackers(): List<TrackerRow> =
@@ -2614,6 +2629,9 @@ private const val DOWNLOAD_CHUNK = 64 * 1024
 
 /** How many tickets a word search asks for (the hub caps a page at 200). */
 private const val WORK_SEARCH_LIMIT = 50
+
+/** Hits of one `search`: a screenful and a little more. */
+private const val SEARCH_LIMIT = 20
 
 internal const val HUB_CALL_TIMEOUT_MS = 45_000L
 internal const val HUB_CONNECT_TIMEOUT_MS = 15_000L

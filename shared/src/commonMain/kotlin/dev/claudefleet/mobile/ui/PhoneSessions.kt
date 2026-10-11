@@ -204,7 +204,8 @@ internal fun SessionsUiState.shownRows(): List<SessionRow> =
     urgent + groups.flatMap { h -> h.projects.flatMap { it.sessions } }
 
 /** Where a search looks (MobileSessionsTools): every kind of hit, or one. */
-enum class SearchScope(val label: String) { ALL("All"), SESSIONS("Sessions"), PROJECTS("Projects"), HOSTS("Hosts"), TICKETS("Tickets") }
+/** The search's chips. TEXT is the hub's full-text index: tasks, conversations, pull requests, the journal. */
+enum class SearchScope(val label: String) { ALL("All"), SESSIONS("Sessions"), TEXT("Text"), PROJECTS("Projects"), HOSTS("Hosts"), TICKETS("Tickets") }
 
 // ── One session at phone size ──
 
@@ -673,6 +674,7 @@ private fun Count(n: Int) {
 internal fun searchCounts(sessions: Int, hits: SearchHits): Map<SearchScope, Int?> = mapOf(
     SearchScope.ALL to null,
     SearchScope.SESSIONS to sessions,
+    SearchScope.TEXT to hits.found.size.takeIf { hits.textAvailable && !hits.textLoading },
     SearchScope.PROJECTS to hits.projects.size,
     SearchScope.HOSTS to hits.hosts.size,
     SearchScope.TICKETS to null,
@@ -757,6 +759,31 @@ private fun LazyListScope.searchSections(
                 selecting = bulk.active,
                 selected = row.id in bulk.selected,
                 onLongClick = select?.let { { it(row.id) } },
+            )
+        }
+    }
+    if (on(SearchScope.TEXT) && hits.found.isNotEmpty()) {
+        item(key = "search-text") { SectionHeading("Text", hits.found.size) }
+        items(hits.found, key = { "search-text-${it.kind}-${it.ref}" }) { hit ->
+            PhoneRow(
+                title = hit.title,
+                line = hit.line(),
+                lead = hit.kindLabel(),
+                dot = false,
+                onClick = if (hit.opens()) ({ handlers.onSearchFound(hit) }) else null,
+            )
+        }
+    }
+    if (scope == SearchScope.TEXT && hits.found.isEmpty()) {
+        item(key = "search-text-none") {
+            SearchNote(
+                when {
+                    !hits.textAvailable -> "This hub has no full-text search."
+                    hits.textLoading -> "Searching…"
+                    hits.query.length < TEXT_SEARCH_MIN -> "Type at least $TEXT_SEARCH_MIN letters."
+                    else -> "Nothing in tasks, conversations or pull requests matches."
+                },
+                searchAll.takeIf { !hits.textLoading },
             )
         }
     }

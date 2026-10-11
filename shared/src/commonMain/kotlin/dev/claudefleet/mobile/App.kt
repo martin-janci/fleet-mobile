@@ -86,6 +86,8 @@ import dev.claudefleet.mobile.data.TrackerActions
 import dev.claudefleet.mobile.data.UsageActions
 import dev.claudefleet.mobile.data.HubSessionDetailsActions
 import dev.claudefleet.mobile.data.HubWorkActions
+import dev.claudefleet.mobile.data.HubSearchActions
+import dev.claudefleet.mobile.data.SearchActions
 import dev.claudefleet.mobile.data.HubMissionActions
 import dev.claudefleet.mobile.data.MissionActions
 import dev.claudefleet.mobile.data.HubRoutineActions
@@ -304,6 +306,12 @@ import dev.claudefleet.mobile.ui.MoveViewModel
 import dev.claudefleet.mobile.ui.SessionFull
 import dev.claudefleet.mobile.ui.SessionScreen
 import dev.claudefleet.mobile.ui.searchEverywhere
+import dev.claudefleet.mobile.ui.TextSearchViewModel
+import dev.claudefleet.mobile.ui.withText
+import dev.claudefleet.mobile.ui.SearchHits
+import dev.claudefleet.mobile.ui.SessionsUiState
+import dev.claudefleet.mobile.ui.TicketsUiState
+import dev.claudefleet.mobile.model.SearchHit
 import dev.claudefleet.mobile.ui.TidyHandlers
 import dev.claudefleet.mobile.ui.TidySheet
 import dev.claudefleet.mobile.ui.TidyViewModel
@@ -470,6 +478,24 @@ class AppContainer(
         return taken
     }
 
+    /**
+     * A search hit in what was said: the session to open on its conversation
+     * with Find on the query, taken by that session's screen exactly once.
+     */
+    private val _conversationFind = MutableStateFlow<Pair<Long, String>?>(null)
+    val conversationFind: StateFlow<Pair<Long, String>?> = _conversationFind.asStateFlow()
+
+    fun requestConversationFind(sessionId: Long, query: String) {
+        _conversationFind.value = sessionId to query
+    }
+
+    /** [sessionId]'s pending Find query, once; then null. */
+    fun consumeConversationFind(sessionId: Long): String? {
+        var taken: String? = null
+        _conversationFind.update { if (it?.first == sessionId) { taken = it.second; null } else it }
+        return taken
+    }
+
     /** Taken exactly once. */
     fun consumeOpenSession(): Long? = _openSession.getAndUpdate { null }
 
@@ -581,6 +607,9 @@ class AppContainer(
 
     /** The work graph's calls, through the same `withClient` as every other. */
     val workActions: WorkActions = HubWorkActions(session)
+
+    /** The hub's full-text `search`, through the same `withClient`. */
+    val searchActions: SearchActions = HubSearchActions(session)
 
     /** Missions (claude-fleet orchestration), through the same `withClient`. */
     val missionActions: MissionActions = HubMissionActions(session)
@@ -944,6 +973,7 @@ private fun FleetRoute(
             prefs = container.prefs,
         )
     }
+    val textSearch = remember(repository, scope) { TextSearchViewModel(repository.capabilities, container.searchActions, scope) }
     val tidy = remember(repository, scope) { TidyViewModel(repository, container.workActions, scope, credentials.canWrite, preselect = { nav.layout.value == PhoneLayout.Classic }) }
     val tidyState by tidy.state.collectAsState()
     val missions = remember(repository, scope) { MissionsViewModel(repository, container.missionActions, scope, credentials.canWrite) }
@@ -1237,12 +1267,7 @@ private fun FleetRoute(
                     val todayState by today.state.collectAsState()
                     val agentState by agent.state.collectAsState()
                     val bulkState by bulk.state.collectAsState()
-                    val searchHosts by repository.hosts.collectAsState()
-                    val searchProjects by repository.projects.collectAsState()
-                    val searchFiles by repository.projectFiles.byProject.collectAsState()
-                    val hits = remember(state.filters.query, searchHosts, searchProjects, ticketsState.available, searchFiles) {
-                        searchEverywhere(state.filters.query, searchHosts, searchProjects, ticketsState.available, searchFiles)
-                    }
+                    val hits = rememberSearchHits(state.filters.query, state.searchOpen, ticketsState.available, repository, textSearch)
                     val sessionsHandlers = SessionsHandlers(
                         onOpenSession = nav::open,
                         onToggleNeedsAttention = sessions::toggleNeedsAttentionOnly,
@@ -1286,6 +1311,7 @@ private fun FleetRoute(
                         onSearchHost = { nav.showSessionsFor(it) },
                         onSearchProject = { nav.newSessionIn(it) },
                         onSearchTicket = { q -> tickets.open(); tickets.onQuery(q); tickets.search() },
+                        onSearchFound = { openSearchHit(it, hits.query, nav, container) },
                     )
                     // The New bar's Sessions tab (redesign 14.3); Classic keeps its list.
                     if (layout == PhoneLayout.New) {
@@ -1311,78 +1337,7 @@ private fun FleetRoute(
                             handlers = sessionsHandlers,
                         )
                     }
-                    if (state.filtersOpen) {
-                        SessionFiltersSheet(
-                            state = state,
-                            handlers = SessionFiltersHandlers(
-                                onClose = { sessions.setFiltersOpen(false) },
-                                onSetWindow = sessions::setWindow,
-                                onSetDirection = sessions::setDirection,
-                                onToggleStatus = sessions::toggleStatus,
-                                // Through the navigator, not
-                                // `sessions.setHostFilter(...)` directly:
-                                // `Screen.Sessions.hostAlias` is the one source of
-                                // truth for the filter, and `open()` reads
-                                // `nav.screen.value` to build `returnTo`. Setting
-                                // the view model alone left that screen value
-                                // stale, so opening a session and coming back
-                                // resurrected the filter the sheet had just
-                                // changed. See `Navigator.clearHostFilter`.
-                                onSetHost = { alias ->
-                                    if (alias == null) nav.clearHostFilter() else nav.showSessionsFor(alias)
-                                },
-                                onSetProject = sessions::setProjectFilter,
-                                onToggleWorkStatus = sessions::toggleWorkStatus,
-                                onToggleWorkStatusName = sessions::toggleWorkStatusName,
-                                onToggleArchived = sessions::toggleArchived,
-                                onToggleOrg = sessions::toggleOrg,
-                                onToggleMyWork = sessions::toggleMyWorkOnly,
-                                onToggleBackground = sessions::toggleBackground,
-                                onClearAll = {
-                                    sessions.clearFilters()
-                                    nav.clearHostFilter()
-                                },
-                                onClearFacet = { id ->
-                                    sessions.clearFacet(id)
-                                    if (id == SessionFacetId.HOST) nav.clearHostFilter()
-                                },
-                                // New: "Filters and grouping" in one sheet.
-                                onSetGroupMode = if (layout == PhoneLayout.New) sessions::setGroupMode else null,
-                                onToggleNeedsAttention = if (layout == PhoneLayout.New) sessions::toggleNeedsAttentionOnly else null,
-                            ),
-                        )
-                    }
-                    if (ticketsState.open) {
-                        val ticketRows by repository.sessions.collectAsState()
-                        TicketsSheet(
-                            state = ticketsState,
-                            handlers = TicketsHandlers(
-                                onClose = tickets::close,
-                                onQuery = tickets::onQuery,
-                                onSearch = { tickets.search() },
-                                onSelect = { tickets.select(it) },
-                                onOpenLive = tickets::openLive,
-                                onStartHere = tickets::startHere,
-                                onResumeHost = tickets::selectResumeHost,
-                                onResume = tickets::resume,
-                                onConfirmResume = { tickets.confirmResume() },
-                                onCancelResume = tickets::cancelResume,
-                                onDismissError = tickets::dismissError,
-                                onOpenFilters = tickets::openFilters,
-                                onCloseFilters = tickets::closeFilters,
-                                onToggleList = tickets::toggleList,
-                                onToggleStatus = tickets::toggleStatus,
-                                onToggleStatusName = tickets::toggleStatusName,
-                                onSetOrg = tickets::setOrg,
-                                onSetTracker = tickets::setTracker,
-                                onSetSession = tickets::setSession,
-                                onClearFacet = tickets::clearFacet,
-                                onClearAll = tickets::clearAll,
-                                onCycleSort = tickets::cycleSort,
-                            ),
-                            rowOf = if (layout == PhoneLayout.New) ({ id -> ticketRows.firstOrNull { it.id == id } }) else null,
-                        )
-                    }
+                    SessionsSheets(state, sessions, ticketsState, tickets, nav, layout, repository)
                 }
                 is Screen.NewSession -> key(current) {
                     val ticketsAvailable = tickets.state.collectAsState().value.available
@@ -2654,6 +2609,133 @@ private fun TaskRoute(
     }
 }
 
+/** The Sessions screen's sheets: filters and tickets. Its own function to keep `FleetRoute` under the JVM's method size limit. */
+@Composable
+private fun SessionsSheets(
+    state: SessionsUiState,
+    sessions: SessionsViewModel,
+    ticketsState: TicketsUiState,
+    tickets: TicketsViewModel,
+    nav: Navigator,
+    layout: PhoneLayout,
+    repository: FleetRepository,
+) {
+    if (state.filtersOpen) {
+        SessionFiltersSheet(
+            state = state,
+            handlers = SessionFiltersHandlers(
+                onClose = { sessions.setFiltersOpen(false) },
+                onSetWindow = sessions::setWindow,
+                onSetDirection = sessions::setDirection,
+                onToggleStatus = sessions::toggleStatus,
+                // Through the navigator, not
+                // `sessions.setHostFilter(...)` directly:
+                // `Screen.Sessions.hostAlias` is the one source of
+                // truth for the filter, and `open()` reads
+                // `nav.screen.value` to build `returnTo`. Setting
+                // the view model alone left that screen value
+                // stale, so opening a session and coming back
+                // resurrected the filter the sheet had just
+                // changed. See `Navigator.clearHostFilter`.
+                onSetHost = { alias ->
+                    if (alias == null) nav.clearHostFilter() else nav.showSessionsFor(alias)
+                },
+                onSetProject = sessions::setProjectFilter,
+                onToggleWorkStatus = sessions::toggleWorkStatus,
+                onToggleWorkStatusName = sessions::toggleWorkStatusName,
+                onToggleArchived = sessions::toggleArchived,
+                onToggleOrg = sessions::toggleOrg,
+                onToggleMyWork = sessions::toggleMyWorkOnly,
+                onToggleBackground = sessions::toggleBackground,
+                onClearAll = {
+                    sessions.clearFilters()
+                    nav.clearHostFilter()
+                },
+                onClearFacet = { id ->
+                    sessions.clearFacet(id)
+                    if (id == SessionFacetId.HOST) nav.clearHostFilter()
+                },
+                // New: "Filters and grouping" in one sheet.
+                onSetGroupMode = if (layout == PhoneLayout.New) sessions::setGroupMode else null,
+                onToggleNeedsAttention = if (layout == PhoneLayout.New) sessions::toggleNeedsAttentionOnly else null,
+            ),
+        )
+    }
+    if (ticketsState.open) {
+        val ticketRows by repository.sessions.collectAsState()
+        TicketsSheet(
+            state = ticketsState,
+            handlers = TicketsHandlers(
+                onClose = tickets::close,
+                onQuery = tickets::onQuery,
+                onSearch = { tickets.search() },
+                onSelect = { tickets.select(it) },
+                onOpenLive = tickets::openLive,
+                onStartHere = tickets::startHere,
+                onResumeHost = tickets::selectResumeHost,
+                onResume = tickets::resume,
+                onConfirmResume = { tickets.confirmResume() },
+                onCancelResume = tickets::cancelResume,
+                onDismissError = tickets::dismissError,
+                onOpenFilters = tickets::openFilters,
+                onCloseFilters = tickets::closeFilters,
+                onToggleList = tickets::toggleList,
+                onToggleStatus = tickets::toggleStatus,
+                onToggleStatusName = tickets::toggleStatusName,
+                onSetOrg = tickets::setOrg,
+                onSetTracker = tickets::setTracker,
+                onSetSession = tickets::setSession,
+                onClearFacet = tickets::clearFacet,
+                onClearAll = tickets::clearAll,
+                onCycleSort = tickets::cycleSort,
+            ),
+            rowOf = if (layout == PhoneLayout.New) ({ id -> ticketRows.firstOrNull { it.id == id } }) else null,
+        )
+    }
+}
+
+/**
+ * Search everywhere's hits for [query]: the hosts, projects and files the
+ * phone holds, then what the hub's full-text index finds once typing pauses
+ * (only while the search is open).
+ */
+@Composable
+private fun rememberSearchHits(
+    query: String,
+    searchOpen: Boolean,
+    ticketsAvailable: Boolean,
+    repository: FleetRepository,
+    textSearch: TextSearchViewModel,
+): SearchHits {
+    val hosts by repository.hosts.collectAsState()
+    val projects by repository.projects.collectAsState()
+    val files by repository.projectFiles.byProject.collectAsState()
+    val caps by repository.capabilities.collectAsState()
+    val text by textSearch.state.collectAsState()
+    val textQuery = if (searchOpen) query else ""
+    LaunchedEffect(textQuery, caps.search) { textSearch.setQuery(textQuery) }
+    val local = remember(query, hosts, projects, ticketsAvailable, files) {
+        searchEverywhere(query, hosts, projects, ticketsAvailable, files)
+    }
+    return withText(local, text, caps.search)
+}
+
+/**
+ * A text hit opens its task, else its session; a hit in what was said opens
+ * the conversation with Find on [query].
+ */
+private fun openSearchHit(hit: SearchHit, query: String, nav: Navigator, container: AppContainer) {
+    val task = hit.taskId?.takeIf { it.isNotBlank() }
+    val session = hit.sessionId
+    when {
+        task != null -> nav.openTask(task)
+        session != null -> {
+            if (hit.kind == "transcript" || hit.kind == "conversation") container.requestConversationFind(session, query)
+            nav.open(session)
+        }
+    }
+}
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun SessionRoute(
@@ -2816,6 +2898,15 @@ private fun SessionRoute(
     LaunchedEffect(focus, sessionId) {
         if (focus == sessionId && container.consumeQuestionFocus(sessionId)) selectTab(SessionTab.Conversation)
     }
+    // A search hit in what was said lands on the conversation, Find open on the query.
+    val findRequest by container.conversationFind.collectAsState()
+    var findOnOpen by remember(sessionId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(findRequest, sessionId) {
+        container.consumeConversationFind(sessionId)?.let {
+            findOnOpen = it
+            selectTab(SessionTab.Conversation)
+        }
+    }
     // Back closes an open diff, commit or file in the Files tab before it
     // leaves the session; composed after `App`'s handler, so asked first.
     val filesOpen = newLayout && sessionTab == SessionTab.Files && repoFiles?.views?.isNotEmpty() == true
@@ -2840,6 +2931,8 @@ private fun SessionRoute(
     SessionScreen(
         sessionId = sessionId,
         state = state,
+        findOnOpen = findOnOpen,
+        onFindOpened = { findOnOpen = null },
         status = status,
         onDraftChange = vm::onDraftChange,
         onSend = { vm.send() },

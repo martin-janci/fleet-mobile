@@ -246,6 +246,9 @@ fun SessionScreen(
      */
     onOpenHistory: () -> List<String>,
     modifier: Modifier = Modifier,
+    /** Open Find on this query: a search hit in what was said. Taken once ([onFindOpened]). */
+    findOnOpen: String? = null,
+    onFindOpened: () -> Unit = {},
     /** The ticket chip and its sheet; the default draws nothing (a hub without the work graph). */
     work: SessionWorkUiState = SessionWorkUiState(),
     workHandlers: SessionWorkHandlers = SessionWorkHandlers(),
@@ -464,6 +467,25 @@ fun SessionScreen(
         findAt = at.mod(matches.size)
         stopReading()
         scope.launch { listState.showTurn(matches[findAt]) }
+    }
+    // A search hit's words: Find opens on them, and the newest match is shown
+    // once the conversation holds one.
+    var findPending by remember { mutableStateOf(false) }
+    LaunchedEffect(findOnOpen) {
+        val q = findOnOpen?.trim().orEmpty()
+        if (q.isEmpty()) return@LaunchedEffect
+        findOpen = true
+        findQuery = q
+        findScope = FindScope.Everything
+        findAt = 0
+        findPending = true
+        onFindOpened()
+    }
+    LaunchedEffect(findPending, matches.isNotEmpty()) {
+        if (findPending && matches.isNotEmpty()) {
+            findPending = false
+            showMatch(0)
+        }
     }
     val header = headerChrome(chromeInputs)
     val footer = footerChrome(chromeInputs)
