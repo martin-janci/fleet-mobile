@@ -224,6 +224,19 @@ class UpdatesTest {
     }
 
     @Test
+    fun a_check_now_that_fails_says_so_instead_of_up_to_date() = runTest {
+        val failing = object : ReleaseSource {
+            override suspend fun latest(): ReleaseInfo? = null
+            override suspend fun latest(refresh: Boolean): ReleaseInfo? =
+                if (refresh) throw CheckFailed("the hub did not answer") else null
+        }
+        val vm = UpdateViewModel(failing, FakeInstaller(), FakePrefs(), "0.9.4", backgroundScope)
+        vm.checkNow().join()
+        assertEquals(ManualCheck.Failed("the hub did not answer"), vm.state.value.manual)
+        assertEquals("Could not check: the hub did not answer", updateCheckLine(vm.state.value.manual))
+    }
+
+    @Test
     fun check_now_does_nothing_when_updates_are_off_or_the_platform_updates_elsewhere() = runTest {
         val source = RecordingSource(release)
         val off = UpdateViewModel(source, FakeInstaller(), FakePrefs(), "0.9.4", backgroundScope)

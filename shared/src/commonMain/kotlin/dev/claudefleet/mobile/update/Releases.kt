@@ -111,11 +111,16 @@ fun interface ReleaseSource {
      * The same, with [refresh] asking the source to read its release channel
      * again first: a person's "Check now". Only the hub can ([HubReleases]);
      * every other source has nothing to re-read and answers as [latest].
+     * Unlike [latest], a source that could not ask throws [CheckFailed] here,
+     * so the person sees why instead of "Up to date".
      * A member with a body, not a default argument: a `fun interface`'s one
      * abstract function may not carry one.
      */
     suspend fun latest(refresh: Boolean): ReleaseInfo? = latest()
 }
+
+/** A person's "Check now" could not be answered; [message] says why. */
+class CheckFailed(message: String) : Exception(message)
 
 /**
  * fleet-mobile's GitHub releases: the release workflow publishes one signed

@@ -11,7 +11,9 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /**
@@ -48,7 +50,9 @@ class HubReleases(
             throw e
         } catch (t: Throwable) {
             // Unreachable, not paired, refused: no card. A 401 has already
-            // sent the app back to Pair through `withClient`.
+            // sent the app back to Pair through `withClient`. A person who
+            // tapped Check now is told, rather than shown "Up to date".
+            if (refresh) throw CheckFailed(t.message ?: "the hub did not answer")
             return null
         } ?: return fallback.latest()
         return try {
@@ -56,6 +60,7 @@ class HubReleases(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
+            if (refresh) throw CheckFailed("the hub's answer could not be read")
             null
         }
     }
@@ -90,9 +95,12 @@ internal fun checkRequest(platform: ClientPlatform, appVersion: String, refresh:
             platform.build?.takeIf { it.isNotBlank() && it != "unknown" }?.let { put("commit", it) }
         }
         putJsonObject("speaks") {
-            putJsonObject("contract_accepts") {
-                put("min", MIN_HUB_CONTRACT)
-                put("max", MAX_HUB_CONTRACT)
+            // `[min, max]`, the wire's spelling. Up to 0.6.3-dev.183 this was
+            // `{min, max}`, which hubs before claude-fleet #869 refused as
+            // unreadable: every check failed and read as "Up to date".
+            putJsonArray("contract_accepts") {
+                add(MIN_HUB_CONTRACT)
+                add(MAX_HUB_CONTRACT)
             }
         }
         if (refresh) put("refresh", true)

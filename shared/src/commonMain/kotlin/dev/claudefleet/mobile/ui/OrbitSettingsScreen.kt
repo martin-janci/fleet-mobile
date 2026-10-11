@@ -507,6 +507,7 @@ internal fun updateCheckLine(check: ManualCheck): String = when (check) {
     ManualCheck.Idle -> "Asks the hub to read its release channel again."
     ManualCheck.Running -> "Checking…"
     is ManualCheck.Done -> check.offered?.let { "v$it available" } ?: "Up to date (v${check.installed})"
+    is ManualCheck.Failed -> "Could not check: ${check.reason}"
 }
 
 /** Quiet hours's line on This phone: "22:00 – 07:00 · Needs you still comes through", or what Off means. */
