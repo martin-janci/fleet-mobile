@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -60,6 +61,10 @@ fun PhoneRow(
     onLongClick: (() -> Unit)? = null,
     /** Drawn in the dot's place: the check box while rows are being picked. */
     leading: (@Composable () -> Unit)? = null,
+    /** [title] with styled spans (a search hit's matches); [title] when null. */
+    titleText: AnnotatedString? = null,
+    /** [line] with styled spans; [line] when null. */
+    lineText: AnnotatedString? = null,
 ) {
     val o = Fleet.colors
     Column(
@@ -85,7 +90,7 @@ fun PhoneRow(
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        title,
+                        titleText ?: AnnotatedString(title),
                         modifier = Modifier.weight(1f),
                         color = o.fg,
                         fontSize = 16.sp,
@@ -102,7 +107,7 @@ fun PhoneRow(
                             withStyle(SpanStyle(color = leadColor)) { append(lead) }
                             if (line.isNotEmpty()) append(separator)
                         }
-                        append(line)
+                        if (lineText != null) append(lineText) else append(line)
                     },
                     color = o.fgMuted,
                     fontSize = 14.sp,

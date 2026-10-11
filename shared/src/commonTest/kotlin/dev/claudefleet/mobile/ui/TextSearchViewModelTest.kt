@@ -4,6 +4,8 @@ import dev.claudefleet.mobile.data.SearchActions
 import dev.claudefleet.mobile.model.SearchHit
 import dev.claudefleet.mobile.model.SearchPage
 import dev.claudefleet.mobile.net.HubCapabilities
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.font.FontWeight
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -86,5 +88,31 @@ class TextSearchViewModelTest {
         assertFalse(pr.opens(), "no task and no session: nothing to open")
         assertEquals("api · pine", pr.line(), "a snippet that repeats the title gives way to where it is")
         assertEquals("PAY-1", SearchHit(kind = "item", ref = "1", title = "Login", key = "PAY-1", taskId = "item:1").kindLabel())
+    }
+
+    @Test
+    fun the_hubs_marks_are_drawn_on_the_words_they_cover() {
+        val mark = SpanStyle(fontWeight = FontWeight.Bold)
+        val hit = SearchHit(kind = "item", ref = "1", title = "Fix login bug", titleMarks = listOf(listOf(4, 9)))
+        val title = hit.markedTitle(mark)
+        assertEquals(listOf("login"), title.spanStyles.map { title.text.substring(it.start, it.end) })
+
+        // A range past the end, or empty, is not trusted.
+        val bad = marked("abc", listOf(listOf(1, 9), listOf(2, 2), listOf(1)), mark)
+        assertEquals(emptyList(), bad.spanStyles)
+    }
+
+    @Test
+    fun a_snippets_marks_follow_their_words_when_its_spaces_fold() {
+        val mark = SpanStyle(fontWeight = FontWeight.Bold)
+        // "  the\n\n  login   bug ": "login" at 9..14, "bug" at 17..20.
+        val hit = SearchHit(
+            kind = "transcript", ref = "a:0", title = "api",
+            snippet = "  the\n\n  login   bug ", snippetMarks = listOf(listOf(9, 14), listOf(17, 20)),
+        )
+        val line = hit.markedLine(mark)
+        assertEquals("the login bug", line.text)
+        assertEquals(listOf("login", "bug"), line.spanStyles.map { line.text.substring(it.start, it.end) })
+        assertEquals("the login bug", hit.line())
     }
 }

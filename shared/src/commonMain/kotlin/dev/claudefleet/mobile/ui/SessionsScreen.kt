@@ -56,6 +56,8 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
@@ -1065,6 +1067,14 @@ private fun BulkOutcomeDialog(outcome: List<BulkOutcome>, onDismiss: () -> Unit)
     )
 }
 
+/** How a search hit's matched words are drawn: the conversation's Find colour behind them. */
+@Composable
+internal fun searchMark(): SpanStyle {
+    val color = MaterialTheme.colorScheme.tertiaryContainer
+    val on = MaterialTheme.colorScheme.onTertiaryContainer
+    return remember(color, on) { SpanStyle(background = color, color = on) }
+}
+
 /** "1 session", "3 sessions". */
 internal fun sessionsWord(n: Int): String = if (n == 1) "1 session" else "$n sessions"
 
@@ -1087,7 +1097,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.searchHits(hits: Sear
         SearchHitRow(host.alias, if (host.reachable) "Host · its sessions" else "Host · unreachable") { handlers.onSearchHost(host.alias) }
     }
     items(hits.found, key = { "search-text-${it.kind}-${it.ref}" }) { hit ->
-        SearchHitRow(hit.title, "${hit.kindLabel()} · ${hit.line()}", onClick = if (hit.opens()) ({ handlers.onSearchFound(hit) }) else null)
+        val mark = searchMark()
+        val title = remember(hit, mark) { hit.markedTitle(mark) }
+        val line = remember(hit, mark) { AnnotatedString("${hit.kindLabel()} · ") + hit.markedLine(mark) }
+        SearchHitRow(title, line, onClick = if (hit.opens()) ({ handlers.onSearchFound(hit) }) else null)
     }
     if (handlers.onNewSession != null) {
         items(hits.projects, key = { "search-project-${it.id}" }) { project ->
@@ -1097,7 +1110,11 @@ private fun androidx.compose.foundation.lazy.LazyListScope.searchHits(hits: Sear
 }
 
 @Composable
-private fun SearchHitRow(title: String, subtitle: String, onClick: (() -> Unit)?) {
+private fun SearchHitRow(title: String, subtitle: String, onClick: (() -> Unit)?) =
+    SearchHitRow(AnnotatedString(title), AnnotatedString(subtitle), onClick)
+
+@Composable
+private fun SearchHitRow(title: AnnotatedString, subtitle: AnnotatedString, onClick: (() -> Unit)?) {
     val tap = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
     Column(modifier = Modifier.fillMaxWidth().then(tap).padding(horizontal = 16.dp, vertical = 10.dp)) {
         Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)

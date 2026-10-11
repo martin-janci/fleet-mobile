@@ -765,12 +765,15 @@ private fun LazyListScope.searchSections(
     if (on(SearchScope.TEXT) && hits.found.isNotEmpty()) {
         item(key = "search-text") { SectionHeading("Text", hits.found.size) }
         items(hits.found, key = { "search-text-${it.kind}-${it.ref}" }) { hit ->
+            val mark = searchMark()
             PhoneRow(
                 title = hit.title,
                 line = hit.line(),
                 lead = hit.kindLabel(),
                 dot = false,
                 onClick = if (hit.opens()) ({ handlers.onSearchFound(hit) }) else null,
+                titleText = remember(hit, mark) { hit.markedTitle(mark) },
+                lineText = remember(hit, mark) { hit.markedLine(mark) },
             )
         }
     }
