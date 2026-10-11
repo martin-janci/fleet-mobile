@@ -22,6 +22,7 @@ class ReleaseWorkflowTest {
 
     private val release: String by lazy { Repo.file(".github/workflows/release.yml").readText() }
     private val ci: String by lazy { Repo.file(".github/workflows/ci.yml").readText() }
+    private val devRelease: String by lazy { Repo.file(".github/workflows/dev-release.yml").readText() }
 
     /**
      * The text of one step, from its own `- name: <marker>` line up to (but
@@ -50,10 +51,12 @@ class ReleaseWorkflowTest {
      * Nothing else may kick off a release. In particular not `pull_request` —
      * a fork's PR would otherwise reach the signing secrets — and not
      * `workflow_dispatch`, which would let a run publish without a tag whose
-     * name has been validated at all.
+     * name has been validated at all. `workflow_call` is the one other way
+     * in (dev-release.yml), and it must name both the tag and the commit: a
+     * called run has no tag of its own to read either from.
      */
     @Test
-    fun it_triggers_only_on_pushed_v_tags() {
+    fun it_triggers_only_on_pushed_v_tags_or_a_call_naming_tag_and_commit() {
         val onBlock = release.substringAfter("\non:").substringBefore("\n\n")
 
         assertTrue("tags:" in onBlock, "must trigger on tags, not branches")
@@ -61,6 +64,16 @@ class ReleaseWorkflowTest {
         assertTrue("branches:" !in onBlock, "a branch push must not cut a release")
         assertTrue("pull_request" !in release, "a fork's PR must never reach the signing secrets")
         assertTrue("workflow_dispatch" !in release, "manual dispatch would publish without a validated tag")
+
+        assertTrue("workflow_call:" in onBlock, "dev-release.yml calls this workflow")
+        val call = onBlock.substringAfter("workflow_call:")
+        for (input in listOf("tag", "sha")) {
+            assertTrue(
+                Regex("""(?s)\b$input:\s*\n.*?required: true""").containsMatchIn(call),
+                "the call must require `$input`",
+            )
+        }
+        assertTrue("ref: \${{ inputs.sha || github.ref }}" in release, "a called run checks out the commit it was handed")
     }
 
     /**
@@ -78,7 +91,7 @@ class ReleaseWorkflowTest {
         )
         assertTrue("cancel-in-progress: false" in release, "an in-flight release build must never be cancelled")
         assertTrue(
-            "group: release-\${{ github.ref_name }}" in release,
+            "group: release-\${{ inputs.tag || github.ref_name }}" in release,
             "the concurrency group must incorporate github.ref_name so releases for different tags don't serialize behind each other",
         )
     }
@@ -232,11 +245,83 @@ class ReleaseWorkflowTest {
 
         val runBodies = runBlockBodies(release)
         assertTrue(runBodies.isNotEmpty(), "expected at least one run: block in the workflow")
+        // `inputs.*` is a called run's tag and commit, which dev-release.yml
+        // took from another repository's channel file: the same rule.
         for (body in runBodies) {
-            assertTrue(
-                "github.ref_name" !in body,
-                "github.ref_name must never be interpolated directly into a run: body — found in:\n$body",
-            )
+            for (input in listOf("github.ref_name", "inputs.")) {
+                assertTrue(
+                    input !in body,
+                    "$input must never be interpolated directly into a run: body — found in:\n$body",
+                )
+            }
+        }
+    }
+
+    /**
+     * dev-release.yml reads text another repository publishes. None of it,
+     * nor anything derived from it, may reach a `run:` body through `${{ }}`:
+     * the plan step takes its settings from `env:` and the fetched text only
+     * through shell variables, which is checkable as "no `${{` in any run
+     * body at all".
+     */
+    @Test
+    fun dev_release_interpolates_nothing_into_its_run_bodies() {
+        val bodies = runBlockBodies(devRelease)
+        assertTrue(bodies.isNotEmpty(), "expected the plan step's run: block")
+        for (body in bodies) {
+            assertFalse("\${{" in body, "no expression may be interpolated into a run: body — found in:\n$body")
+        }
+    }
+
+    /**
+     * Dev builds only, and only through release.yml: the plan skips a stable
+     * `current` (those stay manual), waits for CI on the exact commit, checks
+     * the hub contract, and the release job runs only on its `go`.
+     */
+    @Test
+    fun dev_release_builds_through_release_yml_only_when_the_plan_says_go() {
+        assertTrue("cron: '*/20 * * * *'" in devRelease, "polls every 20 minutes")
+        assertTrue("types: [fleet-dev-release]" in devRelease, "claude-fleet can ping it")
+        assertTrue("cancel-in-progress: false" in devRelease, "a release already building is never cancelled")
+        assertTrue("[[ \"\$current\" == *-* ]]" in devRelease, "a stable version is not built automatically")
+        assertTrue("--workflow ci.yml --commit \"\$sha\"" in devRelease, "CI must have passed on that exact commit")
+        assertTrue("\"completed success\"" in devRelease, "CI must have succeeded, not merely finished")
+        for (name in listOf("CONTRACT_REVISION", "MIN_HUB_CONTRACT", "MAX_HUB_CONTRACT")) {
+            assertTrue(name in devRelease, "the contract check reads $name")
+        }
+        assertTrue("if: needs.plan.outputs.go == 'true'" in devRelease, "the release job is gated on the plan")
+        assertTrue("uses: ./.github/workflows/release.yml" in devRelease, "the build is release.yml's, not a second copy")
+        val writeScopes = devRelease.lineSequence()
+            .filter { Regex("""^\s*[a-z-]+:\s*write\s*$""").matches(it) }
+            .map { it.trim() }
+            .toList()
+        assertEquals(listOf("contents: write"), writeScopes, "contents: write, on the release job only")
+    }
+
+    /**
+     * A dev build must never become this repository's GitHub "latest" — a
+     * phone whose hub is too old to answer falls back to exactly that — and a
+     * called run's tag is created at the commit that was built.
+     */
+    @Test
+    fun a_pre_release_is_never_latest_and_the_tag_lands_on_the_built_commit() {
+        assertTrue("\"\$version\" == *-*" in stepAt("Validate the tag and derive the version name"), "a -suffix marks a pre-release")
+        val publish = stepAt("Publish the release")
+        assertTrue("--prerelease --latest=false" in publish, "a pre-release is published as one, and never latest")
+        assertTrue("--target \"\$BUILD_SHA\"" in publish, "the tag is created at the built commit")
+    }
+
+    /**
+     * `github.run_number` would be dev-release.yml's on a called run, which
+     * counts from 1 again; Android refuses a lower versionCode. The build and
+     * the dispatch both read the one clock-derived value.
+     */
+    @Test
+    fun the_version_code_is_one_monotonic_value_not_the_run_number() {
+        assertTrue("run_number }}" !in release, "the run number must not be the versionCode")
+        assertTrue("1767225600" in stepAt("Compute the versionCode"), "minutes since 2026-01-01T00:00:00Z")
+        for (step in listOf("Build the signed release APK", "Tell claude-fleet")) {
+            assertTrue("VERSION_CODE: \${{ steps.vcode.outputs.code }}" in stepAt(step), "$step reads the computed versionCode")
         }
     }
 
@@ -456,7 +541,7 @@ class ReleaseWorkflowTest {
         assertTrue("fleet-mobile-\$VERSION_NAME.apk" in publish, "the versioned APK is published")
         assertTrue("androidApp-release.apk" in publish, "the old asset name stays for phones that read GitHub")
         assertTrue("SHA256SUMS" in publish, "the sums are published")
-        assertTrue("-PgitSha=\"\$GITHUB_SHA\"" in stepAt("Build the signed release APK"), "the build names its commit")
+        assertTrue("-PgitSha=\"\$BUILD_SHA\"" in stepAt("Build the signed release APK"), "the build names its commit")
     }
 
     /**

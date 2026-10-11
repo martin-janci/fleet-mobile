@@ -1,8 +1,9 @@
 name: TestFlight
 
 # A separate workflow from release.yml on purpose: release.yml is held to tag
-# pushes only (ReleaseWorkflowTest), and signing needs a dry run that can be
-# started by hand before the first real tag. A dispatch never uploads.
+# pushes and calls from dev-release.yml (ReleaseWorkflowTest), and signing
+# needs a dry run that can be started by hand before the first real tag. A
+# dispatch never uploads.
 on:
   push:
     tags:

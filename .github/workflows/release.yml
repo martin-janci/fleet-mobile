@@ -1,12 +1,34 @@
 name: Release
 
+# Two ways in, one build. A pushed `v*` tag (by hand, or claude-fleet's
+# `scripts/release-mobile.sh` for a stable release); or `workflow_call` from
+# dev-release.yml, which builds every claude-fleet dev release by itself and
+# names the tag to create and the commit to build. A tag pushed by hand already
+# exists; a called run creates it at `sha` when it publishes.
+#
+# This repository is public, so any workflow anywhere may `uses:` this file.
+# Such a caller reaches nothing of ours: `secrets: inherit` hands over the
+# caller's own secrets, not this repository's, so the signing-secret check
+# below stops it, and its GITHUB_TOKEN cannot publish here.
 on:
   push:
     tags:
       - 'v*'
+  workflow_call:
+    inputs:
+      tag:
+        description: The release tag to create, like v0.6.3-dev.131.desktop.g65f0edd
+        type: string
+        required: true
+      sha:
+        description: The commit of this repository to build and tag
+        type: string
+        required: true
 
+# `inputs.tag` is empty on a tag push and `github.ref_name` is the tag; on a
+# call, `github.ref_name` is the caller's branch, so the input comes first.
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -22,18 +44,33 @@ jobs:
       contents: write
 
     steps:
+      # A called run builds exactly the commit it was handed, not whatever
+      # the caller's ref points at by now.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha || github.ref }}
 
       # `github.ref_name` is the pushed tag, which is attacker-controlled input
-      # (anyone who can push a tag chooses this string) — it is never
-      # interpolated directly into a `run:` body. It arrives here through
+      # (anyone who can push a tag chooses this string), and `inputs.tag` came
+      # from a channel file another repository publishes — neither is ever
+      # interpolated directly into a `run:` body. The tag arrives here through
       # `env:` and is validated before anything downstream sees it: digits and
       # dots, with an optional `-suffix` of `[0-9A-Za-z.-]`. `VERSION_NAME` is
       # what `assembleRelease` gets as `-PversionName`.
+      #
+      # `sha` is the commit the checkout above actually landed on, read back
+      # from git rather than taken from `GITHUB_SHA`: on a call that is the
+      # caller's commit, not the one being built. It names the build
+      # (`-PgitSha`) and is where a called run's tag is created.
+      #
+      # `prerelease` is whether the version carries a `-suffix` (a dev build,
+      # an rc). Such a release must never become this repository's GitHub
+      # "latest": a phone whose hub is too old to answer `/update/check`
+      # falls back to exactly that.
       - name: Validate the tag and derive the version name
         id: version
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           if [[ ! "$TAG" =~ ^v[0-9]+(\.[0-9]+)*(-[0-9A-Za-z.-]+)?$ ]]; then
@@ -42,6 +79,28 @@ jobs:
           fi
           version="${TAG#v}"
           echo "name=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+          sha="$(git rev-parse HEAD)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::checkout is at '$sha', not a commit" >&2; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      # The versionCode is minutes since 2026-01-01T00:00:00Z. It used to be
+      # `github.run_number`, but a run started by dev-release.yml would get
+      # that workflow's run number, which starts again from 1 — and Android
+      # refuses to install a lower versionCode over a higher one. A clock is
+      # monotonic across both triggers, already far above the last run number
+      # (30), and stays under Android's 2100000000 ceiling for millennia. Two
+      # releases in the same minute would collide; the concurrency group and
+      # the length of a build keep that from happening.
+      - name: Compute the versionCode
+        id: vcode
+        run: |
+          set -euo pipefail
+          echo "code=$(( ($(date -u +%s) - 1767225600) / 60 ))" >> "$GITHUB_OUTPUT"
 
       # Fail before building rather than after: a release build must never
       # ship unsigned or fall back to the debug key, so the absence of any one
@@ -128,15 +187,16 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           VERSION_NAME: ${{ steps.version.outputs.name }}
-          VERSION_CODE: ${{ github.run_number }}
+          VERSION_CODE: ${{ steps.vcode.outputs.code }}
+          BUILD_SHA: ${{ steps.version.outputs.sha }}
         run: |
           set -euo pipefail
-          # `GITHUB_SHA` (the runner's own) becomes BuildConfig.GIT_SHA, the
-          # `build` part of the X-Fleet-Client header the hub reads.
+          # The commit checked out becomes BuildConfig.GIT_SHA, the `build`
+          # part of the X-Fleet-Client header the hub reads.
           ./gradlew :androidApp:assembleRelease \
             -PversionName="$VERSION_NAME" \
             -PversionCode="$VERSION_CODE" \
-            -PgitSha="$GITHUB_SHA" \
+            -PgitSha="$BUILD_SHA" \
             --stacktrace
 
       # A signing config that silently failed to apply (a bad path, an AGP
@@ -212,17 +272,32 @@ jobs:
           echo "size=$(stat -c %s "fleet-mobile-$VERSION_NAME.apk")" >> "$GITHUB_OUTPUT"
 
       # `gh` is preinstalled on the runner and uses `GITHUB_TOKEN` — no
-      # third-party release action needed.
+      # third-party release action needed. `--target` creates a called run's
+      # tag at the commit that was built (a pushed tag already exists there,
+      # and `--target` is then ignored). A tag made with GITHUB_TOKEN starts
+      # no other workflow, so testflight.yml does not run for dev builds.
+      #
+      # A pre-release version is published `--prerelease --latest=false`:
+      # see the validate step for why it must never be "latest". A plain
+      # X.Y.Z is a normal release and becomes "latest" as before.
       - name: Publish the release
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
           VERSION_NAME: ${{ steps.version.outputs.name }}
+          BUILD_SHA: ${{ steps.version.outputs.sha }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
           set -euo pipefail
           out=androidApp/build/outputs/apk/release
+          kind=()
+          if [[ "$PRERELEASE" == true ]]; then
+            kind=(--prerelease --latest=false)
+          fi
           gh release create "$TAG" \
             --title "$TAG" \
+            --target "$BUILD_SHA" \
+            "${kind[@]}" \
             --generate-notes \
             "$out/fleet-mobile-$VERSION_NAME.apk" \
             "$out/androidApp-release.apk" \
@@ -240,7 +315,7 @@ jobs:
           REPO: ${{ github.repository }}
           OWNER: ${{ github.repository_owner }}
           VERSION_NAME: ${{ steps.version.outputs.name }}
-          VERSION_CODE: ${{ github.run_number }}
+          VERSION_CODE: ${{ steps.vcode.outputs.code }}
           SHA256: ${{ steps.apk.outputs.sha256 }}
           SIZE: ${{ steps.apk.outputs.size }}
           SIGNER: ${{ steps.verify.outputs.signer }}

@@ -1,0 +1,132 @@
+name: Dev release
+
+# Every claude-fleet dev release gets a phone build, with nobody pushing a tag.
+# claude-fleet cuts a dev release after every green push to its main and
+# publishes the newest one as `current` in its `dev` channel file. This polls
+# that file and, the first time it names a version this repository has no
+# release for, builds `main` through release.yml with that version as the tag.
+#
+# Dev only: a `current` without a `-suffix` is skipped. A stable release stays
+# a deliberate act — claude-fleet's `scripts/release-mobile.sh` pushes its tag.
+#
+# release.yml creates the tag with GITHUB_TOKEN, and a tag made that way starts
+# no other workflow, so testflight.yml (iOS, on `v*` tags) does not run for a
+# dev build. That is intended: TestFlight gets the stable releases.
+on:
+  schedule:
+    - cron: '*/20 * * * *'
+  workflow_dispatch:
+  # claude-fleet can ping this the moment it publishes, once it holds a token
+  # for it; the schedule is the fallback and needs nothing from claude-fleet.
+  repository_dispatch:
+    types: [fleet-dev-release]
+
+# One plan at a time, and never cancel a release already building: two polls
+# that both see a new version would otherwise both try to publish it. The
+# second waits, then finds the release the first made and stands down.
+concurrency:
+  group: dev-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Is there a new dev release to build?
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      go: ${{ steps.plan.outputs.go }}
+      tag: ${{ steps.plan.outputs.tag }}
+      sha: ${{ steps.plan.outputs.sha }}
+
+    steps:
+      # Everything this step reads from outside — the channel file, the other
+      # repository's source — is untrusted text. It stays in shell variables,
+      # is checked against a strict pattern before it is used for anything,
+      # and only a validated value reaches `$GITHUB_OUTPUT`. A skip is
+      # `go=false` and a successful job, not a failure: most polls find
+      # nothing new, and a red run every 20 minutes would bury a real one.
+      # For the same reason a failed fetch is read as empty and refused by
+      # the validation after it, rather than failing the step.
+      - name: Plan
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL_URL: https://raw.githubusercontent.com/martin-janci/claude-fleet/update-channels/dev.json
+          FLEET_REPO: martin-janci/claude-fleet
+          WIRE: crates/fleet-core/src/wire_contract.rs
+          MOBILE_FILE: shared/src/commonMain/kotlin/dev/claudefleet/mobile/net/HubContract.kt
+        run: |
+          set -euo pipefail
+          skip() { echo "::notice::$*"; echo "go=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          refuse() { echo "::warning::$*"; echo "go=false" >> "$GITHUB_OUTPUT"; exit 0; }
+
+          # 1. The newest dev version claude-fleet has published.
+          channel="$(curl -fsSL --retry 3 --retry-all-errors "$CHANNEL_URL" || true)"
+          current="$(jq -r '.current // empty' <<<"$channel" 2>/dev/null || true)"
+          if [[ ! "$current" =~ ^[0-9]+(\.[0-9]+)*(-[0-9A-Za-z.-]+)?$ ]]; then
+            refuse "the dev channel's current is not a version: '$current'"
+          fi
+          [[ "$current" == *-* ]] || skip "the dev channel names $current, a stable version: those are released by hand"
+          tag="v$current"
+
+          # 2. Already built (or tagged by hand)?
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            skip "$tag is already released here"
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+            skip "$tag is already a tag here"
+          fi
+
+          # 3. claude-fleet's own release must exist: its android-amendment,
+          # which release.yml dispatches, amends that release.
+          if ! gh api "repos/$FLEET_REPO/releases/tags/$tag" >/dev/null 2>&1; then
+            skip "claude-fleet has no release $tag yet"
+          fi
+
+          # 4. Build main as it is now, but only once CI has passed on exactly
+          # that commit — release.yml builds and tests again, but a red main
+          # is no reason to spend a signed release's run finding out.
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha || true)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || refuse "main's head is not a commit: '$sha'"
+          ci="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$sha" -L 1 \
+            --json status,conclusion --jq '.[0] | "\(.status) \(.conclusion)"' || true)"
+          [[ "$ci" == "completed success" ]] || skip "CI on main ${sha:0:12} is '${ci:-not run}', not completed success"
+
+          # 5. The phone must accept the hub contract that release ships. The
+          # same rule as claude-fleet's scripts/check-mobile-contract.sh: an
+          # unreadable number refuses, since a guess is the skew this exists
+          # to stop.
+          wire="$(curl -fsSL --retry 3 --retry-all-errors "https://raw.githubusercontent.com/$FLEET_REPO/$tag/$WIRE" || true)"
+          rev="$(sed -nE 's/^pub const CONTRACT_REVISION: u32 = ([0-9]+);.*/\1/p' <<<"$wire")"
+          [[ "$rev" =~ ^[0-9]+$ ]] || refuse "could not read CONTRACT_REVISION from claude-fleet $tag"
+          mobile="$(gh api -H "Accept: application/vnd.github.raw" "repos/$GITHUB_REPOSITORY/contents/$MOBILE_FILE?ref=$sha" || true)"
+          min="$(sed -nE 's/^const val MIN_HUB_CONTRACT: Int = ([0-9]+).*/\1/p' <<<"$mobile")"
+          max="$(sed -nE 's/^const val MAX_HUB_CONTRACT: Int = ([0-9]+).*/\1/p' <<<"$mobile")"
+          [[ "$min" =~ ^[0-9]+$ && "$max" =~ ^[0-9]+$ ]] \
+            || refuse "could not read MIN/MAX_HUB_CONTRACT from main ${sha:0:12}"
+          (( min <= rev && rev <= max )) \
+            || refuse "main ${sha:0:12} accepts hub contracts $min..$max, but claude-fleet $tag ships $rev: bump HubContract.kt first"
+
+          echo "::notice::building $tag from main ${sha:0:12} (hub contract $rev in $min..$max)"
+          {
+            echo "go=true"
+            echo "tag=$tag"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Build and publish
+    needs: plan
+    if: needs.plan.outputs.go == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.plan.outputs.tag }}
+      sha: ${{ needs.plan.outputs.sha }}
+    secrets: inherit
