@@ -96,6 +96,10 @@ interface SessionActions {
     suspend fun restartUnder(sessionId: Long, profile: String): Unit =
         throw UnsupportedOperationException("restart_session { profile }")
 
+    /** Relaunch under another model and/or effort (`restart_session { model, effort }`). */
+    suspend fun restartWith(sessionId: Long, model: String?, effort: String?): Unit =
+        throw UnsupportedOperationException("restart_session { model, effort }")
+
     /** Which login on [hostAlias] has room left (`check_account_headroom`). */
     suspend fun accountHeadroom(hostAlias: String, profile: String?): Headroom =
         throw UnsupportedOperationException("check_account_headroom")
@@ -201,6 +205,10 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
 
     override suspend fun restartUnder(sessionId: Long, profile: String) {
         session.withClient { it.restartUnder(sessionId, profile) }
+    }
+
+    override suspend fun restartWith(sessionId: Long, model: String?, effort: String?) {
+        session.withClient { it.restartWith(sessionId, model, effort) }
     }
 
     override suspend fun accountHeadroom(hostAlias: String, profile: String?): Headroom =

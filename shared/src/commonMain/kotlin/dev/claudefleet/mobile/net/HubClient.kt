@@ -558,6 +558,21 @@ class HubClient(
         call("propose_host_placement", buildJsonObject { put("project_id", projectId) }) { suggestedHostOf(it) }
 
     /**
+     * Relaunch the session on its conversation under another [model] and/or
+     * [effort] (`restart_session { model, effort }`; "" = the host's
+     * default, null = keep). Codex picks both at launch only.
+     */
+    suspend fun restartWith(sessionId: Long, model: String?, effort: String?): SessionRow =
+        call(
+            "restart_session",
+            buildJsonObject {
+                put("session_id", sessionId)
+                model?.let { put("model", it) }
+                effort?.let { put("effort", it) }
+            },
+        ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
+
+    /**
      * Which login on [hostAlias] has room left (`check_account_headroom`, hub
      * contract 14): [profile] is the session's own, null for the host's login.
      * From the usage the hub already keeps; never a fresh fetch.
