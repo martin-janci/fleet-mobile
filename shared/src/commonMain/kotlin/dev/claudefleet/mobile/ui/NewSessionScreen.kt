@@ -2,6 +2,9 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.model.BackgroundOptions
 import dev.claudefleet.mobile.model.BG_AGENT_CLAUDE
+import dev.claudefleet.mobile.model.BG_AGENT_CODEX
+import dev.claudefleet.mobile.model.CODEX_NEEDS_PROJECT
+import dev.claudefleet.mobile.model.backgroundOptionsFor
 import dev.claudefleet.mobile.model.backgroundAgentWord
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -483,14 +486,17 @@ internal fun BackgroundAgentSheet(
     var readOnly by remember { mutableStateOf(false) }
     var stopAfter by remember { mutableStateOf<Long?>(null) }
     var spend by remember { mutableStateOf<Double?>(null) }
+    // Claude is the hub's default and is never sent; Codex only where it was
+    // offered, and then without the limits it does not take.
+    val picked = agent.takeIf { it in agents } ?: BG_AGENT_CLAUDE
+    val codex = picked == BG_AGENT_CODEX
+    val sent = backgroundOptionsFor(picked, readOnly, stopAfter, spend, hasProject = project != null)
     BottomSheet(
         title = "Background agent",
         meta = BACKGROUND_AGENT_META,
         onDismiss = onDismiss,
-        primary = SheetAction("Start", enabled = prompt.isNotBlank()) {
-            // Claude is the hub's default and is never sent; Codex only where it was offered.
-            val picked = agent.takeIf { it != BG_AGENT_CLAUDE && it in agents }
-            onStart(name, prompt, BackgroundOptions(agent = picked, readOnly = readOnly, stopAfterSecs = stopAfter, stopAfterUsd = spend))
+        primary = SheetAction("Start", enabled = prompt.isNotBlank() && sent != null) {
+            sent?.let { onStart(name, prompt, it) }
         },
         scrollable = true,
     ) {
@@ -520,8 +526,11 @@ internal fun BackgroundAgentSheet(
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (a in agents) ChoiceChip(backgroundAgentWord(a), agent == a, { agent = a })
             }
+            if (codex && sent == null) {
+                Text(CODEX_NEEDS_PROJECT, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
         }
-        if (options) {
+        if (options && !codex) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth().toggleable(value = readOnly, role = Role.Switch) { readOnly = it },
