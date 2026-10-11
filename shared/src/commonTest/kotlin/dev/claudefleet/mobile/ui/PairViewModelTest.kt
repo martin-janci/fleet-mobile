@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.data.AuthActions
 import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.data.NotAPairingCode
 import dev.claudefleet.mobile.data.REVOKED_CREDENTIAL_REASON
+import dev.claudefleet.mobile.data.SsoSignIn
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.store.Credentials
 import kotlinx.coroutines.CompletableDeferred
@@ -18,6 +19,8 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.TestTimeSource
 
 private const val TOKEN = "tok-0123456789abcdef-SECRET"
 private const val HUB = "https://hub.example.com"
@@ -987,5 +990,126 @@ class PairLinkTest {
         assertEquals("fleet.janci.dev", hubLabel("https://fleet.janci.dev/"))
         assertEquals("10.0.0.2:7878", hubLabel("http://10.0.0.2:7878"))
         assertEquals("", hubLabel(""))
+    }
+}
+
+/**
+ * Pairing by signing in with the hub's single sign-on (Keycloak). The browser
+ * does the signing in; what is tested here is the app's two halves of it —
+ * which page it opens, and which links coming back from a web page it lets fill
+ * the fields.
+ */
+class SsoPairTest {
+
+    private val hub = "https://fleet.example.com"
+    private val link = "claudefleet:$hub/pair#ABCDEFGH"
+
+    @Test
+    fun signing_in_opens_the_hubs_sign_in_page_for_the_typed_address() = runTest {
+        val vm = PairViewModel(FakeAuth(), backgroundScope, sso = SsoSignIn())
+        vm.onAddressChange("https://fleet.example.com/")
+
+        assertEquals("https://fleet.example.com/auth/oidc/start", vm.signInWithSso())
+        assertEquals("fleet.example.com", vm.state.value.signingIn)
+        assertNull(vm.state.value.error)
+    }
+
+    @Test
+    fun with_no_usable_address_it_says_so_and_opens_nothing() = runTest {
+        val vm = PairViewModel(FakeAuth(), backgroundScope, cameraAvailable = true)
+        assertNull(vm.signInWithSso())
+        assertEquals(SSO_NEEDS_HUB, vm.state.value.error)
+        assertTrue(vm.state.value.manual, "the address field it points at is open")
+
+        vm.onAddressChange("fleet.example.com")
+        assertNull(vm.signInWithSso(), "an address with no scheme is not one")
+    }
+
+    /** The link the hub's last page carries fills the fields; the person taps Pair. */
+    @Test
+    fun the_link_back_from_the_browser_fills_the_fields_and_waits() = runTest {
+        val auth = FakeAuth()
+        val sso = SsoSignIn()
+        val vm = PairViewModel(auth, backgroundScope, sso = sso)
+        vm.onAddressChange(hub)
+        vm.signInWithSso()
+
+        vm.onPairLink(link, fromBrowser = true)
+        runCurrent()
+
+        assertEquals("ABCDEFGH", vm.state.value.code)
+        assertNull(vm.state.value.error)
+        assertNull(vm.state.value.signingIn)
+        assertEquals(0, auth.pairs.size, "a link never pairs a release build on its own")
+        assertNull(sso.pendingHub, "one sign-in answers one link")
+    }
+
+    /** A web page's link with no sign-in in flight: refused, visibly. */
+    @Test
+    fun a_web_pages_link_with_no_sign_in_in_flight_is_refused() = runTest {
+        val vm = PairViewModel(FakeAuth(), backgroundScope)
+        vm.onPairLink(link, fromBrowser = true)
+        assertEquals(SSO_LINK_REFUSED, vm.state.value.error)
+        assertEquals("", vm.state.value.code, "nothing was filled in")
+    }
+
+    /** …and one naming another hub than the sign-in's. */
+    @Test
+    fun a_web_pages_link_for_another_hub_is_refused() = runTest {
+        val sso = SsoSignIn()
+        val vm = PairViewModel(FakeAuth(), backgroundScope, sso = sso)
+        vm.onAddressChange(hub)
+        vm.signInWithSso()
+
+        vm.onPairLink("claudefleet:https://evil.example.net/pair#ABCDEFGH", fromBrowser = true)
+        assertEquals(SSO_LINK_REFUSED, vm.state.value.error)
+        assertEquals("", vm.state.value.code)
+        assertEquals(hub, sso.pendingHub, "the real sign-in can still answer")
+    }
+
+    /** A link from tooling (no browser) is what it always was. */
+    @Test
+    fun a_link_not_from_a_web_page_needs_no_sign_in() = runTest {
+        val vm = PairViewModel(FakeAuth(), backgroundScope)
+        vm.onPairLink(link)
+        assertEquals("ABCDEFGH", vm.state.value.code)
+    }
+
+    /** The sign-in outlives the view model, which is rebuilt on the way back from the browser. */
+    @Test
+    fun a_new_pair_screen_remembers_the_sign_in_in_flight() = runTest {
+        val sso = SsoSignIn()
+        val first = PairViewModel(FakeAuth(), backgroundScope, cameraAvailable = true, sso = sso)
+        first.onAddressChange(hub)
+        first.signInWithSso()
+
+        val second = PairViewModel(FakeAuth(), backgroundScope, cameraAvailable = true, sso = sso)
+        assertEquals(hub, second.state.value.address)
+        assertEquals("fleet.example.com", second.state.value.signingIn)
+        assertTrue(second.state.value.manual)
+    }
+
+    @Test
+    fun no_browser_ends_the_sign_in() = runTest {
+        val sso = SsoSignIn()
+        val vm = PairViewModel(FakeAuth(), backgroundScope, sso = sso)
+        vm.onAddressChange(hub)
+        vm.signInWithSso()
+        vm.onSsoBrowserUnavailable()
+        assertNull(sso.pendingHub)
+        assertNull(vm.state.value.signingIn)
+        assertEquals(SSO_NO_BROWSER, vm.state.value.error)
+    }
+
+    @Test
+    fun a_sign_in_expires() {
+        val time = TestTimeSource()
+        val sso = SsoSignIn(ttl = 10.minutes, clock = time)
+        sso.start(hub)
+        assertTrue(sso.accepts("https://FLEET.example.com/"), "scheme and host compare case-blind")
+        assertFalse(sso.accepts(null), "a link that names no hub answers nothing")
+        time += 11.minutes
+        assertNull(sso.pendingHub)
+        assertFalse(sso.accepts(hub))
     }
 }

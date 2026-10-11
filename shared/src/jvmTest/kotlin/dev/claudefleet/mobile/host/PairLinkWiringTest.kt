@@ -35,19 +35,21 @@ class PairLinkWiringTest {
     }
 
     /**
-     * And does **not** make it browsable.
+     * Browsable, and only behind the sign-in gate.
      *
-     * `BROWSABLE` is what lets an arbitrary web page launch the app with a URL
-     * of its choosing. This scheme is for tooling and for a link the operator
-     * already has; the release build only fills the fields either way, but the
-     * smaller the set of things that can put a stranger's hub on that screen,
-     * the better.
+     * `BROWSABLE` is what lets a web page launch the app with a URL of its
+     * choosing. It is there so the hub's single-sign-on page can hand the code
+     * back; what keeps it from being anybody's door is that the activity marks
+     * a browser's intent and the Pair screen then accepts the link only as the
+     * answer to a sign-in this phone started (`SsoPairTest`). Drop the marking
+     * and every web page's link fills the fields again — this fails.
      */
     @Test
-    fun android_does_not_make_the_scheme_browsable() {
+    fun android_marks_a_link_that_came_from_a_browser() {
+        assertTrue("android.intent.category.BROWSABLE" in manifest, "single sign-on comes back through a browser")
         assertTrue(
-            "android.intent.category.BROWSABLE" !in manifest,
-            "a browsable scheme lets any web page launch the app with its own URL",
+            "fromBrowser = intent.hasCategory(Intent.CATEGORY_BROWSABLE)" in activity,
+            "a browsable scheme without the mark lets any web page fill the Pair screen",
         )
     }
 

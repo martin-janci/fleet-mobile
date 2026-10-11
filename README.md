@@ -114,6 +114,25 @@ hands — which is the whole point of the scheme. The difference is wired to the
 build (`BuildConfig.DEBUG`, `Platform.isDebugBinary`) and never to anything in
 the link.
 
+### Pairing by signing in (Keycloak)
+
+A hub with single sign-on on (claude-fleet `docs/hub.md` → *Sign in with
+Keycloak*) needs no code carried from its terminal. On the Pair screen, type
+the hub's address and tap **Sign in with single sign-on**: the app opens
+`<hub>/auth/oidc/start` in the system browser, the person signs in there, and
+the hub's last page shows a pairing code with an **Open in the Orbit Fleet
+app** link — the same `claudefleet:` link as above. Tapping it fills the two
+fields; the person taps Pair. Typing the eight characters it shows works too.
+
+To let a browser follow that link, the Android scheme is `BROWSABLE`, which
+would also let any web page open the app with a link of its own. So
+`MainActivity` marks an intent a browser fired (`CATEGORY_BROWSABLE`), and the
+Pair screen accepts such a link only while this phone is waiting for a sign-in
+it started itself, for the hub it started it with, for ten minutes
+(`data/SsoSignIn.kt`); any other browser link is refused on the screen. A link
+from `adb` or a tap outside a browser behaves as before. iOS cannot tell where
+a URL came from, and a custom scheme was already openable from Safari there.
+
 A link goes through exactly the checks a scan does — the same parser, so the
 same rules about userinfo, cleartext and the code alphabet.
 

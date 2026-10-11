@@ -50,7 +50,9 @@ class MainActivity : ComponentActivity() {
         }
         intent.getLongExtra(NeedsYouService.EXTRA_MISSION_ID, -1L).takeIf { it >= 0 }?.let(container::onOpenMission)
         intent.takeIf { it.action == Intent.ACTION_VIEW }?.data?.let {
-            container.onPairLink(it.toString())
+            // A browser adds BROWSABLE to every intent it fires: such a link is
+            // only accepted as the answer to this phone's own sign-in.
+            container.onPairLink(it.toString(), fromBrowser = intent.hasCategory(Intent.CATEGORY_BROWSABLE))
         }
         setIntent(consumed(intent))
     }
