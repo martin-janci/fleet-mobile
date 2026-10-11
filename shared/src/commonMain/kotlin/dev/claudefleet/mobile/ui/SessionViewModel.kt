@@ -24,6 +24,11 @@ import dev.claudefleet.mobile.model.GrantLevel
 import dev.claudefleet.mobile.model.MyAccess
 import dev.claudefleet.mobile.model.ConversationSummary
 import dev.claudefleet.mobile.model.RepairReport
+import dev.claudefleet.mobile.model.NO_REPAIR_STEPS
+import dev.claudefleet.mobile.model.REPAIR_STEPS
+import dev.claudefleet.mobile.model.StartStepState
+import dev.claudefleet.mobile.model.folding
+import dev.claudefleet.mobile.model.newStartToken
 import dev.claudefleet.mobile.model.PendingInput
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.SessionRow
@@ -223,6 +228,12 @@ data class SessionUiState(
     val paneKeys: Set<String> = HubCapabilities.BASE_PANE_KEYS,
     /** What the last repair found and did, until dismissed. */
     val repair: RepairReport? = null,
+    /**
+     * The running repair's steps as the hub reports them (`repair:progress`,
+     * contract 17), keyed by [REPAIR_STEPS]; null when no repair runs or the
+     * hub reports none, and the loader then ticks nothing.
+     */
+    val repairSteps: Map<String, StartStepState>? = null,
     /**
      * The prompt on its way to the hub: out of the box at once and shown at
      * the foot of the conversation as *Sending…*, so a send never looks like
@@ -541,6 +552,9 @@ class SessionViewModel(
         val olderLoaded: Boolean = false,
         val loadingOlder: Boolean = false,
         val repair: RepairReport? = null,
+        /** The running repair's `progress_token`, and its steps as the frames reported them. */
+        val repairToken: String? = null,
+        val repairSteps: Map<String, StartStepState>? = null,
         val pending: String? = null,
         /**
          * The failure a send raised, by identity: the composer draws [error]
@@ -672,6 +686,16 @@ class SessionViewModel(
         )
 
     init {
+        // This screen's own repair steps, by its token; another device's
+        // repair is not this screen's business.
+        scope.launch {
+            fleet.repairProgress.collect { p ->
+                local.update { l ->
+                    val steps = l.repairSteps
+                    if (steps == null || p.token != l.repairToken) l else l.copy(repairSteps = steps.folding(p.step, p.state, REPAIR_STEPS))
+                }
+            }
+        }
         // Every change to the box, however it came — typing, a quote, a send
         // clearing it, a failure putting it back — is what a return finds.
         scope.launch {
@@ -1675,8 +1699,15 @@ class SessionViewModel(
 
     /** Repair the workspace; what was found and done is shown until [dismissRepair]. */
     fun repair(): Job = runManagedThen(::canManageNow) {
-        val report = actions.repair(sessionId)
-        local.update { it.copy(repair = report) }
+        // The real steps, when the hub reports them: a fresh token per repair.
+        val token = if (fleet.capabilities.value.accepts(HubCapabilities.REPAIR_SESSION, PROGRESS_TOKEN)) newStartToken(clock()) else null
+        local.update { it.copy(repairToken = token, repairSteps = token?.let { NO_REPAIR_STEPS }) }
+        try {
+            val report = if (token != null) actions.repair(sessionId, token) else actions.repair(sessionId)
+            local.update { it.copy(repair = report) }
+        } finally {
+            local.update { it.copy(repairToken = null, repairSteps = null) }
+        }
         null
     }
 
@@ -2085,6 +2116,7 @@ class SessionViewModel(
         repairAvailable = fleet.capabilities.value.repairSession,
         paneKeys = fleet.capabilities.value.paneKeys,
         repair = l.repair,
+        repairSteps = l.repairSteps,
         pending = l.pending,
         errorFromSend = l.error != null && l.error === l.sendError,
         notSent = l.notSent,
@@ -2287,6 +2319,7 @@ private object EphemeralQuickReplies : QuickReplyActions {
 }
 
 private const val MODE_REWIND = "rewind"
+private const val PROGRESS_TOKEN = "progress_token"
 private const val MODE_FORK = "fork"
 
 /** Retry's rewind landed but the REPL did not come back in time; the prompt waits in the composer. */

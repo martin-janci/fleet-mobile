@@ -2,6 +2,10 @@
 
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.model.REPAIR_STEPS
+import dev.claudefleet.mobile.model.NO_REPAIR_STEPS
+import dev.claudefleet.mobile.model.StartStepState
+import dev.claudefleet.mobile.model.StartProgress
 import dev.claudefleet.mobile.data.ALL_SESSIONS_CHANGED
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
@@ -106,6 +110,7 @@ private class FakeFleetState(
     override val clockSkewSeconds = MutableStateFlow(0L)
     override val sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val access = MutableStateFlow(MyAccess.UNKNOWN)
+    override val repairProgress = MutableSharedFlow<StartProgress>(extraBufferCapacity = 16)
     override suspend fun refresh() = Unit
 }
 
@@ -358,6 +363,16 @@ private class FakeActions : SessionActions {
     }
 
     override suspend fun repair(sessionId: Long): RepairReport = repairAnswer
+
+    /** The `progress_token` each reporting repair carried; [repairGate] holds one open. */
+    val repairTokens = mutableListOf<String?>()
+    var repairGate: CompletableDeferred<Unit>? = null
+
+    override suspend fun repair(sessionId: Long, progressToken: String?): RepairReport {
+        repairTokens += progressToken
+        repairGate?.await()
+        return repairAnswer
+    }
 
     val recreated = mutableListOf<Long>()
     val dismissed = mutableListOf<Long>()
@@ -3597,6 +3612,49 @@ class SessionViewModelTest {
         vm.dismissRepair()
         runCurrent()
         assertNull(vm.state.value.repair)
+    }
+
+    @Test
+    fun a_repair_ticks_its_own_steps_from_the_hubs_frames() = runTest {
+        val actions = FakeActions().apply { repairGate = CompletableDeferred() }
+        val fleet = FakeFleetState(tools = reviewTools)
+        fleet.capabilities.value = HubCapabilities(
+            tools = reviewTools,
+            params = mapOf(HubCapabilities.REPAIR_SESSION to setOf("session_id", "progress_token")),
+        )
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+
+        val job = vm.repair()
+        runCurrent()
+        val token = assertNotNull(actions.repairTokens.single())
+        assertEquals(NO_REPAIR_STEPS, vm.state.value.repairSteps)
+
+        // Another device's repair is not this screen's.
+        fleet.repairProgress.emit(StartProgress("st-other", "verify", 3, 4, "done"))
+        fleet.repairProgress.emit(StartProgress(token, "fix", 2, 4, "started"))
+        runCurrent()
+        val steps = assertNotNull(vm.state.value.repairSteps)
+        assertEquals(
+            listOf(StartStepState.DONE, StartStepState.STARTED, StartStepState.PENDING, StartStepState.PENDING),
+            REPAIR_STEPS.map { steps[it] },
+        )
+
+        actions.repairGate!!.complete(Unit)
+        job.join()
+        runCurrent()
+        assertNull(vm.state.value.repairSteps, "the steps go with the call")
+        assertEquals(listOf("respawned the pane"), vm.state.value.repair?.actions)
+    }
+
+    @Test
+    fun a_hub_without_progress_tokens_repairs_without_one() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(tools = reviewTools), actions, backgroundScope)
+        vm.repair().join()
+        runCurrent()
+        assertEquals(emptyList(), actions.repairTokens, "the one-argument call, as before")
+        assertNull(vm.state.value.repairSteps)
     }
 
     @Test
