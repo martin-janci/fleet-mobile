@@ -47,6 +47,11 @@ private class UsageCalls : UsageActions {
         accountReads += 1
         return listOf(AccountRow(uuid = "u1", email = "a@b.c"))
     }
+    val renames = mutableListOf<Pair<String, String?>>()
+    override suspend fun setNickname(uuid: String, nickname: String?): AccountRow {
+        renames += uuid to nickname
+        return AccountRow(uuid = uuid, email = "a@b.c", nickname = nickname)
+    }
 }
 
 class UsageViewModelTest {
@@ -136,6 +141,40 @@ class UsageViewModelTest {
         fleet.capabilities.value = HubCapabilities(tools = both)
         runCurrent()
         assertTrue(calls.windows.isEmpty())
+    }
+
+    @Test
+    fun renaming_an_account_takes_the_hubs_row() = runTest {
+        val calls = UsageCalls()
+        val vm = UsageViewModel(UsageFleet(both + HubCapabilities.SET_ACCOUNT_NICKNAME), calls, backgroundScope)
+        vm.attach()
+        runCurrent()
+        assertTrue(vm.state.value.canRename)
+
+        vm.rename("u1", "  Work  ")
+        runCurrent()
+        assertEquals(listOf<Pair<String, String?>>("u1" to "Work"), calls.renames)
+        assertEquals(listOf("Work"), vm.state.value.accounts.map { it.label })
+
+        // Blank clears: the hub gets null and the email shows again.
+        vm.rename("u1", " ")
+        runCurrent()
+        assertEquals("u1" to null, calls.renames.last())
+        assertEquals(listOf("a@b.c"), vm.state.value.accounts.map { it.label })
+    }
+
+    @Test
+    fun no_rename_without_the_tool_or_from_a_readonly_pairing() = runTest {
+        val calls = UsageCalls()
+        val unlisted = UsageViewModel(UsageFleet(both), calls, backgroundScope)
+        val readonly = UsageViewModel(UsageFleet(both + HubCapabilities.SET_ACCOUNT_NICKNAME), calls, backgroundScope, canWrite = false)
+        runCurrent()
+        assertFalse(unlisted.state.value.canRename)
+        assertFalse(readonly.state.value.canRename)
+        unlisted.rename("u1", "Work")
+        readonly.rename("u1", "Work")
+        runCurrent()
+        assertTrue(calls.renames.isEmpty())
     }
 
     @Test

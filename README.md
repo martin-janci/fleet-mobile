@@ -418,22 +418,28 @@ costs one reconnect.
 
 - **No terminal.** The desktop app owns the PTY. A phone shows the conversation,
   not the raw pane.
-- **No host administration.** No provisioning, no adding or removing hosts, no
-  secrets, no pairing other clients. The hub refuses a client token all of
-  those, so the app does not offer a button that would produce an error. The
-  tools it may call are pinned by a test (`ToolsTheAppMayCallTest`), as an
-  allow-list rather than a list of things someone thought to forbid.
+- **Little host administration, and only the owner's.** Since claude-fleet
+  contract 13 the hub lists `add_host`, `install_agent` and
+  `set_account_nickname` to its owner's own device, so that phone can add a
+  host from the hub's SSH config, install fleet-agent on one and name a
+  Claude account (the hub still asks a trusted `full` device for the writes).
+  Provisioning, removing or hiding a host, secrets and pairing other clients
+  stay the hub operator's: the hub refuses a client token all of those, so
+  the app does not offer a button that would produce an error. The tools it
+  may call are pinned by a test (`ToolsTheAppMayCallTest`), as an allow-list
+  rather than a list of things someone thought to forbid.
 - **No writes to a worktree.** The Worktree screen reads changes, history and
   files; staging, committing, checking out and pushing are the desktop's,
   and the hub refuses them to a client token.
-- **No company administration.** Adding a member, changing a role, pairing or
-  revoking a device and setting a budget are the desktop's (Settings →
-  Organisations, through the hub's `org_admin`), which the app never names.
-  The Company screen only reads.
-- **No tracker administration, and no brief editing.** Connecting Jira is
-  `work_admin`, which is master-only and which the app never names (the test
-  forbids it). Starting or resuming work uses the hub's default brief; editing
-  one stays on the desktop.
+- **Little company administration.** The Company screen reads; Members
+  lists an org's people, changes a role and removes someone (`org_admin`).
+  Adding a member pairs a device, and pairing or revoking devices and setting
+  budgets stay the desktop's (Settings → Organisations).
+- **Tracker administration from the owner's phone only, and no brief
+  editing.** The owner's trusted `full` phone lists, adds, tests and removes
+  trackers through `work_admin` (contract 13); any other pairing is refused.
+  Starting or resuming work uses the hub's default brief; editing one stays
+  on the desktop.
 - **No push service.** On Android, *Notify me when a session needs me*
   (Settings, off until turned on) keeps a foreground service holding the hub's
   event stream open, with its own quiet notification, and posts one when a

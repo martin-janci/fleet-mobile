@@ -15,13 +15,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -42,7 +49,44 @@ data class UsageHandlers(
     val onSelect: (UsageWindow) -> Unit = {},
     val onOpenSession: (Long) -> Unit = {},
     val onDismissError: () -> Unit = {},
+    /** Name an account (uuid, name; blank clears). Offered where [UsageUiState.canRename]. */
+    val onRename: (String, String) -> Unit = { _, _ -> },
 )
+
+/** The longest nickname the hub keeps (`Store::set_account_nickname`). */
+internal const val NICKNAME_MAX = 32
+
+/**
+ * Name [account]: the label the desktop and every device show for it. Blank
+ * clears it, so the email shows again.
+ */
+@Composable
+internal fun AccountNameDialog(account: AccountRow, onSave: (String) -> Unit, onDismiss: () -> Unit) {
+    var name by remember(account.uuid) { mutableStateOf(account.nickname.orEmpty()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Name this account") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it.take(NICKNAME_MAX) },
+                    singleLine = true,
+                    label = { Text("Name") },
+                    placeholder = { Text(account.email ?: account.uuid.take(8)) },
+                )
+                Text(
+                    "Shown on every device. Empty shows the email again.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(name); onDismiss() }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
 
 /**
  * Estimated usage over a window — total, by host, by day, the costliest
@@ -51,6 +95,8 @@ data class UsageHandlers(
  */
 @Composable
 fun UsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: Long, modifier: Modifier = Modifier) {
+    var naming by remember { mutableStateOf<AccountRow?>(null) }
+    naming?.let { a -> AccountNameDialog(a, onSave = { handlers.onRename(a.uuid, it) }, onDismiss = { naming = null }) }
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
             title = "Usage",
@@ -77,7 +123,9 @@ fun UsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: Long, 
             }
             if (state.accountsAvailable && state.accounts.isNotEmpty()) {
                 item { Heading("Claude accounts") }
-                items(state.accounts, key = { "account:${it.uuid}" }) { AccountLine(it, nowSeconds) }
+                items(state.accounts, key = { "account:${it.uuid}" }) { a ->
+                    AccountLine(a, nowSeconds, onClick = { naming = a }.takeIf { state.canRename })
+                }
             }
         }
     }
@@ -157,8 +205,12 @@ private fun Bar(label: String, figure: String, fraction: Float) {
 }
 
 @Composable
-private fun AccountLine(account: AccountRow, nowSeconds: Long) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+private fun AccountLine(account: AccountRow, nowSeconds: Long, onClick: (() -> Unit)? = null) {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClickLabel = "Name this account", onClick = onClick) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
         Text(account.label, style = MaterialTheme.typography.bodyMedium)
         Text(
             listOfNotNull(

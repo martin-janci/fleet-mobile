@@ -222,6 +222,14 @@ class ToolsTheAppMayCallTest {
         "agent_installs",
         "add_host",
         "discover_hosts",
+        // Naming a Claude account on the Usage screen (claude-fleet revision
+        // 17): `Access::Person` like `add_host`, listed to the hub owner's own
+        // device only; called only when the hub lists it
+        // (`HubCapabilities.accountNickname`) and the token is full.
+        "set_account_nickname",
+        // A host's health checklist on its sheet (revision 17): readonly and
+        // `Access::Person`, called only when the hub lists it (`checkHost`).
+        "check_host",
         // Automation (redesign 8.9): routines, their runs and their switch.
         // `Access::Client`, not readonly, so the hub does not list it for a
         // readonly token; never a per-host token's (`NOT_FOR_HOST_TOKENS`).
