@@ -196,6 +196,19 @@ data class HubCapabilities(
     val accounts: Boolean get() = LIST_ACCOUNTS in tools
 
     /**
+     * Naming a Claude account from the phone (`set_account_nickname`,
+     * claude-fleet revision 17): listed to the hub owner's own devices only,
+     * as `add_host` is; until then the nickname was set on a desktop.
+     */
+    val accountNickname: Boolean get() = SET_ACCOUNT_NICKNAME in tools
+
+    /**
+     * A host's health checklist on its sheet (`check_host`, claude-fleet
+     * revision 17): the hub owner's devices, as on the desktop's Host detail.
+     */
+    val checkHost: Boolean get() = CHECK_HOST in tools
+
+    /**
      * A paused-on-limit row's Switch account (claude-fleet 4.4 on the phone,
      * 4.10): the hub says which login has room (`check_account_headroom`,
      * contract 14, readonly) and restarts the session under it
@@ -394,6 +407,8 @@ data class HubCapabilities(
         const val RECREATE_SESSION = "recreate_session"
         const val DISMISS_GHOST_SESSION = "dismiss_ghost_session"
         const val LIST_ACCOUNTS = "list_accounts"
+        const val SET_ACCOUNT_NICKNAME = "set_account_nickname"
+        const val CHECK_HOST = "check_host"
         const val WORK_ADMIN = "work_admin"
         const val ACCOUNT_USAGE = "account_usage"
         const val REPO_DIFF = "repo_diff"

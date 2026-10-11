@@ -30,6 +30,8 @@ data class UsageUiState(
     /** The hub has said what it serves; before that nothing reads as "not offered" (r13 P20). */
     val capsKnown: Boolean = false,
     val accountsAvailable: Boolean = false,
+    /** This pairing may name an account (`set_account_nickname`, a full token). */
+    val canRename: Boolean = false,
     val window: UsageWindow = UsageWindow.Week,
     val report: UsageReport? = null,
     val accounts: List<AccountRow> = emptyList(),
@@ -52,6 +54,7 @@ class UsageViewModel(
     private val fleet: FleetState,
     private val actions: UsageActions,
     private val scope: CoroutineScope,
+    private val canWrite: Boolean = true,
 ) {
     private data class Local(
         val window: UsageWindow = UsageWindow.Week,
@@ -68,6 +71,7 @@ class UsageViewModel(
             available = caps.usage,
             capsKnown = caps.known,
             accountsAvailable = caps.accounts,
+            canRename = canWrite && caps.accountNickname,
             window = l.window,
             report = l.report,
             accounts = l.accounts,
@@ -109,6 +113,19 @@ class UsageViewModel(
     }
 
     fun refresh(): Job = scope.launch { read(withAccounts = true) }
+
+    /** Name [uuid] (blank clears); the row takes the hub's answer. */
+    fun rename(uuid: String, nickname: String): Job = scope.launch {
+        if (!state.value.canRename) return@launch
+        try {
+            val row = actions.setNickname(uuid, nickname.trim().ifEmpty { null })
+            local.update { l -> l.copy(accounts = l.accounts.map { if (it.uuid == row.uuid) row else it }) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(error = friendly(t)) }
+        }
+    }
 
     fun dismissError() {
         local.update { it.copy(error = null) }

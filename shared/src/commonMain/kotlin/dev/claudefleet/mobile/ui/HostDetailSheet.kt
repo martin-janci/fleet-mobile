@@ -30,7 +30,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.claudefleet.mobile.model.HostCheck
 import dev.claudefleet.mobile.model.LostCandidate
+import dev.claudefleet.mobile.model.lines
 import dev.claudefleet.mobile.model.RestorePlanEntry
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.components.ErrorBanner
@@ -40,6 +42,8 @@ import dev.claudefleet.mobile.ui.kit.StatusWord
 data class HostDetailHandlers(
     val onClose: () -> Unit = {},
     val onProbe: () -> Unit = {},
+    /** Run the health checklist (`check_host`). */
+    val onCheck: () -> Unit = {},
     val onShowSessions: () -> Unit = {},
     val onCheckLost: () -> Unit = {},
     val onRestore: () -> Unit = {},
@@ -90,11 +94,15 @@ fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowS
                         if (state.canProbe) {
                             OutlinedButton(onClick = handlers.onProbe, enabled = !state.probing) { Text(if (state.probing) "Probing…" else "Re-probe") }
                         }
+                        if (state.canCheck) {
+                            OutlinedButton(onClick = handlers.onCheck, enabled = !state.checking) { Text(if (state.checking) "Checking…" else "Check health") }
+                        }
                         OutlinedButton(onClick = handlers.onShowSessions) {
                             Text("${state.sessionCount} session${if (state.sessionCount == 1) "" else "s"}")
                         }
                     }
                 }
+                state.check?.let { c -> HealthLines(c) }
                 ErrorBanner(state.error, onDismiss = handlers.onDismissError)
             }
             if (state.canRestore || state.canDiscover) {
@@ -239,5 +247,22 @@ private fun PlanEntryRow(entry: RestorePlanEntry) {
         }
         // The word carries the verdict; the colour only repeats it.
         OrbitChip(planVerdict(entry), modifier = Modifier.padding(start = 8.dp), word = if (entry.restores) StatusWord.WORKING else StatusWord.IDLE)
+    }
+}
+
+/** The health checklist's lines, or why the host could not be asked. */
+@Composable
+private fun HealthLines(check: HostCheck) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp)) {
+        check.error?.let {
+            Text("The hub could not ask ${check.alias}: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
+        for (line in check.lines()) {
+            Text(
+                "${if (line.ok) "✓" else "!"} ${line.label}: ${line.detail}",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (line.ok) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+            )
+        }
     }
 }

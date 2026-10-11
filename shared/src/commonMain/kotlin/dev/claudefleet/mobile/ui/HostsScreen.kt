@@ -19,6 +19,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +54,8 @@ fun HostsScreen(
     modifier: Modifier = Modifier,
     /** A host's sheet (re-probe, recovery after a reboot); null where the hub offers none of it. */
     onHostDetails: ((String) -> Unit)? = null,
+    /** Add host (the hub's discover_hosts + add_host); null where the hub does not offer it to this pairing. */
+    onAddHost: (() -> Unit)? = null,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(title = "Hosts")
@@ -80,12 +83,17 @@ fun HostsScreen(
                                     )
                                 }
                             } else Text(
-                                text = "No hosts. Add one from the desktop app or the terminal.",
+                                text = if (onAddHost != null) "No hosts yet." else "No hosts. Add one from the desktop app or the terminal.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(32.dp),
                             )
                         }
+                    }
+                }
+                onAddHost?.let { add ->
+                    item(key = "add") {
+                        TextButton(onClick = add, modifier = Modifier.padding(horizontal = 8.dp)) { Text("Add a host") }
                     }
                 }
                 items(state.hosts, key = { it.alias }) { host ->

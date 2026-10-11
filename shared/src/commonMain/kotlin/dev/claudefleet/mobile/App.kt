@@ -1647,7 +1647,7 @@ private fun FleetRoute(
                     }
                 }
                 Screen.Usage -> {
-                    val usage = remember(repository, scope) { UsageViewModel(repository, container.usageActions, scope) }
+                    val usage = remember(repository, scope) { UsageViewModel(repository, container.usageActions, scope, credentials.canWrite) }
                     DisposableEffect(usage) {
                         usage.attach()
                         onDispose { usage.detach() }
@@ -1659,6 +1659,7 @@ private fun FleetRoute(
                         onSelect = { usage.select(it) },
                         onOpenSession = nav::open,
                         onDismissError = usage::dismissError,
+                        onRename = { uuid, name -> usage.rename(uuid, name); Unit },
                     )
                     if (layout == PhoneLayout.New) {
                         OrbitUsageScreen(state = usageState, nowSeconds = epochSeconds(), handlers = usageHandlers)
@@ -1810,6 +1811,7 @@ private fun FleetRoute(
                             onDismissError = hosts::dismissError,
                             onOpenHost = { nav.showSessionsFor(it) },
                             onHostDetails = onHostDetails,
+                            onAddHost = { addHost.open(); Unit }.takeIf { addHostState.available },
                         )
                     }
                     if (hostSheet.alias != null) {
@@ -1819,6 +1821,7 @@ private fun FleetRoute(
                             handlers = HostDetailHandlers(
                                 onClose = hostDetail::close,
                                 onProbe = { hostDetail.probe() },
+                                onCheck = { hostDetail.check() },
                                 onShowSessions = { hostSheet.alias?.let { alias -> hostDetail.close(); nav.showSessionsFor(alias) } },
                                 onCheckLost = { hostDetail.checkLost() },
                                 onRestore = { hostDetail.restore() },

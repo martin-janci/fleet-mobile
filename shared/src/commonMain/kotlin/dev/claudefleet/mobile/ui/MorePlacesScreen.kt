@@ -260,6 +260,8 @@ private fun HostRowItem(host: HostLine, nowSeconds: Long, behind: Boolean, check
  */
 @Composable
 fun OrbitUsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: Long, modifier: Modifier = Modifier) {
+    var naming by remember { mutableStateOf<AccountRow?>(null) }
+    naming?.let { a -> AccountNameDialog(a, onSave = { handlers.onRename(a.uuid, it) }, onDismiss = { naming = null }) }
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
             title = "Accounts and usage",
@@ -272,7 +274,8 @@ fun OrbitUsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: L
                 if (state.accountsAvailable && state.accounts.isNotEmpty()) {
                     items(state.accounts, key = { "account:${it.uuid}" }) {
                         Column {
-                            AccountItem(it, nowSeconds)
+                            val a = it
+                            AccountItem(a, nowSeconds, onClick = { naming = a }.takeIf { state.canRename })
                             if (state.limitsAvailable) AccountLimitsBlock(state.limits[it.uuid], nowSeconds)
                         }
                     }
@@ -384,7 +387,7 @@ private fun AccountLimitsBlock(snap: AccountUsageSnapshot?, nowSeconds: Long) {
 }
 
 @Composable
-private fun AccountItem(account: AccountRow, nowSeconds: Long) {
+private fun AccountItem(account: AccountRow, nowSeconds: Long, onClick: (() -> Unit)? = null) {
     PhoneRow(
         title = account.label,
         line = listOfNotNull(
@@ -396,6 +399,7 @@ private fun AccountItem(account: AccountRow, nowSeconds: Long) {
         lead = null,
         dot = false,
         age = relativeAgo(account.lastSeenAt, nowSeconds)?.let { "seen $it" },
+        onClick = onClick,
     )
 }
 

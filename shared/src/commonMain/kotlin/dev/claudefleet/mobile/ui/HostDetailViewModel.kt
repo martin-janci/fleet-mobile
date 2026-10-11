@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.HostActions
+import dev.claudefleet.mobile.model.HostCheck
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.LostCandidate
 import dev.claudefleet.mobile.model.RestoreReport
@@ -24,7 +25,12 @@ data class HostDetailUiState(
     val canProbe: Boolean = false,
     val canRestore: Boolean = false,
     val canDiscover: Boolean = false,
+    /** The hub runs the health checklist for this pairing (`check_host`). */
+    val canCheck: Boolean = false,
     val probing: Boolean = false,
+    val checking: Boolean = false,
+    /** The last checklist read for this host; null until one is asked for. */
+    val check: HostCheck? = null,
     /** The last dry run: what a restore would do. */
     val plan: RestoreReport? = null,
     val restoring: Boolean = false,
@@ -65,6 +71,8 @@ class HostDetailViewModel(
     private data class Local(
         val alias: String? = null,
         val probing: Boolean = false,
+        val checking: Boolean = false,
+        val check: HostCheck? = null,
         val plan: RestoreReport? = null,
         val restoring: Boolean = false,
         val restored: RestoreReport? = null,
@@ -103,7 +111,10 @@ class HostDetailViewModel(
             canProbe = caps.probeHost,
             canRestore = canWrite && caps.restoreSessions,
             canDiscover = caps.discoverLost,
+            canCheck = caps.checkHost,
             probing = l.probing,
+            checking = l.checking,
+            check = l.check,
             plan = l.plan,
             restoring = l.restoring,
             restored = l.restored,
@@ -135,6 +146,15 @@ class HostDetailViewModel(
         local.update { it.copy(probing = true, error = null) }
         guarded { actions.probe(alias) }
         local.update { it.copy(probing = false) }
+    }
+
+    /** The health checklist, over the hub's SSH: a read, asked for with a tap. */
+    fun check(): Job = scope.launch {
+        val alias = local.value.alias ?: return@launch
+        if (!fleet.capabilities.value.checkHost || local.value.checking) return@launch
+        local.update { it.copy(checking = true, error = null) }
+        val c = guarded { actions.check(alias) }
+        local.update { if (it.alias == alias) it.copy(checking = false, check = c ?: it.check) else it }
     }
 
     /** The dry run, and the scan for untracked conversations — both reads. */

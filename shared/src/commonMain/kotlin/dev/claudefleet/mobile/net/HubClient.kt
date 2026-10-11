@@ -29,6 +29,7 @@ import dev.claudefleet.mobile.model.DownloadRemoved
 import dev.claudefleet.mobile.model.PullRequestList
 import dev.claudefleet.mobile.model.FleetTask
 import dev.claudefleet.mobile.model.GithubRepo
+import dev.claudefleet.mobile.model.HostCheck
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.HubHealth
 import dev.claudefleet.mobile.model.WizardState
@@ -661,6 +662,20 @@ class HubClient(
     suspend fun listAccounts(): List<AccountRow> =
         call("list_accounts") { json.decodeFromJsonElement(ListSerializer(AccountRow.serializer()), it) }
 
+    /**
+     * Name account [uuid] (`set_account_nickname`): null or blank clears it,
+     * 32 characters at most. Returns the account as the hub now has it; the
+     * desktop and every other device read the same name.
+     */
+    suspend fun setAccountNickname(uuid: String, nickname: String?): AccountRow =
+        call(
+            "set_account_nickname",
+            buildJsonObject {
+                put("uuid", uuid)
+                put("nickname", nickname?.trim()?.ifEmpty { null })
+            },
+        ) { json.decodeFromJsonElement(AccountRow.serializer(), it) }
+
     /** Every account's last usage reading (`account_usage`, readonly). */
     suspend fun accountUsage(): List<AccountUsageSnapshot> =
         call("account_usage") { json.decodeFromJsonElement(ListSerializer(AccountUsageSnapshot.serializer()), it) }
@@ -881,6 +896,10 @@ class HubClient(
                 put("session_id", sessionId)
             },
         ) { }
+
+    /** [alias]'s health checklist, read over the hub's SSH (`check_host`, readonly). */
+    suspend fun checkHost(alias: String): HostCheck =
+        call("check_host", buildJsonObject { put("alias", alias) }) { json.decodeFromJsonElement(HostCheck.serializer(), it) }
 
     /** The hub's `~/.ssh/config` hosts (`discover_hosts`, readonly): candidates for [addHost]. */
     suspend fun discoverHosts(): List<SshHost> =

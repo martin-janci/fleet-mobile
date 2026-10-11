@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.data
 
+import dev.claudefleet.mobile.model.HostCheck
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.LostCandidate
 import dev.claudefleet.mobile.model.RestoreReport
@@ -17,10 +18,14 @@ interface HostActions {
     suspend fun restore(alias: String): RestoreReport
     suspend fun discover(alias: String): List<LostCandidate>
     suspend fun resume(alias: String, candidate: LostCandidate): SessionRow
+
+    /** [alias]'s health checklist (`check_host`); called only where the hub lists it. */
+    suspend fun check(alias: String): HostCheck = throw UnsupportedOperationException("check_host")
 }
 
 class HubHostActions(private val session: AppSession) : HostActions {
     override suspend fun probe(alias: String) = session.withClient { it.probeHost(alias) }
+    override suspend fun check(alias: String) = session.withClient { it.checkHost(alias) }
     override suspend fun restorePlan(alias: String) = session.withClient { it.restoreHostSessions(alias, dryRun = true) }
     override suspend fun restore(alias: String) = session.withClient { it.restoreHostSessions(alias, dryRun = false) }
     override suspend fun discover(alias: String) = session.withClient { it.discoverLostSessions(alias) }

@@ -3,7 +3,9 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.HostActions
+import dev.claudefleet.mobile.model.HostCheck
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.lines
 import dev.claudefleet.mobile.model.LostCandidate
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.RestoreOutcome
@@ -67,6 +69,10 @@ private class Hosts : HostActions {
     override suspend fun resume(alias: String, candidate: LostCandidate): SessionRow {
         calls += "resume:${candidate.claudeSessionId}"
         return SessionRow(id = 42, tmuxName = "resumed")
+    }
+    override suspend fun check(alias: String): HostCheck {
+        calls += "check"
+        return HostCheck(alias = alias, checkedAt = 9, tmuxVersion = "3.4", agentsOnPath = listOf("claude"), fleetHooks = false, guardHook = true)
     }
 }
 
@@ -142,5 +148,31 @@ class HostDetailViewModelTest {
         vm.close()
         runCurrent()
         assertNull(vm.state.value.alias)
+    }
+
+    @Test
+    fun the_health_checklist_is_asked_for_and_offered_only_where_the_hub_lists_it() = runTest {
+        val hosts = Hosts()
+        val none = HostDetailViewModel(HostFleet(ALL_HOST), hosts, backgroundScope, canWrite = true)
+        none.open("pine").join()
+        none.check().join()
+        assertFalse(none.state.value.canCheck)
+        assertFalse("check" in hosts.calls)
+
+        val vm = HostDetailViewModel(HostFleet(ALL_HOST + HubCapabilities.CHECK_HOST), hosts, backgroundScope, canWrite = false)
+        vm.open("pine").join()
+        runCurrent()
+        assertTrue(vm.state.value.canCheck)
+        assertNull(vm.state.value.check)
+        vm.check().join()
+        runCurrent()
+        val lines = vm.state.value.check!!.lines()
+        assertEquals(listOf(true, true, false, true), lines.map { it.ok })
+        assertEquals("3.4", lines.first().detail)
+    }
+
+    @Test
+    fun a_host_that_did_not_answer_has_no_lines_only_its_error() {
+        assertTrue(HostCheck(alias = "pine", error = "timed out").lines().isEmpty())
     }
 }
