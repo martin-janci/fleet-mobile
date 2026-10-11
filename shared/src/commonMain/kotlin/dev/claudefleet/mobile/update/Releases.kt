@@ -71,6 +71,15 @@ data class ReleaseInfo(
 fun interface ReleaseSource {
     /** The newest release, or null when there is none or it could not be read. Never throws. */
     suspend fun latest(): ReleaseInfo?
+
+    /**
+     * The same, with [refresh] asking the source to read its release channel
+     * again first: a person's "Check now". Only the hub can ([HubReleases]);
+     * every other source has nothing to re-read and answers as [latest].
+     * A member with a body, not a default argument: a `fun interface`'s one
+     * abstract function may not carry one.
+     */
+    suspend fun latest(refresh: Boolean): ReleaseInfo? = latest()
 }
 
 /**

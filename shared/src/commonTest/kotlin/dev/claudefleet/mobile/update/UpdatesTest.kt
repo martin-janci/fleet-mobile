@@ -7,6 +7,7 @@ import dev.claudefleet.mobile.ui.Screen
 import dev.claudefleet.mobile.ui.Tab
 import dev.claudefleet.mobile.ui.hubMismatchWords
 import dev.claudefleet.mobile.ui.kit.megabytes
+import dev.claudefleet.mobile.ui.updateCheckLine
 import dev.claudefleet.mobile.ui.updateSteps
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -156,6 +157,63 @@ class UpdatesTest {
         val same = UpdateViewModel({ release }, FakeInstaller(), FakePrefs(), "0.9.5", backgroundScope)
         same.check()
         assertNull(same.state.value.available)
+    }
+
+    /** A source that records whether each read asked for a refresh. */
+    private class RecordingSource(var answer: ReleaseInfo?) : ReleaseSource {
+        val refreshes = mutableListOf<Boolean>()
+        var gate: CompletableDeferred<Unit>? = null
+        override suspend fun latest(): ReleaseInfo? = latest(false)
+        override suspend fun latest(refresh: Boolean): ReleaseInfo? {
+            refreshes += refresh
+            gate?.await()
+            return answer
+        }
+    }
+
+    @Test
+    fun check_now_asks_for_a_refresh_says_checking_then_what_it_found() = runTest {
+        val source = RecordingSource(release)
+        val prefs = FakePrefs()
+        val vm = UpdateViewModel(source, FakeInstaller(), prefs, "v0.9.4", backgroundScope)
+        // Tell me: a person's tap checks all the same.
+        vm.setMode(UpdateMode.TELL)
+        vm.check()
+        assertEquals(listOf(false), source.refreshes, "a routine check never asks the hub to refresh")
+        assertEquals(ManualCheck.Idle, vm.state.value.manual)
+
+        source.gate = CompletableDeferred()
+        val job = vm.checkNow()
+        runCurrent()
+        assertEquals(ManualCheck.Running, vm.state.value.manual)
+        assertEquals("Checking…", updateCheckLine(ManualCheck.Running))
+        // A second tap while it runs is the same check.
+        assertTrue(vm.checkNow() === job)
+        source.gate!!.complete(Unit)
+        job.join()
+        assertEquals(listOf(false, true), source.refreshes)
+        assertEquals(ManualCheck.Done("0.9.4", "0.9.5"), vm.state.value.manual)
+        assertEquals("v0.9.5 available", updateCheckLine(vm.state.value.manual))
+
+        // The hub now offers nothing newer than what runs.
+        source.gate = null
+        source.answer = release.copy(version = "0.9.4")
+        vm.checkNow().join()
+        assertEquals(ManualCheck.Done("0.9.4", null), vm.state.value.manual)
+        assertEquals("Up to date (v0.9.4)", updateCheckLine(vm.state.value.manual))
+    }
+
+    @Test
+    fun check_now_does_nothing_when_updates_are_off_or_the_platform_updates_elsewhere() = runTest {
+        val source = RecordingSource(release)
+        val off = UpdateViewModel(source, FakeInstaller(), FakePrefs(), "0.9.4", backgroundScope)
+        off.setMode(UpdateMode.OFF)
+        off.checkNow().join()
+        val ios = UpdateViewModel(source, null, FakePrefs(), "0.9.4", backgroundScope)
+        ios.checkNow().join()
+        assertEquals(emptyList(), source.refreshes)
+        assertEquals(ManualCheck.Idle, off.state.value.manual)
+        assertEquals(ManualCheck.Idle, ios.state.value.manual)
     }
 
     @Test

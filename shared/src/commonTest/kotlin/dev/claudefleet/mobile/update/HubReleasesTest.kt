@@ -75,6 +75,31 @@ class HubReleasesTest {
         assertNull(checkRequest(android, "dev"))
     }
 
+    /** "Check now" adds `refresh`; every routine check sends the body it always has, without the key. */
+    @Test
+    fun refresh_is_sent_only_when_a_person_asked_for_it() {
+        val routine = Json.parseToJsonElement(assertNotNull(checkRequest(android, "0.9.4"))).jsonObject
+        assertNull(routine["refresh"])
+        val asked = Json.parseToJsonElement(assertNotNull(checkRequest(android, "0.9.4", refresh = true))).jsonObject
+        assertEquals("true", asked["refresh"]!!.jsonPrimitive.content)
+        assertEquals(routine.keys + "refresh", asked.keys)
+    }
+
+    @Test
+    fun the_hub_is_asked_to_refresh_only_through_latest_refresh() = runTest {
+        val bodies = mutableListOf<String>()
+        val hub = HubReleases(android, "0.9.4", { bodies += it; decision("update_available") }, gitHub)
+        hub.latest()
+        hub.latest(refresh = true)
+        // Through the interface, as UpdateViewModel calls it.
+        val source: ReleaseSource = hub
+        source.latest(true)
+        val refresh = bodies.map { Json.parseToJsonElement(it).jsonObject["refresh"]?.jsonPrimitive?.content }
+        assertEquals(listOf(null, "true", "true"), refresh)
+        // A source with no channel to re-read answers as it always does.
+        assertEquals("0.9.9", gitHub.latest(refresh = true)?.version)
+    }
+
     @Test
     fun an_offered_apk_becomes_the_card_with_its_signer() {
         val r = assertNotNull(releaseFromDecision(decision("update_available")))
