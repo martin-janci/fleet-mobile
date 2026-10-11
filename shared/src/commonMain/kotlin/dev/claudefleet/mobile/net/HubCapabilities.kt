@@ -201,6 +201,14 @@ data class HubCapabilities(
     val switchAccount: Boolean
         get() = CHECK_ACCOUNT_HEADROOM in tools && accepts(RESTART_SESSION, "profile")
 
+    /**
+     * The model / effort pickers can relaunch a session under a pick
+     * (`restart_session { model, effort }`) — how a Codex session, whose
+     * `/model` takes no argument, changes model. Read off the schema: an
+     * older hub would ignore the arguments and restart unchanged.
+     */
+    val relaunchWithModel: Boolean get() = accepts(RESTART_SESSION, "model")
+
     /** Send later (redesign 14.14): the hub keeps a prompt for the session's next idle moment (5.10). */
     val sendLater: Boolean get() = QUEUE_PROMPT in tools && QUEUED_PROMPTS in tools
 

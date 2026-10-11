@@ -3,7 +3,9 @@ package dev.claudefleet.mobile.ui
 /**
  * The composer's helpers, as the desktop's `conversation.ts` has them: the
  * slash-command hint list, and the model and effort pickers, which send
- * `/model <alias>` and `/effort <level>` like any typed command.
+ * `/model <alias>` and `/effort <level>` like any typed command — per agent:
+ * a Codex session gets Codex's commands and models, and its pickers relaunch
+ * it (see [switchesByRelaunch]).
  */
 data class SlashCommand(val name: String, val description: String, val args: Boolean = false)
 
@@ -39,11 +41,46 @@ val SLASH_COMMANDS: List<SlashCommand> = listOf(
  * whole draft is one token beginning with `/`: once an argument or a second
  * line is being typed, the suggestions get out of the way.
  */
-fun matchSlashCommands(draft: String): List<SlashCommand> {
+fun matchSlashCommands(draft: String, agent: String? = null): List<SlashCommand> {
     if (!draft.startsWith("/") || draft.any { it.isWhitespace() }) return emptyList()
     val prefix = draft.drop(1).lowercase()
-    return SLASH_COMMANDS.filter { it.name.startsWith(prefix) }
+    return slashCommandsFor(agent).filter { it.name.startsWith(prefix) }
 }
+
+/** The hub's `agent` value for OpenAI's Codex CLI. */
+const val AGENT_CODEX = "codex"
+
+/**
+ * Codex's built-in commands worth offering — the desktop's
+ * `CODEX_SLASH_COMMANDS`, from fleet's Codex adapter. Codex's `/model` takes
+ * no argument: it opens Codex's own picker.
+ */
+val CODEX_SLASH_COMMANDS: List<SlashCommand> = listOf(
+    SlashCommand("model", "Choose the model and reasoning effort"),
+    SlashCommand("permissions", "Choose what Codex is allowed to do"),
+    SlashCommand("new", "Start a new chat"),
+    SlashCommand("compact", "Summarise the conversation to free context"),
+    SlashCommand("status", "Show the configuration and token usage"),
+    SlashCommand("diff", "Show the git diff, untracked files included"),
+    SlashCommand("review", "Review the current changes"),
+    SlashCommand("plan", "Switch to Plan mode"),
+    SlashCommand("mention", "Mention a file", args = true),
+    SlashCommand("resume", "Resume a saved chat"),
+    SlashCommand("fork", "Fork the current chat"),
+    SlashCommand("rename", "Rename the current thread", args = true),
+    SlashCommand("init", "Write an AGENTS.md for this project"),
+    SlashCommand("skills", "Use skills"),
+    SlashCommand("mcp", "List MCP tools"),
+    SlashCommand("hooks", "View and manage lifecycle hooks"),
+    SlashCommand("memories", "Configure memory use and generation"),
+    SlashCommand("copy", "Copy the last response"),
+    SlashCommand("export", "Export the conversation as markdown"),
+    SlashCommand("exit", "Quit Codex (the tmux session stays)"),
+)
+
+/** The built-in commands a session of [agent] (the row's `agent`) offers. */
+fun slashCommandsFor(agent: String?): List<SlashCommand> =
+    if (agent == AGENT_CODEX) CODEX_SLASH_COMMANDS else SLASH_COMMANDS
 
 /** What accepting a suggestion puts in the box: a trailing space where an argument follows. */
 fun completeSlashCommand(c: SlashCommand): String = if (c.args) "/${c.name} " else "/${c.name}"
@@ -73,6 +110,42 @@ val EFFORT_OPTIONS: List<PickerOption> = listOf(
     PickerOption("xhigh", "Extra high"),
     PickerOption("max", "Max"),
 )
+
+/** The models Codex lists (`codex -m`), newest first — the desktop's `CODEX_MODEL_OPTIONS`. */
+val CODEX_MODEL_OPTIONS: List<PickerOption> = listOf(
+    PickerOption("gpt-6.1-sol", "GPT-6.1-Sol"),
+    PickerOption("gpt-6-astra", "GPT-6-Astra"),
+    PickerOption("gpt-6-sol", "GPT-6-Sol"),
+    PickerOption("gpt-6-luna", "GPT-6-Luna"),
+    PickerOption("gpt-5.6-sol", "GPT-5.6-Sol"),
+    PickerOption("gpt-5.6-terra", "GPT-5.6-Terra"),
+    PickerOption("gpt-5.6-luna", "GPT-5.6-Luna"),
+    PickerOption("gpt-5.5", "GPT-5.5"),
+)
+
+/** Codex's reasoning levels a session stores; Codex has no `auto`. */
+val CODEX_EFFORT_OPTIONS: List<PickerOption> = listOf(
+    PickerOption("low", "Low"),
+    PickerOption("medium", "Medium"),
+    PickerOption("high", "High"),
+    PickerOption("xhigh", "Extra high"),
+    PickerOption("max", "Max"),
+)
+
+/** The model or effort ([command]) picker's entries for a session of [agent]. */
+fun pickerOptionsFor(agent: String?, command: String): List<PickerOption> = when {
+    agent == AGENT_CODEX && command == "model" -> CODEX_MODEL_OPTIONS
+    agent == AGENT_CODEX -> CODEX_EFFORT_OPTIONS
+    command == "model" -> MODEL_OPTIONS
+    else -> EFFORT_OPTIONS
+}
+
+/**
+ * Whether [agent] changes model or effort only by a relaunch: Codex's
+ * `/model` takes no argument, so the hub restarts it on the same
+ * conversation with the pick (`restart_session { model, effort }`).
+ */
+fun switchesByRelaunch(agent: String?): Boolean = agent == AGENT_CODEX
 
 /** The line a picker sends — `/model opus` — or null for a blank or multi-word value. */
 fun pickerCommand(command: String, value: String): String? {

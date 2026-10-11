@@ -221,6 +221,8 @@ fun SessionScreen(
     /** ⋮ Background agent…'s Start ([SessionViewModel.startBackground]). */
     onStartBackground: (String, String, BackgroundOptions) -> Unit = { _, _, _ -> },
     onSendCommand: (String) -> Unit,
+    /** A model / effort pick that relaunches the session ([SessionViewModel.relaunchWith]). */
+    onRelaunchWith: (model: String?, effort: String?) -> Unit = { _, _ -> },
     /** The chip row's own content — the fleet's list, see `ui/QuickReplies.kt`. */
     quickReplies: List<QuickReply>,
     /**
@@ -672,6 +674,7 @@ fun SessionScreen(
                         onEdit = onEdit,
                         onStartBackground = onStartBackground,
                         onSendCommand = onSendCommand,
+                        onRelaunchWith = onRelaunchWith,
                         work = work,
                         workHandlers = workHandlers,
                         tasks = tasks,
@@ -1058,7 +1061,7 @@ fun SessionScreen(
                             Chrome.Full -> Column {
                                 // The desktop's slash menu: while the draft is one
                                 // `/word`, the commands it could be; a tap fills it in.
-                                val slash = if (state.readOnly) emptyList() else matchSlashCommands(state.draft)
+                                val slash = if (state.readOnly) emptyList() else matchSlashCommands(state.draft, state.session?.agent)
                                 if (slash.isNotEmpty()) SlashSuggestions(slash, onPick = { onDraftChange(completeSlashCommand(it)) })
                                 // Hidden outright, not merely dimmed, in the same two cases
                                 // the card itself takes over the space for: while it is up
@@ -1438,6 +1441,7 @@ private fun SessionBar(
     /** ⋮ Background agent…'s Start ([SessionViewModel.startBackground]). */
     onStartBackground: (String, String, BackgroundOptions) -> Unit = { _, _, _ -> },
     onSendCommand: (String) -> Unit,
+    onRelaunchWith: (model: String?, effort: String?) -> Unit = { _, _ -> },
     work: SessionWorkUiState,
     workHandlers: SessionWorkHandlers,
     tasks: SessionTasksUiState,
@@ -1532,6 +1536,7 @@ private fun SessionBar(
                     onReview = onReview,
                     onRepair = onRepair,
                     onSendCommand = onSendCommand,
+                    onRelaunchWith = onRelaunchWith,
                     onMove = onMove,
                     orbit = orbit,
                 )
@@ -1685,12 +1690,15 @@ private fun SessionOverflowMenu(
     onReview: (String) -> Unit = {},
     onRepair: () -> Unit = {},
     onSendCommand: (String) -> Unit = {},
+    onRelaunchWith: (model: String?, effort: String?) -> Unit = { _, _ -> },
     onMove: (() -> Unit)? = null,
     /** The New bar's written-out menu (redesign 14.14); null keeps the Classic one. */
     orbit: OrbitMenu? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     var picking by remember { mutableStateOf<String?>(null) }
+    // A Codex pick waiting on its confirm: (command, option).
+    var relaunchPick by remember { mutableStateOf<Pair<String, PickerOption>?>(null) }
     var showReview by remember { mutableStateOf(false) }
     var showRepairConfirm by remember { mutableStateOf(false) }
     var showRecreateConfirm by remember { mutableStateOf(false) }
@@ -1878,10 +1886,44 @@ private fun SessionOverflowMenu(
     }
 
     picking?.let { command ->
-        PickerSheet(
+        val agent = state.session?.agent
+        val relaunch = switchesByRelaunch(agent)
+        if (relaunch && !state.canRelaunchModel) {
+            // Codex's `/model` takes no argument and this hub cannot relaunch
+            // under a pick: open Codex's own picker, answered on the agent tab.
+            ConfirmSheet(
+                title = "Open ${agentName(state.session)}'s model menu?",
+                body = "${agentName(state.session)} picks its model in its own menu. Open it, then choose on the agent tab.",
+                confirm = "Open /model",
+                onConfirm = { picking = null; onSendCommand("/model") },
+                onDismiss = { picking = null },
+            )
+        } else PickerSheet(
             command = command,
-            onPick = { value -> picking = null; pickerCommand(command, value)?.let(onSendCommand) },
+            options = pickerOptionsFor(agent, command),
+            meta = if (relaunch) "${agentName(state.session)} is relaunched on the same conversation." else null,
+            onPick = { value ->
+                picking = null
+                if (relaunch) {
+                    pickerOptionsFor(agent, command).firstOrNull { it.value == value }?.let { relaunchPick = command to it }
+                } else {
+                    pickerCommand(command, value)?.let(onSendCommand)
+                }
+            },
             onDismiss = { picking = null },
+        )
+    }
+    relaunchPick?.let { (command, option) ->
+        val name = agentName(state.session)
+        ConfirmSheet(
+            title = if (command == "model") "Switch $name to ${option.label}?" else "Set $name's effort to ${option.label}?",
+            body = "$name picks its ${if (command == "model") "model" else "reasoning effort"} when it starts, so this relaunches the session on the same conversation. A turn in progress is lost.",
+            confirm = "Relaunch",
+            onConfirm = {
+                relaunchPick = null
+                if (command == "model") onRelaunchWith(option.value, null) else onRelaunchWith(null, option.value)
+            },
+            onDismiss = { relaunchPick = null },
         )
     }
     if (showReview) {
@@ -2038,17 +2080,25 @@ internal fun ReviewDialog(onStart: (String) -> Unit, onDismiss: () -> Unit) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PickerSheet(command: String, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+private fun PickerSheet(
+    command: String,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+    /** The agent's entries ([pickerOptionsFor]); Claude Code's by default. */
+    options: List<PickerOption> = if (command == "model") MODEL_OPTIONS else EFFORT_OPTIONS,
+    /** How the pick reaches the session, when it is not sent as a command (a Codex relaunch). */
+    meta: String? = null,
+) {
     val model = command == "model"
     var chosen by remember(command) { mutableStateOf<String?>(null) }
     BottomSheet(
         title = if (model) "Switch the model" else "Set the effort",
-        meta = if (model) "Sent to the session as /model." else "Sent to the session as /effort.",
+        meta = meta ?: if (model) "Sent to the session as /model." else "Sent to the session as /effort.",
         onDismiss = onDismiss,
         primary = SheetAction(if (model) "Switch" else "Set", enabled = chosen != null) { chosen?.let(onPick) },
         scrollable = true,
     ) {
-        for (option in if (model) MODEL_OPTIONS else EFFORT_OPTIONS) {
+        for (option in options) {
             SheetOption(
                 title = option.label,
                 selected = option.value == chosen,

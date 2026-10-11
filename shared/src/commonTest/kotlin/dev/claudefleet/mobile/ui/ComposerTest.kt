@@ -42,4 +42,24 @@ class ComposerTest {
         assertEquals("Line one and two", withDictation("Line one\n", "and two"))
         assertEquals("keep this", withDictation("keep this", "   "))
     }
+
+    @Test
+    fun a_codex_session_suggests_codex_commands_not_claudes() {
+        assertEquals(listOf("compact", "copy"), matchSlashCommands("/c", AGENT_CODEX).map { it.name })
+        assertTrue(matchSlashCommands("/context", AGENT_CODEX).isEmpty())
+        assertEquals(listOf("new"), matchSlashCommands("/n", AGENT_CODEX).map { it.name })
+        // A row from a hub that names no agent is Claude Code's.
+        assertEquals(matchSlashCommands("/co"), matchSlashCommands("/co", null))
+    }
+
+    @Test
+    fun a_codex_session_picks_from_codex_models_by_a_relaunch() {
+        assertEquals(CODEX_MODEL_OPTIONS, pickerOptionsFor(AGENT_CODEX, "model"))
+        assertTrue(pickerOptionsFor(AGENT_CODEX, "model").none { it.value == "opus" })
+        assertTrue(pickerOptionsFor(AGENT_CODEX, "effort").none { it.value == "auto" })
+        assertEquals(MODEL_OPTIONS, pickerOptionsFor("claude", "model"))
+        assertEquals(EFFORT_OPTIONS, pickerOptionsFor(null, "effort"))
+        assertTrue(switchesByRelaunch(AGENT_CODEX))
+        assertTrue(!switchesByRelaunch("claude") && !switchesByRelaunch(null))
+    }
 }

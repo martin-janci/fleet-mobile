@@ -133,10 +133,13 @@ class TheBackGestureReachesTheNavigatorTest {
                 "installState.installing",
                 "trackersState.wizard != null",
                 "practiceState.open != null",
-                "fleetPageOpen || place != SettingsPlace.Home",
-                "fleetPageOpen",
                 "whatsNew != null",
                 "fleetCheck || importing || (help.mode == null && whatsNew == null)",
+                // SettingsRoute's two, in source order after FleetRoute; it is
+                // composed from FleetRoute's Settings branch, so at runtime they
+                // still come before What's new's.
+                "fleetPageOpen || place != SettingsPlace.Home",
+                "fleetPageOpen",
                 "wizard && wizardStep.previous != null && !state.creating",
                 "wizard && wizardStep.previous == null && !state.creating && newSessionTyped(state)",
                 "wizard && toolsState.addingOn != null",
