@@ -3,6 +3,8 @@ package dev.claudefleet.mobile.ui
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import dev.claudefleet.mobile.model.REPAIR_STEPS
+import dev.claudefleet.mobile.model.StartStepState
 import dev.claudefleet.mobile.ui.kit.FullscreenLoader
 import dev.claudefleet.mobile.ui.kit.FullscreenWait
 import dev.claudefleet.mobile.ui.kit.LoaderStep
@@ -10,11 +12,13 @@ import dev.claudefleet.mobile.ui.kit.StepState
 
 /*
  * The Hex field over a session while its workspace is repaired or the
- * session recreated (MobileFullscreenLoaders). Both are one hub call that
- * answers at the end, so the checklist names what the hub goes through in
- * order and ticks nothing on the way: the first step is the one it starts
- * on, the rest wait, and the loader leaves when the answer lands (in the
- * conversation, as before). Leaving early is safe: the call runs on.
+ * session recreated (MobileFullscreenLoaders). A repair on a contract-17
+ * hub reports its four steps as `repair:progress` frames (gap plan G7.3)
+ * and the checklist ticks them off as they land. A recreate, and a repair
+ * on an older hub, is one call that answers at the end: the checklist then
+ * names what the hub goes through in order and ticks nothing on the way.
+ * The loader leaves when the answer lands (in the conversation, as before).
+ * Leaving early is safe: the call runs on.
  */
 
 /** Which of the two long session repairs the Hex field covers. */
@@ -48,21 +52,62 @@ internal fun repairWaitSteps(wait: RepairWait): List<LoaderStep> {
     return labels.mapIndexed { i, label -> LoaderStep(label, if (i == 0) StepState.Running else StepState.Pending) }
 }
 
+/** A reported repair step, in words: `check`, `fix`, `verify`, `pane` ([REPAIR_STEPS]). */
+internal fun repairStepLabel(step: String): String = when (step) {
+    "check" -> "Check the folder, worktree, branch and pane"
+    "fix" -> "Fix the worktree and its branch"
+    "verify" -> "Check the worktree again"
+    "pane" -> "Start the pane in the worktree"
+    else -> step
+}
+
+/**
+ * The checklist from the hub's own reports ([reported], keyed by
+ * [REPAIR_STEPS]): done steps ticked, a started one running, a failed one
+ * marked so, the rest waiting. Before the first frame the first step reads
+ * as running, since the call is already on its way.
+ */
+internal fun repairReportedSteps(reported: Map<String, StartStepState>): List<LoaderStep> {
+    val anyMoved = reported.values.any { it != StartStepState.PENDING }
+    return REPAIR_STEPS.mapIndexed { i, step ->
+        when (reported[step] ?: StartStepState.PENDING) {
+            StartStepState.DONE -> LoaderStep(repairStepLabel(step), StepState.Done)
+            StartStepState.STARTED -> LoaderStep(repairStepLabel(step), StepState.Running)
+            StartStepState.FAILED -> LoaderStep(repairStepLabel(step), StepState.Running, detail = "failed")
+            StartStepState.PENDING ->
+                LoaderStep(repairStepLabel(step), if (!anyMoved && i == 0) StepState.Running else StepState.Pending)
+        }
+    }
+}
+
 internal const val REPAIR_WAIT_NOTE: String =
     "The hub answers once, when it is done. You can leave; the result lands in the conversation."
 
+internal const val REPAIR_REPORTED_NOTE: String =
+    "You can leave; the repair runs on and the result lands in the conversation."
+
 const val REPAIR_WAIT_TAG = "session.repairWait"
 
-/** The Hex field for [wait] over [name]'s session. [onLeave] hides it; the hub's call runs on. */
+/**
+ * The Hex field for [wait] over [name]'s session. [reported] is a repair's
+ * steps as the hub reports them, or null when it reports none. [onLeave]
+ * hides it; the hub's call runs on.
+ */
 @Composable
-fun RepairWaitScreen(wait: RepairWait, name: String?, onLeave: () -> Unit) {
+fun RepairWaitScreen(
+    wait: RepairWait,
+    name: String?,
+    reported: Map<String, StartStepState>? = null,
+    onLeave: () -> Unit,
+) {
+    val ticking = wait == RepairWait.Repair && reported != null
     FullscreenLoader(
         wait = FullscreenWait.Repair,
         title = repairWaitTitle(wait),
         meta = name,
         onExit = onLeave,
-        steps = repairWaitSteps(wait),
-        note = REPAIR_WAIT_NOTE,
+        steps = if (ticking) repairReportedSteps(reported!!) else repairWaitSteps(wait),
+        note = if (ticking) REPAIR_REPORTED_NOTE else REPAIR_WAIT_NOTE,
         modifier = Modifier.testTag(REPAIR_WAIT_TAG),
     )
 }

@@ -132,6 +132,9 @@ interface SessionActions {
     /** Make the session's directory a healthy worktree with its pane running there. */
     suspend fun repair(sessionId: Long): RepairReport
 
+    /** [repair], its steps reported as `repair:progress` frames carrying [progressToken] (hub contract 17). */
+    suspend fun repair(sessionId: Long, progressToken: String?): RepairReport = repair(sessionId)
+
     /** Kill and rebuild the session in its worktree, resuming its conversation — a ghost too. */
     suspend fun recreate(sessionId: Long): SessionRow
 
@@ -231,6 +234,9 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
         session.withClient { it.spawnReview(sessionId, prompt) }
 
     override suspend fun repair(sessionId: Long): RepairReport = session.withClient { it.repairSession(sessionId) }
+
+    override suspend fun repair(sessionId: Long, progressToken: String?): RepairReport =
+        session.withClient { it.repairSession(sessionId, progressToken) }
 
     override suspend fun recreate(sessionId: Long): SessionRow = session.withClient { it.recreateSession(sessionId) }
 

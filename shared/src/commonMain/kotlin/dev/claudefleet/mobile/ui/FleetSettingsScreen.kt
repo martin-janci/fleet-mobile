@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.model.playbookActivity
 import dev.claudefleet.mobile.model.relativeAgo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.selection.toggleable
@@ -368,6 +369,7 @@ internal fun FieldRow(
                 append(d.help)
                 if (range.isNotEmpty()) append(" ($range)")
                 hint?.let { append(" "); append(it) }
+                playbookActivity(d.key, state.playbooksWeek)?.let { append(" "); append(it) }
                 if (d.restart == "app") append(" Applies after the hub restarts.")
                 d.ownedBy?.let { append(" Change it with $it.") }
                 if (!d.readOnlyHere && state.canWrite && !editable) append(" Change it on a desktop.")

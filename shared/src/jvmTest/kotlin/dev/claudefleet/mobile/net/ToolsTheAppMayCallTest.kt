@@ -258,6 +258,10 @@ class ToolsTheAppMayCallTest {
         // model once. Called only when `tools/list` names it to this token
         // (`HubCapabilities.proposeHost`); a refusal hides the proposal.
         "propose_host_placement",
+        // Add a project resuming on the person's other device (hub contract
+        // 17, gap plan G7.2): `wizard_state`, a person's own rows, called
+        // only where `tools/list` names it (`HubCapabilities.wizardState`).
+        "wizard_state",
     )
 
     @Test

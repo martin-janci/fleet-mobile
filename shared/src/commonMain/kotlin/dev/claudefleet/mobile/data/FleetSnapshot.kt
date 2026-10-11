@@ -67,10 +67,13 @@ val SIGNAL_EVENT_KINDS: List<String> = listOf("download", "account_usage", "gran
  * `start` (`start:progress`, claude-fleet redesign step 5.13), the steps of a
  * `new_session` this phone started with a `start_token`. The frame carries
  * the token, the step and its state, nothing else; the New session form
- * reads it from [FleetState.startProgress]. A hub that does not know the
- * kind ignores it in `?kinds=`.
+ * reads it from [FleetState.startProgress]. `repair` (`repair:progress`,
+ * hub contract 17) is the same for a `repair_session` this phone sent with a
+ * `progress_token`: the session's repair loader ticks from
+ * [FleetState.repairProgress]. A hub that does not know a kind ignores it in
+ * `?kinds=`.
  */
-val PROGRESS_EVENT_KINDS: List<String> = listOf("start")
+val PROGRESS_EVENT_KINDS: List<String> = listOf("start", "repair")
 
 /** Everything the stream asks the hub for with `?kinds=`. */
 val STREAM_EVENT_KINDS: List<String> = SNAPSHOT_EVENT_KINDS + SIGNAL_EVENT_KINDS + PROGRESS_EVENT_KINDS
@@ -207,6 +210,10 @@ fun HubEvent.Row.isUpdateDecisionFrame(): Boolean = name == "update:decision"
 /** The step a `start:progress` frame reports, or null for any other frame and for one that does not decode. */
 fun HubEvent.Row.startProgress(): StartProgress? =
     if (name == "start:progress") decode(StartProgress.serializer(), payload) else null
+
+/** The step a `repair:progress` frame reports (same shape as a start's), or null for any other frame. */
+fun HubEvent.Row.repairProgress(): StartProgress? =
+    if (name == "repair:progress") decode(StartProgress.serializer(), payload) else null
 
 /** The download a `download:changed` frame names, or null for any other frame. */
 fun HubEvent.Row.downloadId(): Long? =

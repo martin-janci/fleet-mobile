@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.data
 
+import dev.claudefleet.mobile.model.HubHealth
 import dev.claudefleet.mobile.model.PagesBundle
 import dev.claudefleet.mobile.model.SettingDescriptor
 import dev.claudefleet.mobile.model.SettingsDecided
@@ -23,6 +24,8 @@ interface FleetSettingsActions {
     suspend fun decide(accept: List<Long>, reject: List<Long>): SettingsDecided
     /** One setting's writes, newest first (`setting_history`). */
     suspend fun history(key: String): List<SettingWrite>
+    /** `fleet_health`, for the week's playbook runs and Jev's answers; null where it is not read. */
+    suspend fun health(): HubHealth? = null
 }
 
 /** [FleetSettingsActions] against the paired hub. */
@@ -33,6 +36,7 @@ class HubFleetSettingsActions(private val session: AppSession) : FleetSettingsAc
         session.withClient { it.setSetting(key, value) }
     override suspend fun pending(): SettingsPending = session.withClient { it.settingProposals() }
     override suspend fun history(key: String): List<SettingWrite> = session.withClient { it.settingHistory(key) }
+    override suspend fun health(): HubHealth = session.withClient { it.fleetHealth() }
     override suspend fun decide(accept: List<Long>, reject: List<Long>): SettingsDecided =
         session.withClient { it.decideSettingProposals(accept, reject) }
 }

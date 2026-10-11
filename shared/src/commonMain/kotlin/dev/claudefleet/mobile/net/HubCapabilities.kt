@@ -137,6 +137,9 @@ data class HubCapabilities(
     val repairSession: Boolean get() = REPAIR_SESSION in tools
     val newBgSession: Boolean get() = NEW_BG_SESSION in tools
 
+    /** Wizards resume on the person's other device (`wizard_state`, contract 17). */
+    val wizardState: Boolean get() = WIZARD_STATE in tools
+
     /**
      * Jev may propose a host (claude-fleet N5, `propose_host_placement`):
      * the New session wizard's Where step, and a host choice on a form in
@@ -384,6 +387,7 @@ data class HubCapabilities(
         const val SPAWN_REVIEW = "spawn_review"
         const val REPAIR_SESSION = "repair_session"
         const val NEW_BG_SESSION = "new_bg_session"
+        const val WIZARD_STATE = "wizard_state"
         const val NEW_SESSION = "new_session"
         const val RESTORE_HOST_SESSIONS = "restore_host_sessions"
         const val DISCOVER_LOST_SESSIONS = "discover_lost_sessions"

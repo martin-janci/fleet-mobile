@@ -25,6 +25,7 @@ import dev.claudefleet.mobile.model.StartProgress
 import dev.claudefleet.mobile.model.StartStepState
 import dev.claudefleet.mobile.model.backgroundAgentWord
 import dev.claudefleet.mobile.model.backgroundAgents
+import dev.claudefleet.mobile.model.backgroundOptionsFor
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CompletableDeferred
@@ -493,6 +494,18 @@ class NewSessionStartTest {
     }
 
     // ---- the background agent's Agent (MobileMissions) ----
+
+    /** claude-fleet G7.3: the hub's Codex needs a project and refuses read-only and the stop limits. */
+    @Test
+    fun codex_goes_without_the_limits_and_only_into_a_project() {
+        assertEquals(BackgroundOptions(agent = "codex"), backgroundOptionsFor("codex", readOnly = true, stopAfterSecs = 3_600L, stopAfterUsd = 5.0, hasProject = true))
+        assertNull(backgroundOptionsFor("codex", readOnly = false, stopAfterSecs = null, stopAfterUsd = null, hasProject = false), "no project: Codex cannot start")
+        assertEquals(
+            BackgroundOptions(readOnly = true, stopAfterSecs = 3_600L, stopAfterUsd = 5.0),
+            backgroundOptionsFor("claude", readOnly = true, stopAfterSecs = 3_600L, stopAfterUsd = 5.0, hasProject = false),
+            "Claude Code keeps its limits and is never named",
+        )
+    }
 
     @Test
     fun codex_is_offered_only_where_the_hub_lists_it_and_claude_is_never_sent() = runTest {

@@ -110,6 +110,27 @@ const val BG_AGENT_CODEX = "codex"
 fun backgroundAgents(enumerated: Set<String>?): List<String> =
     listOf(BG_AGENT_CLAUDE) + listOf(BG_AGENT_CODEX).filter { enumerated?.contains(it) == true }
 
+/**
+ * PURE: what the background agent sheet sends for [agent] (claude-fleet
+ * G7.3). Claude Code is the hub's default and is never named; it takes the
+ * read-only switch and the stop limits. The hub's Codex takes none of them
+ * (it refuses `read_only` and the stop limits) and needs a project, so for
+ * Codex only the agent goes, and null means it cannot start without one.
+ */
+fun backgroundOptionsFor(
+    agent: String,
+    readOnly: Boolean,
+    stopAfterSecs: Long?,
+    stopAfterUsd: Double?,
+    hasProject: Boolean,
+): BackgroundOptions? = when (agent) {
+    BG_AGENT_CODEX -> if (hasProject) BackgroundOptions(agent = BG_AGENT_CODEX) else null
+    else -> BackgroundOptions(readOnly = readOnly, stopAfterSecs = stopAfterSecs, stopAfterUsd = stopAfterUsd)
+}
+
+/** Why Codex cannot start here: the hub runs it in a project only. */
+const val CODEX_NEEDS_PROJECT = "Codex runs in a project. Pick one first."
+
 /** An agent as the sheet names it: "Claude Code", "Codex". */
 fun backgroundAgentWord(agent: String): String = when (agent) {
     BG_AGENT_CODEX -> "Codex"

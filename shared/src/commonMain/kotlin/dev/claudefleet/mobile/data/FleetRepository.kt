@@ -218,6 +218,8 @@ class FleetRepository(
     // Lossy and buffered like `_sessionChanges`: a start's step, for the form waiting on it.
     private val _startProgress = MutableSharedFlow<StartProgress>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val startProgress: Flow<StartProgress> = _startProgress.asSharedFlow()
+    private val _repairProgress = MutableSharedFlow<StartProgress>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val repairProgress: Flow<StartProgress> = _repairProgress.asSharedFlow()
 
     override fun actionMissing(tool: String, action: String) {
         _capabilities.update { it.forgetting(tool, action) }
@@ -502,6 +504,7 @@ class FleetRepository(
                             if (event.isConfirmFrame()) _confirmChanges.tryEmit(Unit)
                             event.downloadId()?.let { _downloadChanges.tryEmit(it) }
                             event.startProgress()?.let { _startProgress.tryEmit(it) }
+                            event.repairProgress()?.let { _repairProgress.tryEmit(it) }
                         }
                     }
                 }
