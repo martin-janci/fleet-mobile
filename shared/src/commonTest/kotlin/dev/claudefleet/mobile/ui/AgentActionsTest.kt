@@ -68,6 +68,11 @@ class AgentActionsTest {
             agentActionTitle(action(payload = """{"repo":"o/r","number":4,"event":"APPROVE","comments":[{}]}""")),
         )
         assertEquals("jira comment", agentActionTitle(AgentAction(id = 1, kind = "jira_comment", payload = "not json")))
+        assertEquals(
+            "Label o/r#4: +core −lgtm",
+            agentActionTitle(AgentAction(id = 1, kind = "pr_labels", payload = """{"repo":"o/r","number":4,"add":["core"],"remove":["lgtm"]}""")),
+        )
+        assertEquals("Describe o/r#4", agentActionTitle(AgentAction(id = 1, kind = "pr_description", payload = """{"repo":"o/r","number":4}""")))
         assertEquals("Comment on L2S-7", agentActionTitle(AgentAction(id = 1, kind = "jira_comment", payload = """{"key":"L2S-7"}""")))
         assertEquals(
             "File a bug in PD for L2S-7: [pay] NPE",

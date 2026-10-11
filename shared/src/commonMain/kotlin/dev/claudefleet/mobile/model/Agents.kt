@@ -57,6 +57,12 @@ fun agentActionTitle(a: AgentAction): String {
     if (p != null) {
         fun f(k: String) = (p[k] as? JsonPrimitive)?.contentOrNull ?: "?"
         when (a.kind) {
+            "pr_labels" -> {
+                fun names(k: String) = (p[k] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
+                val changes = names("add").map { "+$it" } + names("remove").map { "−$it" }
+                return "Label ${f("repo")}#${f("number")}: ${changes.joinToString(" ")}"
+            }
+            "pr_description" -> return "Describe ${f("repo")}#${f("number")}"
             "jira_comment" -> return "Comment on ${f("key")}"
             "jira_create_bug" -> return "File a bug in ${f("project")} for ${f("source_key")}: ${f("summary")}"
             "jira_link" -> return "Link ${f("bug_key")} to ${f("source_key")} (${f("link_type").lowercase()})"
