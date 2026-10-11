@@ -18,6 +18,7 @@ import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
@@ -70,8 +71,9 @@ class HubReleasesTest {
         assertEquals("apk", platform["variant"]!!.jsonPrimitive.content)
         assertEquals("0.9.4", body["installed"]!!.jsonObject["version"]!!.jsonPrimitive.content)
         assertEquals("1a2b3c4", body["installed"]!!.jsonObject["commit"]!!.jsonPrimitive.content)
-        val window = body["speaks"]!!.jsonObject["contract_accepts"]!!.jsonObject
-        assertEquals(MAX_HUB_CONTRACT.toString(), window["max"]!!.jsonPrimitive.content)
+        // `[min, max]`: the hub's `Window` reads the array (the object form was refused).
+        val window = body["speaks"]!!.jsonObject["contract_accepts"]!!.jsonArray
+        assertEquals(listOf(MIN_HUB_CONTRACT.toString(), MAX_HUB_CONTRACT.toString()), window.map { it.jsonPrimitive.content })
         assertNull(checkRequest(android, "dev"))
     }
 
@@ -98,6 +100,17 @@ class HubReleasesTest {
         assertEquals(listOf(null, "true", "true"), refresh)
         // A source with no channel to re-read answers as it always does.
         assertEquals("0.9.9", gitHub.latest(refresh = true)?.version)
+    }
+
+    /** A failed check is "no card" for a routine read, but a person who asked is told why. */
+    @Test
+    fun a_failed_check_is_an_error_only_when_a_person_asked() = runTest {
+        val down = HubReleases(android, "0.9.4", { throw IllegalStateException("400 unreadable check") }, gitHub)
+        assertNull(down.latest())
+        assertEquals("400 unreadable check", assertFailsWith<CheckFailed> { down.latest(refresh = true) }.message)
+        val garbled = HubReleases(android, "0.9.4", { "not json" }, gitHub)
+        assertNull(garbled.latest())
+        assertFailsWith<CheckFailed> { garbled.latest(refresh = true) }
     }
 
     @Test

@@ -97,6 +97,9 @@ sealed interface ManualCheck {
      * the two apart.
      */
     data class Done(val installed: String, val offered: String?) : ManualCheck
+
+    /** The hub could not be asked, or its answer could not be read: [reason] says which. */
+    data class Failed(val reason: String) : ManualCheck
 }
 
 data class UpdateState(
@@ -193,6 +196,8 @@ class UpdateViewModel(
             try {
                 check(refresh = true)
                 _state.update { it.copy(manual = ManualCheck.Done(mine, it.available?.version)) }
+            } catch (e: CheckFailed) {
+                _state.update { it.copy(manual = ManualCheck.Failed(e.message ?: "unknown")) }
             } finally {
                 // Cancelled (the app went away mid-check): not "Checking…" forever.
                 _state.update { if (it.manual is ManualCheck.Running) it.copy(manual = ManualCheck.Idle) else it }
