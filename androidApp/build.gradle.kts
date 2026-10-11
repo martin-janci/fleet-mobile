@@ -15,7 +15,7 @@ android {
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         // Overridable from the command line — the release workflow passes
-        // `-PversionName=<tag without v> -PversionCode=<run number>`. These
+        // `-PversionName=<tag without v> -PversionCode=<minutes since 2026>`. These
         // defaults are what a plain local build still gets.
         versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 1
         versionName = findProperty("versionName") as String? ?: "0.1.0"
