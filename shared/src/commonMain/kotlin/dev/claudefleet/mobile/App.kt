@@ -93,6 +93,8 @@ import dev.claudefleet.mobile.data.HubWorkActions
 import dev.claudefleet.mobile.data.HubSearchActions
 import dev.claudefleet.mobile.data.SearchActions
 import dev.claudefleet.mobile.data.HubMissionActions
+import dev.claudefleet.mobile.data.BuiltInAgentActions
+import dev.claudefleet.mobile.data.HubBuiltInAgentActions
 import dev.claudefleet.mobile.data.MissionActions
 import dev.claudefleet.mobile.data.HubRoutineActions
 import dev.claudefleet.mobile.data.RoutineActions
@@ -336,6 +338,7 @@ import dev.claudefleet.mobile.ui.devicesLine
 import dev.claudefleet.mobile.ui.OrbitMissionsHandlers
 import dev.claudefleet.mobile.ui.OrbitMissionsScreen
 import dev.claudefleet.mobile.ui.MissionsViewModel
+import dev.claudefleet.mobile.ui.AgentActionsViewModel
 import dev.claudefleet.mobile.ui.OrbitTrackersHandlers
 import dev.claudefleet.mobile.ui.OrbitTrackersScreen
 import dev.claudefleet.mobile.ui.TrackerWizardHandlers
@@ -652,6 +655,9 @@ class AppContainer(
 
     /** Missions (claude-fleet orchestration), through the same `withClient`. */
     val missionActions: MissionActions = HubMissionActions(session)
+
+    /** The agents' waiting actions (claude-fleet agents step 5), through the same `withClient`. */
+    val builtInAgentActions: BuiltInAgentActions = HubBuiltInAgentActions(session)
 
     /** Routines and Pause all (redesign 8.9), through the same `withClient`. */
     val routineActions: RoutineActions = HubRoutineActions(session)
@@ -1148,6 +1154,8 @@ private fun FleetRoute(
     val tidy = remember(repository, scope) { TidyViewModel(repository, container.workActions, scope, credentials.canWrite, preselect = { nav.layout.value == PhoneLayout.Classic }) }
     val tidyState by tidy.state.collectAsState()
     val missions = remember(repository, scope) { MissionsViewModel(repository, container.missionActions, scope, credentials.canWrite) }
+    val agentActionsVm = remember(repository, scope) { AgentActionsViewModel(repository, container.builtInAgentActions, scope, credentials.canWrite) }
+    val agentActionsState by agentActionsVm.state.collectAsState()
     val missionsState by missions.state.collectAsState()
     // The Inbox rows' inline answers (G5.4): the session screen's own calls.
     // Here, not under the Inbox, so a Not waiting outlives a tab switch.
@@ -1356,9 +1364,10 @@ private fun FleetRoute(
                     val barAccess by repository.access.collectAsState()
                     // The Inbox's own rows, so the badge, the Inbox and Today agree (review r09 B1).
                     // A mission waiting on a person counts too (G5.4), as the Inbox's header does.
-                    val needYou = remember(barRows, barAccess, missionsState.missions, missionsState.available) {
+                    val needYou = remember(barRows, barAccess, missionsState.missions, missionsState.available, agentActionsState.pending) {
                         inboxRows(barRows, barAccess).size +
-                            (if (missionsState.available) missionWaits(missionsState.missions).size else 0)
+                            (if (missionsState.available) missionWaits(missionsState.missions).size else 0) +
+                            agentActionsState.pending.size
                     }
                     // The Orbit Fleet bar: one badge, the Needs you count, on
                     // Inbox. Work's To review count stays on the Work screen.
@@ -1877,6 +1886,8 @@ private fun FleetRoute(
                     val proposedList = remember(all, access, inboxState.setAside) { proposedRows(all, access, inboxState.setAside) }
                     // A mission that waits on a person is an Inbox row (G5.4): read the missions when the Inbox shows.
                     LaunchedEffect(missionsState.available) { if (missionsState.available) missions.refresh() }
+                    // So is an agent's action waiting for an answer (agents step 5).
+                    LaunchedEffect(agentActionsState.available) { agentActionsVm.refresh() }
                     val missionRows = remember(missionsState.missions, missionsState.available) {
                         if (missionsState.available) missionWaits(missionsState.missions) else emptyList()
                     }
@@ -1887,6 +1898,9 @@ private fun FleetRoute(
                         proposedList = proposedList,
                         missionRows = missionRows,
                         onOpenMission = { missions.openOne(it) },
+                        agentActions = agentActionsState,
+                        onApproveAction = { agentActionsVm.approve(it) },
+                        onRejectAction = { agentActionsVm.reject(it) },
                         inbox = inboxState,
                         rowActions = { row ->
                             inboxRowActions(

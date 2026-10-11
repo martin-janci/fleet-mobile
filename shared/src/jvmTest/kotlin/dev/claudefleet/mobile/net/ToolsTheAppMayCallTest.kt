@@ -94,6 +94,11 @@ class ToolsTheAppMayCallTest {
         "operator_status",
         "mcp_confirms",
         "answer_mcp_confirm",
+        // The built-in agents' actions waiting for a person (claude-fleet
+        // agents step 5): status reads, approve / reject answer one.
+        // `Access::PersonDevice` on the hub, and a write there also needs a
+        // trusted full device — see `AgentActionsViewModel`.
+        "agents",
         // What Control's agent handed on, for its chips (redesign 9.3):
         // readonly, `Access::PersonDevice` (a receipt quotes its prompt).
         "control_handoffs",
