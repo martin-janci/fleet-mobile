@@ -54,5 +54,13 @@ fun agentActionTitle(a: AgentAction): String {
         val n = (p["comments"] as? JsonArray)?.size ?: 0
         return "Post a review on $repo#$number: $event, $n comment${if (n == 1) "" else "s"}"
     }
+    if (p != null) {
+        fun f(k: String) = (p[k] as? JsonPrimitive)?.contentOrNull ?: "?"
+        when (a.kind) {
+            "jira_comment" -> return "Comment on ${f("key")}"
+            "jira_create_bug" -> return "File a bug in ${f("project")} for ${f("source_key")}: ${f("summary")}"
+            "jira_link" -> return "Link ${f("bug_key")} to ${f("source_key")} (${f("link_type").lowercase()})"
+        }
+    }
     return a.kind.replace('_', ' ')
 }

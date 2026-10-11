@@ -68,6 +68,19 @@ class AgentActionsTest {
             agentActionTitle(action(payload = """{"repo":"o/r","number":4,"event":"APPROVE","comments":[{}]}""")),
         )
         assertEquals("jira comment", agentActionTitle(AgentAction(id = 1, kind = "jira_comment", payload = "not json")))
+        assertEquals("Comment on L2S-7", agentActionTitle(AgentAction(id = 1, kind = "jira_comment", payload = """{"key":"L2S-7"}""")))
+        assertEquals(
+            "File a bug in PD for L2S-7: [pay] NPE",
+            agentActionTitle(
+                AgentAction(id = 1, kind = "jira_create_bug", payload = """{"project":"PD","source_key":"L2S-7","summary":"[pay] NPE"}"""),
+            ),
+        )
+        assertEquals(
+            "Link PD-4 to L2S-7 (causes)",
+            agentActionTitle(
+                AgentAction(id = 1, kind = "jira_link", payload = """{"bug_key":"PD-4","source_key":"L2S-7","link_type":"Causes"}"""),
+            ),
+        )
         // The hub's row decodes, its extra fields ignored.
         val row = json.decodeFromString(
             AgentsStatus.serializer(),
