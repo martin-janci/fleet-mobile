@@ -319,7 +319,13 @@ class FleetRepository(
         // Every frame applied while this re-list is in flight, so they can be
         // applied again on top of its answer — see [relistsInFlight].
         val applied = mutableListOf<HubEvent.Row>()
-        snapshotLock.withLock { relistsInFlight += applied }
+        // The picture before the re-list, so a failure after the early
+        // sessions publish below can put it back: all or nothing still holds.
+        val before = snapshotLock.withLock {
+            relistsInFlight += applied
+            snapshot()
+        }
+        var halfPublished = false
         try {
             coroutineScope {
                 val sessions = async { client.listSessions() }
@@ -331,13 +337,26 @@ class FleetRepository(
                 val rows = sessions.await()
                 snapshotLock.withLock {
                     publish(applied.fold(snapshot().copy(sessions = rows)) { snapshot, frame -> snapshot.applying(frame) })
+                    halfPublished = true
                 }
                 val fresh = FleetSnapshot(rows, hosts.await(), projects.await(), tickets = emptyList())
                 snapshotLock.withLock {
                     publish(applied.fold(fresh) { snapshot, frame -> snapshot.applying(frame) })
+                    halfPublished = false
                     relistsInFlight -= applied
                 }
             }
+        } catch (t: Throwable) {
+            // Hosts or projects failed after the sessions went out: back to the
+            // old sessions, with every frame applied since on top of them.
+            if (halfPublished) {
+                withContext(NonCancellable) {
+                    snapshotLock.withLock {
+                        publish(applied.fold(before) { snapshot, frame -> snapshot.applying(frame) })
+                    }
+                }
+            }
+            throw t
         } finally {
             withContext(NonCancellable) { snapshotLock.withLock { relistsInFlight -= applied } }
         }
