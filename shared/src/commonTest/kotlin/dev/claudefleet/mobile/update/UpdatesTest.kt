@@ -271,6 +271,91 @@ class UpdatesTest {
         assertEquals(release, vm.state.value.available)
     }
 
+    private fun tell() = FakePrefs().apply { putStringList(UPDATE_MODE_PREF, listOf("tell")) }
+
+    @Test
+    fun updates_install_on_their_own_unless_the_person_said_otherwise() = runTest {
+        assertEquals(UpdateMode.AUTO, UpdateViewModel({ release }, FakeInstaller(), FakePrefs(), "0.9.4", backgroundScope).state.value.mode)
+        assertEquals(UpdateMode.TELL, UpdateViewModel({ release }, FakeInstaller(), tell(), "0.9.4", backgroundScope).state.value.mode)
+    }
+
+    @Test
+    fun auto_downloads_on_check_and_installs_once_the_app_leaves_the_screen() = runTest {
+        val installer = FakeInstaller()
+        val vm = UpdateViewModel({ release }, installer, FakePrefs(), "0.9.4", backgroundScope)
+        vm.setForeground(true)
+        vm.check()
+        runCurrent()
+        assertEquals(1, installer.downloads, "found means fetched, with no tap")
+        assertIs<UpdatePhase.Ready>(vm.state.value.phase)
+        assertEquals(0, installer.installs, "never under someone's thumb")
+        vm.setForeground(false)
+        runCurrent()
+        assertEquals(1, installer.installs)
+        assertEquals(UpdatePhase.Handed, vm.state.value.phase)
+    }
+
+    @Test
+    fun tell_waits_for_a_tap_at_every_step() = runTest {
+        val installer = FakeInstaller()
+        val vm = UpdateViewModel({ release }, installer, tell(), "0.9.4", backgroundScope)
+        vm.check()
+        runCurrent()
+        assertEquals(0, installer.downloads)
+        vm.download()
+        runCurrent()
+        vm.setForeground(false)
+        runCurrent()
+        assertIs<UpdatePhase.Ready>(vm.state.value.phase)
+        assertEquals(0, installer.installs)
+    }
+
+    @Test
+    fun the_background_job_checks_downloads_and_installs_only_off_screen() = runTest {
+        val away = FakeInstaller()
+        UpdateViewModel({ release }, away, FakePrefs(), "0.9.4", backgroundScope).runInBackground(onScreen = false)
+        assertEquals(1, away.downloads)
+        assertEquals(1, away.installs)
+
+        val shown = FakeInstaller()
+        UpdateViewModel({ release }, shown, FakePrefs(), "0.9.4", backgroundScope).runInBackground(onScreen = true)
+        assertEquals(1, shown.downloads)
+        assertEquals(0, shown.installs)
+
+        val notAllowed = FakeInstaller(allowed = false)
+        val vm = UpdateViewModel({ release }, notAllowed, FakePrefs(), "0.9.4", backgroundScope)
+        vm.runInBackground(onScreen = false)
+        assertEquals(0, notAllowed.installs, "Android's own allow is never skipped")
+        assertEquals(UpdatePhase.Ready("martin-janci", needsPermission = true), vm.state.value.phase)
+
+        val told = FakeInstaller()
+        UpdateViewModel({ release }, told, tell(), "0.9.4", backgroundScope).runInBackground(onScreen = false)
+        assertEquals(0, told.downloads)
+    }
+
+    @Test
+    fun a_refused_release_is_not_fetched_again_on_its_own() = runTest {
+        val installer = FakeInstaller(signature = SignatureCheck.Refused("not ours"))
+        val vm = UpdateViewModel({ release }, installer, FakePrefs(), "0.9.4", backgroundScope)
+        vm.check()
+        runCurrent()
+        assertIs<UpdatePhase.Refused>(vm.state.value.phase)
+        vm.check()
+        runCurrent()
+        assertEquals(1, installer.downloads)
+    }
+
+    @Test
+    fun a_failed_automatic_install_is_said_and_tried_again_at_the_next_check() = runTest {
+        val installer = FakeInstaller()
+        val vm = UpdateViewModel({ release }, installer, FakePrefs(), "0.9.4", backgroundScope)
+        vm.runInBackground(onScreen = false)
+        vm.installFailed("STATUS_FAILURE_ABORTED")
+        assertEquals(UpdatePhase.Failed(INSTALL_REFUSED, "STATUS_FAILURE_ABORTED"), vm.state.value.phase)
+        vm.runInBackground(onScreen = false)
+        assertEquals(2, installer.installs)
+    }
+
     @Test
     fun whats_new_shows_once_after_an_update_and_never_on_a_fresh_install() {
         val prefs = FakePrefs()

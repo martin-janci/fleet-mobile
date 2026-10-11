@@ -228,8 +228,12 @@ class TheAndroidManifestTest {
                 "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
                 "android.permission.POST_NOTIFICATIONS",
                 // The app's own update (14.18): handed to Android's installer,
-                // which asks the person to confirm. See `AndroidAppInstaller`.
+                // which on Android 12+ lets an app allowed to install update
+                // itself with no confirm, from a periodic job kept across a
+                // restart. See `AndroidAppInstaller`, `AppUpdateJob`.
                 "android.permission.REQUEST_INSTALL_PACKAGES",
+                "android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION",
+                "android.permission.RECEIVE_BOOT_COMPLETED",
                 // This phone's lock (14.11), only while the person has it on:
                 // the system's fingerprint check. See `PhoneLock.android.kt`.
                 "android.permission.USE_BIOMETRIC",

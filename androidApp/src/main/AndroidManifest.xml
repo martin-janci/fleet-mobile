@@ -33,12 +33,17 @@
 
     <!--
       The app's own update (redesign 14.18, MobileUpdate): the signed release
-      APK from GitHub, checked against the installed app's signing key and
-      handed to Android's installer, which asks the person to confirm every
-      time. Android also asks, once, before letting the app install at all.
-      Nothing installs without those taps. See `AndroidAppInstaller`.
+      APK the paired hub decides on (its mirror, or GitHub), checked against
+      the installed app's signing key and handed to Android's installer.
+      Android asks, once, before letting the app install at all. After that,
+      on Android 12+, an app updating itself may install without a confirm
+      (UPDATE_PACKAGES_WITHOUT_USER_ACTION): the automatic update does, while
+      the app is off screen. RECEIVE_BOOT_COMPLETED keeps its periodic job
+      (`AppUpdateJob`, persisted) across a restart. See `AndroidAppInstaller`.
     -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!--
       This phone's lock (redesign 14.11): the system's fingerprint or face
@@ -176,6 +181,19 @@
         <receiver
             android:name=".UpdateInstallReceiver"
             android:exported="false" />
+        <!-- The automatic update's periodic check, download and install while the app is away. -->
+        <service
+            android:name=".AppUpdateJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+        <!-- After an update: the watch service and the update job back on. A protected system broadcast. -->
+        <receiver
+            android:name=".AppReplacedReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <service
             android:name=".NeedsYouService"
             android:exported="false"

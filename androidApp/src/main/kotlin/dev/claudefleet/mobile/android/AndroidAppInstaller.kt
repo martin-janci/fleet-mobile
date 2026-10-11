@@ -36,7 +36,10 @@ import java.security.cert.X509Certificate
  * Downloads the release APK into the cache, resuming a paused download with
  * a `Range` request; checks that it is this app, at the release's version,
  * signed with a certificate the installed app is signed with; and hands it
- * to Android's `PackageInstaller`, which asks the person to confirm. A debug
+ * to Android's `PackageInstaller`. On Android 12 and later an app updating
+ * itself may install without a confirm (`USER_ACTION_NOT_REQUIRED`), which
+ * is how the automatic update installs while the app is away; before that,
+ * or whenever Android still wants one, the person confirms. A debug
  * build has its own application id, so a release never passes the check on
  * one: the refusal says so.
  */
@@ -182,6 +185,10 @@ class AndroidAppInstaller(
         val installer = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
             setAppPackageName(context.packageName)
+            // This app updating itself, already allowed to install: Android
+            // 12+ lets that through without its confirm screen. When it still
+            // wants one, the session says so and [UpdateInstallReceiver] asks.
+            if (Build.VERSION.SDK_INT >= 31) setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
         }
         val id = installer.createSession(params)
         installer.openSession(id).use { session ->
@@ -267,22 +274,29 @@ class AndroidAppInstaller(
 }
 
 /**
- * Where Android reports on the install session. The one status this acts on
- * is "the person has to confirm": it opens Android's own confirm screen. A
- * success restarts the app, so there is nothing to say; a failure leaves the
- * Updating screen where it was, with Install still there to tap.
+ * Where Android reports on the install session. "The person has to confirm"
+ * opens Android's own confirm screen when the app is on screen, and posts a
+ * notification that opens it when not (Android does not let an app away
+ * start a screen). A success restarts the app, so there is nothing to say; a
+ * failure puts the Updating screen on Try again, and the automatic update
+ * tries again at its next check.
  */
 class UpdateInstallReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
-        if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
-            val confirm = if (Build.VERSION.SDK_INT >= 33) {
-                intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                intent.getParcelableExtra(Intent.EXTRA_INTENT)
+        when (val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
+            PackageInstaller.STATUS_SUCCESS -> Unit
+            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                val confirm = if (Build.VERSION.SDK_INT >= 33) {
+                    intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(Intent.EXTRA_INTENT)
+                } ?: return
+                confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (AppVisibility.foreground) context.startActivity(confirm) else UpdateNotices.confirm(context, confirm)
             }
-            confirm?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)?.let(context::startActivity)
+            else -> (context.applicationContext as FleetApplication).container.updates
+                .installFailed("PackageInstaller status $status")
         }
     }
 }

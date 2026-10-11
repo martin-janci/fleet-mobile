@@ -50,8 +50,13 @@ sealed interface SignatureCheck {
     data class Refused(val reason: String) : SignatureCheck
 }
 
-/** "Updates" under This phone. Never "install on my own": the phone offers, a person installs. */
+/**
+ * "Updates" under This phone. [AUTO], the default, downloads what the hub
+ * decides, checks it and installs it while the app is away; [TELL] offers it
+ * and a person installs.
+ */
 enum class UpdateMode(val label: String) {
+    AUTO("Install updates on my own"),
     TELL("Tell me, never install on my own"),
     OFF("Don't check"),
 }
@@ -78,7 +83,7 @@ sealed interface UpdatePhase {
 }
 
 data class UpdateState(
-    val mode: UpdateMode = UpdateMode.TELL,
+    val mode: UpdateMode = UpdateMode.AUTO,
     /** The release newer than this app, once [UpdateViewModel.check] has found one. */
     val available: ReleaseInfo? = null,
     val phase: UpdatePhase = UpdatePhase.Idle,
@@ -91,10 +96,14 @@ internal const val LAST_VERSION_PREF = "update.lastVersion"
 internal const val PENDING_NOTES_PREF = "update.pendingNotes"
 
 /**
- * The phone's own update: found on GitHub releases, offered, never forced.
- * Every step to the install is a tap, and the install only ever follows a
- * signature that matched: [install] does nothing from any other phase. The
- * hub is never touched from here; its owner updates it from the desktop.
+ * The phone's own update, as the paired hub decides it (GitHub releases for a
+ * hub too old to). In [UpdateMode.AUTO] a newer release is downloaded and
+ * checked as soon as it is found, and installed when the app leaves the
+ * screen ([setForeground]) or from the background job
+ * ([runInBackground]); in [UpdateMode.TELL] every step is a tap. Either way
+ * the install only ever follows a signature that matched: [install] does
+ * nothing from any other phase. The hub is never touched from here; its
+ * owner updates it from the desktop.
  */
 class UpdateViewModel(
     private val source: ReleaseSource,
@@ -107,20 +116,96 @@ class UpdateViewModel(
     val state: StateFlow<UpdateState> = _state.asStateFlow()
 
     private var job: Job? = null
+    private var installJob: Job? = null
     private var pausing = false
 
-    /** Look for a newer release, quietly. Nothing to do when the setting is off or the platform cannot update. */
+    /**
+     * Whether the app is on screen; an automatic install waits until it is
+     * not. True until told otherwise, so nothing installs under a thumb.
+     */
+    private var foreground = true
+
+    /** The version whose download was refused: not fetched again on its own, only on a tap. */
+    private var refused: String? = null
+
+    /**
+     * Look for a newer release, quietly. Nothing to do when the setting is off
+     * or the platform cannot update. In [UpdateMode.AUTO] a newer release
+     * starts downloading at once.
+     */
     suspend fun check() {
         if (installer == null || _state.value.mode == UpdateMode.OFF) return
         val mine = AppVersion.parse(appVersion) ?: return
         val latest = source.latest() ?: return
         val theirs = AppVersion.parse(latest.version) ?: return
-        _state.update { it.copy(available = latest.takeIf { theirs > mine }) }
+        val newer = latest.takeIf { theirs > mine }
+        _state.update { s ->
+            when {
+                s.available?.version == newer?.version -> s.copy(available = newer)
+                // A different target while one is under way: that one finishes,
+                // and the next check picks the new target up.
+                job?.isActive == true || installJob?.isActive == true || s.phase is UpdatePhase.Handed -> s
+                else -> {
+                    s.available?.let { installer.discard(it) }
+                    s.copy(available = newer, phase = UpdatePhase.Idle)
+                }
+            }
+        }
+        autoDownload()
     }
 
     fun setMode(mode: UpdateMode) {
         prefs.putStringList(UPDATE_MODE_PREF, listOf(mode.name.lowercase()))
         _state.update { it.copy(mode = mode, available = if (mode == UpdateMode.OFF) null else it.available) }
+        autoDownload()
+        autoInstall()
+    }
+
+    /**
+     * The app came on screen ([on]) or left it. Leaving is when an automatic
+     * update installs: Android closes the app for it, so never under someone's
+     * thumb.
+     */
+    fun setForeground(on: Boolean) {
+        foreground = on
+        if (!on) autoInstall()
+    }
+
+    /**
+     * The background job's whole cycle: check, download, verify and install,
+     * returning once the install is handed to Android (or there was nothing
+     * to do). Only in [UpdateMode.AUTO], and with the app off screen
+     * ([onScreen] false) for the install.
+     */
+    suspend fun runInBackground(onScreen: Boolean) {
+        foreground = onScreen
+        if (_state.value.mode != UpdateMode.AUTO) return
+        check()
+        job?.join()
+        autoInstall()
+        installJob?.join()
+    }
+
+    /** Android answered the install session with a failure: say so, and offer it again. */
+    fun installFailed(details: String?) {
+        _state.update { s -> if (s.phase is UpdatePhase.Handed) s.copy(phase = UpdatePhase.Failed(INSTALL_REFUSED, details)) else s }
+    }
+
+    private fun autoDownload() {
+        val s = _state.value
+        val release = s.available ?: return
+        if (s.mode != UpdateMode.AUTO || release.version == refused) return
+        // A failed try is tried again at the next check; a paused one waits for its person.
+        if (s.phase is UpdatePhase.Idle || s.phase is UpdatePhase.Failed) {
+            _state.update { if (it.phase is UpdatePhase.Failed) it.copy(phase = UpdatePhase.Idle) else it }
+            download()
+        }
+    }
+
+    private fun autoInstall() {
+        val s = _state.value
+        if (s.mode != UpdateMode.AUTO || foreground) return
+        if (s.phase is UpdatePhase.Ready && installer?.canInstall() == true) install()
     }
 
     /** Download, then check the signature. Resumes a paused download. */
@@ -144,9 +229,12 @@ class UpdateViewModel(
                     installer.checkSignature(release)
                 }
                 when (check) {
-                    is SignatureCheck.Matches ->
+                    is SignatureCheck.Matches -> {
                         _state.update { it.copy(phase = UpdatePhase.Ready(check.signer, !installer.canInstall())) }
+                        autoInstall()
+                    }
                     is SignatureCheck.Refused -> {
+                        refused = release.version
                         installer.discard(release)
                         _state.update { it.copy(phase = UpdatePhase.Refused(check.reason)) }
                     }
@@ -206,7 +294,7 @@ class UpdateViewModel(
         // What changed, kept for the screen the updated app shows once.
         prefs.putStringList(PENDING_NOTES_PREF, listOf(release.version) + release.notes)
         _state.update { it.copy(phase = UpdatePhase.Handed) }
-        scope.launch {
+        installJob = scope.launch {
             try {
                 installer.install(release)
             } catch (e: CancellationException) {
@@ -232,7 +320,7 @@ class UpdateViewModel(
 
     private fun readMode(): UpdateMode {
         val stored = prefs.getStringList(UPDATE_MODE_PREF).firstOrNull()
-        return UpdateMode.entries.firstOrNull { it.name.lowercase() == stored } ?: UpdateMode.TELL
+        return UpdateMode.entries.firstOrNull { it.name.lowercase() == stored } ?: UpdateMode.AUTO
     }
 }
 

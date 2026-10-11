@@ -624,6 +624,24 @@ tags and `main` may use. A tag with a `-suffix` builds and signs but does not
 upload, and a manual dispatch proves the signing and never uploads. The
 design is in `docs/superpowers/specs/2026-10-05-ios-testflight-design.md`.
 
+### How a phone gets a release
+
+Android updates itself. The app asks its paired hub (`POST /update/check`,
+which follows the hub's channel and any pin; GitHub releases only for a hub
+too old to answer) at every return to the screen, on the hub's
+`update:decision` event, and every six hours from a persisted JobScheduler
+job (`AppUpdateJob`). A newer release is downloaded (the hub's mirror first),
+checked against its published sha256, the signer the hub names and the
+installed app's own signing key, and installed once the app is off screen:
+on Android 12+ an app updating itself installs with no confirm
+(`USER_ACTION_NOT_REQUIRED`). Android asks once, the first time, to allow
+the app to install at all; when it still wants a confirm, a notification
+opens it. Settings → Updates can turn that back to "tell me" (a card in More,
+and a tap at every step) or off.
+
+iOS updates through TestFlight, which installs new builds on its own while
+TestFlight's Automatic Updates is on (its default).
+
 ## What a Mac still has to check
 
 **The shared code runs on iOS, and so does the app itself — far enough to

@@ -392,6 +392,7 @@ import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
@@ -604,6 +605,16 @@ class AppContainer(
         hubBase = { session.credentials()?.hub },
     )
 
+    /**
+     * The app's own update (redesign 14.18), held by the process rather than
+     * a screen: it downloads and installs while the app is away, and the
+     * platform's background job ([UpdateViewModel.runInBackground]) drives
+     * the same one.
+     */
+    val updates: UpdateViewModel by lazy {
+        UpdateViewModel(releases, installer, prefs, appVersion, CoroutineScope(SupervisorJob() + Dispatchers.Default))
+    }
+
     /** The New session form's one call, through the same 401 rule. */
     val newSessionActions: NewSessionActions = HubNewSessionActions(session)
 
@@ -713,6 +724,12 @@ fun App(container: AppContainer) {
                 val auth by container.session.state.collectAsState()
 
                 LaunchedEffect(container) { container.session.restore() }
+                // Whether the app is on screen, for the automatic update: it
+                // installs only once the app has left (14.18).
+                LifecycleStartEffect(container) {
+                    container.updates.setForeground(true)
+                    onStopOrDispose { container.updates.setForeground(false) }
+                }
 
                 // What the hub answered on the pair that just happened, held so
                 // the confirmation can be read rather than flashed past. Null on
@@ -1111,12 +1128,10 @@ private fun FleetRoute(
     val settings = remember(container, scope) {
         SettingsViewModel(container.session, scope, container.appVersion, container.versionActions)
     }
-    // The app's own update (redesign 14.18): looked for once per pairing,
-    // offered on More and in the Inbox, never installed without a tap.
-    val updates = remember(container, scope) {
-        UpdateViewModel(container.releases, container.installer, container.prefs, container.appVersion, scope)
-    }
-    LaunchedEffect(updates) { updates.check() }
+    // The app's own update (redesign 14.18): looked for at every return to
+    // the screen, offered on More and in the Inbox; installed on its own,
+    // once the app leaves the screen, unless the person chose Tell me.
+    val updates = container.updates
     // The hub says an update decision moved (`update:decision`): ask again,
     // a moment later, so a burst of frames is one check.
     LaunchedEffect(updates, repository) {
@@ -1128,7 +1143,8 @@ private fun FleetRoute(
     // Back from Android's "install unknown apps" page: Install works now.
     LifecycleStartEffect(updates) {
         updates.recheckPermission()
-        onStopOrDispose { }
+        val checking = scope.launch { updates.check() }
+        onStopOrDispose { checking.cancel() }
     }
     val updateState by updates.state.collectAsState()
     // Once, on the first launch after an update: the wordmark and what changed.
