@@ -110,6 +110,26 @@ class UpdatesTest {
         assertNull(AppVersion.parse(""))
     }
 
+    /** SemVer 2.0 §11: a phone on one dev build updates to the next one of the same X.Y.Z. */
+    @Test
+    fun pre_releases_order_by_their_identifiers() {
+        fun v(s: String) = AppVersion.parse(s)!!
+        assertTrue(v("0.6.3-dev.131.desktop.g65f0edd") < v("0.6.3-dev.144.desktop.g27d9f57"))
+        // Numeric, not lexical.
+        assertTrue(v("0.6.3-dev.9") < v("0.6.3-dev.10"))
+        assertTrue(v("0.6.3-dev.144.desktop.g27d9f57") < v("0.6.3"))
+        assertTrue(v("0.6.2") < v("0.6.3-dev.1"))
+        assertEquals(0, v("v0.6.3-dev.144").compareTo(v("0.6.3-dev.144")))
+        assertEquals(0, v("0.6.3").compareTo(v("0.6.3")))
+        // Numbers rank below words; a shorter list is smaller when the rest is equal.
+        assertTrue(v("1.0.0-alpha.1") < v("1.0.0-alpha.beta"))
+        assertTrue(v("1.0.0-alpha") < v("1.0.0-alpha.1"))
+        assertTrue(v("1.0.0-alpha.beta") < v("1.0.0-beta"))
+        assertTrue(v("1.0.0-rc.1") < v("1.0.0"))
+        // Build metadata is not a version at all, so it never orders one.
+        assertNull(AppVersion.parse("0.6.3+build.5"))
+    }
+
     @Test
     fun a_github_release_reads_as_the_apk_its_size_its_digest_and_plain_notes() {
         val body = """

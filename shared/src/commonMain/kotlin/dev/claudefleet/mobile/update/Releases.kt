@@ -11,19 +11,30 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
- * A version as the app and the hub print it: `0.9.5`, `v0.9.5`, `0.9.5-rc.1`.
- * Only the three numbers order two versions; a suffix sorts below the same
- * numbers without one, as a release candidate comes before its release.
+ * A version as the app and the hub print it: `0.9.5`, `v0.9.5`, `0.9.5-rc.1`,
+ * `0.6.3-dev.131.desktop.g65f0edd`.
+ *
+ * Ordered as SemVer 2.0 §11 orders pre-releases. A suffix still sorts below
+ * the same numbers without one, as a release candidate comes before its
+ * release. Two suffixes on the same numbers compare identifier by identifier,
+ * split on dots: numbers numerically and below words, words in ASCII order,
+ * and the shorter list first when all before it are equal. It used to stop
+ * at "has a suffix", which made every dev build of one X.Y.Z equal: a phone
+ * on 0.6.3-dev.131 never saw 0.6.3-dev.144 as newer, and claude-fleet cuts a
+ * dev build after every green main push. `+build` metadata is not parsed at
+ * all ([parse] refuses it), so it can never take part in the order.
  */
 data class AppVersion(val major: Int, val minor: Int, val patch: Int, val suffix: String = "") : Comparable<AppVersion> {
-    override fun compareTo(other: AppVersion): Int = compareValuesBy(
-        this,
-        other,
-        { it.major },
-        { it.minor },
-        { it.patch },
-        { if (it.suffix.isEmpty()) 1 else 0 },
-    )
+    override fun compareTo(other: AppVersion): Int {
+        val numbers = compareValuesBy(this, other, { it.major }, { it.minor }, { it.patch })
+        if (numbers != 0) return numbers
+        return when {
+            suffix == other.suffix -> 0
+            suffix.isEmpty() -> 1
+            other.suffix.isEmpty() -> -1
+            else -> comparePreRelease(suffix.split('.'), other.suffix.split('.'))
+        }
+    }
 
     override fun toString(): String = "$major.$minor.$patch" + if (suffix.isEmpty()) "" else "-$suffix"
 
@@ -37,6 +48,30 @@ data class AppVersion(val major: Int, val minor: Int, val patch: Int, val suffix
             return AppVersion(a.toInt(), b.toInt(), c.toInt(), s)
         }
     }
+}
+
+/** SemVer 2.0 §11.4 over two pre-release identifier lists. */
+private fun comparePreRelease(a: List<String>, b: List<String>): Int {
+    for (i in 0 until minOf(a.size, b.size)) {
+        val x = a[i]
+        val y = b[i]
+        // All digits is numeric. Compared as text by length first, then
+        // lexically, so an identifier too long for a Long still orders.
+        val xn = x.isNotEmpty() && x.all { it in '0'..'9' }
+        val yn = y.isNotEmpty() && y.all { it in '0'..'9' }
+        val c = when {
+            xn && yn -> {
+                val xs = x.trimStart('0')
+                val ys = y.trimStart('0')
+                if (xs.length != ys.length) xs.length.compareTo(ys.length) else xs.compareTo(ys)
+            }
+            xn -> -1
+            yn -> 1
+            else -> x.compareTo(y)
+        }
+        if (c != 0) return c
+    }
+    return a.size.compareTo(b.size)
 }
 
 /** One published release of the phone app: the signed APK and what changed. */
