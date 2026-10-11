@@ -4,6 +4,9 @@ import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SearchHit
 import dev.claudefleet.mobile.model.fold
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -62,10 +65,61 @@ fun SearchHit.kindLabel(): String = when (kind) {
 }
 
 /** A text hit's second line: where the words were found, else its session and host. */
-fun SearchHit.line(): String {
-    val snippet = snippet.replace(Regex("\\s+"), " ").trim()
-    if (snippet.isNotEmpty() && snippet != title) return snippet
-    return listOfNotNull(sessionName, hostAlias).joinToString(" · ")
+fun SearchHit.line(): String = markedLine(SpanStyle()).text
+
+/**
+ * [text] with each of the hub's `[start, end)` [marks] (UTF-16, what a
+ * Kotlin string indexes by) drawn in [style]. A range outside the text, or
+ * empty, is left out rather than trusted.
+ */
+fun marked(text: String, marks: List<List<Int>>, style: SpanStyle): AnnotatedString = buildAnnotatedString {
+    append(text)
+    for (m in marks) {
+        val start = m.getOrNull(0) ?: continue
+        val end = m.getOrNull(1) ?: continue
+        if (start in 0 until end && end <= text.length) addStyle(style, start, end)
+    }
+}
+
+/** The title, the hub's matches in [style]. */
+fun SearchHit.markedTitle(style: SpanStyle): AnnotatedString = marked(title, titleMarks, style)
+
+/**
+ * [line] with the hub's matches in [style]. The snippet's runs of
+ * whitespace (a newline in a prompt) fold to one space on a one-line row,
+ * and the marks move with the letters they cover.
+ */
+fun SearchHit.markedLine(style: SpanStyle): AnnotatedString {
+    val (folded, at) = foldSpaces(snippet)
+    if (folded.isNotEmpty() && folded != title) {
+        return marked(folded, snippetMarks.map { r -> r.map { at[it.coerceIn(0, snippet.length)] } }, style)
+    }
+    return AnnotatedString(listOfNotNull(sessionName, hostAlias).joinToString(" · "))
+}
+
+/**
+ * [text] with its ends trimmed and every run of whitespace made one space,
+ * and where each of its indexes (0..length) lands in the result.
+ */
+internal fun foldSpaces(text: String): Pair<String, IntArray> {
+    val out = StringBuilder()
+    val at = IntArray(text.length + 1)
+    var pendingSpace = false
+    for ((i, c) in text.withIndex()) {
+        if (c.isWhitespace()) {
+            if (out.isNotEmpty()) pendingSpace = true
+            at[i] = out.length
+            continue
+        }
+        if (pendingSpace) {
+            out.append(' ')
+            pendingSpace = false
+        }
+        at[i] = out.length
+        out.append(c)
+    }
+    at[text.length] = out.length
+    return out.toString() to at
 }
 
 /** A text hit opens its task, else its session; a pull request or entry with neither does not open. */
