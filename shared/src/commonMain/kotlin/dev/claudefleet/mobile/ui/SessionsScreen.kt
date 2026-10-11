@@ -723,7 +723,7 @@ private fun WorkHeader(work: WorkSummary, attention: Int, orgLabel: String? = nu
     ) {
         work.statusCategory?.let { WorkStatusDot(it) }
         Text(
-            text = if (work.key != null && work.title.isNotBlank()) "${work.label} · ${work.title}" else work.label,
+            text = if (work.key != null && work.title.isNotBlank()) "${work.shownLabel} · ${work.title}" else work.shownLabel,
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.secondary,
             textDecoration = if (work.unavailable) TextDecoration.LineThrough else null,
@@ -971,7 +971,7 @@ internal fun emptySessionsSentence(facets: String): String = "No sessions match 
 
 /** A work heading, in words: the key, its title and status, and who is waiting. */
 internal fun workHeaderDescription(work: WorkSummary, attention: Int, orgLabel: String? = null): String = buildList {
-    add("Work ${work.label}")
+    add("Work ${work.shownLabel}")
     if (work.key != null && work.title.isNotBlank()) add(work.title)
     orgLabel?.let { add("in $it") }
     work.statusName?.let { add(it) }

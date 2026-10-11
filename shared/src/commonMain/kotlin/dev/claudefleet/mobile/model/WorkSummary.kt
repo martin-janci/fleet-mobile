@@ -26,6 +26,13 @@ data class WorkSummary(
     @SerialName("item_id") val itemId: Long? = null,
     /** The item's key, else the link's own `ref_key`. */
     val key: String? = null,
+    /**
+     * The item's fleet ticket key (`CF-12`, claude-fleet migration 168): what
+     * a person reads in place of a GitHub `owner/repo#12` or an Asana id.
+     * Display only — grouping and matching stay on [key]. Absent from an
+     * older hub, or for an item that drew none (a Jira key is already human).
+     */
+    @SerialName("display_key") val displayKey: String? = null,
     /** The ticket's title — third-party text, drawn as plain text only. */
     val title: String = "",
     /** How the link was made: `manual`, `agent`, `branch`, `started`, … */
@@ -53,8 +60,11 @@ data class WorkSummary(
      */
     @SerialName("archived_at") val archivedAt: Long? = null,
 ) {
-    /** What a chip says: the key, else the title, else nothing worth drawing. */
+    /** The key, else the title, else nothing worth drawing — the identity [groupKey] is made of. */
     val label: String get() = key?.takeIf { it.isNotBlank() } ?: title
+
+    /** What a chip says: the fleet ticket key when the item drew one, else [label]. */
+    val shownLabel: String get() = displayKey?.takeIf { it.isNotBlank() } ?: label
 
     /**
      * The grouping identity — the key, compared case-insensitively the way the
@@ -105,6 +115,8 @@ data class Ticket(
     /** The work item id (`item_id` on a session's [WorkSummary]). */
     val id: Long,
     val key: String? = null,
+    /** Its fleet ticket key (`CF-12`), shown in place of [key]; see [WorkSummary.displayKey]. */
+    @SerialName("display_key") val displayKey: String? = null,
     /** Third-party text: drawn as plain text only. */
     val title: String = "",
     val url: String? = null,
@@ -121,7 +133,8 @@ data class Ticket(
     /** `lookup` only: `mine`, `sprint`, `recent`, `filter:<id>`. */
     val views: List<String> = emptyList(),
 ) {
-    val label: String get() = key?.takeIf { it.isNotBlank() } ?: title
+    /** What a person reads: the fleet ticket key, else the key, else the title. */
+    val label: String get() = displayKey?.takeIf { it.isNotBlank() } ?: key?.takeIf { it.isNotBlank() } ?: title
     /** The tracker stopped answering for it — or, from a `work:tracker_removed` frame, the tracker is gone. */
     val unavailable: Boolean get() = unavailableAt != null || unavailableReason != null
 }
@@ -210,6 +223,7 @@ fun WorkSummary.refreshedBy(ticket: Ticket?): WorkSummary {
         statusName = ticket.statusName ?: statusName,
         url = ticket.url ?: url,
         unavailable = ticket.unavailable,
+        displayKey = ticket.displayKey ?: displayKey,
     )
 }
 

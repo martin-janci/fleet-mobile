@@ -1134,7 +1134,7 @@ private fun workGroups(keyed: List<SessionRow>, orgLabel: ((Long) -> String)?): 
             val work = rows.first().work!!
             ProjectGroup(
                 projectId = null,
-                label = work.label,
+                label = work.shownLabel,
                 sessions = rows,
                 work = work,
                 orgLabel = orgLabel?.let { name -> rows.first().orgOf?.let(name) },

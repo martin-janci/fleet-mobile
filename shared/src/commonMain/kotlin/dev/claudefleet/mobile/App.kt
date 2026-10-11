@@ -2445,6 +2445,7 @@ private fun SettingsRoute(
                 theme = theme,
                 notifyKinds = notifyKinds,
                 updateMode = updateState.mode.takeIf { updateState.supported },
+                updateCheck = updateState.manual,
                 lock = lockOn,
                 motion = motion,
                 quiet = quiet,
@@ -2458,6 +2459,7 @@ private fun SettingsRoute(
                 onSetNotify = container.phone::setNotify,
                 onSetQuiet = container.phone::setQuiet,
                 onSetUpdateMode = updates::setMode,
+                onCheckUpdates = { updates.checkNow() },
                 // Either way, only once the check has passed.
                 onSetLock = if (gate.available) {
                     { on: Boolean -> gate.ask(if (on) "Turn on the lock" else "Turn off the lock") { ok -> if (ok) container.phone.setLock(on) } }

@@ -82,6 +82,26 @@ sealed interface UpdatePhase {
     data object Handed : UpdatePhase
 }
 
+/** Where a person's "Check now" ([UpdateViewModel.checkNow]) stands, for its row in Settings. */
+sealed interface ManualCheck {
+    /** Not asked since the app started. */
+    data object Idle : ManualCheck
+    data object Running : ManualCheck
+
+    /**
+     * Answered: [offered] is the newer version on offer once the check is
+     * done, or null when there is none for [installed]. A source that answers
+     * nothing at all (the hub unreachable, or up to date) leaves an earlier
+     * offer standing, as [UpdateViewModel.check] always has; with none
+     * earlier, that reads as up to date, since [ReleaseSource] does not tell
+     * the two apart.
+     */
+    data class Done(val installed: String, val offered: String?) : ManualCheck
+
+    /** The hub could not be asked, or its answer could not be read: [reason] says which. */
+    data class Failed(val reason: String) : ManualCheck
+}
+
 data class UpdateState(
     val mode: UpdateMode = UpdateMode.AUTO,
     /** The release newer than this app, once [UpdateViewModel.check] has found one. */
@@ -89,6 +109,7 @@ data class UpdateState(
     val phase: UpdatePhase = UpdatePhase.Idle,
     /** Whether this platform can update itself at all. */
     val supported: Boolean = false,
+    val manual: ManualCheck = ManualCheck.Idle,
 )
 
 internal const val UPDATE_MODE_PREF = "update.mode"
@@ -128,15 +149,19 @@ class UpdateViewModel(
     /** The version whose download was refused: not fetched again on its own, only on a tap. */
     private var refused: String? = null
 
+    private var manualJob: Job? = null
+
     /**
      * Look for a newer release, quietly. Nothing to do when the setting is off
      * or the platform cannot update. In [UpdateMode.AUTO] a newer release
-     * starts downloading at once.
+     * starts downloading at once. [refresh] asks the hub to re-read its
+     * release channel first ([checkNow]); the routine checks never do, since
+     * the hub allows that once a minute.
      */
-    suspend fun check() {
+    suspend fun check(refresh: Boolean = false) {
         if (installer == null || _state.value.mode == UpdateMode.OFF) return
         val mine = AppVersion.parse(appVersion) ?: return
-        val latest = source.latest() ?: return
+        val latest = source.latest(refresh) ?: return
         val theirs = AppVersion.parse(latest.version) ?: return
         val newer = latest.takeIf { theirs > mine }
         _state.update { s ->
@@ -152,6 +177,32 @@ class UpdateViewModel(
             }
         }
         autoDownload()
+    }
+
+    /**
+     * A person's "Check now": [check] with the hub asked to re-read its
+     * channel, in either [UpdateMode.TELL] or [UpdateMode.AUTO], and what it
+     * found kept in [UpdateState.manual] for the row to say. Nothing when
+     * [check] would do nothing (off, a platform that cannot update, a build
+     * with no release version), so the row never says "Checking…" for a
+     * check that is not made. A second tap while one runs is the same check.
+     */
+    fun checkNow(): Job {
+        manualJob?.takeIf { it.isActive }?.let { return it }
+        val mine = AppVersion.parse(appVersion)?.toString()
+        if (installer == null || _state.value.mode == UpdateMode.OFF || mine == null) return Job().apply { complete() }
+        _state.update { it.copy(manual = ManualCheck.Running) }
+        return scope.launch {
+            try {
+                check(refresh = true)
+                _state.update { it.copy(manual = ManualCheck.Done(mine, it.available?.version)) }
+            } catch (e: CheckFailed) {
+                _state.update { it.copy(manual = ManualCheck.Failed(e.message ?: "unknown")) }
+            } finally {
+                // Cancelled (the app went away mid-check): not "Checking…" forever.
+                _state.update { if (it.manual is ManualCheck.Running) it.copy(manual = ManualCheck.Idle) else it }
+            }
+        }.also { manualJob = it }
     }
 
     fun setMode(mode: UpdateMode) {

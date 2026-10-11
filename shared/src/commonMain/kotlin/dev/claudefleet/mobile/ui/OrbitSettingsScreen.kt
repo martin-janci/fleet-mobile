@@ -62,6 +62,7 @@ import dev.claudefleet.mobile.ui.components.DangerTextButton
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.theme.Fleet
+import dev.claudefleet.mobile.update.ManualCheck
 import dev.claudefleet.mobile.update.UpdateMode
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
@@ -78,6 +79,8 @@ data class OrbitSettingsInput(
     val notifyKinds: NotifyKinds,
     /** The app's own updates (14.18); null where the platform updates elsewhere (iOS: TestFlight). */
     val updateMode: UpdateMode? = null,
+    /** Where the last "Check now" stands, for its row under Updates. */
+    val updateCheck: ManualCheck = ManualCheck.Idle,
     /** This phone's fingerprint lock is on (14.11). */
     val lock: Boolean = false,
     /** How much the app moves (review r11). */
@@ -96,6 +99,8 @@ class OrbitSettingsHandlers(
     val onSetNotify: (NotifyKind, Boolean) -> Unit = { _, _ -> },
     val onSetQuiet: (PhoneQuiet) -> Unit = {},
     val onSetUpdateMode: (UpdateMode) -> Unit = {},
+    /** "Check now" under Updates: the hub re-reads its release channel, then decides. */
+    val onCheckUpdates: () -> Unit = {},
     /** The fingerprint lock's switch; null where the phone cannot ask for one, and the row is not drawn. */
     val onSetLock: ((Boolean) -> Unit)? = null,
     val onForget: () -> Unit = {},
@@ -342,6 +347,18 @@ private fun ColumnScope.ThisPhone(input: OrbitSettingsInput, handlers: OrbitSett
             enabled = mode != UpdateMode.OFF,
             onChange = { handlers.onSetUpdateMode(if (it) UpdateMode.AUTO else UpdateMode.TELL) },
         )
+        // A new release otherwise reaches the phone at the next routine
+        // check, after the hub's own next read of its channel. Off means
+        // don't check, so there is nothing to ask for.
+        if (mode != UpdateMode.OFF) {
+            ActionRow(
+                title = "Check now",
+                line = updateCheckLine(input.updateCheck),
+                action = "Check",
+                enabled = input.updateCheck !is ManualCheck.Running,
+                onClick = handlers.onCheckUpdates,
+            )
+        }
     }
 
     Spacer(Modifier.height(16.dp))
@@ -459,6 +476,38 @@ private fun SwitchRow(title: String, line: String, on: Boolean, enabled: Boolean
         }
         Switch(checked = on, onCheckedChange = null, enabled = enabled)
     }
+}
+
+/**
+ * A row that does one thing on a tap, said by [action] at its end: a check,
+ * not a place, so no chevron. The whole row is the button, as a [SwitchRow]
+ * is its switch.
+ */
+@Composable
+private fun ActionRow(title: String, line: String, action: String, enabled: Boolean, onClick: () -> Unit) {
+    val o = Fleet.colors
+    val gutter = OrbitTokens.spacing("phone-gutter").dp
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .heightIn(min = OrbitTokens.spacing("touch-min").dp)
+            .padding(horizontal = gutter, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = Fleet.type.textLg, color = o.fg)
+            Text(line, style = Fleet.type.textSm, color = o.fgMuted)
+        }
+        Text(action, style = Fleet.type.textMd, color = if (enabled) o.accent else o.fgMuted)
+    }
+}
+
+/** "Check now"'s line: what a tap does, then "Checking…", then what the hub answered. */
+internal fun updateCheckLine(check: ManualCheck): String = when (check) {
+    ManualCheck.Idle -> "Asks the hub to read its release channel again."
+    ManualCheck.Running -> "Checking…"
+    is ManualCheck.Done -> check.offered?.let { "v$it available" } ?: "Up to date (v${check.installed})"
+    is ManualCheck.Failed -> "Could not check: ${check.reason}"
 }
 
 /** Quiet hours's line on This phone: "22:00 – 07:00 · Needs you still comes through", or what Off means. */

@@ -11,7 +11,9 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /**
@@ -38,15 +40,19 @@ class HubReleases(
     /** The paired hub's base URL, for a decision's mirror path. */
     private val hubBase: () -> String? = { null },
 ) : ReleaseSource {
-    override suspend fun latest(): ReleaseInfo? {
-        val body = platform?.let { checkRequest(it, appVersion) } ?: return fallback.latest()
+    override suspend fun latest(): ReleaseInfo? = latest(refresh = false)
+
+    override suspend fun latest(refresh: Boolean): ReleaseInfo? {
+        val body = platform?.let { checkRequest(it, appVersion, refresh) } ?: return fallback.latest()
         val answer = try {
             check(body)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
             // Unreachable, not paired, refused: no card. A 401 has already
-            // sent the app back to Pair through `withClient`.
+            // sent the app back to Pair through `withClient`. A person who
+            // tapped Check now is told, rather than shown "Up to date".
+            if (refresh) throw CheckFailed(t.message ?: "the hub did not answer")
             return null
         } ?: return fallback.latest()
         return try {
@@ -54,6 +60,7 @@ class HubReleases(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
+            if (refresh) throw CheckFailed("the hub's answer could not be read")
             null
         }
     }
@@ -66,8 +73,14 @@ internal fun releasePage(version: String, repo: String = "martin-janci/fleet-mob
 /**
  * The `/update/check` body (`update_proto: 1`). Null when [appVersion] is not
  * a release version: the hub refuses a version it cannot parse.
+ *
+ * [refresh] adds `"refresh": true`, asking the hub to re-read its release
+ * channel before it decides: a person tapped Check now. Additive on the frozen
+ * request: the hub limits it to once a minute, and a hub that predates it
+ * ignores the field. Left out entirely otherwise, so the routine checks send
+ * exactly the body they always have.
  */
-internal fun checkRequest(platform: ClientPlatform, appVersion: String): String? {
+internal fun checkRequest(platform: ClientPlatform, appVersion: String, refresh: Boolean = false): String? {
     val v = AppVersion.parse(appVersion) ?: return null
     val body = buildJsonObject {
         put("update_proto", 1)
@@ -82,11 +95,15 @@ internal fun checkRequest(platform: ClientPlatform, appVersion: String): String?
             platform.build?.takeIf { it.isNotBlank() && it != "unknown" }?.let { put("commit", it) }
         }
         putJsonObject("speaks") {
-            putJsonObject("contract_accepts") {
-                put("min", MIN_HUB_CONTRACT)
-                put("max", MAX_HUB_CONTRACT)
+            // `[min, max]`, the wire's spelling. Up to 0.6.3-dev.183 this was
+            // `{min, max}`, which hubs before claude-fleet #869 refused as
+            // unreadable: every check failed and read as "Up to date".
+            putJsonArray("contract_accepts") {
+                add(MIN_HUB_CONTRACT)
+                add(MAX_HUB_CONTRACT)
             }
         }
+        if (refresh) put("refresh", true)
     }
     return body.toString()
 }

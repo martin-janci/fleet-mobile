@@ -624,11 +624,23 @@ git tag vX.Y.Z && git push origin vX.Y.Z
 ```
 
 `.github/workflows/release.yml` then builds `:androidApp:assembleRelease`
-with the tag (minus its leading `v`) as `versionName` and the workflow run
-number as `versionCode`, verifies the resulting APK is actually signed, and
-attaches it to a GitHub release for that tag. `versionCode` must only ever
-increase for a given signing key — the Play Store and most installers refuse
-an update with a `versionCode` that has gone backwards.
+with the tag (minus its leading `v`) as `versionName` and the minutes since
+2026-01-01 UTC as `versionCode`, verifies the resulting APK is actually
+signed, and attaches it to a GitHub release for that tag. `versionCode` must
+only ever increase for a given signing key — the Play Store and most
+installers refuse an update with a `versionCode` that has gone backwards — and
+a clock does that across both of the workflow's triggers, where a run number
+would not.
+
+Dev builds need nobody. `.github/workflows/dev-release.yml` polls claude-fleet's
+`dev` channel every 20 minutes (or on a `fleet-dev-release` dispatch) and, when
+it names a `-dev` version this repository has no release for, claude-fleet's
+own release of it exists, CI passed on `main`'s head and `HubContract.kt`
+accepts that release's hub contract, calls release.yml to build `main` and
+publish `v<version>` there. A version with a `-suffix` is published as a
+pre-release that is never GitHub's "latest". Stable releases stay manual, as
+above, and the iOS workflow below does not run for dev builds (a tag created by
+a workflow starts no other workflow).
 
 The workflow refuses to run rather than publish something it shouldn't:
 - Any of the four secrets missing → it fails before building. There is no

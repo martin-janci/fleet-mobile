@@ -311,6 +311,8 @@ data class TaskCounts(
 data class LinkTask(
     @SerialName("task_id") val taskId: String = "",
     val key: String? = null,
+    /** Its fleet ticket key (`CF-12`), shown in place of [key]. */
+    @SerialName("display_key") val displayKey: String? = null,
     val title: String = "",
     val kind: TaskKind = TaskKind.Unknown,
     @SerialName("status_category") val statusCategory: StatusCategory? = null,
@@ -320,7 +322,8 @@ data class LinkTask(
     @SerialName("org_id") val orgId: Long? = null,
     @SerialName("tracker_name") val trackerName: String? = null,
 ) {
-    val label: String get() = key?.takeIf { it.isNotBlank() } ?: title.ifBlank { taskId }
+    val label: String get() =
+        displayKey?.takeIf { it.isNotBlank() } ?: key?.takeIf { it.isNotBlank() } ?: title.ifBlank { taskId }
 }
 
 /** One session under a task, or one task of a session (with [task] set). */
@@ -365,6 +368,12 @@ data class WorkTask(
     @SerialName("task_id") val taskId: String = "",
     @SerialName("item_id") val itemId: Long? = null,
     val key: String? = null,
+    /**
+     * Its fleet ticket key (`CF-12`, claude-fleet migration 168), shown in
+     * place of [key]: a GitHub issue's or an Asana task's, or a native task's
+     * (then the same as [key]). Display only; actions send [key].
+     */
+    @SerialName("display_key") val displayKey: String? = null,
     /** Third-party text: plain text only. */
     val title: String = "",
     val url: String? = null,
@@ -439,8 +448,9 @@ data class WorkTask(
      * tracker's ticket, whose text and status are its tracker's).
      */
     val editable: Boolean get() = kind == TaskKind.Local && itemId != null
-    /** The key, else the title, else the id. */
-    val label: String get() = key?.takeIf { it.isNotBlank() } ?: title.ifBlank { taskId }
+    /** The fleet ticket key, else the key, else the title, else the id. */
+    val label: String get() =
+        displayKey?.takeIf { it.isNotBlank() } ?: key?.takeIf { it.isNotBlank() } ?: title.ifBlank { taskId }
 
     /** The tracker is failing — said as such, never as "no sessions". */
     val trackerDown: Boolean get() = trackerId != null && !trackerState.isNullOrBlank() && trackerState != "ok"
@@ -582,10 +592,13 @@ data class SessionTasks(
 data class ReviewTask(
     @SerialName("task_id") val taskId: String = "",
     val key: String? = null,
+    /** Its fleet ticket key (`CF-12`), shown in place of [key]. */
+    @SerialName("display_key") val displayKey: String? = null,
     val title: String = "",
     @SerialName("org_id") val orgId: Long? = null,
 ) {
-    val label: String get() = key?.takeIf { it.isNotBlank() } ?: title.ifBlank { taskId }
+    val label: String get() =
+        displayKey?.takeIf { it.isNotBlank() } ?: key?.takeIf { it.isNotBlank() } ?: title.ifBlank { taskId }
 }
 
 /** Another task the hub thinks the session might be on. */
@@ -594,9 +607,12 @@ data class ReviewAlternative(
     @SerialName("link_id") val linkId: Long = 0,
     @SerialName("task_id") val taskId: String = "",
     val key: String? = null,
+    /** Its fleet ticket key (`CF-12`), shown in place of [key]. */
+    @SerialName("display_key") val displayKey: String? = null,
     val title: String = "",
 ) {
-    val label: String get() = key?.takeIf { it.isNotBlank() } ?: title.ifBlank { taskId }
+    val label: String get() =
+        displayKey?.takeIf { it.isNotBlank() } ?: key?.takeIf { it.isNotBlank() } ?: title.ifBlank { taskId }
 }
 
 /** One thing for a person to decide: a suggestion, or a conflict. */
