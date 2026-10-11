@@ -419,7 +419,7 @@ fun SessionsTab(
                             for (project in host.projects) {
                                 val work = project.work
                                 val heading = when {
-                                    work != null -> if (work.key != null && work.title.isNotBlank()) "${work.label} · ${work.title}" else work.label
+                                    work != null -> if (work.key != null && work.title.isNotBlank()) "${work.shownLabel} · ${work.title}" else work.shownLabel
                                     else -> project.label
                                 }
                                 if (heading.isNotEmpty()) {

@@ -148,7 +148,7 @@ private fun WorkHeading(work: WorkSummary, style: TextStyle) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         work.statusCategory?.let { WorkStatusDot(it) }
         Text(
-            text = work.label,
+            text = work.shownLabel,
             style = style,
             textDecoration = if (work.unavailable) TextDecoration.LineThrough else null,
         )
