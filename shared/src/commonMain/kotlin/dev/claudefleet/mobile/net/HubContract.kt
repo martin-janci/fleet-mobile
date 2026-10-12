@@ -2,7 +2,7 @@ package dev.claudefleet.mobile.net
 
 /**
  * The hub wire-contract revisions this build understands (up to claude-fleet
- * revision 17). A hub
+ * revision 18). A hub
  * outside the range is refused the way the desktop refuses it: the banner
  * says which side is behind, and no row event from that hub is applied.
  *
@@ -86,6 +86,11 @@ package dev.claudefleet.mobile.net
  * playbook run counts, Jev's host proposal for phone tokens and the hub's
  * sync facts. New tools and optional fields only, each read behind
  * `tools/list`, so a revision-17 hub is safe here. The phone rises first.
+ * Revision 18 (session environment variables, claude-fleet CF-2) adds the
+ * `env_vars` tool, an optional `env` map on `new_session` and an optional
+ * `env_target` on a form's secret field. A new tool and optional fields
+ * only: this app calls none of them and reads no new row shape, so a
+ * revision-18 hub is safe here. The phone rises first.
  *
  * [MIN_HUB_CONTRACT] does NOT mirror the desktop's minimum. The desktop
  * raised its own to 3 because a pre-3 hub would silently misperform
@@ -96,7 +101,7 @@ package dev.claudefleet.mobile.net
  * upgraded: this is the phone's own floor, not a copy of the desktop's.
  */
 const val MIN_HUB_CONTRACT: Int = 0
-const val MAX_HUB_CONTRACT: Int = 17
+const val MAX_HUB_CONTRACT: Int = 18
 
 /**
  * What a `contract` field that cannot be read as a revision counts as.
