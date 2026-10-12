@@ -31,7 +31,21 @@ data class DebugDevice(
     @SerialName("claimed_by") val claimedBy: String? = null,
     @SerialName("claim_note") val claimNote: String? = null,
     @SerialName("claimed_until") val claimedUntil: Long? = null,
+    /** Who waits for the claim, first in line first; each gets it in turn. */
+    val queue: List<QueuedHolder> = emptyList(),
+    /** How many wait: [queue]'s length. */
+    val waiting: Int = 0,
+    /** This device's own place in [queue] (1: next), when it waits. */
+    @SerialName("queue_place") val queuePlace: Int? = null,
     @SerialName("last_seen_at") val lastSeenAt: Long = 0,
+)
+
+/** One holder waiting in a device's line (`claim { queue: true }`). */
+@Serializable
+data class QueuedHolder(
+    val holder: String,
+    val note: String? = null,
+    @SerialName("queued_at") val queuedAt: Long = 0,
 )
 
 /** One host's last scan: when, and what went wrong if it did. */
