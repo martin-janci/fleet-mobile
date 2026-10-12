@@ -43,6 +43,8 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.OutlinedButton
 import dev.claudefleet.mobile.model.Mission
+import dev.claudefleet.mobile.model.AgentAction
+import dev.claudefleet.mobile.model.agentActionTitle
 import dev.claudefleet.mobile.model.missionWaitLabel
 import dev.claudefleet.mobile.model.loginLabel
 import dev.claudefleet.mobile.model.relativeTime
@@ -181,6 +183,10 @@ fun InboxScreen(
     /** Missions that wait on a person ([missionWaits]), rows of their own under the sessions (G5.4). */
     missionRows: List<Mission> = emptyList(),
     onOpenMission: (Long) -> Unit = {},
+    /** The agents' actions waiting for a person (claude-fleet agents step 5), with Approve and Reject. */
+    agentActions: AgentActionsUiState = AgentActionsUiState(),
+    onApproveAction: (AgentAction) -> Unit = {},
+    onRejectAction: (AgentAction) -> Unit = {},
     /** The rows' inline answers (G5.4): what each row offers, and what was pressed. */
     inbox: InboxUiState = InboxUiState(),
     rowActions: (SessionRow) -> InboxRowActions = { InboxRowActions() },
@@ -188,7 +194,8 @@ fun InboxScreen(
 ) {
     var view by rememberSaveable { mutableStateOf(InboxView.NeedsYou) }
     // A mission waiting on a person is one more thing that needs you (G5.4).
-    val needYou = rows.size + missionRows.size
+    // So is an agent's action waiting for an answer (agents step 5).
+    val needYou = rows.size + missionRows.size + agentActions.pending.size
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
             title = "Inbox",
@@ -279,6 +286,20 @@ fun InboxScreen(
                             onOpenLog = { onOpenSession(row.id) },
                             accountName = { accountNames[it] },
                         )
+                    }
+                }
+                items(agentActions.pending, key = { "agent-action-${it.id}" }) { a ->
+                    Column {
+                        PhoneRow(
+                            title = agentActionTitle(a),
+                            line = "proposed by an agent",
+                            word = StatusWord.NEEDS_YOU,
+                            lead = phoneLead(StatusWord.NEEDS_YOU, live),
+                            age = relativeTime(a.createdAt.takeIf { it > 0 }, nowSeconds),
+                            onClick = {},
+                            chips = { OrbitChip("Agent") },
+                        )
+                        AgentActionButtons(a, agentActions, onApproveAction, onRejectAction)
                     }
                 }
                 items(missionRows, key = { "mission-${it.id}" }) { m ->
@@ -375,6 +396,28 @@ class InboxRowHandlers(
  * Switch account asks first and moves only on Switch; Wait folds the buttons
  * into "Waiting for the reset". Neither is pre-selected.
  */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AgentActionButtons(
+    a: AgentAction,
+    state: AgentActionsUiState,
+    onApprove: (AgentAction) -> Unit,
+    onReject: (AgentAction) -> Unit,
+) {
+    val notice = state.notices[a.id]
+    if (!state.canAnswer && notice == null) return
+    val busy = a.id in state.busy
+    Column(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp)) {
+        if (state.canAnswer) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { onApprove(a) }, enabled = !busy) { Text("Approve") }
+                TextButton(onClick = { onReject(a) }, enabled = !busy) { Text("Reject") }
+            }
+        }
+        notice?.let { Text(it, color = Fleet.colors.fg2, fontSize = 12.sp) }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun InboxRowButtons(

@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.net
 
+import dev.claudefleet.mobile.model.AgentAction
+import dev.claudefleet.mobile.model.AgentsStatus
 import dev.claudefleet.mobile.model.MyGrants
 import dev.claudefleet.mobile.model.SearchPage
 import dev.claudefleet.mobile.model.SessionGrant
@@ -1449,6 +1451,20 @@ class HubClient(
     suspend fun workOrgs(): List<OrgDetail> =
         call("work", buildJsonObject { put("action", "orgs") }) {
             json.decodeFromJsonElement(ListSerializer(OrgDetail.serializer()), it)
+        }
+
+    // ---- agents (claude-fleet agents design step 5) ----
+
+    /** The agents' actions waiting for a person (`agents { action: status }`). */
+    suspend fun agentsStatus(): AgentsStatus =
+        call("agents", buildJsonObject { put("action", "status"); put("limit", 20) }) {
+            json.decodeFromJsonElement(AgentsStatus.serializer(), it)
+        }
+
+    /** Approve or reject one waiting action (`agents { action: approve | reject, id }`). */
+    suspend fun decideAgentAction(id: Long, approve: Boolean): AgentAction =
+        call("agents", buildJsonObject { put("action", if (approve) "approve" else "reject"); put("id", id) }) {
+            json.decodeFromJsonElement(AgentAction.serializer(), it)
         }
 
     // ---- missions (claude-fleet orchestration O1–O8) ----
