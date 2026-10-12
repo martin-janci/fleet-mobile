@@ -154,7 +154,7 @@ class ForbiddenExplainsItselfTest {
 
 /**
  * [contractVerdict] against this app's own range
- * (`MIN_HUB_CONTRACT = 0`, `MAX_HUB_CONTRACT = 17`; `MAX` mirrors the
+ * (`MIN_HUB_CONTRACT = 0`, `MAX_HUB_CONTRACT = 18`; `MAX` mirrors the
  * desktop's `src-tauri/src/backend/contract.rs`, `MIN` is this app's own
  * floor — see the KDoc on the constants in `HubContract.kt`). One revision
  * below the minimum is a hub too old for this app; one above the maximum is
@@ -172,9 +172,9 @@ class HubContractVerdictTest {
      * is present; this is the half that runs everywhere, CI included.
      */
     @Test
-    fun the_range_is_zero_to_seventeen() {
+    fun the_range_is_zero_to_eighteen() {
         assertEquals(0, MIN_HUB_CONTRACT)
-        assertEquals(17, MAX_HUB_CONTRACT)
+        assertEquals(18, MAX_HUB_CONTRACT)
     }
 
     @Test
@@ -309,6 +309,12 @@ class HubContractVerdictTest {
         assertEquals(ContractVerdict.Ok, contractVerdict(17))
     }
 
+    /** Revision 18 — session environment variables: the `env_vars` tool, `new_session { env }`, a form field's `env_target` — is in range. */
+    @Test
+    fun revision_eighteen_is_ok() {
+        assertEquals(ContractVerdict.Ok, contractVerdict(18))
+    }
+
     /**
      * A contract this app cannot read is refused as "the hub is ahead of me",
      * and says so in words rather than printing 2147483647 at a person.
@@ -326,8 +332,8 @@ class HubContractVerdictTest {
     @Test
     fun a_readable_out_of_range_contract_still_names_itself() {
         assertEquals(
-            "This app is too old for this hub (contract 18). Update the app.",
-            contractVerdict(18).sentence(),
+            "This app is too old for this hub (contract 19). Update the app.",
+            contractVerdict(19).sentence(),
         )
     }
 }
