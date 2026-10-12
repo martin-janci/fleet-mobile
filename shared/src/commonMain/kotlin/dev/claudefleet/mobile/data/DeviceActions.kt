@@ -16,6 +16,10 @@ interface DeviceActions {
 
     suspend fun claim(deviceId: Long): DebugDevice
 
+    /** Wait in line for a device someone else holds. */
+    suspend fun queue(deviceId: Long): DebugDevice
+
+    /** Release a claim, or leave the line when waiting in one. */
     suspend fun release(deviceId: Long): DebugDevice
 
     /** Answers the hub's word for the new state. */
@@ -33,6 +37,9 @@ class HubDeviceActions(private val session: AppSession) : DeviceActions {
     override suspend fun scan() = session.withClient { it.scanDebugDevices() }
 
     override suspend fun claim(deviceId: Long): DebugDevice = session.withClient { it.claimDebugDevice(deviceId, note = "from the phone") }
+
+    override suspend fun queue(deviceId: Long): DebugDevice =
+        session.withClient { it.claimDebugDevice(deviceId, note = "from the phone", queue = true) }
 
     override suspend fun release(deviceId: Long): DebugDevice = session.withClient { it.releaseDebugDevice(deviceId) }
 

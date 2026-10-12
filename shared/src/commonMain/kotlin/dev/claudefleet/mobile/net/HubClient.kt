@@ -1664,11 +1664,21 @@ class HubClient(
         call("debug_devices", buildJsonObject { put("action", "scan") }) { it }
     }
 
-    /** Hold [deviceId] for this device (`client:<name>`) so sessions keep off it. */
-    suspend fun claimDebugDevice(deviceId: Long, note: String? = null): DebugDevice =
-        deviceCall("claim", deviceId) { note?.let { put("note", it) } }
+    /**
+     * Hold [deviceId] for this device (`client:<name>`) so sessions keep off it. With
+     * [queue], a device someone else holds puts this device in its line instead of
+     * failing: the answer's `queue_place` says where, and the claim comes in turn.
+     */
+    suspend fun claimDebugDevice(deviceId: Long, note: String? = null, queue: Boolean = false): DebugDevice =
+        deviceCall("claim", deviceId) {
+            note?.let { put("note", it) }
+            if (queue) put("queue", true)
+        }
 
-    /** Let go of [deviceId], whoever held it; a person may release any claim. */
+    /**
+     * Let go of [deviceId], whoever held it; a person may release any claim. Waiting
+     * in its line while another holds it, this only leaves the line.
+     */
     suspend fun releaseDebugDevice(deviceId: Long): DebugDevice = deviceCall("release", deviceId)
 
     /** Shut down an emulator or simulator. */

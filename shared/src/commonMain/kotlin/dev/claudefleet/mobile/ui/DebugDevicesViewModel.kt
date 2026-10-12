@@ -18,7 +18,15 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** What a person may press on one test phone. */
-enum class DeviceMove(val label: String) { Claim("Claim"), Release("Release"), Boot("Boot"), Shutdown("Shut down"), Logs("Logs") }
+enum class DeviceMove(val label: String) {
+    Claim("Claim"),
+    Queue("Wait in line"),
+    LeaveLine("Leave line"),
+    Release("Release"),
+    Boot("Boot"),
+    Shutdown("Shut down"),
+    Logs("Logs"),
+}
 
 /** One device's log read, kept with the device it came from. */
 data class DeviceLogs(val deviceId: Long, val title: String, val output: DeviceOutput)
@@ -42,7 +50,7 @@ data class DebugDevicesUiState(
 /**
  * Debug devices on the phone (redesign 11.10, on the hub since contract 10):
  * the test phones, emulators and simulators on the fleet's hosts, with Claim,
- * Release, Boot, Shut down and Logs. Install, run and screenshot stay on the
+ * Wait in line / Leave line, Release, Boot, Shut down and Logs. Install, run and screenshot stay on the
  * desktop, as do a device's label and sharing.
  */
 class DebugDevicesViewModel(
@@ -121,6 +129,11 @@ class DebugDevicesViewModel(
         try {
             when (move) {
                 DeviceMove.Claim -> keep(actions.claim(device.id), "Claimed ${device.title}.")
+                DeviceMove.Queue -> {
+                    val d = actions.queue(device.id)
+                    keep(d, d.queuePlace?.let { "In line for ${device.title}: ${placeName(it)}." } ?: "Claimed ${device.title}.")
+                }
+                DeviceMove.LeaveLine -> keep(actions.release(device.id), "Left the line for ${device.title}.")
                 DeviceMove.Release -> keep(actions.release(device.id), "Released ${device.title}.")
                 DeviceMove.Shutdown -> keep(actions.shutdown(device.id), "Shut down ${device.title}.")
                 DeviceMove.Boot -> {
@@ -198,10 +211,30 @@ fun deviceLine(d: DebugDevice, nowSeconds: Long): String {
             "held by ${holderName(holder)}",
             d.claimNote?.takeIf { it.isNotBlank() },
             d.claimedUntil?.let { relativeWithin(it, nowSeconds) }?.let { "$it left" },
+            queueLine(d),
         ).joinToString(" · ")
     }
     return listOfNotNull(d.kind.takeIf { it.isNotBlank() }, os, d.model?.takeIf { it.isNotBlank() }, d.host.takeIf { it.isNotBlank() }, held)
         .joinToString(" · ")
+}
+
+/** "you're next", "you're 3rd in line", "2 waiting", or nothing when nobody waits. */
+fun queueLine(d: DebugDevice): String? {
+    val waiting = maxOf(d.waiting, d.queue.size)
+    return when {
+        d.queuePlace != null -> "you're " + placeName(d.queuePlace)
+        waiting > 0 -> "$waiting waiting"
+        else -> null
+    }
+}
+
+/** A place in line in words: 1 is "next", 2 is "2nd in line". */
+fun placeName(place: Int): String = when {
+    place <= 1 -> "next"
+    place % 100 in 11..13 -> "${place}th in line"
+    place % 10 == 2 -> "${place}nd in line"
+    place % 10 == 3 -> "${place}rd in line"
+    else -> "${place}th in line"
 }
 
 /**
@@ -215,15 +248,18 @@ fun holderName(holder: String): String = when {
 }
 
 /**
- * What may be pressed on [d]: Claim a ready one nobody holds, Release a held
- * one (a person may release any claim), Boot a stopped emulator or
+ * What may be pressed on [d]: Claim a ready one nobody holds, Wait in line for
+ * a held one (Leave line once waiting, which never takes the holder's claim),
+ * Release a held one (a person may release any claim), Boot a stopped emulator or
  * simulator, Shut one down, read the Logs of a ready one. A physical phone is
  * never booted or shut down from here.
  */
 fun deviceMoves(d: DebugDevice): List<DeviceMove> = buildList {
     val virtual = d.kind == "emulator" || d.kind == "simulator"
     if (d.claimedBy == null && d.ready) add(DeviceMove.Claim)
-    if (d.claimedBy != null) add(DeviceMove.Release)
+    if (d.claimedBy != null && d.queuePlace == null) add(DeviceMove.Queue)
+    if (d.claimedBy != null && d.queuePlace != null) add(DeviceMove.LeaveLine)
+    if (d.claimedBy != null && d.queuePlace == null) add(DeviceMove.Release)
     if (virtual && !d.ready && d.state != "unauthorized") add(DeviceMove.Boot)
     if (virtual && d.ready) add(DeviceMove.Shutdown)
     if (d.ready) add(DeviceMove.Logs)

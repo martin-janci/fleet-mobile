@@ -70,9 +70,16 @@ private class FakeDeviceActions : DeviceActions {
         return answer(deviceId) { it.copy(claimedBy = "client:Martin's Pixel") }
     }
 
+    override suspend fun queue(deviceId: Long): DebugDevice {
+        calls += "queue $deviceId"
+        return answer(deviceId) { it.copy(waiting = 2, queuePlace = 2) }
+    }
+
     override suspend fun release(deviceId: Long): DebugDevice {
         calls += "release $deviceId"
-        return answer(deviceId) { it.copy(claimedBy = null, claimNote = null) }
+        return answer(deviceId) {
+            if (it.queuePlace != null) it.copy(waiting = it.waiting - 1, queuePlace = null) else it.copy(claimedBy = null, claimNote = null)
+        }
     }
 
     override suspend fun boot(deviceId: Long): String = "booting".also { calls += "boot $deviceId" }
@@ -139,6 +146,28 @@ class DebugDevicesTest {
     }
 
     @Test
+    fun waiting_in_line_says_the_place_and_leaving_keeps_the_holders_claim() = runTest {
+        val actions = FakeDeviceActions()
+        val vm = devices(actions = actions)
+        runCurrent()
+        vm.open()
+        runCurrent()
+        vm.press(AVD, DeviceMove.Queue)
+        runCurrent()
+        assertEquals(listOf("list false", "queue 2", "list false"), actions.calls)
+        assertEquals("In line for Pixel_8_API_35: 2nd in line.", vm.state.value.notice)
+        val waiting = vm.state.value.devices.single { it.id == 2L }
+        assertEquals(2, waiting.queuePlace)
+        vm.press(waiting, DeviceMove.LeaveLine)
+        runCurrent()
+        assertEquals("release 2", actions.calls[3])
+        val left = vm.state.value.devices.single { it.id == 2L }
+        assertEquals("host:mercury#42", left.claimedBy)
+        assertNull(left.queuePlace)
+        assertEquals("Left the line for Pixel_8_API_35.", vm.state.value.notice)
+    }
+
+    @Test
     fun a_refused_claim_says_why_and_changes_nothing() = runTest {
         val actions = FakeDeviceActions().apply { refuse = true }
         val vm = devices(actions = actions)
@@ -202,7 +231,9 @@ class DebugDevicesTest {
     @Test
     fun each_device_offers_only_what_it_can_do() {
         assertEquals(listOf(DeviceMove.Claim, DeviceMove.Logs), deviceMoves(PIXEL))
-        assertEquals(listOf(DeviceMove.Release, DeviceMove.Shutdown, DeviceMove.Logs), deviceMoves(AVD))
+        assertEquals(listOf(DeviceMove.Queue, DeviceMove.Release, DeviceMove.Shutdown, DeviceMove.Logs), deviceMoves(AVD))
+        // Waiting in its line: only leave the line, never take the holder's claim.
+        assertEquals(listOf(DeviceMove.LeaveLine, DeviceMove.Shutdown, DeviceMove.Logs), deviceMoves(AVD.copy(queuePlace = 1)))
         assertEquals(listOf(DeviceMove.Boot), deviceMoves(SIM))
         assertEquals(emptyList<DeviceMove>(), deviceMoves(PIXEL.copy(state = "unauthorized", ready = false)))
     }
@@ -218,6 +249,15 @@ class DebugDevicesTest {
             "emulator · Android · mercury · held by a session on mercury · Mobile push · 30 min left",
             deviceLine(AVD.copy(claimedUntil = 1_800), 0),
         )
+        assertEquals(
+            "emulator · Android · mercury · held by a session on mercury · Mobile push · 2 waiting",
+            deviceLine(AVD.copy(waiting = 2), 0),
+        )
+        assertEquals(
+            "emulator · Android · mercury · held by a session on mercury · Mobile push · you're next",
+            deviceLine(AVD.copy(waiting = 1, queuePlace = 1), 0),
+        )
+        assertEquals(listOf("next", "2nd in line", "3rd in line", "4th in line", "12th in line", "22nd in line"), listOf(1, 2, 3, 4, 12, 22).map(::placeName))
         assertEquals("Martin's Pixel", holderName("client:Martin's Pixel"))
     }
 
@@ -239,5 +279,15 @@ class DebugDevicesTest {
         assertEquals("client:phone", d.claimedBy)
         assertEquals(1_700_000_000L, d.claimedUntil)
         assertEquals("ssh: timeout", list.hosts[1].error)
+        assertEquals(0, d.waiting)
+
+        val queued = json.decodeFromString(
+            DebugDevice.serializer(),
+            """{"id":5,"title":"Pixel 9","host":"mac","state":"online","ready":true,"claimed_by":"host:mac#7","queue":[{"holder":"host:pine#3","note":"ui tests","queued_at":10},{"holder":"client:phone","queued_at":11}],"waiting":2,"queue_place":2,"first_seen_at":1,"last_seen_at":2}""",
+        )
+        assertEquals(listOf("host:pine#3", "client:phone"), queued.queue.map { it.holder })
+        assertEquals("ui tests", queued.queue[0].note)
+        assertEquals(2, queued.waiting)
+        assertEquals(2, queued.queuePlace)
     }
 }
