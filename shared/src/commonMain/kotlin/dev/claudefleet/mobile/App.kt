@@ -324,6 +324,8 @@ import dev.claudefleet.mobile.ui.TidySheet
 import dev.claudefleet.mobile.ui.TidyViewModel
 import dev.claudefleet.mobile.ui.MissionsHandlers
 import dev.claudefleet.mobile.ui.MissionsSheet
+import dev.claudefleet.mobile.ui.MissionReturn
+import dev.claudefleet.mobile.ui.missionReturn
 import dev.claudefleet.mobile.ui.AutomationHandlers
 import dev.claudefleet.mobile.ui.AutomationSheet
 import dev.claudefleet.mobile.ui.AutomationViewModel
@@ -1264,6 +1266,21 @@ private fun FleetRoute(
         }
     }
     val workState by myWork.state.collectAsState()
+    // A task or a session opened from a mission's detail: the screen under
+    // the sheet, and the mission to put back up when back returns there.
+    var missionUnder by remember(credentials) { mutableStateOf<Pair<Screen, Long>?>(null) }
+    LaunchedEffect(screen) {
+        val (under, id) = missionUnder ?: return@LaunchedEffect
+        when (missionReturn(screen, under)) {
+            MissionReturn.REOPEN -> { missionUnder = null; missions.openOne(id) }
+            MissionReturn.KEEP -> Unit
+            MissionReturn.FORGET -> missionUnder = null
+        }
+    }
+    val leaveMission: () -> Unit = {
+        missionsState.detail?.mission?.id?.let { missionUnder = screen to it }
+        missions.close()
+    }
     // The hub stopped serving the Work view (or a reconnect found an older
     // hub): the tab leaves the bar, and the app leaves the tab.
     LaunchedEffect(workState.available) { if (!workState.available) nav.workUnavailable() }
@@ -2292,6 +2309,13 @@ private fun FleetRoute(
                         onDenySpend = { missions.denySpend(it) },
                         onSignGrant = { level, hours, budget -> missions.signGrant(level, hours, budget) },
                         onRetryItem = { missions.retryItem(it) },
+                        // A task opens as the Work view opens one; only where the hub serves it.
+                        onOpenItem = if (workState.available) {
+                            { id: Long -> leaveMission(); nav.openTask("item:$id") }
+                        } else {
+                            null
+                        },
+                        onOpenSession = { id -> leaveMission(); nav.open(id) },
                     ),
                     orbit = layout == PhoneLayout.New,
                 )
