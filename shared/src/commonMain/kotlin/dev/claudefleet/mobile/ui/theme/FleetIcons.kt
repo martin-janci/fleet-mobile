@@ -451,6 +451,15 @@ object FleetIcons {
         }
     }
 
+    /** A phone with its speaker slot and home bar: a debug device. */
+    val Device: ImageVector by lazy {
+        strokeIcon("Device") {
+            moveTo(7f, 2f); lineTo(17f, 2f); lineTo(17f, 22f); lineTo(7f, 22f); close()
+            moveTo(10.5f, 4.5f); lineTo(13.5f, 4.5f)
+            moveTo(10f, 19f); lineTo(14f, 19f)
+        }
+    }
+
     /** Three ticked lines: TodoWrite. */
     val Checklist: ImageVector by lazy {
         strokeIcon("Checklist") {

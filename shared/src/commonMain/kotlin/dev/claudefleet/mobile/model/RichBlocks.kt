@@ -53,7 +53,7 @@ data class TaskReport(
 )
 
 val UI_TONES = listOf("info", "tip", "success", "warning", "danger")
-val UI_KINDS = listOf("report", "steps", "guide", "callout", "facts", "choices", "form", "progress", "results", "error", "setting")
+val UI_KINDS = listOf("report", "steps", "guide", "callout", "facts", "choices", "form", "progress", "results", "error", "setting", "device")
 
 val PROGRESS_STATES = listOf("running", "waiting", "done", "failed")
 val PROGRESS_STEP_STATES = listOf("pending", "running", "done", "failed", "skipped")
@@ -162,6 +162,12 @@ sealed class UiBlock {
     data class Error(val code: String, val title: String, val body: String?, val detail: String?, val next: List<UiChoice>) : UiBlock()
     /** A settings change an agent proposed; the card reads the key and values from the proposal, never from here. */
     data class Setting(val proposal: Long, val note: String?) : UiBlock()
+    /**
+     * A test phone the agent points at: [device] is a reference as `debug_devices`
+     * takes one (an id, `#12`, a label, name or serial, or `host/that`); the card
+     * reads the device's state from the hub, never from here.
+     */
+    data class Device(val device: String, val title: String?, val note: String?) : UiBlock()
 }
 
 sealed class RichSegment {
@@ -763,6 +769,11 @@ fun checkUiBlock(raw: String): UiCheck {
             val next = each(optArr(v, "next", p, "", 1, 4) ?: emptyList(), p, "next") { o, at -> choice(o, p, at) }
             UiBlock.Error(code, title, str(v, "body", p, "", 4000), str(v, "detail", p, "", 8000), next)
         }
+        "device" -> UiBlock.Device(
+            device = str(v, "device", p, "", 200, required = true)?.trim() ?: "",
+            title = str(v, "title", p, "", 120),
+            note = str(v, "note", p, "", 2000),
+        )
         else -> {
             var proposal: Long? = null
             if (v["proposal"] == null || v["proposal"] is JsonNull) p.add("", "`proposal` is required") else proposal = whole(v, "proposal", p, "", 1)

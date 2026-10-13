@@ -22,7 +22,7 @@ import kotlinx.serialization.json.JsonPrimitive
  */
 
 /** Which detail layout, and which icon, a tool call gets. */
-internal enum class ToolKind { Edit, Bash, Read, Search, Todo, Other }
+internal enum class ToolKind { Edit, Bash, Read, Search, Todo, Device, Other }
 
 /**
  * The call's tool name: the hub's `name`, else read out of a one-liner such as
@@ -57,7 +57,7 @@ internal fun toolKind(name: String): ToolKind = when (name) {
     "Read" -> ToolKind.Read
     "Grep", "Glob" -> ToolKind.Search
     "TodoWrite" -> ToolKind.Todo
-    else -> ToolKind.Other
+    else -> if (isDeviceTool(name)) ToolKind.Device else ToolKind.Other
 }
 
 private val TOOL_VERBS = mapOf(
@@ -76,6 +76,7 @@ private val TOOL_VERBS = mapOf(
 /** The short verb a tool row leads with; `mcp__srv__tool` → `srv · tool`. */
 internal fun toolVerb(name: String): String {
     TOOL_VERBS[name]?.let { return it }
+    if (isDeviceTool(name)) return "Device"
     if (name.startsWith("mcp__")) {
         val parts = name.removePrefix("mcp__").split("__")
         val server = parts.first()
@@ -115,7 +116,9 @@ internal data class ToolLine(
 
 internal fun ConvItem.Tool.line(): ToolLine {
     val name = toolName()
-    val target = toolTarget()
+    // A device call's target is its action and device, read from the one-liner:
+    // the hub's own target for it is at most an install's path.
+    val target = if (isDeviceTool(name)) deviceCallFromSummary(summary).target ?: toolTarget() else toolTarget()
     return ToolLine(
         verb = toolVerb(name),
         target = target?.let(::shortTarget),

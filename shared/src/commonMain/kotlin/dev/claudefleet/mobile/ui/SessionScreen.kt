@@ -345,6 +345,9 @@ fun SessionScreen(
     control: ControlChrome? = null,
     /** Send later and a paused row's Switch account / Wait (redesign 14.14, 4.10); the default does nothing. */
     later: SessionLaterHost = SessionLaterHost(),
+    /** The test phones this session holds or waits for ([SessionDeviceStrip]); the default draws none. */
+    devices: SessionDevicesUiState = SessionDevicesUiState(),
+    devicesHandlers: SessionDevicesHandlers = SessionDevicesHandlers(),
 ) {
     // On the New bar the result sits in the conversation instead (RepairResultCard).
     if (tabs == null) state.repair?.let { RepairReportDialog(it, onDismissRepair) }
@@ -754,6 +757,8 @@ fun SessionScreen(
             // The New bar's tabs: under the header, and still there when a
             // read-back folds it, so another tab is never more than a tap away.
             if (!wide && !fullScreen) tabs?.let { SessionTabRow(it) }
+            // The test phones the session holds or waits for: under the tabs, on every one of them.
+            if (!fullScreen) SessionDeviceStrip(devices, state.nowSeconds, devicesHandlers)
             val pane = tabs?.selected?.takeIf { it != SessionTab.Conversation && !wide }
             if (tabs != null && pane != null) {
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {

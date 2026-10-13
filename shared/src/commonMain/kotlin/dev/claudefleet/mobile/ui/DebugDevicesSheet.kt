@@ -30,6 +30,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.model.DebugDevice
+import dev.claudefleet.mobile.ui.components.Base64Image
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.kit.BottomSheet
@@ -49,8 +50,9 @@ data class DebugDevicesHandlers(
 /**
  * Debug devices on the New bar (redesign 11.10, DebugDevices): the test
  * phones, emulators and simulators on the fleet's hosts, not the people's own
- * devices. Each row says its state, where it is and who holds it, with the
- * presses it allows; Shut down asks first.
+ * devices. Each row says its state, where it is, who holds it and who waits,
+ * with the presses it allows; Shut down asks first, and a Screenshot stays in
+ * the row as a thumbnail (a tap shows it whole).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -89,7 +91,7 @@ fun DebugDevicesSheet(state: DebugDevicesUiState, nowSeconds: Long, handlers: De
                 HorizontalDivider(color = o.border)
                 for (h in failed) Text("${h.host}: ${h.error}", color = o.fgMuted, fontSize = 13.sp)
             }
-            Text("Install, run and screenshots are on the desktop: Settings, Organisations, Debug devices.", color = o.fgMuted, fontSize = 13.sp)
+            Text("Install and run are on the desktop: Settings, Organisations, Debug devices.", color = o.fgMuted, fontSize = 13.sp)
         }
     }
     confirmShutdown?.let { d ->
@@ -143,6 +145,16 @@ private fun DeviceRow(d: DebugDevice, nowSeconds: Long, state: DebugDevicesUiSta
             color = if (d.ready || d.claimedBy != null) o.fg2 else o.fgMuted,
             fontSize = 13.sp,
         )
+        queueNames(d)?.let { names ->
+            Text(
+                "Waiting: $names" + (d.queuePlace?.let { " · you're ${placeName(it)}" } ?: ""),
+                color = o.fgMuted,
+                fontSize = 13.sp,
+            )
+        }
+        state.shots[d.id]?.let { shot ->
+            Base64Image(shot.data, description = "Screenshot of ${d.title}", maxHeight = 160.dp, modifier = Modifier.padding(top = 4.dp))
+        }
         val moves = if (state.canAct) deviceMoves(d) else emptyList()
         if (moves.isNotEmpty()) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
