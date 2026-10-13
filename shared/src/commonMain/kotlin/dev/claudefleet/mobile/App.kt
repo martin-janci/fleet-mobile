@@ -334,6 +334,8 @@ import dev.claudefleet.mobile.ui.PauseAllQuestion
 import dev.claudefleet.mobile.ui.DebugDevicesHandlers
 import dev.claudefleet.mobile.ui.DebugDevicesSheet
 import dev.claudefleet.mobile.ui.DebugDevicesViewModel
+import dev.claudefleet.mobile.ui.SessionDevicesHandlers
+import dev.claudefleet.mobile.ui.SessionDevicesViewModel
 import dev.claudefleet.mobile.ui.devicesLine
 import dev.claudefleet.mobile.ui.OrbitMissionsHandlers
 import dev.claudefleet.mobile.ui.OrbitMissionsScreen
@@ -2974,6 +2976,13 @@ private fun SessionRoute(
         SessionExtrasViewModel(sessionId, repository, container.sessionExtrasActions, scope, credentials.canWrite)
     }
     val extras by extrasVm.state.collectAsState()
+    // The test phones this session holds or waits for: read every 30 s while
+    // this screen is up and the hub serves `debug_devices`, and nowhere else.
+    val devicesVm = remember(sessionId, repository, scope) {
+        SessionDevicesViewModel(sessionId, repository, container.deviceActions, scope, credentials.canWrite)
+    }
+    val sessionDevices by devicesVm.state.collectAsState()
+    LaunchedEffect(devicesVm) { devicesVm.watch() }
     // The New bar's tabs (redesign 14.4): the conversation, the agent's own
     // screen, the worktree (instead of the worktree screen) and Details
     // (instead of the sheet). Each reads when it is opened.
@@ -3119,6 +3128,15 @@ private fun SessionRoute(
         chat = ChatHost(
             settings = container.fleetSettingsActions.takeIf { caps.settingProposals },
             mayDecideSettings = credentials.canWrite && caps.decideSettingProposals,
+            devices = if (caps.debugDevices) devicesVm::devices else null,
+            screenshot = if (caps.debugDevices && credentials.canWrite) devicesVm::takeScreenshot else null,
+        ),
+        devices = sessionDevices,
+        devicesHandlers = SessionDevicesHandlers(
+            onScreenshot = { devicesVm.screenshot(it) },
+            onRelease = { devicesVm.release(it) },
+            onCloseShot = devicesVm::closeShot,
+            onDismissError = devicesVm::dismissError,
         ),
         chatForms = container.chatFormActions.takeIf { caps.ask },
         onRewind = { anchor -> vm.rewind(anchor) },
