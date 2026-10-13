@@ -9,7 +9,9 @@ import dev.claudefleet.mobile.model.HubHealth
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.RoutineBudget
+import dev.claudefleet.mobile.model.RoutineCheck
 import dev.claudefleet.mobile.model.RoutineDetail
+import dev.claudefleet.mobile.model.RoutineExplain
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.net.HubCapabilities
@@ -87,6 +89,16 @@ private class FakeRoutineActions : RoutineActions {
         this.paused = paused
     }
 
+    /** What `explain` answers; null is a hub without the action, and [explainFails] one that refuses it. */
+    var why: RoutineExplain? = null
+    var explainFails = false
+
+    override suspend fun explain(routineId: Long): RoutineExplain? {
+        calls += "explain $routineId"
+        if (explainFails) throw HubError.Tool("E_INVALID", "action must be list | get")
+        return why
+    }
+
     /** Today's spend, micro-USD; null answers as a hub without `budget`. */
     var spent: Long? = null
 
@@ -150,6 +162,38 @@ class AutomationTest {
         assertEquals("Morning brief", fleetRunTitle(runs[2]), "a run whose owner is its kind is titled by the kind, in words")
         assertEquals("2 min ago · \$0.42", fleetRunLine(runs[2], nowSeconds = 420))
         assertEquals("Routine · failed: no host · 3 min ago", fleetRunLine(runs[3], nowSeconds = 380))
+    }
+
+    @Test
+    fun an_open_routine_says_why_it_does_not_fire_and_an_older_hub_says_nothing() = runTest {
+        val actions = FakeRoutineActions()
+        actions.why = RoutineExplain(
+            summary = "Does not fire: Pause all is on.",
+            state = "block",
+            checks = listOf(
+                RoutineCheck("enabled", "ok", "it is on"),
+                RoutineCheck("host", "warn", "the last probe could not reach mac"),
+                RoutineCheck("automation", "block", "Pause all is on"),
+            ),
+        )
+        val vm = automation(actions = actions)
+        runCurrent()
+        vm.open()
+        runCurrent()
+        vm.select(1)
+        runCurrent()
+        val why = vm.state.value.explain
+        assertEquals("Does not fire: Pause all is on.", why?.summary)
+        assertEquals(listOf("Stops it: Pause all is on", "Note: the last probe could not reach mac"), whyLines(why!!))
+        assertTrue("explain 1" in actions.calls)
+        // An older hub refuses the action: the routine still opens, with no why.
+        actions.explainFails = true
+        vm.back()
+        vm.select(1)
+        runCurrent()
+        assertNull(vm.state.value.explain)
+        assertEquals(1L, vm.state.value.detail?.routine?.id)
+        assertNull(vm.state.value.error)
     }
 
     @Test

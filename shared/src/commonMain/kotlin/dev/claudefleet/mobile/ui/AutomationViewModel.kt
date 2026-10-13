@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.model.FleetRun
 import dev.claudefleet.mobile.model.LoopHealth
 import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.RoutineDetail
+import dev.claudefleet.mobile.model.RoutineExplain
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.dollars
 import dev.claudefleet.mobile.model.relativeAgo
@@ -53,6 +54,8 @@ data class AutomationUiState(
     val fleetRuns: List<FleetRun>? = null,
     /** The routine opened from the list; null shows the list. */
     val detail: RoutineDetail? = null,
+    /** Why [detail] does or does not fire; null from a hub without `explain`. */
+    val explain: RoutineExplain? = null,
     /** The hub's `automation_paused`; null until read. */
     val paused: Boolean? = null,
     /** The hub's built-in routines (8.1's loops), read-only; empty from an older hub. */
@@ -90,6 +93,7 @@ class AutomationViewModel(
         val runs: List<RunLine> = emptyList(),
         val fleetRuns: List<FleetRun>? = null,
         val detail: RoutineDetail? = null,
+        val explain: RoutineExplain? = null,
         val paused: Boolean? = null,
         val loops: List<LoopHealth> = emptyList(),
         val spentToday: Long? = null,
@@ -112,6 +116,7 @@ class AutomationViewModel(
             runs = l.runs,
             fleetRuns = l.fleetRuns,
             detail = l.detail,
+            explain = l.explain,
             paused = l.paused,
             loops = l.loops,
             spentToday = l.spentToday,
@@ -239,7 +244,17 @@ class AutomationViewModel(
         local.update { it.copy(loading = true) }
         try {
             val detail = actions.routine(routineId)
-            local.update { it.copy(loading = false, detail = detail).withRoutine(detail.routine) }
+            local.update { it.copy(loading = false, detail = detail, explain = null).withRoutine(detail.routine) }
+            // The why is a second read: an older hub refuses the action, and
+            // the routine still shows without it.
+            val why = try {
+                actions.explain(routineId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                null
+            }
+            local.update { if (it.detail?.routine?.id == routineId) it.copy(explain = why) else it }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -448,3 +463,8 @@ fun builtInAgents(loops: List<LoopHealth>, runs: List<FleetRun>, paused: Boolean
         ),
     )
 }
+
+/** The checks the Why card lists: the ones that stop a fire, then the caveats. */
+fun whyLines(why: RoutineExplain): List<String> =
+    (why.checks.filter { it.state == "block" } + why.checks.filter { it.state == "warn" })
+        .map { "${if (it.state == "block") "Stops it" else "Note"}: ${it.detail}" }

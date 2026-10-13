@@ -62,6 +62,7 @@ import dev.claudefleet.mobile.model.DebugDevice
 import dev.claudefleet.mobile.model.DebugDeviceList
 import dev.claudefleet.mobile.model.DeviceOutput
 import dev.claudefleet.mobile.model.RoutineDetail
+import dev.claudefleet.mobile.model.RoutineExplain
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.RunsPage
 import dev.claudefleet.mobile.model.Headroom
@@ -1620,6 +1621,20 @@ class HubClient(
                 put("routine_id", routineId)
             },
         ) { json.decodeFromJsonElement(RoutineDetail.serializer(), it) }
+
+    /**
+     * Why a routine does or does not fire (`routines { explain }`, claude-fleet
+     * migration 185). An older hub answers `E_INVALID` for the action.
+     */
+    suspend fun routineExplain(routineId: Long): RoutineExplain =
+        call(
+            "routines",
+            buildJsonObject {
+                put("action", "explain")
+                put("routine_id", routineId)
+                put("limit", 1)
+            },
+        ) { json.decodeFromJsonElement(RoutineExplain.serializer(), it) }
 
     /** A routine's runs, newest first, at most [limit]. */
     suspend fun routineRuns(routineId: Long, limit: Int? = null): List<RoutineRun> =

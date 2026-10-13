@@ -69,3 +69,29 @@ data class FailingRoutine(
     val run: RoutineRun,
     @SerialName("may_change") val mayChange: Boolean = false,
 )
+
+/**
+ * One check a fire passes or fails (`routines { explain }`, claude-fleet
+ * migration 185): `enabled`, `automation`, `scheduler`, `schedule` or
+ * `event`, `overlap`, `day_budget`, `fleet_budget`, `account`, `host`.
+ */
+@Serializable
+data class RoutineCheck(
+    val name: String = "",
+    /** ok | warn | block */
+    val state: String = "",
+    val detail: String = "",
+)
+
+/**
+ * `routines { explain }`: why a routine does or does not fire, in one line,
+ * and its checks in the scheduler's order. The event list and the decision
+ * trace pass by under `ignoreUnknownKeys`: the desktop's Debug tab draws them.
+ */
+@Serializable
+data class RoutineExplain(
+    val summary: String = "",
+    /** ok | warn | block: the worst check. */
+    val state: String = "ok",
+    val checks: List<RoutineCheck> = emptyList(),
+)

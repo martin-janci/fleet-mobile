@@ -33,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.model.Routine
+import dev.claudefleet.mobile.model.RoutineExplain
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.kit.BottomSheet
@@ -82,6 +83,7 @@ fun AutomationSheet(state: AutomationUiState, nowSeconds: Long, handlers: Automa
             if (detail != null) {
                 TextButton(onClick = handlers.onBack) { Text("‹ Routines", color = o.accent) }
                 RoutineRow(detail.routine, nowSeconds, state, handlers, canToggle = state.canToggle && detail.mayChange, open = false)
+                state.explain?.let { WhyCard(it) }
                 HorizontalDivider(color = o.border)
                 Text("Last runs · each run opens as a session", color = o.fgMuted, fontSize = 13.sp)
                 if (detail.runs.isEmpty() && !state.loading) Text("No runs yet.", color = o.fgMuted, fontSize = 14.sp)
@@ -103,6 +105,23 @@ fun AutomationSheet(state: AutomationUiState, nowSeconds: Long, handlers: Automa
     }
     if (confirmPause) {
         PauseAllQuestion(onPause = { confirmPause = false; handlers.onSetPaused(true) }, onDismiss = { confirmPause = false })
+    }
+}
+
+/**
+ * Why the open routine does or does not fire (claude-fleet's `explain`): its
+ * one line, then each check that stops a fire or carries a caveat. The full
+ * trace is on the desktop's Debug tab.
+ */
+@Composable
+private fun WhyCard(why: RoutineExplain) {
+    val o = Fleet.colors
+    Column(
+        modifier = Modifier.fillMaxWidth().background(o.bgPane, RoundedCornerShape(8.dp)).padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(why.summary, color = if (why.state == "block") o.danger else o.fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        for (c in whyLines(why)) Text(c, color = o.fgMuted, fontSize = 13.sp)
     }
 }
 
