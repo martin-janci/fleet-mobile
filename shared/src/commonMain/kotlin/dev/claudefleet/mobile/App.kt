@@ -1581,6 +1581,7 @@ private fun FleetRoute(
                     val prState by pullRequests.state.collectAsState()
                     val workHandlers = MyWorkHandlers(
                         onOpenTask = nav::openTask,
+                        onOpenSession = nav::open,
                         onRefresh = { myWork.refresh() },
                         onReload = { myWork.reload() },
                         onToggleSection = myWork::toggleSection,
@@ -1620,6 +1621,8 @@ private fun FleetRoute(
                     // sessions are doing, and To review sits beside Mine.
                     val workRows by repository.sessions.collectAsState()
                     val workRowOf: (Long) -> dev.claudefleet.mobile.model.SessionRow? = { id -> workRows.firstOrNull { it.id == id } }
+                    // What a row's tap opens (This phone): its ticket, or its live session.
+                    val workTap by container.phone.workTap.collectAsState()
                     if (layout == PhoneLayout.New) {
                         val workStatus by repository.status.collectAsState()
                         PhoneMyWorkScreen(
@@ -1630,9 +1633,10 @@ private fun FleetRoute(
                             handlers = workHandlers,
                             reviewCount = if (reviewState.loaded) reviewState.total else workState.reviewCount,
                             onStart = { nav.newSession(ticketKey = it) },
+                            tapOpens = workTap,
                         )
                     } else {
-                        MyWorkScreen(state = workState, handlers = workHandlers)
+                        MyWorkScreen(state = workState, handlers = workHandlers, tapOpens = workTap)
                     }
                     if (prState.open && layout == PhoneLayout.New) {
                         PhonePullRequestsSheet(
@@ -2457,6 +2461,7 @@ private fun SettingsRoute(
         val notifyKinds by container.phone.notifyKinds.collectAsState()
         val quiet by container.phone.quiet.collectAsState()
         val lockOn by container.phone.lock.collectAsState()
+        val workTap by container.phone.workTap.collectAsState()
         val gate = rememberBiometricGate()
         BackHandler(enabled = fleetPageOpen || place != SettingsPlace.Home) {
             if (!fleetSettings.back()) settings.back()
@@ -2473,6 +2478,7 @@ private fun SettingsRoute(
                 lock = lockOn,
                 motion = motion,
                 quiet = quiet,
+                workTap = workTap,
             ),
             handlers = OrbitSettingsHandlers(
                 onOpen = settings::open,
@@ -2480,6 +2486,7 @@ private fun SettingsRoute(
                 onOpenPage = fleetSettings::open,
                 onSetTheme = container.phone::setTheme,
                 onSetMotion = container.phone::setMotion,
+                onSetWorkTap = container.phone::setWorkTap,
                 onSetNotify = container.phone::setNotify,
                 onSetQuiet = container.phone::setQuiet,
                 onSetUpdateMode = updates::setMode,
@@ -2529,6 +2536,8 @@ private fun SettingsRoute(
                 notifier = container.notifier,
                 layout = layout,
                 onSetLayout = onSetLayout,
+                workTap = container.phone.workTap.collectAsState().value,
+                onSetWorkTap = container.phone::setWorkTap,
                 fleetSettings = fleetSection,
                 fleetSaveBar = fleetSaveBar,
             )
