@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -61,6 +62,10 @@ import dev.claudefleet.mobile.ui.kit.SheetAction
  * the same calls. A grant is signed from its review sheet ([GrantSheet], gap
  * plan G5.7), which says every term and pre-selects none; Not now puts the
  * card away on this phone. A failed task offers Retry.
+ *
+ * A task's row opens its task, and its Session button the live session on
+ * it; Sessions lists every live session on the mission's tasks, each opening
+ * its session.
  */
 
 const val MISSION_GRANT_TAG = "mission.grant"
@@ -72,6 +77,9 @@ const val MISSION_PLAN_TAG = "mission.plan."
 const val MISSION_RUNNING_TAG = "mission.running."
 const val MISSION_GRANT_REVIEW_TAG = "mission.grant.review"
 const val MISSION_RETRY_TAG = "mission.retry."
+const val MISSION_STEP_TAG = "mission.step."
+const val MISSION_SESSION_TAG = "mission.session."
+const val MISSION_ITEM_SESSION_TAG = "mission.item.session."
 
 /** How long a grant may run, as the review sheet offers it (the hub takes 1 to 168 hours). */
 internal val GRANT_HOURS: List<Int> = listOf(8, 24, 72)
@@ -97,7 +105,14 @@ enum class PlanMark(val glyph: String, val word: StatusWord?) {
     TODO("○", null),
 }
 
-data class PlanRow(val itemId: Long, val title: String, val mark: PlanMark, val note: String?)
+data class PlanRow(
+    val itemId: Long,
+    val title: String,
+    val mark: PlanMark,
+    val note: String?,
+    /** The live session on this task, when one runs; the row's Session button opens it. */
+    val sessionId: Long? = null,
+)
 
 /** A node's state as a plan mark, as the desktop's `toneOf` files them. */
 internal fun planMark(state: String): PlanMark = when (state) {
@@ -124,6 +139,7 @@ private fun noteOf(mark: PlanMark, state: String): String? = when (mark) {
 internal fun planRows(detail: MissionDetail): List<PlanRow> {
     val titles = detail.items.associate { it.id to (it.title.ifBlank { it.key ?: "Task ${it.id}" }) }
     val asked = detail.plan?.cards.orEmpty().filter { it.state == "open" }.mapNotNull { it.workItemId }.toSet()
+    val sessionOf = sessionByItem(detail)
     val nodes = detail.graph.nodes
     val rows = if (nodes.isNotEmpty()) {
         nodes.sortedWith(compareBy({ it.wave }, { it.itemId })).map { n -> Triple(n.itemId, n.state, planMark(n.state)) }
@@ -135,7 +151,27 @@ internal fun planRows(detail: MissionDetail): List<PlanRow> {
     }
     return rows.map { (id, state, mark0) ->
         val mark = if (id in asked && mark0 != PlanMark.DONE) PlanMark.NEEDS_YOU else mark0
-        PlanRow(id, titles[id] ?: "Task $id", mark, noteOf(mark, state))
+        PlanRow(id, titles[id] ?: "Task $id", mark, noteOf(mark, state), sessionOf[id])
+    }
+}
+
+/** Each task's live session, the first the hub lists when a task has several. */
+internal fun sessionByItem(detail: MissionDetail): Map<Long, Long> =
+    detail.childSessions.groupBy { it.itemId }.mapValues { (_, s) -> s.first().sessionId }
+
+/** One line of the mission's Sessions: its tmux name, then where it runs and on which task. */
+data class MissionSessionLine(val sessionId: Long, val name: String, val line: String)
+
+/** The mission's live sessions as lines: "pine · Probe pairing". */
+internal fun missionSessionLines(detail: MissionDetail): List<MissionSessionLine> {
+    val titles = detail.items.associate { it.id to (it.title.ifBlank { it.key ?: "Task ${it.id}" }) }
+    return detail.childSessions.map { s ->
+        MissionSessionLine(
+            sessionId = s.sessionId,
+            name = s.tmuxName.ifBlank { "Session ${s.sessionId}" },
+            line = listOfNotNull(s.hostAlias.ifBlank { null }, titles[s.itemId] ?: s.itemId.takeIf { it > 0 }?.let { "Task $it" })
+                .joinToString(" · "),
+        )
     }
 }
 
@@ -236,12 +272,17 @@ fun OrbitMissionDetail(detail: MissionDetail, state: MissionsUiState, handlers: 
                 item(key = "running-h") { Heading(line) }
                 items(running, key = { "run:${it.itemId}" }) { r ->
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = gutter, vertical = 6.dp).testTag("$MISSION_RUNNING_TAG${r.itemId}"),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .openable(handlers.onOpenItem?.let { open -> { open(r.itemId) } })
+                            .padding(horizontal = gutter, vertical = 6.dp)
+                            .testTag("$MISSION_RUNNING_TAG${r.itemId}"),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Comet()
-                        Text(r.title, color = o.fg, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(r.title, color = o.fg, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        SessionButton(r, handlers.onOpenSession, tag = "$MISSION_ITEM_SESSION_TAG${r.itemId}.running")
                     }
                 }
             }
@@ -249,7 +290,19 @@ fun OrbitMissionDetail(detail: MissionDetail, state: MissionsUiState, handlers: 
                 item(key = "plan-h") { Heading("Plan") }
                 items(rows, key = { "plan:${it.itemId}" }) { r ->
                     val canRetry = state.canRetry && detail.mayChange && state.busy == null && retryable(r, nodeState[r.itemId].orEmpty())
-                    PlanLine(r, onRetry = { handlers.onRetryItem(r.itemId) }.takeIf { canRetry })
+                    PlanLine(
+                        r,
+                        onRetry = { handlers.onRetryItem(r.itemId) }.takeIf { canRetry },
+                        onOpen = handlers.onOpenItem?.let { open -> { open(r.itemId) } },
+                        onSession = handlers.onOpenSession,
+                    )
+                }
+            }
+            val sessions = missionSessionLines(detail)
+            if (sessions.isNotEmpty()) {
+                item(key = "sessions-h") { Heading("Sessions · ${sessions.size}") }
+                items(sessions, key = { "session:${it.sessionId}" }) { s ->
+                    MissionSessionRow(s, handlers.onOpenSession)
                 }
             }
             if (plan == null) {
@@ -383,11 +436,12 @@ private fun Heading(text: String) {
 }
 
 @Composable
-private fun PlanLine(r: PlanRow, onRetry: (() -> Unit)? = null) {
+private fun PlanLine(r: PlanRow, onRetry: (() -> Unit)? = null, onOpen: (() -> Unit)? = null, onSession: ((Long) -> Unit)? = null) {
     val o = Fleet.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .openable(onOpen)
             .padding(horizontal = OrbitTokens.spacing("phone-gutter").dp, vertical = 4.dp)
             .testTag("$MISSION_PLAN_TAG${r.itemId}"),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -409,9 +463,38 @@ private fun PlanLine(r: PlanRow, onRetry: (() -> Unit)? = null) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        SessionButton(r, onSession, tag = "$MISSION_ITEM_SESSION_TAG${r.itemId}")
         if (onRetry != null) {
             TextButton(onClick = onRetry, modifier = Modifier.testTag("$MISSION_RETRY_TAG${r.itemId}")) { Text("Retry", color = o.accent) }
         }
+    }
+}
+
+/** A row that opens something when tapped, or a plain row where nothing is wired. */
+internal fun Modifier.openable(onOpen: (() -> Unit)?): Modifier =
+    if (onOpen == null) this else clickable(onClick = onOpen)
+
+/** The live session on a task's row, one tap away; nothing when none runs. */
+@Composable
+private fun SessionButton(r: PlanRow, onSession: ((Long) -> Unit)?, tag: String) {
+    val id = r.sessionId ?: return
+    val open = onSession ?: return
+    TextButton(onClick = { open(id) }, modifier = Modifier.testTag(tag)) { Text("Session", color = Fleet.colors.accent) }
+}
+
+/** One live session of the mission: its name, where it runs and its task; a tap opens it. */
+@Composable
+private fun MissionSessionRow(s: MissionSessionLine, onOpen: ((Long) -> Unit)?) {
+    val o = Fleet.colors
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .openable(onOpen?.let { open -> { open(s.sessionId) } })
+            .padding(horizontal = OrbitTokens.spacing("phone-gutter").dp, vertical = 6.dp)
+            .testTag("$MISSION_SESSION_TAG${s.sessionId}"),
+    ) {
+        Text(s.name, color = o.fg, fontSize = 15.sp, lineHeight = 21.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (s.line.isNotBlank()) Text(s.line, color = o.fgMuted, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

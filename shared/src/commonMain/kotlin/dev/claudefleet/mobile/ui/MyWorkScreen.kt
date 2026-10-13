@@ -69,6 +69,8 @@ import dev.claudefleet.mobile.ui.kit.OrbitPullToRefresh
 /** Everything the My work tab reports. */
 data class MyWorkHandlers(
     val onOpenTask: (String) -> Unit = {},
+    /** Open a task's live session by its id: a row's Session button, or a tap under [WorkTapChoice.SESSION]. */
+    val onOpenSession: (Long) -> Unit = {},
     val onRefresh: () -> Unit = {},
     val onReload: () -> Unit = {},
     val onToggleSection: (String) -> Unit = {},
@@ -143,6 +145,8 @@ fun MyWorkScreen(
     state: MyWorkUiState,
     handlers: MyWorkHandlers = MyWorkHandlers(),
     reviewCount: Int = state.reviewCount,
+    /** What tapping a row opens (This phone); its Session button is there either way. */
+    tapOpens: WorkTapChoice = WorkTapChoice.TICKET,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -260,7 +264,11 @@ fun MyWorkScreen(
                         }
                         if (group.collapsed) continue
                         items(group.tasks, key = { "t-${group.key}-${it.taskId}" }) { task ->
-                            TaskCard(task, onClick = { handlers.onOpenTask(task.taskId) })
+                            TaskCard(
+                                task,
+                                onClick = { handlers.openRow(task, tapOpens) },
+                                onOpenSession = liveSessionOf(task)?.let { id -> { handlers.onOpenSession(id) } },
+                            )
                         }
                         if (group.hasMore || group.error != null || group.loadingMore) {
                             item(key = "more-${group.key}") {
@@ -358,7 +366,7 @@ private fun Chevron(collapsed: Boolean, name: String) {
 
 /** A compact task card: key, title, status, tracker, counts, and what wants a person. */
 @Composable
-internal fun TaskCard(task: WorkTask, onClick: () -> Unit) {
+internal fun TaskCard(task: WorkTask, onClick: () -> Unit, onOpenSession: (() -> Unit)? = null) {
     WorkRow(
         label = task.label,
         title = if (task.key != null) task.title else "",
@@ -368,6 +376,7 @@ internal fun TaskCard(task: WorkTask, onClick: () -> Unit) {
         unavailable = task.unavailable,
         review = task.review,
         needsYou = task.needsYou,
+        onOpenSession = onOpenSession,
     )
 }
 
