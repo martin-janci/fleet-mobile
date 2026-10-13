@@ -64,6 +64,7 @@ import dev.claudefleet.mobile.model.DeviceOutput
 import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.RunsPage
+import dev.claudefleet.mobile.model.AutoSwitchView
 import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.suggestedHostOf
 import dev.claudefleet.mobile.model.QueuePromptResult
@@ -677,6 +678,19 @@ class HubClient(
                 put("nickname", nickname?.trim()?.ifEmpty { null })
             },
         ) { json.decodeFromJsonElement(AccountRow.serializer(), it) }
+
+    /**
+     * The signed-in person's answer to automatic account switching
+     * (`auto_switch_account`); only what is set is changed, nothing to read.
+     */
+    suspend fun autoSwitchAccount(enabled: Boolean? = null, continueAfter: Boolean? = null): AutoSwitchView =
+        call(
+            "auto_switch_account",
+            buildJsonObject {
+                enabled?.let { put("enabled", it) }
+                continueAfter?.let { put("continue_after", it) }
+            },
+        ) { json.decodeFromJsonElement(AutoSwitchView.serializer(), it) }
 
     /** Every account's last usage reading (`account_usage`, readonly). */
     suspend fun accountUsage(): List<AccountUsageSnapshot> =

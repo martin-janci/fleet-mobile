@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.data.UsageActions
 import dev.claudefleet.mobile.model.AccountRow
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.AccountUsageWindows
+import dev.claudefleet.mobile.model.AutoSwitchView
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
@@ -51,6 +52,13 @@ private class UsageCalls : UsageActions {
     override suspend fun setNickname(uuid: String, nickname: String?): AccountRow {
         renames += uuid to nickname
         return AccountRow(uuid = uuid, email = "a@b.c", nickname = nickname)
+    }
+    var auto = AutoSwitchView(enabled = true, continueAfter = false, fleetEnabled = true)
+    val autoCalls = mutableListOf<Pair<Boolean?, Boolean?>>()
+    override suspend fun autoSwitch(enabled: Boolean?, continueAfter: Boolean?): AutoSwitchView {
+        autoCalls += enabled to continueAfter
+        auto = auto.copy(enabled = enabled ?: auto.enabled, continueAfter = continueAfter ?: auto.continueAfter)
+        return auto
     }
 }
 
@@ -183,5 +191,43 @@ class UsageViewModelTest {
         assertEquals("1.2k", compactCount(1_234))
         assertEquals("2M", compactCount(2_000_000))
         assertEquals("3.5B", compactCount(3_456_000_000))
+    }
+
+    @Test
+    fun automatic_switching_is_read_and_changed_where_the_hub_offers_it() = runTest {
+        val calls = UsageCalls()
+        val tools = both + HubCapabilities.AUTO_SWITCH_ACCOUNT
+        val vm = UsageViewModel(UsageFleet(tools), calls, backgroundScope)
+        vm.attach()
+        runCurrent()
+        assertEquals(true, vm.state.value.autoSwitch?.enabled)
+        assertTrue(vm.state.value.canChangeAutoSwitch)
+        assertFalse(vm.state.value.autoSwitchContinueAvailable, "no schema: an older hub")
+
+        vm.setAutoSwitch(continueAfter = true)
+        runCurrent()
+        assertEquals(null to true, calls.autoCalls.last())
+        assertEquals(true, vm.state.value.autoSwitch?.continueAfter)
+
+        vm.setAutoSwitch(enabled = false)
+        runCurrent()
+        assertEquals(false, vm.state.value.autoSwitch?.enabled)
+    }
+
+    @Test
+    fun no_automatic_switching_without_the_tool_or_from_a_readonly_pairing() = runTest {
+        val calls = UsageCalls()
+        val unlisted = UsageViewModel(UsageFleet(both), calls, backgroundScope)
+        unlisted.attach()
+        runCurrent()
+        assertEquals(null, unlisted.state.value.autoSwitch)
+        val readonly = UsageViewModel(UsageFleet(both + HubCapabilities.AUTO_SWITCH_ACCOUNT), calls, backgroundScope, canWrite = false)
+        readonly.attach()
+        runCurrent()
+        assertFalse(readonly.state.value.canChangeAutoSwitch)
+        val reads = calls.autoCalls.size
+        readonly.setAutoSwitch(enabled = false)
+        runCurrent()
+        assertEquals(reads, calls.autoCalls.size)
     }
 }

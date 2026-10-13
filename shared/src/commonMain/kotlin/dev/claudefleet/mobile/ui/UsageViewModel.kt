@@ -4,6 +4,7 @@ import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.UsageActions
 import dev.claudefleet.mobile.model.AccountRow
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
+import dev.claudefleet.mobile.model.AutoSwitchView
 import dev.claudefleet.mobile.model.UsageReport
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -39,6 +40,12 @@ data class UsageUiState(
     val limitsAvailable: Boolean = false,
     /** Each account's limits, by its uuid. */
     val limits: Map<String, AccountUsageSnapshot> = emptyMap(),
+    /** The person's answer to automatic switching; null until read or where the hub has no such tool. */
+    val autoSwitch: AutoSwitchView? = null,
+    /** The hub takes "continue after a switch" too. */
+    val autoSwitchContinueAvailable: Boolean = false,
+    /** This pairing may change it (a full token). */
+    val canChangeAutoSwitch: Boolean = false,
     val loading: Boolean = false,
     val error: Friendly? = null,
 )
@@ -60,6 +67,7 @@ class UsageViewModel(
         val window: UsageWindow = UsageWindow.Week,
         val report: UsageReport? = null,
         val accounts: List<AccountRow> = emptyList(),
+        val autoSwitch: AutoSwitchView? = null,
         val loading: Boolean = false,
         val error: Friendly? = null,
     )
@@ -77,6 +85,9 @@ class UsageViewModel(
             accounts = l.accounts,
             limitsAvailable = caps.accountUsage,
             limits = limits,
+            autoSwitch = l.autoSwitch.takeIf { caps.autoSwitch },
+            autoSwitchContinueAvailable = caps.autoSwitchContinue,
+            canChangeAutoSwitch = canWrite && caps.autoSwitch,
             loading = l.loading,
             error = l.error,
         )
@@ -94,9 +105,9 @@ class UsageViewModel(
         if (follow?.isActive == true) return
         follow = scope.launch {
             fleet.capabilities
-                .map { it.usage to it.accounts }
+                .map { Triple(it.usage, it.accounts, it.autoSwitch) }
                 .distinctUntilChanged()
-                .collect { (usage, accounts) -> if (usage || accounts) read(withAccounts = true) }
+                .collect { (usage, accounts, autoSwitch) -> if (usage || accounts || autoSwitch) read(withAccounts = true) }
         }
     }
 
@@ -127,6 +138,19 @@ class UsageViewModel(
         }
     }
 
+    /** Change the person's automatic-switching answer; the screen takes the hub's. */
+    fun setAutoSwitch(enabled: Boolean? = null, continueAfter: Boolean? = null): Job = scope.launch {
+        if (!state.value.canChangeAutoSwitch) return@launch
+        try {
+            val view = actions.autoSwitch(enabled, continueAfter)
+            local.update { it.copy(autoSwitch = view) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(error = friendly(t)) }
+        }
+    }
+
     fun dismissError() {
         local.update { it.copy(error = null) }
     }
@@ -143,6 +167,18 @@ class UsageViewModel(
             if (withAccounts && caps.accounts) {
                 val accounts = actions.accounts()
                 local.update { it.copy(accounts = accounts) }
+            }
+            if (withAccounts && caps.autoSwitch) {
+                // Quiet on failure: a pairing that speaks for no person is
+                // refused it, and the rest of the screen is still good.
+                val view = try {
+                    actions.autoSwitch()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Throwable) {
+                    null
+                }
+                local.update { it.copy(autoSwitch = view) }
             }
         } catch (e: CancellationException) {
             throw e

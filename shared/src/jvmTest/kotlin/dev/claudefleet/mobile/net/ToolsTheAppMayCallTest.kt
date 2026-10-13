@@ -263,6 +263,10 @@ class ToolsTheAppMayCallTest {
         // writes like `send_prompt`; `runs` is the 8.3 union, readonly.
         "touch_session_viewed",
         "check_account_headroom",
+        // The signed-in person's own answer to automatic account switching:
+        // `Access::Client`, a person's tool (claude-fleet guard.rs), only
+        // called when `tools/list` names it (`HubCapabilities.autoSwitch`).
+        "auto_switch_account",
         "queue_prompt",
         "queued_prompts",
         "runs",

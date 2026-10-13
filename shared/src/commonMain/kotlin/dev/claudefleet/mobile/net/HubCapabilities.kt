@@ -241,6 +241,16 @@ data class HubCapabilities(
     /** The phone stamps a session viewed while it is on screen (`touch_session_viewed`, contract 11). */
     val touchViewed: Boolean get() = TOUCH_SESSION_VIEWED in tools
 
+    /**
+     * Automatic account switching, the signed-in person's own answer
+     * (`auto_switch_account`, claude-fleet *Switch automatically*): a session
+     * whose account ran out is resumed under the login with the most room.
+     */
+    val autoSwitch: Boolean get() = AUTO_SWITCH_ACCOUNT in tools
+
+    /** …and "continue where it stopped" after a switch (`continue_after`). */
+    val autoSwitchContinue: Boolean get() = accepts(AUTO_SWITCH_ACCOUNT, "continue_after")
+
     /** Accounts' usage readings (`account_usage`): when a paused row's limit resets (step 4.10). */
     val accountUsage: Boolean get() = ACCOUNT_USAGE in tools
 
@@ -427,6 +437,7 @@ data class HubCapabilities(
         const val ROUTINES = "routines"
         const val RUNS = "runs"
         const val CHECK_ACCOUNT_HEADROOM = "check_account_headroom"
+        const val AUTO_SWITCH_ACCOUNT = "auto_switch_account"
         const val RESTART_SESSION = "restart_session"
         const val QUEUE_PROMPT = "queue_prompt"
         const val QUEUED_PROMPTS = "queued_prompts"
