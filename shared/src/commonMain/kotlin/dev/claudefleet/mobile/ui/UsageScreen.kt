@@ -23,6 +23,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -35,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.AccountRow
+import dev.claudefleet.mobile.model.AutoSwitchView
 import dev.claudefleet.mobile.model.UsageReport
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.components.ErrorBanner
@@ -51,6 +53,10 @@ data class UsageHandlers(
     val onDismissError: () -> Unit = {},
     /** Name an account (uuid, name; blank clears). Offered where [UsageUiState.canRename]. */
     val onRename: (String, String) -> Unit = { _, _ -> },
+    /** Turn automatic switching on or off for my sessions. */
+    val onAutoSwitch: (Boolean) -> Unit = {},
+    /** …and whether a switched session is told to carry on. */
+    val onAutoSwitchContinue: (Boolean) -> Unit = {},
 )
 
 /** The longest nickname the hub keeps (`Store::set_account_nickname`). */
@@ -121,6 +127,10 @@ fun UsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: Long, 
             } else {
                 item { Note("This hub does not report usage.") }
             }
+            state.autoSwitch?.let { view ->
+                item { Heading("When an account runs out") }
+                item { AutoSwitchRows(view, state, handlers) }
+            }
             if (state.accountsAvailable && state.accounts.isNotEmpty()) {
                 item { Heading("Claude accounts") }
                 items(state.accounts, key = { "account:${it.uuid}" }) { a ->
@@ -176,6 +186,49 @@ private fun androidx.compose.foundation.lazy.LazyListScope.usageSections(report:
                 Text(formatUsd(s.costMicros), style = MaterialTheme.typography.labelLarge)
             }
         }
+    }
+}
+
+/**
+ * The person's own answer to automatic account switching, as on the
+ * desktop's Accounts page: switch my sessions, and tell them to carry on.
+ * The fleet's own switch is the owner's, in Settings; the line says so when
+ * it is off.
+ */
+@Composable
+internal fun AutoSwitchRows(view: AutoSwitchView, state: UsageUiState, handlers: UsageHandlers) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        ToggleRow(
+            title = "Switch my sessions automatically",
+            sub = when {
+                !view.fleetEnabled -> "Off for this fleet: the owner turns it on in Settings › Limits."
+                view.enabled -> "A paused session resumes under the login on its host with the most room."
+                else -> "Paused sessions wait for you to switch them."
+            },
+            checked = view.enabled,
+            enabled = state.canChangeAutoSwitch,
+            onChange = handlers.onAutoSwitch,
+        )
+        if (state.autoSwitchContinueAvailable) {
+            ToggleRow(
+                title = "Then tell it to continue",
+                sub = "Only a session whose turn the limit cut off; a finished one is just resumed.",
+                checked = view.continueAfter,
+                enabled = state.canChangeAutoSwitch && view.enabled,
+                onChange = handlers.onAutoSwitchContinue,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ToggleRow(title: String, sub: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Text(sub, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = checked, onCheckedChange = if (enabled) onChange else null, enabled = enabled)
     }
 }
 

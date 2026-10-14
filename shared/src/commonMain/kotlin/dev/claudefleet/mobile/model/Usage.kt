@@ -146,6 +146,19 @@ data class HostLogin(
     @SerialName("used_pct") val usedPct: Double? = null,
 )
 
+/**
+ * `auto_switch_account`: the signed-in person's answer to automatic account
+ * switching, and whether the fleet has it on at all.
+ */
+@Serializable
+data class AutoSwitchView(
+    val enabled: Boolean = true,
+    /** After a switch, tell a session whose turn the limit cut off to carry on. */
+    @SerialName("continue_after") val continueAfter: Boolean = false,
+    /** `accounts.auto_switch`: without it nothing switches, whatever [enabled] says. */
+    @SerialName("fleet_enabled") val fleetEnabled: Boolean = false,
+)
+
 /** `check_account_headroom` (hub contract 14): which login on a host has room left. */
 @Serializable
 data class Headroom(

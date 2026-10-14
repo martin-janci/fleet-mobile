@@ -281,6 +281,9 @@ fun OrbitUsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: L
                     }
                     if (!state.limitsAvailable && state.capsKnown) item(key = "limits") { Quiet(LIMITS_ON_DESKTOP, small = true) }
                 }
+                state.autoSwitch?.let { view ->
+                    item(key = "auto-switch") { AutoSwitchRows(view, state, handlers) }
+                }
                 if (state.available) {
                     item(key = "windows") {
                         Row(
