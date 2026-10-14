@@ -192,7 +192,7 @@ fun ticketFacets(
     orgName: (Long) -> String? = { null },
     trackerName: (Long) -> String? = { null },
 ): List<Facet<TicketFacetId>> = buildList {
-    if (f.lists.isNotEmpty() && f.lists.size < TicketList.entries.size) {
+    if (f.lists.isNotEmpty() && f.lists != TicketList.defaults) {
         add(Facet(TicketFacetId.LIST, "List: " + f.lists.sortedBy { it.ordinal }.joinToString("/") { it.label }))
     }
     if (f.statuses.isNotEmpty() || f.statusNames.isNotEmpty()) {

@@ -84,6 +84,12 @@ data class TicketDetail(
     val resumeWhyNot: String? = null,
     /** What is wrong with the ticket or its tracker, as plain text ([ticketTrouble]). */
     val trouble: List<String> = emptyList(),
+    /**
+     * **Archive** / **Unarchive** — a write credential and a hub that names
+     * `work_link archive_item` (claude-fleet migration 190). Which of the two
+     * is the ticket's [Ticket.archived].
+     */
+    val canArchive: Boolean = false,
 )
 
 /**
@@ -208,23 +214,37 @@ class TicketsViewModel(
             ),
         )
 
-    /** Open the sheet and read the three views. */
+    /**
+     * Open the sheet and read the three views — and *Archived* when the
+     * filters pick it, which nobody reads otherwise.
+     */
     fun open(): Job? {
         if (!fleet.capabilities.value.has(WORK, TICKETS)) return null
         local.update { it.copy(open = true, loading = true, error = null) }
-        return scope.launch {
-            try {
-                val sections = coroutineScope {
-                    VIEWS.map { (view, title) -> async { TicketSection(view, title, actions.tickets(view)) } }
-                        .map { it.await() }
-                }
-                fleet.rememberTickets(sections.flatMap { it.tickets })
-                local.update { it.copy(sections = sections, loading = false) }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (t: Throwable) {
-                local.update { it.copy(loading = false, error = friendlyWork(t)) }
+        return scope.launch { read(lists()) }
+    }
+
+    /** The lists a read covers: the defaults, and Archived while it is picked. */
+    private fun lists(): List<TicketList> =
+        TicketList.entries.filter { it in TicketList.defaults || local.value.filters.shows(it) }
+
+    /** Read [lists] and put them in place of the sections the sheet holds, in list order. */
+    private suspend fun read(lists: List<TicketList>) {
+        try {
+            val read = coroutineScope {
+                lists.map { list -> async { TicketSection(list.wire, list.label, actions.tickets(list.wire)) } }
+                    .map { it.await() }
             }
+            fleet.rememberTickets(read.flatMap { it.tickets })
+            local.update { l ->
+                val byView = (l.sections + read).associateBy { it.view }
+                val order = TicketList.entries.map { it.wire }
+                l.copy(sections = byView.values.sortedBy { order.indexOf(it.view) }, loading = false)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(loading = false, error = friendlyWork(t)) }
         }
     }
 
@@ -247,13 +267,21 @@ class TicketsViewModel(
      * reads unselected under *All*, so a tap must select it, not hide it.
      * After that it adds or removes the list; none left, or all three, is *All*.
      */
-    fun toggleList(list: TicketList) = setFilters { f ->
-        val next = when {
-            f.lists.isEmpty() -> setOf(list)
-            list in f.lists -> f.lists - list
-            else -> f.lists + list
+    fun toggleList(list: TicketList) {
+        setFilters { f ->
+            val next = when {
+                f.lists.isEmpty() -> setOf(list)
+                list in f.lists -> f.lists - list
+                else -> f.lists + list
+            }
+            f.copy(lists = if (next == TicketList.defaults) emptySet() else next)
         }
-        f.copy(lists = if (next.size == TicketList.entries.size) emptySet() else next)
+        // Archived is read only once it is picked.
+        val l = local.value
+        if (list == TicketList.ARCHIVED && l.open && l.filters.shows(list) && l.sections.none { it.view == list.wire }) {
+            local.update { it.copy(loading = true) }
+            scope.launch { read(listOf(list)) }
+        }
     }
 
     fun toggleStatus(status: WorkStatusFilter) = setFilters { f ->
@@ -487,6 +515,33 @@ class TicketsViewModel(
         }
     }
 
+    /**
+     * **Archive** the chosen ticket, or **Unarchive** an archived one: the
+     * hub keeps it, so it leaves every list but *Archived* on every device.
+     * Nothing changes in the ticket's tracker. The lists are read again after.
+     */
+    fun toggleArchived(): Job? {
+        val detail = state.value.selected ?: return null
+        if (!detail.canArchive || local.value.busy) return null
+        val ticket = detail.ticket
+        val on = !ticket.archived
+        local.update { it.copy(busy = true, error = null) }
+        return scope.launch {
+            try {
+                actions.archiveItem(ticket.id, on)
+                val now = ticket.copy(archivedAt = if (on) ARCHIVED_NOW else null)
+                fleet.rememberTickets(listOf(now))
+                local.update { it.copy(busy = false, selected = if (it.selectedId == ticket.id) now else it.selected) }
+                read(lists())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                if (t is HubError.Tool && t.isUnknownAction()) fleet.actionMissing(WORK_LINK, ARCHIVE_ITEM)
+                local.update { it.copy(busy = false, error = friendlyWork(t)) }
+            }
+        }
+    }
+
     fun dismissError() {
         local.update { it.copy(error = null) }
     }
@@ -528,6 +583,7 @@ class TicketsViewModel(
                 pastWork = l.plan?.candidates.orEmpty().sortedByDescending { it.endedAt ?: Long.MIN_VALUE },
                 resumeWhyNot = resumeWhyNot(plan),
                 trouble = ticketTrouble(ticket, trackers),
+                canArchive = canWrite && caps.lists(WORK_LINK, ARCHIVE_ITEM),
             )
         }
         val listedIds = l.sections.flatMapTo(HashSet()) { s -> s.tickets.map { it.id } }
@@ -545,10 +601,12 @@ class TicketsViewModel(
         val liveItems = sessions.mapNotNullTo(HashSet()) { it.work?.itemId }
         val live = { t: Ticket -> t.id in liveItems || t.liveSessionIds.any { it in alive } }
         val f = l.filters
-        val listed = l.sections.map { s -> s.copy(tickets = s.tickets.map { it.current() }) }
+        val listed = l.sections
+            .filter { s -> TicketList.of(s.view)?.let { f.shows(it) || it in TicketList.defaults } != false }
+            .map { s -> s.copy(tickets = s.tickets.map { it.current() }) }
         val all = listed.flatMap { it.tickets }
         val sections = listed
-            .filter { s -> f.lists.isEmpty() || TicketList.of(s.view)?.let { it in f.lists } != false }
+            .filter { s -> TicketList.of(s.view)?.let { f.shows(it) } != false }
             .map { s ->
                 val kept = s.tickets.filter { t -> f.matches(t, orgs::orgOf, live) && ticketMatchesQuery(t, l.query) }
                 s.copy(tickets = sortTickets(kept, l.sort), total = s.tickets.size)
@@ -602,7 +660,10 @@ class TicketsViewModel(
         const val RESUME_PLAN = "resume_plan"
         const val START = "start"
         const val RESUME = "resume"
-        val VIEWS = TicketList.entries.map { it.wire to it.label }
+        const val ARCHIVE_ITEM = "archive_item"
+
+        /** An archive's stamp until the lists are read again: only "archived or not" is read off it. */
+        const val ARCHIVED_NOW = 1L
         const val FILTERS_KEY = "tickets.filters.v1"
         const val SORT_KEY = "tickets.sort"
         val json = Json { ignoreUnknownKeys = true }

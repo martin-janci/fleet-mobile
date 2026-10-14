@@ -130,9 +130,13 @@ data class Ticket(
     @SerialName("live_session_ids") val liveSessionIds: List<Long> = emptyList(),
     /** `lookup` only: an excerpt. Third-party text: plain text only. */
     val description: String? = null,
-    /** `lookup` only: `mine`, `sprint`, `recent`, `filter:<id>`. */
+    /** `lookup` only: `mine`, `sprint`, `recent`, `archived`, `filter:<id>`. */
     val views: List<String> = emptyList(),
+    /** When a person archived it (claude-fleet migration 190); null = not archived. */
+    @SerialName("archived_at") val archivedAt: Long? = null,
 ) {
+    /** A person archived it: it is listed under *Archived* only, and offers Unarchive. */
+    val archived: Boolean get() = archivedAt != null
     /** What a person reads: the fleet ticket key, else the key, else the title. */
     val label: String get() = displayKey?.takeIf { it.isNotBlank() } ?: key?.takeIf { it.isNotBlank() } ?: title
     /** The tracker stopped answering for it — or, from a `work:tracker_removed` frame, the tracker is gone. */

@@ -148,6 +148,14 @@ interface WorkActions {
     suspend fun setStatus(itemId: Long, status: String): WorkItem =
         throw UnsupportedOperationException("set_status")
 
+    /**
+     * **Archive** ticket or task [itemId] (`on`), or **Unarchive** it
+     * (`work_link { archive_item }`, claude-fleet migration 190). Kept on the
+     * hub: it leaves every ticket list but *Archived* on every device.
+     */
+    suspend fun archiveItem(itemId: Long, on: Boolean): Unit =
+        throw UnsupportedOperationException("archive_item")
+
     /** **Edit** local item [itemId]: a null field stays as it is; `""` / empty clears it. */
     suspend fun editItem(
         itemId: Long,
@@ -300,6 +308,8 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
 
     override suspend fun setStatus(itemId: Long, status: String): WorkItem =
         session.withClient { it.setWorkStatus(itemId, status) }
+
+    override suspend fun archiveItem(itemId: Long, on: Boolean) = session.withClient { it.archiveWorkItem(itemId, on) }
 
     override suspend fun editItem(itemId: Long, title: String?, notes: String?, assignees: List<String>?, dueAt: String?): WorkItem =
         session.withClient { it.editWorkItem(itemId, title, notes, assignees, dueAt) }

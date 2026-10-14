@@ -132,6 +132,11 @@ internal class FakeWorkActions : WorkActions {
         return ticketsAnswer[view].orEmpty()
     }
 
+    override suspend fun archiveItem(itemId: Long, on: Boolean) {
+        calls += "archive $itemId $on"
+        fail?.let { throw it }
+    }
+
     override suspend fun lookup(keyOrUrl: String): Ticket {
         calls += "lookup $keyOrUrl"
         failLookup?.let { throw it }

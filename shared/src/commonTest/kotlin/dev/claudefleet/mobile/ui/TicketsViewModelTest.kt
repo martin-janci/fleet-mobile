@@ -12,6 +12,7 @@ import dev.claudefleet.mobile.model.ResumePlan
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.TicketCard
+import dev.claudefleet.mobile.model.TicketList
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
@@ -492,5 +493,77 @@ class TicketsViewModelTest {
         )
         runCurrent()
         assertEquals(mapOf(90L to "Acme", 70L to "Side"), tickets.state.value.ticketOrgs)
+    }
+
+    /** A hub that names `work_link archive_item`: Archive is offered. */
+    private val ARCHIVING = HubCapabilities.of(
+        ToolCatalog(setOf("work", "work_link"), mapOf("work_link" to setOf("start", "resume", "archive_item"))),
+    )
+
+    @Test
+    fun archived_tickets_are_read_only_once_the_archived_list_is_picked() = runTest {
+        val archived = PAY9.copy(archivedAt = 100)
+        val actions = FakeWorkActions().apply { ticketsAnswer = mapOf("mine" to listOf(PAY7), "archived" to listOf(archived)) }
+        val tickets = vm(WorkFleet(caps = ARCHIVING), actions, backgroundScope, Nav())
+        tickets.open()
+        runCurrent()
+        assertFalse("tickets archived" in actions.calls, "All never reads Archived")
+        assertEquals(listOf("My work", "Current sprint", "Recent"), tickets.state.value.sections.map { it.title })
+
+        tickets.toggleList(TicketList.ARCHIVED)
+        runCurrent()
+        assertTrue("tickets archived" in actions.calls)
+        assertEquals(listOf("Archived"), tickets.state.value.sections.map { it.title })
+        assertEquals(listOf("PAY-9"), tickets.state.value.sections[0].tickets.map { it.key })
+
+        tickets.clearAll()
+        runCurrent()
+        assertEquals(listOf("My work", "Current sprint", "Recent"), tickets.state.value.sections.map { it.title }, "back to All: Archived is hidden again")
+    }
+
+    @Test
+    fun archive_and_unarchive_ask_the_hub_and_read_the_lists_again() = runTest {
+        val actions = FakeWorkActions().apply { ticketsAnswer = mapOf("mine" to listOf(PAY9)) }
+        val tickets = vm(WorkFleet(caps = ARCHIVING), actions, backgroundScope, Nav())
+        tickets.open()
+        runCurrent()
+        tickets.select(PAY9)
+        runCurrent()
+        assertTrue(tickets.state.value.selected!!.canArchive)
+        assertEquals("Archive", archiveLabel(tickets.state.value.selected!!.ticket))
+
+        actions.calls.clear()
+        actions.ticketsAnswer = mapOf("mine" to emptyList())
+        tickets.toggleArchived()
+        runCurrent()
+        assertEquals("archive 90 true", actions.calls.first())
+        assertTrue("tickets mine" in actions.calls, "the lists are read again")
+        assertEquals(emptyList(), tickets.state.value.sections[0].tickets, "it left My work")
+        assertEquals("Unarchive", archiveLabel(tickets.state.value.selected!!.ticket))
+
+        actions.calls.clear()
+        tickets.toggleArchived()
+        runCurrent()
+        assertEquals("archive 90 false", actions.calls.first())
+        assertEquals("Archive", archiveLabel(tickets.state.value.selected!!.ticket))
+    }
+
+    @Test
+    fun a_hub_without_archive_item_or_a_readonly_token_offers_no_archive() = runTest {
+        val actions = FakeWorkActions().apply { ticketsAnswer = mapOf("mine" to listOf(PAY9)) }
+        val older = vm(WorkFleet(), actions, backgroundScope, Nav())
+        older.open()
+        runCurrent()
+        older.select(PAY9)
+        runCurrent()
+        assertFalse(older.state.value.selected!!.canArchive)
+        assertNull(older.toggleArchived())
+
+        val readonly = vm(WorkFleet(caps = ARCHIVING), actions, backgroundScope, Nav(), canWrite = false)
+        readonly.open()
+        runCurrent()
+        readonly.select(PAY9)
+        runCurrent()
+        assertFalse(readonly.state.value.selected!!.canArchive)
     }
 }
