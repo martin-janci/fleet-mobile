@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.model.HubHealth
 import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.RoutineBudget
 import dev.claudefleet.mobile.model.RoutineDetail
+import dev.claudefleet.mobile.model.RoutineExplain
 import dev.claudefleet.mobile.model.RoutineRun
 
 /**
@@ -22,6 +23,13 @@ interface RoutineActions {
     suspend fun routine(routineId: Long): RoutineDetail
 
     suspend fun runs(routineId: Long, limit: Int): List<RoutineRun>
+
+    /**
+     * Why a routine does or does not fire (`routines { explain }`). The
+     * default is a hub without the action: no answer, and the sheet says
+     * nothing.
+     */
+    suspend fun explain(routineId: Long): RoutineExplain? = null
 
     /**
      * Every run the fleet made on this person's behalf (`runs { list }`,
@@ -61,6 +69,8 @@ class HubRoutineActions(private val session: AppSession) : RoutineActions {
         session.withClient { it.routineRuns(routineId, limit) }
 
     override suspend fun fleetRuns(limit: Int): List<FleetRun> = session.withClient { it.runs(limit).runs }
+
+    override suspend fun explain(routineId: Long): RoutineExplain? = session.withClient { it.routineExplain(routineId) }
 
     override suspend fun setEnabled(routineId: Long, enabled: Boolean): Routine =
         session.withClient { it.setRoutineEnabled(routineId, enabled) }
