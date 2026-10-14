@@ -83,6 +83,8 @@ data class TicketsHandlers(
     val onClearFacet: (TicketFacetId) -> Unit = {},
     val onClearAll: () -> Unit = {},
     val onCycleSort: () -> Unit = {},
+    /** **Archive** the chosen ticket, or **Unarchive** an archived one. */
+    val onToggleArchived: () -> Unit = {},
 )
 
 /**
@@ -441,6 +443,7 @@ internal fun ticketGroups(tickets: List<Ticket>, orgOf: (Ticket) -> String?, tra
  * its organisation.
  */
 internal fun ticketRowLine(ticket: Ticket, org: String?): String = listOfNotNull(
+    "archived".takeIf { ticket.archived },
     ticket.statusName?.takeIf { it.isNotBlank() },
     if (ticket.liveSessionIds.isNotEmpty()) "live" else null,
     org,
@@ -460,6 +463,7 @@ internal fun ticketLine(ticket: Ticket, org: String?, rowOf: (Long) -> SessionRo
         else -> null
     }
     val rest = listOfNotNull(
+        "archived".takeIf { ticket.archived },
         ticket.statusName?.takeIf { it.isNotBlank() },
         "no session".takeIf { ticket.liveSessionIds.isEmpty() },
         "unavailable".takeIf { ticket.unavailable },
@@ -535,10 +539,18 @@ private fun TicketActions(detail: TicketDetail, busy: Boolean, handlers: Tickets
                     }
                 }
                 if (detail.canStart) OutlinedButton(onClick = handlers.onStartHere, enabled = !busy) { Text("Start here") }
+                if (detail.canArchive) {
+                    TextButton(onClick = handlers.onToggleArchived, enabled = !busy) {
+                        Text(archiveLabel(detail.ticket))
+                    }
+                }
             }
         }
     }
 }
+
+/** The archive button's word: what a tap does to this ticket. */
+internal fun archiveLabel(ticket: Ticket): String = if (ticket.archived) "Unarchive" else "Archive"
 
 /**
  * **Resume**'s question: it starts a session, so it is asked like Restart.

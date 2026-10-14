@@ -2849,6 +2849,7 @@ private fun SessionsSheets(
                 onClearFacet = tickets::clearFacet,
                 onClearAll = tickets::clearAll,
                 onCycleSort = tickets::cycleSort,
+                onToggleArchived = { tickets.toggleArchived() },
             ),
             rowOf = if (layout == PhoneLayout.New) ({ id -> ticketRows.firstOrNull { it.id == id } }) else null,
         )

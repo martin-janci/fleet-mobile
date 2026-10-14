@@ -2183,6 +2183,21 @@ class HubClient(
         ) { json.decodeFromJsonElement(WorkItem.serializer(), it) }
 
     /**
+     * Archive a ticket or task (`work_link { archive_item }`), or unarchive
+     * it with [on] false. The hub answers `{ item_id, changed }`; nothing in
+     * it is needed — the lists are read again.
+     */
+    suspend fun archiveWorkItem(itemId: Long, on: Boolean): Unit =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "archive_item")
+                put("item_id", itemId)
+                put("on", on)
+            },
+        ) { }
+
+    /**
      * A person's edit of a local item (`work_link { edit }`): each field left
      * null stays as it is; `notes` / `dueAt` `""` and `assignees` empty clear
      * them. A tracker's ticket is refused, naming it.

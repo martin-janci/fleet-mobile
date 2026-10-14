@@ -11,10 +11,15 @@ enum class TicketList(val wire: String, val label: String) {
     MINE("mine", "My work"),
     SPRINT("sprint", "Current sprint"),
     RECENT("recent", "Recent"),
+    /** The tickets a person archived — every other list leaves them out. Shown only when picked. */
+    ARCHIVED("archived", "Archived"),
     ;
 
     companion object {
         fun of(wire: String): TicketList? = entries.firstOrNull { it.wire == wire }
+
+        /** What *All* shows: every list but [ARCHIVED], which a person picks on purpose. */
+        val defaults: Set<TicketList> get() = entries.toSet() - ARCHIVED
     }
 }
 
@@ -53,7 +58,7 @@ enum class TicketSort(val label: String) {
  */
 @Serializable
 data class TicketFilters(
-    /** The lists shown; empty means all three. */
+    /** The lists shown; empty means the three [TicketList.defaults] (never Archived). */
     val lists: Set<TicketList> = emptySet(),
     /** Ticket status buckets, OR-ed with [statusNames]; both empty means any status. */
     val statuses: Set<WorkStatusFilter> = emptySet(),
@@ -64,6 +69,9 @@ data class TicketFilters(
     val session: TicketSessionFilter? = null,
 ) {
     val any: Boolean get() = this != TicketFilters()
+
+    /** Is [list]'s section drawn? Empty [lists] is *All*: every list but Archived. */
+    fun shows(list: TicketList): Boolean = if (lists.isEmpty()) list in TicketList.defaults else list in lists
 
     /**
      * Does [ticket] pass every filter but [lists] (which picks sections, not

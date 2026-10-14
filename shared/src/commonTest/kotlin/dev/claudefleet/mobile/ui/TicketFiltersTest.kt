@@ -136,7 +136,8 @@ class TicketFiltersTest {
             labels,
         )
         assertEquals(listOf("Column: Code Review"), ticketFacets(TicketFilters(statusNames = setOf("Code Review"))).map { it.label })
-        assertEquals(emptyList(), ticketFacets(TicketFilters(lists = TicketList.entries.toSet()), "https://x/y"))
+        assertEquals(emptyList(), ticketFacets(TicketFilters(lists = TicketList.defaults), "https://x/y"))
+        assertEquals(listOf("List: Archived"), ticketFacets(TicketFilters(lists = setOf(TicketList.ARCHIVED))).map { it.label })
     }
 
     @Test
