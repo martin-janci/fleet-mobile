@@ -113,6 +113,7 @@ fun agentActionTitle(a: AgentAction): String {
             "tracker_link" -> return "Link ${f("from")} to ${f("to")} (${f("link_type").lowercase()})"
             "record" -> return "Remember ${f("key")} in ${f("store")}"
             "mcp_call" -> return "Call ${f("binding")}.${f("tool")}"
+            "pr_comment" -> return "Comment on ${f("repo")}#${f("number")}"
         }
     }
     return a.kind.replace('_', ' ')

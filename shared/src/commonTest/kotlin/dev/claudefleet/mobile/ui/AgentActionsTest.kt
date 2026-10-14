@@ -122,6 +122,7 @@ class AgentActionsTest {
         assertEquals("Link BUG-9 to L2S-7 (causes)", title("tracker_link", """{"from":"BUG-9","to":"L2S-7","link_type":"Causes"}"""))
         assertEquals("Remember NPE in memory", title("record", """{"store":"memory","key":"NPE"}"""))
         assertEquals("Call kb.add_known_error", title("mcp_call", """{"binding":"kb","tool":"add_known_error"}"""))
+        assertEquals("Comment on o/r#4", title("pr_comment", """{"repo":"o/r","number":4}"""))
         val s = json.decodeFromString(
             AgentsStatus.serializer(),
             """{"rules":[{"id":12,"agent":"fleet","scope":"l2-prod","level":"propose","host_alias":"mercury",
