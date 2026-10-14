@@ -9,6 +9,8 @@ import dev.claudefleet.mobile.model.MissionGraph
 import dev.claudefleet.mobile.model.MissionItem
 import dev.claudefleet.mobile.model.MissionNode
 import dev.claudefleet.mobile.model.MissionPlan
+import dev.claudefleet.mobile.model.MissionFinish
+import dev.claudefleet.mobile.model.MissionSession
 import kotlin.test.assertTrue
 import kotlin.test.assertFalse
 import kotlin.test.Test
@@ -131,5 +133,57 @@ class OrbitMissionDetailTest {
         assertTrue(retryable(failed, "failed"))
         assertFalse(retryable(PlanRow(2, "b", PlanMark.FAILED, "blocked"), "blocked"))
         assertFalse(retryable(PlanRow(3, "c", PlanMark.TODO, null), "ready"))
+    }
+
+    /** A plan row carries its task's live session, the first the hub lists; a task without one has none. */
+    @Test
+    fun a_plan_row_knows_its_tasks_live_session() {
+        val d = detail(
+            nodes = listOf(MissionNode(1, "running", wave = 0), MissionNode(2, "ready", wave = 1)),
+            items = listOf(MissionItem(1, title = "Probe pairing"), MissionItem(2, title = "Docs")),
+        ).copy(
+            sessions = listOf(
+                MissionSession(sessionId = 41, itemId = 1, hostAlias = "pine", tmuxName = "probe"),
+                MissionSession(sessionId = 43, itemId = 1, hostAlias = "oak", tmuxName = "probe-review"),
+            ),
+        )
+        val rows = planRows(d)
+        assertEquals(41L, rows.single { it.itemId == 1L }.sessionId)
+        assertNull(rows.single { it.itemId == 2L }.sessionId)
+    }
+
+    /** Sessions lists every live session: its tmux name, then its host and task. */
+    @Test
+    fun the_sessions_section_names_host_and_task() {
+        val d = detail(items = listOf(MissionItem(1, title = "Probe pairing"), MissionItem(2, key = "FL-2"))).copy(
+            finish = MissionFinish(
+                sessions = listOf(
+                    MissionSession(sessionId = 41, itemId = 1, hostAlias = "pine", tmuxName = "probe"),
+                    MissionSession(sessionId = 42, itemId = 2, hostAlias = "oak", tmuxName = ""),
+                    MissionSession(sessionId = 43, itemId = 99, hostAlias = "", tmuxName = "stray"),
+                ),
+            ),
+        )
+        assertEquals(
+            listOf(
+                MissionSessionLine(41, "probe", "pine · Probe pairing"),
+                MissionSessionLine(42, "Session 42", "oak · FL-2"),
+                MissionSessionLine(43, "stray", "Task 99"),
+            ),
+            missionSessionLines(d),
+        )
+        assertTrue(missionSessionLines(detail()).isEmpty())
+    }
+
+    /** Back from a task or session opened out of a mission puts the mission up again, and only there. */
+    @Test
+    fun the_mission_comes_back_on_the_screen_it_was_over() {
+        val under = Screen.Missions
+        assertEquals(MissionReturn.KEEP, missionReturn(Screen.Task("item:4"), under))
+        assertEquals(MissionReturn.KEEP, missionReturn(Screen.Session(41), under))
+        assertEquals(MissionReturn.KEEP, missionReturn(Screen.Repo(41), under))
+        assertEquals(MissionReturn.REOPEN, missionReturn(Screen.Missions, under))
+        assertEquals(MissionReturn.FORGET, missionReturn(Screen.Inbox, under), "a tab tapped forgets it")
+        assertEquals(MissionReturn.REOPEN, missionReturn(Screen.Sessions(), Screen.Sessions()), "Classic's sheet over the list")
     }
 }

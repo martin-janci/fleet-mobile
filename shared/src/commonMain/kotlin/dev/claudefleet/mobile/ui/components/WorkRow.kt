@@ -7,12 +7,17 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import dev.claudefleet.mobile.model.StatusCategory
+
+/** A row's Session button: its live session, whatever a tap on the row opens. */
+const val WORK_ROW_SESSION_TAG = "work.row.session"
 
 /**
  * One row for a ticket or a task, wherever it is listed — My work and the
@@ -32,6 +37,8 @@ fun WorkRow(
     review: Boolean = false,
     needsYou: Boolean = false,
     selected: Boolean = false,
+    /** Its live session, one tap away: a Session button on the right. Null draws none. */
+    onOpenSession: (() -> Unit)? = null,
 ) {
     ListItem(
         modifier = Modifier.clickable(onClick = onClick),
@@ -69,8 +76,15 @@ fun WorkRow(
                 }
             }
         },
-        trailingContent = if (needsYou) {
-            { Text("needs you", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
+        trailingContent = if (needsYou || onOpenSession != null) {
+            {
+                Column(horizontalAlignment = Alignment.End) {
+                    if (needsYou) Text("needs you", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                    if (onOpenSession != null) {
+                        TextButton(onClick = onOpenSession, modifier = Modifier.testTag(WORK_ROW_SESSION_TAG)) { Text("Session") }
+                    }
+                }
+            }
         } else null,
     )
 }

@@ -26,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
@@ -68,12 +69,17 @@ data class MissionsHandlers(
     val onSignGrant: (Int, Int, Long?) -> Unit = { _, _, _ -> },
     /** Try a failed task again (G5.7). */
     val onRetryItem: (Long) -> Unit = {},
+    /** Open one of the mission's tasks (a work item's id); null leaves its rows plain. */
+    val onOpenItem: ((Long) -> Unit)? = null,
+    /** Open one of the mission's sessions by its id; null draws no Session buttons. */
+    val onOpenSession: ((Long) -> Unit)? = null,
 )
 
 /**
  * Missions as a sheet: the list with Pause all, and one mission's next steps
  * (Go), its cards (Apply / Dismiss, a question answered in words) and the
  * autonomy that applies, with Pause or Resume. Pause all asks first.
+ * A step naming a task opens that task; Sessions opens the mission's live ones.
  * With [orbit] (the New layout) one mission is drawn by [OrbitMissionDetail].
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -209,6 +215,8 @@ private fun MissionBody(detail: MissionDetail, state: MissionsUiState, handlers:
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
                 )
             }
+            // A finished mission's sessions are still worth opening.
+            missionSessions(detail, handlers)
             return@LazyColumn
         }
         if (plan.cards.isNotEmpty()) {
@@ -233,6 +241,28 @@ private fun MissionBody(detail: MissionDetail, state: MissionsUiState, handlers:
                 ) { Text("Take every step") }
             }
         }
+        missionSessions(detail, handlers)
+    }
+}
+
+/** The mission's live sessions, each opening its session: Classic's list of them. */
+private fun androidx.compose.foundation.lazy.LazyListScope.missionSessions(detail: MissionDetail, handlers: MissionsHandlers) {
+    val sessions = missionSessionLines(detail)
+    if (sessions.isEmpty()) return
+    item(key = "sessions-h") { SectionTitle("Sessions (${sessions.size})") }
+    items(sessions, key = { "session:${it.sessionId}" }) { s ->
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .openable(handlers.onOpenSession?.let { open -> { open(s.sessionId) } })
+                .padding(horizontal = 24.dp, vertical = 6.dp)
+                .testTag("$MISSION_SESSION_TAG${s.sessionId}"),
+        ) {
+            Text(s.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (s.line.isNotBlank()) {
+                Text(s.line, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }
 
@@ -244,7 +274,9 @@ private fun SectionTitle(text: String) {
 @Composable
 internal fun StepRow(s: MissionStep, item: String?, enabled: Boolean, handlers: MissionsHandlers) {
     Row(modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(modifier = Modifier.weight(1f)) {
+        // A step that names a task opens it; Go stays the step's own button.
+        val open = s.itemId?.let { id -> handlers.onOpenItem?.let { o -> { o(id) } } }
+        Column(modifier = Modifier.weight(1f).openable(open).testTag("$MISSION_STEP_TAG${s.key()}")) {
             Text(s.line(), style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
             item?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
@@ -289,4 +321,19 @@ internal fun CardRow(c: MissionCard, state: MissionsUiState, mayChange: Boolean,
             }
         }
     }
+}
+
+/** What a screen change does to a mission waiting to be put back up. */
+enum class MissionReturn { REOPEN, KEEP, FORGET }
+
+/**
+ * A task or a session opened from a mission's detail closes the sheet; back
+ * on [under], the screen the sheet was over, the mission comes up again.
+ * While a task, a session or its worktree shows, it waits; anywhere else (a
+ * tab tapped) it is forgotten, so a later visit does not reopen it.
+ */
+internal fun missionReturn(screen: Screen, under: Screen): MissionReturn = when {
+    screen == under -> MissionReturn.REOPEN
+    screen is Screen.Task || screen is Screen.Session || screen is Screen.Repo -> MissionReturn.KEEP
+    else -> MissionReturn.FORGET
 }

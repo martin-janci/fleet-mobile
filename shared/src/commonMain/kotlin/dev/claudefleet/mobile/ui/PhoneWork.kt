@@ -42,6 +42,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
@@ -67,6 +68,7 @@ import dev.claudefleet.mobile.model.WorkTask
 import dev.claudefleet.mobile.model.WorkTaskLink
 import dev.claudefleet.mobile.model.orgColorArgb
 import dev.claudefleet.mobile.model.relativeTime
+import dev.claudefleet.mobile.ui.components.WORK_ROW_SESSION_TAG
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.MarkdownText
 import dev.claudefleet.mobile.ui.components.ScreenHeader
@@ -250,6 +252,8 @@ fun PhoneMyWorkScreen(
     reviewCount: Int = state.reviewCount,
     /** Start on a task with no session: the New session wizard with the key. Null hides it. */
     onStart: ((String) -> Unit)? = null,
+    /** What tapping a row opens (This phone); its Open session is there either way. */
+    tapOpens: WorkTapChoice = WorkTapChoice.TICKET,
     modifier: Modifier = Modifier,
 ) {
     val o = Fleet.colors
@@ -368,7 +372,8 @@ fun PhoneMyWorkScreen(
                                 task = task,
                                 nowSeconds = nowSeconds,
                                 rowOf = rowOf,
-                                onClick = { handlers.onOpenTask(task.taskId) },
+                                onClick = { handlers.openRow(task, tapOpens) },
+                                onOpenSession = liveSessionOf(task)?.let { id -> { handlers.onOpenSession(id) } },
                                 labelOf = labels::get,
                                 onStart = onStart?.takeIf { task.counts.active == 0 && task.sessions.none { it.state == LinkState.Active } }
                                     ?.let { start -> task.key?.takeIf { it.isNotBlank() }?.let { key -> { start(key) } } },
@@ -430,15 +435,30 @@ internal fun PhoneTaskRow(
     onStart: (() -> Unit)? = null,
     /** A blocker's name ("FLEET-12") from the loaded tasks, for "Blocked on …". */
     labelOf: (String) -> String? = { null },
+    /** The task's live session, one tap away whatever the row itself opens. Null draws nothing. */
+    onOpenSession: (() -> Unit)? = null,
 ) {
     val line = taskLine(task, rowOf, labelOf)
     val chips = buildList {
         if (task.review) add("Suggested link")
         if (task.orgMixed) add("Two organisations")
     }
-    val chipRow: (@Composable RowScope.() -> Unit)? = if (chips.isEmpty() && onStart == null) null else {
+    val chipRow: (@Composable RowScope.() -> Unit)? = if (chips.isEmpty() && onStart == null && onOpenSession == null) null else {
         {
             for (c in chips) OrbitChip(c)
+            if (onOpenSession != null) {
+                Text(
+                    "Open session",
+                    color = Fleet.colors.accent,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .heightIn(min = 32.dp)
+                        .clickable(onClick = onOpenSession)
+                        .padding(horizontal = 4.dp, vertical = 6.dp)
+                        .testTag(WORK_ROW_SESSION_TAG),
+                )
+            }
             if (onStart != null) {
                 Text(
                     "Start a session",

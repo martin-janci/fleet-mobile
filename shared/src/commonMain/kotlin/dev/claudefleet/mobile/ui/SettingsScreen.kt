@@ -9,6 +9,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -74,6 +76,9 @@ fun SettingsScreen(
     /** The bottom bar this phone draws (redesign 14.2); null hides the switch. */
     layout: PhoneLayout? = null,
     onSetLayout: (PhoneLayout) -> Unit = {},
+    /** What tapping a Work row opens; null hides the choice. */
+    workTap: WorkTapChoice? = null,
+    onSetWorkTap: (WorkTapChoice) -> Unit = {},
     /** The hub settings' Save bar ([FleetSaveBar]), under the fields so it stays in view. */
     fleetSaveBar: @Composable () -> Unit = {},
 ) {
@@ -111,6 +116,8 @@ fun SettingsScreen(
             if (notifier.supported) NotifyRow(notifier)
 
             if (layout != null) LayoutRow(layout, onSetLayout)
+
+            if (workTap != null) WorkTapRow(workTap, onSetWorkTap)
 
             onOpenUsage?.let { open ->
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -212,6 +219,20 @@ internal fun LayoutRow(layout: PhoneLayout, onSetLayout: (PhoneLayout) -> Unit) 
             )
         }
         Switch(checked = on, onCheckedChange = null)
+    }
+}
+
+/** Ticket or Session: what a tap on a row of My work opens. */
+@Composable
+private fun WorkTapRow(current: WorkTapChoice, onPick: (WorkTapChoice) -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Text("Tapping a work row opens", style = MaterialTheme.typography.titleSmall)
+        Text(WORK_TAP_LINE, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (choice in WorkTapChoice.entries) {
+                FilterChip(selected = choice == current, onClick = { onPick(choice) }, label = { Text(choice.label) })
+            }
+        }
     }
 }
 

@@ -3,11 +3,13 @@ package dev.claudefleet.mobile.data
 import dev.claudefleet.mobile.model.DebugDevice
 import dev.claudefleet.mobile.model.DebugDeviceList
 import dev.claudefleet.mobile.model.DeviceOutput
+import dev.claudefleet.mobile.model.DeviceScreenshot
 
 /**
  * The calls the Debug devices sheet may make (claude-fleet `debug_devices`).
  * Its own interface, as [RoutineActions] is, so the sheet gets only what it
- * draws. Install, run and screenshot stay on the desktop.
+ * draws. The session screen's device strip and a chat's `device` card use it
+ * too, for the list and a screenshot. Install and run stay on the desktop.
  */
 interface DeviceActions {
     suspend fun list(refresh: Boolean): DebugDeviceList
@@ -28,6 +30,9 @@ interface DeviceActions {
     suspend fun shutdown(deviceId: Long): DebugDevice
 
     suspend fun logs(deviceId: Long, lines: Int): DeviceOutput
+
+    /** What the device's screen shows now. */
+    suspend fun screenshot(deviceId: Long): DeviceScreenshot
 }
 
 /** [DeviceActions] against the paired hub, through [AppSession.withClient]. */
@@ -48,4 +53,6 @@ class HubDeviceActions(private val session: AppSession) : DeviceActions {
     override suspend fun shutdown(deviceId: Long): DebugDevice = session.withClient { it.shutdownDebugDevice(deviceId) }
 
     override suspend fun logs(deviceId: Long, lines: Int): DeviceOutput = session.withClient { it.debugDeviceLogs(deviceId, lines) }
+
+    override suspend fun screenshot(deviceId: Long): DeviceScreenshot = session.withClient { it.debugDeviceScreenshot(deviceId) }
 }

@@ -348,7 +348,12 @@ costs one reconnect.
   routines with their runs, and **Pause all** at the top; missions open from
   inside it.
 - **Debug devices** (More → Debug devices, when the hub serves
-  `debug_devices`) — the test phones, emulators and simulators on the hosts.
+  `debug_devices`) — the test phones, emulators and simulators on the hosts,
+  who waits for each, and a **Screenshot** kept in the row. A session shows
+  the devices it holds or waits for in a strip under its tabs (Screenshot,
+  Release), its own `debug_devices` calls read as device rows in the
+  conversation (with a screenshot's image), and a `device` chat card shows
+  the device the agent points at.
 - **Work** (a hub with the work graph) — what each session is working on, as
   the hub decided it:
   - a key chip on every row (a dotted outline for a guess nobody has decided,

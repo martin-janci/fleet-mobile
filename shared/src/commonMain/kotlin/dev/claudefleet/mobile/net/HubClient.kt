@@ -61,6 +61,8 @@ import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.DebugDevice
 import dev.claudefleet.mobile.model.DebugDeviceList
 import dev.claudefleet.mobile.model.DeviceOutput
+import dev.claudefleet.mobile.model.DeviceScreenshot
+import dev.claudefleet.mobile.model.screenshotOf
 import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineExplain
 import dev.claudefleet.mobile.model.RoutineRun
@@ -195,10 +197,16 @@ class HubClient(
      * `E_*` code in `structuredContent`. A genuine JSON-RPC `error` means a
      * protocol failure (unknown tool, malformed arguments). Both become
      * [HubError.Tool].
+     *
+     * [whole] hands [deserialize] the MCP result itself — every content
+     * block — instead of the payload of its first text block: what a tool
+     * that answers an image (`debug_devices { screenshot }`) needs, since
+     * [payloadOf] keeps text only. Everything else leaves it false.
      */
     suspend fun <T> call(
         tool: String,
         args: JsonObject = JsonObject(emptyMap()),
+        whole: Boolean = false,
         deserialize: (JsonElement) -> T,
     ): T {
         val params = buildJsonObject {
@@ -231,7 +239,7 @@ class HubClient(
             // Here rather than at each call site so it holds for every caller,
             // including the ones that legitimately run on the UI scope (a
             // screen's own action handlers).
-            withContext(Dispatchers.Default) { deserialize(payloadOf(result)) }
+            withContext(Dispatchers.Default) { deserialize(payloadOf(result, whole)) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: HubError) {
@@ -1720,6 +1728,22 @@ class HubClient(
             },
         ) { json.decodeFromJsonElement(DeviceOutput.serializer(), it) }
 
+    /**
+     * What [deviceId]'s screen shows now: the hub's line ("Pixel on mac:
+     * 81234 bytes") and the image, base64 as the hub sends it. The hub
+     * refuses a device another holder has claimed (`E_CONFLICT`) and one that
+     * is not ready, as it does every command.
+     */
+    suspend fun debugDeviceScreenshot(deviceId: Long): DeviceScreenshot =
+        call(
+            "debug_devices",
+            buildJsonObject {
+                put("action", "screenshot")
+                put("device", deviceId.toString())
+            },
+            whole = true,
+        ) { screenshotOf(it) }
+
     private suspend fun deviceCall(
         action: String,
         deviceId: Long,
@@ -1822,7 +1846,7 @@ class HubClient(
                 put("org_id", orgId)
                 more()
             },
-            decode,
+            deserialize = decode,
         )
 
     // ---- the Work view (claude-fleet M14) ----
@@ -2517,9 +2541,11 @@ class HubClient(
      * The payload of a successful tool result. Fleet's tools serialize their
      * answer as JSON *inside* the first text content block; a tool that answers
      * prose (`capture_session`, `session_transcript`) puts the prose there
-     * instead, which arrives as a JSON string.
+     * instead, which arrives as a JSON string. With [whole], the result itself
+     * (see [call]).
      */
-    private fun payloadOf(result: JsonObject): JsonElement {
+    private fun payloadOf(result: JsonObject, whole: Boolean = false): JsonElement {
+        if (whole) return result
         val text = (result["content"] as? JsonArray)
             ?.asSequence()
             ?.mapNotNull { it as? JsonObject }

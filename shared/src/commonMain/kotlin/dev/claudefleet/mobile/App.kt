@@ -324,6 +324,8 @@ import dev.claudefleet.mobile.ui.TidySheet
 import dev.claudefleet.mobile.ui.TidyViewModel
 import dev.claudefleet.mobile.ui.MissionsHandlers
 import dev.claudefleet.mobile.ui.MissionsSheet
+import dev.claudefleet.mobile.ui.MissionReturn
+import dev.claudefleet.mobile.ui.missionReturn
 import dev.claudefleet.mobile.ui.AutomationHandlers
 import dev.claudefleet.mobile.ui.AutomationSheet
 import dev.claudefleet.mobile.ui.AutomationViewModel
@@ -334,6 +336,8 @@ import dev.claudefleet.mobile.ui.PauseAllQuestion
 import dev.claudefleet.mobile.ui.DebugDevicesHandlers
 import dev.claudefleet.mobile.ui.DebugDevicesSheet
 import dev.claudefleet.mobile.ui.DebugDevicesViewModel
+import dev.claudefleet.mobile.ui.SessionDevicesHandlers
+import dev.claudefleet.mobile.ui.SessionDevicesViewModel
 import dev.claudefleet.mobile.ui.devicesLine
 import dev.claudefleet.mobile.ui.OrbitMissionsHandlers
 import dev.claudefleet.mobile.ui.OrbitMissionsScreen
@@ -1264,6 +1268,21 @@ private fun FleetRoute(
         }
     }
     val workState by myWork.state.collectAsState()
+    // A task or a session opened from a mission's detail: the screen under
+    // the sheet, and the mission to put back up when back returns there.
+    var missionUnder by remember(credentials) { mutableStateOf<Pair<Screen, Long>?>(null) }
+    LaunchedEffect(screen) {
+        val (under, id) = missionUnder ?: return@LaunchedEffect
+        when (missionReturn(screen, under)) {
+            MissionReturn.REOPEN -> { missionUnder = null; missions.openOne(id) }
+            MissionReturn.KEEP -> Unit
+            MissionReturn.FORGET -> missionUnder = null
+        }
+    }
+    val leaveMission: () -> Unit = {
+        missionsState.detail?.mission?.id?.let { missionUnder = screen to it }
+        missions.close()
+    }
     // The hub stopped serving the Work view (or a reconnect found an older
     // hub): the tab leaves the bar, and the app leaves the tab.
     LaunchedEffect(workState.available) { if (!workState.available) nav.workUnavailable() }
@@ -1564,6 +1583,7 @@ private fun FleetRoute(
                     val prState by pullRequests.state.collectAsState()
                     val workHandlers = MyWorkHandlers(
                         onOpenTask = nav::openTask,
+                        onOpenSession = nav::open,
                         onRefresh = { myWork.refresh() },
                         onReload = { myWork.reload() },
                         onToggleSection = myWork::toggleSection,
@@ -1603,6 +1623,8 @@ private fun FleetRoute(
                     // sessions are doing, and To review sits beside Mine.
                     val workRows by repository.sessions.collectAsState()
                     val workRowOf: (Long) -> dev.claudefleet.mobile.model.SessionRow? = { id -> workRows.firstOrNull { it.id == id } }
+                    // What a row's tap opens (This phone): its ticket, or its live session.
+                    val workTap by container.phone.workTap.collectAsState()
                     if (layout == PhoneLayout.New) {
                         val workStatus by repository.status.collectAsState()
                         PhoneMyWorkScreen(
@@ -1613,9 +1635,10 @@ private fun FleetRoute(
                             handlers = workHandlers,
                             reviewCount = if (reviewState.loaded) reviewState.total else workState.reviewCount,
                             onStart = { nav.newSession(ticketKey = it) },
+                            tapOpens = workTap,
                         )
                     } else {
-                        MyWorkScreen(state = workState, handlers = workHandlers)
+                        MyWorkScreen(state = workState, handlers = workHandlers, tapOpens = workTap)
                     }
                     if (prState.open && layout == PhoneLayout.New) {
                         PhonePullRequestsSheet(
@@ -2292,6 +2315,13 @@ private fun FleetRoute(
                         onDenySpend = { missions.denySpend(it) },
                         onSignGrant = { level, hours, budget -> missions.signGrant(level, hours, budget) },
                         onRetryItem = { missions.retryItem(it) },
+                        // A task opens as the Work view opens one; only where the hub serves it.
+                        onOpenItem = if (workState.available) {
+                            { id: Long -> leaveMission(); nav.openTask("item:$id") }
+                        } else {
+                            null
+                        },
+                        onOpenSession = { id -> leaveMission(); nav.open(id) },
                     ),
                     orbit = layout == PhoneLayout.New,
                 )
@@ -2433,6 +2463,7 @@ private fun SettingsRoute(
         val notifyKinds by container.phone.notifyKinds.collectAsState()
         val quiet by container.phone.quiet.collectAsState()
         val lockOn by container.phone.lock.collectAsState()
+        val workTap by container.phone.workTap.collectAsState()
         val gate = rememberBiometricGate()
         BackHandler(enabled = fleetPageOpen || place != SettingsPlace.Home) {
             if (!fleetSettings.back()) settings.back()
@@ -2449,6 +2480,7 @@ private fun SettingsRoute(
                 lock = lockOn,
                 motion = motion,
                 quiet = quiet,
+                workTap = workTap,
             ),
             handlers = OrbitSettingsHandlers(
                 onOpen = settings::open,
@@ -2456,6 +2488,7 @@ private fun SettingsRoute(
                 onOpenPage = fleetSettings::open,
                 onSetTheme = container.phone::setTheme,
                 onSetMotion = container.phone::setMotion,
+                onSetWorkTap = container.phone::setWorkTap,
                 onSetNotify = container.phone::setNotify,
                 onSetQuiet = container.phone::setQuiet,
                 onSetUpdateMode = updates::setMode,
@@ -2505,6 +2538,8 @@ private fun SettingsRoute(
                 notifier = container.notifier,
                 layout = layout,
                 onSetLayout = onSetLayout,
+                workTap = container.phone.workTap.collectAsState().value,
+                onSetWorkTap = container.phone::setWorkTap,
                 fleetSettings = fleetSection,
                 fleetSaveBar = fleetSaveBar,
             )
@@ -2974,6 +3009,13 @@ private fun SessionRoute(
         SessionExtrasViewModel(sessionId, repository, container.sessionExtrasActions, scope, credentials.canWrite)
     }
     val extras by extrasVm.state.collectAsState()
+    // The test phones this session holds or waits for: read every 30 s while
+    // this screen is up and the hub serves `debug_devices`, and nowhere else.
+    val devicesVm = remember(sessionId, repository, scope) {
+        SessionDevicesViewModel(sessionId, repository, container.deviceActions, scope, credentials.canWrite)
+    }
+    val sessionDevices by devicesVm.state.collectAsState()
+    LaunchedEffect(devicesVm) { devicesVm.watch() }
     // The New bar's tabs (redesign 14.4): the conversation, the agent's own
     // screen, the worktree (instead of the worktree screen) and Details
     // (instead of the sheet). Each reads when it is opened.
@@ -3119,6 +3161,15 @@ private fun SessionRoute(
         chat = ChatHost(
             settings = container.fleetSettingsActions.takeIf { caps.settingProposals },
             mayDecideSettings = credentials.canWrite && caps.decideSettingProposals,
+            devices = if (caps.debugDevices) devicesVm::devices else null,
+            screenshot = if (caps.debugDevices && credentials.canWrite) devicesVm::takeScreenshot else null,
+        ),
+        devices = sessionDevices,
+        devicesHandlers = SessionDevicesHandlers(
+            onScreenshot = { devicesVm.screenshot(it) },
+            onRelease = { devicesVm.release(it) },
+            onCloseShot = devicesVm::closeShot,
+            onDismissError = devicesVm::dismissError,
         ),
         chatForms = container.chatFormActions.takeIf { caps.ask },
         onRewind = { anchor -> vm.rewind(anchor) },

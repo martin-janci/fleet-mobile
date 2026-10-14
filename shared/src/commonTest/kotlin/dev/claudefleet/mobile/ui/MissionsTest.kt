@@ -181,6 +181,49 @@ class MissionsTest {
         assertEquals("$1.23", dollars(plan.costMicros))
     }
 
+    /** A mission's live child sessions: the top-level list, for any state of the mission. */
+    @Test
+    fun a_missions_sessions_read_from_the_wire() {
+        val wire = """
+            {"mission":{"id":3,"state":"active"},
+             "items":[{"id":9,"title":"Schema"}],
+             "sessions":[{"session_id":41,"item_id":9,"host_alias":"pine","tmux_name":"pay-schema","kind":"claude","worktree_kb":2048},
+                         {"session_id":42,"item_id":9,"host_alias":"oak","tmux_name":"pay-review","kind":"claude"}]}
+        """.trimIndent()
+        val d = json.decodeFromString(MissionDetail.serializer(), wire)
+        assertEquals(listOf(41L, 42L), d.childSessions.map { it.sessionId })
+        val first = d.childSessions.first()
+        assertEquals(9, first.itemId)
+        assertEquals("pine", first.hostAlias)
+        assertEquals("pay-schema", first.tmuxName)
+        assertEquals("claude", first.kind)
+        assertEquals(2048, first.worktreeKb)
+        assertNull(d.childSessions[1].worktreeKb)
+    }
+
+    /** An older hub sends no `sessions`: a finished mission's `finish.sessions` stand in; none at all is empty. */
+    @Test
+    fun an_older_hub_falls_back_to_the_finished_missions_sessions() {
+        val finished = """
+            {"mission":{"id":3,"state":"completed"},
+             "finish":{"sessions":[{"session_id":7,"item_id":2,"host_alias":"pine","tmux_name":"w-2","kind":"claude"}],"prs":[]}}
+        """.trimIndent()
+        val d = json.decodeFromString(MissionDetail.serializer(), finished)
+        assertTrue(d.sessions.isEmpty())
+        assertEquals(listOf(7L), d.childSessions.map { it.sessionId })
+
+        val both = """
+            {"mission":{"id":3,"state":"completed"},
+             "sessions":[{"session_id":8,"item_id":2,"host_alias":"pine","tmux_name":"w-2b","kind":"claude"}],
+             "finish":{"sessions":[{"session_id":7,"item_id":2,"host_alias":"pine","tmux_name":"w-2","kind":"claude"}]}}
+        """.trimIndent()
+        assertEquals(listOf(8L), json.decodeFromString(MissionDetail.serializer(), both).childSessions.map { it.sessionId }, "the top-level list wins")
+
+        val old = json.decodeFromString(MissionDetail.serializer(), """{"mission":{"id":3,"state":"active"}}""")
+        assertTrue(old.childSessions.isEmpty())
+        assertNull(old.finish)
+    }
+
     @Test
     fun cards_read_as_the_desktops_card_line() {
         fun card(kind: String, item: Long? = null, vararg p: Pair<String, String>) = MissionCard(

@@ -52,7 +52,10 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.ConvItem
+import dev.claudefleet.mobile.model.DebugDevice
+import dev.claudefleet.mobile.ui.components.Base64Image
 import dev.claudefleet.mobile.model.EditDetail
 import dev.claudefleet.mobile.model.ToolDetail
 import dev.claudefleet.mobile.ui.components.MarkdownText
@@ -294,6 +297,7 @@ private fun iconFor(kind: ToolKind): ImageVector = when (kind) {
     ToolKind.Read -> FleetIcons.Document
     ToolKind.Search -> FleetIcons.Search
     ToolKind.Todo -> FleetIcons.Checklist
+    ToolKind.Device -> FleetIcons.Device
     ToolKind.Other -> FleetIcons.Wrench
 }
 
@@ -356,9 +360,90 @@ private fun ToolDetailBody(tool: ConvItem.Tool, kind: ToolKind, detail: ToolDeta
             val todos = remember(detail.input) { parseTodos(detail.input) }
             if (todos != null) TodoDetail(todos) else FallbackDetail(detail)
         }
+        kind == ToolKind.Device -> DeviceCallDetail(tool, detail)
         else -> {
             val prose = remember(detail.input) { parseProseInput(detail.input) }
             if (prose != null) ProseDetail(prose, detail) else FallbackDetail(detail)
+        }
+    }
+    ToolImages(detail)
+}
+
+// ─── Images in a result (a device screenshot, any tool's) ──────────────────
+
+@Composable
+private fun ToolImages(detail: ToolDetail) {
+    if (detail.images.isEmpty() && detail.imagesOmitted <= 0) return
+    Spacer(Modifier.padding(top = 8.dp))
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        detail.images.forEachIndexed { k, image ->
+            Base64Image(image.data, description = "Image ${k + 1} of the result")
+        }
+        imagesOmittedLine(detail.imagesOmitted)?.let { Muted(it) }
+    }
+}
+
+// ─── debug_devices ──────────────────────────────────────────────────────────
+
+/**
+ * A session's own `debug_devices` call: what it asked of which device, and
+ * the answer as the Debug devices sheet would draw it — the device's state,
+ * holder and line, the list, a command's output — rather than JSON.
+ */
+@Composable
+private fun DeviceCallDetail(tool: ConvItem.Tool, detail: ToolDetail) {
+    val call = remember(detail.input, tool.summary) {
+        deviceCallOf(detail.input).takeIf { it.action != null } ?: deviceCallFromSummary(tool.summary)
+    }
+    val now = remember(detail) { epochSeconds() }
+    for ((key, value) in listOf("action" to call.action, "device" to call.device)) {
+        if (value == null) continue
+        Row(modifier = Modifier.padding(bottom = 2.dp)) {
+            Text(
+                key,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.width(72.dp),
+            )
+            Text(value, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, fontFamily = FontFamily.Monospace)
+        }
+    }
+    Spacer(Modifier.padding(top = 6.dp))
+    Label(if (detail.isError) "Error" else "Result")
+    when (val answer = remember(detail.result, detail.isError) { deviceAnswerOf(detail.result, detail.isError) }) {
+        null -> Muted("Waiting for the result…")
+        is DeviceAnswer.One -> DeviceMini(answer.device, now)
+        is DeviceAnswer.Many -> {
+            if (answer.list.devices.isEmpty()) Muted("No test phones found")
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (d in answer.list.devices) DeviceMini(d, now)
+                for (h in answer.list.hosts) if (!h.error.isNullOrBlank()) Muted("${h.host}: ${h.error}")
+            }
+        }
+        is DeviceAnswer.Output -> {
+            Muted(outputLine(answer.output))
+            if (answer.output.output.isBlank()) Muted("No output") else MonoBlock(answer.output.output, answer.output.exitCode != 0)
+        }
+        is DeviceAnswer.Scanned -> Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            for (h in answer.hosts) Text(scannedLine(h), style = MaterialTheme.typography.bodySmall)
+        }
+        is DeviceAnswer.State -> Text(answer.state, style = MaterialTheme.typography.bodyMedium)
+        is DeviceAnswer.Text -> MonoBlock(answer.text, detail.isError)
+    }
+}
+
+/** One device in a few lines: its title, state and where it is, and who waits. */
+@Composable
+private fun DeviceMini(d: DebugDevice, nowSeconds: Long) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(FleetIcons.Device, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(d.title.ifBlank { "#${d.id}" }, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Text(deviceSummary(d, nowSeconds), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            queueNames(d)?.let { Text("Waiting: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
 }
