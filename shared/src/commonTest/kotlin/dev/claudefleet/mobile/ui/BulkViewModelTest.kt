@@ -250,4 +250,13 @@ class BulkViewModelTest {
         assertTrue(vm.state.value.retryable.isEmpty())
         assertFalse(vm.state.value.outcome!!.single { it.sessionId == 3L }.ok, "the skip is still reported")
     }
+
+    @Test
+    fun a_pinned_session_is_never_bulk_killed() {
+        assertEquals(
+            "a pinned session is not killed; unpin it first",
+            killRefusal(SessionRow(id = 5, tmuxName = "kept", pinnedAt = 100)),
+        )
+        assertNull(killRefusal(SessionRow(id = 1, tmuxName = "one")))
+    }
 }

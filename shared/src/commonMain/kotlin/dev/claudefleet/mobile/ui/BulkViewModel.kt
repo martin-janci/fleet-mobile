@@ -199,5 +199,6 @@ class BulkViewModel(
 internal fun killRefusal(row: SessionRow): String? = when {
     row.isController -> "the fleet's controller is not killed from here"
     row.kind == "external" -> "an external session cannot be killed by the fleet"
+    row.isPinned -> "a pinned session is not killed; unpin it first"
     else -> null
 }

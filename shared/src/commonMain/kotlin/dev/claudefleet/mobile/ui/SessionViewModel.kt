@@ -354,7 +354,7 @@ data class SessionUiState(
      * not offered there even though Restart and Tags still are.
      */
     val canKill: Boolean
-        get() = canManage && session?.kind != "external"
+        get() = canManage && session?.kind != "external" && session?.isPinned != true
 
     /**
      * The hub's own progress through a `safe_kill_session` retirement — the
@@ -1834,7 +1834,7 @@ class SessionViewModel(
     private fun canRestartNow(): Boolean = canManageNow()
 
     /** [SessionUiState.canKill] read from the live sources — see [runManaged]. */
-    private fun canKillNow(): Boolean = canManageNow() && row()?.kind != "external"
+    private fun canKillNow(): Boolean = canManageNow() && row()?.kind != "external" && row()?.isPinned != true
 
     /**
      * [SessionUiState.canAnswer] read from the live sources rather than from

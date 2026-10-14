@@ -128,6 +128,12 @@ data class SessionRow(
      * found it, and from an older hub.
      */
     @SerialName("last_viewed_at") val lastViewedAt: Long? = null,
+    /**
+     * When a person pinned the session (claude-fleet migration 189), unix
+     * seconds; absent when not pinned and from an older hub. The hub refuses
+     * to kill a pinned session (`E_PINNED`) until it is unpinned.
+     */
+    @SerialName("pinned_at") val pinnedAt: Long? = null,
     /** The credential profile the session runs under; absent for the host's own login (accounts, step 4.4). */
     @SerialName("claude_profile") val claudeProfile: String? = null,
     /**
@@ -202,6 +208,9 @@ data class SessionRow(
      */
     val isProposed: Boolean
         get() = attention?.state == Attention.STATE_PROPOSED || attention?.reason == Attention.PROBABLY_WAITING
+
+    /** A person pinned it ([pinnedAt]): nothing closes it until it is unpinned. */
+    val isPinned: Boolean get() = pinnedAt != null
 
     /** The rows the "needs attention" filter keeps, and every needs-you count counts. Never a [isProposed] row. */
     val needsAttention: Boolean get() = attentionReason != null && !isProposed
