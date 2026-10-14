@@ -328,6 +328,7 @@ import dev.claudefleet.mobile.ui.MissionReturn
 import dev.claudefleet.mobile.ui.missionReturn
 import dev.claudefleet.mobile.ui.AutomationHandlers
 import dev.claudefleet.mobile.ui.AutomationSheet
+import dev.claudefleet.mobile.ui.AutomationTab
 import dev.claudefleet.mobile.ui.AutomationViewModel
 import dev.claudefleet.mobile.ui.automationLine
 import dev.claudefleet.mobile.ui.automationRowAction
@@ -2261,9 +2262,15 @@ private fun FleetRoute(
                 AutomationSheet(
                     state = automationState,
                     nowSeconds = epochSeconds(),
+                    agents = agentActionsState,
                     handlers = AutomationHandlers(
                         onClose = automation::close,
-                        onTab = automation::show,
+                        onTab = { tab ->
+                            automation.show(tab)
+                            // The agents' rules come with the Inbox's status read.
+                            if (tab == AutomationTab.Agents) agentActionsVm.refresh()
+                        },
+                        onRevokeRule = { agentActionsVm.revoke(it) },
                         onSelect = { automation.select(it) },
                         onBack = automation::back,
                         onToggle = { automation.toggle(it) },

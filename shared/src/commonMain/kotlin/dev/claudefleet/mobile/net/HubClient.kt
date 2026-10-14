@@ -1490,6 +1490,10 @@ class HubClient(
             json.decodeFromJsonElement(AgentAction.serializer(), it)
         }
 
+    /** End one standing rule, a fleet agent's instance (`agents { action: revoke, id }`). */
+    suspend fun revokeAgentRule(id: Long): Unit =
+        call("agents", buildJsonObject { put("action", "revoke"); put("id", id) }) { }
+
     // ---- missions (claude-fleet orchestration O1–O8) ----
 
     /** The missions this token may see (`work { action: missions }`). */

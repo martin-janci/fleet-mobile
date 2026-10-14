@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.BuiltInAgentActions
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.AgentAction
+import dev.claudefleet.mobile.model.AgentRule
 import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -29,10 +30,14 @@ data class AgentActionsUiState(
     /** This device may approve or reject (a write token; the hub still checks trust). */
     val canAnswer: Boolean = false,
     val pending: List<AgentAction> = emptyList(),
+    /** The standing rules: built-in agents' and fleet agents' instances (Automation › Agents). */
+    val rules: List<AgentRule> = emptyList(),
     /** Actions with a press on the wire. */
     val busy: Set<Long> = emptySet(),
     /** What the last press did, in words, by action. */
     val notices: Map<Long, String> = emptyMap(),
+    /** What the last Revoke did, in words. */
+    val ruleNotice: String? = null,
 )
 
 class AgentActionsViewModel(
@@ -43,6 +48,8 @@ class AgentActionsViewModel(
 ) {
     private data class Local(
         val pending: List<AgentAction> = emptyList(),
+        val rules: List<AgentRule> = emptyList(),
+        val ruleNotice: String? = null,
         val busy: Set<Long> = emptySet(),
         val notices: Map<Long, String> = emptyMap(),
         /** The hub refused this device the tool: stop asking this connection. */
@@ -57,8 +64,10 @@ class AgentActionsViewModel(
             available = available,
             canAnswer = available && canWrite && caps.has(TOOL, "approve"),
             pending = if (available) l.pending else emptyList(),
+            rules = if (available) l.rules else emptyList(),
             busy = l.busy,
             notices = l.notices,
+            ruleNotice = l.ruleNotice,
         )
     }.stateIn(scope, SharingStarted.Eagerly, AgentActionsUiState())
 
@@ -68,7 +77,7 @@ class AgentActionsViewModel(
         return scope.launch {
             try {
                 val s = actions.status()
-                local.update { it.copy(pending = s.pending) }
+                local.update { it.copy(pending = s.pending, rules = s.rules) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: HubError.Tool) {
@@ -76,6 +85,23 @@ class AgentActionsViewModel(
             } catch (_: Throwable) {
                 // Keep the last list: a dropped connection is not "nothing waits".
             }
+        }
+    }
+
+    /** End a rule (a fleet agent's instance); the list drops it. */
+    fun revoke(r: AgentRule): Job? {
+        if (!state.value.canAnswer) return null
+        return scope.launch {
+            val notice = try {
+                actions.revoke(r.id)
+                local.update { l -> l.copy(rules = l.rules.filterNot { it.id == r.id }) }
+                "${r.scope} revoked."
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                friendly(t).body
+            }
+            local.update { it.copy(ruleNotice = notice) }
         }
     }
 

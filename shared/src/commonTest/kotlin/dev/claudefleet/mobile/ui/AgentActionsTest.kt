@@ -4,11 +4,14 @@ import dev.claudefleet.mobile.data.BuiltInAgentActions
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.AgentAction
+import dev.claudefleet.mobile.model.AgentRule
 import dev.claudefleet.mobile.model.AgentsStatus
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.agentActionTitle
+import dev.claudefleet.mobile.model.ruleAgentName
+import dev.claudefleet.mobile.model.ruleLine
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.json
@@ -54,6 +57,10 @@ private class FakeAgents(
         calls += "decide $id $approve"
         refuse?.let { throw it }
         return action(id).copy(state = if (approve) "approved" else "rejected")
+    }
+    override suspend fun revoke(id: Long) {
+        calls += "revoke $id"
+        refuse?.let { throw it }
     }
 }
 
@@ -102,6 +109,52 @@ class AgentActionsTest {
                "decided_by":null,"decided_at":null,"executed_at":null,"error":null,"created_at":100}]}""",
         )
         assertEquals(listOf(3L to 100L), row.pending.map { it.id to it.createdAt })
+    }
+
+    @Test
+    fun a_fleet_agents_action_and_rule_say_what_they_are() {
+        fun title(kind: String, payload: String) = agentActionTitle(AgentAction(id = 1, kind = kind, payload = payload))
+        assertEquals("Comment on L2S-7", title("tracker_comment", """{"key":"L2S-7"}"""))
+        assertEquals(
+            "File a bug in BUG for L2S-7: Key expired",
+            title("tracker_issue", """{"project":"BUG","issue_type":"Bug","summary":"Key expired","link":{"to":"L2S-7"}}"""),
+        )
+        assertEquals("Link BUG-9 to L2S-7 (causes)", title("tracker_link", """{"from":"BUG-9","to":"L2S-7","link_type":"Causes"}"""))
+        assertEquals("Remember NPE in memory", title("record", """{"store":"memory","key":"NPE"}"""))
+        assertEquals("Call kb.add_known_error", title("mcp_call", """{"binding":"kb","tool":"add_known_error"}"""))
+        assertEquals("Comment on o/r#4", title("pr_comment", """{"repo":"o/r","number":4}"""))
+        val s = json.decodeFromString(
+            AgentsStatus.serializer(),
+            """{"rules":[{"id":12,"agent":"fleet","scope":"l2-prod","level":"propose","host_alias":"mercury",
+               "project_id":null,"config":"{}","granted_by":"x","granted_at":1,"expires_at":null,
+               "definition":"l2-support","bindings":"[]","active":true},
+              {"id":3,"agent":"review","scope":"gh:o/r","level":"watch","host_alias":"box","active":false}],
+              "jobs":[],"pending":[]}""",
+        )
+        assertEquals(listOf("l2-support", "PR reviewer"), s.rules.map { ruleAgentName(it) })
+        assertEquals(listOf("l2-prod at propose on mercury", "gh:o/r at watch on box (expired)"), s.rules.map { ruleLine(it) })
+    }
+
+    @Test
+    fun a_rule_is_revoked_and_leaves_the_list() = runTest {
+        val rule = AgentRule(id = 12, agent = "fleet", scope = "l2-prod", level = "watch", hostAlias = "m", definition = "l2-support")
+        val agents = object : BuiltInAgentActions by FakeAgents() {
+            val calls = mutableListOf<String>()
+            override suspend fun status() = AgentsStatus(rules = listOf(rule))
+            override suspend fun revoke(id: Long) {
+                calls += "revoke $id"
+            }
+        }
+        val vm = AgentActionsViewModel(AgentsFleet(withAgents), agents, backgroundScope, canWrite = true)
+        runCurrent()
+        vm.refresh()?.join()
+        runCurrent()
+        assertEquals(listOf(rule), vm.state.value.rules)
+        vm.revoke(rule)?.join()
+        runCurrent()
+        assertEquals(listOf("revoke 12"), agents.calls)
+        assertEquals(emptyList(), vm.state.value.rules)
+        assertEquals("l2-prod revoked.", vm.state.value.ruleNotice)
     }
 
     @Test

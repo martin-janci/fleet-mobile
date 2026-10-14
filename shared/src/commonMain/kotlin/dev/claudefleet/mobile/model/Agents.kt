@@ -30,11 +30,43 @@ data class AgentAction(
     @SerialName("created_at") val createdAt: Long = 0,
 )
 
+/**
+ * One standing rule (`agent_rules`): a built-in agent on a repo or a Jira
+ * project, or an instance of a catalog fleet agent (claude-fleet's
+ * configurable agents, step 5), named by its `definition`.
+ */
+@Serializable
+data class AgentRule(
+    val id: Long,
+    /** `review` | `support` | `fleet`. */
+    val agent: String = "",
+    /** `gh:<owner>/<repo>`, `jira:<id>:<PROJECT>`, or a fleet agent's instance name. */
+    val scope: String = "",
+    /** `watch` | `propose` | `act`. */
+    val level: String = "",
+    @SerialName("host_alias") val hostAlias: String = "",
+    /** A fleet agent's catalog definition. */
+    val definition: String? = null,
+    /** Not expired. */
+    val active: Boolean = true,
+)
+
 /** `agents { action: status }`: the part the phone draws. */
 @Serializable
 data class AgentsStatus(
     val pending: List<AgentAction> = emptyList(),
+    val rules: List<AgentRule> = emptyList(),
 )
+
+/** A rule's agent in words, the desktop's `ruleAgentName`. */
+fun ruleAgentName(r: AgentRule): String = when (r.agent) {
+    "review" -> "PR reviewer"
+    "support" -> "Support"
+    else -> r.definition ?: r.agent
+}
+
+/** "l2-prod at propose on mercury", the desktop's `ruleLine`. */
+fun ruleLine(r: AgentRule): String = "${r.scope} at ${r.level} on ${r.hostAlias}${if (r.active) "" else " (expired)"}"
 
 private val lenient = Json { ignoreUnknownKeys = true }
 
@@ -71,6 +103,17 @@ fun agentActionTitle(a: AgentAction): String {
             }
             "kb_learn" -> return "Teach the support KB: ${f("path")}"
             "jira_link" -> return "Link ${f("bug_key")} to ${f("source_key")} (${f("link_type").lowercase()})"
+            // A catalog fleet agent's (configurable agents, step 4).
+            "tracker_comment" -> return "Comment on ${f("key")}"
+            "tracker_issue" -> {
+                val to = ((p["link"] as? JsonObject)?.get("to") as? JsonPrimitive)?.contentOrNull
+                val type = ((p["issue_type"] as? JsonPrimitive)?.contentOrNull ?: "Task").lowercase()
+                return "File a $type in ${f("project")}${if (to != null) " for $to" else ""}: ${f("summary")}"
+            }
+            "tracker_link" -> return "Link ${f("from")} to ${f("to")} (${f("link_type").lowercase()})"
+            "record" -> return "Remember ${f("key")} in ${f("store")}"
+            "mcp_call" -> return "Call ${f("binding")}.${f("tool")}"
+            "pr_comment" -> return "Comment on ${f("repo")}#${f("number")}"
         }
     }
     return a.kind.replace('_', ' ')
