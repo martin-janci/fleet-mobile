@@ -32,7 +32,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.claudefleet.mobile.model.AgentRule
 import dev.claudefleet.mobile.model.Routine
+import dev.claudefleet.mobile.model.ruleAgentName
+import dev.claudefleet.mobile.model.ruleLine
 import dev.claudefleet.mobile.model.RoutineExplain
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import dev.claudefleet.mobile.ui.components.ErrorBanner
@@ -53,6 +56,8 @@ data class AutomationHandlers(
     /** Missions live beside the routines; null when the hub keeps none. */
     val onOpenMissions: (() -> Unit)? = null,
     val onDismissError: () -> Unit = {},
+    /** End a rule (a fleet agent's instance) from the Agents tab; null where this device may not. */
+    val onRevokeRule: ((AgentRule) -> Unit)? = null,
 )
 
 /**
@@ -63,7 +68,13 @@ data class AutomationHandlers(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AutomationSheet(state: AutomationUiState, nowSeconds: Long, handlers: AutomationHandlers) {
+fun AutomationSheet(
+    state: AutomationUiState,
+    nowSeconds: Long,
+    handlers: AutomationHandlers,
+    /** The agents' standing rules (the Inbox's view model reads them too). */
+    agents: AgentActionsUiState = AgentActionsUiState(),
+) {
     var confirmPause by remember { mutableStateOf(false) }
     val showLoader = rememberLoaderVisible(state.loading || state.busy != null)
     val detail = state.detail
@@ -99,7 +110,7 @@ fun AutomationSheet(state: AutomationUiState, nowSeconds: Long, handlers: Automa
                     )
                 }
             } else {
-                AutomationList(state, nowSeconds, handlers, onPause = { confirmPause = true })
+                AutomationList(state, nowSeconds, handlers, agents, onPause = { confirmPause = true })
             }
         }
     }
@@ -216,7 +227,13 @@ private fun RoutineRow(
 
 /** The sheet's front: Pause all, the two tabs, and Missions below them. */
 @Composable
-private fun AutomationList(state: AutomationUiState, nowSeconds: Long, handlers: AutomationHandlers, onPause: () -> Unit) {
+private fun AutomationList(
+    state: AutomationUiState,
+    nowSeconds: Long,
+    handlers: AutomationHandlers,
+    agents: AgentActionsUiState,
+    onPause: () -> Unit,
+) {
     val o = Fleet.colors
     PauseCard(state, onPause = onPause, onResume = { handlers.onSetPaused(false) })
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -227,10 +244,11 @@ private fun AutomationList(state: AutomationUiState, nowSeconds: Long, handlers:
     when (state.tab) {
         AutomationTab.Agents -> {
             // Read-only, as on the desktop: what fleet runs itself.
-            val agents = state.agents(nowSeconds)
-            agents.forEachIndexed { i, a ->
-                PhoneRow(title = a.name, line = "${a.does} · ${a.state}", dot = false, divider = i < agents.lastIndex)
+            val builtIn = state.agents(nowSeconds)
+            builtIn.forEachIndexed { i, a ->
+                PhoneRow(title = a.name, line = "${a.does} · ${a.state}", dot = false, divider = i < builtIn.lastIndex)
             }
+            AgentRules(agents, handlers.onRevokeRule)
         }
         AutomationTab.Routines -> {
             if (state.loops.isNotEmpty()) {
@@ -282,5 +300,38 @@ private fun AutomationList(state: AutomationUiState, nowSeconds: Long, handlers:
     handlers.onOpenMissions?.let { openMissions ->
         HorizontalDivider(color = o.border)
         PhoneRow(title = "Missions", line = "Plans the loop works through, step by step", dot = false, divider = false, onClick = openMissions)
+    }
+}
+
+/**
+ * The agents' standing rules (claude-fleet's configurable agents, step 5):
+ * the PR reviewer's and the support agent's, and each fleet agent's
+ * instance by its definition. A new instance and Edit are the desktop's
+ * form (or a chat card); the phone revokes one.
+ */
+@Composable
+private fun AgentRules(agents: AgentActionsUiState, onRevoke: ((AgentRule) -> Unit)?) {
+    val o = Fleet.colors
+    if (agents.rules.isEmpty()) return
+    Text("Instances", color = o.fgMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp))
+    agents.rules.forEachIndexed { i, r ->
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            PhoneRow(
+                title = ruleAgentName(r),
+                line = ruleLine(r),
+                dot = false,
+                divider = i < agents.rules.lastIndex,
+                modifier = Modifier.weight(1f),
+            )
+            if (onRevoke != null && agents.canAnswer) {
+                TextButton(
+                    onClick = { onRevoke(r) },
+                    modifier = Modifier.semantics { contentDescription = "Revoke ${r.scope}" },
+                ) { Text("Revoke") }
+            }
+        }
+    }
+    agents.ruleNotice?.let {
+        Text(it, color = o.fgMuted, fontSize = 13.sp, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
     }
 }

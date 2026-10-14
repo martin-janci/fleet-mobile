@@ -9,6 +9,9 @@ interface BuiltInAgentActions {
 
     /** Approve (`true`) or reject an action; the action as it is afterwards. */
     suspend fun decide(id: Long, approve: Boolean): AgentAction
+
+    /** End a standing rule (a fleet agent's instance): `agents { action: revoke, id }`. */
+    suspend fun revoke(id: Long)
 }
 
 /** [BuiltInAgentActions] against the paired hub, through [AppSession.withClient]. */
@@ -17,4 +20,6 @@ class HubBuiltInAgentActions(private val session: AppSession) : BuiltInAgentActi
 
     override suspend fun decide(id: Long, approve: Boolean): AgentAction =
         session.withClient { it.decideAgentAction(id, approve) }
+
+    override suspend fun revoke(id: Long) = session.withClient { it.revokeAgentRule(id) }
 }
