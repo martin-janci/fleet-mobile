@@ -18,6 +18,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import dev.claudefleet.mobile.data.FleetSettingsActions
+import dev.claudefleet.mobile.model.DebugDevice
+import dev.claudefleet.mobile.model.DeviceScreenshot
+import dev.claudefleet.mobile.model.findDevice
+import dev.claudefleet.mobile.ui.deviceLine
+import dev.claudefleet.mobile.ui.friendly
+import dev.claudefleet.mobile.ui.deviceState
+import dev.claudefleet.mobile.ui.queueNames
 import dev.claudefleet.mobile.model.Page
 import dev.claudefleet.mobile.model.ProgressBoard
 import dev.claudefleet.mobile.model.ResultItem
@@ -25,6 +32,7 @@ import dev.claudefleet.mobile.model.formatResultCell
 import dev.claudefleet.mobile.ui.SettingCardModel
 import dev.claudefleet.mobile.ui.whoWords
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonNull
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -113,8 +121,16 @@ class ChatHost(
     val progress: ProgressBoard = ProgressBoard.EMPTY,
     /** Unix seconds, for a results card's `time` values. */
     val nowSeconds: Long = 0,
+    /**
+     * Every test phone this person may see, for a `device` card; null where
+     * the hub serves no `debug_devices` to this device.
+     */
+    val devices: (suspend () -> List<DebugDevice>)? = null,
+    /** A screenshot of a device by id, for a `device` card; null where it may not be taken from here. */
+    val screenshot: (suspend (Long) -> DeviceScreenshot)? = null,
 ) {
-    fun copyWith(progress: ProgressBoard, nowSeconds: Long) = ChatHost(settings, mayDecideSettings, progress, nowSeconds)
+    fun copyWith(progress: ProgressBoard, nowSeconds: Long) =
+        ChatHost(settings, mayDecideSettings, progress, nowSeconds, devices, screenshot)
 
     companion object {
         val None = ChatHost()
@@ -338,6 +354,102 @@ internal fun UiBlockCard(block: UiBlock, raw: String) {
         is UiBlock.Error -> ErrorCard(block)
         is UiBlock.Setting -> SettingCard(block)
         is UiBlock.GuidePage -> GuidePageCard(block.page)
+        is UiBlock.Device -> DeviceBlockCard(block)
+    }
+}
+
+internal const val RICH_DEVICE = "rich-device"
+
+/** What a `device` card found for its reference. */
+private sealed interface DeviceLookup {
+    data object Loading : DeviceLookup
+
+    /** The hub serves no `debug_devices` to this device. */
+    data object Unavailable : DeviceLookup
+
+    data object NotFound : DeviceLookup
+
+    data object Failed : DeviceLookup
+
+    data class Found(val device: DebugDevice) : DeviceLookup
+}
+
+/**
+ * A `device` block: the test phone the agent points at, as the hub has it now
+ * — its state, who holds it and who waits — with the block's own title and
+ * note, and a Screenshot that shows what its screen shows, in the card.
+ */
+@Composable
+private fun DeviceBlockCard(block: UiBlock.Device) {
+    val host = LocalChatHost.current
+    val colors = MaterialTheme.colorScheme
+    val lookup = host.devices
+    var attempt by remember(block.device) { mutableStateOf(0) }
+    val found by produceState<DeviceLookup>(DeviceLookup.Loading, block.device, lookup, attempt) {
+        value = if (lookup == null) {
+            DeviceLookup.Unavailable
+        } else {
+            try {
+                findDevice(lookup(), block.device)?.let { DeviceLookup.Found(it) } ?: DeviceLookup.NotFound
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                DeviceLookup.Failed
+            }
+        }
+    }
+    val device = (found as? DeviceLookup.Found)?.device
+    var shot by remember(block.device) { mutableStateOf<DeviceScreenshot?>(null) }
+    var shooting by remember(block.device) { mutableStateOf(false) }
+    var shotError by remember(block.device) { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val ready = device?.ready == true
+    Card(if (ready) LocalStatusColors.current(StatusTone.COMPLETED).dot else colors.outlineVariant, RICH_DEVICE) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { Heading(block.title ?: device?.title ?: block.device) }
+            device?.let { Chip(deviceState(it), if (it.ready) StatusTone.COMPLETED else null) }
+        }
+        when (val f = found) {
+            DeviceLookup.Loading -> Note("Looking for ${block.device}…")
+            DeviceLookup.Unavailable -> Note("Test phone ${block.device}. Debug devices are not served to this device.")
+            DeviceLookup.NotFound -> Note("No test phone ${block.device} among the ones you can see.")
+            DeviceLookup.Failed -> Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { Note("Couldn't read the test phones.") }
+                TextButton(onClick = { attempt++ }) { Text("Retry") }
+            }
+            is DeviceLookup.Found -> {
+                if (block.title != null) Note(f.device.title)
+                Text(deviceLine(f.device, host.nowSeconds), style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                queueNames(f.device)?.let { Note("Waiting: $it") }
+            }
+        }
+        block.note?.let { MarkdownText(it) }
+        val take = host.screenshot
+        if (device != null && take != null && ready) {
+            OutlinedButton(
+                onClick = {
+                    shooting = true
+                    shotError = null
+                    scope.launch {
+                        try {
+                            shot = take(device.id)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (t: Throwable) {
+                            shotError = friendly(t).body.ifBlank { "The screenshot failed." }
+                        } finally {
+                            shooting = false
+                        }
+                    }
+                },
+                enabled = !shooting,
+            ) { Text(if (shooting) "Taking a screenshot…" else if (shot == null) "Screenshot" else "Screenshot again") }
+        }
+        shotError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.error) }
+        shot?.let { s ->
+            Base64Image(s.data, description = "Screenshot of ${device?.title ?: block.device}")
+            if (s.caption.isNotBlank()) Note(s.caption)
+        }
     }
 }
 

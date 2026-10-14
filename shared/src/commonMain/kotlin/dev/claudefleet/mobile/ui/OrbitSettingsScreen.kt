@@ -87,6 +87,8 @@ data class OrbitSettingsInput(
     val motion: MotionChoice = MotionChoice.SYSTEM,
     /** This phone's own quiet hours (MobileSettings · This phone). */
     val quiet: PhoneQuiet = PhoneQuiet(),
+    /** What tapping a Work row opens. */
+    val workTap: WorkTapChoice = WorkTapChoice.TICKET,
 )
 
 /** Every tap the New layout's Settings reports. */
@@ -96,6 +98,7 @@ class OrbitSettingsHandlers(
     val onOpenPage: (String) -> Unit = {},
     val onSetTheme: (ThemeChoice) -> Unit = {},
     val onSetMotion: (MotionChoice) -> Unit = {},
+    val onSetWorkTap: (WorkTapChoice) -> Unit = {},
     val onSetNotify: (NotifyKind, Boolean) -> Unit = { _, _ -> },
     val onSetQuiet: (PhoneQuiet) -> Unit = {},
     val onSetUpdateMode: (UpdateMode) -> Unit = {},
@@ -315,6 +318,16 @@ private fun ColumnScope.ThisPhone(input: OrbitSettingsInput, handlers: OrbitSett
     // The desktop's Settings → Appearance → Motion (review r11).
     SectionLabel("Motion")
     ChoicePicker(MotionChoice.entries, input.motion, { it.label }, handlers.onSetMotion)
+
+    SectionLabel("Tapping a work row opens")
+    ChoicePicker(WorkTapChoice.entries, input.workTap, { it.label }, handlers.onSetWorkTap)
+    Text(
+        WORK_TAP_LINE,
+        color = o.fgMuted,
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
+        modifier = Modifier.padding(horizontal = gutter, vertical = 6.dp),
+    )
 
     handlers.onSetLock?.let { onSetLock ->
         SectionLabel("Security")

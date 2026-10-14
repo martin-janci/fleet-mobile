@@ -7,6 +7,8 @@ import dev.claudefleet.mobile.model.DebugDevice
 import dev.claudefleet.mobile.model.DebugDeviceList
 import dev.claudefleet.mobile.model.DeviceHostScan
 import dev.claudefleet.mobile.model.DeviceOutput
+import dev.claudefleet.mobile.model.DeviceScreenshot
+import dev.claudefleet.mobile.model.QueuedHolder
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
@@ -16,6 +18,8 @@ import dev.claudefleet.mobile.net.json
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -48,9 +52,11 @@ private class FakeDeviceActions : DeviceActions {
     val calls = mutableListOf<String>()
     var devices = listOf(PIXEL, AVD, SIM)
     var refuse = false
+    var refuseList = false
 
     override suspend fun list(refresh: Boolean): DebugDeviceList {
         calls += "list $refresh"
+        if (refuseList) throw HubError.Tool("E_FORBIDDEN", "no")
         return DebugDeviceList(devices, listOf(DeviceHostScan("mac", 100), DeviceHostScan("oci-arm", error = "adb not found")))
     }
 
@@ -92,6 +98,12 @@ private class FakeDeviceActions : DeviceActions {
     override suspend fun logs(deviceId: Long, lines: Int): DeviceOutput {
         calls += "logs $deviceId $lines"
         return DeviceOutput(output = "I/ActivityManager: Start proc", truncated = true)
+    }
+
+    override suspend fun screenshot(deviceId: Long): DeviceScreenshot {
+        calls += "screenshot $deviceId"
+        if (refuse) throw HubError.Tool("E_CONFLICT", "Pixel 9 is claimed by host:mac#7")
+        return DeviceScreenshot("Pixel 9 on mac: 3 bytes", "image/png", "iVBO")
     }
 }
 
@@ -210,6 +222,135 @@ class DebugDevicesTest {
     }
 
     @Test
+    fun a_screenshot_stays_with_its_device_and_reads_nothing_again() = runTest {
+        val actions = FakeDeviceActions()
+        val vm = devices(actions = actions)
+        runCurrent()
+        vm.open()
+        runCurrent()
+        vm.press(PIXEL, DeviceMove.Screenshot)
+        runCurrent()
+        assertEquals(listOf("list false", "screenshot 1"), actions.calls)
+        assertEquals(mapOf(1L to DeviceScreenshot("Pixel 9 on mac: 3 bytes", "image/png", "iVBO")), vm.state.value.shots)
+        assertNull(vm.state.value.busy)
+        // A stopped simulator has no screen to take.
+        vm.press(SIM, DeviceMove.Screenshot)
+        runCurrent()
+        assertEquals(listOf("list false", "screenshot 1"), actions.calls)
+    }
+
+    @Test
+    fun a_refused_screenshot_says_so_and_keeps_no_image() = runTest {
+        val actions = FakeDeviceActions()
+        val vm = devices(actions = actions)
+        runCurrent()
+        vm.open()
+        runCurrent()
+        actions.refuse = true
+        vm.press(PIXEL, DeviceMove.Screenshot)
+        runCurrent()
+        assertNotNull(vm.state.value.error)
+        assertEquals(emptyMap(), vm.state.value.shots)
+    }
+
+    // ─── The session screen's strip ─────────────────────────────────────
+
+    private fun TestScope.strip(
+        actions: FakeDeviceActions,
+        caps: HubCapabilities = WITH_DEVICES,
+        canWrite: Boolean = true,
+        clock: () -> Long = { 1_000 },
+    ): Pair<SessionDevicesViewModel, DevicesFleet> {
+        val fleet = DevicesFleet(caps)
+        fleet.sessions.value = listOf(SessionRow(id = 42, tmuxName = "s", hostAlias = "mercury"))
+        return SessionDevicesViewModel(42, fleet, actions, backgroundScope, canWrite, clock) to fleet
+    }
+
+    @Test
+    fun the_strip_shows_the_sessions_devices_and_reads_every_30_seconds() = runTest {
+        val actions = FakeDeviceActions()
+        val waited = PIXEL.copy(claimedBy = "client:Martin's Pixel", queue = listOf(QueuedHolder("host:mercury#42")), waiting = 1)
+        actions.devices = listOf(waited, AVD, SIM)
+        val (vm, _) = strip(actions)
+        val watch = backgroundScope.launch { vm.watch() }
+        runCurrent()
+        assertEquals("host:mercury#42", vm.state.value.holder)
+        assertEquals(listOf(AVD, waited), vm.state.value.devices)
+        assertEquals(listOf("list false"), actions.calls)
+        advanceTimeBy(SessionDevicesViewModel.POLL_MS + 1)
+        assertEquals(listOf("list false", "list false"), actions.calls)
+        watch.cancel()
+        advanceTimeBy(SessionDevicesViewModel.POLL_MS * 3)
+        assertEquals(2, actions.calls.size, "no reads once the screen is gone")
+    }
+
+    @Test
+    fun the_strip_never_asks_a_hub_without_debug_devices_and_a_failed_read_is_quiet() = runTest {
+        val actions = FakeDeviceActions()
+        val (vm, fleet) = strip(actions, caps = HubCapabilities())
+        backgroundScope.launch { vm.watch() }
+        runCurrent()
+        advanceTimeBy(SessionDevicesViewModel.POLL_MS * 2)
+        assertEquals(emptyList<String>(), actions.calls)
+        assertEquals(emptyList(), vm.devices())
+
+        // The hub starts serving it: the strip reads, and a refusal leaves no banner.
+        actions.refuseList = true
+        fleet.capabilities.value = WITH_DEVICES
+        runCurrent()
+        assertEquals(listOf("list false"), actions.calls)
+        assertNull(vm.state.value.error)
+        assertEquals(emptyList(), vm.state.value.devices)
+    }
+
+    @Test
+    fun a_cards_lookup_reuses_a_fresh_read() = runTest {
+        val actions = FakeDeviceActions()
+        var now = 1_000L
+        val (vm, _) = strip(actions, clock = { now })
+        runCurrent()
+        assertEquals(3, vm.devices().size)
+        assertEquals(3, vm.devices().size)
+        assertEquals(listOf("list false"), actions.calls)
+        now += 31
+        vm.devices()
+        assertEquals(listOf("list false", "list false"), actions.calls)
+    }
+
+    @Test
+    fun the_strip_takes_a_screenshot_and_releases_its_own_claim() = runTest {
+        val actions = FakeDeviceActions()
+        val (vm, _) = strip(actions)
+        backgroundScope.launch { vm.watch() }
+        runCurrent()
+        vm.screenshot(AVD)
+        runCurrent()
+        val shot = assertNotNull(vm.state.value.shot)
+        assertEquals(AVD.id, shot.deviceId)
+        assertEquals("iVBO", shot.shot.data)
+        vm.closeShot()
+        runCurrent()
+        assertNull(vm.state.value.shot)
+
+        vm.release(AVD)
+        runCurrent()
+        assertEquals(listOf("list false", "screenshot 2", "release 2", "list false"), actions.calls)
+        assertEquals(emptyList(), vm.state.value.devices)
+    }
+
+    @Test
+    fun a_readonly_strip_presses_nothing() = runTest {
+        val actions = FakeDeviceActions()
+        val (vm, _) = strip(actions, canWrite = false)
+        runCurrent()
+        vm.screenshot(AVD)
+        vm.release(AVD)
+        runCurrent()
+        assertFalse(vm.state.value.canAct)
+        assertEquals(emptyList<String>(), actions.calls)
+    }
+
+    @Test
     fun scan_then_list_and_a_readonly_phone_does_neither() = runTest {
         val actions = FakeDeviceActions()
         val vm = devices(actions = actions)
@@ -230,10 +371,16 @@ class DebugDevicesTest {
 
     @Test
     fun each_device_offers_only_what_it_can_do() {
-        assertEquals(listOf(DeviceMove.Claim, DeviceMove.Logs), deviceMoves(PIXEL))
-        assertEquals(listOf(DeviceMove.Queue, DeviceMove.Release, DeviceMove.Shutdown, DeviceMove.Logs), deviceMoves(AVD))
+        assertEquals(listOf(DeviceMove.Claim, DeviceMove.Logs, DeviceMove.Screenshot), deviceMoves(PIXEL))
+        assertEquals(
+            listOf(DeviceMove.Queue, DeviceMove.Release, DeviceMove.Shutdown, DeviceMove.Logs, DeviceMove.Screenshot),
+            deviceMoves(AVD),
+        )
         // Waiting in its line: only leave the line, never take the holder's claim.
-        assertEquals(listOf(DeviceMove.LeaveLine, DeviceMove.Shutdown, DeviceMove.Logs), deviceMoves(AVD.copy(queuePlace = 1)))
+        assertEquals(
+            listOf(DeviceMove.LeaveLine, DeviceMove.Shutdown, DeviceMove.Logs, DeviceMove.Screenshot),
+            deviceMoves(AVD.copy(queuePlace = 1)),
+        )
         assertEquals(listOf(DeviceMove.Boot), deviceMoves(SIM))
         assertEquals(emptyList<DeviceMove>(), deviceMoves(PIXEL.copy(state = "unauthorized", ready = false)))
     }

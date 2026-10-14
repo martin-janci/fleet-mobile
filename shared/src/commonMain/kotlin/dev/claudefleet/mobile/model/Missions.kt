@@ -169,7 +169,35 @@ data class MissionDetail(
     @SerialName("may_change") val mayChange: Boolean = false,
     /** Absent for a draft or a finished mission, and from a hub before the loop. */
     val plan: MissionPlan? = null,
+    /** What a finished mission leaves (G3.7); absent unless it finished, and from an older hub. */
+    val finish: MissionFinish? = null,
+    /**
+     * The live sessions on its tasks, in any state of the mission (a running
+     * one's workers included). Absent from a hub before it: read
+     * [childSessions], which falls back to [finish]'s.
+     */
+    val sessions: List<MissionSession> = emptyList(),
+) {
+    /** The mission's live child sessions: [sessions], or a finished mission's from an older hub. */
+    val childSessions: List<MissionSession> get() = sessions.ifEmpty { finish?.sessions.orEmpty() }
+}
+
+/** One live session on a mission's task (the hub's `FinishSession`). */
+@Serializable
+data class MissionSession(
+    @SerialName("session_id") val sessionId: Long,
+    /** The task it works on. */
+    @SerialName("item_id") val itemId: Long = 0,
+    @SerialName("host_alias") val hostAlias: String = "",
+    @SerialName("tmux_name") val tmuxName: String = "",
+    val kind: String = "",
+    /** Its worktree's size in kB, once the host probe measured it. */
+    @SerialName("worktree_kb") val worktreeKb: Long? = null,
 )
+
+/** A finished mission's leftovers; the phone reads only its sessions. */
+@Serializable
+data class MissionFinish(val sessions: List<MissionSession> = emptyList())
 
 /** One step's outcome (`orchestrate::StepResult`). */
 @Serializable

@@ -50,11 +50,13 @@ enum class MotionChoice(val label: String) {
 private const val THEME_PREF = "phone.theme"
 private const val MOTION_PREF = "phone.motion"
 private const val LOCK_PREF = "phone.lock"
+private const val WORK_TAP_PREF = "phone.work_tap"
 
 /**
  * The settings that belong to this phone alone (redesign 14.11, "This phone"):
  * which notifications it posts and its quiet hours, which theme it draws in,
- * how much it moves, and whether the fingerprint lock is on. Kept on the device, never sent to the hub, and
+ * how much it moves, whether the fingerprint lock is on, and what a tap on a
+ * Work row opens. Kept on the device, never sent to the hub, and
  * saved as they change; there is no Save.
  *
  * One instance for the app, held by `AppContainer`, so the theme switch
@@ -79,6 +81,10 @@ class PhoneSettings(private val prefs: Prefs) {
     private val _lock = MutableStateFlow(prefs.getStringList(LOCK_PREF).firstOrNull() == "on")
     val lock: StateFlow<Boolean> = _lock.asStateFlow()
 
+    /** What tapping a Work row opens: its ticket (the default) or its live session. */
+    private val _workTap = MutableStateFlow(readWorkTap())
+    val workTap: StateFlow<WorkTapChoice> = _workTap.asStateFlow()
+
     /**
      * The lock was passed since the app opened. Held here, not saved: one
      * instance lives as long as the app's container, so a new start asks
@@ -95,6 +101,11 @@ class PhoneSettings(private val prefs: Prefs) {
     fun setMotion(choice: MotionChoice) {
         prefs.putStringList(MOTION_PREF, listOf(choice.name.lowercase()))
         _motion.value = choice
+    }
+
+    fun setWorkTap(choice: WorkTapChoice) {
+        prefs.putStringList(WORK_TAP_PREF, listOf(choice.name.lowercase()))
+        _workTap.value = choice
     }
 
     fun setNotify(kind: NotifyKind, on: Boolean) {
@@ -125,6 +136,11 @@ class PhoneSettings(private val prefs: Prefs) {
     private fun readTheme(): ThemeChoice {
         val stored = prefs.getStringList(THEME_PREF).firstOrNull()
         return ThemeChoice.entries.firstOrNull { it.name.lowercase() == stored } ?: ThemeChoice.SYSTEM
+    }
+
+    private fun readWorkTap(): WorkTapChoice {
+        val stored = prefs.getStringList(WORK_TAP_PREF).firstOrNull()
+        return WorkTapChoice.entries.firstOrNull { it.name.lowercase() == stored } ?: WorkTapChoice.TICKET
     }
 
     private fun readMotion(): MotionChoice {

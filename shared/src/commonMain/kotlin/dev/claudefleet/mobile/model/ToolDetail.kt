@@ -24,6 +24,17 @@ data class ToolDetail(
     /** Null while the call is still waiting for its result. */
     val result: String? = null,
     @SerialName("is_error") val isError: Boolean = false,
+    /** The result's images (a device screenshot): at most two, each at most 4 MiB of base64. */
+    val images: List<ToolImage> = emptyList(),
+    /** How many more images the result held than [images] carries (past the count or the size cap). */
+    @SerialName("images_omitted") val imagesOmitted: Int = 0,
+)
+
+/** One image of a tool's result: `image/png`, `image/jpeg`, …, and its bytes in base64. */
+@Serializable
+data class ToolImage(
+    val mime: String = "",
+    val data: String = "",
 )
 
 /**

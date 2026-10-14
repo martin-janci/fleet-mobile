@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.DebugDevice
 import dev.claudefleet.mobile.model.DeviceHostScan
 import dev.claudefleet.mobile.model.DeviceOutput
+import dev.claudefleet.mobile.model.DeviceScreenshot
 import dev.claudefleet.mobile.model.relativeWithin
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -26,6 +27,7 @@ enum class DeviceMove(val label: String) {
     Boot("Boot"),
     Shutdown("Shut down"),
     Logs("Logs"),
+    Screenshot("Screenshot"),
 }
 
 /** One device's log read, kept with the device it came from. */
@@ -43,6 +45,8 @@ data class DebugDevicesUiState(
     /** What is on the wire: `scan`, or `<deviceId>:<move>`. */
     val busy: String? = null,
     val logs: DeviceLogs? = null,
+    /** The last screenshot taken of each device here, by device id: the row's thumbnail. */
+    val shots: Map<Long, DeviceScreenshot> = emptyMap(),
     val notice: String? = null,
     val error: Friendly? = null,
 )
@@ -50,8 +54,9 @@ data class DebugDevicesUiState(
 /**
  * Debug devices on the phone (redesign 11.10, on the hub since contract 10):
  * the test phones, emulators and simulators on the fleet's hosts, with Claim,
- * Wait in line / Leave line, Release, Boot, Shut down and Logs. Install, run and screenshot stay on the
- * desktop, as do a device's label and sharing.
+ * Wait in line / Leave line, Release, Boot, Shut down, Logs and Screenshot (a
+ * thumbnail in the row). Install and run stay on the desktop, as do a
+ * device's label and sharing.
  */
 class DebugDevicesViewModel(
     private val fleet: FleetState,
@@ -66,6 +71,7 @@ class DebugDevicesViewModel(
         val hosts: List<DeviceHostScan> = emptyList(),
         val busy: String? = null,
         val logs: DeviceLogs? = null,
+        val shots: Map<Long, DeviceScreenshot> = emptyMap(),
         val notice: String? = null,
         val error: Friendly? = null,
     )
@@ -82,6 +88,7 @@ class DebugDevicesViewModel(
             hosts = l.hosts,
             busy = l.busy,
             logs = l.logs,
+            shots = l.shots,
             notice = l.notice,
             error = l.error,
         )
@@ -144,9 +151,13 @@ class DebugDevicesViewModel(
                     val out = actions.logs(device.id, LOG_LINES)
                     local.update { it.copy(logs = DeviceLogs(device.id, device.title, out)) }
                 }
+                DeviceMove.Screenshot -> {
+                    val shot = actions.screenshot(device.id)
+                    local.update { it.copy(shots = it.shots + (device.id to shot)) }
+                }
             }
             local.update { it.copy(busy = null) }
-            if (move != DeviceMove.Logs) read(refresh = false)
+            if (move != DeviceMove.Logs && move != DeviceMove.Screenshot) read(refresh = false)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -218,6 +229,12 @@ fun deviceLine(d: DebugDevice, nowSeconds: Long): String {
         .joinToString(" · ")
 }
 
+/**
+ * Who waits for [d], first in line first: "a session on mercury, Martin's
+ * Pixel"; null when nobody does.
+ */
+fun queueNames(d: DebugDevice): String? = d.queue.takeIf { it.isNotEmpty() }?.joinToString(", ") { holderName(it.holder) }
+
 /** "you're next", "you're 3rd in line", "2 waiting", or nothing when nobody waits. */
 fun queueLine(d: DebugDevice): String? {
     val waiting = maxOf(d.waiting, d.queue.size)
@@ -251,7 +268,8 @@ fun holderName(holder: String): String = when {
  * What may be pressed on [d]: Claim a ready one nobody holds, Wait in line for
  * a held one (Leave line once waiting, which never takes the holder's claim),
  * Release a held one (a person may release any claim), Boot a stopped emulator or
- * simulator, Shut one down, read the Logs of a ready one. A physical phone is
+ * simulator, Shut one down, read the Logs of a ready one or take its
+ * Screenshot (the hub refuses either while another holder has it). A physical phone is
  * never booted or shut down from here.
  */
 fun deviceMoves(d: DebugDevice): List<DeviceMove> = buildList {
@@ -263,4 +281,5 @@ fun deviceMoves(d: DebugDevice): List<DeviceMove> = buildList {
     if (virtual && !d.ready && d.state != "unauthorized") add(DeviceMove.Boot)
     if (virtual && d.ready) add(DeviceMove.Shutdown)
     if (d.ready) add(DeviceMove.Logs)
+    if (d.ready) add(DeviceMove.Screenshot)
 }
