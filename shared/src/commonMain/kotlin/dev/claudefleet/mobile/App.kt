@@ -2094,7 +2094,10 @@ private fun FleetRoute(
                             onPauseAll = if (missionsState.canPauseAll) ({ missions.pauseAll(); Unit }) else null,
                             onNewInControl = if (agentState.available) ({ agent.open(); Unit }) else null,
                             onDismissError = missions::dismissError,
+                            onDismissControlError = agent::dismissError,
                         ),
+                        controlWaking = agentState.waking,
+                        controlError = agentState.error,
                     )
                 }
                 Screen.Trackers -> {
