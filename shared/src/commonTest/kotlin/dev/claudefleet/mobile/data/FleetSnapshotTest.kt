@@ -572,6 +572,48 @@ class FleetSnapshotTest {
         assertSame(fresh, fresh.applying(row("host:pinged", """{"alias":"box"}""")))
     }
 
+    /**
+     * Host health (claude-fleet #913): a ping's `health` lands on the row
+     * when a figure the screens draw moved, and a steady one is not a redraw.
+     */
+    @Test
+    fun a_ping_carries_the_hosts_load_when_it_moved() {
+        val seen = FleetSnapshot(hosts = listOf(HostRow(alias = "box", lastPingedAt = 1L, memTotalKb = 1000, memAvailKb = 500, healthAt = 100)))
+        val loaded = seen.applying(
+            row(
+                "host:pinged",
+                """{"alias":"box","last_pinged_at":2,"reachable":true,"health":{"mem_avail_kb":50,"mem_total_kb":1000,"health_at":160,"cpu_pct":97.4,"mem_low":true,"cpu_saturated":true}}""",
+            ),
+        )
+        val box = loaded.hosts.single()
+        assertEquals(50L, box.memAvailKb)
+        assertEquals(97.4, box.cpuPct)
+        assertTrue(box.memLow)
+        assertEquals(160L, box.healthAt)
+
+        // The same figures a pass later: nothing drawn moved.
+        assertSame(
+            loaded,
+            loaded.applying(
+                row(
+                    "host:pinged",
+                    """{"alias":"box","last_pinged_at":3,"reachable":true,"health":{"mem_avail_kb":50,"mem_total_kb":1000,"health_at":220,"cpu_pct":97.2,"mem_low":true,"cpu_saturated":true}}""",
+                ),
+            ),
+        )
+        // …until the held sample is getting old, so it never reads as stale.
+        val later = 160 + PING_RESAMPLE_SECS
+        val resampled = loaded.applying(
+            row(
+                "host:pinged",
+                """{"alias":"box","last_pinged_at":4,"reachable":true,"health":{"mem_avail_kb":50,"mem_total_kb":1000,"health_at":$later,"cpu_pct":97.2,"mem_low":true,"cpu_saturated":true}}""",
+            ),
+        )
+        assertEquals(later, resampled.hosts.single().healthAt)
+        // A null health is no news.
+        assertSame(loaded, loaded.applying(row("host:pinged", """{"alias":"box","last_pinged_at":5,"reachable":true,"health":null}""")))
+    }
+
     // ---- the work graph (M8) ----
 
     @Test

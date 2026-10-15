@@ -744,6 +744,7 @@ fun SessionScreen(
             // A send's failure is drawn by the composer, where the thumb is.
             if (!state.errorFromSend) ErrorBanner(state.error, onDismiss = onDismissError)
             ErrorBanner(notice, onDismiss = onDismissNotice)
+            state.hostTrouble?.let { HostTroubleStrip(it) }
             // Behind an open sheet a banner cannot be read: the sheet shows it instead.
             if (!work.sheetOpen) ErrorBanner(work.error, onDismiss = workHandlers.onDismissError)
             // New (redesign 14.15): the ticket and its tasks are one sheet.
@@ -3404,5 +3405,21 @@ private fun FailedQuickReplies(enabled: Boolean, onRetry: (() -> Unit)?, onShowE
         val (retry, show) = FAILED_QUICK_REPLIES
         if (onRetry != null) SuggestionChip(onClick = onRetry, enabled = enabled, label = { Text(retry) })
         SuggestionChip(onClick = onShowError, label = { Text(show) })
+    }
+}
+
+/**
+ * The session's host is in trouble (host health, claude-fleet #913): one
+ * line above the conversation, so a slow or killed agent has its reason in
+ * sight. Not dismissable: it goes when the host recovers.
+ */
+@Composable
+private fun HostTroubleStrip(text: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().testTag("host-trouble"),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+    ) {
+        Text(text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
     }
 }

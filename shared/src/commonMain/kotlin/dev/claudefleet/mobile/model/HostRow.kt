@@ -27,4 +27,54 @@ data class HostRow(
     @SerialName("disk_home_free_kb") val diskHomeFreeKb: Long? = null,
     @SerialName("cpu_count") val cpuCount: Int? = null,
     @SerialName("mem_total_kb") val memTotalKb: Long? = null,
+    /**
+     * The rest of the hub's health sample (`list_hosts`, and every
+     * `host:pinged` frame's `health`): `$HOME`'s size and available memory
+     * in kB, and when it was sampled. Null when never sampled.
+     */
+    @SerialName("disk_home_total_kb") val diskHomeTotalKb: Long? = null,
+    @SerialName("mem_avail_kb") val memAvailKb: Long? = null,
+    @SerialName("health_at") val healthAt: Long? = null,
+    /**
+     * Host load (claude-fleet migration 193): CPU busy percent over the last
+     * interval and memory pressure 0–100, null when the host cannot tell;
+     * and the hub's two judgments, made when the sample was written. An
+     * older hub omits all four, which reads as unknown and not loaded. See
+     * [hostLoad].
+     */
+    @SerialName("cpu_pct") val cpuPct: Double? = null,
+    @SerialName("mem_pressure") val memPressure: Double? = null,
+    @SerialName("mem_low") val memLow: Boolean = false,
+    @SerialName("cpu_saturated") val cpuSaturated: Boolean = false,
+)
+
+/**
+ * The health half of a `host:pinged` frame (claude-fleet's `HostHealth`):
+ * the sample a probe pass took, which moves every pass and so never costs
+ * a full `host:probed` row.
+ */
+@Serializable
+data class HostHealthPing(
+    @SerialName("disk_home_free_kb") val diskHomeFreeKb: Long? = null,
+    @SerialName("disk_home_total_kb") val diskHomeTotalKb: Long? = null,
+    @SerialName("mem_avail_kb") val memAvailKb: Long? = null,
+    @SerialName("mem_total_kb") val memTotalKb: Long? = null,
+    @SerialName("health_at") val healthAt: Long? = null,
+    @SerialName("cpu_pct") val cpuPct: Double? = null,
+    @SerialName("mem_pressure") val memPressure: Double? = null,
+    @SerialName("mem_low") val memLow: Boolean = false,
+    @SerialName("cpu_saturated") val cpuSaturated: Boolean = false,
+)
+
+/** [this] with [h]'s sample laid over it; a number the ping leaves out keeps the row's. */
+fun HostRow.withHealth(h: HostHealthPing): HostRow = copy(
+    diskHomeFreeKb = h.diskHomeFreeKb ?: diskHomeFreeKb,
+    diskHomeTotalKb = h.diskHomeTotalKb ?: diskHomeTotalKb,
+    memAvailKb = h.memAvailKb ?: memAvailKb,
+    memTotalKb = h.memTotalKb ?: memTotalKb,
+    healthAt = h.healthAt ?: healthAt,
+    cpuPct = h.cpuPct ?: cpuPct,
+    memPressure = h.memPressure ?: memPressure,
+    memLow = h.memLow,
+    cpuSaturated = h.cpuSaturated,
 )

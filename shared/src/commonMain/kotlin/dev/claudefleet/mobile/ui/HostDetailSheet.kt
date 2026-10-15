@@ -38,6 +38,10 @@ import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.kit.OrbitChip
 import dev.claudefleet.mobile.ui.kit.StatusWord
+import dev.claudefleet.mobile.model.checkedAgo
+import dev.claudefleet.mobile.model.hostLoad
+import dev.claudefleet.mobile.model.loadParts
+import dev.claudefleet.mobile.model.troubleSentence
 
 data class HostDetailHandlers(
     val onClose: () -> Unit = {},
@@ -89,6 +93,15 @@ fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowS
                     )
                     host?.let(::hostFacts)?.let { facts ->
                         Text(facts, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    // Host health (claude-fleet #913): the load now, and what it means when it is trouble.
+                    host?.takeIf { it.healthAt != null }?.let { hostLoad(it, nowSeconds) }?.let { load ->
+                        Text(
+                            (loadParts(load) + checkedAgo(load.at, nowSeconds)).joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        troubleSentence(load)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
                         if (state.canProbe) {

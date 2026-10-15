@@ -126,7 +126,9 @@ fun controlBlockedLine(blocked: String?, host: String?): String {
     val on = host?.let { " ($it)" }.orEmpty()
     return when (blocked) {
         null, "absent" -> "Control is not running. Wake it to start the chat."
-        "lost" -> "Control's session is gone. Wake it to start a new one."
+        // The hub restarts a lost Control by itself (`recovery.auto_restore`,
+        // claude-fleet #913) and tells it what happened; Wake does it now.
+        "lost" -> "Control's session was lost. Fleet restarts it by itself within a minute or two and tells it what happened; Wake restarts it now."
         "no_mcp" -> "Control cannot reach the hub's tools. Waking it restarts it with them."
         "token_revoked" -> "Control's token was revoked. Mint a new one on the desktop: Settings › Devices."
         "no_host" -> "Control has no host to run on. Choose one on the desktop: Settings › Control."

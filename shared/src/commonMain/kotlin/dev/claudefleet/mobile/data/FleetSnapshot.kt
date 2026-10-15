@@ -1,6 +1,10 @@
 package dev.claudefleet.mobile.data
 
+import dev.claudefleet.mobile.model.HostHealthPing
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.diskUsedPct
+import dev.claudefleet.mobile.model.memUsedPct
+import dev.claudefleet.mobile.model.withHealth
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.StartProgress
@@ -12,6 +16,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.long
+import kotlin.math.roundToInt
 
 /** What the app knows about the fleet at one moment. */
 data class FleetSnapshot(
@@ -137,7 +142,7 @@ fun FleetSnapshot.applying(event: HubEvent.Row): FleetSnapshot = when (event.nam
     "session:created", "session:updated" -> upsertSession(event.payload)
     "session:killed" -> removeSession(event.payload)
     "host:added", "host:probed" -> upsertHost(event.payload)
-    "host:pinged" -> firstPing(event.payload)
+    "host:pinged" -> applyPing(event.payload)
     "host:removed" -> removeHost(event.payload)
     "project:updated" -> upsertProject(event.payload)
     "work:item" -> upsertTicket(event.payload)
@@ -288,19 +293,50 @@ private fun FleetSnapshot.upsertHost(payload: JsonElement): FleetSnapshot {
 }
 
 /**
- * `host:pinged` (`{alias, last_pinged_at, reachable, …}`) is what the hub
- * sends when a probe moved only the stamp, once per host per pass. Only a
- * host's first one changes anything drawn: until then the host has never
- * been probed ("not probed yet", and what the first import still reads), and
- * a probe of an unreachable host with no versions sends nothing else. Every
- * later one is a no-op, so a quiet fleet does not redraw each pass.
+ * `host:pinged` (`{alias, last_pinged_at, reachable, claude_version_at,
+ * health}`) is what the hub sends when a probe moved only the stamp and the
+ * health sample, once per host per pass. Two things in it change what is
+ * drawn: a host's first stamp (until then it has never been probed, "not
+ * probed yet", and what the first import still reads), and its load (host
+ * health, claude-fleet migration 193: CPU, memory, disk and the hub's two
+ * judgments). The load is taken only when a figure the screens draw moved,
+ * or the sample the row holds is getting old ([PING_RESAMPLE_SECS]), so a
+ * quiet fleet does not redraw each pass and a steady host's sample never
+ * reads as stale.
  */
-private fun FleetSnapshot.firstPing(payload: JsonElement): FleetSnapshot {
+private fun FleetSnapshot.applyPing(payload: JsonElement): FleetSnapshot {
     val alias = payload.text("alias") ?: return this
     val at = payload.number("last_pinged_at") ?: return this
-    val i = hosts.indexOfFirst { it.alias == alias && it.lastPingedAt == null }
+    val i = hosts.indexOfFirst { it.alias == alias }
     if (i < 0) return this
-    return copy(hosts = hosts.toMutableList().also { it[i] = it[i].copy(lastPingedAt = at) })
+    val host = hosts[i]
+    var next = if (host.lastPingedAt == null) host.copy(lastPingedAt = at) else host
+    val health = ((payload as? JsonObject)?.get("health") as? JsonObject)?.let { decode(HostHealthPing.serializer(), it) }
+    if (health != null) {
+        val sampled = next.withHealth(health)
+        if (loadMoved(next, sampled)) next = sampled
+    }
+    if (next == host) return this
+    return copy(hosts = hosts.toMutableList().also { it[i] = next })
+}
+
+/** A held sample older than this is replaced by the next ping even when no drawn figure moved. */
+internal const val PING_RESAMPLE_SECS: Long = 600
+
+/** Whether [after] draws differently from [before], or refreshes a sample that is getting old. */
+private fun loadMoved(before: HostRow, after: HostRow): Boolean {
+    fun drawn(h: HostRow) = listOf(
+        h.cpuPct?.roundToInt(),
+        h.memPressure?.roundToInt(),
+        memUsedPct(h),
+        diskUsedPct(h),
+        h.memLow,
+        h.cpuSaturated,
+    )
+    if (drawn(before) != drawn(after)) return true
+    val was = before.healthAt ?: return after.healthAt != null
+    val now = after.healthAt ?: return false
+    return now - was >= PING_RESAMPLE_SECS
 }
 
 private fun FleetSnapshot.removeHost(payload: JsonElement): FleetSnapshot {
