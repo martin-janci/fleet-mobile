@@ -154,6 +154,20 @@ class ControlChatTest {
         }
     }
 
+    // 2026-10-15: mefistos stopped answering and the phone showed "comes back
+    // when the host does" with no button, while the hub could move Control.
+    @Test
+    fun a_down_host_with_somewhere_to_go_is_moved_on_the_tap() = runTest {
+        val fake = FakeControl(OperatorStatus(ready = false, blocked = "host_down", host = "mefistos", fallback = "htz"))
+        val vm = ControlViewModel(ControlFleet(CONTROL_TOOLS), fake, fake, backgroundScope, canWrite = true)
+        vm.refresh().join(); runCurrent()
+        assertTrue(vm.state.value.movable)
+        assertTrue(vm.state.value.canWake)
+        assertTrue("Move it to htz" in controlWaitingLine(vm.state.value))
+        vm.wake()?.join(); runCurrent()
+        assertEquals(1, fake.wakes)
+    }
+
     @Test
     fun confirms_are_read_while_the_tab_shows_and_stop_when_it_goes() = runTest {
         val fake = FakeControl(OperatorStatus(ready = true, session = SessionRow(id = 5)))
@@ -316,6 +330,8 @@ class ControlChatTest {
         assertTrue("Wake" in controlBlockedLine(null, null))
         assertTrue("Settings › Devices" in controlBlockedLine("token_revoked", null))
         assertTrue("(pine)" in controlBlockedLine("host_down", "pine"))
+        assertTrue("comes back when the host does" in controlBlockedLine("host_down", "pine"))
+        assertTrue("Move it to oak" in controlBlockedLine("host_down", "pine", "oak"))
         // The hub's own word is not a sentence: it stays off the screen (r13).
         assertFalse("odd" in controlBlockedLine("odd", null))
         assertEquals("Control cannot take a message right now.", controlBlockedLine("odd", null))

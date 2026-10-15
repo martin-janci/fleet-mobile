@@ -85,6 +85,8 @@ data class ControlUiState(
     /** Why it cannot take one: `absent`, `lost`, `no_mcp`, `token_revoked`, `no_host`, `host_down`. */
     val blocked: String? = null,
     val host: String? = null,
+    /** Under `host_down`: the host Control would move to, as the hub names it; null when none can take it. */
+    val fallback: String? = null,
     val waking: Boolean = false,
     /** This device may answer Control's confirms (the hub lists both tools to it). */
     val canConfirm: Boolean = false,
@@ -102,7 +104,11 @@ data class ControlUiState(
     val statusFailed: Boolean = false,
 ) {
     /** Waking may help: nothing runs, or what ran is gone or lost its tools. */
-    val canWake: Boolean get() = available && connected && !statusFailed && sessionId == null && (blocked == null || blocked in WAKEABLE)
+    val canWake: Boolean get() = available && connected && !statusFailed && sessionId == null &&
+        (blocked == null || blocked in WAKEABLE || movable)
+
+    /** Control's host is down and the hub has somewhere else to start it: waking moves it there. */
+    val movable: Boolean get() = blocked == "host_down" && fallback != null
 }
 
 /**
@@ -116,13 +122,13 @@ internal fun controlWaitingLine(state: ControlUiState): String = when {
     state.waking -> "Waking Control…"
     state.statusFailed -> "Couldn't read Control's state."
     !state.known -> "Asking the hub about Control…"
-    else -> controlBlockedLine(state.blocked, state.host)
+    else -> controlBlockedLine(state.blocked, state.host, state.fallback)
 }
 
 private val WAKEABLE = setOf("absent", "lost", "no_mcp")
 
 /** The blocked state in words, and what the person can do about it. */
-fun controlBlockedLine(blocked: String?, host: String?): String {
+fun controlBlockedLine(blocked: String?, host: String?, fallback: String? = null): String {
     val on = host?.let { " ($it)" }.orEmpty()
     return when (blocked) {
         null, "absent" -> "Control is not running. Wake it to start the chat."
@@ -130,7 +136,13 @@ fun controlBlockedLine(blocked: String?, host: String?): String {
         "no_mcp" -> "Control cannot reach the hub's tools. Waking it restarts it with them."
         "token_revoked" -> "Control's token was revoked. Mint a new one on the desktop: Settings › Devices."
         "no_host" -> "Control has no host to run on. Choose one on the desktop: Settings › Control."
-        "host_down" -> "Control's host$on does not answer. It comes back when the host does."
+        // The desktop moves it without asking; the phone offers the same move
+        // as its one button, since nothing else here can unstick it.
+        "host_down" -> if (fallback != null) {
+            "Control's host$on does not answer. Move it to $fallback to keep working; its conversation so far stays on ${host ?: "the old host"}."
+        } else {
+            "Control's host$on does not answer. It comes back when the host does."
+        }
         // The hub's own word for it is not a sentence; it stays off the screen.
         else -> "Control cannot take a message right now."
     }
@@ -179,6 +191,7 @@ class ControlViewModel(
             sessionId = if (available) sessionId else null,
             blocked = op?.blocked?.takeIf { sessionId == null },
             host = op?.host,
+            fallback = op?.fallback?.takeIf { sessionId == null && op.blocked == "host_down" },
             waking = l.waking,
             canConfirm = caps.confirms,
             confirms = if (caps.confirms) l.confirms else emptyList(),
@@ -482,7 +495,15 @@ fun ControlWaiting(
                     onClick = onWake,
                     enabled = !state.waking,
                     modifier = Modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp).testTag(CONTROL_WAKE_TAG),
-                ) { Text(if (state.waking) "Waking…" else "Wake Control") }
+                ) {
+                    Text(
+                        when {
+                            state.waking -> if (state.movable) "Moving…" else "Waking…"
+                            state.movable -> "Move to ${state.fallback}"
+                            else -> "Wake Control"
+                        },
+                    )
+                }
             }
         }
         ConfirmCards(state, onAnswer)
