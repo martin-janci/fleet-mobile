@@ -73,8 +73,8 @@ fun graphFromMission(d: MissionDetail): GraphCard? {
     val titles = d.items.associate { it.id to it.title.ifBlank { it.key ?: "Task ${it.id}" } }
     val waves = nodes
         .groupBy { maxOf(1, it.wave) }
-        .toSortedMap()
-        .values
+        .entries.sortedBy { it.key }
+        .map { it.value }
         .map { w -> w.map { n -> GraphStep(n.itemId, titles[n.itemId] ?: "Task ${n.itemId}", nodeTone(n.state), nodeLabel(n.state)) } }
     val steps = waves.flatten()
     return GraphCard(
@@ -97,7 +97,7 @@ fun treeWaves(items: List<HandoffItem>): List<List<HandoffItem>> {
         memo[i.id] = w
         return w
     }
-    return items.groupBy { wave(it, HashSet()) }.toSortedMap().values.toList()
+    return items.groupBy { wave(it, HashSet()) }.entries.sortedBy { it.key }.map { it.value }
 }
 
 /** A proposed tree as a graph; null with no items. */
