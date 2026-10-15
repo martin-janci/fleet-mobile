@@ -170,6 +170,7 @@ data class OrbitMissionsHandlers(
     /** A new mission is planned with Control; null where the hub offers no coordinator. */
     val onNewInControl: (() -> Unit)? = null,
     val onDismissError: () -> Unit = {},
+    val onDismissControlError: () -> Unit = {},
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -179,6 +180,10 @@ fun OrbitMissionsScreen(
     nowSeconds: Long,
     handlers: OrbitMissionsHandlers,
     modifier: Modifier = Modifier,
+    /** Control is being found or started for "New mission in Control". */
+    controlWaking: Boolean = false,
+    /** Why starting Control failed; shown here, where the button was pressed (2026-10-15: it showed only on Sessions). */
+    controlError: Friendly? = null,
 ) {
     val o = Fleet.colors
     val groups = missionGroups(state.missions, nowSeconds)
@@ -192,6 +197,7 @@ fun OrbitMissionsScreen(
             },
         )
         ErrorBanner(state.error, onDismiss = handlers.onDismissError, onRetry = handlers.onRefresh.takeIf { state.listFailed })
+        ErrorBanner(controlError, onDismiss = handlers.onDismissControlError)
         state.notice?.let { Text(it, color = o.fg2, fontSize = 14.sp, modifier = Modifier.padding(horizontal = gutter(), vertical = 8.dp)) }
         val body = listBody(loaded = state.loaded, failed = state.listFailed && !state.loading, empty = groups.isEmpty)
         LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -224,7 +230,11 @@ fun OrbitMissionsScreen(
                             Text("Pause all missions…", color = o.statusFailed)
                         }
                     }
-                    handlers.onNewInControl?.let { TextButton(onClick = it) { Text("New mission in Control", color = o.accent) } }
+                    handlers.onNewInControl?.let {
+                        TextButton(onClick = it, enabled = !controlWaking) {
+                            Text(if (controlWaking) "Starting Control…" else "New mission in Control", color = o.accent)
+                        }
+                    }
                 }
             }
         }
