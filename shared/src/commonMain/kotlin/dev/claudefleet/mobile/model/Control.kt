@@ -15,6 +15,8 @@ data class OperatorStatus(
     val session: SessionRow? = null,
     val blocked: String? = null,
     val host: String? = null,
+    /** Under `host_down`: where `ensure_operator` would start Control instead; null when no host qualifies. */
+    val fallback: String? = null,
 )
 
 /**
