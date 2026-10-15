@@ -168,6 +168,26 @@ class ControlChatTest {
         assertEquals(1, fake.wakes)
     }
 
+    // 2026-10-15: the line named the configured home (mefistos, up) while
+    // the session Control lived on was on another host, the one down.
+    @Test
+    fun a_down_host_is_the_one_controls_session_lives_on() = runTest {
+        val fake = FakeControl(
+            OperatorStatus(
+                ready = false,
+                session = SessionRow(id = 7, hostAlias = "oak"),
+                blocked = "host_down",
+                host = "mefistos",
+                fallback = "mefistos",
+            ),
+        )
+        val vm = ControlViewModel(ControlFleet(CONTROL_TOOLS), fake, fake, backgroundScope, canWrite = true)
+        vm.refresh().join(); runCurrent()
+        val line = controlWaitingLine(vm.state.value)
+        assertTrue("host (oak) does not answer" in line, line)
+        assertTrue("Move it to mefistos" in line, line)
+    }
+
     @Test
     fun confirms_are_read_while_the_tab_shows_and_stop_when_it_goes() = runTest {
         val fake = FakeControl(OperatorStatus(ready = true, session = SessionRow(id = 5)))

@@ -190,7 +190,11 @@ class ControlViewModel(
             known = l.known || !caps.operatorStatus,
             sessionId = if (available) sessionId else null,
             blocked = op?.blocked?.takeIf { sessionId == null },
-            host = op?.host,
+            // Under `host_down` the host that does not answer is the one
+            // Control's session lives on, which can differ from the
+            // configured home the hub names as `host` (2026-10-15: the phone
+            // blamed mefistos, which was up, for a session elsewhere).
+            host = op?.session?.hostAlias?.takeIf { op.blocked == "host_down" && it.isNotEmpty() } ?: op?.host,
             fallback = op?.fallback?.takeIf { sessionId == null && op.blocked == "host_down" },
             waking = l.waking,
             canConfirm = caps.confirms,
