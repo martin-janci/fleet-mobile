@@ -7,6 +7,7 @@ import dev.claudefleet.mobile.model.RoutineBudget
 import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineExplain
 import dev.claudefleet.mobile.model.RoutineRun
+import dev.claudefleet.mobile.model.RunTrace
 
 /**
  * The calls the Automation sheet may make (claude-fleet redesign 8.5 and
@@ -37,6 +38,13 @@ interface RoutineActions {
      * The default is a hub without the tool, which the caller never asks.
      */
     suspend fun fleetRuns(limit: Int): List<FleetRun> = emptyList()
+
+    /**
+     * A routine fire's or agent job's steps after [afterSeq] (`runs { trace }`,
+     * claude-fleet migration 194). The default is a hub without the action:
+     * a run with no steps.
+     */
+    suspend fun runTrace(runId: String, afterSeq: Long?): RunTrace = RunTrace(runId = runId)
 
     suspend fun setEnabled(routineId: Long, enabled: Boolean): Routine
 
@@ -69,6 +77,8 @@ class HubRoutineActions(private val session: AppSession) : RoutineActions {
         session.withClient { it.routineRuns(routineId, limit) }
 
     override suspend fun fleetRuns(limit: Int): List<FleetRun> = session.withClient { it.runs(limit).runs }
+
+    override suspend fun runTrace(runId: String, afterSeq: Long?): RunTrace = session.withClient { it.runTrace(runId, afterSeq) }
 
     override suspend fun explain(routineId: Long): RoutineExplain? = session.withClient { it.routineExplain(routineId) }
 

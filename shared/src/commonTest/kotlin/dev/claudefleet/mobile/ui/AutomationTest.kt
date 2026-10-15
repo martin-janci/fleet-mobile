@@ -13,6 +13,8 @@ import dev.claudefleet.mobile.model.RoutineCheck
 import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineExplain
 import dev.claudefleet.mobile.model.RoutineRun
+import dev.claudefleet.mobile.model.RunTrace
+import dev.claudefleet.mobile.model.RunTraceStep
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
@@ -81,6 +83,14 @@ private class FakeRoutineActions : RoutineActions {
     )
 
     override suspend fun fleetRuns(limit: Int): List<FleetRun> = fleet.also { calls += "fleet_runs $limit" }
+
+    /** Each run's steps as the hub holds them; a read answers those after `after_seq`. */
+    var traces = mapOf<String, List<RunTraceStep>>()
+
+    override suspend fun runTrace(runId: String, afterSeq: Long?): RunTrace {
+        calls += "trace $runId ${afterSeq ?: "-"}"
+        return RunTrace(runId = runId, steps = traces[runId].orEmpty().filter { afterSeq == null || it.seq > afterSeq })
+    }
 
     override suspend fun paused(): Boolean = paused.also { calls += "paused" }
 
@@ -374,5 +384,65 @@ class AutomationTest {
         assertTrue(d.mayChange)
         assertTrue(json.decodeFromString(HubHealth.serializer(), """{"db_ready":true,"automation_paused":true}""").automationPaused)
         assertFalse(json.decodeFromString(HubHealth.serializer(), """{"db_ready":true}""").automationPaused)
+    }
+    @Test
+    fun a_routine_fire_opens_to_its_steps_and_reads_on_from_the_last() = runTest {
+        // claude-fleet migration 194: `runs { trace }`, offered where `runs` takes a run_id.
+        val actions = FakeRoutineActions()
+        actions.traces = mapOf(
+            "routine:12" to listOf(
+                RunTraceStep(seq = 1, phase = "trigger", kind = "trigger", actor = "scheduler", summary = "Fired by its schedule"),
+                RunTraceStep(seq = 2, phase = "spawn", kind = "error", actor = "hub", summary = "The start on mercury failed: no host"),
+            ),
+        )
+        val caps = HubCapabilities(tools = setOf("routines", "runs", "set_setting", "fleet_health"), params = mapOf("runs" to setOf("action", "run_id")))
+        val vm = automation(caps = caps, actions = actions)
+        runCurrent()
+        vm.open()
+        runCurrent()
+        assertTrue(vm.state.value.canTrace)
+        val fire = vm.state.value.fleetRuns!!.first { it.id == "routine:12" }
+        vm.openRun(fire)
+        runCurrent()
+        val d = assertNotNull(vm.state.value.runDetail)
+        assertEquals(listOf(1L, 2L), d.steps.map { it.seq })
+        assertTrue("trace routine:12 -" in actions.calls)
+        actions.traces = mapOf("routine:12" to actions.traces.getValue("routine:12") + RunTraceStep(seq = 3, phase = "settle", kind = "error", summary = "It started no session"))
+        vm.refreshRun()
+        runCurrent()
+        assertTrue("trace routine:12 2" in actions.calls)
+        assertEquals(listOf(1L, 2L, 3L), vm.state.value.runDetail!!.steps.map { it.seq })
+        vm.closeRun()
+        assertNull(vm.state.value.runDetail)
+    }
+
+    @Test
+    fun a_hub_without_traces_keeps_runs_opening_their_session() = runTest {
+        val vm = automation(caps = HubCapabilities(tools = setOf("routines", "runs", "set_setting", "fleet_health")))
+        runCurrent()
+        assertFalse(vm.state.value.canTrace)
+    }
+
+    @Test
+    fun the_phase_rail_marks_reached_failed_and_live_phases() {
+        val steps = listOf(
+            RunTraceStep(seq = 1, phase = "trigger", kind = "trigger"),
+            RunTraceStep(seq = 2, phase = "checks", kind = "check"),
+            RunTraceStep(seq = 3, phase = "spawn", kind = "spawn", durationMs = 4200),
+            RunTraceStep(seq = 4, phase = "prompt", kind = "prompt"),
+            RunTraceStep(seq = 5, phase = "working", kind = "tool_call", summary = "Bash: pnpm test"),
+        )
+        val live = dev.claudefleet.mobile.model.phaseRail(steps, "running")
+        assertEquals(
+            listOf("Done", "Done", "Todo", "Done", "Done", "Live", "Todo", "Todo"),
+            live.map { it.state.name },
+        )
+        assertEquals("1 step so far", live[5].meta)
+        val failed = dev.claudefleet.mobile.model.phaseRail(listOf(RunTraceStep(seq = 1, phase = "spawn", kind = "error")), "failed")
+        assertEquals("Failed", failed.first { it.phase == "spawn" }.state.name)
+        val skipped = dev.claudefleet.mobile.model.phaseRail(listOf(RunTraceStep(seq = 1, phase = "checks", kind = "check")), "nothing_to_do", skipped = true)
+        assertEquals("Skipped", skipped.first { it.phase == "checks" }.state.name)
+        assertEquals("2m 48s", dev.claudefleet.mobile.model.tookWords(168_000))
+        assertEquals("410 ms", dev.claudefleet.mobile.model.tookWords(410))
     }
 }
