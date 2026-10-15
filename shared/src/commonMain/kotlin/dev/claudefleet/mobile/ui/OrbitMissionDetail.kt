@@ -245,10 +245,6 @@ fun OrbitMissionDetail(detail: MissionDetail, state: MissionsUiState, handlers: 
         Outcome(state)
         val graph = remember(detail) { graphFromMission(detail) }
         LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f, fill = false), contentPadding = PaddingValues(bottom = 16.dp)) {
-            // The task graph (claude-fleet #921): where the mission is, at a glance.
-            if (graph != null) {
-                item(key = "graph") { TaskGraphCard(graph, modifier = Modifier.padding(horizontal = gutter, vertical = 8.dp)) }
-            }
             if (ask != null && !notNow) {
                 item(key = "grant") {
                     GrantCard(
@@ -351,6 +347,10 @@ fun OrbitMissionDetail(detail: MissionDetail, state: MissionsUiState, handlers: 
                         }
                     }
                 }
+            }
+            // The task graph (claude-fleet #921): the whole mission at a glance, below what needs you.
+            if (graph != null) {
+                item(key = "graph") { TaskGraphCard(graph, modifier = Modifier.padding(horizontal = gutter, vertical = 8.dp)) }
             }
             item(key = "footer") {
                 Text(
