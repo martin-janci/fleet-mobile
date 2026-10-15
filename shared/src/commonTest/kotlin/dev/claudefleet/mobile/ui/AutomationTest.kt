@@ -413,6 +413,7 @@ class AutomationTest {
         assertTrue("trace routine:12 2" in actions.calls)
         assertEquals(listOf(1L, 2L, 3L), vm.state.value.runDetail!!.steps.map { it.seq })
         vm.closeRun()
+        runCurrent()
         assertNull(vm.state.value.runDetail)
     }
 
