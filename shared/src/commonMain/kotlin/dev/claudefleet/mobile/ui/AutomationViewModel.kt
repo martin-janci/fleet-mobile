@@ -8,6 +8,7 @@ import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineExplain
 import dev.claudefleet.mobile.model.RoutineRun
+import dev.claudefleet.mobile.model.RunTraceStep
 import dev.claudefleet.mobile.model.dollars
 import dev.claudefleet.mobile.model.relativeAgo
 import dev.claudefleet.mobile.model.relativeTime
@@ -29,6 +30,12 @@ enum class AutomationTab { Routines, Runs, Agents }
 
 /** One of the agents fleet runs itself (the desktop's `builtInAgents`, 8.4): what it does and what it is doing now. */
 data class BuiltInAgent(val id: String, val name: String, val does: String, val state: String)
+
+/**
+ * A run opened from the Runs list (claude-fleet's run timeline): the run and
+ * the steps its trace holds so far, oldest first.
+ */
+data class RunDetail(val run: FleetRun, val steps: List<RunTraceStep> = emptyList(), val loaded: Boolean = false)
 
 /** One row of the Runs list: the run and the routine it belongs to. */
 data class RunLine(val run: RoutineRun, val routine: String)
@@ -54,6 +61,10 @@ data class AutomationUiState(
     val fleetRuns: List<FleetRun>? = null,
     /** The routine opened from the list; null shows the list. */
     val detail: RoutineDetail? = null,
+    /** The run opened from the Runs list, with its steps; null shows the list. */
+    val runDetail: RunDetail? = null,
+    /** The hub keeps run traces (`runs` takes a `run_id`): a routine fire or agent job opens to its steps. */
+    val canTrace: Boolean = false,
     /** Why [detail] does or does not fire; null from a hub without `explain`. */
     val explain: RoutineExplain? = null,
     /** The hub's `automation_paused`; null until read. */
@@ -93,6 +104,7 @@ class AutomationViewModel(
         val runs: List<RunLine> = emptyList(),
         val fleetRuns: List<FleetRun>? = null,
         val detail: RoutineDetail? = null,
+        val runDetail: RunDetail? = null,
         val explain: RoutineExplain? = null,
         val paused: Boolean? = null,
         val loops: List<LoopHealth> = emptyList(),
@@ -116,6 +128,8 @@ class AutomationViewModel(
             runs = l.runs,
             fleetRuns = l.fleetRuns,
             detail = l.detail,
+            runDetail = l.runDetail,
+            canTrace = caps.accepts(HubCapabilities.RUNS, "run_id"),
             explain = l.explain,
             paused = l.paused,
             loops = l.loops,
@@ -132,14 +146,67 @@ class AutomationViewModel(
     }
 
     fun close() {
-        local.update { it.copy(open = false, detail = null, notice = null) }
+        local.update { it.copy(open = false, detail = null, runDetail = null, notice = null) }
     }
 
     /** The More row's line wants the routines without the sheet open. */
     fun refresh(): Job = scope.launch { read() }
 
     fun show(tab: AutomationTab) {
-        local.update { it.copy(tab = tab, detail = null) }
+        local.update { it.copy(tab = tab, detail = null, runDetail = null) }
+    }
+
+    /** Open [run]'s steps (a routine fire or an agent job, on a hub that keeps traces). */
+    fun openRun(run: FleetRun): Job = scope.launch {
+        local.update { it.copy(runDetail = RunDetail(run), notice = null, error = null) }
+        readRun()
+    }
+
+    /** Back from a run's steps to the Runs list. */
+    fun closeRun() {
+        local.update { it.copy(runDetail = null) }
+    }
+
+    /**
+     * Read on from the open run's last step: the sheet calls it every few
+     * seconds while the run runs. The run's row is refreshed from the list
+     * so it settles when the run does.
+     */
+    fun refreshRun(): Job = scope.launch {
+        val open = local.value.runDetail ?: return@launch
+        try {
+            val fresh = actions.fleetRuns(RUNS_SHOWN)
+            local.update { l ->
+                val run = fresh.firstOrNull { it.id == open.run.id }
+                l.copy(fleetRuns = fresh, runDetail = l.runDetail?.let { d -> if (run != null && d.run.id == run.id) d.copy(run = run) else d })
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            // The steps below still move; the row catches up on the next read.
+        }
+        readRun()
+    }
+
+    private suspend fun readRun() {
+        var held = local.value.runDetail ?: return
+        try {
+            for (page in 0 until TRACE_PAGES) {
+                val after = held.steps.lastOrNull()?.seq
+                val trace = actions.runTrace(held.run.id, after)
+                val fresh = trace.steps.filter { after == null || it.seq > after }
+                held = held.copy(steps = held.steps + fresh, loaded = true)
+                if (!trace.more || trace.steps.isEmpty()) break
+            }
+            local.update { l ->
+                val cur = l.runDetail
+                if (cur != null && cur.run.id == held.run.id) l.copy(runDetail = held.copy(run = cur.run)) else l
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { l -> l.copy(error = friendly(t), runDetail = l.runDetail?.copy(loaded = true)) }
+        }
     }
 
     fun select(routineId: Long): Job = scope.launch {
@@ -267,6 +334,7 @@ class AutomationViewModel(
         const val ROUTINES_READ = 20
         const val RUNS_PER_ROUTINE = 10
         const val RUNS_SHOWN = 50
+        const val TRACE_PAGES = 10
     }
 }
 

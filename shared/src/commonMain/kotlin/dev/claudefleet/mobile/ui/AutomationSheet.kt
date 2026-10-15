@@ -3,12 +3,15 @@ package dev.claudefleet.mobile.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -18,6 +21,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,10 +37,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.model.AgentRule
+import dev.claudefleet.mobile.model.FleetRun
+import dev.claudefleet.mobile.model.PhaseState
 import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.ruleAgentName
 import dev.claudefleet.mobile.model.ruleLine
 import dev.claudefleet.mobile.model.RoutineExplain
+import dev.claudefleet.mobile.model.dollars
+import dev.claudefleet.mobile.model.phaseRail
+import dev.claudefleet.mobile.model.runHasTrace
+import dev.claudefleet.mobile.model.tookWords
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.kit.BottomSheet
@@ -44,12 +54,18 @@ import dev.claudefleet.mobile.ui.kit.DotWave
 import dev.claudefleet.mobile.ui.kit.PhoneRow
 import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 import dev.claudefleet.mobile.ui.theme.Fleet
+import kotlinx.coroutines.delay
 
 data class AutomationHandlers(
     val onClose: () -> Unit = {},
     val onTab: (AutomationTab) -> Unit = {},
     val onSelect: (Long) -> Unit = {},
     val onBack: () -> Unit = {},
+    /** Open a routine fire's or agent job's steps (a hub that keeps run traces). */
+    val onOpenRun: (FleetRun) -> Unit = {},
+    val onCloseRun: () -> Unit = {},
+    /** Read on from the open run's last step; called while it runs. */
+    val onRefreshRun: () -> Unit = {},
     val onToggle: (Routine) -> Unit = {},
     val onSetPaused: (Boolean) -> Unit = {},
     val onOpenSession: (Long) -> Unit = {},
@@ -78,9 +94,10 @@ fun AutomationSheet(
     var confirmPause by remember { mutableStateOf(false) }
     val showLoader = rememberLoaderVisible(state.loading || state.busy != null)
     val detail = state.detail
+    val runDetail = state.runDetail
     BottomSheet(
-        title = detail?.routine?.name ?: "Automation",
-        meta = if (detail == null) automationLine(state.routines, state.paused, state.spentToday) else null,
+        title = runDetail?.run?.let(::fleetRunTitle) ?: detail?.routine?.name ?: "Automation",
+        meta = if (detail == null && runDetail == null) automationLine(state.routines, state.paused, state.spentToday) else null,
         onDismiss = handlers.onClose,
         cancelLabel = "Close",
     ) {
@@ -91,7 +108,9 @@ fun AutomationSheet(
             state.notice?.let {
                 Text(it, color = o.fg, fontSize = 14.sp, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
             }
-            if (detail != null) {
+            if (runDetail != null) {
+                RunDetailView(runDetail, nowSeconds, handlers)
+            } else if (detail != null) {
                 TextButton(onClick = handlers.onBack) { Text("‹ Routines", color = o.accent) }
                 RoutineRow(detail.routine, nowSeconds, state, handlers, canToggle = state.canToggle && detail.mayChange, open = false)
                 state.explain?.let { WhyCard(it) }
@@ -281,7 +300,13 @@ private fun AutomationList(
                     line = fleetRunLine(run, nowSeconds),
                     word = fleetRunWord(run),
                     divider = i < all.lastIndex,
-                    onClick = run.sessionIds.firstOrNull()?.let { id -> { handlers.onOpenSession(id) } },
+                    // A routine fire or an agent job opens to its steps where the
+                    // hub keeps them; any other run opens its first session.
+                    onClick = if (state.canTrace && runHasTrace(run)) {
+                        { handlers.onOpenRun(run) }
+                    } else {
+                        run.sessionIds.firstOrNull()?.let { id -> { handlers.onOpenSession(id) } }
+                    },
                 )
             }
         } ?: run {
@@ -333,5 +358,81 @@ private fun AgentRules(agents: AgentActionsUiState, onRevoke: ((AgentRule) -> Un
     }
     agents.ruleNotice?.let {
         Text(it, color = o.fgMuted, fontSize = 13.sp, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+    }
+}
+
+/** How often an open running run reads on, in milliseconds. */
+private const val RUN_REFRESH_MS = 5_000L
+
+/**
+ * One run's steps (claude-fleet's run timeline, on the phone): its phases
+ * from trigger to outcome as a column of dots, then every step it
+ * recorded, newest last. A running run reads on every few seconds; its
+ * session opens from here.
+ */
+@Composable
+private fun RunDetailView(d: RunDetail, nowSeconds: Long, handlers: AutomationHandlers) {
+    val o = Fleet.colors
+    val running = d.run.outcome == "running"
+    LaunchedEffect(d.run.id, running) {
+        while (running) {
+            delay(RUN_REFRESH_MS)
+            handlers.onRefreshRun()
+        }
+    }
+    TextButton(onClick = handlers.onCloseRun) { Text("‹ Runs", color = o.accent) }
+    PhoneRow(
+        title = fleetRunTitle(d.run),
+        line = fleetRunLine(d.run, nowSeconds),
+        word = fleetRunWord(d.run),
+        divider = false,
+        onClick = d.run.sessionIds.firstOrNull()?.let { id -> { handlers.onOpenSession(id) } },
+    )
+    val skipped = d.run.source == "routine" && d.run.outcome == "nothing_to_do" && d.run.sessionIds.isEmpty()
+    val rail = phaseRail(d.steps, d.run.outcome, skipped)
+    Column(
+        modifier = Modifier.fillMaxWidth().background(o.bgPane, RoundedCornerShape(8.dp)).padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text("Phases", color = o.fgMuted, fontSize = 13.sp)
+        for (cell in rail) {
+            val tint = when (cell.state) {
+                PhaseState.Done -> o.statusDone
+                PhaseState.Live -> o.statusWorking
+                PhaseState.Failed -> o.statusFailed
+                PhaseState.Skipped, PhaseState.Todo -> o.border
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.size(8.dp).background(tint, CircleShape))
+                Text(
+                    cell.label,
+                    color = if (cell.state == PhaseState.Todo) o.fgMuted else o.fg,
+                    fontSize = 14.sp,
+                    fontWeight = if (cell.state == PhaseState.Live) FontWeight.SemiBold else FontWeight.Normal,
+                )
+                if (cell.meta.isNotEmpty()) {
+                    Text(cell.meta, color = o.fgMuted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+    HorizontalDivider(color = o.border)
+    Text(if (running) "What it did · live" else "What it did", color = o.fgMuted, fontSize = 13.sp)
+    if (d.loaded && d.steps.isEmpty()) {
+        Text("No steps recorded. A run from before traces shows nothing here.", color = o.fgMuted, fontSize = 14.sp)
+    }
+    d.steps.forEachIndexed { i, step ->
+        PhoneRow(
+            title = step.summary,
+            line = listOfNotNull(
+                step.phase,
+                step.actor,
+                tookWords(step.durationMs).takeIf { it.isNotEmpty() },
+                step.costMicros?.let { dollars(it) },
+                "try ${step.attempt}".takeIf { step.attempt > 1 },
+            ).joinToString(" · "),
+            dot = false,
+            divider = i < d.steps.lastIndex,
+        )
     }
 }

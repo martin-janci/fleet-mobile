@@ -66,6 +66,7 @@ import dev.claudefleet.mobile.model.screenshotOf
 import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineExplain
 import dev.claudefleet.mobile.model.RoutineRun
+import dev.claudefleet.mobile.model.RunTrace
 import dev.claudefleet.mobile.model.RunsPage
 import dev.claudefleet.mobile.model.AutoSwitchView
 import dev.claudefleet.mobile.model.Headroom
@@ -1613,6 +1614,21 @@ class HubClient(
                 limit?.let { put("limit", it) }
             },
         ) { json.decodeFromJsonElement(RunsPage.serializer(), it) }
+
+    /**
+     * One routine fire's or agent job's steps after [afterSeq], oldest first
+     * (`runs { trace }`, claude-fleet migration 194). Called only where the
+     * hub's `runs` takes a `run_id`.
+     */
+    suspend fun runTrace(runId: String, afterSeq: Long? = null): RunTrace =
+        call(
+            "runs",
+            buildJsonObject {
+                put("action", "trace")
+                put("run_id", runId)
+                afterSeq?.let { put("after_seq", it) }
+            },
+        ) { json.decodeFromJsonElement(RunTrace.serializer(), it) }
 
     // ---- routines (claude-fleet redesign 8.5) ----
     //
