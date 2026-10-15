@@ -78,7 +78,8 @@ fun graphFromMission(d: MissionDetail): GraphCard? {
         .map { w -> w.map { n -> GraphStep(n.itemId, titles[n.itemId] ?: "Task ${n.itemId}", nodeTone(n.state), nodeLabel(n.state)) } }
     val steps = waves.flatten()
     return GraphCard(
-        title = d.mission.name.ifBlank { "Mission ${d.mission.id}" },
+        // Drawn inside the mission's own page, which already names it.
+        title = "Task graph",
         waves = markCurrent(waves),
         done = steps.count { it.tone == StepTone.DONE },
         total = steps.size,
