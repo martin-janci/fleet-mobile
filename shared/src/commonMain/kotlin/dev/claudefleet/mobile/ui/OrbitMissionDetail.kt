@@ -41,6 +41,8 @@ import dev.claudefleet.mobile.model.pauseMove
 import dev.claudefleet.mobile.model.runEstimateLine
 import dev.claudefleet.mobile.model.SpendAsk
 import dev.claudefleet.mobile.model.spendAsk
+import dev.claudefleet.mobile.model.graphFromMission
+import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.kit.Comet
 import dev.claudefleet.mobile.ui.kit.StatusWord
@@ -241,7 +243,12 @@ fun OrbitMissionDetail(detail: MissionDetail, state: MissionsUiState, handlers: 
         }
         ErrorBanner(state.error, onDismiss = handlers.onDismissError)
         Outcome(state)
-        LazyColumn(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 16.dp)) {
+        val graph = remember(detail) { graphFromMission(detail) }
+        LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f, fill = false), contentPadding = PaddingValues(bottom = 16.dp)) {
+            // The task graph (claude-fleet #921): where the mission is, at a glance.
+            if (graph != null) {
+                item(key = "graph") { TaskGraphCard(graph, modifier = Modifier.padding(horizontal = gutter, vertical = 8.dp)) }
+            }
             if (ask != null && !notNow) {
                 item(key = "grant") {
                     GrantCard(
@@ -354,6 +361,8 @@ fun OrbitMissionDetail(detail: MissionDetail, state: MissionsUiState, handlers: 
                 )
             }
         }
+        // Steer this mission (claude-fleet #921): under the list, where the thumb is.
+        handlers.steer?.let { SteerComposer(m.name.ifBlank { "Mission ${m.id}" }, it, epochSeconds()) }
     }
     if (reviewing && ask != null) {
         GrantSheet(

@@ -131,6 +131,8 @@ import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.model.ConversationSummary
 import dev.claudefleet.mobile.model.RepairReport
 import dev.claudefleet.mobile.model.ConvTurn
+import dev.claudefleet.mobile.model.FleetNote
+import dev.claudefleet.mobile.model.parseFleetPrompt
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.tailMarker
 import dev.claudefleet.mobile.model.thinkingLine
@@ -2202,7 +2204,10 @@ internal fun Turn(turn: ConvTurn, live: Boolean = false, footer: (@Composable ()
             .padding(start = 12.dp, end = 12.dp, top = if (hasPrompt) 16.dp else 4.dp, bottom = 4.dp),
     ) {
         if (hasPrompt) {
-            PromptBubble(prompt.orEmpty())
+            // Fleet's own digest or restart note (claude-fleet #913) is not
+            // the person's words: one folded line, not a bubble.
+            val note = remember(prompt) { parseFleetPrompt(prompt) }
+            if (note != null) FleetNoteLine(note) else PromptBubble(prompt.orEmpty())
             Spacer(Modifier.height(8.dp))
         }
         TurnItems(turn.items, live) { Item(it) }
@@ -3421,5 +3426,45 @@ private fun HostTroubleStrip(text: String) {
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
     ) {
         Text(text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+    }
+}
+
+/**
+ * Fleet talking in Control's chat (mission control hardening): "Fleet · 3
+ * events", folded; a tap opens the list. The digest's instructions to the
+ * agent stay folded away: they are for Control, not the person.
+ */
+@Composable
+private fun FleetNoteLine(note: FleetNote) {
+    var open by rememberSaveable { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("fleet-note")
+            .clickable(onClickLabel = if (open) "Hide fleet events" else "Show fleet events") { open = !open },
+    ) {
+        Text(
+            (if (open) "▾ " else "▸ ") + note.line,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (open) {
+            for (e in note.events) {
+                Text(
+                    "• ${e.text}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 12.dp, top = 2.dp),
+                )
+            }
+            if (note.more > 0) {
+                Text(
+                    "… and ${note.more} more",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 12.dp, top = 2.dp),
+                )
+            }
+        }
     }
 }

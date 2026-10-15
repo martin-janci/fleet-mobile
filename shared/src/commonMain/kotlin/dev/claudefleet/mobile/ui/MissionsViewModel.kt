@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.MissionActions
 import dev.claudefleet.mobile.model.Mission
@@ -21,6 +22,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -119,6 +123,19 @@ class MissionsViewModel(
             listFailed = l.listFailed,
         )
     }.stateIn(scope, SharingStarted.Eagerly, MissionsUiState())
+
+    init {
+        // The hub back after a drop: what is on screen was read before it,
+        // and nothing replays a mission's changes to this sheet. Read again
+        // while it is open, so Go and Approve act on what is true now.
+        scope.launch {
+            fleet.status
+                .map { it is ConnectionStatus.Connected }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { up -> if (up && local.value.open && local.value.loaded) read() }
+        }
+    }
 
     fun open(): Job = scope.launch {
         local.update { it.copy(open = true, detail = null, results = null, notice = null, error = null) }

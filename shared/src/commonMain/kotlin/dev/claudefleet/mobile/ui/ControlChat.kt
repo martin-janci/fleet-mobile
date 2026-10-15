@@ -93,6 +93,8 @@ data class ControlUiState(
     val answering: Set<String> = emptySet(),
     /** What Control handed on, oldest first, as chips (redesign 9.3); empty on a hub without the receipts. */
     val handoffs: List<HandoffChip> = emptyList(),
+    /** The receipts themselves, for the threads list and the task graph card (claude-fleet #914). */
+    val receipts: List<ControlHandoff> = emptyList(),
     /** "Watching CI on #476 and #477" ([watchingCiLine]); null while no handed-on PR's checks run. */
     val watchingCi: String? = null,
     val error: Friendly? = null,
@@ -120,6 +122,9 @@ internal fun controlWaitingLine(state: ControlUiState): String = when {
 }
 
 private val WAKEABLE = setOf("absent", "lost", "no_mcp")
+
+/** Lost or ghosted: a row nobody can talk to any more. */
+private fun gone(row: SessionRow): Boolean = row.lostAt != null || row.status == "ghost"
 
 /** The blocked state in words, and what the person can do about it. */
 fun controlBlockedLine(blocked: String?, host: String?): String {
@@ -174,7 +179,10 @@ class ControlViewModel(
     private fun assemble(l: Local, caps: HubCapabilities, rows: List<SessionRow>, status: ConnectionStatus): ControlUiState {
         val available = canWrite && caps.agent
         val op = l.status
-        val sessionId = op?.session?.id?.takeIf { op.ready } ?: l.woken
+        // A session the fleet now lists as lost or gone is not one to talk to
+        // (its host rebooted, its agent was killed): the tab shows the
+        // blocked state, and [attach] re-reads Control's status.
+        val sessionId = (op?.session?.id?.takeIf { op.ready } ?: l.woken)?.takeUnless { id -> rows.firstOrNull { it.id == id }?.let(::gone) == true }
         return ControlUiState(
             available = available,
             known = l.known || !caps.operatorStatus,
@@ -186,6 +194,7 @@ class ControlViewModel(
             confirms = if (caps.confirms) l.confirms else emptyList(),
             answering = l.answering,
             handoffs = if (caps.handoffs) handoffChips(l.handoffs, rows) else emptyList(),
+            receipts = if (caps.handoffs) l.handoffs else emptyList(),
             watchingCi = if (caps.handoffs) watchingCiLine(l.handoffs, rows) else null,
             error = l.error,
             connected = status is ConnectionStatus.Connected,
@@ -205,7 +214,30 @@ class ControlViewModel(
                 combine(fleet.capabilities, fleet.status) { caps, status -> caps.operatorStatus to (status is ConnectionStatus.Connected) }
                     .distinctUntilChanged()
                     .drop(1)
-                    .collect { (_, up) -> if (up) readStatus() }
+                    .collect { (_, up) ->
+                        if (up) {
+                            readStatus()
+                            // Frames missed while the stream was down are not replayed to this read.
+                            if (fleet.capabilities.value.confirms) readConfirms()
+                            if (fleet.capabilities.value.handoffs) readHandoffs()
+                        }
+                    }
+            }
+            // Control's own session going away under the tab (its host
+            // rebooted, its agent was killed): read its status again rather
+            // than keep showing a conversation nobody is in.
+            launch {
+                combine(fleet.sessions, local) { rows, l ->
+                    val id = l.status?.takeIf { it.ready }?.session?.id ?: l.woken
+                    id != null && rows.firstOrNull { it.id == id }?.let(::gone) == true
+                }
+                    .distinctUntilChanged()
+                    .collect { lost ->
+                        if (lost) {
+                            local.update { it.copy(woken = null) }
+                            readStatus()
+                        }
+                    }
             }
             // A call waiting for a person is read the moment the hub says so,
             // not up to a poll later; the poll below stays as the net for a
@@ -216,7 +248,10 @@ class ControlViewModel(
                 }
             }
             readStatus()
-            while (isActive && (fleet.capabilities.value.confirms || fleet.capabilities.value.handoffs)) {
+            // Every tick checks the capabilities, rather than the loop ending
+            // when they are not known yet (a cold start before `tools/list`
+            // answered): then handoffs and confirms were never read again.
+            while (isActive) {
                 // Offline or stopped (the app went to the background): no call
                 // can land, so the tick waits for the next one (review r16).
                 if (fleet.status.value is ConnectionStatus.Connected) {
@@ -241,6 +276,16 @@ class ControlViewModel(
         if (fleet.capabilities.value.handoffs) readHandoffs()
     }
 
+    /**
+     * Read Control's state once if nothing has read it yet: for a place
+     * outside the tab that needs to know whether Control runs (a mission's
+     * Steer box), without following it.
+     */
+    fun ensureKnown(): Job? {
+        if (local.value.known) return null
+        return scope.launch { readStatus() }
+    }
+
     /** Wake Control: the one tap that may start its session. */
     fun wake(): Job? {
         if (!state.value.canWake || local.value.waking) return null
@@ -255,6 +300,9 @@ class ControlViewModel(
                 throw e
             } catch (t: Throwable) {
                 local.update { it.copy(waking = false, error = friendly(t)) }
+                // Starting a session can outlast the call's timeout and still
+                // land: ask what is true now rather than say "not running".
+                readStatus()
             }
         }
     }
