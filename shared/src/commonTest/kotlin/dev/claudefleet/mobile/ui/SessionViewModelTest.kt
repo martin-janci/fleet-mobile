@@ -2313,6 +2313,79 @@ class SessionViewModelTest {
         assertFalse(vm.state.value.answering)
     }
 
+    /**
+     * A question found gone leaves no card with live buttons behind: the row
+     * still carries it for up to a reconcile tick, so the card is held back
+     * while the row shows exactly that question, the note stays in the
+     * banner, and the session is read again.
+     */
+    @Test
+    fun a_gone_question_takes_its_card_down_until_the_row_moves() = runTest {
+        val actions = FakeActions()
+        actions.probeAnswer = ActivityProbe(claudeStatus = "working")
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+        assertNotNull(vm.state.value.card, "setup: the card is up")
+        val readsBefore = actions.reads
+
+        vm.answer(Answer.Option(1, "Yes")).join()
+        runCurrent()
+
+        assertNull(vm.state.value.card, "the row still shows the gone question, but its card is down")
+        assertEquals("That question is gone", vm.state.value.error?.title)
+        assertTrue(actions.reads > readsBefore, "the session is read again")
+
+        // The row catches up and later asks something else: that card is drawn.
+        fleet.sessions.value = listOf(row(status = "working"))
+        runCurrent()
+        fleet.sessions.value = listOf(blockedRow(PendingInput("permission", "Push it?", listOf(PendingOption(1, "Yes")))))
+        runCurrent()
+        assertNotNull(vm.state.value.card)
+    }
+
+    /** Asked again after it went away, the same question is a new card, not a held-back one. */
+    @Test
+    fun the_same_question_asked_again_after_the_row_moved_is_drawn() = runTest {
+        val actions = FakeActions()
+        actions.probeAnswer = ActivityProbe(claudeStatus = "working")
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_DIGIT_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+
+        vm.answer(Answer.Option(1, "Yes")).join()
+        runCurrent()
+        assertNull(vm.state.value.card)
+
+        fleet.sessions.value = listOf(row(status = "working"))
+        runCurrent()
+        fleet.sessions.value = listOf(blockedRow())
+        runCurrent()
+        assertNotNull(vm.state.value.card)
+    }
+
+    /** The wait timed out but the pane no longer shows the question: it landed, and the card goes. */
+    @Test
+    fun a_timeout_with_the_question_off_the_pane_takes_the_card_down() = runTest {
+        val actions = FakeActions()
+        actions.waitAnswer = WaitResult(status = "timeout")
+        val fleet = FakeFleetState(listOf(blockedRow()))
+        fleet.hubVersion.value = HUB_VERSION_KEYS
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        // The first read (before Enter) still shows the dialog; the one after the wait does not.
+        val probes = ArrayDeque(listOf(actions.probeAnswer, ActivityProbe(claudeStatus = "working")))
+        actions.onProbe = { probes.removeFirstOrNull() ?: ActivityProbe(claudeStatus = "working") }
+
+        vm.answer(Answer.Enter).join()
+        runCurrent()
+
+        assertEquals(listOf("Enter"), actions.sentKeys)
+        assertNull(vm.state.value.card)
+        assertFalse(vm.state.value.stillWaiting)
+        assertNull(vm.state.value.error)
+    }
+
     /** Not knowing what is on the pane is not the same as knowing it is unchanged. */
     @Test
     fun an_option_is_not_pressed_when_the_pane_cannot_be_read() = runTest {
@@ -4000,6 +4073,32 @@ class SessionViewModelTest {
         assertEquals("half-written", vm.state.value.draft)
         vm.retryLastTurn("  ").join()
         assertEquals(1, actions.sentPrompts.size, "a blank prompt is never sent")
+    }
+
+    /** A Retry that cannot go out says why instead of doing nothing. */
+    @Test
+    fun retry_the_last_turn_that_cannot_go_out_says_why() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(listOf(blockedRow())), actions, backgroundScope, keepNotSent = true)
+        runCurrent()
+
+        vm.retryLastTurn("Run the suite.").join()
+        runCurrent()
+
+        assertTrue(actions.sentPrompts.isEmpty())
+        assertEquals("Answer the question first", vm.state.value.error?.title)
+    }
+
+    /** Dismiss puts away that failure's card only; the key is remembered on the state. */
+    @Test
+    fun a_dismissed_failure_is_remembered_by_its_key() = runTest {
+        val vm = SessionViewModel(ID, FakeFleetState(listOf(row(status = "failed"))), FakeActions(), backgroundScope, keepNotSent = true)
+        runCurrent()
+        assertNull(vm.state.value.dismissedFailure)
+
+        vm.dismissFailed("1:4:2026-10-16T10:00:00Z")
+        runCurrent()
+        assertEquals("1:4:2026-10-16T10:00:00Z", vm.state.value.dismissedFailure)
     }
 
     // ---- Send later (redesign 14.14 on claude-fleet's deferred prompts) ----

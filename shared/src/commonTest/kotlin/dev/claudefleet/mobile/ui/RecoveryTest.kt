@@ -9,6 +9,7 @@ import dev.claudefleet.mobile.model.SessionRow
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** Recovery on the New bar (redesign 14.5, MobileRecovery): what each card says and offers. */
 class RecoveryTest {
@@ -46,6 +47,16 @@ class RecoveryTest {
         assertNull(f.failedStep)
         assertEquals("go on", f.retryPrompt, "the row's last prompt stands in for an unread conversation")
         assertNull(failedSession(row("failed"), emptyList())!!.retryPrompt, "nothing to send again: no Retry")
+    }
+
+    /** A dismissed failure stays away for that failure only: the next failed turn is a new key. */
+    @Test
+    fun each_failure_has_its_own_key() {
+        val turns = listOf(ConvTurn(prompt = "go", at = "2026-10-16T10:00:00Z"))
+        val first = failedSession(row("failed").copy(turnSeq = 4), turns)!!
+        assertEquals(failedKey(row("failed").copy(turnSeq = 4), turns), first.key)
+        val next = failedSession(row("failed").copy(turnSeq = 5), turns + ConvTurn(prompt = "again", at = "2026-10-16T10:05:00Z"))!!
+        assertTrue(first.key != next.key)
     }
 
     @Test

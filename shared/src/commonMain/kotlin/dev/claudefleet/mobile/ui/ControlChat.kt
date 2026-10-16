@@ -43,6 +43,7 @@ import dev.claudefleet.mobile.model.ControlHandoff
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.OperatorStatus
 import dev.claudefleet.mobile.net.HubCapabilities
+import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.kit.Atom
@@ -102,6 +103,8 @@ data class ControlUiState(
     val connected: Boolean = true,
     /** The last `operator_status` read failed: Control's state is unknown, not "not running". */
     val statusFailed: Boolean = false,
+    /** A Retry ([ControlViewModel.refresh]) is reading Control's state again. */
+    val refreshing: Boolean = false,
 ) {
     /** Waking may help: nothing runs, or what ran is gone or lost its tools. */
     val canWake: Boolean get() = available && connected && !statusFailed && sessionId == null &&
@@ -172,6 +175,9 @@ class ControlViewModel(
         val handoffs: List<ControlHandoff> = emptyList(),
         val error: Friendly? = null,
         val statusFailed: Boolean = false,
+        /** Confirms put away on this phone ([hide]); the hub still has them, and the desktop still answers them. */
+        val hidden: Set<String> = emptySet(),
+        val refreshing: Boolean = false,
     )
 
     private val local = MutableStateFlow(Local())
@@ -198,13 +204,14 @@ class ControlViewModel(
             fallback = op?.fallback?.takeIf { sessionId == null && op.blocked == "host_down" },
             waking = l.waking,
             canConfirm = caps.confirms,
-            confirms = if (caps.confirms) l.confirms else emptyList(),
+            confirms = if (caps.confirms) l.confirms.filterNot { it.nonce in l.hidden } else emptyList(),
             answering = l.answering,
             handoffs = if (caps.handoffs) handoffChips(l.handoffs, rows) else emptyList(),
             watchingCi = if (caps.handoffs) watchingCiLine(l.handoffs, rows) else null,
             error = l.error,
             connected = status is ConnectionStatus.Connected,
             statusFailed = l.statusFailed,
+            refreshing = l.refreshing,
         )
     }
 
@@ -250,10 +257,14 @@ class ControlViewModel(
 
     /** Re-read Control's state, as after a reconnect or a pull — and the Retry under a failed read. */
     fun refresh(): Job = scope.launch {
-        local.update { it.copy(error = null) }
-        readStatus()
-        if (fleet.capabilities.value.confirms) readConfirms()
-        if (fleet.capabilities.value.handoffs) readHandoffs()
+        local.update { it.copy(error = null, refreshing = true) }
+        try {
+            readStatus()
+            if (fleet.capabilities.value.confirms) readConfirms()
+            if (fleet.capabilities.value.handoffs) readHandoffs()
+        } finally {
+            local.update { it.copy(refreshing = false) }
+        }
     }
 
     /** Wake Control: the one tap that may start its session. */
@@ -292,9 +303,28 @@ class ControlViewModel(
                 local.update { it.copy(answering = it.answering - nonce) }
                 throw e
             } catch (t: Throwable) {
-                local.update { it.copy(answering = it.answering - nonce, error = friendly(t)) }
+                if (confirmGone(t)) {
+                    // The hub no longer knows this call: answered elsewhere or
+                    // expired. It goes, as a refused answer does, rather than
+                    // staying up with buttons that can only fail again.
+                    local.update { l ->
+                        l.copy(confirms = l.confirms.filterNot { it.nonce == nonce }, answering = l.answering - nonce, error = notRecorded(approved))
+                    }
+                } else {
+                    local.update { it.copy(answering = it.answering - nonce, error = friendly(t)) }
+                }
             }
         }
+    }
+
+    /**
+     * Put one confirm away on this phone, unanswered: the way out of a card
+     * whose answer keeps failing. The hub still holds it and the desktop can
+     * still answer it; the call waits until someone does or it expires.
+     */
+    fun hide(nonce: String) {
+        if (nonce in local.value.answering) return
+        local.update { it.copy(hidden = it.hidden + nonce) }
     }
 
     fun dismissError() {
@@ -347,6 +377,11 @@ class ControlViewModel(
 const val CONTROL_VIEW_TAG = "control.view."
 const val CONTROL_WAKE_TAG = "control.wake"
 const val CONFIRM_CARD_TAG = "control.confirm."
+/** An answer that failed because the hub no longer has the confirm: answered elsewhere, or expired. */
+internal fun confirmGone(t: Throwable): Boolean = t is HubError.Tool && t.code in CONFIRM_GONE_CODES
+
+private val CONFIRM_GONE_CODES = setOf("E_NOTFOUND", "E_CONFLICT", "E_EXPIRED")
+
 /** What a confirm answer the hub refused says: answered elsewhere first, or expired. */
 internal fun notRecorded(approved: Boolean): Friendly = Friendly(
     "Already answered or expired",
@@ -356,6 +391,9 @@ internal fun notRecorded(approved: Boolean): Friendly = Friendly(
 
 const val CONFIRM_APPROVE_TAG = "control.confirm.approve."
 const val CONFIRM_DENY_TAG = "control.confirm.deny."
+const val CONFIRM_HIDE_TAG = "control.confirm.hide."
+const val CONTROL_RETRY_TAG = "control.retry"
+const val CONTROL_FORM_CLOSE_TAG = "control.form.close."
 
 /** The header of the Control tab: "Control · N need you", and its views below. */
 @Composable
@@ -414,10 +452,11 @@ private fun ViewPill(label: String, selected: Boolean, tag: ControlView, onClick
 /**
  * Control's calls that wait on this device's yes, oldest first: what it wants
  * done in words, the exact call in mono, and Approve or Deny. Neither is
- * pre-selected; a card answered elsewhere goes on the next read.
+ * pre-selected; a card answered elsewhere goes on the next read. Hide puts a
+ * card away on this phone without answering it ([ControlViewModel.hide]).
  */
 @Composable
-fun ConfirmCards(state: ControlUiState, onAnswer: (String, Boolean) -> Unit) {
+fun ConfirmCards(state: ControlUiState, onAnswer: (String, Boolean) -> Unit, onHide: (String) -> Unit) {
     if (state.confirms.isEmpty()) return
     val o = Fleet.colors
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -453,6 +492,12 @@ fun ConfirmCards(state: ControlUiState, onAnswer: (String, Boolean) -> Unit) {
                             enabled = !busy,
                             modifier = Modifier.testTag(CONFIRM_APPROVE_TAG + c.nonce),
                         ) { Text(if (busy) "Sending…" else "Approve") }
+                        Spacer(Modifier.weight(1f))
+                        TextButton(
+                            onClick = { onHide(c.nonce) },
+                            enabled = !busy,
+                            modifier = Modifier.testTag(CONFIRM_HIDE_TAG + c.nonce),
+                        ) { Text("Hide") }
                     }
                 }
             }
@@ -473,6 +518,8 @@ fun ControlWaiting(
     onWake: () -> Unit,
     onAnswer: (String, Boolean) -> Unit,
     onDismissError: () -> Unit,
+    /** Put one confirm away on this phone ([ControlViewModel.hide]). */
+    onHide: (String) -> Unit,
     below: @Composable () -> Unit = {},
     /** Read Control's state again after a failed read. */
     onRetry: () -> Unit = {},
@@ -481,18 +528,21 @@ fun ControlWaiting(
     val gutter = OrbitTokens.spacing("phone-gutter").dp
     Column(modifier = Modifier.fillMaxSize()) {
         ControlHeader(subtitle, views)
-        ErrorBanner(state.error, onDismiss = onDismissError, onRetry = onRetry.takeIf { state.statusFailed && state.connected })
+        // One Retry: the body's button when it is drawn, the banner's otherwise.
+        val bodyRetry = state.available && state.connected && state.statusFailed && !state.waking
+        ErrorBanner(state.error, onDismiss = onDismissError, onRetry = onRetry.takeIf { state.statusFailed && state.connected && !bodyRetry })
         Column(modifier = Modifier.padding(horizontal = gutter, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
                 controlWaitingLine(state),
                 style = Fleet.type.textMd,
                 color = o.fg2,
             )
-            if (state.available && state.connected && state.statusFailed && !state.waking) {
+            if (bodyRetry) {
                 OutlinedButton(
                     onClick = onRetry,
-                    modifier = Modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp),
-                ) { Text("Retry") }
+                    enabled = !state.refreshing,
+                    modifier = Modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp).testTag(CONTROL_RETRY_TAG),
+                ) { Text(if (state.refreshing) "Retrying…" else "Retry") }
             }
             if (state.canWake && state.known) {
                 Button(
@@ -510,7 +560,7 @@ fun ControlWaiting(
                 }
             }
         }
-        ConfirmCards(state, onAnswer)
+        ConfirmCards(state, onAnswer, onHide)
         Spacer(Modifier.height(8.dp))
         below()
     }
@@ -722,15 +772,22 @@ fun ControlForms(
         for (row in rows.take(CONTROL_FORMS_SHOWN)) {
             val pending = row.pendingForm
             if (pending != null && answering == pending.formId) {
-                OrbitChatFormCard(
-                    pending = pending,
-                    sessionName = row.displayName,
-                    actions = actions,
-                    canAnswer = canAnswer,
-                    open = true,
-                    onDismiss = { answering = null },
-                    onAskAgain = null,
-                )
+                Column {
+                    OrbitChatFormCard(
+                        pending = pending,
+                        sessionName = row.displayName,
+                        actions = actions,
+                        canAnswer = canAnswer,
+                        open = true,
+                        onDismiss = { answering = null },
+                        onAskAgain = null,
+                    )
+                    // Open, the card itself offers no way back: Close folds it to its row again.
+                    TextButton(
+                        onClick = { answering = null },
+                        modifier = Modifier.padding(horizontal = 12.dp).testTag(CONTROL_FORM_CLOSE_TAG + pending.formId),
+                    ) { Text("Close") }
+                }
             } else if (pending != null) {
                 Surface(
                     color = o.bgPane,

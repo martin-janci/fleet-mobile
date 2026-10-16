@@ -139,6 +139,7 @@ import dev.claudefleet.mobile.ui.components.CompactChip
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.MarkdownText
+import dev.claudefleet.mobile.ui.components.LocalCardsLive
 import dev.claudefleet.mobile.ui.components.LocalComposerFill
 import dev.claudefleet.mobile.ui.components.ChatHost
 import dev.claudefleet.mobile.ui.components.LocalChatHost
@@ -319,6 +320,8 @@ fun SessionScreen(
     onRetryNotSent: () -> Unit = {},
     onEditNotSent: () -> Unit = {},
     onRetryLastTurn: (String) -> Unit = {},
+    /** Put a failed session's card away, by its [FailedSession.key]; the default does nothing. */
+    onDismissFailed: (String) -> Unit = {},
     /** ⋮ Archive (redesign 14.14); null where this hub, pairing or bar has none. */
     onArchive: (() -> Unit)? = null,
     /** One more thing that went wrong, drawn with the screen's other banners (Archive's refusal). */
@@ -831,6 +834,8 @@ fun SessionScreen(
                             turnItems(
                                 rows,
                                 working = state.session?.claudeStatus == "working" && state.streaming,
+                                // An earlier conversation is history: none of its cards act.
+                                cardsLive = state.viewing == null,
                                 replies = ReplyHost(
                                     turns = turns,
                                     truncated = truncated,
@@ -948,7 +953,7 @@ fun SessionScreen(
             // Recovery on the New bar (redesign 14.5): at the foot of the
             // conversation, where the next step is taken — never behind ⋮.
             val failed = if (tabs != null && state.card == null && state.viewing == null) {
-                failedSession(state.session, state.conversation.turns)
+                failedSession(state.session, state.conversation.turns)?.takeUnless { it.key == state.dismissedFailure }
             } else {
                 null
             }
@@ -976,6 +981,7 @@ fun SessionScreen(
                         onRepair = onRepair.takeIf { state.canRepair },
                         onDetails = { tabs.onSelect(SessionTab.Details) },
                         modifier = Modifier.heightIn(max = cardMax),
+                        onDismiss = { onDismissFailed(f.key) },
                     )
                 }
                 state.notSent?.let { n ->
@@ -1223,29 +1229,33 @@ const val SIDE_PANE_TAG = "session.side"
  * than its position, so that turns arriving at the newest end leave every
  * other item's key alone and the list can hold a scrolled-up reader still.
  */
-private fun LazyListScope.turnItems(rows: List<TurnRow>, working: Boolean, replies: ReplyHost? = null) {
+private fun LazyListScope.turnItems(rows: List<TurnRow>, working: Boolean, replies: ReplyHost? = null, cardsLive: Boolean = true) {
     itemsIndexed(rows, key = { _, row -> row.key }, contentType = { _, _ -> "turn" }) { index, row ->
         val live = working && index == 0
-        // Centred at a reading width: on a tablet a line the screen's whole
-        // width is too long to follow back to its start.
-        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-            Box(modifier = Modifier.widthIn(max = READING_WIDTH)) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Turn(
-                        row.turn,
-                        live = live,
-                        // Not on the live turn: it is still being written, and the
-                        // hub refuses a rewind of a session that is not quiet.
-                        footer = if (replies != null && !live) {
-                            { ReplyMenu(row.turn, chronological = rows.size - 1 - index, host = replies) }
-                        } else {
-                            null
-                        },
-                    )
-                    // Inside the live turn's own item, not an item of its
-                    // own: index 0 stays the newest turn for the follow,
-                    // the jump pill and the remembered scroll position.
-                    if (live) ThinkingLine(thinkingLine(row.turn))
+        // Only the newest turn's cards act (choices, next steps, forms): an
+        // older reply's buttons answered a moment that has passed.
+        CompositionLocalProvider(LocalCardsLive provides (cardsLive && index == 0)) {
+            // Centred at a reading width: on a tablet a line the screen's whole
+            // width is too long to follow back to its start.
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                Box(modifier = Modifier.widthIn(max = READING_WIDTH)) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Turn(
+                            row.turn,
+                            live = live,
+                            // Not on the live turn: it is still being written, and the
+                            // hub refuses a rewind of a session that is not quiet.
+                            footer = if (replies != null && !live) {
+                                { ReplyMenu(row.turn, chronological = rows.size - 1 - index, host = replies) }
+                            } else {
+                                null
+                            },
+                        )
+                        // Inside the live turn's own item, not an item of its
+                        // own: index 0 stays the newest turn for the follow,
+                        // the jump pill and the remembered scroll position.
+                        if (live) ThinkingLine(thinkingLine(row.turn))
+                    }
                 }
             }
         }
@@ -2204,7 +2214,13 @@ internal fun Turn(turn: ConvTurn, live: Boolean = false, footer: (@Composable ()
             PromptBubble(prompt.orEmpty())
             Spacer(Modifier.height(8.dp))
         }
-        TurnItems(turn.items, live) { Item(it) }
+        // Within a live turn, only its last text acts: a card the agent wrote
+        // before more words followed was answered by those words or passed by.
+        val cardsLive = LocalCardsLive.current
+        val lastText = remember(turn.items) { turn.items.lastOrNull { it is ConvItem.Text } }
+        TurnItems(turn.items, live) { item ->
+            CompositionLocalProvider(LocalCardsLive provides (cardsLive && item === lastText)) { Item(item) }
+        }
         footer?.invoke()
     }
 }

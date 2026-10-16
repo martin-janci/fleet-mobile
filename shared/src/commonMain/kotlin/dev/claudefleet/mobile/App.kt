@@ -1029,7 +1029,7 @@ private fun ControlTab(
                         val asked = controlRows.firstOrNull { it.id == sessionId }?.lastPrompt
                         if (controlToday.available && asksAboutToday(asked)) TodayLink { today.open() }
                         otherForms()
-                        ConfirmCards(controlState) { nonce, ok -> control.answer(nonce, ok) }
+                        ConfirmCards(controlState, onAnswer = { nonce, ok -> control.answer(nonce, ok) }, onHide = control::hide)
                     },
                     formContext = FormContext(
                         rows = controlRows,
@@ -1047,6 +1047,7 @@ private fun ControlTab(
             onWake = { control.wake() },
             onAnswer = { nonce, ok -> control.answer(nonce, ok) },
             onDismissError = control::dismissError,
+            onHide = control::hide,
             below = {
                 otherForms()
                 TipFor(Tip.CONTROL, help, helpSettings)
@@ -3213,6 +3214,7 @@ private fun SessionRoute(
         onRetryNotSent = { vm.retryNotSent() },
         onEditNotSent = vm::editNotSent,
         onRetryLastTurn = { vm.retryLastTurn(it) },
+        onDismissFailed = vm::dismissFailed,
         // ⋮ Archive leaves the session: back to where it was opened from.
         onArchive = { extrasVm.archive(onBack); Unit }.takeIf { newLayout && caps.archiveSession && credentials.canWrite },
         notice = extras.archiveError.takeIf { newLayout },

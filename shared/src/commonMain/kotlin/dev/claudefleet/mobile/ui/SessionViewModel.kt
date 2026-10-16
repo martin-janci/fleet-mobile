@@ -228,6 +228,8 @@ data class SessionUiState(
     val paneKeys: Set<String> = HubCapabilities.BASE_PANE_KEYS,
     /** What the last repair found and did, until dismissed. */
     val repair: RepairReport? = null,
+    /** The [FailedSession.key] whose card the reader dismissed ([SessionViewModel.dismissFailed]). */
+    val dismissedFailure: String? = null,
     /**
      * The running repair's steps as the hub reports them (`repair:progress`,
      * contract 17), keyed by [REPAIR_STEPS]; null when no repair runs or the
@@ -534,6 +536,15 @@ class SessionViewModel(
         val answering: Boolean = false,
         val stillWaiting: Boolean = false,
         /**
+         * The [questionKey] of a question an answer found gone or changed on
+         * the pane. The row it was drawn from lags the pane by up to a
+         * reconcile tick, so without this the card stayed up with buttons
+         * that could only ever say "gone" again. The card is held back while
+         * the row still shows exactly this question, and comes back as soon
+         * as the row moves to anything else.
+         */
+        val goneQuestion: List<Any?>? = null,
+        /**
          * Whether the reader asked for the terminal. Kept apart from
          * [terminal] so that a capture which has not answered yet — or one
          * that failed — still counts as "shown", which is what makes the
@@ -552,6 +563,7 @@ class SessionViewModel(
         val olderLoaded: Boolean = false,
         val loadingOlder: Boolean = false,
         val repair: RepairReport? = null,
+        val dismissedFailure: String? = null,
         /** The running repair's `progress_token`, and its steps as the frames reported them. */
         val repairToken: String? = null,
         val repairSteps: Map<String, StartStepState>? = null,
@@ -803,6 +815,18 @@ class SessionViewModel(
                 if (s.card == null) local.update { if (it.stillWaiting) it.copy(stillWaiting = false) else it }
             }
         }
+        // A question held back as gone ([Local.goneQuestion]) stays held back
+        // only while the row shows that very question: once the row moves to
+        // anything else — answered, another dialog — the hold is over.
+        scope.launch {
+            fleet.sessions.collect { rows ->
+                val now = rows.firstOrNull { it.id == sessionId }
+                local.update {
+                    val gone = it.goneQuestion
+                    if (gone != null && (now == null || questionKey(now) != gone)) it.copy(goneQuestion = null) else it
+                }
+            }
+        }
         scope.launch {
             fleet.sessionChanges
                 // `ALL_SESSIONS_CHANGED` is the resync sentinel a `ready` or
@@ -995,7 +1019,7 @@ class SessionViewModel(
                     enter = a == Answer.Enter,
                 )
                 if (moved != null) {
-                    local.update { it.copy(answering = false, error = moved) }
+                    questionGone(asked, moved)
                     return@launch
                 }
             }
@@ -1005,7 +1029,7 @@ class SessionViewModel(
                     actions.sendKeysExpecting(sessionId, keyToPress!!, dialogAsked!!)
                 } catch (e: HubError.Tool) {
                     if (e.code != "E_CONFLICT") throw e
-                    local.update { it.copy(answering = false, error = movedOnHub(e.message)) }
+                    questionGone(asked, movedOnHub(e.message))
                     return@launch
                 }
                 else -> when (a) {
@@ -1018,12 +1042,52 @@ class SessionViewModel(
                 }
             }
             val landed = awaitAnswerLanded(asked, receipt.turnSeqBefore)
+            // Timed out with the row still on the question: ask the pane
+            // itself. A question that is no longer there is held back rather
+            // than left up with live buttons on a row that has not caught up.
+            val goneAfter = if (!landed && keyToPress != null && asked != null) {
+                // A pane that cannot be read is no news: the card keeps saying "still waiting".
+                val probe = try {
+                    actions.activity(sessionId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Throwable) {
+                    null
+                }
+                probe?.let { dialogMoved(asked.pendingInput, asked.stuckKind, it, option = null) }
+            } else {
+                null
+            }
+            if (goneAfter != null) {
+                // The answer went out and the question has left the pane: it
+                // landed, the row just has not caught up. No note — nothing failed.
+                questionGone(asked, note = null)
+                return@launch
+            }
             local.update { it.copy(answering = false, stillWaiting = !landed) }
             requestRead(first = false)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
             local.update { it.copy(answering = false, error = friendly(t)) }
+        }
+    }
+
+    /**
+     * The question [asked] showed is gone or changed on the pane: say so in
+     * [note] (the error banner, which the reader dismisses; null says
+     * nothing), hold the card
+     * back while the row still shows that question ([Local.goneQuestion]),
+     * and read the session again so the row catches up.
+     */
+    private suspend fun questionGone(asked: SessionRow?, note: Friendly?) {
+        local.update { it.copy(answering = false, stillWaiting = false, error = note ?: it.error, goneQuestion = asked?.let(::questionKey)) }
+        try {
+            requestRead(first = false)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            // The note is up and the card held back; a failed re-read changes neither.
         }
     }
 
@@ -1077,7 +1141,7 @@ class SessionViewModel(
         try {
             val moved = dialogMoved(asked.pendingInput, asked.stuckKind, actions.activity(sessionId), no)
             if (moved != null) {
-                local.update { it.copy(answering = false, error = moved) }
+                questionGone(asked, moved)
                 return@launch
             }
             val receipt = actions.sendKeys(sessionId, no.n.toString())
@@ -1312,7 +1376,20 @@ class SessionViewModel(
      */
     fun retryLastTurn(prompt: String): Job = scope.launch {
         val current = local.value
-        if (prompt.isBlank() || !canWriteNow(current) || row() == null || blockedNow()) return@launch
+        // A tap that cannot go out says why, rather than doing nothing.
+        val refusal = when {
+            prompt.isBlank() -> Friendly("Nothing to retry", "The last turn has no prompt to send again.", isError = false)
+            readOnly -> Friendly("Read-only", "This device may read the session but not write to it.", isError = false)
+            !connected() -> Friendly("Not connected", "The hub does not answer right now. Retry once it does.", isError = false)
+            !idle(current.sending, current.answering, current.busy) -> Friendly("Still sending", "Wait for the message on its way, then retry.", isError = false)
+            row() == null -> Friendly("Session gone", "The hub no longer lists this session.", isError = false)
+            blockedNow() -> Friendly("Answer the question first", "The session waits on a question; answer it, then retry.", isError = false)
+            else -> null
+        }
+        if (refusal != null) {
+            local.update { it.copy(error = refusal) }
+            return@launch
+        }
         deliver(prompt, clearDraft = false, keep = keepNotSent)
     }
 
@@ -1715,6 +1792,11 @@ class SessionViewModel(
         local.update { it.copy(repair = null) }
     }
 
+    /** Put a failed session's card away, for that failure ([FailedSession.key]) only; in memory. */
+    fun dismissFailed(key: String) {
+        local.update { it.copy(dismissedFailure = key) }
+    }
+
     /**
      * Kill and rebuild the session in its worktree, resuming the same
      * conversation — for a wedged REPL, or to bring a ghost back.
@@ -2094,7 +2176,7 @@ class SessionViewModel(
         // place that decides what a blocked or stuck row offers, and it is
         // asked here with the hub's own version because the structured-key
         // chips depend on it.
-        card = row?.let { blockedCard(it, hubVersion) },
+        card = row?.takeUnless { l.goneQuestion != null && questionKey(it) == l.goneQuestion }?.let { blockedCard(it, hubVersion) },
         answering = l.answering,
         stillWaiting = l.stillWaiting,
         terminal = l.terminal,
@@ -2116,6 +2198,7 @@ class SessionViewModel(
         repairAvailable = fleet.capabilities.value.repairSession,
         paneKeys = fleet.capabilities.value.paneKeys,
         repair = l.repair,
+        dismissedFailure = l.dismissedFailure,
         repairSteps = l.repairSteps,
         pending = l.pending,
         errorFromSend = l.error != null && l.error === l.sendError,
@@ -2289,6 +2372,13 @@ internal fun movedOnHub(message: String): Friendly =
     } else {
         Friendly("The question changed", "Nothing was sent — read it again and choose.", isError = false)
     }
+
+/**
+ * Which question a row is asking, for [SessionViewModel]'s hold on a gone
+ * one: its status, its stuck kind and the dialog's [fingerprint]. PURE.
+ */
+internal fun questionKey(row: SessionRow): List<Any?> =
+    listOf(row.claudeStatus, row.stuckKind, row.pendingInput?.fingerprint())
 
 /** What `wait_for_session` answers when the turn actually moved. */
 internal const val WAIT_SATISFIED: String = "satisfied"

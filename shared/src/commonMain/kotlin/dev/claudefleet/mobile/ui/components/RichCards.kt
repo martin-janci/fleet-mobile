@@ -146,6 +146,17 @@ val LocalChatHost = compositionLocalOf { ChatHost.None }
  */
 val LocalComposerFill = compositionLocalOf<((String) -> Unit)?> { null }
 
+/**
+ * Whether the cards in this text still act: true for the newest reply's last
+ * text, false for an older one, whose choices, next steps and form are drawn
+ * turned off with [CARDS_EARLIER]. True by default, so a card shown on its
+ * own (a preview, a test) acts as before.
+ */
+val LocalCardsLive = compositionLocalOf { true }
+
+/** What an older reply's turned-off card says. */
+internal const val CARDS_EARLIER = "Earlier — no longer active"
+
 /** Hub assistant text: Markdown, with task reports and fleet-ui blocks as cards. */
 @Composable
 fun RichText(
@@ -333,7 +344,8 @@ internal fun UiBlockCard(block: UiBlock, raw: String) {
             }
         }
         is UiBlock.Choices -> {
-            val fill = LocalComposerFill.current
+            val live = LocalCardsLive.current
+            val fill = LocalComposerFill.current.takeIf { live }
             Card(colors.primary, RICH_CARD) {
                 block.title?.let { Heading(it) }
                 block.question?.let { MarkdownText(it) }
@@ -345,7 +357,13 @@ internal fun UiBlockCard(block: UiBlock, raw: String) {
                         }
                     }
                 }
-                Note(if (fill == null) "Choices fill the composer of a session you can write to." else "A choice fills the composer; send it yourself.")
+                Note(
+                    when {
+                        !live -> CARDS_EARLIER
+                        fill == null -> "Choices fill the composer of a session you can write to."
+                        else -> "A choice fills the composer; send it yourself."
+                    },
+                )
             }
         }
         is UiBlock.Form -> FormCard(block.form, raw)
@@ -646,7 +664,8 @@ internal fun cellText(c: JsonElement?, ty: String?, now: Long): String {
 /** An `error` block: what failed, its code, and the next steps, which fill the composer. */
 @Composable
 private fun ErrorCard(block: UiBlock.Error) {
-    val fill = LocalComposerFill.current
+    val live = LocalCardsLive.current
+    val fill = LocalComposerFill.current.takeIf { live }
     val colors = MaterialTheme.colorScheme
     var showDetail by rememberSaveable(block.code, block.title) { mutableStateOf(false) }
     Card(colors.error, RICH_ERROR) {
@@ -670,7 +689,13 @@ private fun ErrorCard(block: UiBlock.Error) {
                     }
                 }
             }
-            Note(if (fill == null) "Next steps fill the composer of a session you can write to." else "A next step fills the composer; send it yourself.")
+            Note(
+                when {
+                    !live -> CARDS_EARLIER
+                    fill == null -> "Next steps fill the composer of a session you can write to."
+                    else -> "A next step fills the composer; send it yourself."
+                },
+            )
         }
     }
 }
@@ -840,7 +865,8 @@ private fun StepsCard(block: UiBlock.Steps, raw: String) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FormCard(form: ReplyForm, raw: String) {
-    val fill = LocalComposerFill.current
+    val live = LocalCardsLive.current
+    val fill = LocalComposerFill.current.takeIf { live }
     val colors = MaterialTheme.colorScheme
     var values by remember(raw) { mutableStateOf(formDefaults(form)) }
     // The text of each number field as typed, so "1." is not reformatted under the thumb.
@@ -884,7 +910,13 @@ private fun FormCard(form: ReplyForm, raw: String) {
                 sent = true
             },
         ) { Text(form.submit ?: "Submit") }
-        Note(if (fill == null) "This form fills the composer of a session you can write to." else "Submitting puts the answers in the composer; nothing is sent until you send it.")
+        Note(
+            when {
+                !live -> CARDS_EARLIER
+                fill == null -> "This form fills the composer of a session you can write to."
+                else -> "Submitting puts the answers in the composer; nothing is sent until you send it."
+            },
+        )
     }
 }
 

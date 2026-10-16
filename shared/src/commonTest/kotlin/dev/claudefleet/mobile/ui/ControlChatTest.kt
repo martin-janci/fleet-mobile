@@ -266,6 +266,67 @@ class ControlChatTest {
         assertEquals("Already answered or expired", vm.state.value.error?.title)
     }
 
+    /** An answer that keeps failing must not leave a card up for good: Hide puts it away on this phone. */
+    @Test
+    fun a_confirm_whose_answer_fails_can_be_hidden_and_stays_hidden_across_reads() = runTest {
+        val base = FakeControl(OperatorStatus(ready = true, session = SessionRow(id = 5)))
+        val fake = object : ControlActions by base {
+            override suspend fun answer(nonce: String, approved: Boolean): Boolean =
+                throw dev.claudefleet.mobile.net.HubError.Transport(IllegalStateException("x"))
+        }
+        val vm = ControlViewModel(ControlFleet(CONTROL_TOOLS), fake, base, backgroundScope, canWrite = true)
+        vm.refresh().join(); runCurrent()
+
+        vm.answer("n1", true)?.join(); runCurrent()
+        assertEquals(listOf("n1", "n2"), vm.state.value.confirms.map { it.nonce }, "a transport failure keeps the card")
+        assertTrue(vm.state.value.error != null)
+
+        vm.hide("n1"); runCurrent()
+        assertEquals(listOf("n2"), vm.state.value.confirms.map { it.nonce })
+        vm.refresh().join(); runCurrent()
+        assertEquals(listOf("n2"), vm.state.value.confirms.map { it.nonce }, "the hub still lists it; this phone does not show it")
+        assertNull(vm.answer("n1", true), "a hidden card takes no answer")
+    }
+
+    /** The hub no longer knows the call: the card goes, as a refused answer does. */
+    @Test
+    fun an_answer_to_a_confirm_the_hub_no_longer_has_takes_the_card_away() = runTest {
+        val base = FakeControl(OperatorStatus(ready = true, session = SessionRow(id = 5)))
+        val fake = object : ControlActions by base {
+            override suspend fun answer(nonce: String, approved: Boolean): Boolean =
+                throw dev.claudefleet.mobile.net.HubError.Tool("E_NOTFOUND", "no such confirm")
+        }
+        val vm = ControlViewModel(ControlFleet(CONTROL_TOOLS), fake, base, backgroundScope, canWrite = true)
+        vm.refresh().join(); runCurrent()
+
+        vm.answer("n1", false)?.join(); runCurrent()
+        assertEquals(listOf("n2"), vm.state.value.confirms.map { it.nonce })
+        assertEquals("Already answered or expired", vm.state.value.error?.title)
+        assertTrue(vm.state.value.answering.isEmpty())
+    }
+
+    /** Retry shows that it is reading, and is done when the read is. */
+    @Test
+    fun retry_says_it_is_reading_until_the_read_ends() = runTest {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val base = FakeControl(OperatorStatus(ready = false, blocked = "absent"))
+        val fake = object : ControlActions by base {
+            override suspend fun status(): OperatorStatus {
+                gate.await()
+                throw dev.claudefleet.mobile.net.HubError.Transport(IllegalStateException("x"))
+            }
+        }
+        val vm = ControlViewModel(ControlFleet(CONTROL_TOOLS), fake, base, backgroundScope, canWrite = true)
+        val job = vm.refresh()
+        runCurrent()
+        assertTrue(vm.state.value.refreshing)
+
+        gate.complete(Unit)
+        job.join(); runCurrent()
+        assertFalse(vm.state.value.refreshing)
+        assertTrue(vm.state.value.statusFailed)
+    }
+
     @Test
     fun a_hub_without_the_tools_is_never_asked() = runTest {
         val fake = FakeControl(OperatorStatus(ready = true, session = SessionRow(id = 5)))
