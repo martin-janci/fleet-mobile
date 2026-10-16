@@ -1087,8 +1087,10 @@ class SessionViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (_: Throwable) {
-            // The note is up and the card held back; a failed re-read changes neither.
+            // The card stays held back; a failed re-read changes nothing here.
         }
+        // The read clears the banner as it starts, so the note goes up after it.
+        if (note != null) local.update { it.copy(error = note) }
     }
 
     /**
