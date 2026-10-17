@@ -17,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,6 +38,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.model.AgentRule
+import dev.claudefleet.mobile.model.AgentRunForm
+import dev.claudefleet.mobile.model.RUN_COMPONENTS
+import dev.claudefleet.mobile.model.RUN_REQUEST_MAX
+import dev.claudefleet.mobile.model.RUN_WINDOWS
+import dev.claudefleet.mobile.model.SelfDebugFinding
+import dev.claudefleet.mobile.model.ruleRunnable
+import dev.claudefleet.mobile.model.severityRank
 import dev.claudefleet.mobile.model.FleetRun
 import dev.claudefleet.mobile.model.PhaseState
 import dev.claudefleet.mobile.model.Routine
@@ -74,6 +82,10 @@ data class AutomationHandlers(
     val onDismissError: () -> Unit = {},
     /** End a rule (a fleet agent's instance) from the Agents tab; null where this device may not. */
     val onRevokeRule: ((AgentRule) -> Unit)? = null,
+    /** Run a manual fleet agent's instance with a focus (Run…); null where this device may not. */
+    val onRunRule: ((AgentRule, AgentRunForm) -> Unit)? = null,
+    /** Read the agents' status again (the findings card's Check again). */
+    val onRefreshAgents: () -> Unit = {},
 )
 
 /**
@@ -267,7 +279,8 @@ private fun AutomationList(
             builtIn.forEachIndexed { i, a ->
                 PhoneRow(title = a.name, line = "${a.does} · ${a.state}", dot = false, divider = i < builtIn.lastIndex)
             }
-            AgentRules(agents, handlers.onRevokeRule)
+            AgentRules(agents, handlers.onRevokeRule, handlers.onRunRule)
+            agents.selfDebug?.let { SelfDebugCard(it, handlers.onRefreshAgents) }
         }
         AutomationTab.Routines -> {
             if (state.loops.isNotEmpty()) {
@@ -332,11 +345,20 @@ private fun AutomationList(
  * The agents' standing rules (claude-fleet's configurable agents, step 5):
  * the PR reviewer's and the support agent's, and each fleet agent's
  * instance by its definition. A new instance and Edit are the desktop's
- * form (or a chat card); the phone revokes one.
+ * form (or a chat card); the phone revokes one, and starts a manual fleet
+ * agent with a focus (Run…).
  */
 @Composable
-private fun AgentRules(agents: AgentActionsUiState, onRevoke: ((AgentRule) -> Unit)?) {
+private fun AgentRules(
+    agents: AgentActionsUiState,
+    onRevoke: ((AgentRule) -> Unit)?,
+    onRun: ((AgentRule, AgentRunForm) -> Unit)?,
+) {
     val o = Fleet.colors
+    var asking by remember { mutableStateOf<AgentRule?>(null) }
+    asking?.let { r ->
+        if (onRun != null) RunAgentDialog(r, onRun = { form -> asking = null; onRun(r, form) }, onDismiss = { asking = null })
+    }
     if (agents.rules.isEmpty()) return
     Text("Instances", color = o.fgMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp))
     agents.rules.forEachIndexed { i, r ->
@@ -348,6 +370,13 @@ private fun AgentRules(agents: AgentActionsUiState, onRevoke: ((AgentRule) -> Un
                 divider = i < agents.rules.lastIndex,
                 modifier = Modifier.weight(1f),
             )
+            if (onRun != null && agents.canRun && ruleRunnable(r)) {
+                TextButton(
+                    onClick = { asking = r },
+                    enabled = r.id !in agents.running,
+                    modifier = Modifier.semantics { contentDescription = "Run ${r.scope}" },
+                ) { Text("Run…") }
+            }
             if (onRevoke != null && agents.canAnswer) {
                 TextButton(
                     onClick = { onRevoke(r) },
@@ -359,6 +388,144 @@ private fun AgentRules(agents: AgentActionsUiState, onRevoke: ((AgentRule) -> Un
     agents.ruleNotice?.let {
         Text(it, color = o.fgMuted, fontSize = 13.sp, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
     }
+}
+
+/**
+ * Run… for a manual fleet agent: what to look at (the request), how far
+ * back, and optionally which component, host or session. Empty fields are
+ * left out of the call ([agentRunArgs]).
+ */
+@Composable
+private fun RunAgentDialog(r: AgentRule, onRun: (AgentRunForm) -> Unit, onDismiss: () -> Unit) {
+    var form by remember(r.id) { mutableStateOf(AgentRunForm()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Run ${ruleAgentName(r)}") },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = form.request,
+                    onValueChange = { form = form.copy(request = it.take(RUN_REQUEST_MAX)) },
+                    label = { Text("What to look at") },
+                    placeholder = { Text("Optional") },
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("Window", color = Fleet.colors.fgMuted, fontSize = 13.sp)
+                ChipFlow {
+                    for ((label, minutes) in RUN_WINDOWS) {
+                        ChoiceChip(label, form.minutes == minutes, onClick = {
+                            form = form.copy(minutes = if (form.minutes == minutes) null else minutes)
+                        })
+                    }
+                }
+                Text("Component", color = Fleet.colors.fgMuted, fontSize = 13.sp)
+                ChipFlow {
+                    for (c in RUN_COMPONENTS) {
+                        ChoiceChip(c, form.component == c, onClick = {
+                            form = form.copy(component = if (form.component == c) null else c)
+                        })
+                    }
+                }
+                OutlinedTextField(
+                    value = form.host,
+                    onValueChange = { form = form.copy(host = it) },
+                    label = { Text("Host") },
+                    placeholder = { Text("Optional") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = form.session,
+                    onValueChange = { form = form.copy(session = it) },
+                    label = { Text("Session") },
+                    placeholder = { Text("Optional") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onRun(form) }) { Text("Run") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * The self debug agent's last run: its summary, then one row per finding,
+ * worst first (critical and high red, medium amber). A row opens to its fix
+ * and evidence. A run still going says so, with Check again.
+ */
+@Composable
+private fun SelfDebugCard(view: SelfDebugView, onRefresh: () -> Unit) {
+    val o = Fleet.colors
+    val report = view.report
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp).background(o.bgPane, RoundedCornerShape(8.dp)).padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text("Self debug", color = o.fgMuted, fontSize = 13.sp)
+        when {
+            report != null -> {
+                Text(
+                    report.summary.ifBlank { if (report.findings.isEmpty()) "Nothing found." else "Findings" },
+                    color = if (report.healthy == false) o.danger else o.fg,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                report.findings.forEachIndexed { i, f -> FindingRow(f, divider = i < report.findings.lastIndex) }
+            }
+            view.job.state == "done" -> Text("Done, with no findings the phone can read.", color = o.fgMuted, fontSize = 14.sp)
+            view.job.state in setOf("failed", "skipped", "needs_person") -> Text(
+                view.job.error?.takeIf { it.isNotBlank() } ?: "The run ended ${view.job.state.replace('_', ' ')}.",
+                color = o.statusFailed,
+                fontSize = 14.sp,
+            )
+            else -> Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Working on it.", color = o.fg, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                TextButton(onClick = onRefresh) { Text("Check again", color = o.accent) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FindingRow(f: SelfDebugFinding, divider: Boolean) {
+    val o = Fleet.colors
+    var open by remember(f) { mutableStateOf(false) }
+    val tint = when (severityRank(f.severity)) {
+        0, 1 -> o.danger
+        2 -> o.statusWaiting
+        else -> o.fgMuted
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { open = !open }
+            .padding(vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.size(8.dp).background(tint, CircleShape))
+            Text(f.title, color = o.fg, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+            if (f.severity.isNotEmpty()) Text(f.severity, color = tint, fontSize = 12.sp)
+        }
+        val line = listOf(f.component, f.cause).filter { it.isNotBlank() }.joinToString(" · ")
+        if (line.isNotEmpty()) {
+            Text(line, color = o.fgMuted, fontSize = 13.sp, maxLines = if (open) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis)
+        }
+        if (open) {
+            if (f.fix.isNotBlank()) Text("Fix: ${f.fix}", color = o.fg, fontSize = 13.sp)
+            if (f.confidence.isNotBlank()) Text("Confidence: ${f.confidence}", color = o.fgMuted, fontSize = 12.sp)
+            for (e in f.evidence) {
+                Text(
+                    listOf(e.source, e.at).filter { it.isNotBlank() }.joinToString(" · ") + if (e.quote.isNotBlank()) "\n${e.quote}" else "",
+                    color = o.fgMuted,
+                    fontSize = 12.sp,
+                )
+            }
+        }
+    }
+    if (divider) HorizontalDivider(color = o.border)
 }
 
 /** How often an open running run reads on, in milliseconds. */

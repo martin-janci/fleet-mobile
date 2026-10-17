@@ -2295,6 +2295,8 @@ private fun FleetRoute(
                             if (tab == AutomationTab.Agents) agentActionsVm.refresh()
                         },
                         onRevokeRule = { agentActionsVm.revoke(it) },
+                        onRunRule = { rule, form -> agentActionsVm.run(rule, form) },
+                        onRefreshAgents = { agentActionsVm.refresh() },
                         onSelect = { automation.select(it) },
                         onBack = automation::back,
                         onOpenRun = { automation.openRun(it) },

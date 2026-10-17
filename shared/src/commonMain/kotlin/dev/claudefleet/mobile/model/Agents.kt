@@ -6,7 +6,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.put
 
 /*
  * The built-in agents' actions waiting for a person (claude-fleet agents
@@ -51,12 +54,33 @@ data class AgentRule(
     val active: Boolean = true,
 )
 
+/** One run of an agent (`agent_jobs`): what the findings card reads. */
+@Serializable
+data class AgentJob(
+    val id: Long,
+    @SerialName("rule_id") val ruleId: Long? = null,
+    /** A manual run's is the `job` that `agents { action: run }` answered. */
+    @SerialName("dedup_key") val dedupKey: String = "",
+    /** `pending` | `running` | `done` | `failed` | `skipped` | `needs_person`. */
+    val state: String = "",
+    val error: String? = null,
+    /** The run's answer, JSON text; null until it is done. */
+    val result: String? = null,
+    @SerialName("created_at") val createdAt: Long = 0,
+    @SerialName("updated_at") val updatedAt: Long = 0,
+)
+
 /** `agents { action: status }`: the part the phone draws. */
 @Serializable
 data class AgentsStatus(
     val pending: List<AgentAction> = emptyList(),
     val rules: List<AgentRule> = emptyList(),
+    val jobs: List<AgentJob> = emptyList(),
 )
+
+/** `agents { action: run }`'s answer: the rule, and the queued job's dedup key. */
+@Serializable
+data class AgentRunStarted(val id: Long = 0, val job: String = "")
 
 /** A rule's agent in words, the desktop's `ruleAgentName`. */
 fun ruleAgentName(r: AgentRule): String = when (r.agent) {
@@ -117,4 +141,128 @@ fun agentActionTitle(a: AgentAction): String {
         }
     }
     return a.kind.replace('_', ' ')
+}
+
+// ---- Run…, and the self debug agent's findings (claude-fleet self debug agent, step 7) ----
+
+/** The catalog definition of the self debug agent. */
+const val SELF_DEBUG = "self-debug"
+
+/** A fleet agent's instance the phone may start by hand; the hub refuses one whose trigger is not manual or schedule. */
+fun ruleRunnable(r: AgentRule): Boolean = r.agent == "fleet" && r.definition != null && r.active
+
+/** The Run… form's windows: label and minutes. */
+val RUN_WINDOWS: List<Pair<String, Int>> = listOf("1 h" to 60, "6 h" to 360, "24 h" to 1440, "3 d" to 4320, "7 d" to 10080)
+
+/** The components a run may be pointed at (`run_scope.component`). */
+val RUN_COMPONENTS: List<String> =
+    listOf("hub", "updater", "agent", "host", "desktop", "phone", "session", "routine", "mission", "jev", "update")
+
+/** Most characters of a run's request (the hub refuses more). */
+const val RUN_REQUEST_MAX = 4000
+
+/** What the Run… form holds; blank fields are left out of the call. */
+data class AgentRunForm(
+    val request: String = "",
+    /** One of [RUN_WINDOWS]' minutes, or null for the agent's own. */
+    val minutes: Int? = null,
+    /** One of [RUN_COMPONENTS], or null. */
+    val component: String? = null,
+    val host: String = "",
+    val session: String = "",
+)
+
+/** `agents { action: run, id, request?, run_scope? }` for [form], every empty field left out. */
+fun agentRunArgs(ruleId: Long, form: AgentRunForm): JsonObject {
+    val request = form.request.trim().take(RUN_REQUEST_MAX)
+    val host = form.host.trim()
+    val session = form.session.trim()
+    val component = form.component?.takeIf { it in RUN_COMPONENTS }
+    val minutes = form.minutes?.coerceIn(1, 10080)
+    val scope = buildJsonObject {
+        minutes?.let { put("minutes", it) }
+        if (host.isNotEmpty()) put("host", host)
+        if (session.isNotEmpty()) put("session", session)
+        component?.let { put("component", it) }
+    }
+    return buildJsonObject {
+        put("action", "run")
+        put("id", ruleId)
+        if (request.isNotEmpty()) put("request", request)
+        if (scope.isNotEmpty()) put("run_scope", scope)
+    }
+}
+
+/** One quoted piece of evidence behind a finding. */
+data class FindingEvidence(val source: String, val at: String, val quote: String)
+
+/** One finding of a self debug run. */
+data class SelfDebugFinding(
+    val title: String,
+    /** `critical` | `high` | `medium` | `low` | `info`, or whatever the agent wrote. */
+    val severity: String,
+    val component: String,
+    val cause: String,
+    val fix: String,
+    val confidence: String,
+    val evidence: List<FindingEvidence>,
+)
+
+/** A self debug run's answer: its summary and its findings, worst first. */
+data class SelfDebugReport(val summary: String, val healthy: Boolean?, val findings: List<SelfDebugFinding>)
+
+/** Where [severity] sorts: critical first, an unknown word last. */
+fun severityRank(severity: String): Int = when (severity.lowercase()) {
+    "critical" -> 0
+    "high" -> 1
+    "medium" -> 2
+    "low" -> 3
+    "info" -> 4
+    else -> 5
+}
+
+/**
+ * A finished self debug job's `result` (`{"subject", "answer": {"summary",
+ * "healthy", "findings": [...]}, "actions"}`) as a report, its findings worst
+ * severity first and otherwise in the agent's order; null when it is not
+ * JSON or has no answer. A field the agent left out reads as empty.
+ */
+fun selfDebugReport(result: String?): SelfDebugReport? {
+    val root = result?.let { runCatching { lenient.parseToJsonElement(it) as? JsonObject }.getOrNull() } ?: return null
+    val answer = root["answer"] as? JsonObject ?: return null
+    fun JsonObject.text(key: String): String = when (val v = this[key]) {
+        is JsonPrimitive -> v.contentOrNull.orEmpty()
+        null -> ""
+        else -> v.toString()
+    }
+    val findings = (answer["findings"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.map { f ->
+        SelfDebugFinding(
+            title = f.text("title").ifBlank { "Untitled finding" },
+            severity = f.text("severity").lowercase(),
+            component = f.text("component"),
+            cause = f.text("cause"),
+            fix = f.text("fix"),
+            confidence = f.text("confidence"),
+            evidence = (f["evidence"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.map { e ->
+                FindingEvidence(e.text("source"), e.text("at"), e.text("quote"))
+            },
+        )
+    }.sortedBy { severityRank(it.severity) }
+    return SelfDebugReport(
+        summary = answer.text("summary"),
+        healthy = (answer["healthy"] as? JsonPrimitive)?.booleanOrNull,
+        findings = findings,
+    )
+}
+
+/**
+ * The self debug job the findings card shows: the one [wanted] names (the
+ * run just started here, whatever its state), else the latest finished one
+ * of any self debug instance; null when there is none.
+ */
+fun selfDebugJob(rules: List<AgentRule>, jobs: List<AgentJob>, wanted: String?): AgentJob? {
+    val ids = rules.filter { it.definition == SELF_DEBUG }.map { it.id }.toSet()
+    val ours = jobs.filter { it.ruleId != null && it.ruleId in ids }
+    wanted?.let { key -> ours.firstOrNull { it.dedupKey == key }?.let { return it } }
+    return ours.filter { it.state == "done" && it.result != null }.maxWithOrNull(compareBy<AgentJob>({ it.updatedAt }, { it.id }))
 }

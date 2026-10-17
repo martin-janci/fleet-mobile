@@ -3,7 +3,14 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.BuiltInAgentActions
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.AgentAction
+import dev.claudefleet.mobile.model.AgentJob
 import dev.claudefleet.mobile.model.AgentRule
+import dev.claudefleet.mobile.model.AgentRunForm
+import dev.claudefleet.mobile.model.SelfDebugReport
+import dev.claudefleet.mobile.model.ruleAgentName
+import dev.claudefleet.mobile.model.ruleRunnable
+import dev.claudefleet.mobile.model.selfDebugJob
+import dev.claudefleet.mobile.model.selfDebugReport
 import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -36,9 +43,18 @@ data class AgentActionsUiState(
     val busy: Set<Long> = emptySet(),
     /** What the last press did, in words, by action. */
     val notices: Map<Long, String> = emptyMap(),
-    /** What the last Revoke did, in words. */
+    /** What the last Revoke or Run… did, in words. */
     val ruleNotice: String? = null,
+    /** This device may start a manual fleet agent (`agents { action: run }`). */
+    val canRun: Boolean = false,
+    /** Rules with a Run… on the wire. */
+    val running: Set<Long> = emptySet(),
+    /** The self debug agent's run the findings card shows, if any. */
+    val selfDebug: SelfDebugView? = null,
 )
+
+/** A self debug job and, once it is done, what it found. */
+data class SelfDebugView(val job: AgentJob, val report: SelfDebugReport?)
 
 class AgentActionsViewModel(
     private val fleet: FleetState,
@@ -49,6 +65,10 @@ class AgentActionsViewModel(
     private data class Local(
         val pending: List<AgentAction> = emptyList(),
         val rules: List<AgentRule> = emptyList(),
+        val jobs: List<AgentJob> = emptyList(),
+        /** The job key of the last Run… started here, which the findings card follows. */
+        val lastRun: String? = null,
+        val running: Set<Long> = emptySet(),
         val ruleNotice: String? = null,
         val busy: Set<Long> = emptySet(),
         val notices: Map<Long, String> = emptyMap(),
@@ -60,6 +80,7 @@ class AgentActionsViewModel(
 
     val state: StateFlow<AgentActionsUiState> = combine(local, fleet.capabilities) { l, caps ->
         val available = caps.has(TOOL, "status") && !l.refused
+        val job = if (available) selfDebugJob(l.rules, l.jobs, l.lastRun) else null
         AgentActionsUiState(
             available = available,
             canAnswer = available && canWrite && caps.has(TOOL, "approve"),
@@ -68,6 +89,9 @@ class AgentActionsViewModel(
             busy = l.busy,
             notices = l.notices,
             ruleNotice = l.ruleNotice,
+            canRun = available && canWrite && caps.has(TOOL, "run"),
+            running = l.running,
+            selfDebug = job?.let { SelfDebugView(it, selfDebugReport(it.result)) },
         )
     }.stateIn(scope, SharingStarted.Eagerly, AgentActionsUiState())
 
@@ -77,7 +101,7 @@ class AgentActionsViewModel(
         return scope.launch {
             try {
                 val s = actions.status()
-                local.update { it.copy(pending = s.pending, rules = s.rules) }
+                local.update { it.copy(pending = s.pending, rules = s.rules, jobs = s.jobs) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: HubError.Tool) {
@@ -102,6 +126,30 @@ class AgentActionsViewModel(
                 friendly(t).body
             }
             local.update { it.copy(ruleNotice = notice) }
+        }
+    }
+
+    /**
+     * Start a manual fleet agent's instance now with [form]'s focus; the
+     * findings card then follows the job it queued. The hub refuses an
+     * instance that finds its own work, and the refusal is the notice.
+     */
+    fun run(r: AgentRule, form: AgentRunForm): Job? {
+        val s = state.value
+        if (!s.canRun || !ruleRunnable(r) || r.id in s.running) return null
+        local.update { it.copy(running = it.running + r.id, ruleNotice = null) }
+        return scope.launch {
+            val notice = try {
+                val started = actions.run(r.id, form)
+                local.update { it.copy(lastRun = started.job.ifBlank { it.lastRun }) }
+                "${ruleAgentName(r)} queued. Its findings show here when it is done."
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                friendly(t).body
+            }
+            local.update { it.copy(running = it.running - r.id, ruleNotice = notice) }
+            refresh()
         }
     }
 
