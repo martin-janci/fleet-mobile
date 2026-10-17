@@ -42,6 +42,8 @@ data class HandoffItem(
     /** The status category: `todo`, `in_progress`, `done`, … */
     val status: String = "",
     @SerialName("proposal_state") val proposalState: String? = null,
+    /** The tree's own edges (the task graph card's waves); empty from an older hub. */
+    @SerialName("depends_on") val dependsOn: List<Long> = emptyList(),
 )
 
 /**

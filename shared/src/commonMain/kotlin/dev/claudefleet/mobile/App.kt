@@ -251,6 +251,16 @@ import dev.claudefleet.mobile.ui.proposedRows
 import dev.claudefleet.mobile.ui.runningRows
 import dev.claudefleet.mobile.ui.doneTodayRows
 import dev.claudefleet.mobile.model.localMidnight
+import dev.claudefleet.mobile.data.NetworkSignal
+import dev.claudefleet.mobile.model.buildThreads
+import dev.claudefleet.mobile.model.graphFromTree
+import dev.claudefleet.mobile.ui.AutonomyChip
+import dev.claudefleet.mobile.ui.AutonomyViewModel
+import dev.claudefleet.mobile.ui.ControlThreadsSheet
+import dev.claudefleet.mobile.ui.ControlThreadsStrip
+import dev.claudefleet.mobile.ui.MissionSteer
+import dev.claudefleet.mobile.ui.MissionSteerUi
+import dev.claudefleet.mobile.ui.TaskGraphCard
 import dev.claudefleet.mobile.ui.sharedRows
 import dev.claudefleet.mobile.ui.loadPhoneLayout
 import dev.claudefleet.mobile.ui.savePhoneLayout
@@ -976,6 +986,7 @@ private fun ControlTab(
     credentials: Credentials,
     nav: Navigator,
     missionsState: MissionsUiState,
+    missions: MissionsViewModel,
     scope: CoroutineScope,
     help: HelpState,
     helpSettings: HelpSettings,
@@ -1019,6 +1030,32 @@ private fun ControlTab(
             onPullRequests = { nav.select(Tab.Work); pullRequests.open(); Unit }.takeIf { controlPrs.available },
         )
     }
+    // Control as a Thread room on the phone (claude-fleet #914): what it handed out, and the newest tree.
+    val missionList = missionsState.missions
+    val threads = remember(controlRows, controlState.receipts, missionList, controlState.sessionId) {
+        val now = epochSeconds()
+        buildThreads(controlRows, controlState.receipts, missionList, controlState.sessionId, localMidnight(now, utcOffsetSeconds(now)))
+    }
+    val treeGraph = remember(controlState.receipts) {
+        controlState.receipts.lastOrNull { it.kind == "tree" && it.items.isNotEmpty() }?.let(::graphFromTree)
+    }
+    // The autonomy dial (claude-fleet #914), for a device the hub lets set fleet settings.
+    val autonomyOn = settingsCaps.fleetSettings && settingsCaps.setSetting && credentials.canWrite
+    val autonomy = remember(container, scope) { AutonomyViewModel(container.fleetSettingsActions, scope) }
+    val autonomyState by autonomy.state.collectAsState()
+    if (autonomyOn) LaunchedEffect(autonomy) { autonomy.load() }
+    var threadsOpen by remember { mutableStateOf(false) }
+    if (threadsOpen) {
+        ControlThreadsSheet(
+            threads = threads,
+            nowSeconds = epochSeconds(),
+            onOpen = { t ->
+                threadsOpen = false
+                if (t.mission) missions.openOne(t.id) else nav.open(t.id)
+            },
+            onClose = { threadsOpen = false },
+        )
+    }
     val sessionId = controlState.sessionId
     if (sessionId != null) {
         key(sessionId) {
@@ -1036,8 +1073,13 @@ private fun ControlTab(
                     header = {
                         ControlHeader(subtitle, views)
                         ErrorBanner(controlState.error, onDismiss = control::dismissError)
+                        // The threads Control handed out (claude-fleet #914), one strip; the list is a sheet.
+                        ControlThreadsStrip(threads) { threadsOpen = true }
                     },
                     aboveComposer = {
+                        // The newest proposed tree, as a task graph (claude-fleet #914).
+                        treeGraph?.let { TaskGraphCard(it, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) }
+                        if (autonomyOn) AutonomyChip(autonomyState, onSet = { autonomy.set(it); Unit }, onDismissError = autonomy::dismissError)
                         HandoffChips(controlState.handoffs, onOpenSession = nav::open, watching = controlState.watchingCi)
                         // Asked about the day ("what did I ship today?"): the answer offers Today.
                         val asked = controlRows.firstOrNull { it.id == sessionId }?.lastPrompt
@@ -1112,6 +1154,14 @@ private fun FleetRoute(
     LifecycleStartEffect(repository) {
         val job = scope.launch { container.logPoller.run { repository.status.value is ConnectionStatus.Connected } }
         onStopOrDispose { job.cancel() }
+    }
+
+    // The network back (Android's callback, NetworkSignal): reconnect now
+    // rather than wait out the backoff's sleep.
+    LaunchedEffect(repository) {
+        NetworkSignal.available.collect {
+            if (repository.status.value !is ConnectionStatus.Connected) repository.reconnectNow()
+        }
     }
 
     // A platform with no always-on watcher (iOS): while the app is open, keep
@@ -1211,6 +1261,11 @@ private fun FleetRoute(
     val control = remember(repository, scope) {
         ControlViewModel(repository, container.controlActions, container.agentActions, scope, credentials.canWrite)
     }
+    // "Steer this mission" (claude-fleet #921): through Control's own session.
+    val steer = remember(repository, scope) {
+        MissionSteer(repository, container.sessionActions, scope, credentials.canWrite) { control.state.value.sessionId }
+    }
+    val steerState by steer.state.collectAsState()
     val agent = remember(repository, scope) {
         AgentViewModel(
             fleet = repository,
@@ -2017,6 +2072,7 @@ private fun FleetRoute(
                     credentials = credentials,
                     nav = nav,
                     missionsState = missionsState,
+                    missions = missions,
                     scope = scope,
                     help = help,
                     helpSettings = helpSettings,
@@ -2360,6 +2416,20 @@ private fun FleetRoute(
                             null
                         },
                         onOpenSession = { id -> leaveMission(); nav.open(id) },
+                        steer = missionsState.detail?.mission?.let { m ->
+                            val steerRows by repository.sessions.collectAsState()
+                            val steerStatus by repository.status.collectAsState()
+                            val controlNow by control.state.collectAsState()
+                            LaunchedEffect(Unit) { control.ensureKnown() }
+                            MissionSteerUi(
+                                blocked = remember(steerRows, steerStatus, controlNow.sessionId) { steer.blocked(steerRows, steerStatus) },
+                                sending = steerState.sending == m.id,
+                                sent = steerState.receipts.filter { it.missionId == m.id },
+                                error = steerState.error,
+                                onSend = { text -> steer.send(m, text); Unit },
+                                onDismissError = steer::dismissError,
+                            )
+                        }.takeIf { layout == PhoneLayout.New },
                     ),
                     orbit = layout == PhoneLayout.New,
                 )

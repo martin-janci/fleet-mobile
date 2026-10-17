@@ -595,13 +595,7 @@ class FleetRepository(
     private fun discover() {
         discovery?.cancel()
         discovery = scope.launch {
-            val caps = try {
-                HubCapabilities.of(client.toolCatalog())
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Throwable) {
-                HubCapabilities()
-            }
+            val caps = readCapabilities()
             _capabilities.value = caps
             myWorkRead?.cancel()
             // Three independent reads, side by side rather than one after
@@ -618,6 +612,31 @@ class FleetRepository(
             if (!caps.work) _trackers.value = emptyList()
             _myWork.value = if (caps.work) readMyWork() else null
         }
+    }
+
+    /**
+     * `tools/list`, with a second and third try on a failure that says
+     * nothing about the hub (a dropped connection, a timeout, a 5xx). One
+     * flaky read used to wipe every capability until the next `ready`, which
+     * on a healthy stream can be hours: Control read "not offered", Missions
+     * vanished. A hub that answers and refuses (no `tools/list`) is the old
+     * hub, at once; a hub that never answers keeps what this connection's
+     * last read found, else the old hub's nothing.
+     */
+    private suspend fun readCapabilities(): HubCapabilities {
+        var last: Throwable? = null
+        for (wait in CATALOG_RETRY_MS) {
+            if (wait > 0) delay(wait)
+            try {
+                return HubCapabilities.of(client.toolCatalog())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                if (!isTransientHubFailure(t)) return HubCapabilities()
+                last = t
+            }
+        }
+        return if (last != null && _capabilities.value.tools.isNotEmpty()) _capabilities.value else HubCapabilities()
     }
 
     /** A *My work* read in flight from [refresh]; a newer read replaces it. */
@@ -840,6 +859,13 @@ internal val MAX_RECONNECT_DELAY = 30.seconds
  * Deterministic, with no jitter. One phone reconnecting to one hub is not a
  * thundering herd, and a fixed schedule is one a test can assert exactly.
  */
+/** The waits before each `tools/list` try: at once, then 1 s, then 4 s. */
+internal val CATALOG_RETRY_MS: List<Long> = listOf(0L, 1_000L, 4_000L)
+
+/** A failure that says nothing about what the hub offers: the call may well work again. */
+internal fun isTransientHubFailure(t: Throwable): Boolean =
+    t is HubError.Transport || (t is HubError.Http && t.status >= 500)
+
 internal fun reconnectDelay(failures: Int): Duration {
     val doublings = (failures - 1).coerceIn(0, 5)
     return minOf(BASE_RECONNECT_DELAY * (1 shl doublings), MAX_RECONNECT_DELAY)

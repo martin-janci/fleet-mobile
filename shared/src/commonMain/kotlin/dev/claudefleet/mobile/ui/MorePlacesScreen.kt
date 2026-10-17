@@ -49,6 +49,7 @@ import dev.claudefleet.mobile.model.UsageReport
 import dev.claudefleet.mobile.model.relativeAgo
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.model.relativeWithin
+import dev.claudefleet.mobile.model.loadParts
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
@@ -83,12 +84,28 @@ internal fun signalLost(h: HostLine): Boolean = !h.reachable && !neverChecked(h)
 /** Exceptions first: lost hosts (longest gone first), then those never checked. Healthy rows stay quiet below. */
 internal data class HostGroups(val attention: List<HostLine>, val connected: List<HostLine>)
 
-internal fun hostGroups(hosts: List<HostLine>): HostGroups {
-    val (attention, connected) = hosts.partition { !it.reachable || neverChecked(it) }
+internal fun hostGroups(hosts: List<HostLine>, nowSeconds: Long? = null): HostGroups {
+    // A host low on memory, saturated or short of disk (host health,
+    // claude-fleet #913) needs attention too, after the lost ones: its
+    // agents are the next to be killed. Judged only with a clock.
+    fun loaded(h: HostLine) = h.reachable && nowSeconds != null && loadOf(h, nowSeconds)?.trouble != null
+    val (attention, connected) = hosts.partition { !it.reachable || neverChecked(it) || loaded(it) }
     return HostGroups(
-        attention = attention.sortedWith(compareBy<HostLine>({ !signalLost(it) }, { it.lastPingedAt ?: Long.MAX_VALUE })),
+        attention = attention.sortedWith(
+            compareBy<HostLine>({ !signalLost(it) }, { loaded(it) }, { it.lastPingedAt ?: Long.MAX_VALUE }),
+        ),
         connected = connected,
     )
+}
+
+/**
+ * "CPU 18% · Mem 55% · Disk 40%" for a reachable host the hub sampled; null
+ * for a lost or never-sampled one, whose row says that instead.
+ */
+internal fun hostLoadChip(h: HostLine, nowSeconds: Long): String? {
+    val load = loadOf(h, nowSeconds) ?: return null
+    if (!h.reachable || load.at == null) return null
+    return loadParts(load).joinToString(" · ")
 }
 
 /** "5 hosts · 1 lost": the header's count. Hidden hosts count; they are listed here. */
@@ -173,7 +190,9 @@ fun OrbitHostsScreen(
     handlers: OrbitHostsHandlers,
     modifier: Modifier = Modifier,
 ) {
-    val groups = remember(state.hosts) { hostGroups(state.hosts) }
+    // Re-grouped each minute as well: a sample going stale changes the judgment.
+    val minute = nowSeconds / 60
+    val groups = remember(state.hosts, minute) { hostGroups(state.hosts, nowSeconds) }
     val behind = remember(state.hosts) { behindHosts(state.hosts) }
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(title = "Hosts", subtitle = state.hosts.takeIf { it.isNotEmpty() }?.let(::hostsHeadline))
@@ -240,6 +259,8 @@ private fun HostRowItem(host: HostLine, nowSeconds: Long, behind: Boolean, check
                 }
                 never -> handlers.onCheck?.let { probe -> RowAction("Check now", enabled = !checking) { probe(host.alias) } }
                 else -> {
+                    loadOf(host, nowSeconds)?.trouble?.let { OrbitChip(it, word = StatusWord.FAILED) }
+                    hostLoadChip(host, nowSeconds)?.let { OrbitChip(it) }
                     OrbitChip(host.transport)
                     if (behind) OrbitChip("claude ${host.claudeVersion?.substringBefore(' ')} · behind")
                     if (host.transport == "ssh") handlers.onInstallAgent?.let { add -> RowAction("Install agent") { add(host.alias) } }

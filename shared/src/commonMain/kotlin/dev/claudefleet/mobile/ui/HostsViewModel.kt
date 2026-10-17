@@ -3,7 +3,9 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.HostActions
 import dev.claudefleet.mobile.data.FleetState
+import dev.claudefleet.mobile.model.HostLoad
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.hostLoad
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.ui.kit.StatusWord
 import kotlinx.coroutines.CancellationException
@@ -37,7 +39,15 @@ data class HostLine(
     val working: Int = 0,
     /** The round trip of the hub's last probe, in ms; null for `local` and from an older hub. */
     val latencyMs: Long? = null,
+    /**
+     * The hub's row, for its health sample: what [hostLoad] judges against a
+     * clock the screen holds. Null in a line built by hand.
+     */
+    val row: HostRow? = null,
 )
+
+/** [line]'s CPU, memory and disk now; null when the line carries no row. */
+internal fun loadOf(line: HostLine, nowSeconds: Long): HostLoad? = line.row?.let { hostLoad(it, nowSeconds) }
 
 data class HostsUiState(
     val hosts: List<HostLine> = emptyList(),
@@ -168,6 +178,7 @@ class HostsViewModel(
                     needsYou = words[host.alias]?.count { it == StatusWord.NEEDS_YOU } ?: 0,
                     working = words[host.alias]?.count { it == StatusWord.WORKING } ?: 0,
                     latencyMs = host.latencyMs,
+                    row = host,
                 )
             },
             status = status,

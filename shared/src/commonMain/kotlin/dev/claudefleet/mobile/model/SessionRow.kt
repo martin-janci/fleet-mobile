@@ -44,6 +44,13 @@ data class SessionRow(
     @SerialName("last_activity_at") val lastActivityAt: Long? = null,
     /** Set on a ghost row — a session fleet knows about but tmux no longer has. */
     @SerialName("lost_at") val lostAt: Long? = null,
+    /**
+     * Why the row was lost: `host_reboot` | `tmux_server_gone` |
+     * `process_died` (its agent was killed under it: out of memory, oomd;
+     * claude-fleet migration 193) | `missing` | `killed`. Null while live,
+     * and from an older hub. Kept as the hub's word; see [lostReasonLabel].
+     */
+    @SerialName("lost_reason") val lostReason: String? = null,
     @SerialName("turn_seq") val turnSeq: Long = 0,
     @SerialName("pr_url") val prUrl: String? = null,
     /** passing | failing | pending, from the PR's check rollup. */
@@ -256,4 +263,31 @@ data class Attention(
         /** The state of a proposal (contract 15): shown apart, never counted. */
         const val STATE_PROPOSED = "proposed"
     }
+}
+
+/**
+ * The `lost_reason`s the hub keeps a row for, to `sessions.lost_ttl_secs`,
+ * so it can be resumed, and that its automatic restore
+ * (`recovery.auto_restore`, when on) brings back by itself:
+ * `RESUMABLE_LOST_REASONS` in claude-fleet's `store/rows.rs`.
+ */
+val RESUMABLE_LOST_REASONS: Set<String> = setOf("process_died", "tmux_server_gone", "host_reboot")
+
+/** Why a session was lost, in words; null for an unknown or absent reason. Mirrors the desktop's `lostReasonLabel`. */
+fun lostReasonLabel(reason: String?): String? = when (reason) {
+    "host_reboot" -> "host rebooted"
+    "tmux_server_gone" -> "tmux server stopped"
+    "process_died" -> "its process stopped (out of memory or killed)"
+    "local_disabled" -> "local host is off on this hub"
+    else -> null
+}
+
+/**
+ * A lost row's line: "Lost · its process stopped (out of memory or
+ * killed)". Null for a live row; "Lost" alone when the hub gave no reason
+ * this build names.
+ */
+fun lostLine(row: SessionRow): String? {
+    if (row.lostAt == null) return null
+    return lostReasonLabel(row.lostReason)?.let { "Lost · $it" } ?: "Lost"
 }

@@ -73,6 +73,8 @@ data class MissionsHandlers(
     val onOpenItem: ((Long) -> Unit)? = null,
     /** Open one of the mission's sessions by its id; null draws no Session buttons. */
     val onOpenSession: ((Long) -> Unit)? = null,
+    /** "Steer this mission" through Control (claude-fleet #921); null draws no composer. */
+    val steer: MissionSteerUi? = null,
 )
 
 /**
