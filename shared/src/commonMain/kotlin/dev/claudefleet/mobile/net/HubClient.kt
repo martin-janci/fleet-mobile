@@ -2504,6 +2504,16 @@ class HubClient(
         return text
     }
 
+    /**
+     * `POST /log` (claude-fleet self debug agent): [body] is a poll (`{}`) or
+     * an upload of this app's log. The status and the reply as they came,
+     * without [throwForStatus]: a 401, 403 or 404 here means "this hub takes
+     * no log from this app" and stops the poller ([dev.claudefleet.mobile.log.LogPoller]),
+     * not the pairing — so it must not reach [dev.claudefleet.mobile.data.AppSession.withClient]
+     * as [HubError.Unauthorized]. A network failure is [HubError.Transport].
+     */
+    suspend fun postLog(body: String): Pair<Int, String> = send("$base/log", body, authenticated = true)
+
     /** `/mcp` for a long poll, a lifecycle call or a hub with no JSON mount; `/mcp/json` otherwise. */
     private fun mountFor(framed: Boolean): String =
         if (framedOnly || framed) "$base/mcp" else "$base/mcp/json"

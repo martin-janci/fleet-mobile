@@ -9,6 +9,9 @@ internal expect fun platformName(): String
 /** Unix seconds, so a UI clock can be read without pulling in a date library. */
 internal expect fun epochSeconds(): Long
 
+/** Unix milliseconds, for the app's own log stamps (`log/LogRing.kt`). */
+internal expect fun epochMillis(): Long
+
 /**
  * How far this device's local time was ahead of UTC at [atEpochSeconds], in
  * seconds (negative west of Greenwich) — what turns "now" into "since local

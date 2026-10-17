@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.log.FleetLog
+import dev.claudefleet.mobile.log.LogLevel
 import dev.claudefleet.mobile.net.HubError
 
 /** What a banner shows: a title, a sentence, and the raw hub text behind a Details expander. */
@@ -13,7 +15,13 @@ const val NO_TRANSCRIPT = "E_NO_TRANSCRIPT"
  * rule holds here by construction — and `details` is [explain]'s output and
  * nothing else, in every branch, which is what keeps that true.
  */
-fun friendly(t: Throwable): Friendly {
+fun friendly(t: Throwable): Friendly = friendlyWords(t).also {
+    // The app's log (`log/LogRing.kt`): every failure a screen shows comes
+    // through here, in the same token-safe words the Details expander holds.
+    FleetLog.ring.add(if (it.isError) LogLevel.Warn else LogLevel.Info, "ui", "${it.title}: ${it.details ?: it.body}")
+}
+
+private fun friendlyWords(t: Throwable): Friendly {
     val raw = explain(t)
     return when (t) {
         is HubError.Tool -> when (t.code) {
