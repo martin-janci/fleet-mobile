@@ -42,6 +42,8 @@ import dev.claudefleet.mobile.model.ConfirmRequest
 import dev.claudefleet.mobile.model.ControlHandoff
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.OperatorStatus
+import dev.claudefleet.mobile.model.QueuedPrompt
+import dev.claudefleet.mobile.model.queuedChipText
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.ui.components.ErrorBanner
@@ -866,6 +868,39 @@ fun ControlForms(
                 color = o.fgMuted,
                 modifier = Modifier.padding(horizontal = 4.dp),
             )
+        }
+    }
+}
+
+const val QUEUED_CHIP_TAG = "control.queued."
+const val QUEUED_CANCEL_TAG = "control.queued.cancel."
+
+/**
+ * The messages typed while Control was mid-turn (Control review F4/F19),
+ * each a chip "Queued: … · Cancel" above the composer until the turn ends
+ * and the hub types it. Cancel takes it back before Control gets it.
+ */
+@Composable
+fun QueuedChips(queued: List<QueuedPrompt>, enabled: Boolean, onCancel: (Long) -> Unit) {
+    if (queued.isEmpty()) return
+    val o = Fleet.colors
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        for (q in queued) {
+            Surface(
+                color = o.bgPane,
+                border = BorderStroke(1.dp, o.controlBorder),
+                shape = RoundedCornerShape(50),
+                modifier = Modifier.heightIn(min = 32.dp).testTag(QUEUED_CHIP_TAG + q.id),
+            ) {
+                Row(modifier = Modifier.padding(start = 12.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(queuedChipText(q), style = Fleet.type.textSm, color = o.fg2, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                    TextButton(
+                        onClick = { onCancel(q.id) },
+                        enabled = enabled,
+                        modifier = Modifier.testTag(QUEUED_CANCEL_TAG + q.id),
+                    ) { Text("Cancel") }
+                }
+            }
         }
     }
 }

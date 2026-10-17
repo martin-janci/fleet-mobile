@@ -135,6 +135,7 @@ import dev.claudefleet.mobile.model.RepairReport
 import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.FleetNote
 import dev.claudefleet.mobile.model.parseFleetPrompt
+import dev.claudefleet.mobile.model.personQueued
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.tailMarker
 import dev.claudefleet.mobile.model.thinkingLine
@@ -955,6 +956,10 @@ fun SessionScreen(
                 )
             }
             control?.aboveComposer?.invoke()
+            // What the person typed while Control was mid-turn, waiting in the hub's queue (Control review F19).
+            if (control != null && state.queuesWhileWorking) {
+                QueuedChips(remember(state.queued) { personQueued(state.queued) }, enabled = state.connected, onCancel = later.onCancelQueued)
+            }
 
             // Recovery on the New bar (redesign 14.5): at the foot of the
             // conversation, where the next step is taken — never behind ⋮.
@@ -1132,7 +1137,8 @@ fun SessionScreen(
                                     agent = tabs?.agent,
                                     onAnswerInWords = { scrollToNewest(); onAnswerInWords() },
                                     // The New bar names what Send does while Claude works: Queue.
-                                    queueLabel = tabs != null && state.session?.claudeStatus == "working",
+                                    // Control's composer queues on the hub while it works (Control review F19).
+                                    queueLabel = (tabs != null || state.queuesWhileWorking) && state.session?.claudeStatus == "working",
                                     // New bar only, like ⋮ Send later… whose sheet it opens.
                                     onSendLater = { laterDraft = state.draft }.takeIf { tabs != null && state.canSendLater },
                                 )
@@ -2995,6 +3001,19 @@ private fun PromptBox(
                     Text("■", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { contentDescription = "Stop the agent" })
                 }
             } else if (queueLabel && !wordsMode) {
+                // Control's composer keeps Stop beside Queue: a draft must not hide the way to halt the turn.
+                if (state.queuesWhileWorking && state.canStopTurn) {
+                    FilledIconButton(
+                        onClick = { haptics.performHapticFeedback(HapticFeedbackType.LongPress); onStop() },
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError,
+                        ),
+                        modifier = Modifier.padding(bottom = 4.dp).size(48.dp),
+                    ) {
+                        Text("■", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { contentDescription = "Stop the agent" })
+                    }
+                }
                 Button(
                     onClick = { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); onSend() },
                     enabled = state.canSend,

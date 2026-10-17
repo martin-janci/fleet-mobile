@@ -3015,7 +3015,8 @@ private fun SessionRoute(
     control: ControlChrome? = null,
 ) {
     val scope = rememberWorkScope()
-    val vm = remember(sessionId, repository, scope, newLayout) {
+    val queuesForControl = control != null
+    val vm = remember(sessionId, repository, scope, newLayout, queuesForControl) {
         SessionViewModel(
             sessionId = sessionId,
             fleet = repository,
@@ -3033,6 +3034,8 @@ private fun SessionRoute(
             keepNotSent = newLayout,
             // ⋮ Background agent… (MobileFormsSession), on this session's host.
             background = container.newSessionActions,
+            // Control's composer queues on the hub while it works (Control review F19).
+            queueWhileWorking = queuesForControl,
         )
     }
     val workVm = remember(sessionId, repository, scope) {
@@ -3068,6 +3071,12 @@ private fun SessionRoute(
     LaunchedEffect(sessionId) { vm.load() }
 
     val state by vm.state.collectAsState()
+    // Control's queued messages: read again whenever its turn moves, so one the hub typed leaves its chip.
+    if (queuesForControl) {
+        LaunchedEffect(sessionId, state.session?.claudeStatus, state.session?.turnSeq, state.queuesWhileWorking) {
+            if (state.queuesWhileWorking) vm.loadQueued()
+        }
+    }
     // The Details tab's Review… and Force kill… ask here (r09 B18); ⋮ keeps its own.
     var detailsAsk by remember { mutableStateOf<DetailsAsk?>(null) }
     // The Hex field while a repair or a recreate runs (MobileFullscreenLoaders), New bar only.

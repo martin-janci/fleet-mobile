@@ -4149,6 +4149,102 @@ class SessionViewModelTest {
         assertTrue(actions.queuedSent.isEmpty())
     }
 
+    // ---- Control's queued composer (Control review F4/F19) ----
+
+    @Test
+    fun controls_composer_queues_on_the_hub_while_it_works_and_keeps_stop() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(
+            ID,
+            FakeFleetState(listOf(row(status = "working")), tools = setOf("queue_prompt", "queued_prompts")),
+            actions,
+            backgroundScope,
+            queueWhileWorking = true,
+        )
+        runCurrent()
+        vm.onDraftChange("  and check the CI too  ")
+        runCurrent()
+        assertTrue(vm.state.value.queuesWhileWorking)
+        assertTrue(vm.state.value.queuesSend)
+        assertTrue(vm.state.value.canStopTurn, "Stop stays beside Queue with a draft in the box")
+        assertFalse(vm.state.value.canStop, "the empty-box Stop is Send's place, not this one")
+
+        vm.send().join()
+        runCurrent()
+
+        assertEquals(listOf("and check the CI too"), actions.queuedSent, "through queue_prompt, trimmed")
+        assertTrue(actions.sentPrompts.isEmpty(), "never typed into the working pane")
+        assertEquals("", vm.state.value.draft)
+        assertNull(vm.state.value.pending)
+        assertEquals(listOf("and check the CI too"), vm.state.value.queued.map { it.body })
+
+        vm.cancelQueued(1).join()
+        runCurrent()
+        assertEquals(listOf(1L), actions.cancelled)
+        assertTrue(vm.state.value.queued.isEmpty())
+    }
+
+    @Test
+    fun controls_composer_types_at_once_when_idle_and_on_a_hub_without_the_queue() = runTest {
+        val idle = FakeActions()
+        val vm = SessionViewModel(
+            ID,
+            FakeFleetState(listOf(row(status = "idle")), tools = setOf("queue_prompt", "queued_prompts")),
+            idle,
+            backgroundScope,
+            queueWhileWorking = true,
+        )
+        runCurrent()
+        vm.onDraftChange("next")
+        vm.send().join()
+        runCurrent()
+        assertEquals(listOf("next"), idle.sentPrompts)
+        assertTrue(idle.queuedSent.isEmpty())
+
+        val old = FakeActions()
+        val oldVm = SessionViewModel(ID, FakeFleetState(listOf(row(status = "working"))), old, backgroundScope, queueWhileWorking = true)
+        runCurrent()
+        assertFalse(oldVm.state.value.queuesWhileWorking)
+        oldVm.onDraftChange("next")
+        oldVm.send().join()
+        runCurrent()
+        assertEquals(listOf("next"), old.sentPrompts, "an older hub keeps today's send")
+    }
+
+    @Test
+    fun an_ordinary_session_never_queues_from_send() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(listOf(row(status = "working")), tools = setOf("queue_prompt", "queued_prompts")), actions, backgroundScope)
+        runCurrent()
+        assertFalse(vm.state.value.queuesSend)
+        vm.onDraftChange("go on")
+        vm.send().join()
+        runCurrent()
+        assertEquals(listOf("go on"), actions.sentPrompts)
+        assertTrue(actions.queuedSent.isEmpty())
+    }
+
+    @Test
+    fun a_refused_queue_puts_the_words_back_in_the_box() = runTest {
+        val actions = object : SessionActions by FakeActions() {
+            override suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming): QueuePromptResult =
+                throw HubError.Tool("E_INVALID_STATE", "no")
+        }
+        val vm = SessionViewModel(
+            ID,
+            FakeFleetState(listOf(row(status = "working")), tools = setOf("queue_prompt", "queued_prompts")),
+            actions,
+            backgroundScope,
+            queueWhileWorking = true,
+        )
+        runCurrent()
+        vm.onDraftChange("keep me")
+        vm.send().join()
+        runCurrent()
+        assertEquals("keep me", vm.state.value.draft)
+        assertNotNull(vm.state.value.error)
+    }
+
     // ---- Done · unread: the open screen stamps the session viewed (contract 11) ----
 
     @Test
