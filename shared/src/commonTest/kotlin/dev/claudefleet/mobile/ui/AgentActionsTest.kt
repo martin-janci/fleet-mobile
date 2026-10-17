@@ -134,6 +134,10 @@ class AgentActionsTest {
         assertEquals("Remember NPE in memory", title("record", """{"store":"memory","key":"NPE"}"""))
         assertEquals("Call kb.add_known_error", title("mcp_call", """{"binding":"kb","tool":"add_known_error"}"""))
         assertEquals("Comment on o/r#4", title("pr_comment", """{"repo":"o/r","number":4}"""))
+        assertEquals("Create a task: Flaky reconnect (2 steps)", title("work_task", """{"title":"Flaky reconnect","steps":["a","b"]}"""))
+        assertEquals("Start a session on o/r (htz): Fix backoff", title("fix_session", """{"project":"o/r","host":"htz","title":"Fix backoff"}"""))
+        assertEquals("Change hub.probe_secs from 30 to 60", title("setting", """{"key":"hub.probe_secs","value":"60","was":"30"}"""))
+        assertEquals("Recover fed-v2 on htz", title("session_recover", """{"session":"fed-v2","host":"htz"}"""))
         val s = json.decodeFromString(
             AgentsStatus.serializer(),
             """{"rules":[{"id":12,"agent":"fleet","scope":"l2-prod","level":"propose","host_alias":"mercury",

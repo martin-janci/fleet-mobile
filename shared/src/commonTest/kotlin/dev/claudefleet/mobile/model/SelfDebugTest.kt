@@ -38,6 +38,8 @@ class SelfDebugTest {
         assertEquals("hub", oom.component)
         assertEquals("raise the limit", oom.fix)
         assertEquals("high", oom.confidence)
+        // The self debug agent's own words sort with the others'.
+        assertEquals(listOf(0, 2, 3), listOf("critical", "major", "minor").map { severityRank(it) })
         assertEquals(listOf(FindingEvidence("hub", "2026-10-17T10:15:40Z", "killed")), oom.evidence)
         assertEquals("0.6", r.findings.first { it.title == "Stale agent" }.confidence)
         // Missing fields read as empty, not as a failure.

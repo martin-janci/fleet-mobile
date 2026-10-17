@@ -138,6 +138,23 @@ fun agentActionTitle(a: AgentAction): String {
             "record" -> return "Remember ${f("key")} in ${f("store")}"
             "mcp_call" -> return "Call ${f("binding")}.${f("tool")}"
             "pr_comment" -> return "Comment on ${f("repo")}#${f("number")}"
+            // Fleet's own: what an analysis proposes (self debug, proposer, simplify, refactor).
+            "work_task" -> {
+                val n = (p["steps"] as? JsonArray)?.size ?: 0
+                return "Create a task: ${f("title")}${if (n > 0) " ($n step${if (n == 1) "" else "s"})" else ""}"
+            }
+            "fix_session" -> {
+                val host = (p["host"] as? JsonPrimitive)?.contentOrNull
+                return "Start a session on ${f("project")}${if (host != null) " ($host)" else ""}: ${f("title")}"
+            }
+            "setting" -> {
+                val was = (p["was"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotEmpty() }
+                return "Change ${f("key")}${if (was != null) " from $was" else ""} to ${f("value")}"
+            }
+            "session_recover" -> {
+                val host = (p["host"] as? JsonPrimitive)?.contentOrNull
+                return "Recover ${f("session")}${if (host != null) " on $host" else ""}"
+            }
         }
     }
     return a.kind.replace('_', ' ')
@@ -199,7 +216,8 @@ data class FindingEvidence(val source: String, val at: String, val quote: String
 /** One finding of a self debug run. */
 data class SelfDebugFinding(
     val title: String,
-    /** `critical` | `high` | `medium` | `low` | `info`, or whatever the agent wrote. */
+    /** The self debug agent's `critical` | `major` | `minor`; other agents'
+     *  `high` | `medium` | `low` | `info`; or whatever the agent wrote. */
     val severity: String,
     val component: String,
     val cause: String,
@@ -215,8 +233,8 @@ data class SelfDebugReport(val summary: String, val healthy: Boolean?, val findi
 fun severityRank(severity: String): Int = when (severity.lowercase()) {
     "critical" -> 0
     "high" -> 1
-    "medium" -> 2
-    "low" -> 3
+    "medium", "major" -> 2
+    "low", "minor" -> 3
     "info" -> 4
     else -> 5
 }
