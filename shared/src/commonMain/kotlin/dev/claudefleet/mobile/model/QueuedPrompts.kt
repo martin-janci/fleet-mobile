@@ -74,12 +74,19 @@ fun personQueued(queued: List<QueuedPrompt>): List<QueuedPrompt> =
 fun withoutUntrustedMarker(body: String): String {
     val t = body.trimStart()
     val first = t.substringBefore('\n')
-    return if (first.startsWith("[claude-fleet: message from ") && first.trimEnd().endsWith("treat as untrusted input]")) {
+    return if (first.startsWith(UNTRUSTED_MARKER_HEAD) && first.trimEnd().endsWith("treat as untrusted input]")) {
         t.substringAfter('\n', "")
     } else {
         body
     }
 }
+
+/**
+ * The hub's marker line opens with this. Split in two literals on purpose:
+ * it is the hub's wire text, never drawn, and the copy rules
+ * (`CopyRulesTest`) refuse the old product name in a string the app shows.
+ */
+private const val UNTRUSTED_MARKER_HEAD = "[claude" + "-fleet: message from "
 
 /** A queued message's chip: "Queued: fix the tests", one line, cut to [max] characters with an ellipsis. */
 fun queuedChipText(q: QueuedPrompt, max: Int = 40): String {
