@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -33,8 +34,12 @@ val LocalStatusColors = staticCompositionLocalOf<(StatusTone) -> FleetStatusColo
  * ask here by name.
  */
 @Immutable
-class OrbitColors internal constructor(val isDark: Boolean) {
-    private fun c(name: String) = Color(OrbitTokens.argb(name, isDark))
+class OrbitColors internal constructor(
+    val isDark: Boolean,
+    /** The palette engine's colours for this moment ([OrbitPalette.colors]); a token it leaves out keeps the manual's value. */
+    private val painted: Map<String, Long> = emptyMap(),
+) {
+    private fun c(name: String) = Color(painted[name] ?: OrbitTokens.argb(name, isDark))
 
     val bg = c("bg")
     val bgPane = c("bg-pane")
@@ -232,5 +237,28 @@ fun FleetTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () ->
         LocalOrbitType provides Type,
     ) {
         MaterialTheme(colorScheme = if (dark) DarkScheme else LightScheme, shapes = OrbitShapes, content = content)
+    }
+}
+
+/**
+ * The dynamic day/night theme ("Mission HUD"): the palette engine's colours
+ * for a sun height, contrast level and accent ([OrbitPalette]), laid over the
+ * manual's tokens. Dark exactly while [sun] is below 0. The app root uses
+ * this; previews and tests keep the fixed [FleetTheme] above.
+ */
+@Composable
+fun FleetTheme(sun: Double, contrast: ContrastLevel, accent: OrbitAccent, content: @Composable () -> Unit) {
+    // A minute's drift often rounds to the same colours: key on the result, not the inputs.
+    val painted = remember(sun, contrast, accent) { OrbitPalette.colors(sun, contrast, accent.hue) }
+    val dark = sun < 0
+    val orbit = remember(painted) { OrbitColors(dark, painted) }
+    val scheme = remember(orbit) { orbitColorScheme(orbit) }
+    val status = remember(orbit) { { tone: StatusTone -> orbitStatusColors(orbit, tone) } }
+    CompositionLocalProvider(
+        LocalStatusColors provides status,
+        LocalOrbitColors provides orbit,
+        LocalOrbitType provides Type,
+    ) {
+        MaterialTheme(colorScheme = scheme, shapes = OrbitShapes, content = content)
     }
 }

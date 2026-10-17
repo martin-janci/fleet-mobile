@@ -5,6 +5,8 @@ import dev.claudefleet.mobile.notify.PhoneQuiet
 import dev.claudefleet.mobile.notify.phoneQuiet
 import dev.claudefleet.mobile.notify.notifyKinds
 import dev.claudefleet.mobile.store.FakePrefs
+import dev.claudefleet.mobile.ui.theme.LocalClock
+import dev.claudefleet.mobile.ui.theme.OrbitAccent
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -13,12 +15,16 @@ import kotlin.test.assertTrue
 class PhoneSettingsTest {
 
     @Test
-    fun the_theme_follows_the_system_until_one_is_picked_and_survives_a_restart() {
+    fun the_theme_follows_the_sun_until_one_is_picked_and_survives_a_restart() {
         val prefs = FakePrefs()
         val first = PhoneSettings(prefs)
-        assertEquals(ThemeChoice.SYSTEM, first.theme.value)
-        assertTrue(first.theme.value.isDark(systemDark = true))
-        assertFalse(first.theme.value.isDark(systemDark = false))
+        assertEquals(ThemeChoice.SUN, first.theme.value)
+        val noon = { LocalClock(dayOfYear = 290, hour = 12, minute = 30, utcOffsetHours = 2.0, standardOffsetHours = 1.0) }
+        val midnight = { LocalClock(dayOfYear = 290, hour = 0, minute = 30, utcOffsetHours = 2.0, standardOffsetHours = 1.0) }
+        assertFalse(ThemeChoice.SUN.isDark(systemDark = true, clock = noon))
+        assertTrue(ThemeChoice.SUN.isDark(systemDark = false, clock = midnight))
+        assertTrue(ThemeChoice.SYSTEM.isDark(systemDark = true))
+        assertFalse(ThemeChoice.SYSTEM.isDark(systemDark = false))
 
         first.setTheme(ThemeChoice.LIGHT)
         assertEquals(ThemeChoice.LIGHT, first.theme.value)
@@ -29,9 +35,22 @@ class PhoneSettingsTest {
     }
 
     @Test
-    fun an_unreadable_theme_falls_back_to_the_system() {
+    fun an_unreadable_theme_falls_back_to_the_sun() {
         val prefs = FakePrefs().apply { putStringList("phone.theme", listOf("sepia")) }
-        assertEquals(ThemeChoice.SYSTEM, PhoneSettings(prefs).theme.value)
+        assertEquals(ThemeChoice.SUN, PhoneSettings(prefs).theme.value)
+    }
+
+    @Test
+    fun contrast_and_accent_start_on_standard_and_cyan_and_survive_a_restart() {
+        val prefs = FakePrefs()
+        val first = PhoneSettings(prefs)
+        assertEquals(ContrastChoice.STANDARD, first.contrast.value)
+        assertEquals(OrbitAccent.CYAN, first.accent.value)
+        first.setContrast(ContrastChoice.HIGH)
+        first.setAccent(OrbitAccent.COPPER)
+        val again = PhoneSettings(prefs)
+        assertEquals(ContrastChoice.HIGH, again.contrast.value)
+        assertEquals(OrbitAccent.COPPER, again.accent.value)
     }
 
     /** r11: Motion follows the system until one is picked, survives a restart, and maps to LocalReducedMotion. */

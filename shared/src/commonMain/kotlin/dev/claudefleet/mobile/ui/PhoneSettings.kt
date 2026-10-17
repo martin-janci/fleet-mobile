@@ -8,23 +8,45 @@ import dev.claudefleet.mobile.notify.phoneQuiet
 import dev.claudefleet.mobile.notify.writeNotifyKinds
 import dev.claudefleet.mobile.notify.writePhoneQuiet
 import dev.claudefleet.mobile.store.Prefs
+import dev.claudefleet.mobile.ui.theme.ContrastLevel
+import dev.claudefleet.mobile.ui.theme.LocalClock
+import dev.claudefleet.mobile.ui.theme.OrbitAccent
+import dev.claudefleet.mobile.ui.theme.OrbitPalette
+import dev.claudefleet.mobile.ui.theme.localClock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** The theme This phone draws in. System follows the phone's own setting, as the app always has. */
+/**
+ * The theme this phone draws in. Sun (the default, as on the desktop) is light
+ * while the sun is up where the phone is and dark after sunset, easing through
+ * golden hour, blue hour and night ([OrbitPalette]). System follows the
+ * phone's own light/dark setting; Light and Dark hold noon and a mid-night.
+ */
 enum class ThemeChoice(val label: String) {
-    DARK("Dark"),
-    LIGHT("Light"),
+    SUN("Sun"),
     SYSTEM("System"),
+    LIGHT("Light"),
+    DARK("Dark"),
     ;
 
-    /** Dark or not, given what the system says. */
-    fun isDark(systemDark: Boolean): Boolean = when (this) {
-        DARK -> true
-        LIGHT -> false
-        SYSTEM -> systemDark
+    /** The sun height the theme paints at, given the system setting and the clock. */
+    fun sun(systemDark: Boolean, clock: () -> LocalClock = ::localClock): Double = when (this) {
+        SUN -> OrbitPalette.sunNow(clock())
+        SYSTEM -> if (systemDark) OrbitPalette.DARK_SUN else OrbitPalette.LIGHT_SUN
+        LIGHT -> OrbitPalette.LIGHT_SUN
+        DARK -> OrbitPalette.DARK_SUN
     }
+
+    /** Dark or not, given what the system says (and, for Sun, the clock). */
+    fun isDark(systemDark: Boolean, clock: () -> LocalClock = ::localClock): Boolean = sun(systemDark, clock) < 0
+}
+
+/** Contrast, the desktop's levels. Text is held at the same contrast all day; High is for glare. */
+enum class ContrastChoice(val label: String, val level: ContrastLevel) {
+    SOFT("Soft", ContrastLevel.SOFT),
+    STANDARD("Standard", ContrastLevel.STD),
+    HIGH("High", ContrastLevel.HIGH),
 }
 
 /**
@@ -49,6 +71,8 @@ enum class MotionChoice(val label: String) {
 
 private const val THEME_PREF = "phone.theme"
 private const val MOTION_PREF = "phone.motion"
+private const val CONTRAST_PREF = "phone.contrast"
+private const val ACCENT_PREF = "phone.accent"
 private const val LOCK_PREF = "phone.lock"
 private const val WORK_TAP_PREF = "phone.work_tap"
 
@@ -69,6 +93,12 @@ class PhoneSettings(private val prefs: Prefs) {
 
     private val _motion = MutableStateFlow(readMotion())
     val motion: StateFlow<MotionChoice> = _motion.asStateFlow()
+
+    private val _contrast = MutableStateFlow(read(CONTRAST_PREF, ContrastChoice.entries, ContrastChoice.STANDARD))
+    val contrast: StateFlow<ContrastChoice> = _contrast.asStateFlow()
+
+    private val _accent = MutableStateFlow(read(ACCENT_PREF, OrbitAccent.entries, OrbitAccent.CYAN))
+    val accent: StateFlow<OrbitAccent> = _accent.asStateFlow()
 
     private val _notifyKinds = MutableStateFlow(prefs.notifyKinds())
     val notifyKinds: StateFlow<NotifyKinds> = _notifyKinds.asStateFlow()
@@ -96,6 +126,16 @@ class PhoneSettings(private val prefs: Prefs) {
     fun setTheme(choice: ThemeChoice) {
         prefs.putStringList(THEME_PREF, listOf(choice.name.lowercase()))
         _theme.value = choice
+    }
+
+    fun setContrast(choice: ContrastChoice) {
+        prefs.putStringList(CONTRAST_PREF, listOf(choice.name.lowercase()))
+        _contrast.value = choice
+    }
+
+    fun setAccent(choice: OrbitAccent) {
+        prefs.putStringList(ACCENT_PREF, listOf(choice.name.lowercase()))
+        _accent.value = choice
     }
 
     fun setMotion(choice: MotionChoice) {
@@ -135,7 +175,12 @@ class PhoneSettings(private val prefs: Prefs) {
 
     private fun readTheme(): ThemeChoice {
         val stored = prefs.getStringList(THEME_PREF).firstOrNull()
-        return ThemeChoice.entries.firstOrNull { it.name.lowercase() == stored } ?: ThemeChoice.SYSTEM
+        return ThemeChoice.entries.firstOrNull { it.name.lowercase() == stored } ?: ThemeChoice.SUN
+    }
+
+    private fun <T : Enum<T>> read(key: String, entries: List<T>, fallback: T): T {
+        val stored = prefs.getStringList(key).firstOrNull()
+        return entries.firstOrNull { it.name.lowercase() == stored } ?: fallback
     }
 
     private fun readWorkTap(): WorkTapChoice {

@@ -65,6 +65,7 @@ import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.update.ManualCheck
 import dev.claudefleet.mobile.update.UpdateMode
 import dev.claudefleet.mobile.ui.theme.FleetIcons
+import dev.claudefleet.mobile.ui.theme.OrbitAccent
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
 
 /**
@@ -89,6 +90,9 @@ data class OrbitSettingsInput(
     val quiet: PhoneQuiet = PhoneQuiet(),
     /** What tapping a Work row opens. */
     val workTap: WorkTapChoice = WorkTapChoice.TICKET,
+    /** The theme's contrast level and accent (dynamic theme). */
+    val contrast: ContrastChoice = ContrastChoice.STANDARD,
+    val accent: OrbitAccent = OrbitAccent.CYAN,
 )
 
 /** Every tap the New layout's Settings reports. */
@@ -98,6 +102,8 @@ class OrbitSettingsHandlers(
     val onOpenPage: (String) -> Unit = {},
     val onSetTheme: (ThemeChoice) -> Unit = {},
     val onSetMotion: (MotionChoice) -> Unit = {},
+    val onSetContrast: (ContrastChoice) -> Unit = {},
+    val onSetAccent: (OrbitAccent) -> Unit = {},
     val onSetWorkTap: (WorkTapChoice) -> Unit = {},
     val onSetNotify: (NotifyKind, Boolean) -> Unit = { _, _ -> },
     val onSetQuiet: (PhoneQuiet) -> Unit = {},
@@ -314,6 +320,19 @@ private fun ColumnScope.ThisPhone(input: OrbitSettingsInput, handlers: OrbitSett
 
     SectionLabel("Theme")
     ThemePicker(input.theme, handlers.onSetTheme)
+    Text(
+        THEME_LINE,
+        color = o.fgMuted,
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
+        modifier = Modifier.padding(horizontal = gutter, vertical = 6.dp),
+    )
+
+    SectionLabel("Contrast")
+    ChoicePicker(ContrastChoice.entries, input.contrast, { it.label }, handlers.onSetContrast)
+
+    SectionLabel("Accent")
+    ChoicePicker(OrbitAccent.entries, input.accent, { it.label }, handlers.onSetAccent)
 
     // The desktop's Settings → Appearance → Motion (review r11).
     SectionLabel("Motion")
@@ -594,7 +613,10 @@ private fun ClockField(label: String, minute: Int, enabled: Boolean, modifier: M
     )
 }
 
-/** Dark, Light, System as one segmented control; dark first, as the manual is. */
+private const val THEME_LINE =
+    "Sun is light while the sun is up where you are and dark after sunset, easing through golden hour, blue hour and night."
+
+/** Sun, System, Light, Dark as one segmented control, the desktop's order. */
 @Composable
 private fun ThemePicker(current: ThemeChoice, onPick: (ThemeChoice) -> Unit) =
     ChoicePicker(ThemeChoice.entries, current, { it.label }, onPick)
