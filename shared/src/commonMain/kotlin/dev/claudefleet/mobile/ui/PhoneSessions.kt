@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.model.SessionFacetId
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.lostLine
 import dev.claudefleet.mobile.model.AccountLimit
 import dev.claudefleet.mobile.model.limitAt
 import dev.claudefleet.mobile.model.relativeWithin
@@ -133,7 +134,7 @@ internal fun waitsOn(
 /**
  * A Blocked row's line (redesign step 4.10), as the desktop words it:
  * "Paused · limit on tech.silvester", "tech.silvester is signed out",
- * "Host down". Null for any other row. With the account's usage reading
+ * "Host down", and a lost row's "Lost · host rebooted". Null for any other row. With the account's usage reading
  * ([limit], from `account_usage`) a paused row also says which window and
  * when it resets: "Paused · weekly limit on tech.silvester · resets in 3 d".
  */
@@ -151,7 +152,9 @@ internal fun blockedLine(
     }
     "no_credentials" -> accountName?.let { "$it is signed out" } ?: "Signed out"
     "host_down" -> "${row.hostAlias.ifBlank { "Host" }} is down"
-    else -> null
+    // A lost row says why (claude-fleet migration 193 added `process_died`,
+    // out of memory), not the activity it had before it went.
+    else -> lostLine(row)
 }
 
 /** The limit [row]'s account is at now, from the usage readings; null when none is known. */

@@ -1,12 +1,15 @@
 package dev.claudefleet.mobile.android
 
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import dev.claudefleet.mobile.App
 import dev.claudefleet.mobile.AppContainer
+import dev.claudefleet.mobile.data.NetworkSignal
 
 /**
  * Thin Android host: all UI lives in `:shared`.
@@ -88,12 +91,25 @@ class MainActivity : ComponentActivity() {
         setContent { App(container) }
     }
 
+    /**
+     * The network coming back reconnects the hub's stream at once
+     * ([NetworkSignal]) rather than after the backoff's sleep. Registered
+     * only while the app is in front, which is when the stream runs.
+     */
+    private val network = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            NetworkSignal.networkAvailable()
+        }
+    }
+
     override fun onStart() {
         super.onStart()
         AppVisibility.foreground = true
+        runCatching { getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(network) }
     }
 
     override fun onStop() {
+        runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(network) }
         AppVisibility.foreground = false
         super.onStop()
     }

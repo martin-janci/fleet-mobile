@@ -32,6 +32,9 @@ import dev.claudefleet.mobile.model.newStartToken
 import dev.claudefleet.mobile.model.PendingInput
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.hostLoad
+import dev.claudefleet.mobile.model.troubleSentence
 import dev.claudefleet.mobile.model.appending
 import dev.claudefleet.mobile.model.fingerprint
 import dev.claudefleet.mobile.model.tailMarker
@@ -199,6 +202,12 @@ data class SessionUiState(
      * happened to be built.
      */
     val nowSeconds: Long = 0,
+    /**
+     * The session's host is in trouble (host health, claude-fleet #913):
+     * low on memory, saturated, short of disk or offline, in a sentence for
+     * above the conversation. Null when the host is fine or unknown.
+     */
+    val hostTrouble: String? = null,
     /**
      * The hub has `rewind_conversation` (`HubCapabilities.rewind`). With
      * [canManage], what offers Rewind here, Retry and Fork here under a reply.
@@ -689,12 +698,14 @@ class SessionViewModel(
         // into one `Pair` first rather than nesting a second `.stateIn` or
         // hand-rolling a sixth `combine`, so there is still exactly one
         // downstream collector to reason about.
-        combine(fleet.sessions, fleet.status, fleet.hubVersion, local, combine(probe, now, fleet.access, ::Triple)) { rows, status, version, l, (probed, nowSeconds, access) ->
-            assemble(rows.firstOrNull { it.id == sessionId }, status, version, l, probed, nowSeconds, access)
+        combine(fleet.sessions, fleet.status, fleet.hubVersion, local, combine(probe, now, fleet.access, fleet.hosts, ::Ticks)) { rows, status, version, l, t ->
+            val row = rows.firstOrNull { it.id == sessionId }
+            assemble(row, status, version, l, t.probed, t.nowSeconds, t.access).withHostTrouble(row, t.hosts, t.nowSeconds)
         }.stateIn(
             scope,
             SharingStarted.Eagerly,
-            assemble(row(), fleet.status.value, fleet.hubVersion.value, local.value, probe.value, now.value, fleet.access.value),
+            assemble(row(), fleet.status.value, fleet.hubVersion.value, local.value, probe.value, now.value, fleet.access.value)
+                .withHostTrouble(row(), fleet.hosts.value, now.value),
         )
 
     init {
@@ -2435,3 +2446,13 @@ Pass 2 — code quality: clarity, structure, test coverage.
 Pass 3 — risk: anything dangerous, security-sensitive, or destructive?
 
 Cite file:line for every point. End with an overall verdict: approve / approve-with-fixes / needs-rework."""
+
+/** The inner fold of [SessionViewModel.state]'s flows: `combine` has no six-flow overload. */
+private data class Ticks(val probed: Boolean?, val nowSeconds: Long, val access: MyAccess, val hosts: List<HostRow>)
+
+/** [this] with its host's trouble, if any: see [SessionUiState.hostTrouble]. */
+internal fun SessionUiState.withHostTrouble(row: SessionRow?, hosts: List<HostRow>, nowSeconds: Long): SessionUiState {
+    val host = row?.hostAlias?.let { alias -> hosts.firstOrNull { it.alias == alias } }
+    val trouble = host?.let { troubleSentence(hostLoad(it, nowSeconds)) }
+    return if (trouble == hostTrouble) this else copy(hostTrouble = trouble)
+}

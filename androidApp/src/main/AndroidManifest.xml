@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The network coming back reconnects the hub's stream at once (MainActivity, NetworkSignal). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!--
       "Notify me when a session needs me" (Settings, off until turned on): a

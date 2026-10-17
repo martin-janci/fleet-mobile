@@ -219,6 +219,10 @@ class TheAndroidManifestTest {
         assertEquals(
             setOf(
                 "android.permission.INTERNET",
+                // The network coming back reconnects the stream at once
+                // (MainActivity's default-network callback, NetworkSignal).
+                // Already in the APK through media3; now asked for on purpose.
+                "android.permission.ACCESS_NETWORK_STATE",
                 "android.permission.CAMERA",
                 // "Notify me when a session needs me" (off until turned on):
                 // a foreground service of type specialUse holding the hub's
