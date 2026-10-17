@@ -260,6 +260,11 @@ data class SessionUiState(
     val notSent: NotSent? = null,
     /** The hub keeps a prompt for the session's next idle moment (`queue_prompt`, redesign 14.14). */
     val sendLaterAvailable: Boolean = false,
+    /**
+     * Send queues while the agent works ([queuesSend]): Control's composer on
+     * a hub with `queue_prompt` (Control review F4/F19).
+     */
+    val queuesWhileWorking: Boolean = false,
     /** The prompts the hub keeps for this session, oldest first, as last read. */
     val queued: List<QueuedPrompt> = emptyList(),
     /** What the last Send later did, in words ("Sent now: the session was idle."). */
@@ -314,8 +319,16 @@ data class SessionUiState(
 
     /** A working agent can be stopped (Escape) — Send's place while there is nothing to send. */
     val canStop: Boolean
+        get() = canStopTurn && draft.isEmpty()
+
+    /** [canStop] without the empty box: Control's Stop beside Queue, so a draft does not hide it. */
+    val canStopTurn: Boolean
         get() = idle(sending, answering, busy) && !readOnly && connected && card == null &&
-            session?.claudeStatus == "working" && draft.isEmpty()
+            session?.claudeStatus == "working"
+
+    /** Send would put the draft in the hub's queue now ([queuesWhileWorking] and mid-turn). */
+    val queuesSend: Boolean
+        get() = queuesSendNow(queuesWhileWorking, session?.claudeStatus)
 
     val canReview: Boolean
         get() = canManage && reviewAvailable
@@ -456,6 +469,14 @@ data class SessionUiState(
 internal fun idle(sending: Boolean, answering: Boolean, busy: Boolean): Boolean = !sending && !answering && !busy
 
 /**
+ * Whether a send goes to the hub's queue rather than into the pane: only
+ * where the screen queues ([SessionUiState.queuesWhileWorking]) and only
+ * mid-turn. An idle agent is typed to at once, as before.
+ */
+internal fun queuesSendNow(queuesWhileWorking: Boolean, claudeStatus: String?): Boolean =
+    queuesWhileWorking && claudeStatus == "working"
+
+/**
  * One session: the conversation newest at the bottom, and a box to answer it.
  *
  * The row in the bar comes from the live fleet picture, so the status and the
@@ -513,6 +534,12 @@ class SessionViewModel(
      * where the app has not handed one over; the menu then offers nothing.
      */
     private val background: NewSessionActions? = null,
+    /**
+     * Control's composer (Control review F4/F19): while the agent is mid-turn
+     * a message goes to the hub's queue (`queue_prompt`) rather than into the
+     * pane, shown with Cancel until the turn ends and the hub types it.
+     */
+    private val queueWhileWorking: Boolean = false,
 ) {
     /**
      * The screen state this class owns, as opposed to what the fleet owns.
@@ -1225,7 +1252,45 @@ class SessionViewModel(
         // its value trails the last `onDraftChange` by however long the
         // collector takes to be resumed. A send must not depend on that.
         if (!canSendNow(current)) return@launch
+        if (queuesSendNow(queuesNow(), row()?.claudeStatus)) {
+            queueDraft(current.draft)
+            return@launch
+        }
         deliver(current.draft, clearDraft = true)
+    }
+
+    /** [queueWhileWorking] on a hub that keeps prompts (`queue_prompt`), for a person who may drive the session. */
+    private fun queuesNow(): Boolean = queueWhileWorking && fleet.capabilities.value.sendLater && !readOnly
+
+    /**
+     * The draft into the hub's queue (`queue_prompt`), typed by the hub once
+     * the turn ends: out of the box at once, back in it if the hub refuses.
+     * A turn that ended meanwhile is typed now ([QueuePromptResult.delivered]).
+     */
+    private suspend fun queueDraft(text: String) {
+        val body = text.trim()
+        local.update { it.copy(sending = true, error = null, pending = body, draft = "") }
+        try {
+            val r = actions.queuePrompt(sessionId, body, SendLaterTiming())
+            quickReplies.remember(body)
+            val queued = runCatching { actions.queuedPrompts(sessionId) }.getOrNull()
+            local.update { it.copy(sending = false, pending = null, queued = queued?.filter { q -> q.waiting } ?: it.queued) }
+            if (r.delivered) requestRead(first = false)
+        } catch (e: CancellationException) {
+            local.update { it.copy(sending = false, pending = null, draft = if (it.draft.isEmpty()) text else it.draft) }
+            throw e
+        } catch (t: Throwable) {
+            val failure = friendly(t)
+            local.update {
+                it.copy(
+                    sending = false,
+                    pending = null,
+                    draft = if (it.draft.isEmpty()) text else it.draft,
+                    error = failure,
+                    sendError = failure,
+                )
+            }
+        }
     }
 
     /**
@@ -2217,6 +2282,7 @@ class SessionViewModel(
         errorFromSend = l.error != null && l.error === l.sendError,
         notSent = l.notSent,
         sendLaterAvailable = fleet.capabilities.value.sendLater,
+        queuesWhileWorking = queueWhileWorking && fleet.capabilities.value.sendLater && !readOnlyFor(access.levelFor(row)),
         queued = l.queued,
         sendLaterNotice = l.sendLaterNotice,
         sendLaterAtAvailable = fleet.capabilities.value.sendLaterAt,

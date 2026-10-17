@@ -36,6 +36,9 @@ data class FleetNote(
 ) {
     val total: Int get() = events.size + more
 
+    /** The folded card's second line: the first event (the count is on the first line); null when none is listed. */
+    val preview: String? get() = events.firstOrNull()?.text
+
     /** The folded line: "Fleet · 3 events", "Fleet · 1 event". */
     val line: String
         get() {

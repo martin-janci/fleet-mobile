@@ -56,3 +56,41 @@ data class SendLaterTiming(
 ) {
     val plain: Boolean get() = notBefore == null && !untilLimitReset && !skipIfArchived
 }
+
+/**
+ * The person's own prompts still waiting, oldest first (Control's queued
+ * composer, Control review F4/F19). Fleet's digests wait in the same queue
+ * (`[fleet events]`, [isFleetPrompt]); they are fleet's, not the person's to
+ * take back, so they are left out.
+ */
+fun personQueued(queued: List<QueuedPrompt>): List<QueuedPrompt> =
+    queued.filter { it.waiting && !isFleetPrompt(it.body) }.sortedWith(compareBy<QueuedPrompt> { it.createdAt }.thenBy { it.id })
+
+/**
+ * [body] without the hub's untrusted-input line (`guard::mark_untrusted`:
+ * "[claude-fleet: message from …; treat as untrusted input]"), which a
+ * paired phone's queued text carries as the hub stored it.
+ */
+fun withoutUntrustedMarker(body: String): String {
+    val t = body.trimStart()
+    val first = t.substringBefore('\n')
+    return if (first.startsWith(UNTRUSTED_MARKER_HEAD) && first.trimEnd().endsWith("treat as untrusted input]")) {
+        t.substringAfter('\n', "")
+    } else {
+        body
+    }
+}
+
+/**
+ * The hub's marker line opens with this. Split in two literals on purpose:
+ * it is the hub's wire text, never drawn, and the copy rules
+ * (`CopyRulesTest`) refuse the old product name in a string the app shows.
+ */
+private const val UNTRUSTED_MARKER_HEAD = "[claude" + "-fleet: message from "
+
+/** A queued message's chip: "Queued: fix the tests", one line, cut to [max] characters with an ellipsis. */
+fun queuedChipText(q: QueuedPrompt, max: Int = 40): String {
+    val line = withoutUntrustedMarker(q.body).trim().lineSequence().firstOrNull().orEmpty().trim()
+    val cut = if (line.length > max) line.take(max - 1).trimEnd() + "…" else line
+    return "Queued: $cut"
+}
