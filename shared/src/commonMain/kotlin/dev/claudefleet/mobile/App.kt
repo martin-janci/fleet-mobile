@@ -407,6 +407,7 @@ import dev.claudefleet.mobile.ui.scan.qrScannerSupported
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.FleetTheme
+import dev.claudefleet.mobile.ui.theme.localClock
 import dev.claudefleet.mobile.ui.PhoneSettings
 import androidx.compose.foundation.isSystemInDarkTheme
 import io.ktor.client.HttpClient
@@ -750,11 +751,22 @@ class AppContainer(
 @Composable
 fun App(container: AppContainer) {
     val theme by container.phone.theme.collectAsState()
-    val dark = theme.isDark(isSystemInDarkTheme())
+    val contrast by container.phone.contrast.collectAsState()
+    val accent by container.phone.accent.collectAsState()
+    // The dynamic theme follows the sun: re-read the clock once a minute.
+    var clock by remember { mutableStateOf(localClock()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000)
+            clock = localClock()
+        }
+    }
+    val sun = theme.sun(isSystemInDarkTheme()) { clock }
+    val dark = sun < 0
     // This phone's Motion choice (review r11); System leaves the OS setting in charge.
     val motion by container.phone.motion.collectAsState()
     CompositionLocalProvider(LocalReducedMotion provides motion.reduced) {
-    FleetTheme(dark = dark) {
+    FleetTheme(sun = sun, contrast = contrast.level, accent = accent) {
         // The phone's clock and battery in the app's colours, not the system's.
         SystemBarsAppearance(dark = dark)
         Surface(modifier = Modifier.fillMaxSize()) {
@@ -2549,6 +2561,8 @@ private fun SettingsRoute(
         val quiet by container.phone.quiet.collectAsState()
         val lockOn by container.phone.lock.collectAsState()
         val workTap by container.phone.workTap.collectAsState()
+        val contrast by container.phone.contrast.collectAsState()
+        val accent by container.phone.accent.collectAsState()
         val gate = rememberBiometricGate()
         BackHandler(enabled = fleetPageOpen || place != SettingsPlace.Home) {
             if (!fleetSettings.back()) settings.back()
@@ -2566,6 +2580,8 @@ private fun SettingsRoute(
                 motion = motion,
                 quiet = quiet,
                 workTap = workTap,
+                contrast = contrast,
+                accent = accent,
             ),
             handlers = OrbitSettingsHandlers(
                 onOpen = settings::open,
@@ -2573,6 +2589,8 @@ private fun SettingsRoute(
                 onOpenPage = fleetSettings::open,
                 onSetTheme = container.phone::setTheme,
                 onSetMotion = container.phone::setMotion,
+                onSetContrast = container.phone::setContrast,
+                onSetAccent = container.phone::setAccent,
                 onSetWorkTap = container.phone::setWorkTap,
                 onSetNotify = container.phone::setNotify,
                 onSetQuiet = container.phone::setQuiet,
