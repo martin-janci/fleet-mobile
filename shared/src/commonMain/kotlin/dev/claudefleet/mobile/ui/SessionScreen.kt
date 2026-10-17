@@ -40,6 +40,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -99,6 +100,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -813,6 +815,7 @@ fun SessionScreen(
                     CompositionLocalProvider(
                         LocalToolDetails provides toolDetails,
                         LocalChatHost provides chat.copyWith(progress = progress, nowSeconds = state.nowSeconds),
+                        LocalFleetNoteOpen provides control?.formContext,
                         LocalFindQuery provides if (findOpen) findQuery else "",
                         // A tool spins only while the session works and the
                         // stream would say when it stops; otherwise it is
@@ -3446,40 +3449,75 @@ private fun HostTroubleStrip(text: String) {
 }
 
 /**
- * Fleet talking in Control's chat (mission control hardening): "Fleet · 3
- * events", folded; a tap opens the list. The digest's instructions to the
- * agent stay folded away: they are for Control, not the person.
+ * Where a fleet digest's events open their sessions: Control's chat lends its
+ * rows and its Open ([ControlChrome.formContext]); null elsewhere, and a
+ * digest's lines are then plain text.
+ */
+internal val LocalFleetNoteOpen = compositionLocalOf<FormContext?> { null }
+
+/**
+ * Fleet talking in Control's chat (mission control hardening, Control review
+ * F19): a compact digest card, "Fleet · 3 events" with the first event under
+ * it, folded; a tap opens the list, where a line naming a session that is
+ * still in the fleet opens it. The digest's instructions to the agent stay
+ * folded away: they are for Control, not the person.
  */
 @Composable
 private fun FleetNoteLine(note: FleetNote) {
     var open by rememberSaveable { mutableStateOf(false) }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("fleet-note")
-            .clickable(onClickLabel = if (open) "Hide fleet events" else "Show fleet events") { open = !open },
+    val o = Fleet.colors
+    val host = LocalFleetNoteOpen.current
+    Surface(
+        color = o.bgPane,
+        border = BorderStroke(1.dp, o.controlBorder),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth().testTag("fleet-note"),
     ) {
-        Text(
-            (if (open) "▾ " else "▸ ") + note.line,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (open) {
-            for (e in note.events) {
-                Text(
-                    "• ${e.text}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 12.dp, top = 2.dp),
-                )
-            }
-            if (note.more > 0) {
-                Text(
-                    "… and ${note.more} more",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 12.dp, top = 2.dp),
-                )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClickLabel = if (open) "Hide fleet events" else "Show fleet events") { open = !open }
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            Text(
+                (if (open) "▾ " else "▸ ") + note.line,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (!open) {
+                note.preview?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 14.dp, top = 2.dp),
+                    )
+                }
+            } else {
+                for (e in note.events) {
+                    val target = e.sessionId?.takeIf { id -> host?.rows?.any { it.id == id } == true }
+                    Row(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "• ${e.text}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (target != null && host != null) {
+                            TextButton(onClick = { host.onOpenSession(target) }, modifier = Modifier.testTag("fleet-note-open-$target")) { Text("Open") }
+                        }
+                    }
+                }
+                if (note.more > 0) {
+                    Text(
+                        "… and ${note.more} more",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 12.dp, top = 2.dp),
+                    )
+                }
             }
         }
     }
