@@ -4,11 +4,16 @@ import dev.claudefleet.mobile.data.BuiltInAgentActions
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.AgentAction
+import dev.claudefleet.mobile.model.AgentJob
 import dev.claudefleet.mobile.model.AgentRule
+import dev.claudefleet.mobile.model.AgentRunForm
+import dev.claudefleet.mobile.model.AgentRunStarted
 import dev.claudefleet.mobile.model.AgentsStatus
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.SELF_DEBUG
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.agentRunArgs
 import dev.claudefleet.mobile.model.agentActionTitle
 import dev.claudefleet.mobile.model.ruleAgentName
 import dev.claudefleet.mobile.model.ruleLine
@@ -61,6 +66,12 @@ private class FakeAgents(
     override suspend fun revoke(id: Long) {
         calls += "revoke $id"
         refuse?.let { throw it }
+    }
+
+    override suspend fun run(id: Long, form: AgentRunForm): AgentRunStarted {
+        calls += "run $id ${form.request}"
+        refuse?.let { throw it }
+        return AgentRunStarted(id, "r$id:manual:1:abcd")
     }
 }
 
@@ -123,6 +134,10 @@ class AgentActionsTest {
         assertEquals("Remember NPE in memory", title("record", """{"store":"memory","key":"NPE"}"""))
         assertEquals("Call kb.add_known_error", title("mcp_call", """{"binding":"kb","tool":"add_known_error"}"""))
         assertEquals("Comment on o/r#4", title("pr_comment", """{"repo":"o/r","number":4}"""))
+        assertEquals("Create a task: Flaky reconnect (2 steps)", title("work_task", """{"title":"Flaky reconnect","steps":["a","b"]}"""))
+        assertEquals("Start a session on o/r (htz): Fix backoff", title("fix_session", """{"project":"o/r","host":"htz","title":"Fix backoff"}"""))
+        assertEquals("Change hub.probe_secs from 30 to 60", title("setting", """{"key":"hub.probe_secs","value":"60","was":"30"}"""))
+        assertEquals("Recover fed-v2 on htz", title("session_recover", """{"session":"fed-v2","host":"htz"}"""))
         val s = json.decodeFromString(
             AgentsStatus.serializer(),
             """{"rules":[{"id":12,"agent":"fleet","scope":"l2-prod","level":"propose","host_alias":"mercury",
@@ -155,6 +170,62 @@ class AgentActionsTest {
         assertEquals(listOf("revoke 12"), agents.calls)
         assertEquals(emptyList(), vm.state.value.rules)
         assertEquals("l2-prod revoked.", vm.state.value.ruleNotice)
+    }
+
+    @Test
+    fun run_starts_a_manual_fleet_agent_and_the_card_follows_its_job() = runTest {
+        val selfDebug = AgentRule(id = 4, agent = "fleet", scope = "me", level = "watch", hostAlias = "m", definition = SELF_DEBUG)
+        val review = AgentRule(id = 3, agent = "review", scope = "gh:o/r", level = "watch", hostAlias = "m")
+        var jobs = emptyList<AgentJob>()
+        val agents = object : BuiltInAgentActions by FakeAgents() {
+            val calls = mutableListOf<String>()
+            override suspend fun status() = AgentsStatus(rules = listOf(selfDebug, review), jobs = jobs)
+            override suspend fun run(id: Long, form: AgentRunForm): AgentRunStarted {
+                calls += "run $id ${agentRunArgs(id, form)}"
+                return AgentRunStarted(id, "r4:manual:9:abcd")
+            }
+        }
+        val vm = AgentActionsViewModel(AgentsFleet(withAgents), agents, backgroundScope, canWrite = true)
+        runCurrent()
+        vm.refresh()?.join()
+        runCurrent()
+        assertTrue(vm.state.value.canRun)
+        assertNull(vm.state.value.selfDebug)
+        // A built-in agent has no Run….
+        assertNull(vm.run(review, AgentRunForm()))
+
+        jobs = listOf(AgentJob(id = 1, ruleId = 4, dedupKey = "r4:manual:9:abcd", state = "pending"))
+        vm.run(selfDebug, AgentRunForm(request = "why", minutes = 60))?.join()
+        runCurrent()
+        assertEquals(listOf("""run 4 {"action":"run","id":4,"request":"why","run_scope":{"minutes":60}}"""), agents.calls)
+        assertEquals("pending", vm.state.value.selfDebug?.job?.state)
+        assertNull(vm.state.value.selfDebug?.report)
+        assertEquals("self-debug queued. Its findings show here when it is done.", vm.state.value.ruleNotice)
+
+        jobs = listOf(
+            AgentJob(
+                id = 1, ruleId = 4, dedupKey = "r4:manual:9:abcd", state = "done",
+                result = """{"answer":{"summary":"ok","healthy":true,"findings":[{"title":"a","severity":"info"},{"title":"b","severity":"high"}]}}""",
+            ),
+        )
+        vm.refresh()?.join()
+        runCurrent()
+        assertEquals(listOf("b", "a"), vm.state.value.selfDebug?.report?.findings?.map { it.title })
+    }
+
+    @Test
+    fun a_readonly_pairing_or_an_older_hub_has_no_run() = runTest {
+        val readonly = AgentActionsViewModel(AgentsFleet(withAgents), FakeAgents(), backgroundScope, canWrite = false)
+        val older = AgentActionsViewModel(
+            AgentsFleet(HubCapabilities(tools = setOf(AgentActionsViewModel.TOOL), actions = mapOf(AgentActionsViewModel.TOOL to setOf("status", "approve", "reject", "revoke")))),
+            FakeAgents(),
+            backgroundScope,
+            canWrite = true,
+        )
+        runCurrent()
+        assertFalse(readonly.state.value.canRun)
+        assertFalse(older.state.value.canRun)
+        assertTrue(older.state.value.canAnswer)
     }
 
     @Test

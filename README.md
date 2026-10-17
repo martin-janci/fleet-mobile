@@ -260,6 +260,17 @@ Passing one fails the *connection*, not the app: it becomes an ordinary
 handle every other dropped connection handle this one. Overshooting a ceiling
 costs one reconnect.
 
+### Its own log, only when asked
+
+The app keeps its last 2000 log lines (at most 512 KiB) in memory, redacted as
+they are written: bearer values, `token=` / `password=` values and long
+token-shaped runs are masked. While it is open and connected it asks the hub
+every 30 s (`POST /log {}`) whether the hub's self debug agent wants them, and
+sends the lines of the window it names only then. A hub that answers 401, 403
+or 404 there is not asked again until the app restarts. On Android an uncaught
+exception's last lines are kept on disk until the next start, so a crash is in
+the log the hub reads afterwards.
+
 ## What it does
 
 - **Layout** — Classic or New, like the desktop's layout switch: *New

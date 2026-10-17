@@ -2,6 +2,9 @@ package dev.claudefleet.mobile.net
 
 import dev.claudefleet.mobile.model.AgentAction
 import dev.claudefleet.mobile.model.AgentsStatus
+import dev.claudefleet.mobile.model.AgentRunForm
+import dev.claudefleet.mobile.model.AgentRunStarted
+import dev.claudefleet.mobile.model.agentRunArgs
 import dev.claudefleet.mobile.model.MyGrants
 import dev.claudefleet.mobile.model.SearchPage
 import dev.claudefleet.mobile.model.SessionGrant
@@ -1481,7 +1484,8 @@ class HubClient(
 
     /** The agents' actions waiting for a person (`agents { action: status }`). */
     suspend fun agentsStatus(): AgentsStatus =
-        call("agents", buildJsonObject { put("action", "status"); put("limit", 20) }) {
+        // `agent: fleet` narrows only the jobs (the findings card reads the fleet agents'); rules and pending stay whole.
+        call("agents", buildJsonObject { put("action", "status"); put("agent", "fleet"); put("limit", 20) }) {
             json.decodeFromJsonElement(AgentsStatus.serializer(), it)
         }
 
@@ -1494,6 +1498,10 @@ class HubClient(
     /** End one standing rule, a fleet agent's instance (`agents { action: revoke, id }`). */
     suspend fun revokeAgentRule(id: Long): Unit =
         call("agents", buildJsonObject { put("action", "revoke"); put("id", id) }) { }
+
+    /** Run a manual fleet agent's instance now (`agents { action: run, id, request?, run_scope? }`). */
+    suspend fun runAgentRule(id: Long, form: AgentRunForm): AgentRunStarted =
+        call("agents", agentRunArgs(id, form)) { json.decodeFromJsonElement(AgentRunStarted.serializer(), it) }
 
     // ---- missions (claude-fleet orchestration O1–O8) ----
 
@@ -2503,6 +2511,16 @@ class HubClient(
         throwForStatus(status, text, base, token)
         return text
     }
+
+    /**
+     * `POST /log` (claude-fleet self debug agent): [body] is a poll (`{}`) or
+     * an upload of this app's log. The status and the reply as they came,
+     * without [throwForStatus]: a 401, 403 or 404 here means "this hub takes
+     * no log from this app" and stops the poller ([dev.claudefleet.mobile.log.LogPoller]),
+     * not the pairing — so it must not reach [dev.claudefleet.mobile.data.AppSession.withClient]
+     * as [HubError.Unauthorized]. A network failure is [HubError.Transport].
+     */
+    suspend fun postLog(body: String): Pair<Int, String> = send("$base/log", body, authenticated = true)
 
     /** `/mcp` for a long poll, a lifecycle call or a hub with no JSON mount; `/mcp/json` otherwise. */
     private fun mountFor(framed: Boolean): String =

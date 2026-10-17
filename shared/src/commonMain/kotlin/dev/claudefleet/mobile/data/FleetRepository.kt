@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.epochSeconds
+import dev.claudefleet.mobile.log.FleetLog
 import dev.claudefleet.mobile.ui.ProjectFileNames
 import dev.claudefleet.mobile.ui.explain
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
@@ -490,6 +491,7 @@ class FleetRepository(
                             event.now?.let { _clockSkewSeconds.value = it - clock() }
                             _hubContract.value = event.contract
                             _status.value = ConnectionStatus.Connected(event.version)
+                            FleetLog.info("stream", "connected to the hub (${event.version})")
                             _sessionChanges.tryEmit(ALL_SESSIONS_CHANGED)
                             _downloadChanges.tryEmit(ALL_DOWNLOADS_CHANGED)
                             discover()
@@ -567,6 +569,7 @@ class FleetRepository(
             lagged = false
             failures += 1
             _status.value = ConnectionStatus.Reconnecting(failures + 1, reason, details)
+            FleetLog.warn("stream", "reconnecting, attempt ${failures + 1}: ${details ?: reason ?: "the stream ended"}")
             // A wake left over from while the stream was up is not a request
             // to skip this wait.
             wake.tryReceive()

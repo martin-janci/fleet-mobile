@@ -10,5 +10,7 @@ internal actual fun platformName(): String = "iOS"
 
 internal actual fun epochSeconds(): Long = NSDate().timeIntervalSince1970.toLong()
 
+internal actual fun epochMillis(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toLong()
+
 internal actual fun utcOffsetSeconds(atEpochSeconds: Long): Int =
     NSTimeZone.localTimeZone.secondsFromGMTForDate(NSDate.dateWithTimeIntervalSince1970(atEpochSeconds.toDouble())).toInt()

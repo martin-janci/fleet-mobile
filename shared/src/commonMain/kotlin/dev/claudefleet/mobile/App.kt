@@ -109,6 +109,8 @@ import dev.claudefleet.mobile.update.AppInstaller
 import dev.claudefleet.mobile.update.GitHubReleases
 import dev.claudefleet.mobile.update.ReleaseSource
 import dev.claudefleet.mobile.update.HubReleases
+import dev.claudefleet.mobile.log.FleetLog
+import dev.claudefleet.mobile.log.LogPoller
 import dev.claudefleet.mobile.net.ClientPlatform
 import dev.claudefleet.mobile.net.FleetClient
 import dev.claudefleet.mobile.net.clientHeaderValue
@@ -688,6 +690,18 @@ class AppContainer(
     val controlActions: ControlActions = HubControlActions(session)
 
     /**
+     * This app's log, sent to the hub only when its self debug agent asks
+     * (`POST /log`); held per process, so a hub that said stop is not asked
+     * again this run.
+     */
+    val logPoller: LogPoller = LogPoller(
+        ring = FleetLog.ring,
+        app = "fleet-mobile $appVersion",
+        post = { body -> session.withClient { it.postLog(body) } },
+        secret = { session.credentials()?.token },
+    )
+
+    /**
      * The chip row and the draft history — one instance for the whole app,
      * not one per session screen, so a chip added on one session's screen is
      * there the next time any session's screen opens, and so is the shared
@@ -1147,6 +1161,13 @@ private fun FleetRoute(
         repository.start()
         onStopOrDispose { repository.stop() }
     }
+    // This app's log, for the hub's self debug agent: asked for every 30 s
+    // while on screen and connected, sent only when wanted.
+    LifecycleStartEffect(repository) {
+        val job = scope.launch { container.logPoller.run { repository.status.value is ConnectionStatus.Connected } }
+        onStopOrDispose { job.cancel() }
+    }
+
     // The network back (Android's callback, NetworkSignal): reconnect now
     // rather than wait out the backoff's sleep.
     LaunchedEffect(repository) {
@@ -2342,6 +2363,8 @@ private fun FleetRoute(
                             if (tab == AutomationTab.Agents) agentActionsVm.refresh()
                         },
                         onRevokeRule = { agentActionsVm.revoke(it) },
+                        onRunRule = { rule, form -> agentActionsVm.run(rule, form) },
+                        onRefreshAgents = { agentActionsVm.refresh() },
                         onSelect = { automation.select(it) },
                         onBack = automation::back,
                         onOpenRun = { automation.openRun(it) },

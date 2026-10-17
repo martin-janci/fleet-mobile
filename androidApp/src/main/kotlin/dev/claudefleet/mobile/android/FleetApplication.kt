@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.android
 import android.app.Application
 import android.os.Build
 import dev.claudefleet.mobile.AppContainer
+import dev.claudefleet.mobile.log.FleetLog
 import dev.claudefleet.mobile.net.ClientPlatform
 import dev.claudefleet.mobile.store.AndroidPrefs
 import dev.claudefleet.mobile.store.AndroidSecrets
@@ -23,8 +24,33 @@ class FleetApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        keepCrashesInTheLog()
         // The automatic update's periodic check while the app is away (14.18).
         AppUpdateJob.schedule(this)
+    }
+
+    /**
+     * An uncaught exception goes into the app's log ([FleetLog]), and the
+     * log's last lines are kept on disk: the ring is memory and dies with the
+     * process, so the next start puts them back, for the hub's self debug
+     * agent to read. `commit()`, not `apply()`: the process ends right after.
+     */
+    private fun keepCrashesInTheLog() {
+        val crashes = getSharedPreferences(CRASH_PREFS, MODE_PRIVATE)
+        crashes.getString(LAST_CRASH, null)?.let { kept ->
+            FleetLog.restore(kept.split('\n'))
+            crashes.edit().remove(LAST_CRASH).apply()
+        }
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, t ->
+            try {
+                FleetLog.error("crash", "uncaught on ${thread.name}", t)
+                crashes.edit().putString(LAST_CRASH, FleetLog.crashRecord().joinToString("\n")).commit()
+            } catch (_: Throwable) {
+                // Nothing to add: the crash itself is what matters.
+            }
+            previous?.uncaughtException(thread, t)
+        }
     }
 
     val container: AppContainer by lazy {
@@ -46,6 +72,9 @@ class FleetApplication : Application() {
         )
     }
 }
+
+private const val CRASH_PREFS = "fleet_log"
+private const val LAST_CRASH = "last_crash"
 
 /** The primary ABI in the hub's words (`aarch64`, `x86_64`, `armv7`, `x86`). */
 internal fun androidArch(): String = when (val abi = Build.SUPPORTED_ABIS.firstOrNull().orEmpty()) {
