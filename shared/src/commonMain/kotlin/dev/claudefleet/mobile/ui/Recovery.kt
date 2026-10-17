@@ -51,6 +51,8 @@ data class FailedSession(
     val failedStep: String?,
     /** The prompt "Retry the last turn" sends again; null when there is none to send. */
     val retryPrompt: String?,
+    /** Which failure this is — the session and its last turn ([failedKey]) — for Dismiss to put away this one only. */
+    val key: String = "",
 )
 
 /**
@@ -67,8 +69,17 @@ fun failedSession(row: SessionRow?, turns: List<ConvTurn>): FailedSession? {
         cause = row.currentActivity?.trim()?.takeIf { it.isNotEmpty() } ?: "Claude Code stopped with an error on the last turn.",
         failedStep = step,
         retryPrompt = turns.lastOrNull { !it.prompt.isNullOrBlank() }?.prompt ?: row.lastPrompt?.takeIf { it.isNotBlank() },
+        key = failedKey(row, turns),
     )
 }
+
+/**
+ * One failure's identity: the session, its turn counter and its last turn's
+ * time. A dismissed card stays away for this failure only; the next turn
+ * that fails is a new card.
+ */
+fun failedKey(row: SessionRow, turns: List<ConvTurn>): String =
+    "${row.id}:${row.turnSeq}:${turns.lastOrNull()?.at.orEmpty()}"
 
 /** The words a failed session's quick replies change to (MobileRecovery): Retry and Show the error. */
 internal val FAILED_QUICK_REPLIES = listOf("Retry", "Show the error")
@@ -88,6 +99,7 @@ fun repairLeft(report: RepairReport): List<String> = report.deferred + report.wa
 
 internal const val NOT_SENT_TAG = "recovery.notSent"
 internal const val FAILED_TAG = "recovery.failed"
+const val FAILED_DISMISS_TAG = "recovery.failed.dismiss"
 internal const val REPAIRED_TAG = "recovery.repaired"
 const val FAILED_DETAILS_TAG = "recovery.failed.details"
 
@@ -126,6 +138,8 @@ internal fun FailedSessionCard(
     onRepair: (() -> Unit)?,
     onDetails: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Put this failure's card away; null offers no Dismiss. */
+    onDismiss: (() -> Unit)? = null,
 ) {
     RecoverySurface(RecoveryTone.Failed, FAILED_TAG, modifier) {
         failed.failedStep?.let {
@@ -146,6 +160,9 @@ internal fun FailedSessionCard(
                 }
             }
             TextButton(onClick = onDetails, modifier = Modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp).testTag(FAILED_DETAILS_TAG)) { Text("Details") }
+            if (onDismiss != null) {
+                TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp).testTag(FAILED_DISMISS_TAG)) { Text("Dismiss") }
+            }
         }
     }
 }

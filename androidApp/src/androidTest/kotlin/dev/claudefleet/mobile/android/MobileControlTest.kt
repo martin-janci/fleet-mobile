@@ -55,7 +55,7 @@ class MobileControlTest {
         val answers = mutableListOf<Pair<String, Boolean>>()
         compose.setContent {
             FleetTheme {
-                ConfirmCards(ControlUiState(available = true, canConfirm = true, confirms = confirms)) { n, ok -> answers += n to ok }
+                ConfirmCards(ControlUiState(available = true, canConfirm = true, confirms = confirms), onAnswer = { n, ok -> answers += n to ok }, onHide = {})
             }
         }
         compose.onNodeWithText("Control asks").assertExists()
@@ -103,6 +103,7 @@ class MobileControlTest {
                     onWake = { wakes++ },
                     onAnswer = { _, _ -> },
                     onDismissError = {},
+                    onHide = {},
                 )
             }
         }
@@ -127,6 +128,7 @@ class MobileControlTest {
                     onWake = {},
                     onAnswer = { _, _ -> },
                     onDismissError = {},
+                    onHide = {},
                 )
             }
         }

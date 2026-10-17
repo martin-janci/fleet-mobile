@@ -151,6 +151,8 @@ internal const val FORM_BACK = "form-back"
 internal const val FORM_ASK_AGAIN = "form-ask-again"
 internal const val FORM_FULL = "form-full"
 internal const val FORM_STARTED = "form-started"
+internal const val FORM_DISMISS = "form-dismiss"
+internal const val FORM_STALE = "form-stale"
 
 /**
  * What Control's chat lends its forms. Answered, a form shows the session
@@ -207,7 +209,11 @@ internal fun OrbitChatFormCard(
                     if (s.loading) {
                         FormBuilding(pending.title, sessionName)
                     } else {
-                        Text(pending.title.ifBlank { "A form" }, style = Fleet.type.textMd, color = o.fg)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(pending.title.ifBlank { "A form" }, style = Fleet.type.textMd, color = o.fg, modifier = Modifier.weight(1f))
+                            // Closed, the card can always be put away, even when it cannot be read.
+                            if (!open) TextButton(onClick = onDismiss, modifier = Modifier.testTag(FORM_DISMISS)) { Text("Dismiss") }
+                        }
                         s.loadFailure?.let { f ->
                             Text(f.title, style = Fleet.type.textSm, color = o.danger)
                             Text(f.body, style = Fleet.type.textSm, color = o.fg2)
@@ -215,13 +221,22 @@ internal fun OrbitChatFormCard(
                         }
                     }
                 }
+                !open && s.pending -> {
+                    // Closed but still waiting on the hub: nothing here answers it any more
+                    // (the session moved on), so the card says so and only goes away.
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(form.title.ifBlank { pending.title.ifBlank { "A form" } }, style = Fleet.type.textMd, color = o.fg, modifier = Modifier.weight(1f))
+                        TextButton(onClick = onDismiss, modifier = Modifier.testTag(FORM_DISMISS)) { Text("Dismiss") }
+                    }
+                    Text("No longer waiting here", style = Fleet.type.textSm, color = o.fgMuted, modifier = Modifier.testTag(FORM_STALE))
+                }
                 !s.pending -> {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(formOutcomeLine(form), style = Fleet.type.textSm, color = o.fg2, modifier = Modifier.weight(1f).testTag(FORM_OUTCOME))
                         if (form.state == "expired" && onAskAgain != null) {
                             TextButton(onClick = onAskAgain, modifier = Modifier.testTag(FORM_ASK_AGAIN)) { Text("Ask again") }
                         }
-                        if (!open) TextButton(onClick = onDismiss) { Text("Dismiss") }
+                        if (!open) TextButton(onClick = onDismiss, modifier = Modifier.testTag(FORM_DISMISS)) { Text("Dismiss") }
                     }
                     form.note?.takeIf { form.state == "declined" }?.let { Note("“$it”") }
                     // Answered: what was answered in a few words, and View for all of it (MobileChatForms).
