@@ -127,6 +127,9 @@ import dev.claudefleet.mobile.ui.AddProjectStep
 import dev.claudefleet.mobile.ui.AgentViewModel
 import dev.claudefleet.mobile.ui.ConfirmCards
 import dev.claudefleet.mobile.ui.ControlChrome
+import dev.claudefleet.mobile.ui.EscalationCards
+import dev.claudefleet.mobile.ui.EscalationLater
+import dev.claudefleet.mobile.model.escalations
 import dev.claudefleet.mobile.ui.FormContext
 import dev.claudefleet.mobile.ui.ControlForms
 import dev.claudefleet.mobile.ui.ControlHeader
@@ -706,6 +709,9 @@ class AppContainer(
     /** This phone's own settings: notification kinds and the theme (redesign 14.11). */
     val phone: PhoneSettings = PhoneSettings(prefs)
 
+    /** The escalation cards in Control's chat put off with Later, kept across restarts (Control review F18). */
+    val escalationLater: EscalationLater = EscalationLater(prefs)
+
     /** The fleet's settings pages' calls (claude-fleet declarative pages P6). */
     val fleetSettingsActions: FleetSettingsActions = HubFleetSettingsActions(session)
     val wizardDrafts: WizardDrafts = HubWizardDrafts(session)
@@ -1030,6 +1036,11 @@ private fun ControlTab(
     val autonomy = remember(container, scope) { AutonomyViewModel(container.fleetSettingsActions, scope) }
     val autonomyState by autonomy.state.collectAsState()
     if (autonomyOn) LaunchedEffect(autonomy) { autonomy.load() }
+    // The escalation cards: the rows Needs you reads (shared-in sessions are their owners' to answer).
+    val laterKeys by container.escalationLater.later.collectAsState()
+    val escalationCards = remember(controlRows, controlAccess, controlState.sessionId, laterKeys) {
+        escalations(controlRows.filter { controlAccess.levelFor(it) == null }, controlState.sessionId, laterKeys.toSet())
+    }
     var threadsOpen by remember { mutableStateOf(false) }
     if (threadsOpen) {
         ControlThreadsSheet(
@@ -1071,6 +1082,13 @@ private fun ControlTab(
                         val asked = controlRows.firstOrNull { it.id == sessionId }?.lastPrompt
                         if (controlToday.available && asksAboutToday(asked)) TodayLink { today.open() }
                         otherForms()
+                        // What needs the person across the fleet, worst first, with Later (Control review F19).
+                        EscalationCards(
+                            all = escalationCards,
+                            onOpen = nav::open,
+                            onLater = container.escalationLater::putOff,
+                            onMore = { nav.select(Tab.Inbox) },
+                        )
                         ConfirmCards(controlState, onAnswer = { nonce, ok -> control.answer(nonce, ok) }, onHide = control::hide)
                     },
                     formContext = FormContext(
@@ -1091,6 +1109,12 @@ private fun ControlTab(
             onDismissError = control::dismissError,
             onHide = control::hide,
             below = {
+                EscalationCards(
+                    all = escalationCards,
+                    onOpen = nav::open,
+                    onLater = container.escalationLater::putOff,
+                    onMore = { nav.select(Tab.Inbox) },
+                )
                 otherForms()
                 TipFor(Tip.CONTROL, help, helpSettings)
             },
