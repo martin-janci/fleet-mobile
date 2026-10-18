@@ -23,6 +23,8 @@ data class Routine(
     @SerialName("skip_next") val skipNext: Boolean = false,
     /** Why the scheduler turned it off (a budget, a failing streak); null when a person did. */
     @SerialName("paused_reason") val pausedReason: String? = null,
+    /** An event routine fires only on this host (hub migration 201). */
+    @SerialName("event_host") val eventHost: String? = null,
 )
 
 /** One run of a routine (`routine_runs`). */

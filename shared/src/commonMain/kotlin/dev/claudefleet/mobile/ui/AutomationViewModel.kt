@@ -366,7 +366,7 @@ fun routineLine(r: Routine, nowSeconds: Long): String {
         return listOfNotNull("Off", r.pausedReason?.takeIf { it.isNotBlank() }?.let { "turned off: $it" }).joinToString(" · ")
     }
     val what = when (r.trigger) {
-        "event" -> "When ${eventLabel(r.event)}"
+        "event" -> "When ${eventLabel(r.event)}" + (r.eventHost?.takeIf { it.isNotBlank() }?.let { " on $it" } ?: "")
         "manual" -> "Run now only"
         else -> listOfNotNull(
             r.cron?.takeIf { it.isNotBlank() },
@@ -376,7 +376,7 @@ fun routineLine(r: Routine, nowSeconds: Long): String {
     return listOfNotNull(what, "skips the next run".takeIf { r.skipNext }, r.hostAlias.takeIf { it.isNotBlank() }).joinToString(" · ")
 }
 
-/** A session event a routine waits on, in words. */
+/** An event a routine waits on, in words: a session's, a pull request's, or the fleet's (a host, an account, a mission). */
 fun eventLabel(event: String?): String = when (event) {
     "turn_done" -> "a turn ends"
     "stop_failure" -> "a session fails"
@@ -386,6 +386,25 @@ fun eventLabel(event: String?): String = when (event) {
     "task_failed" -> "a task fails"
     "session_restore_failed" -> "a restore fails"
     "workspace_repair_failed" -> "a repair fails"
+    "needs_you" -> "a session waits for you"
+    "auto_restored" -> "a session is brought back"
+    "auto_restore_failed" -> "a session is past bringing back"
+    "account_switched" -> "a session moves to another account"
+    "account_switch_failed" -> "an account switch fails"
+    "session_moved" -> "a session moves to another host"
+    "pr_opened" -> "a pull request is opened"
+    "pr_review" -> "a pull request gets a review"
+    "pr_ci_failed" -> "a pull request's checks fail"
+    "pr_ci_passed" -> "a pull request's checks pass"
+    "pr_merged" -> "a pull request is merged"
+    "host_offline" -> "a host goes offline"
+    "host_online" -> "a host is back online"
+    "host_low" -> "a host runs low on disk or memory"
+    "account_limited" -> "an account hits its limit"
+    "account_available" -> "an account is under its limit again"
+    "login_signed_out" -> "a Claude login is signed out"
+    "mission_done" -> "a mission completes"
+    "mission_failed" -> "a mission fails"
     null, "" -> "an event"
     else -> event.replace('_', ' ')
 }

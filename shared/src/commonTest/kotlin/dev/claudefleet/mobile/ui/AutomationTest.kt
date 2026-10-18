@@ -347,6 +347,11 @@ class AutomationTest {
             routineLine(Routine(id = 1, enabled = true, trigger = "cron", cron = "30 7 * * 1-5", nextRunAt = now + 7_200, hostAlias = "mercury"), now),
         )
         assertEquals("When a turn ends", routineLine(Routine(id = 2, enabled = true, trigger = "event", event = "turn_done"), now))
+        assertEquals(
+            "When a host goes offline on nas",
+            routineLine(Routine(id = 6, enabled = true, trigger = "event", event = "host_offline", eventHost = "nas"), now),
+        )
+        assertEquals("When an account hits its limit", routineLine(Routine(id = 7, enabled = true, trigger = "event", event = "account_limited"), now))
         assertEquals("Off", routineLine(Routine(id = 3, trigger = "cron"), now))
         assertEquals("Off · turned off: day budget spent", routineLine(Routine(id = 4, pausedReason = "day budget spent"), now))
         assertEquals("Run now only · skips the next run", routineLine(Routine(id = 5, enabled = true, trigger = "manual", skipNext = true), now))
