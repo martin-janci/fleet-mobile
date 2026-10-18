@@ -53,7 +53,7 @@ data class TaskReport(
 )
 
 val UI_TONES = listOf("info", "tip", "success", "warning", "danger")
-val UI_KINDS = listOf("report", "steps", "guide", "callout", "facts", "choices", "form", "progress", "results", "error", "setting", "device")
+val UI_KINDS = listOf("report", "steps", "guide", "callout", "facts", "choices", "form", "progress", "results", "error", "setting", "device", "fix")
 
 val PROGRESS_STATES = listOf("running", "waiting", "done", "failed")
 val PROGRESS_STEP_STATES = listOf("pending", "running", "done", "failed", "skipped")
@@ -168,6 +168,11 @@ sealed class UiBlock {
      * reads the device's state from the hub, never from here.
      */
     data class Device(val device: String, val title: String?, val note: String?) : UiBlock()
+    /**
+     * A fleet problem autofix found, by its finding id (`autofix { action: list }`).
+     * The phone draws it read-only: Fix, Later and Details live on the desktop.
+     */
+    data class Fix(val findingId: Long) : UiBlock()
 }
 
 sealed class RichSegment {
@@ -774,6 +779,11 @@ fun checkUiBlock(raw: String): UiCheck {
             title = str(v, "title", p, "", 120),
             note = str(v, "note", p, "", 2000),
         )
+        "fix" -> {
+            var findingId: Long? = null
+            if (v["finding_id"] == null || v["finding_id"] is JsonNull) p.add("", "`finding_id` is required") else findingId = whole(v, "finding_id", p, "", 1)
+            UiBlock.Fix(findingId ?: 0)
+        }
         else -> {
             var proposal: Long? = null
             if (v["proposal"] == null || v["proposal"] is JsonNull) p.add("", "`proposal` is required") else proposal = whole(v, "proposal", p, "", 1)

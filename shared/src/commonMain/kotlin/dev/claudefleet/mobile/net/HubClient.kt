@@ -1140,6 +1140,10 @@ class HubClient(
     suspend fun listPages(): PagesBundle =
         call("list_pages") { json.decodeFromJsonElement(PagesBundle.serializer(), it) }
 
+    /** Every registered setting's effective value, by key (`get_settings`). */
+    suspend fun settingValues(): Map<String, String> =
+        call("get_settings") { json.decodeFromJsonElement(MapSerializer(String.serializer(), String.serializer()), it) }
+
     /** Every registered setting with its metadata and effective value. */
     suspend fun describeSettings(): List<SettingDescriptor> =
         call("get_settings", buildJsonObject { put("describe", true) }) {

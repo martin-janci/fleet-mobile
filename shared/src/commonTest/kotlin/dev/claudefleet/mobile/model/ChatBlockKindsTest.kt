@@ -38,6 +38,9 @@ class ChatBlockKindsTest {
             "a wizard with answers drafted from the message",
             "a wizard with drafted answers it cannot take",
             "a wizard whose values are not an object",
+            "a fleet agent's grant form",
+            "a fleet agent wizard without its definition",
+            "a definition on another wizard",
             "not a known kind",
             "choices recommending two options",
             "choices with a recommended that is not a flag",
@@ -45,6 +48,8 @@ class ChatBlockKindsTest {
             "an error next step with an unknown action or no host",
             "a dashboard the agent proposes",
             "a dashboard whose widgets do not check out",
+            "a dashboard with a burn-up",
+            "a burn-up over too short or too long a window",
         )
     }
 
@@ -105,6 +110,13 @@ class ChatBlockKindsTest {
         assertEquals(listOf("`device` is required"), bad.problems)
         val long = assertIs<UiCheck.Bad>(checkUiBlock("""{"spec":"fleet.ui/1","kind":"device","device":"${"d".repeat(201)}"}"""))
         assertEquals(listOf("`device` is longer than 200 characters"), long.problems)
+    }
+
+    @Test
+    fun a_fix_carries_only_its_finding_id() {
+        assertEquals(UiBlock.Fix(42), block("""{"spec":"fleet.ui/1","kind":"fix","finding_id":42,"title":"ignored"}"""))
+        val bad = assertIs<UiCheck.Bad>(checkUiBlock("""{"spec":"fleet.ui/1","kind":"fix"}"""))
+        assertEquals(listOf("`finding_id` is required"), bad.problems)
     }
 
     @Test
