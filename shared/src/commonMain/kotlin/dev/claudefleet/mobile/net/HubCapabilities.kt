@@ -238,6 +238,14 @@ data class HubCapabilities(
     val sendLaterAfterLimit: Boolean get() = sendLater && accepts(QUEUE_PROMPT, "until_limit_reset")
     val sendLaterSkipArchived: Boolean get() = sendLater && accepts(QUEUE_PROMPT, "skip_if_archived")
 
+    /**
+     * Tune prompt (`session_prompt_tune`): a model rewrites the composer's
+     * draft into a clearer prompt, as a proposal the person may put into the
+     * box. An older hub does not list it; the hub refuses it while the
+     * fleet's Prompt tuner setting is off, and for a watch-only share.
+     */
+    val promptTune: Boolean get() = SESSION_PROMPT_TUNE in tools
+
     /** The phone stamps a session viewed while it is on screen (`touch_session_viewed`, contract 11). */
     val touchViewed: Boolean get() = TOUCH_SESSION_VIEWED in tools
 
@@ -441,6 +449,7 @@ data class HubCapabilities(
         const val RESTART_SESSION = "restart_session"
         const val QUEUE_PROMPT = "queue_prompt"
         const val QUEUED_PROMPTS = "queued_prompts"
+        const val SESSION_PROMPT_TUNE = "session_prompt_tune"
         const val TOUCH_SESSION_VIEWED = "touch_session_viewed"
         const val SET_SETTING = "set_setting"
         const val DEBUG_DEVICES = "debug_devices"

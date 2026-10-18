@@ -269,6 +269,10 @@ class ToolsTheAppMayCallTest {
         "auto_switch_account",
         "queue_prompt",
         "queued_prompts",
+        // Tune prompt: a model's rewrite of the composer's draft, a proposal
+        // only (`Access::Client`, the reach of an answer). Called only where
+        // `tools/list` names it (`HubCapabilities.promptTune`).
+        "session_prompt_tune",
         "runs",
         // Jev's host for the New session wizard and a host choice in
         // Control's chat (claude-fleet N5, redesign 4.11): `propose_host_placement`, a read that may ask the decision

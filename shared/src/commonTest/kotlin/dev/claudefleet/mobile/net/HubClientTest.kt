@@ -689,6 +689,32 @@ class HubClientTest {
         assertEquals("true", seen[1]["skip_if_archived"]?.jsonPrimitive?.content)
     }
 
+    /** Tune prompt: the draft, the ask and the earlier prompts go to `session_prompt_tune`; an empty ask and history stay off the wire. */
+    @Test
+    fun tune_prompt_sends_the_draft_its_ask_and_the_history() = runTest {
+        val seen = mutableListOf<JsonObject>()
+        val client = clientAnswering { body ->
+            assertEquals("session_prompt_tune", body.tool())
+            seen += body.args()
+            """{"prompt":"Make the login test pass; done is a green run.","notes":"Said what done looks like.",
+               "unchanged":false,"model":"claude-haiku","host_alias":"pine","at":1800000000}"""
+        }
+        val answer = client.tunePrompt(7, "fix login test", "Add what done looks like", listOf("run the tests", "look at login"))
+        assertEquals("Make the login test pass; done is a green run.", answer.prompt)
+        assertEquals("Said what done looks like.", answer.notes)
+        assertFalse(answer.unchanged)
+        assertEquals("claude-haiku", answer.model)
+        assertEquals("pine", answer.hostAlias)
+        assertEquals(1_800_000_000L, answer.at)
+        assertEquals(7, seen[0]["session_id"]?.jsonPrimitive?.int)
+        assertEquals("fix login test", seen[0]["draft"]?.jsonPrimitive?.content)
+        assertEquals("Add what done looks like", seen[0]["ask"]?.jsonPrimitive?.content)
+        assertEquals(listOf("run the tests", "look at login"), seen[0]["history"]?.jsonArray?.map { it.jsonPrimitive.content })
+
+        client.tunePrompt(7, "fix login test")
+        assertEquals(setOf("session_id", "draft"), seen[1].keys)
+    }
+
     /** A dialog's option is a digit key — never the text "2", which the hub refuses into a blocked session. */
     @Test
     fun a_digit_is_sent_as_a_key() = runTest {

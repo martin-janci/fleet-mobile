@@ -289,7 +289,19 @@ data class SessionUiState(
     val limitNotice: String? = null,
     /** Details › Switch account…'s sheet (gap plan G5.5); null while it is closed. */
     val accountSwitch: AccountSwitch? = null,
+    /** The hub rewrites a draft into a clearer prompt (`session_prompt_tune`). */
+    val promptTuneAvailable: Boolean = false,
+    /** The Tune prompt sheet; null while it is closed. */
+    val tune: PromptTune? = null,
 ) {
+    /**
+     * Tune prompt is offered: the hub has it, there is a draft to tune, and
+     * this person may send the prompt it proposes. Tuning itself sends
+     * nothing, so it waits on no write in flight.
+     */
+    val canTune: Boolean
+        get() = promptTuneAvailable && !readOnly && session != null && connected && draft.isNotBlank()
+
     /** Send later is offered: the hub keeps prompts and this person may drive the session. */
     val canSendLater: Boolean
         get() = sendLaterAvailable && !readOnly && session != null && connected
@@ -617,6 +629,7 @@ class SessionViewModel(
         val waitingUntil: Long? = null,
         val limitNotice: String? = null,
         val accountSwitch: AccountSwitch? = null,
+        val tune: PromptTune? = null,
     )
 
     private val local = MutableStateFlow(Local(draft = drafts.recall(sessionId)))
@@ -1584,6 +1597,78 @@ class SessionViewModel(
         local.update { it.copy(sendLaterNotice = null) }
     }
 
+    // ---- Tune prompt (`session_prompt_tune`) ----
+
+    /** The tune in flight, so Discard can let go of it. */
+    private var tuneJob: Job? = null
+
+    /** [SessionUiState.canTune] against the live sources, as [sendLater] checks its own. */
+    private fun canTuneNow(): Boolean =
+        fleet.capabilities.value.promptTune && !readOnly && row() != null && connected() && local.value.draft.isNotBlank()
+
+    /** Open the Tune prompt sheet on the composer's draft. Nothing is asked until Tune. */
+    fun openTune() {
+        if (!canTuneNow()) return
+        local.update { it.copy(tune = PromptTune()) }
+    }
+
+    /** Discard: close the sheet, dropping any rewrite and any tune still running. The draft is untouched. */
+    fun closeTune() {
+        tuneJob?.cancel()
+        tuneJob = null
+        local.update { it.copy(tune = null) }
+    }
+
+    fun onTuneAskChange(text: String) {
+        local.update { l -> l.copy(tune = l.tune?.let { it.copy(ask = text) }) }
+    }
+
+    /** The person's edit of the proposed rewrite, before Use this. */
+    fun onTuneRewriteChange(text: String) {
+        local.update { l -> l.copy(tune = l.tune?.let { it.copy(rewrite = text) }) }
+    }
+
+    /**
+     * Ask the hub to rewrite the composer's draft: [ask] (a quick chip's
+     * words) replaces what the sheet's field holds, null keeps it. The
+     * session's earlier prompts on screen go along as context. What comes
+     * back is a proposal in the sheet; nothing is sent to the session.
+     */
+    fun tune(ask: String? = null): Job? {
+        val open = local.value.tune ?: return null
+        if (open.running || !canTuneNow()) return null
+        val steer = ask ?: open.ask
+        val draft = local.value.draft.trim()
+        val history = tuneHistory(local.value.conversation)
+        local.update { l -> l.copy(tune = l.tune?.let { it.copy(ask = steer, running = true, error = null) }) }
+        val job = scope.launch {
+            try {
+                val answer = actions.tunePrompt(sessionId, draft, steer.trim(), history)
+                local.update { l -> l.copy(tune = l.tune?.let { it.copy(running = false, answer = answer, rewrite = answer.prompt) }) }
+            } catch (e: CancellationException) {
+                local.update { l -> l.copy(tune = l.tune?.let { it.copy(running = false) }) }
+                throw e
+            } catch (t: Throwable) {
+                val words = tuneErrorText(t)
+                local.update { l -> l.copy(tune = l.tune?.let { it.copy(running = false, error = words) }) }
+            }
+        }
+        tuneJob = job
+        return job
+    }
+
+    /**
+     * Use this: the (possibly edited) rewrite replaces the composer's draft
+     * and the sheet closes. Never sends — the person still taps Send.
+     */
+    fun acceptTune() {
+        local.update { l ->
+            val t = l.tune ?: return@update l
+            if (t.running || t.answer?.unchanged != false || t.rewrite.isBlank()) return@update l
+            l.copy(draft = t.rewrite, tune = null)
+        }
+    }
+
     // ---- a paused-on-limit row: Switch account and Wait (step 4.10) ----
 
     /**
@@ -2296,6 +2381,8 @@ class SessionViewModel(
         waitingUntil = l.waitingUntil?.takeIf { it > nowSeconds },
         limitNotice = l.limitNotice,
         accountSwitch = l.accountSwitch,
+        promptTuneAvailable = fleet.capabilities.value.promptTune,
+        tune = l.tune,
     )
 }
 

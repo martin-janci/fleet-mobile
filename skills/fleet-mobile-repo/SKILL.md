@@ -168,6 +168,11 @@ missing feature should only hide a button. Instead, on every `ready`,
   later, held by the hub until the session is next idle) and `runs` (the
   Automation sheet's Runs union) are each called only where `tools/list`
   names them; an older hub keeps the old screen.
+- **Tune prompt.** `session_prompt_tune` (`HubCapabilities.promptTune`): the
+  composer's ✎ opens a sheet where a model rewrites the draft. It is a
+  proposal: *Use this* replaces the draft and never sends. The hub refuses it
+  with `E_INVALID_STATE` while the fleet's Prompt tuner setting is off; the
+  sheet shows the hub's words.
 - A hub that cannot answer `tools/list` reads as the old hub: nothing
   work-shaped is offered, and nothing errors. `HUB_VERSION_KEYS` stays only
   for the `send_prompt { keys }` chips, and `HUB_VERSION_DIGIT_KEYS` (0.2.36)

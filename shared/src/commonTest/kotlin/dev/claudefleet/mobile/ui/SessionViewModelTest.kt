@@ -19,6 +19,7 @@ import dev.claudefleet.mobile.model.Attention
 import dev.claudefleet.mobile.model.QueuedPrompt
 import dev.claudefleet.mobile.model.QueuePromptResult
 import dev.claudefleet.mobile.model.SendLaterTiming
+import dev.claudefleet.mobile.model.TuneAnswer
 import dev.claudefleet.mobile.model.HostLogin
 import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.ActivityProbe
@@ -331,6 +332,17 @@ private class FakeActions : SessionActions {
         timings += timing
         if (!queueDelivers) waiting += QueuedPrompt(id = waiting.size + 1L, sessionId = sessionId, body = prompt)
         return QueuePromptResult(sessionId, delivered = queueDelivers, queuedId = if (queueDelivers) null else waiting.size.toLong())
+    }
+
+    /** Every `session_prompt_tune` call: (draft, ask, history). */
+    val tuned = mutableListOf<Triple<String, String, List<String>>>()
+    var tuneAnswer = TuneAnswer(prompt = "Rewritten prompt", notes = "Said what done looks like.", model = "claude-haiku", hostAlias = "pine", at = 1L)
+    var tuneFails: Throwable? = null
+
+    override suspend fun tunePrompt(sessionId: Long, draft: String, ask: String, history: List<String>): TuneAnswer {
+        tuned += Triple(draft, ask, history)
+        tuneFails?.let { throw it }
+        return tuneAnswer
     }
 
     override suspend fun queuedPrompts(sessionId: Long, cancel: Long?): List<QueuedPrompt> {
@@ -4099,6 +4111,116 @@ class SessionViewModelTest {
         vm.dismissFailed("1:4:2026-10-16T10:00:00Z")
         runCurrent()
         assertEquals("1:4:2026-10-16T10:00:00Z", vm.state.value.dismissedFailure)
+    }
+
+    // ---- Tune prompt (`session_prompt_tune`) ----
+
+    @Test
+    fun use_this_replaces_the_draft_and_sends_nothing() = runTest {
+        val actions = FakeActions().apply {
+            answer = Conversation(turns = listOf(turn("2026-10-18T09:00:00Z", "fix the login test"), turn("2026-10-18T09:05:00Z", "now the signup one")))
+        }
+        val vm = SessionViewModel(ID, FakeFleetState(tools = setOf(HubCapabilities.SESSION_PROMPT_TUNE)), actions, backgroundScope)
+        vm.load().join()
+        vm.onDraftChange("  make the tests pass  ")
+        runCurrent()
+        assertTrue(vm.state.value.canTune)
+
+        vm.openTune()
+        runCurrent()
+        assertNotNull(vm.state.value.tune)
+        vm.tune("Shorter")?.join()
+        runCurrent()
+
+        assertEquals(
+            listOf(Triple("make the tests pass", "Shorter", listOf("fix the login test", "now the signup one"))),
+            actions.tuned,
+            "the draft trimmed, the chip's ask, the session's prompts oldest first",
+        )
+        val open = assertNotNull(vm.state.value.tune)
+        assertEquals("Rewritten prompt", open.rewrite)
+        assertEquals("Shorter", open.ask)
+        assertFalse(open.running)
+
+        vm.onTuneRewriteChange("Rewritten prompt, edited")
+        vm.acceptTune()
+        runCurrent()
+        assertEquals("Rewritten prompt, edited", vm.state.value.draft, "the edited rewrite is in the box")
+        assertNull(vm.state.value.tune, "the sheet closes")
+        assertTrue(actions.sentPrompts.isEmpty(), "a tune never sends")
+        assertTrue(actions.queuedSent.isEmpty())
+    }
+
+    @Test
+    fun discard_leaves_the_draft_and_an_unchanged_answer_offers_nothing_to_use() = runTest {
+        val actions = FakeActions().apply { tuneAnswer = TuneAnswer(prompt = "keep going", unchanged = true, model = "claude-haiku") }
+        val vm = SessionViewModel(ID, FakeFleetState(tools = setOf(HubCapabilities.SESSION_PROMPT_TUNE)), actions, backgroundScope)
+        vm.onDraftChange("keep going")
+        runCurrent()
+        vm.openTune()
+        vm.tune()?.join()
+        runCurrent()
+        assertEquals("", actions.tuned.single().second, "no ask typed, none sent")
+        vm.acceptTune()
+        runCurrent()
+        assertNotNull(vm.state.value.tune, "an unchanged draft has no Use this")
+        vm.closeTune()
+        runCurrent()
+        assertNull(vm.state.value.tune)
+        assertEquals("keep going", vm.state.value.draft)
+        assertTrue(actions.sentPrompts.isEmpty())
+    }
+
+    @Test
+    fun tune_is_offered_only_on_a_hub_with_the_tool_a_draft_and_a_person_who_may_send() = runTest {
+        val actions = FakeActions()
+        val old = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope)
+        old.onDraftChange("tidy this")
+        runCurrent()
+        assertFalse(old.state.value.canTune, "an older hub does not list session_prompt_tune")
+        old.openTune()
+        runCurrent()
+        assertNull(old.state.value.tune)
+
+        val tools = setOf(HubCapabilities.SESSION_PROMPT_TUNE)
+        val empty = SessionViewModel(ID, FakeFleetState(tools = tools), actions, backgroundScope)
+        runCurrent()
+        assertFalse(empty.state.value.canTune, "nothing typed, nothing to tune")
+
+        val readonly = SessionViewModel(ID, FakeFleetState(tools = tools), actions, backgroundScope, canSendPrompts = false)
+        readonly.onDraftChange("tidy this")
+        runCurrent()
+        assertFalse(readonly.state.value.canTune)
+        readonly.openTune()
+        readonly.tune()
+        runCurrent()
+        assertNull(readonly.state.value.tune)
+        assertTrue(actions.tuned.isEmpty())
+    }
+
+    @Test
+    fun a_refused_tune_says_why_in_the_sheet() = runTest {
+        val actions = FakeActions().apply {
+            tuneFails = HubError.Tool("E_INVALID_STATE", "Prompt tuner is off. Turn it on in Settings › Work & trackers › Writing help.")
+        }
+        val vm = SessionViewModel(ID, FakeFleetState(tools = setOf(HubCapabilities.SESSION_PROMPT_TUNE)), actions, backgroundScope)
+        vm.onDraftChange("tidy this")
+        runCurrent()
+        vm.openTune()
+        vm.tune()?.join()
+        runCurrent()
+        val open = assertNotNull(vm.state.value.tune)
+        assertEquals("Prompt tuner is off. Turn it on in Settings › Work & trackers › Writing help.", open.error)
+        assertFalse(open.running)
+        assertNull(open.answer)
+        assertEquals("tidy this", vm.state.value.draft, "the draft is untouched")
+        assertNull(vm.state.value.error, "said in the sheet, not on the screen's banner")
+    }
+
+    @Test
+    fun the_drafted_line_names_the_model_and_the_host() {
+        assertEquals("Drafted · by claude-haiku on pine", tuneDraftedLine(TuneAnswer(model = "claude-haiku", hostAlias = "pine")))
+        assertEquals("Drafted", tuneDraftedLine(TuneAnswer()))
     }
 
     // ---- Send later (redesign 14.14 on claude-fleet's deferred prompts) ----

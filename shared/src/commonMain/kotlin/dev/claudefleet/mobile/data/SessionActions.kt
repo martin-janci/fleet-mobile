@@ -4,6 +4,7 @@ import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.QueuePromptResult
 import dev.claudefleet.mobile.model.SendLaterTiming
 import dev.claudefleet.mobile.model.QueuedPrompt
+import dev.claudefleet.mobile.model.TuneAnswer
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.PendingInput
 import dev.claudefleet.mobile.model.Conversation
@@ -115,6 +116,14 @@ interface SessionActions {
     /** The prompts the hub keeps for this session; [cancel] takes one back first (`queued_prompts`). */
     suspend fun queuedPrompts(sessionId: Long, cancel: Long? = null): List<QueuedPrompt> = emptyList()
 
+    /**
+     * Tune prompt (`session_prompt_tune`): a model's rewrite of [draft], a
+     * proposal only — nothing reaches the session. [ask] steers it ("" for
+     * none); [history] is the session's earlier prompts, oldest first.
+     */
+    suspend fun tunePrompt(sessionId: Long, draft: String, ask: String, history: List<String>): TuneAnswer =
+        throw UnsupportedOperationException("session_prompt_tune")
+
     /** Stamp the session viewed now (`touch_session_viewed`), so its finished turns read as seen. */
     suspend fun touchViewed(sessionId: Long) {}
 
@@ -222,6 +231,9 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
 
     override suspend fun queuedPrompts(sessionId: Long, cancel: Long?): List<QueuedPrompt> =
         session.withClient { it.queuedPrompts(sessionId, cancel) }
+
+    override suspend fun tunePrompt(sessionId: Long, draft: String, ask: String, history: List<String>): TuneAnswer =
+        session.withClient { it.tunePrompt(sessionId, draft, ask, history) }
 
     override suspend fun touchViewed(sessionId: Long) {
         session.withClient { it.touchSessionViewed(sessionId) }
