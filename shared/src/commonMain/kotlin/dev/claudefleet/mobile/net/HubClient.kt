@@ -77,6 +77,7 @@ import dev.claudefleet.mobile.model.suggestedHostOf
 import dev.claudefleet.mobile.model.QueuePromptResult
 import dev.claudefleet.mobile.model.SendLaterTiming
 import dev.claudefleet.mobile.model.QueuedPrompt
+import dev.claudefleet.mobile.model.TuneAnswer
 import dev.claudefleet.mobile.model.MissionCard
 import dev.claudefleet.mobile.model.MissionGrant
 import dev.claudefleet.mobile.model.StepResult
@@ -624,6 +625,24 @@ class HubClient(
                 if (timing.skipIfArchived) put("skip_if_archived", true)
             },
         ) { json.decodeFromJsonElement(QueuePromptResult.serializer(), it) }
+
+    /**
+     * Tune prompt (`session_prompt_tune`): a model rewrites [draft] into a
+     * clearer prompt for the session's agent. [ask] is what to improve
+     * ("Shorter"; empty for no steer), [history] the session's earlier
+     * prompts, oldest first, for context. A proposal: nothing is sent to the
+     * session. Empty [ask] and [history] stay off the wire.
+     */
+    suspend fun tunePrompt(sessionId: Long, draft: String, ask: String = "", history: List<String> = emptyList()): TuneAnswer =
+        call(
+            "session_prompt_tune",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("draft", draft)
+                if (ask.isNotBlank()) put("ask", ask)
+                if (history.isNotEmpty()) putJsonArray("history") { history.forEach { add(it) } }
+            },
+        ) { json.decodeFromJsonElement(TuneAnswer.serializer(), it) }
 
     /** The session's prompts still waiting (and any whose typing failed); [cancel] takes one back first. */
     suspend fun queuedPrompts(sessionId: Long, cancel: Long? = null): List<QueuedPrompt> =

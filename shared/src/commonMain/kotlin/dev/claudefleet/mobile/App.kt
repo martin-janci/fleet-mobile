@@ -51,6 +51,7 @@ import dev.claudefleet.mobile.data.WizardDrafts
 import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.model.limitAt
 import dev.claudefleet.mobile.ui.SessionLaterHost
+import dev.claudefleet.mobile.ui.PromptTuneHost
 import dev.claudefleet.mobile.ui.components.ChatHost
 import dev.claudefleet.mobile.data.ChatFormActions
 import dev.claudefleet.mobile.data.HubChatFormActions
@@ -3379,6 +3380,14 @@ private fun SessionRoute(
                 accountName = { uuid -> names[uuid] },
             )
         },
+        tune = PromptTuneHost(
+            onOpen = vm::openTune,
+            onAsk = vm::onTuneAskChange,
+            onTune = { ask -> vm.tune(ask) },
+            onRewrite = vm::onTuneRewriteChange,
+            onAccept = vm::acceptTune,
+            onDiscard = vm::closeTune,
+        ),
         full = full,
         onFull = { full = it },
         control = control,

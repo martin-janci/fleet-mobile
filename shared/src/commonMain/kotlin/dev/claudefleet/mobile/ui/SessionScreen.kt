@@ -353,6 +353,8 @@ fun SessionScreen(
     control: ControlChrome? = null,
     /** Send later and a paused row's Switch account / Wait (redesign 14.14, 4.10); the default does nothing. */
     later: SessionLaterHost = SessionLaterHost(),
+    /** Tune prompt's sheet (`session_prompt_tune`); the default does nothing. */
+    tune: PromptTuneHost = PromptTuneHost(),
     /** The test phones this session holds or waits for ([SessionDeviceStrip]); the default draws none. */
     devices: SessionDevicesUiState = SessionDevicesUiState(),
     devicesHandlers: SessionDevicesHandlers = SessionDevicesHandlers(),
@@ -438,6 +440,8 @@ fun SessionScreen(
             onQueued = { sent -> if (state.draft.trim() == sent.trim()) onDraftChange("") },
         )
     }
+    // Tune prompt: a proposal for the draft; Use this puts it in the box, unsent.
+    state.tune?.let { PromptTuneSheet(state, it, tune) }
     val focusManager = LocalFocusManager.current
     val readingWatch = remember(direction) {
         object : NestedScrollConnection {
@@ -1141,6 +1145,7 @@ fun SessionScreen(
                                     queueLabel = (tabs != null || state.queuesWhileWorking) && state.session?.claudeStatus == "working",
                                     // New bar only, like ⋮ Send later… whose sheet it opens.
                                     onSendLater = { laterDraft = state.draft }.takeIf { tabs != null && state.canSendLater },
+                                    onTune = tune.onOpen.takeIf { state.canTune },
                                 )
                             }
                             // The pill a folded footer leaves. A tap is someone
@@ -2861,6 +2866,8 @@ private fun PromptBox(
      * no prompts for later or this person may not drive the session.
      */
     onSendLater: (() -> Unit)? = null,
+    /** Tune prompt with what is typed; null where the hub has no tuner or this person may not send. */
+    onTune: (() -> Unit)? = null,
 ) {
     val haptics = LocalHapticFeedback.current
     var showHistory by remember { mutableStateOf(false) }
@@ -2898,6 +2905,8 @@ private fun PromptBox(
         // The clock takes the ⏎'s place once there is a draft: it carries the
         // typed words to the sheet. An empty box still has ⋮ Send later….
         val laterKey = onSendLater.takeIf { state.draft.isNotBlank() && state.card == null }
+        // Tune sits beside the clock, on a draft only: a proposal for it, never a send.
+        val tuneKey = onTune.takeIf { state.draft.isNotBlank() && state.card == null }
         val micKey = dictate.takeIf { typing }
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextField(
@@ -2931,8 +2940,8 @@ private fun PromptBox(
                         Icon(FleetIcons.History, contentDescription = "Draft history")
                     }
                 },
-                // At most two at once: the mic, and ⏎ or the clock.
-                trailingIcon = if (enterKey || laterKey != null || micKey != null) {
+                // At most three at once: the mic, and ⏎ or the clock and Tune.
+                trailingIcon = if (enterKey || laterKey != null || tuneKey != null || micKey != null) {
                     {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (micKey != null) {
@@ -2943,6 +2952,11 @@ private fun PromptBox(
                             if (laterKey != null) {
                                 IconButton(onClick = laterKey) {
                                     Icon(FleetIcons.SendLater, contentDescription = "Send later")
+                                }
+                            }
+                            if (tuneKey != null) {
+                                IconButton(onClick = tuneKey, modifier = Modifier.testTag(TUNE_OPEN_TAG)) {
+                                    Icon(FleetIcons.Edit, contentDescription = "Tune prompt")
                                 }
                             }
                             if (enterKey) {
