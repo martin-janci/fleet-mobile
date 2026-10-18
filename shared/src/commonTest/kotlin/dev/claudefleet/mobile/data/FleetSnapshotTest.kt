@@ -511,7 +511,7 @@ class FleetSnapshotTest {
      */
     @Test
     fun every_event_survives_the_field_projection_the_stream_asks_for() {
-        val keep = SNAPSHOT_PAYLOAD_FIELDS.toSet()
+        val keep = STREAM_PAYLOAD_FIELDS.toSet()
         fun project(frame: HubEvent.Row): HubEvent.Row {
             val obj = frame.payload as? JsonObject ?: return frame
             return HubEvent.Row(
@@ -554,6 +554,35 @@ class FleetSnapshotTest {
                 "${frame.name} lost its only key to the projection",
             )
         }
+
+        // A ping patches a host already held, and its load rides nested
+        // under `health`, a key no row declares.
+        val ping = row(
+            "host:pinged",
+            """{"alias":"box","last_pinged_at":1758153700,"reachable":true,"claude_version_at":1758150000,"health":{"health_at":1758153700,"cpu_pct":97.4}}""",
+        )
+        assertTrue(seeded.applying(project(ping)) !== seeded, "host:pinged lost its health to the projection")
+        assertEquals(seeded.applying(ping), seeded.applying(project(ping)), "host:pinged must apply the same projected as whole")
+    }
+
+    /**
+     * The stream's `?fields=` keeps top-level keys only (the hub's
+     * `events_route::project`), so a ping's nested `health` survives only
+     * because [STREAM_PAYLOAD_FIELDS] names it.
+     */
+    @Test
+    fun a_pings_health_survives_the_stream_projection() {
+        val keep = STREAM_PAYLOAD_FIELDS.toSet()
+        val frame = row(
+            "host:pinged",
+            """{"alias":"box","last_pinged_at":2,"reachable":true,"health":{"mem_avail_kb":50,"mem_total_kb":1000,"health_at":160,"cpu_pct":97.4,"mem_low":true,"cpu_saturated":true}}""",
+        )
+        val projected = HubEvent.Row(frame.name, JsonObject((frame.payload as JsonObject).filterKeys { it in keep }))
+        val seen = FleetSnapshot(hosts = listOf(HostRow(alias = "box", lastPingedAt = 1L, memTotalKb = 1000, memAvailKb = 500, healthAt = 100)))
+
+        assertEquals(seen.applying(frame), seen.applying(projected))
+        assertEquals(97.4, seen.applying(projected).hosts.single().cpuPct)
+        assertTrue("claude_version_at" in keep)
     }
 
     /**

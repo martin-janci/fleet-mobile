@@ -324,9 +324,10 @@ class FleetRepository(
         val applied = mutableListOf<HubEvent.Row>()
         // The picture before the re-list, so a failure after the early
         // sessions publish below can put it back: all or nothing still holds.
-        val before = snapshotLock.withLock {
+        // And this re-list's generation — see [relistGen].
+        val (before, gen) = snapshotLock.withLock {
             relistsInFlight += applied
-            snapshot()
+            snapshot() to ++relistGen
         }
         var halfPublished = false
         try {
@@ -339,12 +340,14 @@ class FleetRepository(
                 // project lists to be drawn.
                 val rows = sessions.await()
                 snapshotLock.withLock {
-                    publish(applied.fold(snapshot().copy(sessions = rows)) { snapshot, frame -> snapshot.applying(frame) })
-                    halfPublished = true
+                    if (claimPublish(gen)) {
+                        publish(applied.fold(snapshot().copy(sessions = rows)) { snapshot, frame -> snapshot.applying(frame) })
+                        halfPublished = true
+                    }
                 }
                 val fresh = FleetSnapshot(rows, hosts.await(), projects.await(), tickets = emptyList())
                 snapshotLock.withLock {
-                    publish(applied.fold(fresh) { snapshot, frame -> snapshot.applying(frame) })
+                    if (claimPublish(gen)) publish(applied.fold(fresh) { snapshot, frame -> snapshot.applying(frame) })
                     halfPublished = false
                     relistsInFlight -= applied
                 }
@@ -352,10 +355,12 @@ class FleetRepository(
         } catch (t: Throwable) {
             // Hosts or projects failed after the sessions went out: back to the
             // old sessions, with every frame applied since on top of them.
+            // Unless a newer re-list has published since: its picture is newer
+            // than both.
             if (halfPublished) {
                 withContext(NonCancellable) {
                     snapshotLock.withLock {
-                        publish(applied.fold(before) { snapshot, frame -> snapshot.applying(frame) })
+                        if (claimPublish(gen)) publish(applied.fold(before) { snapshot, frame -> snapshot.applying(frame) })
                     }
                 }
             }
@@ -371,6 +376,28 @@ class FleetRepository(
      * flows from different coroutines.
      */
     private val snapshotLock = Mutex()
+
+    /**
+     * The generation of the latest re-list started, and of the latest one
+     * that published; both under [snapshotLock].
+     *
+     * Re-lists overlap — a pull-to-refresh beside a `ready`, a `lagged`
+     * resync beside either — and answer in any order. The frames applied
+     * while one waits are replayed on top of its answer ([relistsInFlight]),
+     * but a frame the stream never delivered (the gap that triggered the
+     * newer re-list) is not: an older answer landing last would put back a
+     * session the newer one had already seen killed. So a re-list publishes
+     * only while no newer one has.
+     */
+    private var relistGen = 0L
+    private var publishedGen = 0L
+
+    /** Whether re-list [gen] may publish now, claiming it if so. Call under [snapshotLock]. */
+    private fun claimPublish(gen: Long): Boolean {
+        if (gen < publishedGen) return false
+        publishedGen = gen
+        return true
+    }
 
     /**
      * One list per re-list in flight, collecting every frame applied while it
