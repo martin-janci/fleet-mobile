@@ -115,13 +115,27 @@ val SNAPSHOT_PAYLOAD_FIELDS: List<String> =
         .sorted()
 
 /**
- * What the stream asks the hub for with `?fields=`: [SNAPSHOT_PAYLOAD_FIELDS]
- * and the keys of a `start:progress` frame ([StartProgress]), derived the
- * same way. `?fields=` is one list for every frame, so a progress frame
- * projected to the row fields alone would arrive as `{}`.
+ * The keys of a `host:pinged` frame that are no field of [HostRow]: the
+ * nested `health` sample (which [HostRow] keeps flattened) and the stamp of
+ * the last Claude version check. Written down, because no serializer here
+ * declares them — the ping is read field by field ([applyPing]) — and the
+ * hub's projection keeps top-level keys only, so without `health` every
+ * ping arrived with its load stripped.
+ */
+internal val PING_PAYLOAD_FIELDS: List<String> = listOf("claude_version_at", "health")
+
+/**
+ * What the stream asks the hub for with `?fields=`: [SNAPSHOT_PAYLOAD_FIELDS],
+ * the keys of a `start:progress` frame ([StartProgress]), derived the same
+ * way, and [PING_PAYLOAD_FIELDS]. `?fields=` is one list for every frame, so
+ * a progress frame projected to the row fields alone would arrive as `{}`.
  */
 val STREAM_PAYLOAD_FIELDS: List<String> =
-    (SNAPSHOT_PAYLOAD_FIELDS + StartProgress.serializer().descriptor.let { d -> (0 until d.elementsCount).map { d.getElementName(it) } })
+    (
+        SNAPSHOT_PAYLOAD_FIELDS +
+            StartProgress.serializer().descriptor.let { d -> (0 until d.elementsCount).map { d.getElementName(it) } } +
+            PING_PAYLOAD_FIELDS
+    )
         .distinct()
         .sorted()
 

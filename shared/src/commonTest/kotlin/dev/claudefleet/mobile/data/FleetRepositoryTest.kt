@@ -391,6 +391,44 @@ class FleetRepositoryTest {
         repository.stop()
     }
 
+    /**
+     * Two re-lists overlap (a pull beside a `ready` or a `lagged` resync) and
+     * the older answers last. The kill that the newer one already reflects
+     * reached this phone as no frame — it fell into the gap the newer one
+     * re-lists for — so replaying frames cannot save it: the older answer
+     * must not publish at all, or session 1 comes back.
+     */
+    @Test
+    fun an_older_refresh_answering_last_does_not_publish_over_a_newer_one() = runTest {
+        val hub = FakeHub(sessionsJson = sessionRows(1, 2))
+        val stream = FakeStream {
+            emit(READY)
+            awaitCancellation()
+        }
+        val repository = repo(hub, stream, backgroundScope)
+        repository.start()
+        repository.status.first { it is ConnectionStatus.Connected }
+
+        // Refresh A: the hub reads rows 1 and 2, and the reply is held.
+        val gate = CompletableDeferred<Unit>()
+        hub.sessionsGate = gate
+        val older = async { repository.refresh() }
+        hub.sessionsRead.await()
+
+        // Session 1 is killed unseen; refresh B reads after it and lands.
+        hub.sessionsGate = null
+        hub.sessionsJson = sessionRows(2)
+        repository.refresh()
+        assertEquals(listOf(2L), repository.sessions.value.map { it.id })
+
+        // A's answer arrives last.
+        gate.complete(Unit)
+        older.await()
+
+        assertEquals(listOf(2L), repository.sessions.value.map { it.id }, "the older re-list must not resurrect session 1")
+        repository.stop()
+    }
+
     @Test
     fun an_unknown_event_name_leaves_the_snapshot_alone() = runTest {
         val hub = FakeHub(sessionsJson = sessionRows(1, 2))
