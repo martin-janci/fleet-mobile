@@ -42,9 +42,12 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
+          # Actions runs this step under `bash -e`, and `set` here does not
+          # take -e back off: a bare call that exits 1 or 2 would end the
+          # step before the warn-only and unreadable-source branches below.
           set -uo pipefail
-          bash scripts/check-design-tokens.sh --diff
-          rc=$?
+          rc=0
+          bash scripts/check-design-tokens.sh --diff || rc=$?
           if [ "$rc" -eq 0 ]; then exit 0; fi
           if [ "$rc" -eq 2 ]; then
             echo "::warning::could not read claude-fleet's tokens.json; not a verdict either way"
