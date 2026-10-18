@@ -101,6 +101,8 @@ import dev.claudefleet.mobile.data.HubRoutineActions
 import dev.claudefleet.mobile.data.RoutineActions
 import dev.claudefleet.mobile.data.DeviceActions
 import dev.claudefleet.mobile.data.HubDeviceActions
+import dev.claudefleet.mobile.data.AutofixActions
+import dev.claudefleet.mobile.data.HubAutofixActions
 import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.data.NewSessionActions
 import dev.claudefleet.mobile.data.SessionActions
@@ -356,6 +358,10 @@ import dev.claudefleet.mobile.ui.DebugDevicesViewModel
 import dev.claudefleet.mobile.ui.SessionDevicesHandlers
 import dev.claudefleet.mobile.ui.SessionDevicesViewModel
 import dev.claudefleet.mobile.ui.devicesLine
+import dev.claudefleet.mobile.ui.AutofixHandlers
+import dev.claudefleet.mobile.ui.AutofixSheet
+import dev.claudefleet.mobile.ui.AutofixViewModel
+import dev.claudefleet.mobile.ui.autofixLine
 import dev.claudefleet.mobile.ui.OrbitMissionsHandlers
 import dev.claudefleet.mobile.ui.OrbitMissionsScreen
 import dev.claudefleet.mobile.ui.MissionsViewModel
@@ -686,6 +692,7 @@ class AppContainer(
 
     /** Debug devices (redesign 11.10), through the same `withClient`. */
     val deviceActions: DeviceActions = HubDeviceActions(session)
+    val autofixActions: AutofixActions = HubAutofixActions(session)
 
     /** The way into the hub's agent, through the same `withClient`. */
     val agentActions: AgentActions = HubAgentActions(session)
@@ -1286,6 +1293,8 @@ private fun FleetRoute(
     val automationState by automation.state.collectAsState()
     val debugDevices = remember(repository, scope) { DebugDevicesViewModel(repository, container.deviceActions, scope, credentials.canWrite) }
     val debugDevicesState by debugDevices.state.collectAsState()
+    val autofix = remember(repository, scope) { AutofixViewModel(repository, container.autofixActions, scope, credentials.canWrite) }
+    val autofixState by autofix.state.collectAsState()
     val today = remember(repository, scope) {
         TodayViewModel(
             fleet = repository,
@@ -1349,7 +1358,7 @@ private fun FleetRoute(
                     id,
                     closers = listOf(
                         { today.close() }, { tidy.close() }, { tickets.close() }, { missions.close() },
-                        { automation.close() }, { debugDevices.close() }, { pullRequests.close() },
+                        { automation.close() }, { debugDevices.close() }, { pullRequests.close() }, { autofix.close() },
                     ),
                     open = nav::open,
                 )
@@ -1375,7 +1384,7 @@ private fun FleetRoute(
             container.consumeOpenMission()?.let { id ->
                 openOverSheets(
                     id,
-                    closers = listOf({ today.close() }, { tidy.close() }, { tickets.close() }, { automation.close() }, { debugDevices.close() }, { pullRequests.close() }),
+                    closers = listOf({ today.close() }, { tidy.close() }, { tickets.close() }, { automation.close() }, { debugDevices.close() }, { pullRequests.close() }, { autofix.close() }),
                     open = { missions.openOne(it) },
                 )
             }
@@ -2121,6 +2130,7 @@ private fun FleetRoute(
                     val moreStatus by repository.status.collectAsState()
                     LaunchedEffect(automationState.available) { if (automationState.available) automation.refresh() }
                     LaunchedEffect(debugDevicesState.available) { if (debugDevicesState.available) debugDevices.refresh() }
+                    LaunchedEffect(autofixState.available) { if (autofixState.available) autofix.refresh() }
                     var askPauseAll by remember { mutableStateOf(false) }
                     if (askPauseAll) {
                         PauseAllQuestion(onPause = { askPauseAll = false; automation.setPaused(true) }, onDismiss = { askPauseAll = false })
@@ -2131,6 +2141,10 @@ private fun FleetRoute(
                         top = { updateState.available?.let { UpdateCard(it, container.appVersion, onOpen = nav::openUpdate) } },
                         entries = buildList {
                             add(MoreEntry("Hosts", hostsLine(hostRows)) { nav.openFromMore(Screen.Hosts) })
+                            if (autofixState.available) {
+                                // What fleet found broken, its fixes, and the fixes run today (autofix).
+                                add(MoreEntry("Problems & fixes", autofixLine(autofixState)) { autofix.open() })
+                            }
                             if (settingsCaps.usage || settingsCaps.accounts) {
                                 val usageLine = accountsLine(moreList.accountUsage.values, moreList.nowSeconds)
                                 add(MoreEntry("Accounts and usage", usageLine ?: "Quotas, and estimated spend by host and day") { nav.openUsage() })
@@ -2413,6 +2427,19 @@ private fun FleetRoute(
                             null
                         },
                         onDismissError = automation::dismissError,
+                    ),
+                )
+            }
+            if (autofixState.open) {
+                AutofixSheet(
+                    state = autofixState,
+                    nowSeconds = epochSeconds(),
+                    handlers = AutofixHandlers(
+                        onClose = autofix::close,
+                        onScan = { autofix.scan() },
+                        onApply = { autofix.apply(it) },
+                        onLater = { autofix.later(it) },
+                        onDismissError = autofix::dismissError,
                     ),
                 )
             }

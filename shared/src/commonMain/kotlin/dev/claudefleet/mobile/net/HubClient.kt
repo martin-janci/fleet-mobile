@@ -5,6 +5,8 @@ import dev.claudefleet.mobile.model.AgentsStatus
 import dev.claudefleet.mobile.model.AgentRunForm
 import dev.claudefleet.mobile.model.AgentRunStarted
 import dev.claudefleet.mobile.model.agentRunArgs
+import dev.claudefleet.mobile.model.AutofixFinding
+import dev.claudefleet.mobile.model.AutofixFindings
 import dev.claudefleet.mobile.model.MyGrants
 import dev.claudefleet.mobile.model.SearchPage
 import dev.claudefleet.mobile.model.SessionGrant
@@ -1727,6 +1729,40 @@ class HubClient(
             },
         ) { json.decodeFromJsonElement(Routine.serializer(), it) }
 
+    // ---- autofix: problems & fixes (claude-fleet `service/autofix`) ----
+    //
+    // `autofix` is served to a person's device only, and nothing here is
+    // called unless `tools/list` names it (`HubCapabilities.autofix`). The
+    // hub decides who may apply and dismiss: `list` says so in `can_apply`.
+
+    /** The live findings, the ones fixed in the last day, and whether this device may decide them. */
+    suspend fun autofixFindings(): AutofixFindings =
+        call("autofix", buildJsonObject { put("action", "list") }) { json.decodeFromJsonElement(AutofixFindings.serializer(), it) }
+
+    /** Check the fleet now, then list: what the hub found comes back as [autofixFindings] does. */
+    suspend fun scanAutofix(): AutofixFindings =
+        call("autofix", buildJsonObject { put("action", "scan") }) { json.decodeFromJsonElement(AutofixFindings.serializer(), it) }
+
+    /** Fix: run [id]'s fix and re-check. The row comes back cleared, verifying, or apply_failed with the reason. */
+    suspend fun applyAutofix(id: Long): AutofixFinding =
+        call(
+            "autofix",
+            buildJsonObject {
+                put("action", "apply")
+                put("id", id)
+            },
+        ) { json.decodeFromJsonElement(AutofixFinding.serializer(), it) }
+
+    /** Later: hide [id] for a day. */
+    suspend fun dismissAutofix(id: Long): AutofixFinding =
+        call(
+            "autofix",
+            buildJsonObject {
+                put("action", "dismiss")
+                put("id", id)
+            },
+        ) { json.decodeFromJsonElement(AutofixFinding.serializer(), it) }
+
     // ---- debug devices (claude-fleet contract revision 10) ----
     //
     // `debug_devices` is not readonly on the hub, so a readonly token is not
@@ -2754,6 +2790,8 @@ class HubClient(
             "routines",
             // Trackers (redesign 14.20): `test` talks to the tracker.
             "work_admin",
+            // Problems & fixes: `apply` runs a fix on a host over SSH.
+            "autofix",
         )
 
         /**

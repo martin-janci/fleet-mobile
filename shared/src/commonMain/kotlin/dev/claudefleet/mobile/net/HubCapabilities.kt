@@ -313,6 +313,13 @@ data class HubCapabilities(
     val debugDevices: Boolean get() = DEBUG_DEVICES in tools
 
     /**
+     * Problems & fixes (claude-fleet `autofix`): known broken fleet states,
+     * explained, with a fix where one exists. Served to a person's device
+     * only; whether this one may apply and dismiss is the list's `can_apply`.
+     */
+    val autofix: Boolean get() = AUTOFIX in tools
+
+    /**
      * Org administration (`org_admin`, company administration phase D): the
      * Company screen lists an org's members and changes their roles. Not
      * readonly on the hub, and the hub refuses anyone who does not
@@ -453,6 +460,7 @@ data class HubCapabilities(
         const val TOUCH_SESSION_VIEWED = "touch_session_viewed"
         const val SET_SETTING = "set_setting"
         const val DEBUG_DEVICES = "debug_devices"
+        const val AUTOFIX = "autofix"
         const val ORG_ADMIN = "org_admin"
         const val MY_GRANTS = "my_grants"
         val SHARE_TOOLS = listOf("session_access", "session_share", "session_narrow", "session_unshare")
