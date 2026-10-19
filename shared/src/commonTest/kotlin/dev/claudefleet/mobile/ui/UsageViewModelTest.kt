@@ -79,6 +79,20 @@ class UsageViewModelTest {
         assertEquals(listOf("a@b.c"), vm.state.value.accounts.map { it.label })
     }
 
+    /** Review w23-9: a report that fails still leaves the accounts, and says why. */
+    @Test
+    fun a_failed_report_keeps_the_accounts() = runTest {
+        val calls = object : UsageActions by UsageCalls() {
+            override suspend fun report(sinceSecs: Long?): UsageReport = throw IllegalStateException("timed out")
+        }
+        val vm = UsageViewModel(UsageFleet(both), calls, backgroundScope)
+        vm.attach()
+        runCurrent()
+        assertEquals(listOf("a@b.c"), vm.state.value.accounts.map { it.label })
+        assertTrue(vm.state.value.error != null, "the failure is still the banner's")
+        assertFalse(vm.state.value.loading)
+    }
+
     @Test
     fun another_window_rereads_the_report_but_not_the_accounts() = runTest {
         val calls = UsageCalls()
