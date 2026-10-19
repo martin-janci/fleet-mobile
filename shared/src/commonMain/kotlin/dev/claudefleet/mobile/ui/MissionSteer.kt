@@ -44,6 +44,12 @@ data class SteerState(
     val sending: Long? = null,
     val receipts: List<SteerReceipt> = emptyList(),
     val error: Friendly? = null,
+    /**
+     * Steers Control took, by mission, counted for good: [receipts] is capped,
+     * so its size stops growing and cannot tell the composer a send went
+     * through (review w21-15).
+     */
+    val delivered: Map<Long, Int> = emptyMap(),
 )
 
 /** What the mission detail draws its composer from. */
@@ -56,6 +62,8 @@ data class MissionSteerUi(
     val error: Friendly?,
     val onSend: (String) -> Unit,
     val onDismissError: () -> Unit,
+    /** How many of this mission's steers Control took ([SteerState.delivered]); the composer clears when it grows. */
+    val delivered: Int = 0,
 )
 
 /**
@@ -87,7 +95,11 @@ class MissionSteer(
             try {
                 actions.sendPrompt(op.id, steerBody(m, text))
                 local.update {
-                    it.copy(sending = null, receipts = (it.receipts + SteerReceipt(m.id, text.trim(), epochSeconds())).takeLast(MAX_RECEIPTS))
+                    it.copy(
+                        sending = null,
+                        receipts = (it.receipts + SteerReceipt(m.id, text.trim(), epochSeconds())).takeLast(MAX_RECEIPTS),
+                        delivered = it.delivered + (m.id to (it.delivered[m.id] ?: 0) + 1),
+                    )
                 }
             } catch (e: CancellationException) {
                 local.update { it.copy(sending = null) }

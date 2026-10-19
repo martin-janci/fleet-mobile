@@ -2499,6 +2499,7 @@ private fun FleetRoute(
                                 error = steerState.error,
                                 onSend = { text -> steer.send(m, text); Unit },
                                 onDismissError = steer::dismissError,
+                                delivered = steerState.delivered[m.id] ?: 0,
                             )
                         }.takeIf { layout == PhoneLayout.New },
                     ),

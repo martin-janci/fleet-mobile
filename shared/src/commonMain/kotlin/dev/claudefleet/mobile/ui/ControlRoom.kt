@@ -202,8 +202,9 @@ fun SteerComposer(missionName: String, steer: MissionSteerUi, nowSeconds: Long, 
     val o = Fleet.colors
     var text by rememberSaveable(missionName) { mutableStateOf("") }
     // The draft goes only once Control has it: a failed send keeps it for Send again.
-    val baseline = remember(missionName) { steer.sent.size }
-    LaunchedEffect(steer.sent.size) { if (steer.sent.size > baseline) text = "" }
+    // Counted, not the receipts' size: those are capped at 20 (review w21-15).
+    val baseline = remember(missionName) { steer.delivered }
+    LaunchedEffect(steer.delivered) { if (steer.delivered > baseline) text = "" }
     Column(modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag(STEER_TAG), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         for (r in steer.sent.takeLast(3)) {
             Text(
