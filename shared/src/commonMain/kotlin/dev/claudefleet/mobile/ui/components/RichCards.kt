@@ -373,6 +373,11 @@ internal fun UiBlockCard(block: UiBlock, raw: String) {
         is UiBlock.Setting -> SettingCard(block)
         is UiBlock.GuidePage -> GuidePageCard(block.page)
         is UiBlock.Device -> DeviceBlockCard(block)
+        is UiBlock.Fix -> Card(colors.outlineVariant, RICH_FIX) {
+            Label("Fleet problem")
+            Text("Autofix finding #${block.findingId}", style = MaterialTheme.typography.bodyMedium)
+            Note("Review and apply its fix in fleet on the desktop.")
+        }
     }
 }
 
@@ -478,6 +483,7 @@ internal const val RICH_ERROR = "rich-error"
 internal const val RICH_SETTING = "rich-setting"
 internal const val RICH_SETTING_APPLY = "rich-setting-apply"
 internal const val RICH_GUIDE_PAGE = "rich-guide-page"
+internal const val RICH_FIX = "rich-fix"
 
 private val PROGRESS_LABEL = mapOf("running" to "Working", "waiting" to "Needs you", "done" to "Done", "failed" to "Failed")
 private val STEP_MARK = mapOf("pending" to "○", "running" to "◐", "done" to "✓", "failed" to "✕", "skipped" to "–")

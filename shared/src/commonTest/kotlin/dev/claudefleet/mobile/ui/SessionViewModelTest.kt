@@ -338,6 +338,14 @@ private class FakeActions : SessionActions {
     val tuned = mutableListOf<Triple<String, String, List<String>>>()
     var tuneAnswer = TuneAnswer(prompt = "Rewritten prompt", notes = "Said what done looks like.", model = "claude-haiku", hostAlias = "pine", at = 1L)
     var tuneFails: Throwable? = null
+    /** `work.prompt_tune` as `get_settings` answers it; null as a token that cannot read settings. */
+    var tuneSetting: Boolean? = null
+    var tuneSettingReads = 0
+
+    override suspend fun promptTuneOn(): Boolean? {
+        tuneSettingReads++
+        return tuneSetting
+    }
 
     override suspend fun tunePrompt(sessionId: Long, draft: String, ask: String, history: List<String>): TuneAnswer {
         tuned += Triple(draft, ask, history)
@@ -4215,6 +4223,47 @@ class SessionViewModelTest {
         assertNull(open.answer)
         assertEquals("tidy this", vm.state.value.draft, "the draft is untouched")
         assertNull(vm.state.value.error, "said in the sheet, not on the screen's banner")
+    }
+
+    @Test
+    fun tune_waits_on_the_fleets_prompt_tune_setting_where_this_token_reads_settings() = runTest {
+        val tools = setOf(HubCapabilities.SESSION_PROMPT_TUNE, HubCapabilities.LIST_PAGES, HubCapabilities.GET_SETTINGS)
+        val off = FakeActions().apply { tuneSetting = false }
+        val vm = SessionViewModel(ID, FakeFleetState(tools = tools), off, backgroundScope)
+        vm.onDraftChange("tidy this")
+        runCurrent()
+        assertEquals(1, off.tuneSettingReads)
+        assertFalse(vm.state.value.canTune, "work.prompt_tune is off, its default: no icon, as on the desktop")
+        vm.openTune()
+        runCurrent()
+        assertNull(vm.state.value.tune)
+
+        val unknown = SessionViewModel(ID, FakeFleetState(tools = tools), FakeActions().apply { tuneSetting = null }, backgroundScope)
+        unknown.onDraftChange("tidy this")
+        runCurrent()
+        assertFalse(unknown.state.value.canTune, "a setting it could not read counts as off")
+
+        val on = SessionViewModel(ID, FakeFleetState(tools = tools), FakeActions().apply { tuneSetting = true }, backgroundScope)
+        on.onDraftChange("tidy this")
+        runCurrent()
+        assertTrue(on.state.value.canTune)
+    }
+
+    @Test
+    fun a_tune_refused_as_off_takes_the_icon_away() = runTest {
+        val actions = FakeActions().apply {
+            tuneFails = HubError.Tool("E_INVALID_STATE", "Prompt tuner is off. Turn it on in Settings › Work & trackers › Writing help.")
+        }
+        val vm = SessionViewModel(ID, FakeFleetState(tools = setOf(HubCapabilities.SESSION_PROMPT_TUNE)), actions, backgroundScope)
+        vm.onDraftChange("tidy this")
+        runCurrent()
+        assertEquals(0, actions.tuneSettingReads, "a token that cannot read settings is not asked")
+        assertTrue(vm.state.value.canTune)
+        vm.openTune()
+        vm.tune()?.join()
+        runCurrent()
+        assertNotNull(vm.state.value.tune?.error, "the refusal is still said in the sheet")
+        assertFalse(vm.state.value.canTune, "and the tuner is not offered again on this connection")
     }
 
     @Test

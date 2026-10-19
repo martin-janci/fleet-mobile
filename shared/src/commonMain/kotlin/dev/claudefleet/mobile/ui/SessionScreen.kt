@@ -2905,7 +2905,7 @@ private fun PromptBox(
         // The clock takes the ⏎'s place once there is a draft: it carries the
         // typed words to the sheet. An empty box still has ⋮ Send later….
         val laterKey = onSendLater.takeIf { state.draft.isNotBlank() && state.card == null }
-        // Tune sits beside the clock, on a draft only: a proposal for it, never a send.
+        // Tune, on a draft only: a proposal for it, never a send. Beside the clock it shares a ⋮.
         val tuneKey = onTune.takeIf { state.draft.isNotBlank() && state.card == null }
         val micKey = dictate.takeIf { typing }
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2940,7 +2940,9 @@ private fun PromptBox(
                         Icon(FleetIcons.History, contentDescription = "Draft history")
                     }
                 },
-                // At most three at once: the mic, and ⏎ or the clock and Tune.
+                // At most two at once, so a narrow phone keeps room to type:
+                // the mic, and ⏎, the clock or Tune. With both the clock and
+                // Tune they share one ⋮, whose menu names each.
                 trailingIcon = if (enterKey || laterKey != null || tuneKey != null || micKey != null) {
                     {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2949,12 +2951,37 @@ private fun PromptBox(
                                     Icon(FleetIcons.Mic, contentDescription = "Voice input")
                                 }
                             }
-                            if (laterKey != null) {
+                            if (laterKey != null && tuneKey != null) {
+                                var draftMenu by remember { mutableStateOf(false) }
+                                Box {
+                                    IconButton(onClick = { draftMenu = true }) {
+                                        Icon(FleetIcons.MoreVert, contentDescription = "More for this draft")
+                                    }
+                                    DropdownMenu(expanded = draftMenu, onDismissRequest = { draftMenu = false }) {
+                                        DropdownMenuItem(
+                                            text = { Text("Send later…") },
+                                            leadingIcon = { Icon(FleetIcons.SendLater, contentDescription = null) },
+                                            onClick = {
+                                                draftMenu = false
+                                                laterKey()
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Tune prompt…") },
+                                            leadingIcon = { Icon(FleetIcons.Edit, contentDescription = null) },
+                                            onClick = {
+                                                draftMenu = false
+                                                tuneKey()
+                                            },
+                                            modifier = Modifier.testTag(TUNE_OPEN_TAG),
+                                        )
+                                    }
+                                }
+                            } else if (laterKey != null) {
                                 IconButton(onClick = laterKey) {
                                     Icon(FleetIcons.SendLater, contentDescription = "Send later")
                                 }
-                            }
-                            if (tuneKey != null) {
+                            } else if (tuneKey != null) {
                                 IconButton(onClick = tuneKey, modifier = Modifier.testTag(TUNE_OPEN_TAG)) {
                                     Icon(FleetIcons.Edit, contentDescription = "Tune prompt")
                                 }

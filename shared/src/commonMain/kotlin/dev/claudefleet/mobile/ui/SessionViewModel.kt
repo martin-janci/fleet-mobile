@@ -630,6 +630,11 @@ class SessionViewModel(
         val limitNotice: String? = null,
         val accountSwitch: AccountSwitch? = null,
         val tune: PromptTune? = null,
+        /**
+         * The fleet's `work.prompt_tune`, as this connection last read or
+         * learned it: null until known. See [promptTuneOn].
+         */
+        val tuneSetting: Boolean? = null,
     )
 
     private val local = MutableStateFlow(Local(draft = drafts.recall(sessionId)))
@@ -757,6 +762,24 @@ class SessionViewModel(
                     val steps = l.repairSteps
                     if (steps == null || p.token != l.repairToken) l else l.copy(repairSteps = steps.folding(p.step, p.state, REPAIR_STEPS))
                 }
+            }
+        }
+        // Tune prompt's setting: the hub lists `session_prompt_tune` to every
+        // client and refuses it while `work.prompt_tune` is off (its default),
+        // so the icon waits on the setting, as the desktop's tuner does. Read
+        // afresh whenever what the hub serves changes (a new `ready`).
+        scope.launch {
+            fleet.capabilities.collect { caps ->
+                local.update { it.copy(tuneSetting = null) }
+                if (!caps.promptTune || !caps.fleetSettings || tokenReadOnly) return@collect
+                val on = try {
+                    actions.promptTuneOn()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Throwable) {
+                    null
+                }
+                local.update { it.copy(tuneSetting = on) }
             }
         }
         // Every change to the box, however it came — typing, a quote, a send
@@ -1604,7 +1627,7 @@ class SessionViewModel(
 
     /** [SessionUiState.canTune] against the live sources, as [sendLater] checks its own. */
     private fun canTuneNow(): Boolean =
-        fleet.capabilities.value.promptTune && !readOnly && row() != null && connected() && local.value.draft.isNotBlank()
+        promptTuneOn(fleet.capabilities.value, local.value.tuneSetting) && !readOnly && row() != null && connected() && local.value.draft.isNotBlank()
 
     /** Open the Tune prompt sheet on the composer's draft. Nothing is asked until Tune. */
     fun openTune() {
@@ -1650,7 +1673,12 @@ class SessionViewModel(
                 throw e
             } catch (t: Throwable) {
                 val words = tuneErrorText(t)
-                local.update { l -> l.copy(tune = l.tune?.let { it.copy(running = false, error = words) }) }
+                // "Prompt tuner is off": said in the sheet, and the icon goes
+                // until the hub serves this phone afresh.
+                val off = t is HubError.Tool && t.code == "E_INVALID_STATE"
+                local.update { l ->
+                    l.copy(tune = l.tune?.let { it.copy(running = false, error = words) }, tuneSetting = if (off) false else l.tuneSetting)
+                }
             }
         }
         tuneJob = job
@@ -2381,10 +2409,19 @@ class SessionViewModel(
         waitingUntil = l.waitingUntil?.takeIf { it > nowSeconds },
         limitNotice = l.limitNotice,
         accountSwitch = l.accountSwitch,
-        promptTuneAvailable = fleet.capabilities.value.promptTune,
+        promptTuneAvailable = promptTuneOn(fleet.capabilities.value, l.tuneSetting),
         tune = l.tune,
     )
 }
+
+/**
+ * Tune prompt is on for this hub: it lists `session_prompt_tune`, and the
+ * fleet's `work.prompt_tune` is on. A token that reads settings needs the
+ * setting read as on (unknown is off, as on the desktop); one that cannot
+ * read them is offered the tuner until the hub refuses it as off.
+ */
+internal fun promptTuneOn(caps: HubCapabilities, setting: Boolean?): Boolean =
+    caps.promptTune && (if (caps.fleetSettings) setting == true else setting != false)
 
 /**
  * The one rule for "can this screen reach the hub", used by

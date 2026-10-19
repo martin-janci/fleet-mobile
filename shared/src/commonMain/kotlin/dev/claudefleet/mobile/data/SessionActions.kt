@@ -16,6 +16,9 @@ import dev.claudefleet.mobile.model.ToolDetail
 import dev.claudefleet.mobile.model.WaitResult
 import kotlinx.coroutines.CancellationException
 
+/** The fleet setting that turns Tune prompt on (claude-fleet `work.prompt_tune`, off by default). */
+const val PROMPT_TUNE_SETTING = "work.prompt_tune"
+
 /**
  * The calls a session screen may make.
  *
@@ -123,6 +126,13 @@ interface SessionActions {
      */
     suspend fun tunePrompt(sessionId: Long, draft: String, ask: String, history: List<String>): TuneAnswer =
         throw UnsupportedOperationException("session_prompt_tune")
+
+    /**
+     * Whether the fleet's `work.prompt_tune` is on (`get_settings`): the hub
+     * lists `session_prompt_tune` to every client and refuses it while the
+     * setting is off, its default. Null where this token cannot read settings.
+     */
+    suspend fun promptTuneOn(): Boolean? = null
 
     /** Stamp the session viewed now (`touch_session_viewed`), so its finished turns read as seen. */
     suspend fun touchViewed(sessionId: Long) {}
@@ -234,6 +244,9 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
 
     override suspend fun tunePrompt(sessionId: Long, draft: String, ask: String, history: List<String>): TuneAnswer =
         session.withClient { it.tunePrompt(sessionId, draft, ask, history) }
+
+    override suspend fun promptTuneOn(): Boolean =
+        session.withClient { it.settingValues()[PROMPT_TUNE_SETTING] == "true" }
 
     override suspend fun touchViewed(sessionId: Long) {
         session.withClient { it.touchSessionViewed(sessionId) }
