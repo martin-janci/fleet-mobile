@@ -228,7 +228,7 @@ private val SECS_PER: Map<String, Long> = mapOf("seconds" to 1, "minutes" to 60,
 
 private val UNIT_WORDS: Map<String, String> = mapOf(
     "ms" to "ms", "seconds" to "seconds", "minutes" to "minutes", "hours" to "hours", "days" to "days",
-    "percent" to "%", "kib" to "KiB", "mib" to "MiB", "tokens" to "tokens",
+    "percent" to "%", "kib" to "KiB", "mib" to "MiB", "tokens" to "tokens", "count" to "", "usd" to "USD",
 )
 
 /** The unit a number is shown in, as a word; empty when it has none. */
@@ -267,6 +267,13 @@ fun SettingDescriptor.fromDisplay(typed: String): Result<String> {
     return Result.success(stored.toString())
 }
 
+/** A minimum in the shown unit, rounded UP to two places as [toDisplay]
+ *  rounds, so the number shown is one the hub accepts: 900 s is 0.25 hours. */
+private fun shownMin(min: Long, factor: Long): String {
+    if (min % factor == 0L) return (min / factor).toString()
+    return (kotlin.math.ceil(min.toDouble() / factor * 100) / 100).toString()
+}
+
 /** "1–365 days", "0 = never": the bounds in the shown unit. */
 fun SettingDescriptor.rangeText(): String {
     val u = unitWord
@@ -274,7 +281,7 @@ fun SettingDescriptor.rangeText(): String {
         kind.type == "int" && kind.min != null && kind.max != null ->
             "${kind.min}–${kind.max}${if (u.isNotEmpty()) " $u" else ""}"
         kind.type == "secs" && (kind.min ?: 0) > 0 ->
-            "at least ${(kind.min ?: 0) / unitFactor()}${if (u.isNotEmpty()) " $u" else ""}"
+            "at least ${shownMin(kind.min ?: 0, unitFactor())}${if (u.isNotEmpty()) " $u" else ""}"
         kind.type == "secs" -> u
         else -> ""
     }
