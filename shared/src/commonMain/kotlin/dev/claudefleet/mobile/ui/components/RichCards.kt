@@ -22,6 +22,7 @@ import dev.claudefleet.mobile.model.DebugDevice
 import dev.claudefleet.mobile.model.DeviceScreenshot
 import dev.claudefleet.mobile.model.findDevice
 import dev.claudefleet.mobile.ui.deviceLine
+import dev.claudefleet.mobile.ui.fixCardNote
 import dev.claudefleet.mobile.ui.friendly
 import dev.claudefleet.mobile.ui.deviceState
 import dev.claudefleet.mobile.ui.queueNames
@@ -128,9 +129,13 @@ class ChatHost(
     val devices: (suspend () -> List<DebugDevice>)? = null,
     /** A screenshot of a device by id, for a `device` card; null where it may not be taken from here. */
     val screenshot: (suspend (Long) -> DeviceScreenshot)? = null,
+    /** The hub serves `autofix` here: a `fix` card points at More › Problems & fixes. */
+    val autofix: Boolean = false,
+    /** This token may apply a fix (it writes). */
+    val autofixWrite: Boolean = false,
 ) {
     fun copyWith(progress: ProgressBoard, nowSeconds: Long) =
-        ChatHost(settings, mayDecideSettings, progress, nowSeconds, devices, screenshot)
+        ChatHost(settings, mayDecideSettings, progress, nowSeconds, devices, screenshot, autofix, autofixWrite)
 
     companion object {
         val None = ChatHost()
@@ -376,7 +381,8 @@ internal fun UiBlockCard(block: UiBlock, raw: String) {
         is UiBlock.Fix -> Card(colors.outlineVariant, RICH_FIX) {
             Label("Fleet problem")
             Text("Autofix finding #${block.findingId}", style = MaterialTheme.typography.bodyMedium)
-            Note("Review and apply its fix in fleet on the desktop.")
+            val host = LocalChatHost.current
+            Note(fixCardNote(host.autofix, host.autofixWrite))
         }
     }
 }

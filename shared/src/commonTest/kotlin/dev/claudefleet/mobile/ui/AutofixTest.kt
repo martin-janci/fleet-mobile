@@ -149,6 +149,13 @@ class AutofixTest {
         runCurrent()
         assertEquals(listOf(1L, 2L), vm.state.value.hidden.map { it.id })
         assertTrue(vm.state.value.problems.isEmpty())
+        // Snoozed is not fixed: the words say they are only hidden.
+        assertEquals("No open problems · 2 hidden · 1 fixed today", autofixLine(vm.state.value))
+        assertEquals("No open problems · 2 hidden until later.", noOpenProblemsLine(vm.state.value))
+        assertEquals("No open problems · 2 hidden until later.", scanNotice(vm.state.value.findings))
+        assertEquals("No problems found.", scanNotice(emptyList()))
+        assertEquals(null, scanNotice(listOf(HOOKS)))
+        assertEquals("Nothing is broken that fleet knows of.", noOpenProblemsLine(AutofixUiState(loaded = true)))
     }
 
     @Test
@@ -198,6 +205,9 @@ class AutofixTest {
         assertFalse(fixRunning(HOOKS.copy(state = "verifying", lastAttemptAt = 1000), 1100))
         assertEquals("What fleet found broken, and its fixes", autofixLine(AutofixUiState()))
         assertEquals("No problems found", autofixLine(AutofixUiState(loaded = true)))
+        assertEquals("Review and apply its fix in More › Problems & fixes.", fixCardNote(autofix = true, canWrite = true))
+        assertTrue(fixCardNote(autofix = true, canWrite = false).startsWith("Review it in More › Problems & fixes"))
+        assertEquals("Review and apply its fix in fleet on the desktop.", fixCardNote(autofix = false, canWrite = true))
     }
 
     @Test
