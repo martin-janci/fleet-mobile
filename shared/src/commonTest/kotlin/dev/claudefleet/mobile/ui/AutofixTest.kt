@@ -83,6 +83,17 @@ class AutofixTest {
         canWrite: Boolean = true,
     ) = AutofixViewModel(AutofixFleet(caps), actions, backgroundScope, canWrite)
 
+    /** [vm] with its sheet opened and the first list read. */
+    private fun TestScope.opened(
+        caps: HubCapabilities = WITH_AUTOFIX,
+        actions: FakeAutofixActions = FakeAutofixActions(),
+        canWrite: Boolean = true,
+    ) = vm(caps, actions, canWrite).also {
+        runCurrent()
+        it.open()
+        runCurrent()
+    }
+
     @Test
     fun a_hub_without_autofix_is_never_asked() = runTest {
         val actions = FakeAutofixActions()
@@ -96,10 +107,7 @@ class AutofixTest {
 
     @Test
     fun opening_splits_the_problems_the_hidden_and_the_fixed() = runTest {
-        val vm = vm()
-        runCurrent()
-        vm.open()
-        runCurrent()
+        val vm = opened()
         val s = vm.state.value
         assertTrue(s.open && s.loaded && s.canApply)
         assertEquals(listOf(1L), s.problems.map { it.id })
@@ -111,10 +119,7 @@ class AutofixTest {
     @Test
     fun a_fix_that_clears_moves_the_row_to_the_fixed() = runTest {
         val actions = FakeAutofixActions()
-        val vm = vm(actions = actions)
-        runCurrent()
-        vm.open()
-        runCurrent()
+        val vm = opened(actions = actions)
         vm.apply(HOOKS)
         runCurrent()
         val s = vm.state.value
@@ -127,10 +132,7 @@ class AutofixTest {
     @Test
     fun a_failed_fix_stays_with_its_reason() = runTest {
         val actions = FakeAutofixActions().apply { answer = { it.copy(state = "apply_failed", lastError = "ssh timed out") } }
-        val vm = vm(actions = actions)
-        runCurrent()
-        vm.open()
-        runCurrent()
+        val vm = opened(actions = actions)
         vm.apply(HOOKS)
         runCurrent()
         val row = vm.state.value.problems.single()
@@ -141,10 +143,7 @@ class AutofixTest {
 
     @Test
     fun later_hides_the_row() = runTest {
-        val vm = vm()
-        runCurrent()
-        vm.open()
-        runCurrent()
+        val vm = opened()
         vm.later(HOOKS)
         runCurrent()
         assertEquals(listOf(1L, 2L), vm.state.value.hidden.map { it.id })
@@ -154,10 +153,7 @@ class AutofixTest {
     @Test
     fun a_device_the_hub_does_not_trust_only_reads() = runTest {
         val actions = FakeAutofixActions().apply { canApply = false }
-        val vm = vm(actions = actions)
-        runCurrent()
-        vm.open()
-        runCurrent()
+        val vm = opened(actions = actions)
         assertFalse(vm.state.value.canApply)
         vm.apply(HOOKS)
         vm.later(HOOKS)
@@ -167,20 +163,14 @@ class AutofixTest {
 
     @Test
     fun a_readonly_token_only_reads_even_when_the_hub_would_let_it() = runTest {
-        val vm = vm(canWrite = false)
-        runCurrent()
-        vm.open()
-        runCurrent()
+        val vm = opened(canWrite = false)
         assertFalse(vm.state.value.canApply)
     }
 
     @Test
     fun a_refused_fix_shows_the_refusal() = runTest {
         val actions = FakeAutofixActions().apply { refuse = true }
-        val vm = vm(actions = actions)
-        runCurrent()
-        vm.open()
-        runCurrent()
+        val vm = opened(actions = actions)
         vm.apply(HOOKS)
         runCurrent()
         assertNotNull(vm.state.value.error)

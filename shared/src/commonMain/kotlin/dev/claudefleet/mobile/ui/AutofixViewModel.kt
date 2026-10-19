@@ -34,10 +34,10 @@ data class AutofixUiState(
     val error: Friendly? = null,
 ) {
     /** What a person is asked about: everything live but the hidden. */
-    val problems: List<AutofixFinding> get() = findings.filter { it.state != DISMISSED }
+    val problems: List<AutofixFinding> get() = findings.filterNot { it.dismissed }
 
     /** Hidden with Later, until the hub shows them again. */
-    val hidden: List<AutofixFinding> get() = findings.filter { it.state == DISMISSED }
+    val hidden: List<AutofixFinding> get() = findings.filter { it.dismissed }
 }
 
 /**
@@ -97,47 +97,36 @@ class AutofixViewModel(
     }
 
     /** Check the fleet now; the answer is the list as it then stands. */
-    fun scan(): Job = scope.launch {
-        if (!state.value.available || local.value.busy != null) return@launch
-        local.update { it.copy(busy = SCAN, error = null, notice = null) }
-        try {
-            val list = actions.scan()
-            local.update { it.copy(busy = null, loaded = true, list = list, notice = if (list.findings.none { f -> f.state != DISMISSED }) "No problems found." else null) }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (t: Throwable) {
-            local.update { it.copy(busy = null, error = friendly(t)) }
-        }
+    fun scan(): Job = act(SCAN, state.value.available) {
+        val list = actions.scan()
+        local.update { it.copy(busy = null, loaded = true, list = list, notice = if (list.problems.isEmpty()) "No problems found." else null) }
     }
 
     /** Fix: the hub runs the fix and re-checks; the row takes its answer. */
-    fun apply(finding: AutofixFinding): Job = scope.launch {
-        if (!state.value.canApply || local.value.busy != null || finding.fix == null) return@launch
-        local.update { it.copy(busy = "${finding.id}:apply", error = null, notice = null) }
-        try {
-            val row = actions.apply(finding.id)
-            val name = findingTitle(finding)
-            keep(
-                row,
-                when (row.state) {
-                    CLEARED -> "Fixed: $name."
-                    APPLY_FAILED -> "The fix did not work: " + (row.lastError ?: name)
-                    else -> "Fix applied to $name — checking that it worked."
-                },
-            )
-        } catch (e: CancellationException) {
-            throw e
-        } catch (t: Throwable) {
-            local.update { it.copy(busy = null, error = friendly(t)) }
-        }
+    fun apply(finding: AutofixFinding): Job = act("${finding.id}:apply", state.value.canApply && finding.fix != null) {
+        val row = actions.apply(finding.id)
+        val name = findingTitle(finding)
+        keep(
+            row,
+            when {
+                row.cleared -> "Fixed: $name."
+                row.failed -> "The fix did not work: " + (row.lastError ?: name)
+                else -> "Fix applied to $name — checking that it worked."
+            },
+        )
     }
 
     /** Later: hidden for a day. */
-    fun later(finding: AutofixFinding): Job = scope.launch {
-        if (!state.value.canApply || local.value.busy != null || finding.state == DISMISSED) return@launch
-        local.update { it.copy(busy = "${finding.id}:dismiss", error = null, notice = null) }
+    fun later(finding: AutofixFinding): Job = act("${finding.id}:dismiss", state.value.canApply && !finding.dismissed) {
+        keep(actions.dismiss(finding.id), "Hidden until tomorrow: ${findingTitle(finding)}.")
+    }
+
+    /** One press while nothing else is on the wire; [call] clears `busy` with its answer. */
+    private fun act(busy: String, allowed: Boolean, call: suspend () -> Unit): Job = scope.launch {
+        if (!allowed || local.value.busy != null) return@launch
+        local.update { it.copy(busy = busy, error = null, notice = null) }
         try {
-            keep(actions.dismiss(finding.id), "Hidden until tomorrow: ${findingTitle(finding)}.")
+            call()
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -149,7 +138,7 @@ class AutofixViewModel(
     private fun keep(row: AutofixFinding, notice: String) {
         local.update { l ->
             val rest = l.list.findings.filter { it.id != row.id }
-            val list = if (row.state == CLEARED) {
+            val list = if (row.cleared) {
                 l.list.copy(findings = rest, fixed = listOf(row) + l.list.fixed.filter { it.id != row.id })
             } else {
                 l.list.copy(findings = (rest + row).sortedWith(compareBy({ it.firstSeenAt }, { it.id })))
@@ -176,10 +165,6 @@ class AutofixViewModel(
     }
 }
 
-private const val DISMISSED = "dismissed"
-private const val CLEARED = "cleared"
-private const val APPLY_FAILED = "apply_failed"
-
 /** The More row: "2 problems · 1 fixed today", "No problems found". */
 fun autofixLine(state: AutofixUiState): String {
     if (!state.loaded) return "What fleet found broken, and its fixes"
@@ -205,11 +190,11 @@ fun subjectWords(subject: String): String {
 }
 
 /** The state of a finding in a few words, for the row's status line; null while it is simply open. */
-fun findingStateWords(f: AutofixFinding): String? = when (f.state) {
-    "verifying" -> "Fix applied — checking that it worked…"
-    APPLY_FAILED -> f.lastError?.takeIf { it.isNotBlank() }?.let { "The fix did not work: $it" } ?: "The fix did not work."
-    DISMISSED -> "Hidden until later."
-    CLEARED -> "Resolved."
+fun findingStateWords(f: AutofixFinding): String? = when {
+    f.verifying -> "Fix applied — checking that it worked…"
+    f.failed -> f.lastError?.takeIf { it.isNotBlank() }?.let { "The fix did not work: $it" } ?: "The fix did not work."
+    f.dismissed -> "Hidden until later."
+    f.cleared -> "Resolved."
     else -> null
 }
 
@@ -220,11 +205,11 @@ fun fixedLine(f: AutofixFinding): String {
 }
 
 /** A fix waiting on a person reads "Fix…"; one that failed reads "Try again…". */
-fun fixLabel(f: AutofixFinding): String = if (f.state == APPLY_FAILED) "Try again…" else "Fix…"
+fun fixLabel(f: AutofixFinding): String = if (f.failed) "Try again…" else "Fix…"
 
 /**
  * A fix that ran under a minute ago is still running on the hub: Fix stays
  * off until its re-check, as the hub refuses a second apply that soon.
  */
 fun fixRunning(f: AutofixFinding, nowSeconds: Long): Boolean =
-    f.state == "verifying" && f.lastAttemptAt != null && nowSeconds - f.lastAttemptAt < 60
+    f.verifying && f.lastAttemptAt != null && nowSeconds - f.lastAttemptAt < 60

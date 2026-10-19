@@ -458,10 +458,13 @@ private fun number(o: JsonObject, key: String, p: Problems, where: String): Doub
     return d
 }
 
-/** A whole number of at least [min], as the desktop's `num`; absent is null. */
-private fun whole(o: JsonObject, key: String, p: Problems, where: String, min: Long): Long? {
+/** A whole number of at least [min], as the desktop's `num`; absent is null (and a problem when [required]). */
+private fun whole(o: JsonObject, key: String, p: Problems, where: String, min: Long, required: Boolean = false): Long? {
     val v = o[key]
-    if (v == null || v is JsonNull) return null
+    if (v == null || v is JsonNull) {
+        if (required) p.add(where, "`$key` is required")
+        return null
+    }
     val d = (v as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull
     if (d == null || !d.isFinite()) {
         p.add(where, "`$key` must be a number")
@@ -779,16 +782,8 @@ fun checkUiBlock(raw: String): UiCheck {
             title = str(v, "title", p, "", 120),
             note = str(v, "note", p, "", 2000),
         )
-        "fix" -> {
-            var findingId: Long? = null
-            if (v["finding_id"] == null || v["finding_id"] is JsonNull) p.add("", "`finding_id` is required") else findingId = whole(v, "finding_id", p, "", 1)
-            UiBlock.Fix(findingId ?: 0)
-        }
-        else -> {
-            var proposal: Long? = null
-            if (v["proposal"] == null || v["proposal"] is JsonNull) p.add("", "`proposal` is required") else proposal = whole(v, "proposal", p, "", 1)
-            UiBlock.Setting(proposal ?: 0, str(v, "note", p, "", 500))
-        }
+        "fix" -> UiBlock.Fix(whole(v, "finding_id", p, "", 1, required = true) ?: 0)
+        else -> UiBlock.Setting(whole(v, "proposal", p, "", 1, required = true) ?: 0, str(v, "note", p, "", 500))
     }
     return if (p.list.isEmpty() && block != null) UiCheck.Ok(block) else UiCheck.Bad(p.list.ifEmpty { listOf("is not a block") })
 }

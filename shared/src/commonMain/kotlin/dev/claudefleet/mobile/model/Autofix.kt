@@ -32,7 +32,19 @@ data class AutofixFinding(
     val evidence: List<String> = emptyList(),
     val fix: AutofixFix? = null,
     val action: AutofixAction? = null,
-)
+) {
+    /** Hidden with Later, until the hub shows it again. */
+    val dismissed: Boolean get() = state == "dismissed"
+
+    /** Resolved: its fix ran and the re-check found it gone. */
+    val cleared: Boolean get() = state == "cleared"
+
+    /** Its fix ran and the re-check still found it. */
+    val failed: Boolean get() = state == "apply_failed"
+
+    /** Its fix ran and the hub has not re-checked yet. */
+    val verifying: Boolean get() = state == "verifying"
+}
 
 /** What a finding's fix does. */
 @Serializable
@@ -61,4 +73,7 @@ data class AutofixFindings(
     /** Cleared in the last day after a fix ran. */
     val fixed: List<AutofixFinding> = emptyList(),
     @SerialName("can_apply") val canApply: Boolean = false,
-)
+) {
+    /** What a person is asked about: everything live but the hidden. */
+    val problems: List<AutofixFinding> get() = findings.filterNot { it.dismissed }
+}
