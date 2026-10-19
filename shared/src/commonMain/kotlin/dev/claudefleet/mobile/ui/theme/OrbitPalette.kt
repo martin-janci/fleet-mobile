@@ -213,7 +213,6 @@ internal object OrbitPalette {
             "count-bg" to count.hex,
             "track" to g(0.09).hex,
             "org-1" to accent.hex,
-            "loader-accent" to accent.hex,
             "control-bg" to (if (dark) raise.hex else pane.hex),
             "control-bg-hover" to hover.hex,
             "control-bg-active" to g(0.1).hex,
