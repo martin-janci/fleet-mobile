@@ -122,18 +122,36 @@ data class AccountUsageSnapshot(
 /** An account at a usage limit: which window, and when it resets. */
 data class AccountLimit(val weekly: Boolean, val resetsAt: Long?)
 
+/** A window's length, for a reading with no reset time (the hub's `FIVE_HOUR_SECS`, `WEEK_SECS`). */
+private const val FIVE_HOUR_SECS = 5 * 3_600L
+private const val WEEK_SECS = 7 * 86_400L
+
 /**
  * The limit this account is at, at [now] (unix seconds), or null. The hub's
- * own rule (`attention::Facts::from_fleet`): a window is at its limit when it
- * is fully used and has not reset yet, and the weekly one wins, because it is
- * the longer wait.
+ * own rule (`attention::Facts::from_fleet`, review w23-6): a window is at its
+ * limit when it is fully used and has not reset yet — before its reset time,
+ * or, with none, while the reading is younger than the window
+ * (`Window::live_at`). With both at their limit the one that frees last
+ * decides (no reset time holds longest); weekly wins a tie.
  */
 fun AccountUsageSnapshot.limitAt(now: Long): AccountLimit? {
     val u = usage ?: return null
-    fun UsageWindow.atLimit() = utilization >= 100.0 && (resetsAt == null || resetsAt > now)
-    u.sevenDay?.takeIf { it.atLimit() }?.let { return AccountLimit(weekly = true, resetsAt = it.resetsAt) }
-    u.fiveHour?.takeIf { it.atLimit() }?.let { return AccountLimit(weekly = false, resetsAt = it.resetsAt) }
-    return null
+    fun UsageWindow.atLimit(len: Long): Boolean {
+        if (utilization < 100.0) return false
+        val at = resetsAt
+        if (at != null) return at > now
+        val f = fetchedAt ?: return false
+        return now - f < len
+    }
+    val weekly = u.sevenDay?.takeIf { it.atLimit(WEEK_SECS) }
+    val five = u.fiveHour?.takeIf { it.atLimit(FIVE_HOUR_SECS) }
+    fun frees(w: UsageWindow): Long = w.resetsAt ?: Long.MAX_VALUE
+    return when {
+        weekly != null && five != null && frees(five) > frees(weekly) -> AccountLimit(weekly = false, resetsAt = five.resetsAt)
+        weekly != null -> AccountLimit(weekly = true, resetsAt = weekly.resetsAt)
+        five != null -> AccountLimit(weekly = false, resetsAt = five.resetsAt)
+        else -> null
+    }
 }
 
 /** One login on a host (`check_account_headroom`, claude-fleet's `account_limits::HostLogin`). */

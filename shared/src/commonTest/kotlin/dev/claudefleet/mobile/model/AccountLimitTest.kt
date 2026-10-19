@@ -9,8 +9,8 @@ import kotlin.test.assertNull
 class AccountLimitTest {
     private val now = 1_000L
 
-    private fun snap(fiveHour: UsageWindow? = null, sevenDay: UsageWindow? = null) =
-        AccountUsageSnapshot("a", AccountUsageWindows(fiveHour, sevenDay), "ok")
+    private fun snap(fiveHour: UsageWindow? = null, sevenDay: UsageWindow? = null, fetchedAt: Long? = null) =
+        AccountUsageSnapshot("a", AccountUsageWindows(fiveHour, sevenDay), "ok", fetchedAt)
 
     @Test
     fun a_full_window_that_has_not_reset_is_a_limit_and_the_weekly_one_wins() {
@@ -19,7 +19,34 @@ class AccountLimitTest {
             AccountLimit(weekly = true, resetsAt = 9_000),
             snap(UsageWindow(100.0, 2_000), UsageWindow(100.0, 9_000)).limitAt(now),
         )
-        assertEquals(AccountLimit(weekly = false, resetsAt = null), snap(fiveHour = UsageWindow(100.0, null)).limitAt(now))
+        assertEquals(AccountLimit(weekly = false, resetsAt = null), snap(fiveHour = UsageWindow(100.0, null), fetchedAt = now - 60).limitAt(now))
+    }
+
+    /** Review w23-6: the hub's `Window::live_at` and "the one that frees last". */
+    @Test
+    fun both_at_their_limit_the_one_that_frees_last_decides() {
+        // Weekly resets in 1 h, the 5-hour window in 3 h: paused for 3 h.
+        assertEquals(
+            AccountLimit(weekly = false, resetsAt = now + 3 * 3_600),
+            snap(UsageWindow(100.0, now + 3 * 3_600), UsageWindow(100.0, now + 3_600)).limitAt(now),
+        )
+        // A tie is weekly's; no reset time holds longest.
+        assertEquals(AccountLimit(weekly = true, resetsAt = 5_000), snap(UsageWindow(100.0, 5_000), UsageWindow(100.0, 5_000)).limitAt(now))
+        assertEquals(
+            AccountLimit(weekly = false, resetsAt = null),
+            snap(UsageWindow(100.0, null), UsageWindow(100.0, 5_000), fetchedAt = now - 60).limitAt(now),
+        )
+    }
+
+    @Test
+    fun a_full_window_with_no_reset_time_holds_only_while_the_reading_is_younger_than_the_window() {
+        assertNull(snap(fiveHour = UsageWindow(100.0, null)).limitAt(now), "no reading time, nothing to go on")
+        val twoDays = 1_000_000L
+        assertNull(snap(fiveHour = UsageWindow(100.0, null), fetchedAt = twoDays - 2 * 86_400).limitAt(twoDays))
+        assertEquals(
+            AccountLimit(weekly = true, resetsAt = null),
+            snap(sevenDay = UsageWindow(100.0, null), fetchedAt = twoDays - 2 * 86_400).limitAt(twoDays),
+        )
     }
 
     @Test
