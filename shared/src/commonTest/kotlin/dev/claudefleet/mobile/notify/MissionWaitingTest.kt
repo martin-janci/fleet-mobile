@@ -38,6 +38,16 @@ class MissionWaitingTest {
         assertEquals("Mission 4", missionWaitAlerts(emptyMap(), listOf(waiting(4).copy(name = " "))).first.single().title)
     }
 
+    /** Review w21-3: a wait that ended takes its notification down. */
+    @Test
+    fun a_wait_that_ended_is_withdrawn_and_one_still_waiting_is_not() {
+        val (_, seen) = missionWaitAlerts(emptyMap(), listOf(waiting(1), waiting(2)))
+        val (_, now) = missionWaitAlerts(seen, listOf(waiting(2), Mission(id = 1, name = "Ship 1.4", state = "active")))
+        assertEquals(listOf(1L), missionWaitsResolved(seen, now))
+        assertEquals(emptyList(), missionWaitsResolved(null, now), "nothing before the first look")
+        assertEquals(emptyList(), missionWaitsResolved(now, now))
+    }
+
     @Test
     fun the_seen_waits_survive_in_prefs_and_nothing_stored_is_no_look_yet() {
         val prefs = FakePrefs()
