@@ -57,8 +57,11 @@ fun escalationKey(row: SessionRow, bucket: TriageBucket): String = "${row.id}:${
  * What needs the person, worst first (then by id, so the list does not
  * reshuffle on every frame), leaving out the cards put off ([later]).
  * [controlId] is Control's own session: a card only for [OWN_BUCKETS].
+ * With [formsShown] (Control's chat draws other sessions' forms, with
+ * Answer here), a session waiting on a form is that card and not this one
+ * too (review w21-8).
  */
-fun escalations(rows: List<SessionRow>, controlId: Long?, later: Set<String>): List<Escalation> {
+fun escalations(rows: List<SessionRow>, controlId: Long?, later: Set<String>, formsShown: Boolean = false): List<Escalation> {
     val out = mutableListOf<Escalation>()
     // A host that is down is one card, not one per session on it; insertion order is kept.
     val down = LinkedHashMap<String, MutableList<SessionRow>>()
@@ -67,6 +70,7 @@ fun escalations(rows: List<SessionRow>, controlId: Long?, later: Set<String>): L
         val words = why(bucket) ?: continue
         val own = row.id == controlId
         if (own && bucket !in OWN_BUCKETS) continue
+        if (formsShown && bucket == TriageBucket.WAITING && row.pendingForm != null) continue
         if (bucket == TriageBucket.HOST_DOWN) {
             if ("host:${row.hostAlias}" in later) continue
             down.getOrPut(row.hostAlias) { mutableListOf() }.add(row)

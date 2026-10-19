@@ -1076,8 +1076,8 @@ private fun ControlTab(
     val controlHosts by repository.hosts.collectAsState()
     // A host that answers again ends its Later, so its next outage is a card (review w21-1).
     LaunchedEffect(controlHosts) { container.escalationLater.forgetRecoveredHosts(controlHosts) }
-    val escalationCards = remember(controlRows, controlAccess, controlState.sessionId, laterKeys) {
-        escalations(controlRows.filter { controlAccess.levelFor(it) == null }, controlState.sessionId, laterKeys.toSet())
+    val escalationCards = remember(controlRows, controlAccess, controlState.sessionId, laterKeys, settingsCaps.ask) {
+        escalations(controlRows.filter { controlAccess.levelFor(it) == null }, controlState.sessionId, laterKeys.toSet(), formsShown = settingsCaps.ask)
     }
     var threadsOpen by remember { mutableStateOf(false) }
     if (threadsOpen) {
