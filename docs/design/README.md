@@ -27,5 +27,10 @@ copy or `OrbitTokens.kt`, and only warns on other PRs, since the drift almost
 always starts in claude-fleet. Both repositories are public, so it needs no
 secret.
 
+`palette-golden.json` is claude-fleet's file too, copied unchanged: the
+palette engine's golden values, generated from its `src/lib/palette.ts`.
+`OrbitPaletteTest` holds `OrbitPalette.kt` to it (one byte of float drift per
+channel), and the same script and workflow hold the copy to claude-fleet main.
+
 To change a token: change the manual, copy its `tokens.json` here unchanged,
 then update the literal in `OrbitTokens.kt`.
