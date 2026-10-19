@@ -15,6 +15,7 @@ import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.loginLabel
 import dev.claudefleet.mobile.model.forAccount
+import dev.claudefleet.mobile.model.isSignedOut
 import dev.claudefleet.mobile.model.QueuedPrompt
 import dev.claudefleet.mobile.model.HostLogin
 import dev.claudefleet.mobile.model.SendLaterTiming
@@ -1723,7 +1724,9 @@ class SessionViewModel(
         if (!idle(local.value.sending, local.value.answering, local.value.busy)) return@launch
         local.update { it.copy(busy = true, error = null, limitNotice = null, switchTarget = null) }
         try {
-            val h = actions.accountHeadroom(r.hostAlias, r.claudeProfile).forAccount(r.accountUuid)
+            // Never a login the hub knows is signed out (review w23-3).
+            val host = fleet.hosts.value.firstOrNull { it.alias == r.hostAlias }
+            val h = actions.accountHeadroom(r.hostAlias, r.claudeProfile).forAccount(r.accountUuid) { l -> host?.isSignedOut(l.profile) == true }
             val target = h.suggestion
             local.update {
                 if (target != null) it.copy(switchTarget = target)

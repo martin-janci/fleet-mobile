@@ -46,7 +46,25 @@ data class HostRow(
     @SerialName("mem_pressure") val memPressure: Double? = null,
     @SerialName("mem_low") val memLow: Boolean = false,
     @SerialName("cpu_saturated") val cpuSaturated: Boolean = false,
+    /**
+     * The host's Claude logins fleet knows are signed out (claude-fleet
+     * migration 197, `login_health`): the host's own (`profile` null) and its
+     * login profiles. Empty from an older hub, and when every login is
+     * signed in as far as fleet knows.
+     */
+    @SerialName("signed_out_logins") val signedOutLogins: List<SignedOutLogin> = emptyList(),
 )
+
+/** One signed-out login on a host: its profile (null = the host's own login) and since when (unix seconds). */
+@Serializable
+data class SignedOutLogin(
+    val profile: String? = null,
+    val since: Long = 0,
+    @SerialName("checked_at") val checkedAt: Long = 0,
+)
+
+/** [profile]'s login on this host is signed out (the hub's `login_health::is_signed_out`). */
+fun HostRow.isSignedOut(profile: String?): Boolean = signedOutLogins.any { it.profile == profile }
 
 /**
  * The health half of a `host:pinged` frame (claude-fleet's `HostHealth`):

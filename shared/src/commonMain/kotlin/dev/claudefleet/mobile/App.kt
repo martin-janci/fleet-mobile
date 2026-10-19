@@ -50,6 +50,7 @@ import dev.claudefleet.mobile.data.HubWizardDrafts
 import dev.claudefleet.mobile.data.WizardDrafts
 import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.model.limitAt
+import dev.claudefleet.mobile.model.isSignedOut
 import dev.claudefleet.mobile.ui.SessionLaterHost
 import dev.claudefleet.mobile.ui.PromptTuneHost
 import dev.claudefleet.mobile.ui.components.ChatHost
@@ -1288,6 +1289,7 @@ private fun FleetRoute(
             scope,
             credentials.canWrite,
             accountName = { uuid -> repository.accountNames.value[uuid] },
+            signedOut = { alias, profile -> repository.hosts.value.firstOrNull { it.alias == alias }?.isSignedOut(profile) == true },
         )
     }
     val trackers = remember(repository, scope) { TrackersViewModel(repository, container.trackerActions, scope, credentials.canWrite) }

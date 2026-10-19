@@ -8,6 +8,7 @@ import dev.claudefleet.mobile.model.Mission
 import dev.claudefleet.mobile.model.MissionWait
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.forAccount
+import dev.claudefleet.mobile.model.signedInElsewhere
 import dev.claudefleet.mobile.model.loginLabel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -84,6 +85,8 @@ fun inboxRowActions(
             switchAccount = mayManage && switchAvailable,
             waitUntil = limit?.resetsAt,
         )
+        // A signed-out login: resume under one that is signed in (review w23-4).
+        row.attention?.reason == "no_credentials" -> InboxRowActions(switchAccount = mayManage && switchAvailable)
         inboxWord(row) == dev.claudefleet.mobile.ui.kit.StatusWord.FAILED -> InboxRowActions(
             openLog = true,
             retryPrompt = row.lastPrompt?.trim()?.takeIf {
@@ -149,6 +152,8 @@ class InboxViewModel(
     private val canWrite: Boolean,
     /** An account uuid's label from `list_accounts`, for "Resumed under …". */
     private val accountName: (String) -> String? = { null },
+    /** A host's login is signed out (`signed_out_logins`), by host alias and profile; never offered as a switch target. */
+    private val signedOut: (String, String?) -> Boolean = { _, _ -> false },
 ) {
     private val _state = MutableStateFlow(InboxUiState())
     val state: StateFlow<InboxUiState> = _state.asStateFlow()
@@ -166,9 +171,16 @@ class InboxViewModel(
     fun proposeSwitch(row: SessionRow, switchAvailable: Boolean): Job? {
         if (!inboxRowActions(row, canWrite, switchAvailable, null).switchAccount) return null
         return press(row.id) {
-            val target = actions.headroom(row.hostAlias, row.claudeProfile).forAccount(row.accountUuid).suggestion
+            val out = { l: HostLogin -> signedOut(row.hostAlias, l.profile) }
+            val h = actions.headroom(row.hostAlias, row.claudeProfile)
+            val target = if (row.attention?.reason == "no_credentials") {
+                h.signedInElsewhere(row.claudeProfile, out)
+            } else {
+                h.forAccount(row.accountUuid, out).suggestion
+            }
             if (target == null) {
-                "No other login on ${row.hostAlias} has room left."
+                if (row.attention?.reason == "no_credentials") "No other login on ${row.hostAlias} is signed in with room left."
+                else "No other login on ${row.hostAlias} has room left."
             } else {
                 _state.update { it.copy(switchTargets = it.switchTargets + (row.id to target)) }
                 null

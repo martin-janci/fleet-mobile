@@ -16,6 +16,8 @@ import dev.claudefleet.mobile.model.RestoreOutcome
 import dev.claudefleet.mobile.model.RestorePlanEntry
 import dev.claudefleet.mobile.model.RestoreReport
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.SignedOutLogin
+import dev.claudefleet.mobile.model.isSignedOut
 import dev.claudefleet.mobile.model.SshHost
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
@@ -182,6 +184,20 @@ class HostsInstallWizardsTest {
     }
 
     // ── Ping and host facts ──
+
+    /** Review w23-3: the hub's signed-out logins are read, so a switch never targets one. */
+    @Test
+    fun a_host_row_reads_its_signed_out_logins() {
+        val rows = json.decodeFromString(
+            ListSerializer(HostRow.serializer()),
+            """[{"alias":"mac","reachable":true,"signed_out_logins":[{"profile":"work","since":100,"checked_at":200},{"since":50}]},{"alias":"pine"}]""",
+        )
+        assertTrue(rows[0].isSignedOut("work"))
+        assertTrue(rows[0].isSignedOut(null), "the host's own login")
+        assertFalse(rows[0].isSignedOut("home"))
+        assertEquals(SignedOutLogin("work", 100, 200), rows[0].signedOutLogins[0])
+        assertTrue(rows[1].signedOutLogins.isEmpty(), "an older hub sends none")
+    }
 
     @Test
     fun host_rows_show_the_hubs_ping_only_for_a_host_that_answers() = runTest {

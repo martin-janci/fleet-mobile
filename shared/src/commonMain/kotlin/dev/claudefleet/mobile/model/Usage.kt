@@ -178,7 +178,7 @@ data class Headroom(
  * suggestion are read for that account: the login under the line with the
  * least used, on another account.
  */
-fun Headroom.forAccount(accountUuid: String?): Headroom {
+fun Headroom.forAccount(accountUuid: String?, signedOut: (HostLogin) -> Boolean = { false }): Headroom {
     val chosen = accountUuid?.let { a -> logins.firstOrNull { it.accountUuid == a } } ?: return this
     val used = chosen.usedPct
     val over = used != null && used >= pauseAtPct
@@ -186,12 +186,24 @@ fun Headroom.forAccount(accountUuid: String?): Headroom {
     if (over) {
         for (l in logins) {
             val pct = l.usedPct ?: continue
-            if (l.accountUuid == chosen.accountUuid || pct >= pauseAtPct) continue
+            // A signed-out login would restart the session into `/login`
+            // (the hub's own filter, account_limits.rs; review w23-3).
+            if (l.accountUuid == chosen.accountUuid || pct >= pauseAtPct || signedOut(l)) continue
             if (suggestion == null || pct < (suggestion.usedPct ?: Double.MAX_VALUE)) suggestion = l
         }
     }
     return copy(chosen = chosen, over = over, suggestion = suggestion)
 }
+
+/**
+ * For a session whose login is signed out (`no_credentials`, review w23-4):
+ * the signed-in login on the host with the most room, other than
+ * [exceptProfile] (the session's own, which is the one signed out), and
+ * under the pause line. Logins with a reading come first; null when none.
+ */
+fun Headroom.signedInElsewhere(exceptProfile: String?, signedOut: (HostLogin) -> Boolean): HostLogin? =
+    logins.filter { l -> l.profile != exceptProfile && !signedOut(l) && (l.usedPct ?: 0.0) < pauseAtPct }
+        .minByOrNull { it.usedPct ?: Double.MAX_VALUE }
 
 /** "work (m.janci@…)" or the account alone: how a login reads in the switch question. */
 fun loginLabel(l: HostLogin, accountName: (String) -> String?): String {
