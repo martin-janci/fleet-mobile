@@ -997,7 +997,7 @@ private fun BulkOutcomeSheet(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(x.name, color = o.fg, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
-                            if (x.ok) verb.replaceFirstChar { it.uppercaseChar() } else x.reason ?: "Not $verb",
+                            if (x.ok) x.reason ?: verb.replaceFirstChar { it.uppercaseChar() } else x.reason ?: "Not $verb",
                             color = o.fgMuted,
                             fontSize = 13.sp,
                             maxLines = 2,

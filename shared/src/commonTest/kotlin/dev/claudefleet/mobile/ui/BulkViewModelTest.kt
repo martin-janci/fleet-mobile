@@ -6,9 +6,13 @@ import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.ConversationSummary
+import dev.claudefleet.mobile.model.GrantLevel
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.MyAccess
 import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.QueuePromptResult
 import dev.claudefleet.mobile.model.RepairReport
+import dev.claudefleet.mobile.model.SendLaterTiming
 import dev.claudefleet.mobile.model.SendPromptResult
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.ToolDetail
@@ -34,6 +38,7 @@ private class BulkFleet(rows: List<SessionRow>) : FleetState {
     override val clockSkewSeconds = MutableStateFlow(0L)
     override val sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16)
     override val capabilities = MutableStateFlow(HubCapabilities())
+    override val access = MutableStateFlow(MyAccess.UNKNOWN)
     override suspend fun refresh() = Unit
 }
 
@@ -42,6 +47,15 @@ private class BulkCalls : SessionActions {
     val sent = mutableListOf<Pair<Long, String>>()
     val killed = mutableListOf<Long>()
     val failing = mutableSetOf<Long>()
+    val queued = mutableListOf<Pair<Long, String>>()
+    /** Sessions `queue_prompt` types into at once (they were idle). */
+    val idle = mutableSetOf<Long>()
+
+    override suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming): QueuePromptResult {
+        if (sessionId in failing) throw HubError.Tool("E_INVALID_STATE", "busy")
+        queued += sessionId to prompt
+        return QueuePromptResult(sessionId, delivered = sessionId in idle, queuedId = if (sessionId in idle) null else sessionId)
+    }
 
     override suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult {
         if (sessionId in failing) throw HubError.Tool("E_INVALID_STATE", "busy")
@@ -72,10 +86,10 @@ private class BulkCalls : SessionActions {
 }
 
 private val ROWS = listOf(
-    SessionRow(id = 1, tmuxName = "one"),
-    SessionRow(id = 2, tmuxName = "two"),
-    SessionRow(id = 3, tmuxName = "boss", isController = true),
-    SessionRow(id = 4, tmuxName = "outside", kind = "external"),
+    SessionRow(id = 1, tmuxName = "one", status = "running"),
+    SessionRow(id = 2, tmuxName = "two", status = "running"),
+    SessionRow(id = 3, tmuxName = "boss", status = "running", isController = true),
+    SessionRow(id = 4, tmuxName = "outside", status = "running", kind = "external"),
 )
 
 class BulkViewModelTest {
@@ -249,6 +263,34 @@ class BulkViewModelTest {
         assertEquals(listOf(2L, 1L), calls.killed)
         assertTrue(vm.state.value.retryable.isEmpty())
         assertFalse(vm.state.value.outcome!!.single { it.sessionId == 3L }.ok, "the skip is still reported")
+    }
+
+    /** Review w22-1: the desktop's bulk prompt queues, and skips shells, stopped rows and narrow shares. */
+    @Test
+    fun a_bulk_prompt_queues_where_the_hub_can_and_skips_what_cannot_take_it() = runTest {
+        val rows = ROWS.take(2) + listOf(
+            SessionRow(id = 5, tmuxName = "shell-1", status = "running", kind = "shell"),
+            SessionRow(id = 6, tmuxName = "gone", status = "stopped"),
+            SessionRow(id = 7, tmuxName = "theirs", status = "running", ownerPersonId = 9),
+        )
+        val fleet = BulkFleet(rows)
+        fleet.capabilities.value = HubCapabilities(tools = setOf(HubCapabilities.QUEUE_PROMPT, HubCapabilities.QUEUED_PROMPTS))
+        fleet.access.value = MyAccess(personId = 1, grants = mapOf(7L to GrantLevel.WATCH))
+        val calls = BulkCalls().apply { idle += 1L }
+        val vm = BulkViewModel(fleet, calls, backgroundScope, canWrite = true)
+        listOf(1L, 2L, 5L, 6L, 7L).forEach(vm::toggle)
+
+        vm.send("rebase on main").join()
+        runCurrent()
+
+        assertTrue(calls.sent.isEmpty(), "never typed straight in where the hub queues")
+        assertEquals(listOf(1L to "rebase on main", 2L to "rebase on main"), calls.queued)
+        val outcome = vm.state.value.outcome!!
+        assertNull(outcome.single { it.sessionId == 1L }.reason, "an idle session took it now")
+        assertEquals("Queued · goes in when idle", outcome.single { it.sessionId == 2L }.reason)
+        val skipped = outcome.filter { !it.ok }
+        assertEquals(setOf(5L, 6L, 7L), skipped.map { it.sessionId }.toSet())
+        assertTrue(skipped.none { it.retryable })
     }
 
     @Test

@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.SessionActions
+import dev.claudefleet.mobile.model.GrantLevel
 import dev.claudefleet.mobile.model.SessionRow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -61,9 +62,11 @@ data class BulkUiState(
 /**
  * The desktop's bulk select on the phone: pick sessions (a long press starts,
  * a tap then toggles), then send them one prompt or kill them. One call per
- * session — `send_prompt`, `kill_session` — in the order picked, each one's
- * failure reported against its name rather than stopping the rest. Kill skips
- * what the hub would refuse (the controller, an external session) and says so.
+ * session — `queue_prompt` (`send_prompt` on a hub without it), `kill_session`
+ * — in the order picked, each one's failure reported against its name rather
+ * than stopping the rest. Kill skips what the hub would refuse (the controller,
+ * an external session), Send what cannot take a prompt ([sendRefusal]), and
+ * each says so.
  */
 class BulkViewModel(
     private val fleet: FleetState,
@@ -156,16 +159,31 @@ class BulkViewModel(
         val l = local.value
         if (!canWrite || l.running || ids.isEmpty()) return@launch
         if (action == BulkAction.Archive && (archiveOne == null || !fleet.capabilities.value.archiveSession)) return@launch
+        val access = fleet.access.value
+        // Through the hub's queue where it has one, as the desktop's bulk
+        // prompt does (review w22-1): never typed into a turn or a question.
+        val queue = fleet.capabilities.value.sendLater
         fun skip(row: SessionRow): String? = when (action) {
             BulkAction.Kill -> killRefusal(row)
             BulkAction.Archive -> if (row.isController) "the fleet's controller is not archived" else null
-            is BulkAction.Send -> null
+            is BulkAction.Send -> sendRefusal(row, access.levelFor(row))
         }
-        suspend fun call(row: SessionRow) {
-            when (action) {
-                is BulkAction.Send -> actions.sendPrompt(row.id, action.text)
-                BulkAction.Kill -> actions.kill(row.id)
-                BulkAction.Archive -> (archiveOne ?: throw IllegalStateException("this hub cannot archive"))(row.id)
+        /** What the outcome line says for a session that took the action; null for the plain verb. */
+        suspend fun call(row: SessionRow): String? = when (action) {
+            is BulkAction.Send ->
+                if (queue) {
+                    if (actions.queuePrompt(row.id, action.text).delivered) null else "Queued · goes in when idle"
+                } else {
+                    actions.sendPrompt(row.id, action.text)
+                    null
+                }
+            BulkAction.Kill -> {
+                actions.kill(row.id)
+                null
+            }
+            BulkAction.Archive -> {
+                (archiveOne ?: throw IllegalStateException("this hub cannot archive"))(row.id)
+                null
             }
         }
         val rows = fleet.sessions.value
@@ -177,8 +195,7 @@ class BulkViewModel(
                 BulkOutcome(row.id, row.displayName, ok = false, reason = refusal, retryable = false)
             } else {
                 try {
-                    call(row)
-                    BulkOutcome(row.id, row.displayName, ok = true)
+                    BulkOutcome(row.id, row.displayName, ok = true, reason = call(row))
                 } catch (e: CancellationException) {
                     throw e
                 } catch (t: Throwable) {
@@ -193,6 +210,19 @@ class BulkViewModel(
             cur.copy(running = false, outcome = merged, selected = cur.selected - done, selecting = false)
         }
     }
+}
+
+/**
+ * Why a bulk prompt skips [row], or null: a shell would run the words as a
+ * command, a session that is not running cannot take them, and a share below
+ * Steer may not write to it ([share] from [dev.claudefleet.mobile.model.MyAccess.levelFor]).
+ * The desktop's `BulkPromptDialog` skips the same three (review w22-1).
+ */
+internal fun sendRefusal(row: SessionRow, share: String?): String? = when {
+    row.kind == "shell" -> "a shell: the words would run as a command"
+    row.status != "running" -> "not running"
+    share == GrantLevel.WATCH || share == GrantLevel.ANSWER -> "shared with you to ${if (share == GrantLevel.WATCH) "watch" else "answer"} only"
+    else -> null
 }
 
 /** Why the hub would refuse to kill [row], or null — the same rule as a session's own *Kill now*. */
