@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.model.AgentAction
 import dev.claudefleet.mobile.model.AgentJob
 import dev.claudefleet.mobile.model.AgentRule
 import dev.claudefleet.mobile.model.AgentRunForm
+import dev.claudefleet.mobile.model.SELF_DEBUG
 import dev.claudefleet.mobile.model.SelfDebugReport
 import dev.claudefleet.mobile.model.ruleAgentName
 import dev.claudefleet.mobile.model.ruleRunnable
@@ -142,7 +143,13 @@ class AgentActionsViewModel(
             val notice = try {
                 val started = actions.run(r.id, form)
                 local.update { it.copy(lastRun = started.job.ifBlank { it.lastRun }) }
-                "${ruleAgentName(r)} queued. Its findings show here when it is done."
+                // The findings card follows self debug runs only; another
+                // definition's proposals go to the Inbox (review w08-10).
+                if (r.definition == SELF_DEBUG) {
+                    "${ruleAgentName(r)} queued. Its findings show here when it is done."
+                } else {
+                    "${ruleAgentName(r)} queued. What it proposes reaches the Inbox when it is done."
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {
@@ -165,7 +172,7 @@ class AgentActionsViewModel(
             val notice = try {
                 val done = actions.decide(a.id, approve)
                 local.update { l -> l.copy(pending = l.pending.filterNot { it.id == done.id }) }
-                if (approve) "Approved: it goes out on the hub's next pass." else "Rejected."
+                if (approve) "Approved: it runs within a minute." else "Rejected."
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {
