@@ -366,6 +366,12 @@ internal fun UiBlockCard(block: UiBlock, raw: String) {
                 )
             }
         }
+        is UiBlock.DesktopOnly -> Card(colors.outlineVariant, RICH_DESKTOP_ONLY) {
+            Label(if (block.kind == "wizard") "Form" else "Dashboard")
+            Text(block.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            block.why?.let { MarkdownText(it) }
+            Note("Opens in Orbit Fleet on the desktop.")
+        }
         is UiBlock.Form -> FormCard(block.form, raw)
         is UiBlock.Progress -> ProgressCard(block, raw)
         is UiBlock.Results -> ResultsCard(block)
@@ -382,6 +388,7 @@ internal fun UiBlockCard(block: UiBlock, raw: String) {
 }
 
 internal const val RICH_DEVICE = "rich-device"
+internal const val RICH_DESKTOP_ONLY = "rich-desktop-only"
 
 /** What a `device` card found for its reference. */
 private sealed interface DeviceLookup {

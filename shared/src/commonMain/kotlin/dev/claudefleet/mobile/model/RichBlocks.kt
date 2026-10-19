@@ -53,7 +53,17 @@ data class TaskReport(
 )
 
 val UI_TONES = listOf("info", "tip", "success", "warning", "danger")
-val UI_KINDS = listOf("report", "steps", "guide", "callout", "facts", "choices", "form", "progress", "results", "error", "setting", "device", "fix")
+val UI_KINDS = listOf("report", "steps", "guide", "callout", "facts", "choices", "form", "progress", "results", "error", "setting", "wizard", "dashboard", "device", "fix")
+
+/** The app wizards a `wizard` block may name (chat-blocks.md), with the name the desktop's form carries. */
+val UI_WIZARDS: List<Pair<String, String>> = listOf(
+    "add_host" to "Add host",
+    "add_project" to "Add project",
+    "fleet_agent" to "New fleet agent",
+    "get_started" to "Get started",
+    "new_session" to "New session",
+    "pair_device" to "Pair a device",
+)
 
 val PROGRESS_STATES = listOf("running", "waiting", "done", "failed")
 val PROGRESS_STEP_STATES = listOf("pending", "running", "done", "failed", "skipped")
@@ -168,6 +178,12 @@ sealed class UiBlock {
      * reads the device's state from the hub, never from here.
      */
     data class Device(val device: String, val title: String?, val note: String?) : UiBlock()
+    /**
+     * A `wizard` or `dashboard` block (review w21-5): valid, but run only by
+     * the desktop. The phone draws a quiet note with [name] (the wizard's
+     * form or the dashboard's title) and [why], never the red "Not shown".
+     */
+    data class DesktopOnly(val kind: String, val name: String, val why: String?) : UiBlock()
     /**
      * A fleet problem autofix found, by its finding id (`autofix { action: list }`).
      * The phone draws it read-only: Fix, Later and Details live on the desktop.
@@ -783,6 +799,30 @@ fun checkUiBlock(raw: String): UiCheck {
             var findingId: Long? = null
             if (v["finding_id"] == null || v["finding_id"] is JsonNull) p.add("", "`finding_id` is required") else findingId = whole(v, "finding_id", p, "", 1)
             UiBlock.Fix(findingId ?: 0)
+        }
+        "wizard" -> {
+            // The block's own checks (chat-blocks.md › wizard); the answers in
+            // `values` are the desktop form's to check, and are not drawn here.
+            val wizard = str(v, "wizard", p, "", 64, required = true)
+            val label = UI_WIZARDS.firstOrNull { it.first == wizard }?.second
+            if (wizard != null && label == null) p.add("", "`wizard` must be one of ${UI_WIZARDS.joinToString(", ") { it.first }}")
+            val definition = str(v, "definition", p, "", 64)
+            if (wizard == "fleet_agent" && definition.isNullOrBlank()) p.add("", "a `fleet_agent` wizard names its `definition`")
+            if (wizard != null && wizard != "fleet_agent" && definition != null) p.add("", "`definition` is for the `fleet_agent` wizard")
+            val why = str(v, "why", p, "", 500)
+            val values = v["values"]
+            if (values != null && values !is JsonNull && values !is JsonObject) p.add("", "`values` must be an object of answers by field name")
+            val name = if (wizard == "fleet_agent" && definition != null) "$label: $definition" else label
+            name?.let { UiBlock.DesktopOnly("wizard", it, why) }
+        }
+        "dashboard" -> {
+            val id = str(v, "id", p, "", KEY_MAX, required = true)
+            if (id != null && id.isNotBlank() && !KEY_RE.matches(id)) p.add("", "`id` must be letters, digits and . _ : -")
+            val title = str(v, "title", p, "", 80, required = true)
+            str(v, "intro", p, "", 300)
+            val why = str(v, "why", p, "", 500)
+            arr(v, "widgets", p, "", 1, 12)
+            title?.let { UiBlock.DesktopOnly("dashboard", it, why) }
         }
         else -> {
             var proposal: Long? = null
