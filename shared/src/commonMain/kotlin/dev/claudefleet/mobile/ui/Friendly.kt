@@ -32,6 +32,7 @@ private fun friendlyWords(t: Throwable): Friendly {
             } ?: Friendly("The hub refused that", t.message, isError = true, details = raw)
             "E_CONFIRM_REQUIRED" -> Friendly("Needs a confirmation on the desktop", "Approve it there; this screen will follow.", isError = true, details = raw)
             "E_BG_SESSION" -> Friendly("Runs outside tmux", "This session has no terminal to type into.", isError = true, details = raw)
+            "E_PINNED" -> Friendly("This session is pinned", "Unpin it on the desktop first.", isError = true, details = raw)
             else -> Friendly("The hub refused that", t.message, isError = true, details = raw)
         }
         // Every branch carries `details`, and these four used to carry none —

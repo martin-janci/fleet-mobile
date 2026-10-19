@@ -1789,6 +1789,7 @@ private fun SessionOverflowMenu(
                     review = state.canReview,
                     archive = orbit.onArchive != null,
                     kill = manage && state.canKill,
+                    pinned = session?.isPinned == true,
                     worktree = onRepo != null,
                     sendLater = state.canSendLater,
                     background = state.canStartBackground,
@@ -1902,11 +1903,17 @@ private fun SessionOverflowMenu(
         }
         if (manage) {
             HorizontalDivider()
-            DropdownMenuItem(
-                text = { Text("Safe remove") },
-                enabled = actionable,
-                onClick = { expanded = false; showSafeKillConfirm = true },
-            )
+            if (state.session?.isPinned == true) {
+                // Said rather than hidden: the hub refuses Safe remove and Kill
+                // on a pinned session (`E_PINNED`), and the phone cannot unpin.
+                DropdownMenuItem(text = { Text("Pinned: unpin on the desktop") }, enabled = false, onClick = {})
+            } else {
+                DropdownMenuItem(
+                    text = { Text("Safe remove") },
+                    enabled = actionable,
+                    onClick = { expanded = false; showSafeKillConfirm = true },
+                )
+            }
             if (state.canKill) {
                 DropdownMenuItem(
                     text = { Text("Kill now", color = MaterialTheme.colorScheme.error) },

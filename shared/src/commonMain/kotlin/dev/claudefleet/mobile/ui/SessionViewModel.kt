@@ -359,7 +359,7 @@ data class SessionUiState(
         get() = canManage && recreateAvailable
 
     val canDismissGhost: Boolean
-        get() = canManage && ghost && dismissGhostAvailable
+        get() = canManage && ghost && dismissGhostAvailable && session?.isPinned != true
     /**
      * Whether the ⋮ menu is offered at all: a readonly credential may not
      * call any of these tools, a session that has left the fleet has nothing
