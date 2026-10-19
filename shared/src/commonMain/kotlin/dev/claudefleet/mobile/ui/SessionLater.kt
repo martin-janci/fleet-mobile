@@ -57,8 +57,11 @@ import dev.claudefleet.mobile.ui.theme.OrbitTokens
  * that does not care, or a hub that serves neither.
  */
 class SessionLaterHost(
-    /** The prompt and when it goes (gap plan G5.5); a plain [SendLaterTiming] is "when idle". */
-    val onSendLater: (String, SendLaterTiming) -> Unit = { _, _ -> },
+    /**
+     * The prompt and when it goes (gap plan G5.5); a plain [SendLaterTiming] is "when idle".
+     * The third argument runs once the hub has accepted it, never on a refusal (review w22-3).
+     */
+    val onSendLater: (String, SendLaterTiming, () -> Unit) -> Unit = { _, _, _ -> },
     val onLoadQueued: () -> Unit = {},
     val onCancelQueued: (Long) -> Unit = {},
     val onDismissNotice: () -> Unit = {},
@@ -282,9 +285,12 @@ internal fun SendLaterSheet(
         ) {
             val timing = sendLaterTiming(choice, now(), utcOffset, clock, skip && state.sendLaterSkipAvailable)
             if (timing != null) {
-                host.onSendLater(text, timing)
-                onQueued(text)
-                text = ""
+                val sent = text
+                // Let go of the text only once the hub has it (review w22-3).
+                host.onSendLater(sent, timing) {
+                    onQueued(sent)
+                    if (text == sent) text = ""
+                }
             }
         },
         scrollable = true,

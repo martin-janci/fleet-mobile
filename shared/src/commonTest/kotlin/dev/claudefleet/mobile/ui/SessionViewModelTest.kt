@@ -4320,6 +4320,31 @@ class SessionViewModelTest {
         assertTrue(actions.queuedSent.isEmpty())
     }
 
+    @Test
+    fun send_later_lets_go_of_the_text_only_once_the_hub_accepts_it() = runTest {
+        // Review w22-3: the sheet and the composer cleared before the hub
+        // answered, so a refusal lost the prompt.
+        var accepted = 0
+        val refusing = object : SessionActions by FakeActions() {
+            override suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming): QueuePromptResult =
+                throw HubError.Tool("E_PERMISSION", "no")
+        }
+        val refused = SessionViewModel(ID, FakeFleetState(tools = setOf("queue_prompt", "queued_prompts")), refusing, backgroundScope)
+        runCurrent()
+        refused.sendLater("keep me", SendLaterTiming()) { accepted++ }.join()
+        runCurrent()
+        assertEquals(0, accepted, "a refusal keeps the text")
+        assertNotNull(refused.state.value.error)
+
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(tools = setOf("queue_prompt", "queued_prompts")), actions, backgroundScope)
+        runCurrent()
+        vm.sendLater("go", SendLaterTiming()) { accepted++ }.join()
+        runCurrent()
+        assertEquals(1, accepted)
+        assertEquals(listOf("go"), actions.queuedSent)
+    }
+
     // ---- Control's queued composer (Control review F4/F19) ----
 
     @Test

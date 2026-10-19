@@ -1550,18 +1550,31 @@ class SessionViewModel(
      * Each part goes only to a hub whose `queue_prompt` names it: an older
      * hub would ignore it and type a "tomorrow" prompt at the next idle
      * moment, so a timing it cannot keep is not sent at all.
+     *
+     * [onAccepted] runs only once the hub has taken the prompt, so the sheet
+     * and the composer let go of the text then and not before (review w22-3):
+     * a refusal or a guard below leaves it where the person typed it.
      */
-    fun sendLater(text: String, timing: SendLaterTiming = SendLaterTiming()): Job = scope.launch {
+    fun sendLater(text: String, timing: SendLaterTiming = SendLaterTiming(), onAccepted: () -> Unit = {}): Job = scope.launch {
         val body = text.trim()
         val caps = fleet.capabilities.value
-        if (body.isEmpty() || !caps.sendLater || readOnly || row() == null || !connected()) return@launch
+        if (body.isEmpty() || !caps.sendLater || readOnly || row() == null) return@launch
         if (timing.notBefore != null && !caps.sendLaterAt) return@launch
         if (timing.untilLimitReset && !caps.sendLaterAfterLimit) return@launch
         if (timing.skipIfArchived && !caps.sendLaterSkipArchived) return@launch
-        if (!idle(local.value.sending, local.value.answering, local.value.busy)) return@launch
+        // A tap that cannot go out says why; the text stays in the sheet.
+        if (!connected()) {
+            local.update { it.copy(error = Friendly("Not connected", "The hub does not answer right now. Try again once it does.", isError = false)) }
+            return@launch
+        }
+        if (!idle(local.value.sending, local.value.answering, local.value.busy)) {
+            local.update { it.copy(error = Friendly("Still sending", "Wait for the message on its way, then schedule this one.", isError = false)) }
+            return@launch
+        }
         local.update { it.copy(busy = true, error = null, sendLaterNotice = null) }
         try {
             val r = actions.queuePrompt(sessionId, body, timing)
+            onAccepted()
             val notice = when {
                 r.delivered -> "Sent now: the session was idle."
                 timing.notBefore != null || timing.untilLimitReset -> "Kept: it goes in when its time comes and the session is idle."
