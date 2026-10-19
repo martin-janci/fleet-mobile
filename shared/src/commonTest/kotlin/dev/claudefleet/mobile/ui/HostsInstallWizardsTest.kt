@@ -135,6 +135,39 @@ class HostsInstallWizardsTest {
         assertFalse(readonly.state.value.whenBack)
     }
 
+    /** Review w23-10/11/13: a lost host waits for the scan and offers no Restore; a host never checked offers no Run plan when back. */
+    @Test
+    fun a_lost_host_skips_the_scan_and_offers_only_run_plan_when_back() = runTest {
+        val fleet = G58Fleet(listOf(HostRow(alias = "pine", reachable = false, lastPingedAt = 1)), RESTORE_TOOLS)
+        val actions = Restores()
+        val vm = HostDetailViewModel(fleet, actions, backgroundScope, canWrite = true)
+        vm.open("pine").join()
+        runCurrent()
+        assertFalse("discover" in actions.calls, "the scan goes over SSH, and the host does not answer")
+        assertEquals("Untracked conversations: looked for when pine answers again.", vm.state.value.discoverNote)
+        assertFalse(vm.state.value.canRestoreNow, "the hub refuses a restore on a host that does not answer")
+        assertTrue(vm.state.value.canRunWhenBack)
+
+        val never = HostDetailViewModel(G58Fleet(listOf(HostRow(alias = "pine")), RESTORE_TOOLS), Restores(), backgroundScope, canWrite = true)
+        never.open("pine").join()
+        runCurrent()
+        assertFalse(never.state.value.canRunWhenBack, "a host never checked is not back from anything")
+    }
+
+    @Test
+    fun a_failed_scan_says_so_rather_than_looking_for_ever() = runTest {
+        val fleet = G58Fleet(listOf(HostRow(alias = "pine", reachable = true, lastPingedAt = 1)), RESTORE_TOOLS)
+        val actions = object : HostActions by Restores() {
+            override suspend fun discover(alias: String): List<LostCandidate> = throw HubError.Transport(IllegalStateException("timed out"))
+        }
+        val vm = HostDetailViewModel(fleet, actions, backgroundScope, canWrite = true)
+        vm.open("pine").join()
+        runCurrent()
+        assertNull(vm.state.value.candidates)
+        assertEquals("Could not look for untracked conversations. Check again to retry.", vm.state.value.discoverNote)
+        assertTrue(vm.state.value.canRestoreNow)
+    }
+
     @Test
     fun a_failed_restore_when_back_says_so() = runTest {
         val fleet = G58Fleet(listOf(HostRow(alias = "pine", reachable = false, lastPingedAt = 1)), RESTORE_TOOLS)

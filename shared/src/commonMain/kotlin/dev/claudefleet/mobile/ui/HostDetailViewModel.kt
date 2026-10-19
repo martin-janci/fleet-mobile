@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.model.HostCheck
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.LostCandidate
 import dev.claudefleet.mobile.model.RestoreReport
+import dev.claudefleet.mobile.model.isSignalLost
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -37,6 +38,12 @@ data class HostDetailUiState(
     /** The last real restore's outcome. */
     val restored: RestoreReport? = null,
     val candidates: List<LostCandidate>? = null,
+    /**
+     * Why there is no scan for untracked conversations to show: the host does
+     * not answer, or the scan failed (review w23-10). Null while one runs or
+     * once one answered.
+     */
+    val discoverNote: String? = null,
     val resuming: String? = null,
     val error: Friendly? = null,
     /** The host is armed: the restore runs from this phone when the hub next sees it answer. */
@@ -44,8 +51,15 @@ data class HostDetailUiState(
     /** What the armed restore did when the host came back, in words; null when none has run. */
     val backNote: String? = null,
 ) {
-    /** Run plan when back is offered: the host does not answer now, and this pairing may restore. */
-    val canRunWhenBack: Boolean get() = canRestore && host != null && !host.reachable
+    /**
+     * Run plan when back is offered: the host answered once and does not now,
+     * and this pairing may restore. A host never checked is not "back" from
+     * anything (review w23-13).
+     */
+    val canRunWhenBack: Boolean get() = canRestore && host != null && host.isSignalLost
+
+    /** Restore is offered only on a host that answers: the hub refuses it otherwise, `E_HOST_OFFLINE` (review w23-11). */
+    val canRestoreNow: Boolean get() = canRestore && host?.reachable == true
 
     /** What the plan would actually bring back. */
     val restorable: Int get() = plan?.plan?.count { it.restores } ?: 0
@@ -77,6 +91,7 @@ class HostDetailViewModel(
         val restoring: Boolean = false,
         val restored: RestoreReport? = null,
         val candidates: List<LostCandidate>? = null,
+        val discoverNote: String? = null,
         val resuming: String? = null,
         val error: Friendly? = null,
     )
@@ -119,6 +134,7 @@ class HostDetailViewModel(
             restoring = l.restoring,
             restored = l.restored,
             candidates = l.candidates,
+            discoverNote = l.discoverNote,
             resuming = l.resuming,
             error = l.error,
             whenBack = l.alias != null && l.alias in b.armed,
@@ -165,7 +181,22 @@ class HostDetailViewModel(
             guarded { actions.restorePlan(alias) }?.let { plan -> local.update { if (it.alias == alias) it.copy(plan = plan) else it } }
         }
         if (caps.discoverLost) {
-            guarded { actions.discover(alias) }?.let { found -> local.update { if (it.alias == alias) it.copy(candidates = found) else it } }
+            // The scan goes over SSH: on a host that does not answer it can
+            // only time out, so it waits for the host (review w23-10).
+            val host = fleet.hosts.value.firstOrNull { it.alias == alias }
+            if (host != null && host.isSignalLost) {
+                local.update { if (it.alias == alias) it.copy(discoverNote = "Untracked conversations: looked for when $alias answers again.") else it }
+            } else {
+                local.update { if (it.alias == alias) it.copy(discoverNote = null) else it }
+                val found = guarded { actions.discover(alias) }
+                local.update {
+                    when {
+                        it.alias != alias -> it
+                        found != null -> it.copy(candidates = found, discoverNote = null)
+                        else -> it.copy(discoverNote = "Could not look for untracked conversations. Check again to retry.")
+                    }
+                }
+            }
         }
     }
 

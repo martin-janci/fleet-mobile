@@ -1989,6 +1989,8 @@ private fun FleetRoute(
                                 onDismissError = hostDetail::dismissError,
                                 onRunWhenBack = hostDetail::runWhenBack,
                                 onCancelWhenBack = hostDetail::cancelWhenBack,
+                                onInstallAgent = { hostSheet.alias?.let { alias -> hostDetail.close(); installs.open(alias) }; Unit }
+                                    .takeIf { credentials.canWrite && hostCaps.installAgent },
                             ),
                         )
                     }

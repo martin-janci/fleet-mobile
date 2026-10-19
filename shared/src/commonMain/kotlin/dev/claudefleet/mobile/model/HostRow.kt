@@ -78,3 +78,11 @@ fun HostRow.withHealth(h: HostHealthPing): HostRow = copy(
     memLow = h.memLow,
     cpuSaturated = h.cpuSaturated,
 )
+
+/** Never reached and never probed: "not checked yet", not offline (the Hosts list's own rule; review w23-13). */
+val HostRow.isNeverChecked: Boolean
+    get() = lastPingedAt == null && claudeVersion == null && tmuxVersion == null
+
+/** Lost: the hub had it once and cannot reach it now. A host never checked is not offline. */
+val HostRow.isSignalLost: Boolean
+    get() = !reachable && !isNeverChecked

@@ -38,8 +38,10 @@ class MoreLinesTest {
     @Test
     fun the_footer_has_both_versions_and_the_health() {
         val up = HostRow(alias = "mac", reachable = true)
-        val down = HostRow(alias = "nas", reachable = false)
+        val down = HostRow(alias = "nas", reachable = false, lastPingedAt = 100)
         assertEquals("Orbit Fleet 0.9.4 · hub 0.9.4 · all systems OK", moreFooter("0.9.4", "0.9.4", listOf(up), connected = true))
+        // Review w23-13: a host never checked yet is not offline.
+        assertEquals("Orbit Fleet 0.9.4 · all systems OK", moreFooter("0.9.4", null, listOf(up, HostRow(alias = "new")), connected = true))
         assertEquals("Orbit Fleet 0.9.4 · 1 host offline", moreFooter("0.9.4", null, listOf(up, down), connected = true))
         assertEquals("Orbit Fleet 0.9.4 · hub 0.9.3 · hub offline", moreFooter("0.9.4", "0.9.3", listOf(up), connected = false))
     }

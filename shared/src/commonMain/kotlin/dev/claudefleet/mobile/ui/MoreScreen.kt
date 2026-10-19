@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.isSignalLost
 import dev.claudefleet.mobile.model.limitAt
 import kotlin.math.roundToInt
 import dev.claudefleet.mobile.ui.components.ScreenHeader
@@ -38,7 +39,8 @@ internal const val MORE_ACTION_TAG = "more.action."
 /** "5 hosts · oci-arm offline", or "2 offline" when more than one is: the Hosts row's live line. */
 fun hostsLine(hosts: List<HostRow>): String {
     val shown = hosts.filterNot { it.hidden }
-    val down = shown.filterNot { it.reachable }
+    // A host never checked yet is not offline (review w23-13).
+    val down = shown.filter { it.isSignalLost }
     val count = if (shown.size == 1) "1 host" else "${shown.size} hosts"
     return when (down.size) {
         0 -> count
@@ -75,7 +77,7 @@ fun moreSubtitle(hub: String, canWrite: Boolean): String = "$hub · ${if (canWri
 
 /** More's footer (MobileNav): both versions, and whether every host answers. */
 fun moreFooter(appVersion: String, hubVersion: String?, hosts: List<HostRow>, connected: Boolean): String {
-    val down = hosts.filterNot { it.hidden }.count { !it.reachable }
+    val down = hosts.filterNot { it.hidden }.count { it.isSignalLost }
     val health = when {
         !connected -> "hub offline"
         down == 0 -> "all systems OK"
