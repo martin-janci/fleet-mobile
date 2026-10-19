@@ -1072,6 +1072,9 @@ private fun ControlTab(
     if (autonomyOn) LaunchedEffect(autonomy) { autonomy.load() }
     // The escalation cards: the rows Needs you reads (shared-in sessions are their owners' to answer).
     val laterKeys by container.escalationLater.later.collectAsState()
+    val controlHosts by repository.hosts.collectAsState()
+    // A host that answers again ends its Later, so its next outage is a card (review w21-1).
+    LaunchedEffect(controlHosts) { container.escalationLater.forgetRecoveredHosts(controlHosts) }
     val escalationCards = remember(controlRows, controlAccess, controlState.sessionId, laterKeys) {
         escalations(controlRows.filter { controlAccess.levelFor(it) == null }, controlState.sessionId, laterKeys.toSet())
     }

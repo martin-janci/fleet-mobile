@@ -92,3 +92,33 @@ const val LATER_KEPT = 200
 
 /** [key] put off, on top of [later], the oldest dropped past [LATER_KEPT]. */
 fun putOff(later: List<String>, key: String): List<String> = (later.filterNot { it == key } + key).takeLast(LATER_KEPT)
+
+/** A Later older than this lapses, as on the desktop (`LATER_MAX_AGE_SECS`): a week. */
+const val LATER_MAX_AGE_SECS = 7 * 86_400L
+
+/** One card put off with Later and when (unix seconds). */
+data class LaterEntry(val key: String, val at: Long)
+
+/** The entries still worth keeping at [now]: younger than [LATER_MAX_AGE_SECS], the newest [LATER_KEPT]. */
+fun pruneLater(entries: List<LaterEntry>, now: Long): List<LaterEntry> =
+    entries.filter { now - it.at < LATER_MAX_AGE_SECS }.takeLast(LATER_KEPT)
+
+/**
+ * [entries] without the host-down cards of hosts that are up again (the
+ * desktop's `dropRecoveredHosts`, review w21-1). A host-down key names the
+ * host, not the outage, so a Later on one outage must end when the host
+ * recovers, or it would hide the next outage too.
+ */
+fun dropRecoveredHosts(entries: List<LaterEntry>, hosts: List<HostRow>): List<LaterEntry> {
+    val up = hosts.filter { it.reachable }.mapTo(HashSet()) { "host:${it.alias}" }
+    return entries.filterNot { it.key in up }
+}
+
+/** How a [LaterEntry] is kept in prefs: `key<TAB>at`. */
+fun laterEntryText(e: LaterEntry): String = "${e.key}\t${e.at}"
+
+/** A kept entry read back; one kept before entries carried a time (a bare key) counts from [now]. */
+fun parseLaterEntry(text: String, now: Long): LaterEntry {
+    val at = text.substringAfterLast('\t', "").toLongOrNull()
+    return if (at == null) LaterEntry(text, now) else LaterEntry(text.substringBeforeLast('\t'), at)
+}
