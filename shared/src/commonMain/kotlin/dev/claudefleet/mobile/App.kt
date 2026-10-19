@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.backhandler.BackHandler
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LifecycleStartEffect
 import dev.claudefleet.mobile.data.SsoSignIn
 import dev.claudefleet.mobile.data.ConnectionStatus
@@ -788,6 +789,13 @@ fun App(container: AppContainer) {
             delay(60_000)
             clock = localClock()
         }
+    }
+    // `delay` runs on uptime, which stops in deep sleep: a phone unlocked in
+    // the morning would show the night palette until the minute ran out, so
+    // coming back to the foreground re-reads the clock at once (review w20-6).
+    LifecycleResumeEffect(Unit) {
+        clock = localClock()
+        onPauseOrDispose { }
     }
     val sun = theme.sun(isSystemInDarkTheme()) { clock }
     val dark = sun < 0
