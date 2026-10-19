@@ -61,7 +61,7 @@ class EscalationLaterTest {
     @Test
     fun past_three_cards_the_rest_are_counted() {
         assertNull(escalationsMoreLine(3))
-        assertEquals("2 more in Needs you", escalationsMoreLine(5))
+        assertEquals("2 more in Inbox", escalationsMoreLine(5))
     }
 
     @Test

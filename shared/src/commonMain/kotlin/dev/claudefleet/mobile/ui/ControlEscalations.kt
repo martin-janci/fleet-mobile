@@ -80,10 +80,10 @@ const val ESCALATION_OPEN_TAG = "control.escalation.open."
 const val ESCALATION_LATER_TAG = "control.escalation.later."
 const val ESCALATIONS_MORE_TAG = "control.escalations.more"
 
-/** "2 more in Needs you", or null when every card is drawn. */
+/** "2 more in Inbox" (the tab it opens; review w21-13), or null when every card is drawn. */
 internal fun escalationsMoreLine(total: Int): String? {
     val more = total - ESCALATIONS_SHOWN
-    return if (more > 0) "$more more in Needs you" else null
+    return if (more > 0) "$more more in Inbox" else null
 }
 
 /**
