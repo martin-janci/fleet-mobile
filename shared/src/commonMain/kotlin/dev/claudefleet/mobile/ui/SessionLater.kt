@@ -259,7 +259,8 @@ internal fun SendLaterSheet(
     var text by remember { mutableStateOf(initialText) }
     var choice by remember { mutableStateOf(SendLaterWhen.Idle) }
     var clock by remember { mutableStateOf("") }
-    var skip by remember { mutableStateOf(false) }
+    // On by default, as the desktop's sheet: a prompt for a session archived meanwhile is dropped (review w22-9).
+    var skip by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) { host.onLoadQueued() }
     val o = Fleet.colors
     val choices = sendLaterChoices(
