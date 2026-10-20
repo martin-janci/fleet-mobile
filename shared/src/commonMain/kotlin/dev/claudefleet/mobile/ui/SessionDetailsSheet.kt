@@ -105,7 +105,7 @@ fun accountMeter(accountUuid: String?, name: String?, usage: AccountUsageSnapsho
     val label = name ?: uuid.take(8)
     // A reading the last try failed to refresh says so, and how old it is
     // (review w23-7): an expired login's meters are not current.
-    val stale = usage?.takeIf { it.usage != null }?.let { limitsNote(it, now) }?.removeSuffix(".")
+    val stale = usage?.takeIf { it.usage != null && it.status != null }?.let { limitsNote(it, now) }?.removeSuffix(".")
     usage?.limitAt(now)?.let { limit ->
         val window = if (limit.weekly) "weekly" else "5-hour"
         val resets = relativeWithin(limit.resetsAt, now)?.let { " · resets in $it" }.orEmpty()
