@@ -102,7 +102,7 @@ class AutofixViewModel(
         local.update { it.copy(busy = SCAN, error = null, notice = null) }
         try {
             val list = actions.scan()
-            local.update { it.copy(busy = null, loaded = true, list = list, notice = if (list.findings.none { f -> f.state != DISMISSED }) "No problems found." else null) }
+            local.update { it.copy(busy = null, loaded = true, list = list, notice = scanNotice(list.findings)) }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -180,13 +180,46 @@ private const val DISMISSED = "dismissed"
 private const val CLEARED = "cleared"
 private const val APPLY_FAILED = "apply_failed"
 
-/** The More row: "2 problems · 1 fixed today", "No problems found". */
+/**
+ * The More row: "2 problems · 1 fixed today", "No problems found". Findings
+ * hidden with Later still exist and come back, so a list holding only those
+ * reads "No open problems · 2 hidden", not "No problems found".
+ */
 fun autofixLine(state: AutofixUiState): String {
     if (!state.loaded) return "What fleet found broken, and its fixes"
     val n = state.problems.size
     val fixed = state.fixed.size
-    val problems = if (n == 0) "No problems found" else "$n problem${if (n == 1) "" else "s"}"
+    val hidden = state.hidden.size
+    val problems = when {
+        n > 0 -> "$n problem${if (n == 1) "" else "s"}"
+        hidden > 0 -> "No open problems · $hidden hidden"
+        else -> "No problems found"
+    }
     return if (fixed == 0) problems else "$problems · $fixed fixed today"
+}
+
+/** The sheet's line when nothing is open: it names the rows hidden with Later, if any. */
+fun noOpenProblemsLine(state: AutofixUiState): String {
+    val hidden = state.hidden.size
+    return if (hidden == 0) "Nothing is broken that fleet knows of." else "No open problems · $hidden hidden until later."
+}
+
+/** What Check now says when it found nothing open; null while something is. */
+internal fun scanNotice(findings: List<AutofixFinding>): String? {
+    if (findings.any { it.state != DISMISSED }) return null
+    val hidden = findings.size
+    return if (hidden == 0) "No problems found." else "No open problems · $hidden hidden until later."
+}
+
+/**
+ * What a chat `fix` card says to do with its finding: the phone's own
+ * More › Problems & fixes where the hub serves `autofix` here, and the
+ * desktop only where it does not (or this token cannot apply a fix).
+ */
+fun fixCardNote(autofix: Boolean, canWrite: Boolean): String = when {
+    autofix && canWrite -> "Review and apply its fix in More › Problems & fixes."
+    autofix -> "Review it in More › Problems & fixes; the desktop or a trusted device applies its fix."
+    else -> "Review and apply its fix in fleet on the desktop."
 }
 
 /** The finding's title, or its kind when the hub could not read the body. */

@@ -3351,6 +3351,8 @@ private fun SessionRoute(
             mayDecideSettings = credentials.canWrite && caps.decideSettingProposals,
             devices = if (caps.debugDevices) devicesVm::devices else null,
             screenshot = if (caps.debugDevices && credentials.canWrite) devicesVm::takeScreenshot else null,
+            autofix = caps.autofix,
+            autofixWrite = credentials.canWrite,
         ),
         devices = sessionDevices,
         devicesHandlers = SessionDevicesHandlers(
