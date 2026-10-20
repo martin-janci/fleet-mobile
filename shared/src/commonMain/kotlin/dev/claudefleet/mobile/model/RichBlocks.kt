@@ -50,6 +50,10 @@ data class TaskReport(
     val blockers: List<String>,
     val followups: List<String>,
     val confidence: String?,
+    /** What was done, the choices made, and what is left (#931; the desktop's ReportCard). */
+    val done: List<String> = emptyList(),
+    val decisions: List<String> = emptyList(),
+    val remaining: List<String> = emptyList(),
 )
 
 val UI_TONES = listOf("info", "tip", "success", "warning", "danger")
@@ -237,6 +241,9 @@ fun reportFromValue(v: JsonElement): TaskReport? {
         blockers = reportList(v["blockers"]),
         followups = reportList(v["followups"]),
         confidence = confidence,
+        done = reportList(v["done"]),
+        decisions = reportList(v["decisions"]),
+        remaining = reportList(v["remaining"]),
     )
 }
 

@@ -258,6 +258,10 @@ internal fun ReportCard(report: TaskReport, raw: String, title: String?, marker:
             report.confidence?.let { Chip("confidence $it", null) }
         }
         if (report.summary.isNotEmpty()) MarkdownText(report.summary)
+        val plain = MaterialTheme.colorScheme.onSurfaceVariant
+        ReportList("Done", report.done, plain)
+        ReportList("Decisions", report.decisions, plain)
+        ReportList("Left", report.remaining, plain)
         val error = MaterialTheme.colorScheme.error
         ReportList("Blockers", report.blockers, error)
         ReportList("Warnings", report.warnings, LocalStatusColors.current(StatusTone.BLOCKED).dot)
