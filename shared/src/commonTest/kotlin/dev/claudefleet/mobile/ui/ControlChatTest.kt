@@ -400,6 +400,18 @@ class ControlChatTest {
         assertEquals("failed", handoffSessionState(SessionRow(id = 1, claudeStatus = "working", stuckKind = "oom")))
     }
 
+    /** Review wave 24 (w24-5): the desktop's "pre-approved" / "approved" chip. */
+    @Test
+    fun a_session_handoff_says_how_it_was_let_through() {
+        val row = SessionRow(id = 9, friendlyName = "Fix CI", claudeStatus = "working")
+        val pre = handoffChip(ControlHandoff(id = 1, kind = "session", sessionId = 9, approval = "pre_approved"), listOf(row))
+        assertEquals("Sent to Fix CI · pre-approved", pre.label)
+        val person = handoffChip(ControlHandoff(id = 2, kind = "session", sessionId = 9, approval = "person"), listOf(row))
+        assertEquals("Sent to Fix CI · approved", person.label)
+        val none = handoffChip(ControlHandoff(id = 3, kind = "session", sessionId = 9), listOf(row))
+        assertEquals("Sent to Fix CI", none.label)
+    }
+
     @Test
     fun the_newest_three_show_oldest_first() {
         val hs = (5L downTo 1L).map { ControlHandoff(id = it, kind = "task", item = HandoffItem(it, "t$it", "todo")) }

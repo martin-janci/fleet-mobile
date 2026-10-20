@@ -40,6 +40,7 @@ import dev.claudefleet.mobile.data.ControlActions
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.ConfirmRequest
 import dev.claudefleet.mobile.model.ControlHandoff
+import dev.claudefleet.mobile.model.approvalWords
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.OperatorStatus
 import dev.claudefleet.mobile.model.QueuedPrompt
@@ -667,7 +668,10 @@ fun handoffChip(h: ControlHandoff, rows: List<SessionRow>): HandoffChip = when (
         if (row == null) {
             HandoffChip(h.id, "Sent to ${h.preview ?: "a session"} · ended", null)
         } else {
-            HandoffChip(h.id, "Sent to ${row.displayName}", handoffSessionState(row), row.id)
+            // The desktop's approval chip (HandoffCards): a call that went
+            // through without a card must not read like one a person approved.
+            val approval = approvalWords(h)?.let { " · $it" }.orEmpty()
+            HandoffChip(h.id, "Sent to ${row.displayName}$approval", handoffSessionState(row), row.id)
         }
     }
     "mission" -> HandoffChip(
