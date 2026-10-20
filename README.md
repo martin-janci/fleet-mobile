@@ -369,7 +369,10 @@ the log the hub reads afterwards.
   day are listed with what ran. A `fix` card in a conversation points here.
 - **Automation** (More → Automation, when the hub serves `routines`) — the
   routines with their runs, and **Pause all** at the top; missions open from
-  inside it.
+  inside it. A routine that keeps notebooks (hub migration 204, routine
+  memory) shows them under its runs: what its runs read and rewrite, who
+  wrote each last, and **Edit** / **Clear** where this device may change the
+  routine. Which notebooks a routine keeps is chosen on the desktop.
 - **Debug devices** (More → Debug devices, when the hub serves
   `debug_devices`) — the test phones, emulators and simulators on the hosts,
   who waits for each, and a **Screenshot** kept in the row. A session shows

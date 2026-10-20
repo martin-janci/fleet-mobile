@@ -25,7 +25,53 @@ data class Routine(
     @SerialName("paused_reason") val pausedReason: String? = null,
     /** An event routine fires only on this host (hub migration 201). */
     @SerialName("event_host") val eventHost: String? = null,
+    /**
+     * The notebooks its runs read and rewrite (hub migration 204): `routine`,
+     * `project` or `both`; null when it keeps none, or from a hub without
+     * routine memory.
+     */
+    val memory: String? = null,
+    /** The fleet notes each finished run in the notebook. */
+    @SerialName("memory_auto") val memoryAuto: Boolean = false,
 )
+
+/**
+ * One notebook (claude-fleet `store::RoutineMemoryRow`): the routine's own
+ * (`scope` `routine`) or its project's, shared by the project's routines in
+ * one org (`project`).
+ */
+@Serializable
+data class RoutineNotebook(
+    /** routine | project */
+    val scope: String = "",
+    val body: String = "",
+    @SerialName("updated_at") val updatedAt: Long = 0,
+    /** person | run | fleet */
+    @SerialName("updated_by") val updatedBy: String = "",
+    @SerialName("updated_run_id") val updatedRunId: Long? = null,
+)
+
+/**
+ * `routines { memory }` and `set_memory`'s answer (claude-fleet
+ * `routines::memory::RoutineMemory`): the notebooks a routine uses as they
+ * are now. A notebook nothing wrote yet is absent.
+ */
+@Serializable
+data class RoutineMemory(
+    @SerialName("routine_id") val routineId: Long = 0,
+    val memory: String? = null,
+    @SerialName("memory_auto") val memoryAuto: Boolean = false,
+    val routine: RoutineNotebook? = null,
+    val project: RoutineNotebook? = null,
+    @SerialName("max_chars") val maxChars: Int = 4000,
+    @SerialName("may_change") val mayChange: Boolean = false,
+) {
+    /** The notebooks it uses, its own first, each with what was written (an empty one when nothing was). */
+    fun notebooks(): List<RoutineNotebook> = buildList {
+        if (memory == "routine" || memory == "both") add(routine ?: RoutineNotebook(scope = "routine"))
+        if (memory == "project" || memory == "both") add(project ?: RoutineNotebook(scope = "project"))
+    }
+}
 
 /** One run of a routine (`routine_runs`). */
 @Serializable

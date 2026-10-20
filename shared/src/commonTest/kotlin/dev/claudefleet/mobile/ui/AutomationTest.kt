@@ -12,6 +12,8 @@ import dev.claudefleet.mobile.model.RoutineBudget
 import dev.claudefleet.mobile.model.RoutineCheck
 import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineExplain
+import dev.claudefleet.mobile.model.RoutineMemory
+import dev.claudefleet.mobile.model.RoutineNotebook
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.RunTrace
 import dev.claudefleet.mobile.model.RunTraceStep
@@ -113,6 +115,29 @@ private class FakeRoutineActions : RoutineActions {
     var spent: Long? = null
 
     override suspend fun budget(): RoutineBudget? = spent?.let { calls += "budget"; RoutineBudget(spentMicros = it) }
+
+    /** The notebooks `memory` answers for a routine whose row names its memory. */
+    var notebooks = RoutineMemory(
+        routineId = 1,
+        memory = "both",
+        memoryAuto = true,
+        routine = RoutineNotebook(scope = "routine", body = "PR 12 waits on Bo.", updatedAt = 100, updatedBy = "run", updatedRunId = 42),
+        mayChange = true,
+    )
+    var refuseMemory = false
+
+    override suspend fun memory(routineId: Long): RoutineMemory {
+        calls += "memory $routineId"
+        return notebooks
+    }
+
+    override suspend fun setMemory(routineId: Long, notebook: String, text: String): RoutineMemory {
+        calls += "set_memory $routineId $notebook $text"
+        if (refuseMemory) throw HubError.Tool("E_FORBIDDEN", "not yours")
+        val row = RoutineNotebook(scope = notebook, body = text, updatedAt = 500, updatedBy = "person")
+        notebooks = if (notebook == "project") notebooks.copy(project = row) else notebooks.copy(routine = row)
+        return notebooks
+    }
 }
 
 private val WITH_ROUTINES = HubCapabilities(tools = setOf("routines", "set_setting", "fleet_health"))
@@ -465,5 +490,99 @@ class AutomationTest {
         assertEquals("Skipped", skipped.first { it.phase == "checks" }.state.name)
         assertEquals("2m 48s", dev.claudefleet.mobile.model.tookWords(168_000))
         assertEquals("410 ms", dev.claudefleet.mobile.model.tookWords(410))
+    }
+
+    // ---- routine memory (claude-fleet migration 204) ----
+
+    private fun withMemory(actions: FakeRoutineActions) {
+        actions.list = actions.list.map { if (it.id == 1L) it.copy(memory = "both", memoryAuto = true) else it }
+    }
+
+    @Test
+    fun a_routine_that_keeps_notebooks_shows_them_and_one_that_does_not_is_never_asked() = runTest {
+        val actions = FakeRoutineActions()
+        withMemory(actions)
+        val vm = automation(actions = actions)
+        runCurrent()
+        vm.open()
+        runCurrent()
+        vm.select(2)
+        runCurrent()
+        assertNull(vm.state.value.memory)
+        assertTrue(actions.calls.none { it.startsWith("memory ") }, "a routine without memory, or an older hub, is not asked")
+        vm.back()
+        vm.select(1)
+        runCurrent()
+        val m = assertNotNull(vm.state.value.memory)
+        assertTrue(vm.state.value.canEditMemory)
+        assertEquals(listOf("routine", "project"), m.notebooks().map { it.scope }, "its own first, the project's empty")
+        assertEquals("Its own and the project's notebooks · notes each run", memoryLine(m))
+        assertEquals("Last written by run 42 · 5 min ago", notebookLine(m.notebooks()[0], nowSeconds = 400))
+        assertEquals("Empty", notebookLine(m.notebooks()[1], nowSeconds = 400))
+        assertEquals("The project's notebook", notebookTitle("project"))
+        vm.back()
+        runCurrent()
+        assertNull(vm.state.value.memory)
+    }
+
+    @Test
+    fun a_notebook_is_saved_and_cleared_from_the_hubs_answer() = runTest {
+        val actions = FakeRoutineActions()
+        withMemory(actions)
+        val vm = automation(actions = actions)
+        runCurrent()
+        vm.open()
+        runCurrent()
+        vm.select(1)
+        runCurrent()
+        vm.saveMemory("project", "CI is slow on Mondays.")
+        runCurrent()
+        assertTrue("set_memory 1 project CI is slow on Mondays." in actions.calls)
+        assertEquals("CI is slow on Mondays.", vm.state.value.memory?.project?.body)
+        assertEquals("Notebook saved.", vm.state.value.notice)
+        vm.saveMemory("routine", "")
+        runCurrent()
+        assertEquals("", vm.state.value.memory?.routine?.body)
+        assertEquals("Notebook cleared.", vm.state.value.notice)
+        // A refusal says why and keeps what the hub last said.
+        actions.refuseMemory = true
+        vm.saveMemory("routine", "x")
+        runCurrent()
+        assertNotNull(vm.state.value.error)
+        assertEquals("", vm.state.value.memory?.routine?.body)
+        assertNull(vm.state.value.busy)
+    }
+
+    @Test
+    fun a_readonly_phone_reads_notebooks_but_never_writes_them() = runTest {
+        val actions = FakeRoutineActions()
+        withMemory(actions)
+        val vm = automation(actions = actions, canWrite = false)
+        runCurrent()
+        vm.open()
+        runCurrent()
+        vm.select(1)
+        runCurrent()
+        assertNotNull(vm.state.value.memory)
+        assertFalse(vm.state.value.canEditMemory)
+        vm.saveMemory("routine", "x")
+        runCurrent()
+        assertTrue(actions.calls.none { it.startsWith("set_memory") })
+    }
+
+    @Test
+    fun a_routine_row_reads_the_hubs_memory_fields_and_an_older_hubs_lack_of_them() {
+        val r = json.decodeFromString(Routine.serializer(), """{"id":3,"memory":"project","memory_auto":true}""")
+        assertEquals("project", r.memory)
+        assertTrue(r.memoryAuto)
+        val old = json.decodeFromString(Routine.serializer(), """{"id":3}""")
+        assertNull(old.memory)
+        assertFalse(old.memoryAuto)
+        val m = json.decodeFromString(
+            RoutineMemory.serializer(),
+            """{"routine_id":3,"memory":"project","memory_auto":false,"project":{"scope":"project","owner_id":7,"circle":-2,"body":"b","updated_at":9,"updated_by":"fleet","updated_run_id":5},"max_chars":4000,"may_change":true}""",
+        )
+        assertEquals(listOf("b"), m.notebooks().map { it.body })
+        assertEquals(5L, m.project?.updatedRunId)
     }
 }

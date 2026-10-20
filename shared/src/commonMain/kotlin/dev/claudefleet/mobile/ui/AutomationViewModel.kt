@@ -7,6 +7,8 @@ import dev.claudefleet.mobile.model.LoopHealth
 import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineExplain
+import dev.claudefleet.mobile.model.RoutineMemory
+import dev.claudefleet.mobile.model.RoutineNotebook
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.RunTraceStep
 import dev.claudefleet.mobile.model.dollars
@@ -67,6 +69,13 @@ data class AutomationUiState(
     val canTrace: Boolean = false,
     /** Why [detail] does or does not fire; null from a hub without `explain`. */
     val explain: RoutineExplain? = null,
+    /**
+     * [detail]'s notebooks (claude-fleet migration 204); null when it keeps
+     * none, or from a hub without routine memory.
+     */
+    val memory: RoutineMemory? = null,
+    /** A person may rewrite or clear [memory]'s notebooks from this device. */
+    val canEditMemory: Boolean = false,
     /** The hub's `automation_paused`; null until read. */
     val paused: Boolean? = null,
     /** The hub's built-in routines (8.1's loops), read-only; empty from an older hub. */
@@ -106,6 +115,7 @@ class AutomationViewModel(
         val detail: RoutineDetail? = null,
         val runDetail: RunDetail? = null,
         val explain: RoutineExplain? = null,
+        val memory: RoutineMemory? = null,
         val paused: Boolean? = null,
         val loops: List<LoopHealth> = emptyList(),
         val spentToday: Long? = null,
@@ -131,6 +141,8 @@ class AutomationViewModel(
             runDetail = l.runDetail,
             canTrace = caps.accepts(HubCapabilities.RUNS, "run_id"),
             explain = l.explain,
+            memory = l.memory,
+            canEditMemory = canWrite && caps.routines && l.memory?.mayChange == true,
             paused = l.paused,
             loops = l.loops,
             spentToday = l.spentToday,
@@ -146,14 +158,14 @@ class AutomationViewModel(
     }
 
     fun close() {
-        local.update { it.copy(open = false, detail = null, runDetail = null, notice = null) }
+        local.update { it.copy(open = false, detail = null, memory = null, runDetail = null, notice = null) }
     }
 
     /** The More row's line wants the routines without the sheet open. */
     fun refresh(): Job = scope.launch { read() }
 
     fun show(tab: AutomationTab) {
-        local.update { it.copy(tab = tab, detail = null, runDetail = null) }
+        local.update { it.copy(tab = tab, detail = null, memory = null, runDetail = null) }
     }
 
     /** Open [run]'s steps (a routine fire or an agent job, on a hub that keeps traces). */
@@ -215,7 +227,29 @@ class AutomationViewModel(
     }
 
     fun back() {
-        local.update { it.copy(detail = null, notice = null) }
+        local.update { it.copy(detail = null, memory = null, notice = null) }
+    }
+
+    /**
+     * Rewrite the open routine's [notebook] (`routine` | `project`) with
+     * [text]; `""` clears it. The card shows the hub's answer, never the
+     * text as sent.
+     */
+    fun saveMemory(notebook: String, text: String): Job = scope.launch {
+        val id = local.value.memory?.routineId ?: return@launch
+        if (!state.value.canEditMemory || local.value.busy != null) return@launch
+        local.update { it.copy(busy = "memory:$id", error = null, notice = null) }
+        try {
+            val saved = actions.setMemory(id, notebook, text)
+            local.update {
+                val notice = if (text.isEmpty()) "Notebook cleared." else "Notebook saved."
+                if (it.detail?.routine?.id == id) it.copy(busy = null, memory = saved, notice = notice) else it.copy(busy = null)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(busy = null, error = friendly(t)) }
+        }
     }
 
     fun dismissError() {
@@ -311,7 +345,7 @@ class AutomationViewModel(
         local.update { it.copy(loading = true) }
         try {
             val detail = actions.routine(routineId)
-            local.update { it.copy(loading = false, detail = detail, explain = null).withRoutine(detail.routine) }
+            local.update { it.copy(loading = false, detail = detail, explain = null, memory = null).withRoutine(detail.routine) }
             // The why is a second read: an older hub refuses the action, and
             // the routine still shows without it.
             val why = try {
@@ -322,6 +356,18 @@ class AutomationViewModel(
                 null
             }
             local.update { if (it.detail?.routine?.id == routineId) it.copy(explain = why) else it }
+            // Its notebooks, only for a routine whose row names them: an
+            // older hub sends no `memory`, and is never asked the action.
+            if (detail.routine.memory != null) {
+                val memory = try {
+                    actions.memory(routineId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Throwable) {
+                    null
+                }
+                local.update { if (it.detail?.routine?.id == routineId) it.copy(memory = memory) else it }
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -556,3 +602,28 @@ fun builtInAgents(loops: List<LoopHealth>, runs: List<FleetRun>, paused: Boolean
 fun whyLines(why: RoutineExplain): List<String> =
     (why.checks.filter { it.state == "block" } + why.checks.filter { it.state == "warn" })
         .map { "${if (it.state == "block") "Stops it" else "Note"}: ${it.detail}" }
+
+/** A notebook's heading: the routine's own, or its project's. */
+fun notebookTitle(scope: String): String = if (scope == "project") "The project's notebook" else "This routine's notebook"
+
+/** Who wrote a notebook last, and when: "Last written by run 42 · 3 min ago"; "Empty" when nothing was. */
+fun notebookLine(n: RoutineNotebook, nowSeconds: Long): String {
+    if (n.updatedAt == 0L) return "Empty"
+    val who = when (n.updatedBy) {
+        "run" -> n.updatedRunId?.let { "run $it" } ?: "a run"
+        "fleet" -> "the fleet"
+        else -> "a person"
+    }
+    return listOfNotNull("Last written by $who", relativeAgo(n.updatedAt, nowSeconds)).joinToString(" · ")
+}
+
+/** What a routine's notebooks are, in words: "Its own notebook · notes each run". */
+fun memoryLine(m: RoutineMemory): String = listOfNotNull(
+    when (m.memory) {
+        "routine" -> "Its own notebook"
+        "project" -> "The project's notebook"
+        "both" -> "Its own and the project's notebooks"
+        else -> null
+    },
+    "notes each run".takeIf { m.memoryAuto },
+).joinToString(" · ")

@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.RoutineBudget
 import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineExplain
+import dev.claudefleet.mobile.model.RoutineMemory
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.RunTrace
 
@@ -65,6 +66,17 @@ interface RoutineActions {
      * a hub without the action: no reading, and the line names no spend.
      */
     suspend fun budget(): RoutineBudget? = null
+
+    /**
+     * The notebooks a routine's runs read and rewrite (`routines { memory }`,
+     * claude-fleet migration 204). The default is a hub without routine
+     * memory: none, and the routine shows no Memory card.
+     */
+    suspend fun memory(routineId: Long): RoutineMemory? = null
+
+    /** Rewrite one notebook (`routine` | `project`); `""` clears it. Answers them as the hub now holds them. */
+    suspend fun setMemory(routineId: Long, notebook: String, text: String): RoutineMemory =
+        throw UnsupportedOperationException("this hub keeps no routine memory")
 }
 
 /** [RoutineActions] against the paired hub, through [AppSession.withClient]. */
@@ -94,6 +106,11 @@ class HubRoutineActions(private val session: AppSession) : RoutineActions {
     }
 
     override suspend fun budget(): RoutineBudget? = session.withClient { it.routineBudget() }
+
+    override suspend fun memory(routineId: Long): RoutineMemory? = session.withClient { it.routineMemory(routineId) }
+
+    override suspend fun setMemory(routineId: Long, notebook: String, text: String): RoutineMemory =
+        session.withClient { it.setRoutineMemory(routineId, notebook, text) }
 
     private companion object {
         const val AUTOMATION_PAUSED = "automation.paused"
