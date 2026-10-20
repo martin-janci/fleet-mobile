@@ -2470,7 +2470,16 @@ private fun FleetRoute(
                         onClose = missions::close,
                         onRefresh = { missions.refresh() },
                         onSelect = { missions.select(it) },
-                        onBack = missions::back,
+                        // New layout: "‹ Missions" goes to the Missions screen, never
+                        // the Classic list inside the sheet (review w21-12).
+                        onBack = if (layout == PhoneLayout.New) {
+                            {
+                                missions.close()
+                                if (screen != Screen.Missions) nav.openMissions()
+                            }
+                        } else {
+                            missions::back
+                        },
                         onStart = { missions.start(it) },
                         onDecide = { card, ok, note -> missions.decide(card, ok, note) },
                         onTogglePause = { missions.togglePause() },
