@@ -109,6 +109,14 @@ class SessionG55Test {
     private fun snapshot(five: UsageWindow?, week: UsageWindow?) =
         AccountUsageSnapshot("acc-a", AccountUsageWindows(fiveHour = five, sevenDay = week), "ok", now)
 
+    /** Review w23-7: a reading the hub could not refresh says why and how old it is. */
+    @Test
+    fun the_account_row_says_when_its_meters_are_stale() {
+        val expired = snapshot(UsageWindow(38.0, now + 100), UsageWindow(60.0, now + 9_000)).copy(status = "login_expired", fetchedAt = now - 3 * 86_400)
+        val m = assertNotNull(accountMeter("acc-a", "m@work", expired, now))
+        assertEquals("62% left · week 40% left · Its login expired; sign in again on the host · meters from 3 d ago", m.line)
+    }
+
     @Test
     fun the_account_row_names_the_account_and_what_is_left() {
         val m = assertNotNull(accountMeter("acc-a", "m@work", snapshot(UsageWindow(25.0, now + 100), UsageWindow(40.0, now + 9_000)), now))
