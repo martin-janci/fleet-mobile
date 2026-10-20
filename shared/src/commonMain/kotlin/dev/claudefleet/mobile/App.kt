@@ -2156,7 +2156,7 @@ private fun FleetRoute(
                                 add(MoreEntry("Problems & fixes", autofixLine(autofixState)) { autofix.open() })
                             }
                             if (settingsCaps.usage || settingsCaps.accounts) {
-                                val usageLine = accountsLine(moreList.accountUsage.values, moreList.nowSeconds)
+                                val usageLine = accountsLine(moreList.accountUsage.values, moreList.nowSeconds) { uuid -> moreList.accountNames[uuid] }
                                 add(MoreEntry("Accounts and usage", usageLine ?: "Quotas, and estimated spend by host and day") { nav.openUsage() })
                             }
                             if (automationState.available) {
