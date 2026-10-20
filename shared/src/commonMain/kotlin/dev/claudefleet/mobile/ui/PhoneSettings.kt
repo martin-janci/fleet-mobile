@@ -19,7 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * The theme this phone draws in. Sun (the default, as on the desktop) is light
- * while the sun is up where the phone is and dark after sunset, easing through
+ * while the sun is up in the phone's time zone and dark after sunset, easing through
  * golden hour, blue hour and night ([OrbitPalette]). System follows the
  * phone's own light/dark setting; Light and Dark hold noon and a mid-night.
  */

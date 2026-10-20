@@ -614,7 +614,7 @@ private fun ClockField(label: String, minute: Int, enabled: Boolean, modifier: M
 }
 
 private const val THEME_LINE =
-    "Sun is light while the sun is up where you are and dark after sunset, easing through golden hour, blue hour and night."
+    "Sun is light while the sun is up in your time zone and dark after sunset, easing through golden hour, blue hour and night."
 
 /** Sun, System, Light, Dark as one segmented control, the desktop's order. */
 @Composable

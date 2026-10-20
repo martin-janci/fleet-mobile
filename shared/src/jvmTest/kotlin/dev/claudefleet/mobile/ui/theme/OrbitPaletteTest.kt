@@ -3,6 +3,12 @@ package dev.claudefleet.mobile.ui.theme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
+import dev.claudefleet.mobile.host.Repo
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.double
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -26,29 +32,44 @@ class OrbitPaletteTest {
         return max(la, lb) / min(la, lb)
     }
 
-    /** Golden values from claude-fleet's `src/lib/palette.ts` (same inputs). One byte of float drift is allowed. */
+    /**
+     * Golden values from claude-fleet's `src/lib/palette.ts`, read from
+     * `docs/design/palette-golden.json` (its file, copied unchanged and held to
+     * claude-fleet main by `scripts/check-design-tokens.sh`; review w20-12).
+     * One byte of float drift is allowed.
+     */
     @Test
     fun paints_what_the_desktop_paints() {
-        val golden = listOf(
-            Triple(Triple(1.0, ContrastLevel.STD, 205.0), "bg,bg-pane,fg,fg-muted,accent,accent-fg,status-waiting,control-border,code",
-                "#f7fbfe,#feffff,#161a1e,#565c62,#02717a,#ffffff,#84540e,#a1a8ae,#03707e"),
-            Triple(Triple(0.3, ContrastLevel.SOFT, 258.0), "bg,bg-pane,fg,fg-muted,accent,accent-fg,status-waiting,control-border,code",
-                "#f0f6fa,#f8fcff,#2d3338,#565f66,#085dc7,#ffffff,#83530c,#afbbc1,#03707e"),
-            Triple(Triple(-0.1, ContrastLevel.STD, 205.0), "bg,bg-pane,fg,fg-muted,accent,accent-fg,status-waiting,control-border,code",
-                "#16212e,#1c2834,#ffffff,#8baaca,#34d5e4,#0b0f17,#f3a949,#476381,#22cde5"),
-            Triple(Triple(-1.0, ContrastLevel.HIGH, 45.0), "bg,bg-pane,fg,fg-muted,accent,accent-fg,status-waiting,control-border,code",
-                "#0b1016,#10151c,#e1edfa,#a0aec0,#fca57e,#0b0f17,#f3a949,#5a6877,#22cde5"),
-        )
-        for ((input, names, hexes) in golden) {
-            val p = OrbitPalette.colors(input.first, input.second, input.third)
-            for ((name, hex) in names.split(",").zip(hexes.split(","))) {
-                val want = hex.removePrefix("#").toLong(16)
-                val got = assertNotNull(p[name], name) and 0xFFFFFFL
+        val golden = Json.parseToJsonElement(Repo.file("docs/design/palette-golden.json").readText()).jsonObject
+        val cases = golden["cases"]!!.jsonArray.map { it.jsonObject }
+        assertTrue(cases.isNotEmpty(), "palette-golden.json has no cases")
+        for (case in cases) {
+            val sun = case["sun"]!!.jsonPrimitive.double
+            val level = ContrastLevel.valueOf(case["contrast"]!!.jsonPrimitive.content.uppercase())
+            val hue = case["hue"]!!.jsonPrimitive.double
+            val p = OrbitPalette.colors(sun, level, hue)
+            for ((name, hex) in case["colors"]!!.jsonObject) {
+                val want = hex.jsonPrimitive.content.removePrefix("#").toLong(16)
+                val got = assertNotNull(p[name], "$name at sun=$sun $level $hue") and 0xFFFFFFL
                 for (shift in listOf(16, 8, 0)) {
                     val d = abs(((got shr shift) and 0xFFL) - ((want shr shift) and 0xFFL))
-                    assertTrue(d <= 1, "$name at $input: got #${got.toString(16).padStart(6, '0')}, desktop paints $hex")
+                    assertTrue(d <= 1, "$name at sun=$sun $level $hue: got #${got.toString(16).padStart(6, '0')}, desktop paints ${hex.jsonPrimitive.content}")
                 }
             }
+        }
+    }
+
+    /**
+     * Galaxy and Radar draw `loader-accent` on `brand-ink`, dark in both
+     * themes; the engine's day accent is dark too and fell to 2.4:1 there, so
+     * the engine leaves the brand value alone (review w20-2).
+     */
+    @Test
+    fun the_loader_accent_reads_on_its_dark_stage() {
+        for (level in ContrastLevel.entries) for (accent in OrbitAccent.entries) for (sun in suns) {
+            val o = OrbitColors(sun < 0, OrbitPalette.colors(sun, level, accent.hue))
+            val r = ratio(o.loaderAccent, o.brandInk)
+            assertTrue(r >= 4.5f, "$level/$accent sun=$sun: loader-accent on brand-ink $r < 4.5")
         }
     }
 
