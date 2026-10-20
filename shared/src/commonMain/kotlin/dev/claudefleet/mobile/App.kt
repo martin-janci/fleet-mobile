@@ -303,6 +303,8 @@ import dev.claudefleet.mobile.ui.accountMeter
 import dev.claudefleet.mobile.ui.forkTurnChoices
 import dev.claudefleet.mobile.ui.forkWorktreeName
 import dev.claudefleet.mobile.ui.KillConfirmDialog
+import dev.claudefleet.mobile.ui.LocalKillCheck
+import dev.claudefleet.mobile.model.ChangedFile
 import dev.claudefleet.mobile.ui.ReviewDialog
 import dev.claudefleet.mobile.ui.RepairWait
 import dev.claudefleet.mobile.ui.RepairWaitScreen
@@ -1498,7 +1500,9 @@ private fun FleetRoute(
 
     // Every HubBanner's Retry wakes the reconnect loop, not only its screen's refresh (review r13).
     val reconnect: () -> Unit = remember(repository) { { repository.reconnectNow() } }
-    CompositionLocalProvider(LocalHubReconnect provides reconnect) {
+    // The Kill sheet names the uncommitted files it would throw away (review w22-2).
+    val killCheck: (suspend (Long) -> List<ChangedFile>)? = if (settingsCaps.repo) container.repoActions::changes else null
+    CompositionLocalProvider(LocalHubReconnect provides reconnect, LocalKillCheck provides killCheck) {
     Scaffold(
         bottomBar = {
             // Not on a session: it is a detail screen with its own Back, and
@@ -3535,7 +3539,7 @@ private fun SessionRoute(
             onStart = { prompt -> detailsAsk = null; vm.spawnReview(prompt, onOpenSession) },
             onDismiss = { detailsAsk = null },
         )
-        DetailsAsk.Kill -> KillConfirmDialog(onConfirm = { detailsAsk = null; vm.kill() }, onDismiss = { detailsAsk = null })
+        DetailsAsk.Kill -> KillConfirmDialog(onConfirm = { detailsAsk = null; vm.kill() }, onDismiss = { detailsAsk = null }, sessionId = state.session?.id)
         DetailsAsk.Fork -> {
             val turns = state.conversation.turns
             ForkSheet(

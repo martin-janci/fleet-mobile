@@ -109,6 +109,15 @@ class SessionG55Test {
     private fun snapshot(five: UsageWindow?, week: UsageWindow?) =
         AccountUsageSnapshot("acc-a", AccountUsageWindows(fiveHour = five, sevenDay = week), "ok", now)
 
+    /** Review w22-2: the Kill sheet names what the kill would throw away. */
+    @Test
+    fun the_kill_sheet_names_the_uncommitted_files() {
+        assertEquals("No uncommitted changes in its worktree.", killChangesLine(emptyList()))
+        assertEquals("Leaves 1 uncommitted file: App.kt. Safe remove keeps them.", killChangesLine(listOf(ChangedFile("src/App.kt", "M"))))
+        val four = listOf("a/x.kt", "b.kt", "c/d/e.md", "f.txt").map { ChangedFile(it, "M") }
+        assertEquals("Leaves 4 uncommitted files: x.kt, b.kt, e.md and 1 more. Safe remove keeps them.", killChangesLine(four))
+    }
+
     /** Review w23-5: a dead-end switch target says why, and stays pickable. */
     @Test
     fun a_switch_target_names_what_makes_it_a_dead_end() {
