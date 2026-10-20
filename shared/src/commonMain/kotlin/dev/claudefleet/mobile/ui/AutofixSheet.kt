@@ -155,6 +155,7 @@ private fun FindingRow(f: AutofixFinding, nowSeconds: Long, state: AutofixUiStat
         findingStateWords(f)?.let {
             Text(it, color = if (f.state == "apply_failed") o.usageWarn else o.fgMuted, fontSize = 13.sp)
         }
+        autoWords(f, nowSeconds)?.let { Text(it, color = o.fgMuted, fontSize = 13.sp) }
         if (details) {
             if (f.evidence.isNotEmpty()) {
                 Label("What fleet saw")
@@ -163,13 +164,12 @@ private fun FindingRow(f: AutofixFinding, nowSeconds: Long, state: AutofixUiStat
             f.fix?.let { fix ->
                 Label("What the fix does" + if (fix.reversible) "" else " (cannot be undone)")
                 for (c in fix.changes) Text("• $c", color = o.fg2, fontSize = 13.sp)
-                if (fix.safety == "safe" && fix.auto) {
-                    Text("Safe: fleet runs this fix by itself unless automatic fixes are off.", color = o.fgMuted, fontSize = 13.sp)
-                }
             }
-            if (f.fix == null && f.action?.action == "login" && f.action.host != null) {
-                Text("Log in on ${f.action.host} from the desktop: fleet cannot do it for you.", color = o.fg2, fontSize = 13.sp)
-            }
+        }
+        // A sign-in finding has no Fix button: what to do is shown up front,
+        // not behind Details (review w09-8).
+        if (f.fix == null && f.action?.action == "login" && f.action.host != null) {
+            Text("Log in on ${f.action.host} from the desktop: fleet cannot do it for you.", color = o.fg2, fontSize = 13.sp)
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             val enabled = state.busy == null

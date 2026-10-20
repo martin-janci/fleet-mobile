@@ -180,13 +180,13 @@ private const val DISMISSED = "dismissed"
 private const val CLEARED = "cleared"
 private const val APPLY_FAILED = "apply_failed"
 
-/** The More row: "2 problems · 1 fixed today", "No problems found". */
+/** The More row: "2 problems · 1 fixed in the last day", "No problems found". */
 fun autofixLine(state: AutofixUiState): String {
     if (!state.loaded) return "What fleet found broken, and its fixes"
     val n = state.problems.size
     val fixed = state.fixed.size
     val problems = if (n == 0) "No problems found" else "$n problem${if (n == 1) "" else "s"}"
-    return if (fixed == 0) problems else "$problems · $fixed fixed today"
+    return if (fixed == 0) problems else "$problems · $fixed fixed in the last day"
 }
 
 /** The finding's title, or its kind when the hub could not read the body. */
@@ -211,6 +211,26 @@ fun findingStateWords(f: AutofixFinding): String? = when (f.state) {
     DISMISSED -> "Hidden until later."
     CLEARED -> "Resolved."
     else -> null
+}
+
+/**
+ * For a safe automatic fix: whether fleet runs it by itself, and when, or
+ * that it stopped (as the desktop's `autoWords`). Null for any other fix.
+ */
+fun autoWords(f: AutofixFinding, nowSeconds: Long): String? {
+    val fix = f.fix ?: return null
+    if (fix.safety != "safe" || !fix.auto) return null
+    if (f.state != "open" && f.state != APPLY_FAILED) return null
+    val runs = f.autoRuns ?: return "Safe: fleet runs this fix by itself unless automatic fixes are off."
+    if (!runs) {
+        if (f.attempts > 0) {
+            val times = if (f.attempts == 1) "once" else "${f.attempts} times"
+            return "Fleet tried this fix $times and stopped trying by itself; fix it here."
+        }
+        return "Fleet will not run this fix by itself (automatic fixes are off or paused); fix it here."
+    }
+    val mins = ((f.autoNextAt ?: nowSeconds) - nowSeconds + 59) / 60
+    return if (mins <= 1) "Fleet runs this fix by itself on its next check." else "Fleet tries this fix again by itself in ~$mins min."
 }
 
 /** What a fixed finding's row says ran: the fix's summary, and how many tries it took. */

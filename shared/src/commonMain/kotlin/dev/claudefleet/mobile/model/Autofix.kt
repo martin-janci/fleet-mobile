@@ -32,6 +32,14 @@ data class AutofixFinding(
     val evidence: List<String> = emptyList(),
     val fix: AutofixFix? = null,
     val action: AutofixAction? = null,
+    /**
+     * Whether the hub tries the fix by itself: false when it will not
+     * (automatic fixes off or paused, its tries for the day spent), null
+     * from a hub older than the field.
+     */
+    @SerialName("auto_runs") val autoRuns: Boolean? = null,
+    /** When it next tries (unix seconds), when [autoRuns]. */
+    @SerialName("auto_next_at") val autoNextAt: Long? = null,
 )
 
 /** What a finding's fix does. */
