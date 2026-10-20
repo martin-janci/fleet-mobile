@@ -1062,6 +1062,8 @@ private fun ControlTab(
     }
     // Control as a Thread room on the phone (claude-fleet #914): what it handed out, and the newest tree.
     val missionList = missionsState.missions
+    // Control's thread strip and Missions pill read the missions too, not only Inbox and Missions (review w21-2).
+    LaunchedEffect(missionsState.available) { if (missionsState.available) missions.refresh() }
     val threads = remember(controlRows, controlState.receipts, missionList, controlState.sessionId) {
         val now = epochSeconds()
         buildThreads(controlRows, controlState.receipts, missionList, controlState.sessionId, localMidnight(now, utcOffsetSeconds(now)))

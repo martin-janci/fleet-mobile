@@ -135,6 +135,16 @@ class MissionsViewModel(
                 .drop(1)
                 .collect { up -> if (up && local.value.open && local.value.loaded) read() }
         }
+        // A mission moves on the hub (a step taken, a grant signed on the
+        // desktop): re-read what this phone has read, the open detail with
+        // it, so the Control strip, the Missions pill and Go act on what is
+        // true now (review w21-2; the desktop's `onWorkChangedDebounced`).
+        // Not while an action of this phone's is in flight: it reads after.
+        scope.launch {
+            fleet.workChanges.throttleLatest(WORK_REREAD_MS).collect {
+                if (local.value.loaded && local.value.busy == null && state.value.available) read()
+            }
+        }
     }
 
     fun open(): Job = scope.launch {
@@ -324,6 +334,9 @@ class MissionsViewModel(
         }
     }
 }
+
+/** At most one missions re-read per this long while work keeps changing. */
+private const val WORK_REREAD_MS = 2_000L
 
 /** A grant runs at most a week (the hub's `GRANT_MAX_SECS`). */
 const val GRANT_MAX_HOURS: Int = 168
