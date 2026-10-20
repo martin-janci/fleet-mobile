@@ -98,6 +98,9 @@ const val TUNE_RUN_TAG = "session.tune.run"
 const val TUNE_REWRITE_TAG = "session.tune.rewrite"
 const val TUNE_CHIP_TAG = "session.tune.chip."
 
+/** The desktop's words for a rewrite cut at the limit (review w30-6). */
+const val TUNE_CUT_WARNING = "The rewrite ran past the limit and was cut at its end (…). Read its end before you use it."
+
 /**
  * Tune prompt: a model rewrites the composer's draft into a clearer prompt
  * for the agent, as a proposal. *Use this* puts the (editable) rewrite in the
@@ -117,7 +120,7 @@ internal fun PromptTuneSheet(state: SessionUiState, tune: PromptTune, host: Prom
         onDismiss = host.onDiscard,
         modifier = Modifier.testTag(TUNE_SHEET_TAG),
         primary = if (answer != null && !answer.unchanged) {
-            SheetAction("Use this", enabled = !tune.running && tune.rewrite.isNotBlank(), onClick = host.onAccept)
+            SheetAction(if (answer.cut) "Use this (cut)" else "Use this", enabled = !tune.running && tune.rewrite.isNotBlank(), onClick = host.onAccept)
         } else {
             null
         },
@@ -158,6 +161,9 @@ internal fun PromptTuneSheet(state: SessionUiState, tune: PromptTune, host: Prom
                 Text("Your draft already reads clearly; nothing was changed.", style = Fleet.type.textSm, color = o.fg)
             } else {
                 answer.notes.takeIf { it.isNotBlank() }?.let { Text(it, style = Fleet.type.textSm, color = o.fgMuted) }
+                if (answer.cut) {
+                    Text(TUNE_CUT_WARNING, style = Fleet.type.textSm, color = o.danger)
+                }
                 OutlinedTextField(
                     value = tune.rewrite,
                     onValueChange = host.onRewrite,
