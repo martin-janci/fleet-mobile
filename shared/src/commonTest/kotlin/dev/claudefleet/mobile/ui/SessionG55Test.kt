@@ -109,6 +109,16 @@ class SessionG55Test {
     private fun snapshot(five: UsageWindow?, week: UsageWindow?) =
         AccountUsageSnapshot("acc-a", AccountUsageWindows(fiveHour = five, sevenDay = week), "ok", now)
 
+    /** Review w23-5: a dead-end switch target says why, and stays pickable. */
+    @Test
+    fun a_switch_target_names_what_makes_it_a_dead_end() {
+        val same = HostLogin(profile = "work2", accountUuid = "acc-a", usedPct = 100.0)
+        assertEquals("100% used · same account, shares its limit · at its limit", switchLoginSub(same, "acc-a", 95.0, signedOut = false))
+        val fine = HostLogin(profile = "home", accountUuid = "acc-b", usedPct = 12.0)
+        assertEquals("12% used", switchLoginSub(fine, "acc-a", 95.0, signedOut = false))
+        assertEquals("12% used · signed out", switchLoginSub(fine, "acc-a", 95.0, signedOut = true))
+    }
+
     /** Review w23-7: a reading the hub could not refresh says why and how old it is. */
     @Test
     fun the_account_row_says_when_its_meters_are_stale() {

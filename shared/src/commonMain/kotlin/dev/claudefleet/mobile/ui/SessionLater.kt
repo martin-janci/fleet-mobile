@@ -367,7 +367,25 @@ data class AccountSwitch(
     val logins: List<HostLogin> = emptyList(),
     val picked: HostLogin? = null,
     val notice: String? = null,
+    /** The hub's pause line (`pause_at_pct`): a login at or over it is "at its limit". */
+    val pauseAtPct: Double = 100.0,
+    /** The profiles on the host fleet knows are signed out (null = the host's own login). */
+    val signedOut: List<String?> = emptyList(),
 )
+
+/**
+ * A login's line in Switch account (review w23-5): how much it has used,
+ * and what makes it a dead end — the session's own account, which shares
+ * its limit; a login at the pause line; one that is signed out. Each stays
+ * pickable: the person still decides.
+ */
+fun switchLoginSub(l: HostLogin, sessionAccount: String?, pauseAtPct: Double, signedOut: Boolean): String =
+    listOfNotNull(
+        usedText(l),
+        "same account, shares its limit".takeIf { sessionAccount != null && l.accountUuid == sessionAccount },
+        "at its limit".takeIf { (l.usedPct ?: 0.0) >= pauseAtPct },
+        "signed out".takeIf { signedOut },
+    ).joinToString(" · ")
 
 /** Every login on the host but the one the session runs under ([currentProfile], null = the host's own). */
 fun otherLogins(h: Headroom, currentProfile: String?): List<HostLogin> =
@@ -401,7 +419,7 @@ internal fun SwitchAccountSheet(
         for (l in switch.logins) {
             SheetOption(
                 title = loginLabel(l, accountName),
-                sub = usedText(l),
+                sub = switchLoginSub(l, session?.accountUuid, switch.pauseAtPct, l.profile in switch.signedOut),
                 selected = l == switch.picked,
                 onSelect = { onPick(l) },
             )

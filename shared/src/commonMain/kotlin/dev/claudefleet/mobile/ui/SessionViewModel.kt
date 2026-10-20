@@ -1796,7 +1796,8 @@ class SessionViewModel(
         if (!fleet.capabilities.value.switchAccount || !canRestartNow() || !connected()) return@launch
         local.update { it.copy(accountSwitch = AccountSwitch(loading = true), error = null, limitNotice = null) }
         try {
-            val h = actions.accountHeadroom(r.hostAlias, r.claudeProfile).forAccount(r.accountUuid)
+            val signedOut = fleet.hosts.value.firstOrNull { it.alias == r.hostAlias }?.signedOutLogins.orEmpty().map { it.profile }
+            val h = actions.accountHeadroom(r.hostAlias, r.claudeProfile).forAccount(r.accountUuid) { l -> l.profile in signedOut }
             val choices = otherLogins(h, r.claudeProfile)
             local.update { l ->
                 val open = l.accountSwitch ?: return@update l
@@ -1804,6 +1805,8 @@ class SessionViewModel(
                     accountSwitch = open.copy(
                         loading = false,
                         logins = choices,
+                        pauseAtPct = h.pauseAtPct,
+                        signedOut = signedOut,
                         picked = open.picked ?: h.suggestion?.takeIf { it in choices },
                         notice = if (choices.isEmpty()) "${r.hostAlias} has no other login to switch to." else null,
                     ),
