@@ -131,4 +131,19 @@ class ControlRoomTest {
         assertTrue(steerBlocked(SessionRow(id = 5), connected = false, canWrite = true)!!.startsWith("Not connected"))
         assertFalse(steerBlocked(SessionRow(id = 5), connected = true, canWrite = true) != null)
     }
+
+    /** Review w21-15: past the 20 receipts kept, a steer that went through still counts, so the box clears. */
+    @Test
+    fun every_delivered_steer_counts_past_the_receipt_cap() = runTest {
+        val fleet = RoomFleet(listOf(SessionRow(id = 5, tmuxName = "control")))
+        val calls = SteerCalls()
+        val steer = MissionSteer(fleet, calls, backgroundScope, canWrite = true) { 5L }
+        val m = Mission(id = 9, name = "Ship it")
+        repeat(21) { steer.send(m, "step $it")?.join() }
+        assertEquals(20, steer.state.value.receipts.size)
+        assertEquals(21, steer.state.value.delivered[9L])
+        calls.failing = true
+        steer.send(m, "refused")?.join()
+        assertEquals(21, steer.state.value.delivered[9L], "a refusal is not delivered")
+    }
 }

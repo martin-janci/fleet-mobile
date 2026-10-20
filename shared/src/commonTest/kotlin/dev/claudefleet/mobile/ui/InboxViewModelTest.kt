@@ -87,6 +87,37 @@ class InboxViewModelTest {
         assertFalse(inboxRowActions(SessionRow(id = 3, tmuxName = "x", claudeStatus = "blocked", attention = Attention("waiting")), true, true, null).any)
     }
 
+    /** Review w23-3: a signed-out login is never proposed, though its last reading has room. */
+    @Test
+    fun switch_account_never_proposes_a_signed_out_login() = runTest {
+        val expired = HostLogin(profile = "work", accountUuid = "acct-b", usedPct = 5.0)
+        val fresh = HostLogin(profile = "home", accountUuid = "acct-c", usedPct = 40.0)
+        val hub = FakeInbox(headroom = Headroom(pauseAtPct = 95.0, logins = listOf(HostLogin(accountUuid = "acct-a", usedPct = 100.0), expired, fresh)))
+        val vm = InboxViewModel(hub, this, canWrite = true, signedOut = { host, profile -> host == "mac" && profile == "work" })
+        vm.proposeSwitch(paused(), switchAvailable = true); runCurrent()
+        assertEquals(fresh, vm.state.value.switchTargets[2L])
+    }
+
+    /** Review w23-4: a signed-out row offers Switch account, to a login that is signed in. */
+    @Test
+    fun a_signed_out_row_switches_to_a_signed_in_login() = runTest {
+        val row = paused().copy(claudeProfile = "work", attention = Attention("no_credentials", since = 20, state = "blocked"))
+        assertTrue(inboxRowActions(row, canWrite = true, switchAvailable = true, limit = null).switchAccount)
+        assertFalse(inboxRowActions(row, canWrite = false, switchAvailable = true, limit = null).switchAccount)
+
+        val own = HostLogin(profile = "work", accountUuid = "acct-a", usedPct = 3.0)
+        val home = HostLogin(profile = "home", accountUuid = "acct-a", usedPct = 30.0)
+        val full = HostLogin(profile = "full", accountUuid = "acct-b", usedPct = 99.0)
+        val hub = FakeInbox(headroom = Headroom(pauseAtPct = 95.0, logins = listOf(own, home, full)))
+        val vm = InboxViewModel(hub, this, canWrite = true)
+        vm.proposeSwitch(row, switchAvailable = true); runCurrent()
+        assertEquals(home, vm.state.value.switchTargets[2L], "not its own signed-out login, nor one past the pause line")
+
+        val none = InboxViewModel(FakeInbox(headroom = Headroom(pauseAtPct = 95.0, logins = listOf(own))), this, canWrite = true)
+        none.proposeSwitch(row, switchAvailable = true); runCurrent()
+        assertEquals("No other login on mac is signed in with room left.", none.state.value.notices[2L])
+    }
+
     @Test
     fun retry_sends_the_last_prompt_once_and_says_so() = runTest {
         val hub = FakeInbox()

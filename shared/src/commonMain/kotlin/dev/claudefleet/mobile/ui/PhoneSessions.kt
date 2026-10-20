@@ -206,6 +206,14 @@ internal fun stateBands(rows: List<SessionRow>): List<Pair<StatusWord?, List<Ses
 internal fun SessionsUiState.shownRows(): List<SessionRow> =
     urgent + groups.flatMap { h -> h.projects.flatMap { it.sessions } }
 
+/**
+ * The rows Select all and All idle may pick: what is on screen, so not the
+ * sessions inside a collapsed group, which Send and Archive would otherwise
+ * act on unseen (review w22-7).
+ */
+internal fun SessionsUiState.pickableRows(): List<SessionRow> =
+    urgent + groups.filterNot { it.collapsed }.flatMap { h -> h.projects.flatMap { it.sessions } }
+
 /** Where a search looks (MobileSessionsTools): every kind of hit, or one. */
 /** The search's chips. TEXT is the hub's full-text index: tasks, conversations, pull requests, the journal. */
 enum class SearchScope(val label: String) { ALL("All"), SESSIONS("Sessions"), TEXT("Text"), PROJECTS("Projects"), HOSTS("Hosts"), TICKETS("Tickets") }
@@ -342,8 +350,8 @@ fun SessionsTab(
             bulk.active -> SelectionHeader(
                 bulk,
                 onClear = handlers.onClearSelection,
-                onSelectAll = { bulkHandlers.onSelectAll(rows.map { it.id }) },
-                onSelectIdle = idleIds(rows).takeIf { it.isNotEmpty() }?.let { ids -> { bulkHandlers.onSelectAll(ids) } },
+                onSelectAll = { bulkHandlers.onSelectAll(state.pickableRows().map { it.id }) },
+                onSelectIdle = idleIds(state.pickableRows()).takeIf { it.isNotEmpty() }?.let { ids -> { bulkHandlers.onSelectAll(ids) } },
             )
             state.searchOpen -> SearchHeader(
                 query = state.filters.query,
@@ -882,21 +890,26 @@ private fun BulkActionBar(bulk: BulkUiState, onSend: () -> Unit, onKill: () -> U
     Surface(color = o.bgPane) {
         Column {
             HorizontalDivider(color = o.border)
+            // Offline, each action would fail once per session (review w22-8).
+            if (!bulk.online) {
+                Text("Not connected to the hub: these act once it answers.", color = o.fgMuted, fontSize = 12.sp, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
+            }
+            val ready = !bulk.running && bulk.online
             Row(
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                TextButton(onClick = onSend, enabled = !bulk.running && bulk.selected.isNotEmpty(), modifier = Modifier.weight(1f)) {
+                TextButton(onClick = onSend, enabled = ready && bulk.selected.isNotEmpty(), modifier = Modifier.weight(1f)) {
                     Text("Send a message")
                 }
                 if (bulk.canArchive) {
-                    TextButton(onClick = onArchive, enabled = !bulk.running && bulk.selected.isNotEmpty(), modifier = Modifier.weight(1f)) {
+                    TextButton(onClick = onArchive, enabled = ready && bulk.selected.isNotEmpty(), modifier = Modifier.weight(1f)) {
                         Text("Archive")
                     }
                 }
-                TextButton(onClick = onKill, enabled = !bulk.running && bulk.killable > 0, modifier = Modifier.weight(1f)) {
-                    Text("Kill…", color = if (!bulk.running && bulk.killable > 0) o.danger else o.fgMuted)
+                TextButton(onClick = onKill, enabled = ready && bulk.killable > 0, modifier = Modifier.weight(1f)) {
+                    Text("Kill…", color = if (ready && bulk.killable > 0) o.danger else o.fgMuted)
                 }
             }
         }
@@ -997,7 +1010,7 @@ private fun BulkOutcomeSheet(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(x.name, color = o.fg, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
-                            if (x.ok) verb.replaceFirstChar { it.uppercaseChar() } else x.reason ?: "Not $verb",
+                            if (x.ok) x.reason ?: verb.replaceFirstChar { it.uppercaseChar() } else x.reason ?: "Not $verb",
                             color = o.fgMuted,
                             fontSize = 13.sp,
                             maxLines = 2,

@@ -263,7 +263,6 @@ private fun HostRowItem(host: HostLine, nowSeconds: Long, behind: Boolean, check
                     hostLoadChip(host, nowSeconds)?.let { OrbitChip(it) }
                     OrbitChip(host.transport)
                     if (behind) OrbitChip("claude ${host.claudeVersion?.substringBefore(' ')} · behind")
-                    if (host.transport == "ssh") handlers.onInstallAgent?.let { add -> RowAction("Install agent") { add(host.alias) } }
                 }
             }
         },

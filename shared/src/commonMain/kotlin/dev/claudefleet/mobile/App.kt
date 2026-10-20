@@ -51,6 +51,7 @@ import dev.claudefleet.mobile.data.HubWizardDrafts
 import dev.claudefleet.mobile.data.WizardDrafts
 import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.model.limitAt
+import dev.claudefleet.mobile.model.isSignedOut
 import dev.claudefleet.mobile.ui.SessionLaterHost
 import dev.claudefleet.mobile.ui.PromptTuneHost
 import dev.claudefleet.mobile.ui.components.ChatHost
@@ -303,6 +304,8 @@ import dev.claudefleet.mobile.ui.accountMeter
 import dev.claudefleet.mobile.ui.forkTurnChoices
 import dev.claudefleet.mobile.ui.forkWorktreeName
 import dev.claudefleet.mobile.ui.KillConfirmDialog
+import dev.claudefleet.mobile.ui.LocalKillCheck
+import dev.claudefleet.mobile.model.ChangedFile
 import dev.claudefleet.mobile.ui.ReviewDialog
 import dev.claudefleet.mobile.ui.RepairWait
 import dev.claudefleet.mobile.ui.RepairWaitScreen
@@ -753,8 +756,10 @@ class AppContainer(
      * are baked into both the client and the stream: re-pairing against a
      * different hub has to produce a different repository, not a mutated one.
      */
-    fun repository(credentials: Credentials, scope: CoroutineScope): FleetRepository =
-        FleetRepository(
+    fun repository(credentials: Credentials, scope: CoroutineScope): FleetRepository {
+        // Another hub's session ids are not this one's: its drafts go (review w22-5).
+        drafts.forHub(credentials.hub)
+        return FleetRepository(
             client = HubClient(http, credentials.hub, credentials.token),
             events = HubEventStream(http, credentials.hub, credentials.token),
             scope = scope,
@@ -766,6 +771,7 @@ class AppContainer(
             // `forget()`, so the Pair screen can say why.
             onRevoked = { session.revoke() },
         )
+    }
 }
 
 /**
@@ -1066,6 +1072,8 @@ private fun ControlTab(
     }
     // Control as a Thread room on the phone (claude-fleet #914): what it handed out, and the newest tree.
     val missionList = missionsState.missions
+    // Control's thread strip and Missions pill read the missions too, not only Inbox and Missions (review w21-2).
+    LaunchedEffect(missionsState.available) { if (missionsState.available) missions.refresh() }
     val threads = remember(controlRows, controlState.receipts, missionList, controlState.sessionId) {
         val now = epochSeconds()
         buildThreads(controlRows, controlState.receipts, missionList, controlState.sessionId, localMidnight(now, utcOffsetSeconds(now)))
@@ -1080,8 +1088,11 @@ private fun ControlTab(
     if (autonomyOn) LaunchedEffect(autonomy) { autonomy.load() }
     // The escalation cards: the rows Needs you reads (shared-in sessions are their owners' to answer).
     val laterKeys by container.escalationLater.later.collectAsState()
-    val escalationCards = remember(controlRows, controlAccess, controlState.sessionId, laterKeys) {
-        escalations(controlRows.filter { controlAccess.levelFor(it) == null }, controlState.sessionId, laterKeys.toSet())
+    val controlHosts by repository.hosts.collectAsState()
+    // A host that answers again ends its Later, so its next outage is a card (review w21-1).
+    LaunchedEffect(controlHosts) { container.escalationLater.forgetRecoveredHosts(controlHosts) }
+    val escalationCards = remember(controlRows, controlAccess, controlState.sessionId, laterKeys, settingsCaps.ask) {
+        escalations(controlRows.filter { controlAccess.levelFor(it) == null }, controlState.sessionId, laterKeys.toSet(), formsShown = settingsCaps.ask)
     }
     var threadsOpen by remember { mutableStateOf(false) }
     if (threadsOpen) {
@@ -1293,6 +1304,7 @@ private fun FleetRoute(
             scope,
             credentials.canWrite,
             accountName = { uuid -> repository.accountNames.value[uuid] },
+            signedOut = { alias, profile -> repository.hosts.value.firstOrNull { it.alias == alias }?.isSignedOut(profile) == true },
         )
     }
     val trackers = remember(repository, scope) { TrackersViewModel(repository, container.trackerActions, scope, credentials.canWrite) }
@@ -1496,7 +1508,9 @@ private fun FleetRoute(
 
     // Every HubBanner's Retry wakes the reconnect loop, not only its screen's refresh (review r13).
     val reconnect: () -> Unit = remember(repository) { { repository.reconnectNow() } }
-    CompositionLocalProvider(LocalHubReconnect provides reconnect) {
+    // The Kill sheet names the uncommitted files it would throw away (review w22-2).
+    val killCheck: (suspend (Long) -> List<ChangedFile>)? = if (settingsCaps.repo) container.repoActions::changes else null
+    CompositionLocalProvider(LocalHubReconnect provides reconnect, LocalKillCheck provides killCheck) {
     Scaffold(
         bottomBar = {
             // Not on a session: it is a detail screen with its own Back, and
@@ -1994,6 +2008,8 @@ private fun FleetRoute(
                                 onDismissError = hostDetail::dismissError,
                                 onRunWhenBack = hostDetail::runWhenBack,
                                 onCancelWhenBack = hostDetail::cancelWhenBack,
+                                onInstallAgent = { hostSheet.alias?.let { alias -> hostDetail.close(); installs.open(alias) }; Unit }
+                                    .takeIf { credentials.canWrite && hostCaps.installAgent },
                             ),
                         )
                     }
@@ -2154,7 +2170,7 @@ private fun FleetRoute(
                                 add(MoreEntry("Problems & fixes", autofixLine(autofixState)) { autofix.open() })
                             }
                             if (settingsCaps.usage || settingsCaps.accounts) {
-                                val usageLine = accountsLine(moreList.accountUsage.values, moreList.nowSeconds)
+                                val usageLine = accountsLine(moreList.accountUsage.values, moreList.nowSeconds) { uuid -> moreList.accountNames[uuid] }
                                 add(MoreEntry("Accounts and usage", usageLine ?: "Quotas, and estimated spend by host and day") { nav.openUsage() })
                             }
                             if (automationState.available) {
@@ -2471,7 +2487,16 @@ private fun FleetRoute(
                         onClose = missions::close,
                         onRefresh = { missions.refresh() },
                         onSelect = { missions.select(it) },
-                        onBack = missions::back,
+                        // New layout: "‹ Missions" goes to the Missions screen, never
+                        // the Classic list inside the sheet (review w21-12).
+                        onBack = if (layout == PhoneLayout.New) {
+                            {
+                                missions.close()
+                                if (screen != Screen.Missions) nav.openMissions()
+                            }
+                        } else {
+                            missions::back
+                        },
                         onStart = { missions.start(it) },
                         onDecide = { card, ok, note -> missions.decide(card, ok, note) },
                         onTogglePause = { missions.togglePause() },
@@ -2500,6 +2525,7 @@ private fun FleetRoute(
                                 error = steerState.error,
                                 onSend = { text -> steer.send(m, text); Unit },
                                 onDismissError = steer::dismissError,
+                                delivered = steerState.delivered[m.id] ?: 0,
                             )
                         }.takeIf { layout == PhoneLayout.New },
                     ),
@@ -3405,7 +3431,7 @@ private fun SessionRoute(
             val names by repository.accountNames.collectAsState()
             val usage by repository.accountUsage.collectAsState()
             SessionLaterHost(
-                onSendLater = { text, timing -> vm.sendLater(text, timing) },
+                onSendLater = { text, timing, accepted -> vm.sendLater(text, timing, accepted) },
                 onLoadQueued = { vm.loadQueued() },
                 onCancelQueued = { vm.cancelQueued(it) },
                 onDismissNotice = vm::dismissSendLaterNotice,
@@ -3523,7 +3549,7 @@ private fun SessionRoute(
             onStart = { prompt -> detailsAsk = null; vm.spawnReview(prompt, onOpenSession) },
             onDismiss = { detailsAsk = null },
         )
-        DetailsAsk.Kill -> KillConfirmDialog(onConfirm = { detailsAsk = null; vm.kill() }, onDismiss = { detailsAsk = null })
+        DetailsAsk.Kill -> KillConfirmDialog(onConfirm = { detailsAsk = null; vm.kill() }, onDismiss = { detailsAsk = null }, sessionId = state.session?.id)
         DetailsAsk.Fork -> {
             val turns = state.conversation.turns
             ForkSheet(

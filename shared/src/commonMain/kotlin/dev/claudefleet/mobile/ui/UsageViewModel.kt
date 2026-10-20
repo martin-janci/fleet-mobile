@@ -158,15 +158,31 @@ class UsageViewModel(
     private suspend fun read(withAccounts: Boolean) {
         val caps = fleet.capabilities.value
         local.update { it.copy(loading = true, error = null) }
+        // Each read stands alone: a report that times out on a large fleet
+        // still leaves the accounts and their meters (review w23-9). The
+        // first failure is the banner's.
+        var failure: Throwable? = null
         try {
             if (caps.usage) {
                 val window = local.value.window
-                val report = actions.report(window.seconds)
-                local.update { if (it.window == window) it.copy(report = report) else it }
+                try {
+                    val report = actions.report(window.seconds)
+                    local.update { if (it.window == window) it.copy(report = report) else it }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    failure = t
+                }
             }
             if (withAccounts && caps.accounts) {
-                val accounts = actions.accounts()
-                local.update { it.copy(accounts = accounts) }
+                try {
+                    val accounts = actions.accounts()
+                    local.update { it.copy(accounts = accounts) }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    if (failure == null) failure = t
+                }
             }
             if (withAccounts && caps.autoSwitch) {
                 // Quiet on failure: a pairing that speaks for no person is
@@ -180,10 +196,7 @@ class UsageViewModel(
                 }
                 local.update { it.copy(autoSwitch = view) }
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (t: Throwable) {
-            local.update { it.copy(error = friendly(t)) }
+            failure?.let { t -> local.update { it.copy(error = friendly(t)) } }
         } finally {
             local.update { it.copy(loading = false) }
         }

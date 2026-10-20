@@ -19,6 +19,9 @@ interface AlertPoster {
 
     /** A mission waits on a person (gap plan G5.7); a platform that cannot say it says nothing. */
     fun postMission(alert: MissionWaitAlert) {}
+
+    /** The mission no longer waits: its notification comes down (review w21-3). */
+    fun withdrawMission(missionId: Long) {}
 }
 
 /** The seen set the background check and the open app share, in [Prefs]. */
@@ -116,8 +119,10 @@ class NeedsYouCheck(
         } catch (_: Exception) {
             null
         } ?: return
-        val (alerts, after) = missionWaitAlerts(prefs.readMissionSeen(), missions)
+        val before = prefs.readMissionSeen()
+        val (alerts, after) = missionWaitAlerts(before, missions)
         if (prefs.notifyAllows(MISSION_WAITING_REASON)) alerts.forEach(poster::postMission)
+        missionWaitsResolved(before, after).forEach(poster::withdrawMission)
         prefs.writeMissionSeen(after)
     }
 }

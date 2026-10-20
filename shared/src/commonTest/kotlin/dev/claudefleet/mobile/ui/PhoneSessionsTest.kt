@@ -162,6 +162,16 @@ class PhoneSessionsTest {
         assertEquals("2 archived", bulkOutcomeLine(BulkAction.Archive, outcome.take(2)))
     }
 
+    /** Review w22-7: Select all picks what is on screen, never a folded host's sessions. */
+    @Test
+    fun select_all_skips_the_sessions_of_a_folded_host() {
+        val open = HostGroup("mac", true, listOf(ProjectGroup(1, "p", listOf(SessionRow(id = 1, claudeStatus = "idle")))))
+        val folded = HostGroup("nas", true, listOf(ProjectGroup(2, "q", listOf(SessionRow(id = 2, claudeStatus = "idle")))), collapsed = true)
+        val state = SessionsUiState(groups = listOf(open, folded))
+        assertEquals(listOf(1L, 2L), state.shownRows().map { it.id })
+        assertEquals(listOf(1L), state.pickableRows().map { it.id })
+    }
+
     /** r09 B6: "All idle" picks the sessions whose agent waits at its prompt. */
     @Test
     fun all_idle_picks_the_idle_rows() {

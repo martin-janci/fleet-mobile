@@ -24,31 +24,21 @@ class ChatBlockKindsTest {
     private companion object {
         /**
          * Shared cases for what the desktop and the hub check and the phone
-         * does not read yet: the `wizard` and `dashboard` kinds (so its "not a
-         * known kind" list is shorter than theirs), a choice's `recommended`,
+         * does not read yet: a wizard's drafted `values` and a dashboard's
+         * widgets (the phone checks only the block around them, review
+         * w21-5), a choice's `recommended`,
          * a progress's `started_at` and step `detail`, and an error's next-step
          * `action`. Found when the fixture was copied again for the `device`
          * kind, which the phone does read. Each name must still be a case and
          * still fail: porting one turns this test red until its name goes.
          */
         val NOT_PORTED_YET: Set<String> = setOf(
-            "a wizard",
-            "a wizard the chat cannot run",
-            "a wizard without its id",
-            "a wizard with answers drafted from the message",
             "a wizard with drafted answers it cannot take",
-            "a wizard whose values are not an object",
-            "a fleet agent's grant form",
-            "a fleet agent wizard without its definition",
-            "a definition on another wizard",
-            "not a known kind",
             "choices recommending two options",
             "choices with a recommended that is not a flag",
             "a progress with a bad start time and a long step detail",
             "an error next step with an unknown action or no host",
-            "a dashboard the agent proposes",
             "a dashboard whose widgets do not check out",
-            "a dashboard with a burn-up",
             "a burn-up over too short or too long a window",
         )
     }
@@ -110,6 +100,25 @@ class ChatBlockKindsTest {
         assertEquals(listOf("`device` is required"), bad.problems)
         val long = assertIs<UiCheck.Bad>(checkUiBlock("""{"spec":"fleet.ui/1","kind":"device","device":"${"d".repeat(201)}"}"""))
         assertEquals(listOf("`device` is longer than 200 characters"), long.problems)
+    }
+
+    /** Review w21-5: a valid wizard or dashboard is a quiet desktop-only card, not "Not shown". */
+    @Test
+    fun a_wizard_or_a_dashboard_is_a_desktop_only_card() {
+        assertEquals(
+            UiBlock.DesktopOnly("wizard", "Add project", "You asked for it."),
+            block("""{"spec":"fleet.ui/1","kind":"wizard","wizard":"add_project","why":"You asked for it."}"""),
+        )
+        assertEquals(
+            UiBlock.DesktopOnly("wizard", "New fleet agent: l2-support", null),
+            block("""{"spec":"fleet.ui/1","kind":"wizard","wizard":"fleet_agent","definition":"l2-support"}"""),
+        )
+        assertEquals(
+            UiBlock.DesktopOnly("dashboard", "Release 4.2", null),
+            block("""{"spec":"fleet.ui/1","kind":"dashboard","id":"dash.r42","title":"Release 4.2","widgets":[{"kind":"stat","title":"Open","value":"open"}]}"""),
+        )
+        val bad = assertIs<UiCheck.Bad>(checkUiBlock("""{"spec":"fleet.ui/1","kind":"dashboard","id":"d","title":"T","widgets":[]}"""))
+        assertEquals(listOf("`widgets` needs at least 1 entry"), bad.problems)
     }
 
     @Test

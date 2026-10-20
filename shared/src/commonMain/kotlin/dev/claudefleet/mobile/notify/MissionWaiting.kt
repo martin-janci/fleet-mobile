@@ -82,6 +82,15 @@ fun missionWaitAlerts(seen: Map<Long, String>?, missions: List<Mission>): Pair<L
     return alerts to now
 }
 
+/**
+ * The missions whose wait the last look saw and this one does not ([now] is
+ * the second half of [missionWaitAlerts]): their "waits for you"
+ * notifications come down, as a session's does once it is answered (review
+ * w21-3). Nothing before the first look.
+ */
+fun missionWaitsResolved(seen: Map<Long, String>?, now: Map<Long, String>): List<Long> =
+    seen.orEmpty().filter { (id, key) -> key.isNotEmpty() && now[id].isNullOrEmpty() }.keys.toList()
+
 /** The waits the background check last saw, in [Prefs]; null before the first look. */
 private const val MISSION_WAIT_SEEN: String = "mission_wait_seen"
 private const val MISSION_SEEN_HEADER = "v1"
