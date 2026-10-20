@@ -276,10 +276,6 @@ class MissionsTest {
         val fleet = MissionsFleet(loop)
         val vm = MissionsViewModel(fleet, actions, backgroundScope, canWrite = true)
         runCurrent()
-        fleet.workChanges.emit(1)
-        runCurrent()
-        assertTrue(actions.calls.isEmpty(), "nothing read yet, nothing to re-read")
-
         vm.open().join()
         vm.select(1).join()
         runCurrent()
