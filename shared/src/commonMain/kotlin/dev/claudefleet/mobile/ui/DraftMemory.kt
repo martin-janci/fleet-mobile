@@ -39,6 +39,23 @@ class DraftMemory(private val prefs: Prefs? = null) {
         p.putStringList(KEY, drafts.flatMap { (id, text) -> listOf(id.toString(), text.take(MAX_CHARS)) })
     }
 
+    /**
+     * The prompt the hub refused ("Not sent" on the New bar), by session: the
+     * box was already emptied, so leaving the screen used to lose it (review
+     * w22-4). Kept for this run only, beside the drafts.
+     */
+    private val unsent: MutableMap<Long, String> = linkedMapOf()
+
+    fun recallUnsent(sessionId: Long): String? = unsent[sessionId]
+
+    fun keepUnsent(sessionId: Long, text: String?) {
+        unsent.remove(sessionId)
+        if (!text.isNullOrEmpty()) {
+            unsent[sessionId] = text
+            while (unsent.size > MAX_SESSIONS) unsent.remove(unsent.keys.first())
+        }
+    }
+
     private val _filled = MutableSharedFlow<Long>(extraBufferCapacity = 8)
 
     /** The sessions whose draft [fill] changed, so a box already open takes it up. */

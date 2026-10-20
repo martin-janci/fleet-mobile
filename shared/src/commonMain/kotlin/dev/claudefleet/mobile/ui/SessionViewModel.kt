@@ -638,7 +638,13 @@ class SessionViewModel(
         val tuneSetting: Boolean? = null,
     )
 
-    private val local = MutableStateFlow(Local(draft = drafts.recall(sessionId)))
+    private val local = MutableStateFlow(
+        Local(
+            draft = drafts.recall(sessionId),
+            // A prompt the hub refused before the person left is still here to Retry or Edit (review w22-4).
+            notSent = drafts.recallUnsent(sessionId)?.let { NotSent(it, Friendly("Not sent", "The hub did not take this prompt. Retry it, or edit it.", isError = false)) },
+        ),
+    )
     private val tokenReadOnly = !canSendPrompts
 
     /**
@@ -787,6 +793,10 @@ class SessionViewModel(
         // clearing it, a failure putting it back — is what a return finds.
         scope.launch {
             local.map { it.draft }.distinctUntilChanged().collect { drafts.keep(sessionId, it) }
+        }
+        // Likewise a prompt the hub refused, until it is retried or edited (review w22-4).
+        scope.launch {
+            local.map { it.notSent?.text }.distinctUntilChanged().collect { drafts.keepUnsent(sessionId, it) }
         }
         // A draft filled from outside the box while it is open (a lesson's prompt).
         scope.launch {

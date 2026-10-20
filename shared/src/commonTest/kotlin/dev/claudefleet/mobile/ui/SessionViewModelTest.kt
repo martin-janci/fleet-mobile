@@ -4015,6 +4015,27 @@ class SessionViewModelTest {
         assertFalse(vm.state.value.sending)
     }
 
+    /** Review w22-4: leaving the session and coming back keeps the refused prompt. */
+    @Test
+    fun a_refused_prompt_is_still_there_after_leaving_the_session() = runTest {
+        val drafts = DraftMemory()
+        val actions = FakeActions()
+        actions.sendFails = HubError.Tool("E_BUSY", "mid-turn")
+        val first = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, keepNotSent = true, drafts = drafts)
+        first.onDraftChange("Run the full suite")
+        first.send().join()
+        runCurrent()
+
+        val again = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, keepNotSent = true, drafts = drafts)
+        runCurrent()
+        assertEquals("Run the full suite", again.state.value.notSent?.text)
+
+        actions.sendFails = null
+        again.retryNotSent().join()
+        runCurrent()
+        assertNull(drafts.recallUnsent(ID), "sent, so forgotten")
+    }
+
     @Test
     fun retry_sends_the_kept_words_again_and_leaves_the_box_alone() = runTest {
         val actions = FakeActions()
