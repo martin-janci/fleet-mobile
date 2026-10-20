@@ -34,6 +34,26 @@ class DraftMemory(private val prefs: Prefs? = null) {
         if (before != drafts[sessionId]) save()
     }
 
+    /** The hub these drafts were typed for; null before the first pairing this build saw. */
+    private var hub: String? = prefs?.getStringList(HUB_KEY)?.firstOrNull()
+
+    /**
+     * The drafts belong to [hubUrl] from now on. Pairing with another hub
+     * drops the last one's: session ids are per hub, so #12 on hub B must not
+     * open with what was typed for hub A's #12 (review w22-5). Drafts kept
+     * before this build recorded a hub are taken to be the current hub's.
+     */
+    fun forHub(hubUrl: String) {
+        val was = hub
+        if (was == hubUrl) return
+        hub = hubUrl
+        prefs?.putStringList(HUB_KEY, listOf(hubUrl))
+        if (was == null) return
+        drafts.clear()
+        unsent.clear()
+        save()
+    }
+
     private fun save() {
         val p = prefs ?: return
         p.putStringList(KEY, drafts.flatMap { (id, text) -> listOf(id.toString(), text.take(MAX_CHARS)) })
@@ -75,6 +95,8 @@ class DraftMemory(private val prefs: Prefs? = null) {
     companion object {
         /** The prefs key: a flat list of session id, draft, session id, draft, … */
         const val KEY = "composer_drafts"
+        /** The prefs key of the hub the drafts were typed for ([forHub]). */
+        const val HUB_KEY = "composer_drafts_hub"
         const val MAX_SESSIONS = 10
         const val MAX_CHARS = 4_000
 

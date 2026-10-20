@@ -753,8 +753,10 @@ class AppContainer(
      * are baked into both the client and the stream: re-pairing against a
      * different hub has to produce a different repository, not a mutated one.
      */
-    fun repository(credentials: Credentials, scope: CoroutineScope): FleetRepository =
-        FleetRepository(
+    fun repository(credentials: Credentials, scope: CoroutineScope): FleetRepository {
+        // Another hub's session ids are not this one's: its drafts go (review w22-5).
+        drafts.forHub(credentials.hub)
+        return FleetRepository(
             client = HubClient(http, credentials.hub, credentials.token),
             events = HubEventStream(http, credentials.hub, credentials.token),
             scope = scope,
@@ -766,6 +768,7 @@ class AppContainer(
             // `forget()`, so the Pair screen can say why.
             onRevoked = { session.revoke() },
         )
+    }
 }
 
 /**
