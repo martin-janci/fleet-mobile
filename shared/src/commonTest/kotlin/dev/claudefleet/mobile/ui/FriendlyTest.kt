@@ -25,6 +25,13 @@ class FriendlyTest {
     }
 
     @Test
+    fun a_pinned_refusal_says_to_unpin_on_the_desktop() {
+        val f = friendly(HubError.Tool("E_PINNED", "safe_kill_session refused: s on h is pinned. Unpin it first."))
+        assertEquals("This session is pinned", f.title)
+        assertTrue(f.isError)
+    }
+
+    @Test
     fun a_missing_session_reads_as_gone() {
         val f = friendly(HubError.Tool("E_NOTFOUND", "no session 21520"))
         assertEquals("This session is gone", f.title)

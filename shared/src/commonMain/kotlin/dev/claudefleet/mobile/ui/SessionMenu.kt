@@ -58,6 +58,8 @@ data class OrbitMenuFacts(
     val review: Boolean = false,
     val archive: Boolean = false,
     val kill: Boolean = false,
+    /** A person pinned it: the hub refuses Safe remove (`E_PINNED`) until it is unpinned. */
+    val pinned: Boolean = false,
     val worktree: Boolean = false,
     /** The hub keeps prompts for later and this person may drive the session. */
     val sendLater: Boolean = false,
@@ -91,7 +93,7 @@ fun orbitMenuItems(f: OrbitMenuFacts): List<OrbitMenuItem> = buildList {
     add(OrbitMenuItem(OrbitItem.Details, "Details", "host, branch, model, timeline", 3, writes = false))
     if (f.worktree) add(OrbitMenuItem(OrbitItem.Worktree, "Files", "changes, history, the worktree", 3, writes = false))
     if (f.archive) add(OrbitMenuItem(OrbitItem.Archive, "Archive", "off the work board", 4))
-    if (f.manage) add(OrbitMenuItem(OrbitItem.Retire, "Safe remove", "commit and push, then remove", 4))
+    if (f.manage && !f.pinned) add(OrbitMenuItem(OrbitItem.Retire, "Safe remove", "commit and push, then remove", 4))
     if (f.kill) add(OrbitMenuItem(OrbitItem.Kill, "Kill session…", "asks first", 4, danger = true))
 }
 

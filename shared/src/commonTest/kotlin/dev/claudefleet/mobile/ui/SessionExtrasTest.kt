@@ -303,6 +303,12 @@ class SessionExtrasTest {
     }
 
     @Test
+    fun a_pinned_session_is_not_offered_safe_remove() {
+        assertTrue(orbitMenuItems(OrbitMenuFacts(manage = true)).any { it.id == OrbitItem.Retire })
+        assertTrue(orbitMenuItems(OrbitMenuFacts(manage = true, pinned = true)).none { it.id == OrbitItem.Retire })
+    }
+
+    @Test
     fun the_menu_offers_only_what_this_session_can_do() {
         val items = orbitMenuItems(OrbitMenuFacts(tmuxName = "s")).map { it.id }
         assertEquals(listOf(OrbitItem.CopyAttach, OrbitItem.Details), items)

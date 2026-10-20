@@ -3648,6 +3648,11 @@ class SessionViewModelTest {
         val live = SessionViewModel(ID, FakeFleetState(tools = ghostTools), FakeActions(), backgroundScope)
         assertTrue(live.state.value.canRecreate)
         assertFalse(live.state.value.canDismissGhost)
+
+        // A pinned ghost is not dismissed: the hub refuses it (E_PINNED).
+        val pinned = SessionViewModel(ID, FakeFleetState(listOf(ghost.copy(pinnedAt = 100)), tools = ghostTools), FakeActions(), backgroundScope)
+        assertTrue(pinned.state.value.canRecreate)
+        assertFalse(pinned.state.value.canDismissGhost)
     }
 
     @Test
