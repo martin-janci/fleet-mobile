@@ -142,6 +142,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.io.Sink
 import kotlinx.io.readByteArray
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
@@ -1740,32 +1741,25 @@ class HubClient(
     // hub decides who may apply and dismiss: `list` says so in `can_apply`.
 
     /** The live findings, the ones fixed in the last day, and whether this device may decide them. */
-    suspend fun autofixFindings(): AutofixFindings =
-        call("autofix", buildJsonObject { put("action", "list") }) { json.decodeFromJsonElement(AutofixFindings.serializer(), it) }
+    suspend fun autofixFindings(): AutofixFindings = autofixCall("list", AutofixFindings.serializer())
 
     /** Check the fleet now, then list: what the hub found comes back as [autofixFindings] does. */
-    suspend fun scanAutofix(): AutofixFindings =
-        call("autofix", buildJsonObject { put("action", "scan") }) { json.decodeFromJsonElement(AutofixFindings.serializer(), it) }
+    suspend fun scanAutofix(): AutofixFindings = autofixCall("scan", AutofixFindings.serializer())
 
     /** Fix: run [id]'s fix and re-check. The row comes back cleared, verifying, or apply_failed with the reason. */
-    suspend fun applyAutofix(id: Long): AutofixFinding =
-        call(
-            "autofix",
-            buildJsonObject {
-                put("action", "apply")
-                put("id", id)
-            },
-        ) { json.decodeFromJsonElement(AutofixFinding.serializer(), it) }
+    suspend fun applyAutofix(id: Long): AutofixFinding = autofixCall("apply", AutofixFinding.serializer(), id)
 
     /** Later: hide [id] for a day. */
-    suspend fun dismissAutofix(id: Long): AutofixFinding =
+    suspend fun dismissAutofix(id: Long): AutofixFinding = autofixCall("dismiss", AutofixFinding.serializer(), id)
+
+    private suspend fun <T> autofixCall(action: String, answer: KSerializer<T>, id: Long? = null): T =
         call(
             "autofix",
             buildJsonObject {
-                put("action", "dismiss")
-                put("id", id)
+                put("action", action)
+                if (id != null) put("id", id)
             },
-        ) { json.decodeFromJsonElement(AutofixFinding.serializer(), it) }
+        ) { json.decodeFromJsonElement(answer, it) }
 
     // ---- debug devices (claude-fleet contract revision 10) ----
     //

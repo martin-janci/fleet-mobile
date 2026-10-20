@@ -113,11 +113,8 @@ fun AutofixSheet(state: AutofixUiState, nowSeconds: Long, handlers: AutofixHandl
                 }
             },
             confirmButton = {
-                if (fix.reversible) {
-                    TextButton(onClick = { confirm = null; handlers.onApply(f) }) { Text("Fix") }
-                } else {
-                    DangerTextButton(onClick = { confirm = null; handlers.onApply(f) }) { Text("Fix") }
-                }
+                val onFix: () -> Unit = { confirm = null; handlers.onApply(f) }
+                if (fix.reversible) TextButton(onClick = onFix) { Text("Fix") } else DangerTextButton(onClick = onFix) { Text("Fix") }
             },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } },
         )
@@ -153,7 +150,7 @@ private fun FindingRow(f: AutofixFinding, nowSeconds: Long, state: AutofixUiStat
         )
         f.explanation?.takeIf { it.isNotBlank() }?.let { Text(it, color = o.fg2, fontSize = 14.sp) }
         findingStateWords(f)?.let {
-            Text(it, color = if (f.state == "apply_failed") o.usageWarn else o.fgMuted, fontSize = 13.sp)
+            Text(it, color = if (f.failed) o.usageWarn else o.fgMuted, fontSize = 13.sp)
         }
         if (details) {
             if (f.evidence.isNotEmpty()) {
@@ -178,7 +175,7 @@ private fun FindingRow(f: AutofixFinding, nowSeconds: Long, state: AutofixUiStat
                     Text(if (state.busy == "${f.id}:apply") "Fixing…" else fixLabel(f), color = o.accent)
                 }
             }
-            if (state.canApply && f.state != "dismissed") {
+            if (state.canApply && !f.dismissed) {
                 TextButton(onClick = onLater, enabled = enabled) { Text("Later", color = o.accent) }
             }
             TextButton(onClick = { details = !details }) { Text(if (details) "Hide details" else "Details", color = o.accent) }
@@ -201,5 +198,5 @@ private fun FixedRow(f: AutofixFinding, nowSeconds: Long) {
 
 @Composable
 private fun Label(text: String) {
-    Text(text.uppercase(), color = Fleet.colors.fgMuted, fontSize = 11.sp, letterSpacing = 0.5.sp, modifier = Modifier.padding(top = 4.dp))
+    Text(text.uppercase(), color = Fleet.colors.fgMuted, style = Fleet.type.text2xs, letterSpacing = 0.5.sp, modifier = Modifier.padding(top = 4.dp))
 }
