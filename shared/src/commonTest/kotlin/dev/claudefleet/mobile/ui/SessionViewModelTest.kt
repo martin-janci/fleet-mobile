@@ -3260,7 +3260,7 @@ class SessionViewModelTest {
         vm.kill().join()
         runCurrent()
 
-        assertEquals("Needs a confirmation on the desktop", vm.state.value.error?.title)
+        assertEquals("Needs a yes", vm.state.value.error?.title)
         assertFalse(vm.state.value.busy, "a failed call must still clear busy")
     }
 
