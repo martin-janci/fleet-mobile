@@ -23,4 +23,6 @@ data class TuneAnswer(
     @SerialName("host_alias") val hostAlias: String = "",
     /** Unix seconds it was written. */
     val at: Long = 0,
+    /** The model ran past the limit and [prompt] was cut there (ends in "…"). */
+    val cut: Boolean = false,
 )

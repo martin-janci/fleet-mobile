@@ -339,6 +339,21 @@ class AutomationTest {
         assertFalse("budget" in older.calls)
     }
 
+    /** Review w30-5: every hub `routines::EVENTS` kind (fleet-core service/routines/mod.rs, 27) has words, never its raw key. */
+    @Test
+    fun every_hub_event_has_a_label() {
+        val events = listOf(
+            "turn_done", "stop_failure", "stuck", "lost", "task_done", "task_failed", "session_restore_failed",
+            "workspace_repair_failed", "pr_review", "pr_ci_failed", "pr_ci_passed", "pr_merged", "needs_you",
+            "auto_restored", "auto_restore_failed", "account_switched", "account_switch_failed", "session_moved",
+            "pr_opened", "host_offline", "host_online", "host_low", "account_limited", "account_available",
+            "login_signed_out", "mission_done", "mission_failed",
+        )
+        assertEquals(27, events.toSet().size)
+        for (e in events) assertTrue(eventLabel(e) != e.replace('_', ' '), e)
+        assertEquals("a session is not restored after a reboot", eventLabel("session_restore_failed"))
+    }
+
     @Test
     fun a_routine_says_when_it_runs_or_why_it_does_not() {
         val now = 1_000_000L
@@ -346,7 +361,7 @@ class AutomationTest {
             "30 7 * * 1-5 · next in 2 h · mercury",
             routineLine(Routine(id = 1, enabled = true, trigger = "cron", cron = "30 7 * * 1-5", nextRunAt = now + 7_200, hostAlias = "mercury"), now),
         )
-        assertEquals("When a turn ends", routineLine(Routine(id = 2, enabled = true, trigger = "event", event = "turn_done"), now))
+        assertEquals("When a session is done with a turn", routineLine(Routine(id = 2, enabled = true, trigger = "event", event = "turn_done"), now))
         assertEquals(
             "When a host goes offline on nas",
             routineLine(Routine(id = 6, enabled = true, trigger = "event", event = "host_offline", eventHost = "nas"), now),

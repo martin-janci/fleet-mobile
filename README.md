@@ -273,7 +273,7 @@ the log the hub reads afterwards.
 
 ## What it does
 
-- **Layout** — Classic or New, like the desktop's layout switch: *New
+- **Layout** — Classic or New: *New
   navigation* in Settings, on unless a phone chose Classic. Classic's bottom bar is
   Sessions, Work, Files, Hosts and Settings. New's is Inbox, Sessions,
   Control, Work and More; Hosts, Files, Settings and the places below move
@@ -355,6 +355,18 @@ the log the hub reads afterwards.
   **History** (who changed it, from what to what). Maps, id lists and price
   tables, resources (Trackers, Organisations) and data pages stay on a
   desktop.
+- **Control** (the New bar's Control tab) — the fleet's coordinator: its
+  conversation under a "Control · N need you" header, the calls it waits on
+  a person for as Approve / Deny cards above the composer, what needs you as
+  escalation cards (Open, Later), and the threads and missions it handed
+  out, with a task graph card and a *Steer* box for a mission.
+- **Appearance** (Settings → This phone) — Theme (Sun, System, Light, Dark;
+  Sun follows the sun in your time zone), Contrast (Soft, Standard, High),
+  Accent and Motion, painted by the desktop's palette engine.
+- **Problems & fixes** (More → Problems & fixes, when the hub serves
+  `autofix`) — what fleet found broken, why, and what each fix changes. Fix
+  always asks first; Later hides a row for a day; the fixes run in the last
+  day are listed with what ran. A `fix` card in a conversation points here.
 - **Automation** (More → Automation, when the hub serves `routines`) — the
   routines with their runs, and **Pause all** at the top; missions open from
   inside it.
@@ -451,8 +463,9 @@ the log the hub reads afterwards.
 
 ## What it deliberately does not do
 
-- **No terminal.** The desktop app owns the PTY. A phone shows the conversation,
-  not the raw pane.
+- **No raw agent pane.** The agent is read as a conversation; the desktop
+  app owns the agent's PTY. The only terminals are plain shells, in a
+  session's Terminals tab.
 - **Little host administration, and only the owner's.** Since claude-fleet
   contract 13 the hub lists `add_host`, `install_agent` and
   `set_account_nickname` to its owner's own device, so that phone can add a

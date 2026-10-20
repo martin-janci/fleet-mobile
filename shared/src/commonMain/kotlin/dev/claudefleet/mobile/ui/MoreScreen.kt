@@ -149,19 +149,3 @@ internal fun EntryRows(entries: List<MoreEntry>) {
         )
     }
 }
-
-/**
- * The New layout's Control tab: the fleet's coordinator (the desktop's agent,
- * a session on the hub, which the phone shows on its ordinary Session
- * screen) and the missions it runs. It replaces the agent button the Sessions
- * list used to float; 14.7 grows it into the coordinator chat with forms.
- */
-@Composable
-fun ControlScreen(subtitle: String?, entries: List<MoreEntry>, modifier: Modifier = Modifier) {
-    Column(modifier = modifier.fillMaxSize()) {
-        ScreenHeader(title = "Control", subtitle = subtitle)
-        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            EntryRows(entries)
-        }
-    }
-}
