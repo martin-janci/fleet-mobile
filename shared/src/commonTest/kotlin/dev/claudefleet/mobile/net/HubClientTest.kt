@@ -1323,6 +1323,22 @@ class HubClientTest {
         assertEquals("/mcp/json", calls.path(1))
     }
 
+    /** The hub bounds a tune at `Deadline::Lifecycle` and the host run may take 90 s: past the ordinary 45 s. */
+    @Test
+    fun a_prompt_tune_rides_the_framed_mount_under_the_lifecycle_deadline() = runTest {
+        val calls = Calls()
+        val engine = MockEngine { request ->
+            calls.requests += request
+            respond(sse(okResult("""{"prompt":"p","notes":"n"}""")), HttpStatusCode.OK, sseHeaders)
+        }
+        val hub = HubClient(HttpClient(engine).withHubTimeouts(), BASE, "tok-phone")
+
+        hub.tunePrompt(7, "fix it")
+
+        assertEquals("/mcp", calls.path(0))
+        assertEquals(HUB_LIFECYCLE_TIMEOUT_MS, calls.requests[0].getCapabilityOrNull(HttpTimeoutCapability)?.requestTimeoutMillis)
+    }
+
     /** `E_EXISTS` names the live session so the phone can jump to it — and its details are scrubbed like the message. */
     @Test
     fun a_refusal_keeps_its_details_with_the_token_scrubbed() = runTest {

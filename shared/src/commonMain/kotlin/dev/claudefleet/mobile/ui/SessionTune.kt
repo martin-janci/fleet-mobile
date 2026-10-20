@@ -40,8 +40,21 @@ data class PromptTune(
 /** The quick asks under the field: a tap tunes with that one. */
 val TUNE_ASKS: List<String> = listOf("Shorter", "More specific", "Add what done looks like", "Split into steps")
 
-/** How many of the session's earlier prompts go along as context. */
-internal const val TUNE_HISTORY = 5
+/**
+ * How many of the session's earlier prompts go along as context: the hub's
+ * `HISTORY_MAX_ITEMS`, as the desktop sends (it cuts the oldest to fit).
+ */
+internal const val TUNE_HISTORY = 40
+
+/**
+ * The ask a quick chip runs with: the chip's words after what the person
+ * typed, so a tap never throws their words away. A field that is empty or
+ * holds only a chip's words takes the tapped chip's instead.
+ */
+internal fun tuneAskWith(typed: String, chip: String): String {
+    val t = typed.trim()
+    return if (t.isEmpty() || t in TUNE_ASKS) chip else "$t; $chip"
+}
 
 /** The session's last prompts on screen, oldest first, for the tuner's context. */
 internal fun tuneHistory(conversation: Conversation, max: Int = TUNE_HISTORY): List<String> =

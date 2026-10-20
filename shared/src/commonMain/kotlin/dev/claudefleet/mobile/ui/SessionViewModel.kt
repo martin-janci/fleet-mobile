@@ -1667,17 +1667,23 @@ class SessionViewModel(
 
     /**
      * Ask the hub to rewrite the composer's draft: [ask] (a quick chip's
-     * words) replaces what the sheet's field holds, null keeps it. The
-     * session's earlier prompts on screen go along as context. What comes
-     * back is a proposal in the sheet; nothing is sent to the session.
+     * words) joins what the sheet's field holds ([tuneAskWith]), null keeps
+     * it. Once a rewrite is on screen, Tune again and the chips build on it
+     * (with the person's edits), not on the box's draft. The session's
+     * earlier prompts on screen go along as context. What comes back is a
+     * proposal in the sheet; nothing is sent to the session.
      */
     fun tune(ask: String? = null): Job? {
         val open = local.value.tune ?: return null
         if (open.running || !canTuneNow()) return null
-        val steer = ask ?: open.ask
-        val draft = local.value.draft.trim()
+        val steer = ask?.let { tuneAskWith(open.ask, it) } ?: open.ask
+        // The field keeps what the person typed; a chip's words show there
+        // only when it held none, so a second chip does not stack on the first.
+        val shown = if (ask != null && steer != ask) open.ask else steer
+        val rewrite = open.rewrite.takeIf { open.answer?.unchanged == false && it.isNotBlank() }
+        val draft = (rewrite ?: local.value.draft).trim()
         val history = tuneHistory(local.value.conversation)
-        local.update { l -> l.copy(tune = l.tune?.let { it.copy(ask = steer, running = true, error = null) }) }
+        local.update { l -> l.copy(tune = l.tune?.let { it.copy(ask = shown, running = true, error = null) }) }
         val job = scope.launch {
             try {
                 val answer = actions.tunePrompt(sessionId, draft, steer.trim(), history)

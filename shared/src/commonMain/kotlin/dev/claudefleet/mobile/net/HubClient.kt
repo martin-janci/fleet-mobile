@@ -2790,6 +2790,8 @@ class HubClient(
             "work_admin",
             // Problems & fixes: `apply` runs a fix on a host over SSH.
             "autofix",
+            // Tune prompt: a model run on the session's host, up to 90 s.
+            "session_prompt_tune",
         )
 
         /**

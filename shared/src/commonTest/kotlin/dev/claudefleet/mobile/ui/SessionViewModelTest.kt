@@ -4165,6 +4165,29 @@ class SessionViewModelTest {
         assertTrue(actions.queuedSent.isEmpty())
     }
 
+    /** Tune again builds on the rewrite on screen, edits included; a chip joins the typed ask (review w07-3). */
+    @Test
+    fun tune_again_builds_on_the_edited_rewrite_and_a_chip_keeps_the_typed_ask() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(tools = setOf(HubCapabilities.SESSION_PROMPT_TUNE)), actions, backgroundScope)
+        vm.onDraftChange("make the tests pass")
+        runCurrent()
+        vm.openTune()
+        vm.tune()?.join()
+        runCurrent()
+        vm.onTuneRewriteChange("Rewritten prompt, edited")
+        vm.onTuneAskChange("keep the ticket key")
+        vm.tune("Shorter")?.join()
+        runCurrent()
+
+        assertEquals(
+            listOf("make the tests pass" to "", "Rewritten prompt, edited" to "keep the ticket key; Shorter"),
+            actions.tuned.map { it.first to it.second },
+        )
+        assertEquals("make the tests pass", vm.state.value.draft, "the box is untouched until Use this")
+        assertEquals("keep the ticket key", vm.state.value.tune?.ask, "the typed ask stays in the field")
+    }
+
     @Test
     fun discard_leaves_the_draft_and_an_unchanged_answer_offers_nothing_to_use() = runTest {
         val actions = FakeActions().apply { tuneAnswer = TuneAnswer(prompt = "keep going", unchanged = true, model = "claude-haiku") }
