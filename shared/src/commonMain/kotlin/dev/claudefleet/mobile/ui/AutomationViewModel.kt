@@ -379,7 +379,7 @@ fun routineLine(r: Routine, nowSeconds: Long): String {
 /** An event a routine waits on, in words: a session's, a pull request's, or the fleet's (a host, an account, a mission). */
 fun eventLabel(event: String?): String = when (event) {
     "turn_done" -> "a turn ends"
-    "stop_failure" -> "a session fails"
+    "stop_failure" -> "a session's turn fails"
     "stuck" -> "a session is stuck"
     "lost" -> "a session is lost"
     "task_done" -> "a task is done"
@@ -388,7 +388,7 @@ fun eventLabel(event: String?): String = when (event) {
     "workspace_repair_failed" -> "a repair fails"
     "needs_you" -> "a session waits for you"
     "auto_restored" -> "a session is brought back"
-    "auto_restore_failed" -> "a session is past bringing back"
+    "auto_restore_failed" -> "an automatic restore attempt fails"
     "account_switched" -> "a session moves to another account"
     "account_switch_failed" -> "an account switch fails"
     "session_moved" -> "a session moves to another host"
