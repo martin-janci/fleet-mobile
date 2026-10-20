@@ -1030,6 +1030,8 @@ private fun ControlTab(
     scope: CoroutineScope,
     help: HelpState,
     helpSettings: HelpSettings,
+    /** The hub lets this device apply a fix (`autofix list`'s `can_apply`), for a chat `fix` card's wording. */
+    autofixCanApply: Boolean = false,
 ) {
     // The Control tab is Control's conversation (redesign 9.8,
     // 14.7). New bar only: the Classic bar has no Control tab.
@@ -1119,6 +1121,7 @@ private fun ControlTab(
                 onOpenSession = nav::open,
                 onOpenRepo = nav::openRepo,
                 callScope = scope,
+                autofixCanApply = autofixCanApply,
                 control = ControlChrome(
                     header = {
                         ControlHeader(subtitle, views)
@@ -1717,6 +1720,7 @@ private fun FleetRoute(
                         callScope = scope,
                         // The New bar draws the session as tabs (redesign 14.4).
                         newLayout = layout == PhoneLayout.New,
+                        autofixCanApply = autofixState.canApply,
                     )
                 }
                 Screen.Work -> {
@@ -2146,6 +2150,7 @@ private fun FleetRoute(
                     scope = scope,
                     help = help,
                     helpSettings = helpSettings,
+                    autofixCanApply = autofixState.canApply,
                 )
                 Screen.More -> {
                     val hostRows by repository.hosts.collectAsState()
@@ -3114,6 +3119,12 @@ private fun SessionRoute(
     onOpenRepo: (Long) -> Unit,
     callScope: CoroutineScope,
     newLayout: Boolean = false,
+    /**
+     * The hub lets this device apply a fix: `autofix list`'s `can_apply` (a
+     * trusted, full-access device), not merely a write token. False until
+     * the list is read, so a fix card falls back to the neutral wording.
+     */
+    autofixCanApply: Boolean = false,
     /** Control's header and confirms in place of the session's own bar (redesign 9.8). */
     control: ControlChrome? = null,
 ) {
@@ -3386,7 +3397,7 @@ private fun SessionRoute(
             devices = if (caps.debugDevices) devicesVm::devices else null,
             screenshot = if (caps.debugDevices && credentials.canWrite) devicesVm::takeScreenshot else null,
             autofix = caps.autofix,
-            autofixWrite = credentials.canWrite,
+            autofixCanApply = autofixCanApply,
         ),
         devices = sessionDevices,
         devicesHandlers = SessionDevicesHandlers(

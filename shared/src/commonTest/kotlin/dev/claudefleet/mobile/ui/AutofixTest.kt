@@ -186,6 +186,8 @@ class AutofixTest {
         val actions = FakeAutofixActions().apply { canApply = false }
         val vm = opened(actions = actions)
         assertFalse(vm.state.value.canApply)
+        // A write token the hub does not trust: a fix card must not tell it to apply here.
+        assertTrue(fixCardNote(autofix = true, canApply = vm.state.value.canApply).startsWith("Review it in More › Problems & fixes"))
         vm.apply(HOOKS)
         vm.later(HOOKS)
         runCurrent()
@@ -219,9 +221,9 @@ class AutofixTest {
         assertFalse(fixRunning(HOOKS.copy(state = "verifying", lastAttemptAt = 1000), 1100))
         assertEquals("What fleet found broken, and its fixes", autofixLine(AutofixUiState()))
         assertEquals("No problems found", autofixLine(AutofixUiState(loaded = true)))
-        assertEquals("Review and apply its fix in More › Problems & fixes.", fixCardNote(autofix = true, canWrite = true))
-        assertTrue(fixCardNote(autofix = true, canWrite = false).startsWith("Review it in More › Problems & fixes"))
-        assertEquals("Review and apply its fix in fleet on the desktop.", fixCardNote(autofix = false, canWrite = true))
+        assertEquals("Review and apply its fix in More › Problems & fixes.", fixCardNote(autofix = true, canApply = true))
+        assertTrue(fixCardNote(autofix = true, canApply = false).startsWith("Review it in More › Problems & fixes"))
+        assertEquals("Review and apply its fix in fleet on the desktop.", fixCardNote(autofix = false, canApply = true))
     }
 
     @Test

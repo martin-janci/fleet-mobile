@@ -324,6 +324,7 @@ private class FakeActions : SessionActions {
     var headroom = Headroom()
     val headroomAsked = mutableListOf<Pair<String, String?>>()
     val restartedUnder = mutableListOf<String>()
+    val restartedOverLimit = mutableListOf<String>()
 
     val timings = mutableListOf<SendLaterTiming>()
 
@@ -376,8 +377,9 @@ private class FakeActions : SessionActions {
         return headroom
     }
 
-    override suspend fun restartUnder(sessionId: Long, profile: String) {
+    override suspend fun restartUnder(sessionId: Long, profile: String, overLimitOk: Boolean) {
         restartedUnder += profile
+        if (overLimitOk) restartedOverLimit += profile
     }
 
     val reviews = mutableListOf<String>()
@@ -4699,8 +4701,32 @@ class SessionViewModelTest {
         vm.confirmAccountSwitch { if (it == "acc-b") "me@home" else null }.join()
         runCurrent()
         assertEquals(listOf(""), actions.restartedUnder, "the host's own login is the empty profile")
+        assertTrue(actions.restartedOverLimit.isEmpty(), "under the line: no over_limit_ok")
         assertNull(vm.state.value.accountSwitch)
         assertEquals("Resumed under me@home.", vm.state.value.limitNotice)
+    }
+
+    /** A login the picker marks "at its limit" was picked knowing it: the switch says so, or the hub refuses `E_ACCOUNT_LIMIT`. */
+    @Test
+    fun switch_account_from_details_onto_a_login_past_the_line_sends_over_limit_ok() = runTest {
+        val actions = FakeActions().apply {
+            headroom = Headroom(
+                pauseAtPct = 90.0,
+                logins = listOf(HostLogin("work", "acc-a", 30.0), HostLogin("spare", "acc-c", 92.0)),
+            )
+        }
+        val fleet = FakeFleetState(listOf(running)).apply {
+            capabilities.value = HubCapabilities(tools = switchTools, params = mapOf("restart_session" to setOf("session_id", "profile")))
+        }
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+        vm.openAccountSwitch().join()
+        runCurrent()
+        vm.pickAccountSwitch(HostLogin("spare", "acc-c", 92.0))
+        vm.confirmAccountSwitch().join()
+        runCurrent()
+        assertEquals(listOf("spare"), actions.restartedUnder)
+        assertEquals(listOf("spare"), actions.restartedOverLimit)
     }
 
     @Test

@@ -201,10 +201,12 @@ internal fun scanNotice(findings: List<AutofixFinding>): String? {
 /**
  * What a chat `fix` card says to do with its finding: the phone's own
  * More › Problems & fixes where the hub serves `autofix` here, and the
- * desktop only where it does not (or this token cannot apply a fix).
+ * desktop only where it does not. [canApply] is the hub's answer
+ * ([AutofixUiState.canApply]: a trusted, full-access device), not merely a
+ * write token: an untrusted phone finds no Fix button there.
  */
-fun fixCardNote(autofix: Boolean, canWrite: Boolean): String = when {
-    autofix && canWrite -> "Review and apply its fix in More › Problems & fixes."
+fun fixCardNote(autofix: Boolean, canApply: Boolean): String = when {
+    autofix && canApply -> "Review and apply its fix in More › Problems & fixes."
     autofix -> "Review it in More › Problems & fixes; the desktop or a trusted device applies its fix."
     else -> "Review and apply its fix in fleet on the desktop."
 }

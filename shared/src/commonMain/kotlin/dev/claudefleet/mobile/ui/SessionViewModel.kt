@@ -1847,12 +1847,18 @@ class SessionViewModel(
         local.update { it.copy(accountSwitch = null) }
     }
 
-    /** Restart the session under the picked login, resuming its conversation. */
+    /**
+     * Restart the session under the picked login, resuming its conversation.
+     * A login the picker marked "at its limit" was picked knowing it, so the
+     * switch says so (`over_limit_ok`) rather than being refused.
+     */
     fun confirmAccountSwitch(accountName: (String) -> String? = { null }): Job {
-        val picked = local.value.accountSwitch?.picked
+        val open = local.value.accountSwitch
+        val picked = open?.picked
         return runManagedThen({ picked != null && canRestartNow() && fleet.capabilities.value.switchAccount }) {
             val t = picked ?: return@runManagedThen null
-            actions.restartUnder(sessionId, t.profile ?: "")
+            val over = (t.usedPct ?: 0.0) >= (open?.pauseAtPct ?: 100.0)
+            actions.restartUnder(sessionId, t.profile ?: "", overLimitOk = over)
             local.update { it.copy(accountSwitch = null, limitNotice = "Resumed under ${loginLabel(t, accountName)}.") }
             null
         }

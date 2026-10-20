@@ -562,13 +562,16 @@ class HubClient(
      * `restart_session { profile }`): [profile] is a credential profile's
      * name, or "" for the host's own login. The conversation is resumed under
      * it; a running `claude` cannot change its login, so a switch is a restart.
+     * [overLimitOk]: the person picked a login past `accounts.pause_at`
+     * knowing it; without it the hub may refuse `E_ACCOUNT_LIMIT`.
      */
-    suspend fun restartUnder(sessionId: Long, profile: String): SessionRow =
+    suspend fun restartUnder(sessionId: Long, profile: String, overLimitOk: Boolean = false): SessionRow =
         call(
             "restart_session",
             buildJsonObject {
                 put("session_id", sessionId)
                 put("profile", profile)
+                if (overLimitOk) put("over_limit_ok", true)
             },
         ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
 
