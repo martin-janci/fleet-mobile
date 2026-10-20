@@ -49,6 +49,17 @@ class RichBlocksTest {
     }
 
     @Test
+    fun reportFromValue_reads_done_decisions_and_remaining() {
+        val v = kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"summary": "s", "outcome": "done", "done": ["a", "b", "c"], "decisions": "kept the API", "remaining": ["docs"]}""",
+        )
+        val r = reportFromValue(v)!!
+        assertEquals(listOf("a", "b", "c"), r.done)
+        assertEquals(listOf("kept the API"), r.decisions)
+        assertEquals(listOf("docs"), r.remaining)
+    }
+
+    @Test
     fun an_unknown_outcome_is_partial_and_the_lists_are_capped() {
         val v = buildJsonObject {
             put("outcome", "shipped")

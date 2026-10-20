@@ -95,6 +95,30 @@ class AutofixTest {
     }
 
     @Test
+    fun a_safe_fix_says_when_fleet_tries_again_or_that_it_stopped() {
+        val safe = AutofixFix(summary = "s", safety = "safe", auto = true)
+        val open = DONE.copy(state = "open", attempts = 0, fix = safe)
+        assertEquals(null, autoWords(HOOKS, 1000))
+        assertEquals("Safe: fleet runs this fix by itself unless automatic fixes are off.", autoWords(open, 1000))
+        assertEquals("Fleet runs this fix by itself on its next check.", autoWords(open.copy(autoRuns = true, autoNextAt = 1000), 1000))
+        assertEquals(
+            "Fleet tries this fix again by itself in ~10 min.",
+            autoWords(open.copy(state = "apply_failed", attempts = 1, autoRuns = true, autoNextAt = 1600), 1000),
+        )
+        assertEquals(
+            "Fleet tried this fix 3 times and stopped trying by itself; fix it here.",
+            autoWords(open.copy(state = "apply_failed", attempts = 3, autoRuns = false), 1000),
+        )
+    }
+
+    @Test
+    fun the_hub_s_auto_runs_parses() {
+        val f = json.decodeFromString(AutofixFinding.serializer(), """{"id":1,"auto_runs":false}""")
+        assertEquals(false, f.autoRuns)
+        assertEquals(null, json.decodeFromString(AutofixFinding.serializer(), """{"id":1}""").autoRuns)
+    }
+
+    @Test
     fun a_hub_without_autofix_is_never_asked() = runTest {
         val actions = FakeAutofixActions()
         val vm = vm(caps = HubCapabilities(), actions = actions)
@@ -113,7 +137,7 @@ class AutofixTest {
         assertEquals(listOf(1L), s.problems.map { it.id })
         assertEquals(listOf(2L), s.hidden.map { it.id })
         assertEquals(listOf(3L), s.fixed.map { it.id })
-        assertEquals("1 problem · 1 fixed today", autofixLine(s))
+        assertEquals("1 problem · 1 fixed in the last day", autofixLine(s))
     }
 
     @Test
@@ -149,7 +173,7 @@ class AutofixTest {
         assertEquals(listOf(1L, 2L), vm.state.value.hidden.map { it.id })
         assertTrue(vm.state.value.problems.isEmpty())
         // Snoozed is not fixed: the words say they are only hidden.
-        assertEquals("No open problems · 2 hidden · 1 fixed today", autofixLine(vm.state.value))
+        assertEquals("No open problems · 2 hidden · 1 fixed in the last day", autofixLine(vm.state.value))
         assertEquals("No open problems · 2 hidden until later.", noOpenProblemsLine(vm.state.value))
         assertEquals("No open problems · 2 hidden until later.", scanNotice(vm.state.value.findings))
         assertEquals("No problems found.", scanNotice(emptyList()))
