@@ -1057,15 +1057,7 @@ fun formatResultCell(ty: String, v: JsonElement?, now: Long): String {
     if (v == null || v is JsonNull) return "—"
     val prim = v as? JsonPrimitive ?: return v.toString()
     val n = if (prim.isString) prim.content.toDoubleOrNull() else prim.doubleOrNull
-    if (ty == "time" && n != null) {
-        val d = maxOf(0L, now - n.toLong())
-        return when {
-            d < 60 -> "just now"
-            d < 3600 -> "${d / 60} min ago"
-            d < 86_400 -> "${d / 3600} h ago"
-            else -> "${d / 86_400} d ago"
-        }
-    }
+    if (ty == "time" && n != null) return relativeAgo(n.toLong(), now) ?: "never"
     return when {
         ty == "usd_micros" && n != null -> {
             val usd = n / 1_000_000
