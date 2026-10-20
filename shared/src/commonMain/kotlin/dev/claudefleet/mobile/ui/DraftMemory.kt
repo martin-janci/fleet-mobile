@@ -98,7 +98,12 @@ class DraftMemory(private val prefs: Prefs? = null) {
         /** The prefs key of the hub the drafts were typed for ([forHub]). */
         const val HUB_KEY = "composer_drafts_hub"
         const val MAX_SESSIONS = 10
-        const val MAX_CHARS = 4_000
+        /**
+         * Per draft in the store (memory keeps it whole). Was 4,000, which cut
+         * a pasted log in half silently after the process was killed (review
+         * w22-6); ten of these still keep the store small.
+         */
+        const val MAX_CHARS = 32_000
 
         private fun load(prefs: Prefs?): Map<Long, String> {
             val flat = prefs?.getStringList(KEY) ?: return emptyMap()
