@@ -376,22 +376,23 @@ fun routineLine(r: Routine, nowSeconds: Long): String {
     return listOfNotNull(what, "skips the next run".takeIf { r.skipNext }, r.hostAlias.takeIf { it.isNotBlank() }).joinToString(" · ")
 }
 
-/** An event a routine waits on, in words: a session's, a pull request's, or the fleet's (a host, an account, a mission). */
+/** An event a routine waits on, in words: a session's, a pull request's, or the fleet's (a host, an account, a mission).
+ * The desktop's `eventLabel` (src/lib/routines.ts) in lower case: one routine reads the same on both (review w30-5). */
 fun eventLabel(event: String?): String = when (event) {
-    "turn_done" -> "a turn ends"
+    "turn_done" -> "a session is done with a turn"
     "stop_failure" -> "a session's turn fails"
     "stuck" -> "a session is stuck"
     "lost" -> "a session is lost"
-    "task_done" -> "a task is done"
-    "task_failed" -> "a task fails"
-    "session_restore_failed" -> "a restore fails"
-    "workspace_repair_failed" -> "a repair fails"
-    "needs_you" -> "a session waits for you"
-    "auto_restored" -> "a session is brought back"
+    "task_done" -> "a session is done with its task"
+    "task_failed" -> "a session is failed at its task"
+    "session_restore_failed" -> "a session is not restored after a reboot"
+    "workspace_repair_failed" -> "a session is left with a broken workspace"
+    "needs_you" -> "a session is waiting for you"
+    "auto_restored" -> "a session is brought back automatically"
     "auto_restore_failed" -> "an automatic restore attempt fails"
-    "account_switched" -> "a session moves to another account"
+    "account_switched" -> "a session is moved to another account"
     "account_switch_failed" -> "an account switch fails"
-    "session_moved" -> "a session moves to another host"
+    "session_moved" -> "a session is moved to another host"
     "pr_opened" -> "a pull request is opened"
     "pr_review" -> "a pull request gets a review"
     "pr_ci_failed" -> "a pull request's checks fail"

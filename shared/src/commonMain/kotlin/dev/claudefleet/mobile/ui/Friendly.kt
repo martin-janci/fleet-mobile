@@ -30,7 +30,10 @@ private fun friendlyWords(t: Throwable): Friendly {
             "E_FORBIDDEN" -> trustHint(t.message)?.let { command ->
                 Friendly("Trust this phone on the hub first", "On the hub, run: $command", isError = true, details = raw)
             } ?: Friendly("The hub refused that", t.message, isError = true, details = raw)
-            "E_CONFIRM_REQUIRED" -> Friendly("Needs a confirmation on the desktop", "Approve it there; this screen will follow.", isError = true, details = raw)
+            // Review w16-3: the phone lists and answers confirmations in
+            // Control itself (ControlChat / ControlActions), and a headless
+            // hub has no desktop at all.
+            "E_CONFIRM_REQUIRED" -> Friendly("Needs a yes", "Approve it in Control; this screen will follow.", isError = true, details = raw)
             "E_BG_SESSION" -> Friendly("Runs outside tmux", "This session has no terminal to type into.", isError = true, details = raw)
             "E_PINNED" -> Friendly("This session is pinned", "Unpin it on the desktop first.", isError = true, details = raw)
             else -> Friendly("The hub refused that", t.message, isError = true, details = raw)
