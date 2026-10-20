@@ -882,21 +882,26 @@ private fun BulkActionBar(bulk: BulkUiState, onSend: () -> Unit, onKill: () -> U
     Surface(color = o.bgPane) {
         Column {
             HorizontalDivider(color = o.border)
+            // Offline, each action would fail once per session (review w22-8).
+            if (!bulk.online) {
+                Text("Not connected to the hub: these act once it answers.", color = o.fgMuted, fontSize = 12.sp, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
+            }
+            val ready = !bulk.running && bulk.online
             Row(
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                TextButton(onClick = onSend, enabled = !bulk.running && bulk.selected.isNotEmpty(), modifier = Modifier.weight(1f)) {
+                TextButton(onClick = onSend, enabled = ready && bulk.selected.isNotEmpty(), modifier = Modifier.weight(1f)) {
                     Text("Send a message")
                 }
                 if (bulk.canArchive) {
-                    TextButton(onClick = onArchive, enabled = !bulk.running && bulk.selected.isNotEmpty(), modifier = Modifier.weight(1f)) {
+                    TextButton(onClick = onArchive, enabled = ready && bulk.selected.isNotEmpty(), modifier = Modifier.weight(1f)) {
                         Text("Archive")
                     }
                 }
-                TextButton(onClick = onKill, enabled = !bulk.running && bulk.killable > 0, modifier = Modifier.weight(1f)) {
-                    Text("Kill…", color = if (!bulk.running && bulk.killable > 0) o.danger else o.fgMuted)
+                TextButton(onClick = onKill, enabled = ready && bulk.killable > 0, modifier = Modifier.weight(1f)) {
+                    Text("Kill…", color = if (ready && bulk.killable > 0) o.danger else o.fgMuted)
                 }
             }
         }

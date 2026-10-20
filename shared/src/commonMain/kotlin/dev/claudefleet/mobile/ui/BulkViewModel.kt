@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.SessionActions
 import dev.claudefleet.mobile.model.GrantLevel
@@ -52,6 +53,8 @@ data class BulkUiState(
     val action: BulkAction? = null,
     /** The hub can archive and this pairing may: the bar shows Archive. */
     val canArchive: Boolean = false,
+    /** Connected to the hub: offline, every action would fail once per session (review w22-8). */
+    val online: Boolean = true,
 ) {
     val active: Boolean get() = selecting || selected.isNotEmpty()
 
@@ -86,7 +89,7 @@ class BulkViewModel(
 
     private val local = MutableStateFlow(Local())
 
-    val state: StateFlow<BulkUiState> = combine(local, fleet.sessions, fleet.capabilities) { l, rows, caps ->
+    val state: StateFlow<BulkUiState> = combine(local, fleet.sessions, fleet.capabilities, fleet.status) { l, rows, caps, status ->
         // A session that left the fleet leaves the selection with it.
         val live = l.selected.filterTo(LinkedHashSet()) { id -> rows.any { it.id == id } }
         BulkUiState(
@@ -98,6 +101,7 @@ class BulkViewModel(
             selecting = l.selecting,
             action = l.action,
             canArchive = canWrite && archiveOne != null && caps.archiveSession,
+            online = status is ConnectionStatus.Connected,
         )
     }.stateIn(scope, SharingStarted.Eagerly, BulkUiState(enabled = canWrite))
 
@@ -158,6 +162,7 @@ class BulkViewModel(
     private fun run(action: BulkAction, ids: Set<Long>, merge: Boolean): Job = scope.launch {
         val l = local.value
         if (!canWrite || l.running || ids.isEmpty()) return@launch
+        if (fleet.status.value !is ConnectionStatus.Connected) return@launch
         if (action == BulkAction.Archive && (archiveOne == null || !fleet.capabilities.value.archiveSession)) return@launch
         val access = fleet.access.value
         // Through the hub's queue where it has one, as the desktop's bulk

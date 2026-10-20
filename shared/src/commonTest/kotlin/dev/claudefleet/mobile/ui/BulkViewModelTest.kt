@@ -293,6 +293,22 @@ class BulkViewModelTest {
         assertTrue(skipped.none { it.retryable })
     }
 
+    /** Review w22-8: offline, nothing goes out, rather than N identical failures. */
+    @Test
+    fun offline_the_bar_is_off_and_nothing_goes_out() = runTest {
+        val fleet = BulkFleet(ROWS)
+        fleet.status.value = ConnectionStatus.Offline("no signal")
+        val calls = BulkCalls()
+        val vm = BulkViewModel(fleet, calls, backgroundScope, canWrite = true)
+        vm.toggle(1)
+        runCurrent()
+        assertFalse(vm.state.value.online)
+        vm.kill().join()
+        runCurrent()
+        assertTrue(calls.killed.isEmpty())
+        assertNull(vm.state.value.outcome)
+    }
+
     @Test
     fun a_pinned_session_is_never_bulk_killed() {
         assertEquals(
