@@ -77,7 +77,7 @@ fun AutofixSheet(state: AutofixUiState, nowSeconds: Long, handlers: AutofixHandl
                 Text(it, color = o.fg, fontSize = 14.sp, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
             }
             if (state.loaded && state.problems.isEmpty()) {
-                Text("Nothing is broken that fleet knows of.", color = o.fgMuted, fontSize = 14.sp)
+                Text(noOpenProblemsLine(state), color = o.fgMuted, fontSize = 14.sp)
             }
             state.problems.forEachIndexed { i, f ->
                 FindingRow(f, nowSeconds, state, onFix = { confirm = f }, onLater = { handlers.onLater(f) })

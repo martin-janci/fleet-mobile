@@ -116,6 +116,20 @@ class RichBlocksTest {
     }
 
     @Test
+    fun a_fence_tagged_with_the_spec_name_or_untagged_is_a_card() {
+        // Mirrors rich_blocks.test.ts: the desktop and the hub read these as cards.
+        val fix = "{\"spec\":\"fleet.ui/1\",\"kind\":\"fix\",\"finding_id\":14}"
+        for (lang in listOf("fleet.ui", "fleet_ui", "fleetui", "FLEET.UI", "jsonc", "")) {
+            val segs = splitRich("Approve it.\n\n$fence$lang\n$fix\n$fence")
+            assertEquals(listOf("Md", "Ui"), segs.map { it::class.simpleName }, "lang `$lang`")
+        }
+        val plain = "$fence\n{\"kind\": \"fix\", \"finding_id\": 14}\n$fence"
+        assertEquals(listOf<RichSegment>(RichSegment.Md(plain)), splitRich(plain))
+        val other = "${fence}yaml\n$fix\n$fence"
+        assertEquals(listOf<RichSegment>(RichSegment.Md(other)), splitRich(other))
+    }
+
+    @Test
     fun an_unclosed_fleet_ui_fence_stays_markdown_while_it_streams() {
         assertEquals(listOf("Md"), splitRich("${fence}fleet-ui\n{\"spec\": \"fleet.ui/1\",").map { it::class.simpleName })
     }

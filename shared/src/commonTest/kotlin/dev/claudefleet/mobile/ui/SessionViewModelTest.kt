@@ -341,9 +341,15 @@ private class FakeActions : SessionActions {
     /** `work.prompt_tune` as `get_settings` answers it; null as a token that cannot read settings. */
     var tuneSetting: Boolean? = null
     var tuneSettingReads = 0
+    /** Reads of the setting that fail (the stream reconnecting) before one answers. */
+    var tuneSettingFailures = 0
 
     override suspend fun promptTuneOn(): Boolean? {
         tuneSettingReads++
+        if (tuneSettingFailures > 0) {
+            tuneSettingFailures--
+            throw IllegalStateException("the hub closed the stream")
+        }
         return tuneSetting
     }
 
@@ -4247,6 +4253,31 @@ class SessionViewModelTest {
         on.onDraftChange("tidy this")
         runCurrent()
         assertTrue(on.state.value.canTune)
+    }
+
+    @Test
+    fun a_failed_read_of_the_tune_setting_is_tried_again_and_read_afresh_on_reconnect() = runTest {
+        val tools = setOf(HubCapabilities.SESSION_PROMPT_TUNE, HubCapabilities.LIST_PAGES, HubCapabilities.GET_SETTINGS)
+        val fleet = FakeFleetState(tools = tools)
+        val actions = FakeActions().apply { tuneSetting = true; tuneSettingFailures = 1 }
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        vm.onDraftChange("tidy this")
+        runCurrent()
+        assertFalse(vm.state.value.canTune, "the first read failed: not yet known")
+        advanceTimeBy(2_001)
+        runCurrent()
+        assertEquals(2, actions.tuneSettingReads)
+        assertTrue(vm.state.value.canTune, "the retry read it as on")
+
+        // Turned off from the desktop while the stream was down: the same
+        // tools come back, and the next connection still reads it afresh.
+        actions.tuneSetting = false
+        fleet.status.value = ConnectionStatus.Reconnecting(attempt = 1, reason = "the hub closed the stream")
+        runCurrent()
+        fleet.status.value = ConnectionStatus.Connected("0.9.3")
+        runCurrent()
+        assertEquals(3, actions.tuneSettingReads)
+        assertFalse(vm.state.value.canTune)
     }
 
     @Test

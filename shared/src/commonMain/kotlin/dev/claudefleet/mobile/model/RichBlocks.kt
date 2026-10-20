@@ -32,6 +32,14 @@ import kotlinx.serialization.json.doubleOrNull
 
 const val UI_SPEC = "fleet.ui/1"
 const val UI_FENCE = "fleet-ui"
+
+/** Fence languages an agent writes for a card by mistake (the spec's own
+ *  name, mostly): drawn as one, like a self-declaring json block. Mirrors
+ *  rich_blocks.ts UI_FENCE_ALIASES. */
+private val UI_FENCE_ALIASES = setOf("fleet.ui", "fleet_ui", "fleetui")
+
+/** Fence languages whose block is a card when its object says it is one. */
+private val SELF_DECLARED_LANGS = setOf("json", "jsonc", "")
 /** Largest block JSON drawn as a card (bytes of the fence body). */
 const val UI_MAX_BYTES = 32 * 1024
 
@@ -376,8 +384,10 @@ fun splitRich(source: String): List<RichSegment> {
 
 private fun uiSegment(f: Fence): RichSegment? {
     val raw = f.body.trim()
-    if (f.lang != UI_FENCE) {
-        if (f.lang != "json" || !raw.startsWith("{") || UI_SPEC !in raw) return null
+    val tagged = f.lang == UI_FENCE || f.lang in UI_FENCE_ALIASES
+    if (!tagged) {
+        // A ```json (or untagged) block is a card only when it says it is one.
+        if (f.lang !in SELF_DECLARED_LANGS || !raw.startsWith("{") || UI_SPEC !in raw) return null
         val v = parseJson(raw) as? JsonObject ?: return null
         if (v["spec"].stringOrNull() != UI_SPEC) return null
     }
