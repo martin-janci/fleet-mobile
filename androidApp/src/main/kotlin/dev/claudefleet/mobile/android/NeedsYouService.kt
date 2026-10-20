@@ -26,6 +26,7 @@ import dev.claudefleet.mobile.notify.ROUTINE_FAILED_REASON
 import dev.claudefleet.mobile.notify.RoutineFailedAlert
 import dev.claudefleet.mobile.notify.missionWaitActions
 import dev.claudefleet.mobile.notify.missionWaitAlerts
+import dev.claudefleet.mobile.notify.missionWaitsResolved
 import dev.claudefleet.mobile.notify.routineFailedAlerts
 import dev.claudefleet.mobile.notify.needsYouContent
 import dev.claudefleet.mobile.notify.decodeSeen
@@ -292,6 +293,8 @@ class NeedsYouService : Service() {
             }
             if (missions != null) {
                 val (alerts, now) = missionWaitAlerts(seen, missions)
+                // A wait that ended takes its notification down (review w21-3).
+                for (id in missionWaitsResolved(seen, now)) manager(this).cancel(MISSION_BASE + (id % 100_000).toInt())
                 seen = now
                 if (!AppVisibility.foreground && container.prefs.notifyAllows(MISSION_WAITING_REASON)) alerts.forEach(::postMission)
             }

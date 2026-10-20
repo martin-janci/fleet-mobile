@@ -20,6 +20,26 @@ class DraftMemoryTest {
         assertEquals("half a thought\nwith a second line", next.recall(42))
     }
 
+    /** Review w22-5: another hub's session #12 does not open with this hub's #12 draft. */
+    @Test
+    fun pairing_with_another_hub_drops_the_last_ones_drafts() {
+        val prefs = FakePrefs()
+        val first = DraftMemory(prefs)
+        first.keep(12, "kept from before hubs were recorded")
+        first.forHub("https://a.example")
+        assertEquals("kept from before hubs were recorded", first.recall(12), "the first hub recorded keeps what is there")
+        first.keepUnsent(12, "refused")
+
+        val next = DraftMemory(prefs)
+        next.forHub("https://a.example")
+        assertEquals("kept from before hubs were recorded", next.recall(12), "the same hub again keeps them")
+
+        next.forHub("https://b.example")
+        assertEquals("", next.recall(12))
+        assertEquals("", DraftMemory(prefs).recall(12), "and the store forgets them too")
+        assertEquals(null, first.recallUnsent(99))
+    }
+
     @Test
     fun a_sent_draft_is_dropped_from_the_store() {
         val prefs = FakePrefs()

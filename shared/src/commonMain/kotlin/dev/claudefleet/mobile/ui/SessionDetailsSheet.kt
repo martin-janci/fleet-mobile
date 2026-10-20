@@ -103,10 +103,13 @@ data class AccountMeter(val name: String, val line: String?, val leftFraction: F
 fun accountMeter(accountUuid: String?, name: String?, usage: AccountUsageSnapshot?, now: Long): AccountMeter? {
     val uuid = accountUuid ?: return null
     val label = name ?: uuid.take(8)
+    // A reading the last try failed to refresh says so, and how old it is
+    // (review w23-7): an expired login's meters are not current.
+    val stale = usage?.takeIf { it.usage != null && it.status != null }?.let { limitsNote(it, now) }?.removeSuffix(".")
     usage?.limitAt(now)?.let { limit ->
         val window = if (limit.weekly) "weekly" else "5-hour"
         val resets = relativeWithin(limit.resetsAt, now)?.let { " · resets in $it" }.orEmpty()
-        return AccountMeter(label, "At its $window limit$resets", 0f, low = true)
+        return AccountMeter(label, "At its $window limit$resets" + stale?.let { " · $it" }.orEmpty(), 0f, low = true)
     }
     fun left(w: UsageWindow?): Double? = w?.let {
         if (it.resetsAt != null && it.resetsAt <= now) 100.0 else (100.0 - it.utilization).coerceIn(0.0, 100.0)
@@ -116,6 +119,7 @@ fun accountMeter(accountUuid: String?, name: String?, usage: AccountUsageSnapsho
     val line = listOfNotNull(
         five?.let { "${it.roundToInt()}% left" },
         week?.let { "week ${it.roundToInt()}% left" },
+        stale,
     ).joinToString(" · ").ifEmpty { null }
     val tight = listOfNotNull(five, week).minOrNull()
     return AccountMeter(label, line, tight?.let { (it / 100.0).toFloat() }, low = tight != null && tight < LOW_BELOW_PCT)

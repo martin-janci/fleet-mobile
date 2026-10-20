@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.HostCheck
+import dev.claudefleet.mobile.model.isNeverChecked
 import dev.claudefleet.mobile.model.LostCandidate
 import dev.claudefleet.mobile.model.lines
 import dev.claudefleet.mobile.model.RestorePlanEntry
@@ -56,6 +57,8 @@ data class HostDetailHandlers(
     /** Arm and disarm Run plan when back. */
     val onRunWhenBack: () -> Unit = {},
     val onCancelWhenBack: () -> Unit = {},
+    /** Open the fleet-agent install's review for this host; null where the hub or pairing cannot install. */
+    val onInstallAgent: (() -> Unit)? = null,
 )
 
 /**
@@ -77,7 +80,11 @@ fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowS
                     Text(state.alias.orEmpty(), style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
                     Text(
                         listOfNotNull(
-                            if (host?.reachable == true) "reachable" else "unreachable",
+                            when {
+                                host?.reachable == true -> "reachable"
+                                host?.isNeverChecked == true -> "not checked yet"
+                                else -> "unreachable"
+                            },
                             host?.transport?.takeIf { it != "ssh" },
                             relativeAgo(host?.lastPingedAt, nowSeconds)?.let { "pinged $it" },
                             pingWords(host?.latencyMs)?.takeIf { host?.reachable == true },
@@ -114,6 +121,10 @@ fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowS
                             Text("${state.sessionCount} session${if (state.sessionCount == 1) "" else "s"}")
                         }
                     }
+                    // The desktop offers the agent in Host detail, not on every list row (review w23-12).
+                    if (host?.transport == "ssh" && host?.reachable == true) {
+                        handlers.onInstallAgent?.let { install -> TextButton(onClick = install) { Text("Install agent") } }
+                    }
                 }
                 state.check?.let { c -> HealthLines(c) }
                 ErrorBanner(state.error, onDismiss = handlers.onDismissError)
@@ -138,7 +149,7 @@ fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowS
                                 for (entry in plan.plan) {
                                     PlanEntryRow(entry)
                                 }
-                                if (state.restorable > 0) {
+                                if (state.restorable > 0 && state.canRestoreNow) {
                                     OutlinedButton(
                                         onClick = { confirming = true },
                                         enabled = !state.restoring,
@@ -172,7 +183,8 @@ fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowS
                 val resumable = state.resumable
                 item {
                     Text(
-                        if (state.candidates == null) "Looking for untracked conversations…"
+                        state.discoverNote?.takeIf { state.candidates == null }
+                            ?: if (state.candidates == null) "Looking for untracked conversations…"
                         else if (resumable.isEmpty()) "No untracked conversations to resume."
                         else "Conversations fleet has no session for",
                         style = MaterialTheme.typography.labelLarge,

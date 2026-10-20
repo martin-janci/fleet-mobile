@@ -251,7 +251,7 @@ class AgentActionsTest {
         runCurrent()
         assertEquals(listOf("status", "decide 7 true"), agents.calls)
         assertTrue(vm.state.value.pending.isEmpty())
-        assertEquals("Approved: it goes out on the hub's next pass.", vm.state.value.notices[7])
+        assertEquals("Approved: it runs within a minute.", vm.state.value.notices[7])
     }
 
     @Test

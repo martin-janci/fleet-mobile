@@ -83,6 +83,8 @@ internal class RecordingPoster : AlertPoster {
     override fun postRoutine(alert: RoutineFailedAlert) { routines += alert.runId }
     override fun postMission(alert: MissionWaitAlert) { missions += "${alert.missionId} ${alert.text}" }
     override fun withdraw(sessionId: Long) { withdrawn += sessionId }
+    val missionsWithdrawn = mutableListOf<Long>()
+    override fun withdrawMission(missionId: Long) { missionsWithdrawn += missionId }
 }
 
 private class Hub {
@@ -339,5 +341,11 @@ class KeepSeenWhileOpenTest {
         c.once()
 
         assertEquals(listOf("5 Mission waits for you to sign the autonomy grant"), poster.missions)
+        assertEquals(emptyList(), poster.missionsWithdrawn)
+
+        // Review w21-3: signed on the desktop, so the notification comes down.
+        hub.missions = """[{"id":5,"name":"Ship 1.4","state":"active"}]"""
+        c.once()
+        assertEquals(listOf(5L), poster.missionsWithdrawn)
     }
 }

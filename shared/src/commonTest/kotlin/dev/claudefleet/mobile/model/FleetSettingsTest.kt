@@ -79,6 +79,10 @@ class FleetSettingsTest {
         assertTrue(days.fromDisplay("2.5").isFailure, "a whole number")
         assertEquals("3 days", days.inWords("3"))
         assertTrue(days.rangeText().startsWith("1–365 days"), days.rangeText())
+        // claude-fleet review w15-3: a minimum under one shown unit is not "0".
+        assertEquals("at least 0.25 hours", d("update.check_interval_secs").rangeText())
+        // w15-13: a dollar setting says so.
+        assertEquals("USD", d("decide.jev.daily_token_budget").copy(unit = "usd").unitWord)
     }
 
     @Test

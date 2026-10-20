@@ -17,9 +17,12 @@ class MoreLinesTest {
     fun accounts_name_a_limit_first_then_the_busiest_week() {
         assertNull(accountsLine(emptyList(), 1_000))
         assertEquals("Weekly 86% on the busiest account", accountsLine(listOf(account("a", 40.0), account("b", 86.2)), 1_000))
-        assertEquals("An account is at its weekly limit", accountsLine(listOf(account("a", 100.0), account("b", 10.0)), 1_000))
+        assertEquals("An account is at its weekly limit · resets in 16 min", accountsLine(listOf(account("a", 100.0), account("b", 10.0)), 1_000))
+        // Review w23-8: one account at its limit is named.
+        assertEquals("Work is at its weekly limit · resets in 16 min", accountsLine(listOf(account("a", 100.0), account("b", 10.0)), 1_000) { if (it == "a") "Work" else null })
         assertEquals("2 accounts at a limit", accountsLine(listOf(account("a", 100.0), account("b", 100.0)), 1_000))
-        assertEquals("Weekly 100% on the busiest account", accountsLine(listOf(account("a", 100.0, resetsAt = 500)), 1_000), "a window that reset is no limit")
+        assertNull(accountsLine(listOf(account("a", 100.0, resetsAt = 500)), 1_000), "a window that reset is no limit, and no reading of now")
+        assertEquals("Weekly 40% on the busiest account", accountsLine(listOf(account("a", 90.0, resetsAt = 500), account("b", 40.0)), 1_000))
     }
 
     @Test
@@ -38,8 +41,10 @@ class MoreLinesTest {
     @Test
     fun the_footer_has_both_versions_and_the_health() {
         val up = HostRow(alias = "mac", reachable = true)
-        val down = HostRow(alias = "nas", reachable = false)
+        val down = HostRow(alias = "nas", reachable = false, lastPingedAt = 100)
         assertEquals("Orbit Fleet 0.9.4 · hub 0.9.4 · all systems OK", moreFooter("0.9.4", "0.9.4", listOf(up), connected = true))
+        // Review w23-13: a host never checked yet is not offline.
+        assertEquals("Orbit Fleet 0.9.4 · all systems OK", moreFooter("0.9.4", null, listOf(up, HostRow(alias = "new")), connected = true))
         assertEquals("Orbit Fleet 0.9.4 · 1 host offline", moreFooter("0.9.4", null, listOf(up, down), connected = true))
         assertEquals("Orbit Fleet 0.9.4 · hub 0.9.3 · hub offline", moreFooter("0.9.4", "0.9.3", listOf(up), connected = false))
     }

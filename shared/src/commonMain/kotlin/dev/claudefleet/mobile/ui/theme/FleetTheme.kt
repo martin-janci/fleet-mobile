@@ -144,9 +144,12 @@ object Fleet {
  * `primary` the accent, `tertiary` the waiting amber the quota meter turns at
  * 80 %, `error` the failed red, outlines the two border weights.
  */
-internal fun orbitColorScheme(o: OrbitColors): ColorScheme {
+internal fun orbitColorScheme(
+    o: OrbitColors,
+    /** The other side's colours, for the inverse roles (snackbars, inversePrimary). */
+    inverse: OrbitColors = if (o.isDark) LightOrbit else DarkOrbit,
+): ColorScheme {
     val base = if (o.isDark) darkColorScheme() else lightColorScheme()
-    val inverse = if (o.isDark) LightOrbit else DarkOrbit
     return base.copy(
         primary = o.accent,
         onPrimary = o.accentFg,
@@ -252,7 +255,12 @@ fun FleetTheme(sun: Double, contrast: ContrastLevel, accent: OrbitAccent, conten
     val painted = remember(sun, contrast, accent) { OrbitPalette.colors(sun, contrast, accent.hue) }
     val dark = sun < 0
     val orbit = remember(painted) { OrbitColors(dark, painted) }
-    val scheme = remember(orbit) { orbitColorScheme(orbit) }
+    // The inverse roles come from the other side of the same Contrast and
+    // Accent, not the manual's fixed palette (review w20-7).
+    val inverse = remember(dark, contrast, accent) {
+        OrbitColors(!dark, OrbitPalette.colors(if (dark) OrbitPalette.LIGHT_SUN else OrbitPalette.DARK_SUN, contrast, accent.hue))
+    }
+    val scheme = remember(orbit, inverse) { orbitColorScheme(orbit, inverse) }
     val status = remember(orbit) { { tone: StatusTone -> orbitStatusColors(orbit, tone) } }
     CompositionLocalProvider(
         LocalStatusColors provides status,

@@ -37,6 +37,16 @@ class ControlEscalationsTest {
         assertNull(cards[1].detail)
     }
 
+    /** Review w21-8: a session waiting on a form is its ControlForms card, not an escalation as well. */
+    @Test
+    fun a_form_drawn_in_controls_chat_is_not_also_an_escalation() {
+        val asks = row(2, "fed-v2", reason = "waiting", status = "blocked").copy(pendingForm = PendingForm("f1", "Which branch?"))
+        assertEquals(listOf(2L), escalations(listOf(asks), null, emptySet()).map { it.sessionId }, "no forms drawn: the card stays")
+        assertTrue(escalations(listOf(asks), null, emptySet(), formsShown = true).isEmpty())
+        val failed = row(3, "broke", reason = "failed").copy(pendingForm = PendingForm("f2"))
+        assertEquals(listOf(3L), escalations(listOf(failed), null, emptySet(), formsShown = true).map { it.sessionId }, "only the wait is the form's")
+    }
+
     @Test
     fun a_down_host_is_one_card_for_every_session_on_it() {
         val rows = listOf(

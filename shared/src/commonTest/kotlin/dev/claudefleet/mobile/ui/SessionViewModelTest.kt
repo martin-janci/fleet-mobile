@@ -3648,6 +3648,11 @@ class SessionViewModelTest {
         val live = SessionViewModel(ID, FakeFleetState(tools = ghostTools), FakeActions(), backgroundScope)
         assertTrue(live.state.value.canRecreate)
         assertFalse(live.state.value.canDismissGhost)
+
+        // A pinned ghost is not dismissed: the hub refuses it (E_PINNED).
+        val pinned = SessionViewModel(ID, FakeFleetState(listOf(ghost.copy(pinnedAt = 100)), tools = ghostTools), FakeActions(), backgroundScope)
+        assertTrue(pinned.state.value.canRecreate)
+        assertFalse(pinned.state.value.canDismissGhost)
     }
 
     @Test
@@ -4021,6 +4026,27 @@ class SessionViewModelTest {
         assertFalse(vm.state.value.sending)
     }
 
+    /** Review w22-4: leaving the session and coming back keeps the refused prompt. */
+    @Test
+    fun a_refused_prompt_is_still_there_after_leaving_the_session() = runTest {
+        val drafts = DraftMemory()
+        val actions = FakeActions()
+        actions.sendFails = HubError.Tool("E_BUSY", "mid-turn")
+        val first = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, keepNotSent = true, drafts = drafts)
+        first.onDraftChange("Run the full suite")
+        first.send().join()
+        runCurrent()
+
+        val again = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, keepNotSent = true, drafts = drafts)
+        runCurrent()
+        assertEquals("Run the full suite", again.state.value.notSent?.text)
+
+        actions.sendFails = null
+        again.retryNotSent().join()
+        runCurrent()
+        assertNull(drafts.recallUnsent(ID), "sent, so forgotten")
+    }
+
     @Test
     fun retry_sends_the_kept_words_again_and_leaves_the_box_alone() = runTest {
         val actions = FakeActions()
@@ -4163,6 +4189,29 @@ class SessionViewModelTest {
         assertNull(vm.state.value.tune, "the sheet closes")
         assertTrue(actions.sentPrompts.isEmpty(), "a tune never sends")
         assertTrue(actions.queuedSent.isEmpty())
+    }
+
+    /** Tune again builds on the rewrite on screen, edits included; a chip joins the typed ask (review w07-3). */
+    @Test
+    fun tune_again_builds_on_the_edited_rewrite_and_a_chip_keeps_the_typed_ask() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(tools = setOf(HubCapabilities.SESSION_PROMPT_TUNE)), actions, backgroundScope)
+        vm.onDraftChange("make the tests pass")
+        runCurrent()
+        vm.openTune()
+        vm.tune()?.join()
+        runCurrent()
+        vm.onTuneRewriteChange("Rewritten prompt, edited")
+        vm.onTuneAskChange("keep the ticket key")
+        vm.tune("Shorter")?.join()
+        runCurrent()
+
+        assertEquals(
+            listOf("make the tests pass" to "", "Rewritten prompt, edited" to "keep the ticket key; Shorter"),
+            actions.tuned.map { it.first to it.second },
+        )
+        assertEquals("make the tests pass", vm.state.value.draft, "the box is untouched until Use this")
+        assertEquals("keep the ticket key", vm.state.value.tune?.ask, "the typed ask stays in the field")
     }
 
     @Test
@@ -4349,6 +4398,31 @@ class SessionViewModelTest {
         readonly.sendLater("x").join()
         runCurrent()
         assertTrue(actions.queuedSent.isEmpty())
+    }
+
+    @Test
+    fun send_later_lets_go_of_the_text_only_once_the_hub_accepts_it() = runTest {
+        // Review w22-3: the sheet and the composer cleared before the hub
+        // answered, so a refusal lost the prompt.
+        var accepted = 0
+        val refusing = object : SessionActions by FakeActions() {
+            override suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming): QueuePromptResult =
+                throw HubError.Tool("E_PERMISSION", "no")
+        }
+        val refused = SessionViewModel(ID, FakeFleetState(tools = setOf("queue_prompt", "queued_prompts")), refusing, backgroundScope)
+        runCurrent()
+        refused.sendLater("keep me", SendLaterTiming()) { accepted++ }.join()
+        runCurrent()
+        assertEquals(0, accepted, "a refusal keeps the text")
+        assertNotNull(refused.state.value.error)
+
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(tools = setOf("queue_prompt", "queued_prompts")), actions, backgroundScope)
+        runCurrent()
+        vm.sendLater("go", SendLaterTiming()) { accepted++ }.join()
+        runCurrent()
+        assertEquals(1, accepted)
+        assertEquals(listOf("go"), actions.queuedSent)
     }
 
     // ---- Control's queued composer (Control review F4/F19) ----

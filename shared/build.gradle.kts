@@ -77,6 +77,7 @@ tasks.matching { it.name == "jvmTest" }.configureEach {
             ".gitignore",
             "shared/build.gradle.kts",
             "docs/design/tokens.json",
+            "docs/design/palette-golden.json",
         ),
     )
         .withPropertyName("scannedRootFiles")

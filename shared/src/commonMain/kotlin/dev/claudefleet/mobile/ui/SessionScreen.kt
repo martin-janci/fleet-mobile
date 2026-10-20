@@ -166,6 +166,8 @@ import dev.claudefleet.mobile.ui.kit.reducedMotion
 import dev.claudefleet.mobile.ui.kit.rememberPhoneConnection
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.Fleet
+import dev.claudefleet.mobile.model.ChangedFile
+import kotlinx.coroutines.CancellationException
 import dev.claudefleet.mobile.data.ConnectionStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -1789,6 +1791,7 @@ private fun SessionOverflowMenu(
                     review = state.canReview,
                     archive = orbit.onArchive != null,
                     kill = manage && state.canKill,
+                    pinned = session?.isPinned == true,
                     worktree = onRepo != null,
                     sendLater = state.canSendLater,
                     background = state.canStartBackground,
@@ -1902,11 +1905,17 @@ private fun SessionOverflowMenu(
         }
         if (manage) {
             HorizontalDivider()
-            DropdownMenuItem(
-                text = { Text("Safe remove") },
-                enabled = actionable,
-                onClick = { expanded = false; showSafeKillConfirm = true },
-            )
+            if (state.session?.isPinned == true) {
+                // Said rather than hidden: the hub refuses Safe remove and Kill
+                // on a pinned session (`E_PINNED`), and the phone cannot unpin.
+                DropdownMenuItem(text = { Text("Pinned: unpin on the desktop") }, enabled = false, onClick = {})
+            } else {
+                DropdownMenuItem(
+                    text = { Text("Safe remove") },
+                    enabled = actionable,
+                    onClick = { expanded = false; showSafeKillConfirm = true },
+                )
+            }
             if (state.canKill) {
                 DropdownMenuItem(
                     text = { Text("Kill now", color = MaterialTheme.colorScheme.error) },
@@ -2077,6 +2086,7 @@ private fun ManageDialogs(
         KillConfirmDialog(
             onConfirm = { hideKillConfirm(); onKill() },
             onDismiss = hideKillConfirm,
+            sessionId = state.session?.id,
         )
     }
 }
@@ -2160,11 +2170,26 @@ private fun ConfirmSheet(title: String, body: String, confirm: String, onConfirm
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun KillConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+internal fun KillConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit, sessionId: Long? = null) {
     var enabled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         delay(KILL_CONFIRM_DELAY)
         enabled = true
+    }
+    // What the kill would throw away in the worktree, as the desktop's
+    // kill_check says it (review w22-2); only where the hub serves repo_changes.
+    val check = LocalKillCheck.current
+    var worktree by remember(sessionId) { mutableStateOf(if (check != null && sessionId != null) "Checking its worktree…" else null) }
+    if (check != null && sessionId != null) {
+        LaunchedEffect(sessionId) {
+            worktree = try {
+                killChangesLine(check(sessionId))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                "Could not check its worktree: ${friendly(t).title}"
+            }
+        }
     }
     BottomSheet(
         title = "Kill this session now?",
@@ -2172,7 +2197,21 @@ internal fun KillConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
             "This cannot be undone.",
         onDismiss = onDismiss,
         primary = SheetAction("Kill now", enabled = enabled, onClick = onConfirm),
-    ) {}
+    ) {
+        worktree?.let { Text(it, style = Fleet.type.textSm, color = Fleet.colors.fg) }
+    }
+}
+
+/** Reads a session's uncommitted files (`repo_changes`) for the Kill sheet; null where the hub has none. */
+internal val LocalKillCheck = compositionLocalOf<(suspend (Long) -> List<ChangedFile>)?> { null }
+
+/** The Kill sheet's worktree line: what the kill leaves behind, or that nothing is. */
+internal fun killChangesLine(files: List<ChangedFile>): String {
+    if (files.isEmpty()) return "No uncommitted changes in its worktree."
+    val names = files.take(3).joinToString(", ") { it.path.substringAfterLast('/') }
+    val more = if (files.size > 3) " and ${files.size - 3} more" else ""
+    val n = if (files.size == 1) "1 uncommitted file" else "${files.size} uncommitted files"
+    return "Leaves $n: $names$more. Retire commits and pushes them first."
 }
 
 /**

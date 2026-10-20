@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Is docs/design/tokens.json still byte-identical to claude-fleet's?
+# Are docs/design/tokens.json and palette-golden.json still byte-identical
+# to claude-fleet's?
 #
 # The phone's copy of the Orbit Fleet tokens is claude-fleet's
 # `docs/design/tokens.json`, unchanged (docs/design/README.md). Inside this
@@ -18,9 +19,9 @@
 #                           public raw URL. Both repos are public, so no secret
 #                           is needed and none is asked for.
 #
-# Exit 0 when identical, 1 when they differ (the diff on stderr with --diff),
-# 2 when claude-fleet's file could not be read: an unreadable source is not
-# "no drift", and the caller decides whether that fails.
+# Exit 0 when identical, 1 when one differs (the diff on stderr with --diff),
+# 2 when claude-fleet's file could not be read and none differs: an unreadable
+# source is not "no drift", and the caller decides whether that fails.
 set -euo pipefail
 
 REPO="${CLAUDE_FLEET_REPO:-martin-janci/claude-fleet}"
@@ -39,24 +40,32 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
-fetched=""
-if command -v gh >/dev/null 2>&1 && [ -n "${GH_TOKEN:-}" ]; then
-  gh api -H "Accept: application/vnd.github.raw" "repos/$REPO/contents/$FILE?ref=$ref" >"$tmp" 2>/dev/null && fetched=1
-fi
-if [ -z "$fetched" ]; then
-  curl -fsSL "https://raw.githubusercontent.com/$REPO/$ref/$FILE" -o "$tmp" 2>/dev/null && fetched=1
-fi
-if [ -z "$fetched" ] || [ ! -s "$tmp" ]; then
-  echo "check-design-tokens.sh: could not read $FILE from $REPO@$ref" >&2
-  exit 2
-fi
+# The palette engine's golden values (review w20-12) are claude-fleet's file
+# too, held to OrbitPalette.kt by OrbitPaletteTest the way tokens.json is held
+# to OrbitTokens.kt.
+rc=0
+for FILE in "$FILE" docs/design/palette-golden.json; do
+  fetched=""
+  if command -v gh >/dev/null 2>&1 && [ -n "${GH_TOKEN:-}" ]; then
+    gh api -H "Accept: application/vnd.github.raw" "repos/$REPO/contents/$FILE?ref=$ref" >"$tmp" 2>/dev/null && fetched=1
+  fi
+  if [ -z "$fetched" ]; then
+    curl -fsSL "https://raw.githubusercontent.com/$REPO/$ref/$FILE" -o "$tmp" 2>/dev/null && fetched=1
+  fi
+  if [ -z "$fetched" ] || [ ! -s "$tmp" ]; then
+    echo "check-design-tokens.sh: could not read $FILE from $REPO@$ref" >&2
+    [ "$rc" -eq 1 ] || rc=2
+    continue
+  fi
 
-if cmp -s "$tmp" "$root/$FILE"; then
-  echo "$FILE matches $REPO@$ref"
-  exit 0
-fi
-echo "check-design-tokens.sh: $FILE differs from $REPO@$ref — copy it here unchanged, then update OrbitTokens.kt until OrbitTokensDriftTest passes (docs/design/README.md)" >&2
-if [ -n "$diff" ]; then
-  diff -u "$root/$FILE" "$tmp" --label "fleet-mobile/$FILE" --label "$REPO@$ref/$FILE" >&2 || true
-fi
-exit 1
+  if cmp -s "$tmp" "$root/$FILE"; then
+    echo "$FILE matches $REPO@$ref"
+    continue
+  fi
+  echo "check-design-tokens.sh: $FILE differs from $REPO@$ref — copy it here unchanged, then update OrbitTokens.kt / OrbitPalette.kt until OrbitTokensDriftTest and OrbitPaletteTest pass (docs/design/README.md)" >&2
+  if [ -n "$diff" ]; then
+    diff -u "$root/$FILE" "$tmp" --label "fleet-mobile/$FILE" --label "$REPO@$ref/$FILE" >&2 || true
+  fi
+  rc=1
+done
+exit "$rc"

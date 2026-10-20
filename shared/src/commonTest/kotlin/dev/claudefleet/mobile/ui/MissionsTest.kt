@@ -53,6 +53,7 @@ private class MissionsFleet(caps: HubCapabilities) : FleetState {
     override val clockSkewSeconds = MutableStateFlow(0L)
     override val sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16)
     override val capabilities = MutableStateFlow(caps)
+    override val workChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16)
     override suspend fun refresh() = Unit
 }
 
@@ -266,6 +267,22 @@ class MissionsTest {
         val s = readonly.state.value
         assertTrue(s.available, "a readonly pairing still sees its missions")
         assertFalse(s.canStart || s.canDecide || s.canPause || s.canPauseAll)
+    }
+
+    /** Review w21-2: a mission that moves on the hub is read again, its open detail with it. */
+    @Test
+    fun a_work_change_rereads_the_missions_and_the_open_one() = runTest {
+        val actions = FakeMissionActions()
+        val fleet = MissionsFleet(loop)
+        val vm = MissionsViewModel(fleet, actions, backgroundScope, canWrite = true)
+        runCurrent()
+        vm.open().join()
+        vm.select(1).join()
+        runCurrent()
+        actions.calls.clear()
+        fleet.workChanges.emit(2)
+        runCurrent()
+        assertEquals(listOf("missions", "mission 1"), actions.calls)
     }
 
     @Test

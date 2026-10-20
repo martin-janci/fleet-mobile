@@ -57,8 +57,11 @@ import dev.claudefleet.mobile.ui.theme.OrbitTokens
  * that does not care, or a hub that serves neither.
  */
 class SessionLaterHost(
-    /** The prompt and when it goes (gap plan G5.5); a plain [SendLaterTiming] is "when idle". */
-    val onSendLater: (String, SendLaterTiming) -> Unit = { _, _ -> },
+    /**
+     * The prompt and when it goes (gap plan G5.5); a plain [SendLaterTiming] is "when idle".
+     * The third argument runs once the hub has accepted it, never on a refusal (review w22-3).
+     */
+    val onSendLater: (String, SendLaterTiming, () -> Unit) -> Unit = { _, _, _ -> },
     val onLoadQueued: () -> Unit = {},
     val onCancelQueued: (Long) -> Unit = {},
     val onDismissNotice: () -> Unit = {},
@@ -256,7 +259,8 @@ internal fun SendLaterSheet(
     var text by remember { mutableStateOf(initialText) }
     var choice by remember { mutableStateOf(SendLaterWhen.Idle) }
     var clock by remember { mutableStateOf("") }
-    var skip by remember { mutableStateOf(false) }
+    // On by default, as the desktop's sheet: a prompt for a session archived meanwhile is dropped (review w22-9).
+    var skip by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) { host.onLoadQueued() }
     val o = Fleet.colors
     val choices = sendLaterChoices(
@@ -282,9 +286,12 @@ internal fun SendLaterSheet(
         ) {
             val timing = sendLaterTiming(choice, now(), utcOffset, clock, skip && state.sendLaterSkipAvailable)
             if (timing != null) {
-                host.onSendLater(text, timing)
-                onQueued(text)
-                text = ""
+                val sent = text
+                // Let go of the text only once the hub has it (review w22-3).
+                host.onSendLater(sent, timing) {
+                    onQueued(sent)
+                    if (text == sent) text = ""
+                }
             }
         },
         scrollable = true,
@@ -360,7 +367,25 @@ data class AccountSwitch(
     val logins: List<HostLogin> = emptyList(),
     val picked: HostLogin? = null,
     val notice: String? = null,
+    /** The hub's pause line (`pause_at_pct`): a login at or over it is "at its limit". */
+    val pauseAtPct: Double = 100.0,
+    /** The profiles on the host fleet knows are signed out (null = the host's own login). */
+    val signedOut: List<String?> = emptyList(),
 )
+
+/**
+ * A login's line in Switch account (review w23-5): how much it has used,
+ * and what makes it a dead end — the session's own account, which shares
+ * its limit; a login at the pause line; one that is signed out. Each stays
+ * pickable: the person still decides.
+ */
+fun switchLoginSub(l: HostLogin, sessionAccount: String?, pauseAtPct: Double, signedOut: Boolean): String =
+    listOfNotNull(
+        usedText(l),
+        "same account, shares its limit".takeIf { sessionAccount != null && l.accountUuid == sessionAccount },
+        "at its limit".takeIf { (l.usedPct ?: 0.0) >= pauseAtPct },
+        "signed out".takeIf { signedOut },
+    ).joinToString(" · ")
 
 /** Every login on the host but the one the session runs under ([currentProfile], null = the host's own). */
 fun otherLogins(h: Headroom, currentProfile: String?): List<HostLogin> =
@@ -394,7 +419,7 @@ internal fun SwitchAccountSheet(
         for (l in switch.logins) {
             SheetOption(
                 title = loginLabel(l, accountName),
-                sub = usedText(l),
+                sub = switchLoginSub(l, session?.accountUuid, switch.pauseAtPct, l.profile in switch.signedOut),
                 selected = l == switch.picked,
                 onSelect = { onPick(l) },
             )

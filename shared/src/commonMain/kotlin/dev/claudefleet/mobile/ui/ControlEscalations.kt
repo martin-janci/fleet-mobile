@@ -18,8 +18,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.ESCALATIONS_SHOWN
 import dev.claudefleet.mobile.model.Escalation
+import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.LaterEntry
+import dev.claudefleet.mobile.model.dropRecoveredHosts
+import dev.claudefleet.mobile.model.laterEntryText
+import dev.claudefleet.mobile.model.parseLaterEntry
+import dev.claudefleet.mobile.model.pruneLater
 import dev.claudefleet.mobile.store.Prefs
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
@@ -33,15 +40,34 @@ import kotlinx.coroutines.flow.asStateFlow
  * key carries the session's turn ([dev.claudefleet.mobile.model.escalationKey]),
  * so the same session needing the person again later is a new card.
  */
-class EscalationLater(private val prefs: Prefs? = null) {
-    private val keys = MutableStateFlow(prefs?.getStringList(KEY).orEmpty())
+class EscalationLater(private val prefs: Prefs? = null, private val now: () -> Long = { epochSeconds() }) {
+    private var entries: List<LaterEntry> = run {
+        val t = now()
+        pruneLater(prefs?.getStringList(KEY).orEmpty().map { parseLaterEntry(it, t) }, t)
+    }
+    private val keys = MutableStateFlow(entries.map { it.key })
 
     val later: StateFlow<List<String>> = keys.asStateFlow()
 
     fun putOff(key: String) {
-        val next = dev.claudefleet.mobile.model.putOff(keys.value, key)
-        keys.value = next
-        prefs?.putStringList(KEY, next)
+        val t = now()
+        save(pruneLater(entries.filterNot { it.key == key } + LaterEntry(key, t), t))
+    }
+
+    /**
+     * Forget the Later of every host-down card whose host answers again, so
+     * the host's next outage is a card again (review w21-1). Writes only
+     * when something was dropped.
+     */
+    fun forgetRecoveredHosts(hosts: List<HostRow>) {
+        val kept = dropRecoveredHosts(entries, hosts)
+        if (kept.size != entries.size) save(kept)
+    }
+
+    private fun save(next: List<LaterEntry>) {
+        entries = next
+        keys.value = next.map { it.key }
+        prefs?.putStringList(KEY, next.map(::laterEntryText))
     }
 
     companion object {
@@ -54,10 +80,10 @@ const val ESCALATION_OPEN_TAG = "control.escalation.open."
 const val ESCALATION_LATER_TAG = "control.escalation.later."
 const val ESCALATIONS_MORE_TAG = "control.escalations.more"
 
-/** "2 more in Needs you", or null when every card is drawn. */
+/** "2 more in Inbox" (the tab it opens; review w21-13), or null when every card is drawn. */
 internal fun escalationsMoreLine(total: Int): String? {
     val more = total - ESCALATIONS_SHOWN
-    return if (more > 0) "$more more in Needs you" else null
+    return if (more > 0) "$more more in Inbox" else null
 }
 
 /**

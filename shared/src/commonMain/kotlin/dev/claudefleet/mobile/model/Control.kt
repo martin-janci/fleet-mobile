@@ -66,4 +66,18 @@ data class ControlHandoff(
     val item: HandoffItem? = null,
     val items: List<HandoffItem> = emptyList(),
     val preview: String? = null,
+    /**
+     * How the call was let through (claude-fleet migration 196): `person` —
+     * approved on its card; `pre_approved` — the autonomy position let it
+     * through without a card. Null when no card was needed, or from an
+     * older hub (review wave 24, w24-5).
+     */
+    val approval: String? = null,
 )
+
+/** The chip's words for how a handoff was let through, or null — the desktop's `approvalWords` (`handoffs.ts`). */
+fun approvalWords(h: ControlHandoff): String? = when (h.approval) {
+    "pre_approved" -> "pre-approved"
+    "person" -> "approved"
+    else -> null
+}

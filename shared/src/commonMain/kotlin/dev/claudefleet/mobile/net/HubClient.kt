@@ -2790,6 +2790,22 @@ class HubClient(
             "work_admin",
             // Problems & fixes: `apply` runs a fix on a host over SSH.
             "autofix",
+            // Tune prompt: a model run on the session's host, up to 90 s.
+            "session_prompt_tune",
+            // Review wave 24 (w24-2): also `Deadline::Lifecycle` on the hub.
+            // A restart (Restart, Switch account, Switch model) or a kill
+            // runs on the host; `add_host` probes the host first;
+            // `propose_host_placement` may ask the decision model; the two
+            // conversation reads parse a transcript on the host. At 45 s the
+            // phone gave up while the hub kept going, and a retry sent a
+            // second restart. `HubDeadlinesTest` pins this against guard.rs.
+            "restart_session",
+            "kill_session",
+            "safe_kill_session",
+            "add_host",
+            "propose_host_placement",
+            "session_conversation",
+            "session_tool_detail",
         )
 
         /**

@@ -167,10 +167,12 @@ class NewLayoutTest {
     @Test
     fun the_hosts_row_says_what_is_offline() {
         val up = HostRow(alias = "mac", reachable = true)
-        val down = HostRow(alias = "oci-arm", reachable = false)
-        val hidden = HostRow(alias = "old", reachable = false, hidden = true)
+        val down = HostRow(alias = "oci-arm", reachable = false, lastPingedAt = 100)
+        val hidden = HostRow(alias = "old", reachable = false, hidden = true, lastPingedAt = 100)
         assertEquals("1 host", hostsLine(listOf(up)))
         assertEquals("2 hosts · oci-arm offline", hostsLine(listOf(up, down, hidden)))
         assertEquals("2 hosts · 2 offline", hostsLine(listOf(down, down.copy(alias = "nas"))))
+        // Review w23-13: a host never checked yet is not offline.
+        assertEquals("2 hosts", hostsLine(listOf(up, HostRow(alias = "new", reachable = false))))
     }
 }

@@ -49,6 +49,17 @@ class RichBlocksTest {
     }
 
     @Test
+    fun reportFromValue_reads_done_decisions_and_remaining() {
+        val v = kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"summary": "s", "outcome": "done", "done": ["a", "b", "c"], "decisions": "kept the API", "remaining": ["docs"]}""",
+        )
+        val r = reportFromValue(v)!!
+        assertEquals(listOf("a", "b", "c"), r.done)
+        assertEquals(listOf("kept the API"), r.decisions)
+        assertEquals(listOf("docs"), r.remaining)
+    }
+
+    @Test
     fun an_unknown_outcome_is_partial_and_the_lists_are_capped() {
         val v = buildJsonObject {
             put("outcome", "shipped")
@@ -158,7 +169,7 @@ class RichBlocksTest {
 
     @Test
     fun what_is_wrong_is_named_and_where() {
-        assertEquals(UiCheck.Bad(listOf("`kind` must be one of report, steps, guide, callout, facts, choices, form, progress, results, error, setting, device, fix")), check("\"kind\": \"chart\""))
+        assertEquals(UiCheck.Bad(listOf("`kind` must be one of report, steps, guide, callout, facts, choices, form, progress, results, error, setting, wizard, dashboard, device, fix")), check("\"kind\": \"chart\""))
         assertEquals(UiCheck.Bad(listOf("`spec` must be \"fleet.ui/1\"")), checkUiBlock("{\"spec\": \"fleet.ui/2\", \"kind\": \"callout\", \"body\": \"x\"}"))
         assertEquals(UiCheck.Bad(listOf("`tone` must be one of info, tip, success, warning, danger")), check("\"kind\": \"callout\", \"tone\": \"loud\", \"body\": \"x\""))
         assertEquals(UiCheck.Bad(listOf("option 1: `prompt` is required")), check("\"kind\": \"choices\", \"options\": [{\"label\": \"A\"}]"))

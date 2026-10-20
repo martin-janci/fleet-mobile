@@ -263,6 +263,10 @@ internal fun ReportCard(report: TaskReport, raw: String, title: String?, marker:
             report.confidence?.let { Chip("confidence $it", null) }
         }
         if (report.summary.isNotEmpty()) MarkdownText(report.summary)
+        val plain = MaterialTheme.colorScheme.onSurfaceVariant
+        ReportList("Done", report.done, plain)
+        ReportList("Decisions", report.decisions, plain)
+        ReportList("Left", report.remaining, plain)
         val error = MaterialTheme.colorScheme.error
         ReportList("Blockers", report.blockers, error)
         ReportList("Warnings", report.warnings, LocalStatusColors.current(StatusTone.BLOCKED).dot)
@@ -371,6 +375,12 @@ internal fun UiBlockCard(block: UiBlock, raw: String) {
                 )
             }
         }
+        is UiBlock.DesktopOnly -> Card(colors.outlineVariant, RICH_DESKTOP_ONLY) {
+            Label(if (block.kind == "wizard") "Form" else "Dashboard")
+            Text(block.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            block.why?.let { MarkdownText(it) }
+            Note("Opens in Orbit Fleet on the desktop.")
+        }
         is UiBlock.Form -> FormCard(block.form, raw)
         is UiBlock.Progress -> ProgressCard(block, raw)
         is UiBlock.Results -> ResultsCard(block)
@@ -388,6 +398,7 @@ internal fun UiBlockCard(block: UiBlock, raw: String) {
 }
 
 internal const val RICH_DEVICE = "rich-device"
+internal const val RICH_DESKTOP_ONLY = "rich-desktop-only"
 
 /** What a `device` card found for its reference. */
 private sealed interface DeviceLookup {

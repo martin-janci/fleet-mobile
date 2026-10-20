@@ -109,6 +109,33 @@ class SessionG55Test {
     private fun snapshot(five: UsageWindow?, week: UsageWindow?) =
         AccountUsageSnapshot("acc-a", AccountUsageWindows(fiveHour = five, sevenDay = week), "ok", now)
 
+    /** Review w22-2: the Kill sheet names what the kill would throw away. */
+    @Test
+    fun the_kill_sheet_names_the_uncommitted_files() {
+        assertEquals("No uncommitted changes in its worktree.", killChangesLine(emptyList()))
+        assertEquals("Leaves 1 uncommitted file: App.kt. Retire commits and pushes them first.", killChangesLine(listOf(ChangedFile("src/App.kt", "M"))))
+        val four = listOf("a/x.kt", "b.kt", "c/d/e.md", "f.txt").map { ChangedFile(it, "M") }
+        assertEquals("Leaves 4 uncommitted files: x.kt, b.kt, e.md and 1 more. Retire commits and pushes them first.", killChangesLine(four))
+    }
+
+    /** Review w23-5: a dead-end switch target says why, and stays pickable. */
+    @Test
+    fun a_switch_target_names_what_makes_it_a_dead_end() {
+        val same = HostLogin(profile = "work2", accountUuid = "acc-a", usedPct = 100.0)
+        assertEquals("100% used · same account, shares its limit · at its limit", switchLoginSub(same, "acc-a", 95.0, signedOut = false))
+        val fine = HostLogin(profile = "home", accountUuid = "acc-b", usedPct = 12.0)
+        assertEquals("12% used", switchLoginSub(fine, "acc-a", 95.0, signedOut = false))
+        assertEquals("12% used · signed out", switchLoginSub(fine, "acc-a", 95.0, signedOut = true))
+    }
+
+    /** Review w23-7: a reading the hub could not refresh says why and how old it is. */
+    @Test
+    fun the_account_row_says_when_its_meters_are_stale() {
+        val expired = snapshot(UsageWindow(38.0, now + 100), UsageWindow(60.0, now + 9_000)).copy(status = "login_expired", fetchedAt = now - 3 * 86_400)
+        val m = assertNotNull(accountMeter("acc-a", "m@work", expired, now))
+        assertEquals("62% left · week 40% left · Its login expired; sign in again on the host · meters from 3 d ago", m.line)
+    }
+
     @Test
     fun the_account_row_names_the_account_and_what_is_left() {
         val m = assertNotNull(accountMeter("acc-a", "m@work", snapshot(UsageWindow(25.0, now + 100), UsageWindow(40.0, now + 9_000)), now))

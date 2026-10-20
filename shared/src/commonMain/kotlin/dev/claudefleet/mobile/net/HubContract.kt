@@ -89,16 +89,21 @@ package dev.claudefleet.mobile.net
  * Revision 18 (session environment variables, claude-fleet CF-2) adds the
  * `env_vars` tool, an optional `env` map on `new_session` and an optional
  * `env_target` on a form's secret field. A new tool and optional fields
- * only: this app calls none of them and reads no new row shape, so a
- * revision-18 hub is safe here. The phone rises first.
+ * only: this app calls none of them, so a revision-18 hub is safe here.
+ * The phone rises first. Since then the hub's rows grew a session's
+ * `pinned_at`, a host's load (`HostRow`, `host:pinged`'s `health`) and
+ * `runs { trace }`; the phone reads each as an optional field, absent from
+ * an older hub, so no revision moved for them.
  *
  * [MIN_HUB_CONTRACT] does NOT mirror the desktop's minimum. The desktop
  * raised its own to 3 because a pre-3 hub would silently misperform
  * `move_session { when: cancel }` — but this app never calls `move_session`
  * (see `ToolsTheAppMayCallTest`'s `permitted` set), so that hazard does not
- * exist here. The floor stays `0` because the production hub this app talks
- * to is still 0.2.34 at revision 1, which must keep working until it is
- * upgraded: this is the phone's own floor, not a copy of the desktop's.
+ * exist here. The floor stays `0` because an older hub is gated per tool
+ * rather than refused: each call newer than the oldest hub is made only when
+ * that hub's `tools/list` names it ([HubCapabilities]), so what an old hub
+ * does serve keeps working. This is the phone's own floor, not a copy of the
+ * desktop's.
  */
 const val MIN_HUB_CONTRACT: Int = 0
 const val MAX_HUB_CONTRACT: Int = 18

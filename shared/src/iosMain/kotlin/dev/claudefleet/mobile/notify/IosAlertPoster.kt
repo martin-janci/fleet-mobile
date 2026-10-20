@@ -98,6 +98,10 @@ class IosAlertPoster : AlertPoster {
         )
     }
 
+    override fun withdrawMission(missionId: Long) {
+        center.removeDeliveredNotificationsWithIdentifiers(listOf("${NEEDS_YOU_ID_PREFIX}mission-$missionId"))
+    }
+
     override fun withdraw(sessionId: Long) {
         center.removeDeliveredNotificationsWithIdentifiers(listOf(needsYouId(sessionId)))
     }
