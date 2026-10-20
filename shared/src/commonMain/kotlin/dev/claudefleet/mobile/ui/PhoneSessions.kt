@@ -206,6 +206,14 @@ internal fun stateBands(rows: List<SessionRow>): List<Pair<StatusWord?, List<Ses
 internal fun SessionsUiState.shownRows(): List<SessionRow> =
     urgent + groups.flatMap { h -> h.projects.flatMap { it.sessions } }
 
+/**
+ * The rows Select all and All idle may pick: what is on screen, so not the
+ * sessions inside a collapsed group, which Send and Archive would otherwise
+ * act on unseen (review w22-7).
+ */
+internal fun SessionsUiState.pickableRows(): List<SessionRow> =
+    urgent + groups.filterNot { it.collapsed }.flatMap { h -> h.projects.flatMap { it.sessions } }
+
 /** Where a search looks (MobileSessionsTools): every kind of hit, or one. */
 /** The search's chips. TEXT is the hub's full-text index: tasks, conversations, pull requests, the journal. */
 enum class SearchScope(val label: String) { ALL("All"), SESSIONS("Sessions"), TEXT("Text"), PROJECTS("Projects"), HOSTS("Hosts"), TICKETS("Tickets") }
@@ -342,8 +350,8 @@ fun SessionsTab(
             bulk.active -> SelectionHeader(
                 bulk,
                 onClear = handlers.onClearSelection,
-                onSelectAll = { bulkHandlers.onSelectAll(rows.map { it.id }) },
-                onSelectIdle = idleIds(rows).takeIf { it.isNotEmpty() }?.let { ids -> { bulkHandlers.onSelectAll(ids) } },
+                onSelectAll = { bulkHandlers.onSelectAll(state.pickableRows().map { it.id }) },
+                onSelectIdle = idleIds(state.pickableRows()).takeIf { it.isNotEmpty() }?.let { ids -> { bulkHandlers.onSelectAll(ids) } },
             )
             state.searchOpen -> SearchHeader(
                 query = state.filters.query,
