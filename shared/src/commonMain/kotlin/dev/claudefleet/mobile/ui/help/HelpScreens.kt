@@ -70,6 +70,7 @@ import dev.claudefleet.mobile.ui.FieldRow
 import dev.claudefleet.mobile.ui.FleetSettingsUiState
 import dev.claudefleet.mobile.ui.PhoneSessionRow
 import dev.claudefleet.mobile.ui.components.ScreenHeader
+import dev.claudefleet.mobile.ui.components.SectionLabel
 import dev.claudefleet.mobile.ui.kit.OrbitMark
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.FleetIcons
@@ -418,14 +419,8 @@ fun LearnScreen(
 }
 
 @Composable
-private fun Label(text: String) {
-    Text(
-        text.uppercase(),
-        style = Fleet.type.text2xs,
-        color = Fleet.colors.fgMuted,
-        modifier = Modifier.padding(start = gutter, end = 16.dp, top = 20.dp, bottom = 6.dp),
-    )
-}
+private fun Label(text: String) =
+    SectionLabel(text, Modifier.padding(start = gutter, end = 16.dp, top = 20.dp, bottom = 6.dp))
 
 // ---- a lesson on the real screens ----
 
