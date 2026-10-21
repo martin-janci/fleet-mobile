@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.LATER_KEPT
 import dev.claudefleet.mobile.model.LATER_MAX_AGE_SECS
 import dev.claudefleet.mobile.store.FakePrefs
 import kotlin.test.Test
@@ -49,6 +50,17 @@ class EscalationLaterTest {
         val prefs = FakePrefs()
         prefs.putStringList(EscalationLater.KEY, listOf("2:waiting:4"))
         assertEquals(listOf("2:waiting:4"), EscalationLater(prefs) { 5L }.later.value)
+    }
+
+    @Test
+    fun later_keeps_the_newest_keys_once_each() {
+        val later = EscalationLater { 1_000L }
+        for (i in 1..(LATER_KEPT + 5)) later.putOff("k$i")
+        assertEquals(LATER_KEPT, later.later.value.size)
+        assertEquals("k6", later.later.value.first())
+        later.putOff("k6")
+        assertEquals("k6", later.later.value.last())
+        assertEquals(LATER_KEPT, later.later.value.size)
     }
 
     @Test

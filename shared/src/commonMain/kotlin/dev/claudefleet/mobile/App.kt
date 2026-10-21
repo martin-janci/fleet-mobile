@@ -1992,9 +1992,6 @@ private fun FleetRoute(
                                 // The host's sheet runs the reboot plan's dry run and the lost-conversation scan on opening.
                                 onRecovery = { alias: String -> hostDetail.open(alias); Unit }
                                     .takeIf { (credentials.canWrite && hostCaps.restoreSessions) || hostCaps.discoverLost },
-                                // Only where the hub lists the job to this pairing; the tap opens the review, not the install.
-                                onInstallAgent = { alias: String -> installs.open(alias) }
-                                    .takeIf { credentials.canWrite && hostCaps.installAgent },
                                 onAddHost = { addHost.open(); Unit }.takeIf { addHostState.available },
                             ),
                         )

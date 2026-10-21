@@ -167,12 +167,6 @@ data class OrbitHostsHandlers(
     val onCheck: ((String) -> Unit)? = null,
     /** The reboot plan and the conversations the host has no row for (the host's sheet). */
     val onRecovery: ((String) -> Unit)? = null,
-    /**
-     * Install the agent on a host the hub reaches over SSH (14.19): opens the
-     * review, never installs. Null where the hub does not list the job to
-     * this pairing.
-     */
-    val onInstallAgent: ((String) -> Unit)? = null,
     /** Add a host from the hub's SSH config (the Radar); null where the hub does not list `add_host` to this pairing. */
     val onAddHost: (() -> Unit)? = null,
 )

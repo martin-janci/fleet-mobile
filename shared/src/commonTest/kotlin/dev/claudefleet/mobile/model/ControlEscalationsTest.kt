@@ -83,17 +83,6 @@ class ControlEscalationsTest {
     }
 
     @Test
-    fun later_keeps_the_newest_keys_once_each() {
-        var kept = emptyList<String>()
-        for (i in 1..(LATER_KEPT + 5)) kept = putOff(kept, "k$i")
-        assertEquals(LATER_KEPT, kept.size)
-        assertEquals("k6", kept.first())
-        kept = putOff(kept, "k6")
-        assertEquals("k6", kept.last())
-        assertEquals(LATER_KEPT, kept.size)
-    }
-
-    @Test
     fun a_digests_folded_card_previews_its_first_event() {
         val note = parseFleetPrompt("[fleet events] What changed.\n- pine (#12) finished a turn\n- host htz is unreachable")!!
         assertEquals("pine (#12) finished a turn", note.preview)
