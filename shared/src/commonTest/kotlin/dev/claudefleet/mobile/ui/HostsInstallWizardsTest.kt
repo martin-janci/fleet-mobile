@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.coroutines.CompletableDeferred
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -174,6 +175,31 @@ class HostsInstallWizardsTest {
         fleet.hosts.value = listOf(HostRow(alias = "pine", reachable = true, lastPingedAt = 3))
         runCurrent()
         assertEquals(1, actions.calls.count { it == "discover" }, "once, not on every re-list")
+    }
+
+    /** Review 7: an armed host's restore does the looking; the waiting scan does not run beside it. */
+    @Test
+    fun an_armed_host_that_answers_again_is_scanned_once_after_its_restore() = runTest {
+        val fleet = G58Fleet(listOf(HostRow(alias = "pine", reachable = false, lastPingedAt = 1)), RESTORE_TOOLS)
+        val fake = Restores()
+        val gate = CompletableDeferred<Unit>()
+        val actions = object : HostActions by fake {
+            override suspend fun restore(alias: String): RestoreReport {
+                gate.await()
+                return fake.restore(alias)
+            }
+        }
+        val vm = HostDetailViewModel(fleet, actions, backgroundScope, canWrite = true)
+        vm.open("pine").join()
+        runCurrent()
+        vm.runWhenBack()
+        runCurrent()
+        fleet.hosts.value = listOf(HostRow(alias = "pine", reachable = true, lastPingedAt = 2))
+        runCurrent()
+        assertFalse("discover" in fake.calls, "no scan while the restore runs: ${fake.calls}")
+        gate.complete(Unit)
+        runCurrent()
+        assertEquals(listOf("restore", "discover"), fake.calls.filter { it == "restore" || it == "discover" })
     }
 
     @Test

@@ -123,6 +123,7 @@ import dev.claudefleet.mobile.model.WorkTreePage
 import dev.claudefleet.mobile.model.WorkView
 import dev.claudefleet.mobile.model.WorkViewDraft
 import io.ktor.client.HttpClient
+import io.ktor.client.network.sockets.SocketTimeoutException
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.client.plugins.timeout
@@ -228,7 +229,23 @@ class HubClient(
             else -> null
         }
         val framed = tool in FRAMED_TOOLS || tool in LIFECYCLE_TOOLS || tool in LONG_POLL_TOOLS
-        val result = rpc("tools/call", params, framed, deadline)
+        val result = if (tool in LIFECYCLE_JSON_TOOLS && !framedOnly) {
+            // The JSON mount sends nothing until the reply is whole, so the
+            // ordinary 45 s idle timeout is what notices a dead connection —
+            // raising it to the lifecycle deadline let one silent socket hold
+            // the transcript for five and a half minutes. A read the hub is
+            // still working on past that goes round once more on `/mcp`,
+            // whose keep-alive holds the socket for as long as it takes.
+            // These are reads, so asking twice costs only the bytes.
+            try {
+                rpc("tools/call", params, framed = false, requestTimeoutMs = deadline)
+            } catch (e: HubError.Transport) {
+                if (e.kind != SOCKET_TIMEOUT_KIND) throw e
+                rpc("tools/call", params, framed = true, requestTimeoutMs = deadline)
+            }
+        } else {
+            rpc("tools/call", params, framed, deadline)
+        }
         if (result["isError"]?.asBooleanOrNull() == true) throw toolError(result)
         // Inside the try, not outside it: [HubError] claims to be the closed set
         // every screen branches on, and a payload that does not fit the model
@@ -324,16 +341,14 @@ class HubClient(
             put("params", params)
         }
         val payload = json.encodeToString(JsonObject.serializer(), envelope)
-        // A long deadline on the JSON mount has no keep-alive to hold the
-        // socket open, so the idle timeout moves with it there
-        // ([LIFECYCLE_JSON_TOOLS]); on `/mcp` the 15 s keep-alive does that.
-        val idleTimeoutMs = requestTimeoutMs.takeIf { !framed && !framedOnly }
+        // Only the whole-request deadline moves; the socket idle timeout stays
+        // the ordinary one on either mount, so a dead connection is noticed
+        // in 45 s ([LIFECYCLE_JSON_TOOLS] says what a slow JSON read does).
         var (status, body) = send(
             mountFor(framed),
             payload,
             authenticated = true,
             requestTimeoutMs = requestTimeoutMs,
-            socketTimeoutMs = idleTimeoutMs,
         )
         if (status == 404 && !framedOnly) {
             // The hub predates the JSON mount. Note it once and never ask
@@ -2597,17 +2612,13 @@ class HubClient(
         body: String,
         authenticated: Boolean,
         requestTimeoutMs: Long? = null,
-        socketTimeoutMs: Long? = null,
     ): Pair<Int, String> = try {
         val response: HttpResponse = http.post(url) {
-            // On the framed mount only the whole-request deadline moves: the
-            // hub's 15 s keep-alive is what keeps the socket from going idle.
-            // A slow call on the JSON mount moves the socket timeout too.
-            if (requestTimeoutMs != null || socketTimeoutMs != null) {
-                timeout {
-                    if (requestTimeoutMs != null) requestTimeoutMillis = requestTimeoutMs
-                    if (socketTimeoutMs != null) socketTimeoutMillis = socketTimeoutMs
-                }
+            // Only the whole-request deadline moves: on the framed mount the
+            // hub's 15 s keep-alive keeps the socket from going idle, and on
+            // the JSON mount the idle timeout is what notices a dead one.
+            if (requestTimeoutMs != null) {
+                timeout { requestTimeoutMillis = requestTimeoutMs }
             }
             contentType(ContentType.Application.Json)
             // rmcp's streamable-HTTP transport requires both, and answers 406
@@ -2827,12 +2838,19 @@ class HubClient(
 
         /**
          * Tools the hub bounds at `Deadline::Lifecycle` that stay on the
-         * JSON mount: they get [HUB_LIFECYCLE_TIMEOUT_MS] (and the socket
-         * timeout with it) but not the framing. The two transcript reads
-         * (review w24-2) are the phone's largest and most frequent replies —
-         * every turn of an open session, every older page, every tool tap —
-         * and `/mcp` answers `text/event-stream`, which no proxy compresses:
+         * JSON mount: they get [HUB_LIFECYCLE_TIMEOUT_MS] as the request
+         * deadline but not the framing. The two transcript reads (review
+         * w24-2) are the phone's largest and most frequent replies — every
+         * turn of an open session, every older page, every tool tap — and
+         * `/mcp` answers `text/event-stream`, which no proxy compresses:
          * about six times the bytes on mobile data for nothing.
+         *
+         * The socket idle timeout stays [HUB_CALL_TIMEOUT_MS]: with no
+         * keep-alive on this mount it is the only thing that notices a dead
+         * connection, and the session screen runs every transcript read
+         * behind one lock. A read that goes silent that long is asked once
+         * more on the framed mount (see [call]) — the hub may simply still be
+         * parsing a long transcript.
          */
         val LIFECYCLE_JSON_TOOLS = setOf(
             "session_conversation",
@@ -2922,6 +2940,9 @@ private const val WORK_SEARCH_LIMIT = 50
 private const val SEARCH_LIMIT = 20
 
 internal const val HUB_CALL_TIMEOUT_MS = 45_000L
+
+/** [HubError.Transport.kind] of a socket that went silent past its idle timeout, on every engine. */
+private val SOCKET_TIMEOUT_KIND: String? = SocketTimeoutException::class.simpleName
 internal const val HUB_CONNECT_TIMEOUT_MS = 15_000L
 
 /**

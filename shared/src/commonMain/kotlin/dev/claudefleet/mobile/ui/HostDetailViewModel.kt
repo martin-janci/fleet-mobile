@@ -108,7 +108,12 @@ class HostDetailViewModel(
      * open and connected, and the sheet says so. Kept across closing the
      * sheet, which [Local] is not.
      */
-    private data class Back(val armed: Set<String> = emptySet(), val notes: Map<String, String> = emptyMap())
+    private data class Back(
+        val armed: Set<String> = emptySet(),
+        val notes: Map<String, String> = emptyMap(),
+        /** Armed hosts whose restore is under way: no longer [armed], not yet done. */
+        val running: Set<String> = emptySet(),
+    )
 
     private val back = MutableStateFlow(Back())
 
@@ -128,7 +133,8 @@ class HostDetailViewModel(
             }
                 .distinctUntilChanged()
                 .collect { alias ->
-                    if (alias != null && alias !in back.value.armed) discover(alias)
+                    val b = back.value
+                    if (alias != null && alias !in b.armed && alias !in b.running) discover(alias)
                 }
         }
     }
@@ -251,16 +257,22 @@ class HostDetailViewModel(
     /** The armed restore for [alias], once: disarmed before the call, so a second re-list cannot run it twice. */
     private suspend fun runBack(alias: String) {
         if (alias !in back.value.armed) return
-        back.update { it.copy(armed = it.armed - alias) }
-        if (!canWrite || !fleet.capabilities.value.restoreSessions) return
+        if (!canWrite || !fleet.capabilities.value.restoreSessions) {
+            back.update { it.copy(armed = it.armed - alias) }
+            return
+        }
+        // Marked running in the same step that disarms it, so the waiting
+        // scan does not take "no longer armed" for "nothing will look".
+        back.update { it.copy(armed = it.armed - alias, running = it.running + alias) }
         val note = try {
             backNote(alias, actions.restore(alias))
         } catch (e: CancellationException) {
+            back.update { it.copy(running = it.running - alias) }
             throw e
         } catch (t: Throwable) {
             "$alias answered again, but the restore failed: ${friendly(t).body}"
         }
-        back.update { it.copy(notes = it.notes + (alias to note)) }
+        back.update { it.copy(notes = it.notes + (alias to note), running = it.running - alias) }
         if (local.value.alias == alias) checkLost().join()
     }
 
