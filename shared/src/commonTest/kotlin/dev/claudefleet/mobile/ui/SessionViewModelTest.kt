@@ -4216,6 +4216,28 @@ class SessionViewModelTest {
         assertEquals("keep the ticket key", vm.state.value.tune?.ask, "the typed ask stays in the field")
     }
 
+    /** Review w24: a re-tune of a rewrite that the hub calls unchanged still offers that rewrite. */
+    @Test
+    fun a_retune_of_a_rewrite_answered_unchanged_can_still_be_used() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(tools = setOf(HubCapabilities.SESSION_PROMPT_TUNE)), actions, backgroundScope)
+        vm.onDraftChange("make the tests pass")
+        runCurrent()
+        vm.openTune()
+        vm.tune()?.join()
+        runCurrent()
+        vm.onTuneRewriteChange("Rewritten prompt, edited")
+        actions.tuneAnswer = TuneAnswer(prompt = "Rewritten prompt, edited", unchanged = true, model = "claude-haiku")
+        vm.tune("Shorter")?.join()
+        runCurrent()
+
+        assertEquals(false, vm.state.value.tune?.answer?.unchanged, "measured against the box's draft, not the rewrite")
+        vm.acceptTune()
+        runCurrent()
+        assertEquals("Rewritten prompt, edited", vm.state.value.draft)
+        assertNull(vm.state.value.tune)
+    }
+
     @Test
     fun discard_leaves_the_draft_and_an_unchanged_answer_offers_nothing_to_use() = runTest {
         val actions = FakeActions().apply { tuneAnswer = TuneAnswer(prompt = "keep going", unchanged = true, model = "claude-haiku") }

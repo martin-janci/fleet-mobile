@@ -152,7 +152,7 @@ private fun FindingRow(f: AutofixFinding, nowSeconds: Long, state: AutofixUiStat
         findingStateWords(f)?.let {
             Text(it, color = if (f.failed) o.usageWarn else o.fgMuted, fontSize = 13.sp)
         }
-        autoWords(f, nowSeconds)?.let { Text(it, color = o.fgMuted, fontSize = 13.sp) }
+        autoWords(f, nowSeconds, canApply = state.canApply)?.let { Text(it, color = o.fgMuted, fontSize = 13.sp) }
         if (details) {
             if (f.evidence.isNotEmpty()) {
                 Label("What fleet saw")

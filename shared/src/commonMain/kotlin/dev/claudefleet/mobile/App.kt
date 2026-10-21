@@ -1090,9 +1090,7 @@ private fun ControlTab(
     if (autonomyOn) LaunchedEffect(autonomy) { autonomy.load() }
     // The escalation cards: the rows Needs you reads (shared-in sessions are their owners' to answer).
     val laterKeys by container.escalationLater.later.collectAsState()
-    val controlHosts by repository.hosts.collectAsState()
-    // A host that answers again ends its Later, so its next outage is a card (review w21-1).
-    LaunchedEffect(controlHosts) { container.escalationLater.forgetRecoveredHosts(controlHosts) }
+    // A host that answers again ends its Later at FleetRoute, whichever tab is on screen (review w21-1, w24).
     val escalationCards = remember(controlRows, controlAccess, controlState.sessionId, laterKeys, settingsCaps.ask) {
         escalations(controlRows.filter { controlAccess.levelFor(it) == null }, controlState.sessionId, laterKeys.toSet(), formsShown = settingsCaps.ask)
     }
@@ -1230,6 +1228,14 @@ private fun FleetRoute(
         }
     }
 
+    // A host that answers again ends its Later, so its next outage is a card
+    // (review w21-1). Here, not in the Control tab: on the phone Control is
+    // one tab of several, and a host that came back and went down again
+    // while another tab was on screen stayed put off (review w24).
+    LaunchedEffect(repository) {
+        repository.hosts.collect { container.escalationLater.forgetRecoveredHosts(it) }
+    }
+
     // A platform with no always-on watcher (iOS): while the app is open, keep
     // the seen set the background check reads, so the first check after
     // closing the app does not announce what the person just looked at.
@@ -1318,6 +1324,11 @@ private fun FleetRoute(
     val debugDevicesState by debugDevices.state.collectAsState()
     val autofix = remember(repository, scope) { AutofixViewModel(repository, container.autofixActions, scope, credentials.canWrite) }
     val autofixState by autofix.state.collectAsState()
+    // Read once the hub serves it, whichever screen is first: a chat `fix`
+    // card's wording keys on its `can_apply`, and a trusted phone that went
+    // straight to a session or Control was told someone else applies the
+    // fix until More was opened (review w24).
+    LaunchedEffect(autofix, autofixState.available) { if (autofixState.available) autofix.refresh() }
     val today = remember(repository, scope) {
         TodayViewModel(
             fleet = repository,

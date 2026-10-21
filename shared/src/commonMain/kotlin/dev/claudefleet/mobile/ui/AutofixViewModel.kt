@@ -238,18 +238,21 @@ fun findingStateWords(f: AutofixFinding): String? = when {
 /**
  * For a safe automatic fix: whether fleet runs it by itself, and when, or
  * that it stopped (as the desktop's `autoWords`). Null for any other fix.
+ * [canApply] is whether the sheet draws this row's Fix button: without one,
+ * "fix it here" would send the person looking for a button that is not there.
  */
-fun autoWords(f: AutofixFinding, nowSeconds: Long): String? {
+fun autoWords(f: AutofixFinding, nowSeconds: Long, canApply: Boolean = true): String? {
     val fix = f.fix ?: return null
     if (fix.safety != "safe" || !fix.auto) return null
     if (f.state != "open" && f.state != APPLY_FAILED) return null
     val runs = f.autoRuns ?: return "Safe: fleet runs this fix by itself unless automatic fixes are off."
     if (!runs) {
+        val where = if (canApply) "fix it here" else "fix it from the desktop"
         if (f.attempts > 0) {
             val times = if (f.attempts == 1) "once" else "${f.attempts} times"
-            return "Fleet tried this fix $times and stopped trying by itself; fix it here."
+            return "Fleet tried this fix $times and stopped trying by itself; $where."
         }
-        return "Fleet will not run this fix by itself (automatic fixes are off or paused); fix it here."
+        return "Fleet will not run this fix by itself (automatic fixes are off or paused); $where."
     }
     val mins = ((f.autoNextAt ?: nowSeconds) - nowSeconds + 59) / 60
     return if (mins <= 1) "Fleet runs this fix by itself on its next check." else "Fleet tries this fix again by itself in ~$mins min."

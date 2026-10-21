@@ -28,6 +28,8 @@ import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.json
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
@@ -283,6 +285,87 @@ class MissionsTest {
         fleet.workChanges.emit(2)
         runCurrent()
         assertEquals(listOf("missions", "mission 1"), actions.calls)
+    }
+
+    /** Review w24: nothing read yet is nothing to re-read, and a press in flight reads after itself. */
+    @Test
+    fun a_work_change_before_open_or_during_a_press_reads_nothing() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val fake = FakeMissionActions()
+        val actions = object : MissionActions by fake {
+            override suspend fun start(missionId: Long, step: String?): StartOutcome {
+                gate.await()
+                return fake.start(missionId, step)
+            }
+        }
+        val fleet = MissionsFleet(loop)
+        val vm = MissionsViewModel(fleet, actions, backgroundScope, canWrite = true)
+        runCurrent()
+        fleet.workChanges.emit(1)
+        runCurrent()
+        assertEquals(emptyList(), fake.calls, "nothing read yet")
+
+        advanceTimeBy(2_001)
+        vm.open().join()
+        vm.select(1).join()
+        runCurrent()
+        fake.calls.clear()
+        val press = vm.start()
+        runCurrent()
+        assertEquals("all", vm.state.value.busy)
+        fleet.workChanges.emit(2)
+        runCurrent()
+        assertFalse("missions" in fake.calls, "a press in flight: ${fake.calls}")
+        gate.complete(Unit)
+        press.join()
+    }
+
+    /** Review w24: a background re-read that answers after Back does not pull the person back in. */
+    @Test
+    fun a_late_work_change_reread_does_not_undo_back_or_a_new_pick() = runTest {
+        val fake = FakeMissionActions()
+        var hold: CompletableDeferred<Unit>? = null
+        val actions = object : MissionActions by fake {
+            override suspend fun mission(missionId: Long): MissionDetail {
+                hold?.await()
+                return fake.mission(missionId)
+            }
+        }
+        val fleet = MissionsFleet(loop)
+        val vm = MissionsViewModel(fleet, actions, backgroundScope, canWrite = true)
+        vm.open().join()
+        vm.select(1).join()
+        runCurrent()
+        val gate = CompletableDeferred<Unit>()
+        hold = gate
+        fleet.workChanges.emit(2)
+        runCurrent()
+        vm.back()
+        gate.complete(Unit)
+        runCurrent()
+        assertNull(vm.state.value.detail, "Back stays back")
+        assertFalse(vm.state.value.loading)
+        assertNull(vm.state.value.error)
+    }
+
+    /** Review w24: a re-read the person did not ask for raises no banner when it fails. */
+    @Test
+    fun a_failed_work_change_reread_raises_no_banner() = runTest {
+        val fake = FakeMissionActions()
+        var fail = false
+        val actions = object : MissionActions by fake {
+            override suspend fun missions(): List<Mission> =
+                if (fail) throw HubError.Transport(IllegalStateException("x")) else fake.missions()
+        }
+        val fleet = MissionsFleet(loop)
+        val vm = MissionsViewModel(fleet, actions, backgroundScope, canWrite = true)
+        vm.open().join()
+        runCurrent()
+        fail = true
+        fleet.workChanges.emit(2)
+        runCurrent()
+        assertNull(vm.state.value.error)
+        assertFalse(vm.state.value.listFailed)
     }
 
     @Test

@@ -162,7 +162,19 @@ class BulkViewModel(
     private fun run(action: BulkAction, ids: Set<Long>, merge: Boolean): Job = scope.launch {
         val l = local.value
         if (!canWrite || l.running || ids.isEmpty()) return@launch
-        if (fleet.status.value !is ConnectionStatus.Connected) return@launch
+        if (fleet.status.value !is ConnectionStatus.Connected) {
+            // Not silently: a sheet that closed on Send or Kill must not leave
+            // the person thinking it went. Each picked row says it did not,
+            // and Retry stays offered for when the hub is back.
+            val rows = fleet.sessions.value
+            val offline = ids.mapNotNull { id -> rows.firstOrNull { it.id == id } }
+                .map { BulkOutcome(it.id, it.displayName, ok = false, reason = NOT_CONNECTED) }
+            local.update { cur ->
+                val merged = if (merge) cur.outcome.orEmpty().map { o -> offline.firstOrNull { it.sessionId == o.sessionId } ?: o } else offline
+                cur.copy(outcome = merged, action = action)
+            }
+            return@launch
+        }
         if (action == BulkAction.Archive && (archiveOne == null || !fleet.capabilities.value.archiveSession)) return@launch
         val access = fleet.access.value
         // Through the hub's queue where it has one, as the desktop's bulk
@@ -216,6 +228,9 @@ class BulkViewModel(
         }
     }
 }
+
+/** A bulk action's line for each picked session while the hub is not connected. */
+internal const val NOT_CONNECTED = "not connected to the hub"
 
 /**
  * Why a bulk prompt skips [row], or null: a shell would run the words as a

@@ -2211,7 +2211,7 @@ internal fun killChangesLine(files: List<ChangedFile>): String {
     val names = files.take(3).joinToString(", ") { it.path.substringAfterLast('/') }
     val more = if (files.size > 3) " and ${files.size - 3} more" else ""
     val n = if (files.size == 1) "1 uncommitted file" else "${files.size} uncommitted files"
-    return "Leaves $n: $names$more. Retire commits and pushes them first."
+    return "Leaves $n: $names$more. Safe remove commits and pushes them first."
 }
 
 /**

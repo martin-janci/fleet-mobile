@@ -109,6 +109,15 @@ class AutofixTest {
             "Fleet tried this fix 3 times and stopped trying by itself; fix it here.",
             autoWords(open.copy(state = "apply_failed", attempts = 3, autoRuns = false), 1000),
         )
+        // Review w24: a phone that draws no Fix button does not say "fix it here".
+        assertEquals(
+            "Fleet tried this fix 3 times and stopped trying by itself; fix it from the desktop.",
+            autoWords(open.copy(state = "apply_failed", attempts = 3, autoRuns = false), 1000, canApply = false),
+        )
+        assertEquals(
+            "Fleet will not run this fix by itself (automatic fixes are off or paused); fix it from the desktop.",
+            autoWords(open.copy(autoRuns = false), 1000, canApply = false),
+        )
     }
 
     @Test

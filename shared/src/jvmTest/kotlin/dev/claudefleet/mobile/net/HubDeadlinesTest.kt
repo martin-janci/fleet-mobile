@@ -52,19 +52,32 @@ class HubDeadlinesTest {
         val text = hubClient().readText()
         val called = Regex("""call\(\s*"([a-z_]+)"""").findAll(text).map { it.groupValues[1] }.toSet()
         assertTrue(called.isNotEmpty(), "found no tool calls at all — the pattern has gone stale")
-        val lifecycle = namesIn(text, "LIFECYCLE_TOOLS")
+        val lifecycle = namesIn(text, "LIFECYCLE_TOOLS") + namesIn(text, "LIFECYCLE_JSON_TOOLS")
         val longPoll = namesIn(text, "LONG_POLL_TOOLS")
 
         assertEquals(
             emptySet(),
             (called intersect hubLifecycle) - lifecycle - longPoll - exempt,
-            "a tool the hub bounds at Deadline::Lifecycle is on the 45 s deadline: add it to LIFECYCLE_TOOLS",
+            "a tool the hub bounds at Deadline::Lifecycle is on the 45 s deadline: add it to LIFECYCLE_TOOLS (or LIFECYCLE_JSON_TOOLS)",
         )
         assertEquals(
             emptySet(),
             (called intersect hubLongPoll) - longPoll - exempt,
             "a tool the hub bounds at Deadline::LongPoll is not on the long-poll deadline: add it to LONG_POLL_TOOLS",
         )
+    }
+
+    /**
+     * The transcript reads take the long deadline without the framing: `/mcp`
+     * answers `text/event-stream`, which no proxy compresses, and these are
+     * the phone's largest, most frequent replies.
+     */
+    @Test
+    fun the_transcript_reads_keep_the_compressed_json_mount() {
+        val text = hubClient().readText()
+        val json = namesIn(text, "LIFECYCLE_JSON_TOOLS")
+        assertEquals(setOf("session_conversation", "session_tool_detail"), json)
+        assertEquals(emptySet(), json intersect namesIn(text, "LIFECYCLE_TOOLS"), "a JSON-mount read must not also be framed")
     }
 
     /** The quoted names inside `val <name> = setOf( … )`. */

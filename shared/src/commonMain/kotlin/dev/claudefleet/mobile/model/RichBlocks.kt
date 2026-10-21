@@ -822,9 +822,21 @@ fun checkUiBlock(raw: String): UiCheck {
             val wizard = str(v, "wizard", p, "", 64, required = true)
             val label = UI_WIZARDS.firstOrNull { it.first == wizard }?.second
             if (wizard != null && label == null) p.add("", "`wizard` must be one of ${UI_WIZARDS.joinToString(", ") { it.first }}")
-            val definition = str(v, "definition", p, "", 64)
-            if (wizard == "fleet_agent" && definition.isNullOrBlank()) p.add("", "a `fleet_agent` wizard names its `definition`")
-            if (wizard != null && wizard != "fleet_agent" && definition != null) p.add("", "`definition` is for the `fleet_agent` wizard")
+            // As the hub's chat_blocks.rs: a `fleet_agent` wizard's
+            // `definition` is a key (letters, digits and . _ : -), not free
+            // text, so a name the desktop refuses is not drawn here either.
+            val fleetAgent = (v["wizard"] as? JsonPrimitive)?.takeIf { it.isString }?.content == "fleet_agent"
+            val definition = when {
+                v["definition"] == null || v["definition"] is JsonNull -> {
+                    if (fleetAgent) p.add("", "a `fleet_agent` wizard names its `definition`")
+                    null
+                }
+                !fleetAgent -> {
+                    p.add("", "`definition` is for the `fleet_agent` wizard")
+                    null
+                }
+                else -> key(v, "definition", p, "")
+            }
             val why = str(v, "why", p, "", 500)
             val values = v["values"]
             if (values != null && values !is JsonNull && values !is JsonObject) p.add("", "`values` must be an object of answers by field name")

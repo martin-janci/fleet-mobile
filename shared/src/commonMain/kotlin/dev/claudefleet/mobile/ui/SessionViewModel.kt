@@ -1710,8 +1710,16 @@ class SessionViewModel(
         local.update { l -> l.copy(tune = l.tune?.let { it.copy(ask = shown, running = true, error = null) }) }
         val job = scope.launch {
             try {
-                val answer = actions.tunePrompt(sessionId, draft, steer.trim(), history)
-                local.update { l -> l.copy(tune = l.tune?.let { it.copy(running = false, answer = answer, rewrite = answer.prompt) }) }
+                val got = actions.tunePrompt(sessionId, draft, steer.trim(), history)
+                local.update { l ->
+                    // The hub's `unchanged` compares against what was sent. A
+                    // re-tune of a rewrite sends the rewrite, so "unchanged"
+                    // there means "no further change" — the composer still
+                    // holds the untuned draft, and Use this must stay on offer.
+                    // Measured against the box's draft instead (review w24).
+                    val answer = if (rewrite != null) got.copy(unchanged = got.prompt.trim() == l.draft.trim()) else got
+                    l.copy(tune = l.tune?.let { it.copy(running = false, answer = answer, rewrite = answer.prompt) })
+                }
             } catch (e: CancellationException) {
                 local.update { l -> l.copy(tune = l.tune?.let { it.copy(running = false) }) }
                 throw e
