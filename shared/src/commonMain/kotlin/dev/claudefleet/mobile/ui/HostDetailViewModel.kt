@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -92,6 +93,8 @@ class HostDetailViewModel(
         val restored: RestoreReport? = null,
         val candidates: List<LostCandidate>? = null,
         val discoverNote: String? = null,
+        /** The scan was held back for a host that does not answer: it runs when the host does. */
+        val scanWaits: Boolean = false,
         val resuming: String? = null,
         val error: Friendly? = null,
     )
@@ -115,6 +118,18 @@ class HostDetailViewModel(
         scope.launch {
             combine(fleet.hosts, back) { hosts, b -> b.armed.filter { a -> hosts.any { it.alias == a && it.reachable } } }
                 .collect { due -> due.forEach { runBack(it) } }
+        }
+        // The sheet said the scan runs when the host answers again: keep that
+        // promise while the sheet is open (review w24). An armed host's own
+        // restore looks again by itself ([runBack]), so it is left to that.
+        scope.launch {
+            combine(fleet.hosts, local) { hosts, l ->
+                l.alias?.takeIf { a -> l.scanWaits && hosts.any { it.alias == a && it.reachable } }
+            }
+                .distinctUntilChanged()
+                .collect { alias ->
+                    if (alias != null && alias !in back.value.armed) discover(alias)
+                }
         }
     }
 
@@ -185,17 +200,24 @@ class HostDetailViewModel(
             // only time out, so it waits for the host (review w23-10).
             val host = fleet.hosts.value.firstOrNull { it.alias == alias }
             if (host != null && host.isSignalLost) {
-                local.update { if (it.alias == alias) it.copy(discoverNote = "Untracked conversations: looked for when $alias answers again.") else it }
-            } else {
-                local.update { if (it.alias == alias) it.copy(discoverNote = null) else it }
-                val found = guarded { actions.discover(alias) }
                 local.update {
-                    when {
-                        it.alias != alias -> it
-                        found != null -> it.copy(candidates = found, discoverNote = null)
-                        else -> it.copy(discoverNote = "Could not look for untracked conversations. Check again to retry.")
-                    }
+                    if (it.alias == alias) it.copy(discoverNote = "Untracked conversations: looked for when $alias answers again.", scanWaits = true) else it
                 }
+            } else {
+                discover(alias)
+            }
+        }
+    }
+
+    /** The scan for untracked conversations on [alias], over the hub's SSH. */
+    private suspend fun discover(alias: String) {
+        local.update { if (it.alias == alias) it.copy(discoverNote = null, scanWaits = false) else it }
+        val found = guarded { actions.discover(alias) }
+        local.update {
+            when {
+                it.alias != alias -> it
+                found != null -> it.copy(candidates = found, discoverNote = null)
+                else -> it.copy(discoverNote = "Could not look for untracked conversations. Check again to retry.")
             }
         }
     }

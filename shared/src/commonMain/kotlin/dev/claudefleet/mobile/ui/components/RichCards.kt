@@ -131,11 +131,11 @@ class ChatHost(
     val screenshot: (suspend (Long) -> DeviceScreenshot)? = null,
     /** The hub serves `autofix` here: a `fix` card points at More › Problems & fixes. */
     val autofix: Boolean = false,
-    /** This token may apply a fix (it writes). */
-    val autofixWrite: Boolean = false,
+    /** The hub lets this device apply a fix (`autofix list`'s `can_apply`); false until read. */
+    val autofixCanApply: Boolean = false,
 ) {
     fun copyWith(progress: ProgressBoard, nowSeconds: Long) =
-        ChatHost(settings, mayDecideSettings, progress, nowSeconds, devices, screenshot, autofix, autofixWrite)
+        ChatHost(settings, mayDecideSettings, progress, nowSeconds, devices, screenshot, autofix, autofixCanApply)
 
     companion object {
         val None = ChatHost()
@@ -392,7 +392,7 @@ internal fun UiBlockCard(block: UiBlock, raw: String) {
             Label("Fleet problem")
             Text("Autofix finding #${block.findingId}", style = MaterialTheme.typography.bodyMedium)
             val host = LocalChatHost.current
-            Note(fixCardNote(host.autofix, host.autofixWrite))
+            Note(fixCardNote(host.autofix, host.autofixCanApply))
         }
     }
 }

@@ -40,6 +40,7 @@ import dev.claudefleet.mobile.ui.kit.BottomSheet
 import dev.claudefleet.mobile.ui.kit.DotWave
 import dev.claudefleet.mobile.ui.kit.SheetAction
 import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
+import dev.claudefleet.mobile.ui.components.SectionLabel
 import dev.claudefleet.mobile.ui.theme.Fleet
 
 data class AutofixHandlers(
@@ -152,7 +153,7 @@ private fun FindingRow(f: AutofixFinding, nowSeconds: Long, state: AutofixUiStat
         findingStateWords(f)?.let {
             Text(it, color = if (f.failed) o.usageWarn else o.fgMuted, fontSize = 13.sp)
         }
-        autoWords(f, nowSeconds)?.let { Text(it, color = o.fgMuted, fontSize = 13.sp) }
+        autoWords(f, nowSeconds, canApply = state.canApply)?.let { Text(it, color = o.fgMuted, fontSize = 13.sp) }
         if (details) {
             if (f.evidence.isNotEmpty()) {
                 Label("What fleet saw")
@@ -197,6 +198,4 @@ private fun FixedRow(f: AutofixFinding, nowSeconds: Long) {
 }
 
 @Composable
-private fun Label(text: String) {
-    Text(text.uppercase(), color = Fleet.colors.fgMuted, style = Fleet.type.text2xs, letterSpacing = 0.5.sp, modifier = Modifier.padding(top = 4.dp))
-}
+private fun Label(text: String) = SectionLabel(text, Modifier.padding(top = 4.dp), letterSpacing = 0.5.sp)

@@ -96,6 +96,14 @@ class MissionsViewModel(
         val error: Friendly? = null,
         val loaded: Boolean = false,
         val listFailed: Boolean = false,
+        /**
+         * Bumped by every move of the person's (open, pick, back, close) and
+         * around every press: a mission read that started before the latest
+         * bump answers for a sheet that is no longer on screen, so it is
+         * dropped rather than pulling the person back into a mission they
+         * left or overwriting what a press just read (review w24).
+         */
+        val pick: Long = 0,
     )
 
     private val local = MutableStateFlow(Local())
@@ -140,15 +148,16 @@ class MissionsViewModel(
         // it, so the Control strip, the Missions pill and Go act on what is
         // true now (review w21-2; the desktop's `onWorkChangedDebounced`).
         // Not while an action of this phone's is in flight: it reads after.
+        // Quiet: the person did nothing, so a failed re-read raises no banner.
         scope.launch {
             fleet.workChanges.throttleLatest(WORK_REREAD_MS).collect {
-                if (local.value.loaded && local.value.busy == null && state.value.available) read()
+                if (local.value.loaded && local.value.busy == null && state.value.available) read(quiet = true)
             }
         }
     }
 
     fun open(): Job = scope.launch {
-        local.update { it.copy(open = true, detail = null, results = null, notice = null, error = null) }
+        local.update { it.copy(open = true, detail = null, results = null, notice = null, error = null, pick = it.pick + 1) }
         read()
     }
 
@@ -157,24 +166,24 @@ class MissionsViewModel(
      * screen lists them itself and hands a tap to the sheet's detail.
      */
     fun openOne(missionId: Long): Job = scope.launch {
-        local.update { it.copy(open = true, detail = null, results = null, notice = null, error = null) }
+        local.update { it.copy(open = true, detail = null, results = null, notice = null, error = null, pick = it.pick + 1) }
         readOne(missionId)
     }
 
     fun close() {
-        local.update { it.copy(open = false, detail = null, results = null, notice = null) }
+        local.update { it.copy(open = false, detail = null, results = null, notice = null, pick = it.pick + 1) }
     }
 
     fun refresh(): Job = scope.launch { read() }
 
     fun select(missionId: Long): Job = scope.launch {
-        local.update { it.copy(results = null, notice = null, error = null) }
+        local.update { it.copy(results = null, notice = null, error = null, pick = it.pick + 1) }
         readOne(missionId)
     }
 
     /** Back from a mission to the list. */
     fun back() {
-        local.update { it.copy(detail = null, results = null, notice = null) }
+        local.update { it.copy(detail = null, results = null, notice = null, pick = it.pick + 1) }
     }
 
     fun dismissError() {
@@ -287,38 +296,48 @@ class MissionsViewModel(
     private fun act(busy: String, call: suspend (Long) -> Unit): Job = scope.launch {
         val id = local.value.detail?.mission?.id ?: return@launch
         if (local.value.busy != null) return@launch
-        local.update { it.copy(busy = busy, error = null, results = null, notice = null) }
+        local.update { it.copy(busy = busy, error = null, results = null, notice = null, pick = it.pick + 1) }
         try {
             call(id)
-            local.update { it.copy(busy = null) }
+            local.update { it.copy(busy = null, pick = it.pick + 1) }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(busy = null, error = friendly(t)) }
+            local.update { it.copy(busy = null, error = friendly(t), pick = it.pick + 1) }
         }
         readOne(id)
     }
 
-    private suspend fun read() {
-        local.update { it.copy(loading = true) }
+    /**
+     * The list, then the open mission. [quiet] is a re-read nobody asked for
+     * (a work change): it shows no spinner and no banner, and a failure keeps
+     * what is on screen rather than marking the list failed.
+     */
+    private suspend fun read(quiet: Boolean = false) {
+        if (!quiet) local.update { it.copy(loading = true) }
         try {
             val missions = actions.missions()
-            local.update { it.copy(loading = false, missions = missions, loaded = true, listFailed = false) }
-            local.value.detail?.mission?.id?.let { readOne(it) }
+            local.update { it.copy(loading = if (quiet) it.loading else false, missions = missions, loaded = true, listFailed = false) }
+            local.value.detail?.mission?.id?.let { readOne(it, quiet) }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(loading = false, error = friendly(t), listFailed = true) }
+            if (!quiet) local.update { it.copy(loading = false, error = friendly(t), listFailed = true) }
         }
     }
 
-    private suspend fun readOne(missionId: Long) {
-        local.update { it.copy(loading = true) }
+    private suspend fun readOne(missionId: Long, quiet: Boolean = false) {
+        val pick = local.value.pick
+        if (!quiet) local.update { it.copy(loading = true) }
         try {
             val detail = actions.mission(missionId)
             local.update { l ->
+                val loading = if (quiet) l.loading else false
+                // The person moved, or a press ran, since this read began:
+                // what it answers is no longer what the sheet shows.
+                if (l.pick != pick) return@update l.copy(loading = loading)
                 l.copy(
-                    loading = false,
+                    loading = loading,
                     detail = detail,
                     // The list line follows the mission's state; its counts
                     // are the list's own, which the detail may not carry.
@@ -330,7 +349,7 @@ class MissionsViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(loading = false, error = friendly(t)) }
+            if (!quiet) local.update { it.copy(loading = false, error = friendly(t)) }
         }
     }
 }

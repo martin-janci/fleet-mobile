@@ -324,6 +324,7 @@ private class FakeActions : SessionActions {
     var headroom = Headroom()
     val headroomAsked = mutableListOf<Pair<String, String?>>()
     val restartedUnder = mutableListOf<String>()
+    val restartedOverLimit = mutableListOf<String>()
 
     val timings = mutableListOf<SendLaterTiming>()
 
@@ -376,8 +377,9 @@ private class FakeActions : SessionActions {
         return headroom
     }
 
-    override suspend fun restartUnder(sessionId: Long, profile: String) {
+    override suspend fun restartUnder(sessionId: Long, profile: String, overLimitOk: Boolean) {
         restartedUnder += profile
+        if (overLimitOk) restartedOverLimit += profile
     }
 
     val reviews = mutableListOf<String>()
@@ -4214,6 +4216,28 @@ class SessionViewModelTest {
         assertEquals("keep the ticket key", vm.state.value.tune?.ask, "the typed ask stays in the field")
     }
 
+    /** Review w24: a re-tune of a rewrite that the hub calls unchanged still offers that rewrite. */
+    @Test
+    fun a_retune_of_a_rewrite_answered_unchanged_can_still_be_used() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(tools = setOf(HubCapabilities.SESSION_PROMPT_TUNE)), actions, backgroundScope)
+        vm.onDraftChange("make the tests pass")
+        runCurrent()
+        vm.openTune()
+        vm.tune()?.join()
+        runCurrent()
+        vm.onTuneRewriteChange("Rewritten prompt, edited")
+        actions.tuneAnswer = TuneAnswer(prompt = "Rewritten prompt, edited", unchanged = true, model = "claude-haiku")
+        vm.tune("Shorter")?.join()
+        runCurrent()
+
+        assertEquals(false, vm.state.value.tune?.answer?.unchanged, "measured against the box's draft, not the rewrite")
+        vm.acceptTune()
+        runCurrent()
+        assertEquals("Rewritten prompt, edited", vm.state.value.draft)
+        assertNull(vm.state.value.tune)
+    }
+
     @Test
     fun discard_leaves_the_draft_and_an_unchanged_answer_offers_nothing_to_use() = runTest {
         val actions = FakeActions().apply { tuneAnswer = TuneAnswer(prompt = "keep going", unchanged = true, model = "claude-haiku") }
@@ -4699,8 +4723,32 @@ class SessionViewModelTest {
         vm.confirmAccountSwitch { if (it == "acc-b") "me@home" else null }.join()
         runCurrent()
         assertEquals(listOf(""), actions.restartedUnder, "the host's own login is the empty profile")
+        assertTrue(actions.restartedOverLimit.isEmpty(), "under the line: no over_limit_ok")
         assertNull(vm.state.value.accountSwitch)
         assertEquals("Resumed under me@home.", vm.state.value.limitNotice)
+    }
+
+    /** A login the picker marks "at its limit" was picked knowing it: the switch says so, or the hub refuses `E_ACCOUNT_LIMIT`. */
+    @Test
+    fun switch_account_from_details_onto_a_login_past_the_line_sends_over_limit_ok() = runTest {
+        val actions = FakeActions().apply {
+            headroom = Headroom(
+                pauseAtPct = 90.0,
+                logins = listOf(HostLogin("work", "acc-a", 30.0), HostLogin("spare", "acc-c", 92.0)),
+            )
+        }
+        val fleet = FakeFleetState(listOf(running)).apply {
+            capabilities.value = HubCapabilities(tools = switchTools, params = mapOf("restart_session" to setOf("session_id", "profile")))
+        }
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+        vm.openAccountSwitch().join()
+        runCurrent()
+        vm.pickAccountSwitch(HostLogin("spare", "acc-c", 92.0))
+        vm.confirmAccountSwitch().join()
+        runCurrent()
+        assertEquals(listOf("spare"), actions.restartedUnder)
+        assertEquals(listOf("spare"), actions.restartedOverLimit)
     }
 
     @Test

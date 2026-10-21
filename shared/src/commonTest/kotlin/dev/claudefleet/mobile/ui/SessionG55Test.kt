@@ -113,9 +113,9 @@ class SessionG55Test {
     @Test
     fun the_kill_sheet_names_the_uncommitted_files() {
         assertEquals("No uncommitted changes in its worktree.", killChangesLine(emptyList()))
-        assertEquals("Leaves 1 uncommitted file: App.kt. Retire commits and pushes them first.", killChangesLine(listOf(ChangedFile("src/App.kt", "M"))))
+        assertEquals("Leaves 1 uncommitted file: App.kt. Safe remove commits and pushes them first.", killChangesLine(listOf(ChangedFile("src/App.kt", "M"))))
         val four = listOf("a/x.kt", "b.kt", "c/d/e.md", "f.txt").map { ChangedFile(it, "M") }
-        assertEquals("Leaves 4 uncommitted files: x.kt, b.kt, e.md and 1 more. Retire commits and pushes them first.", killChangesLine(four))
+        assertEquals("Leaves 4 uncommitted files: x.kt, b.kt, e.md and 1 more. Safe remove commits and pushes them first.", killChangesLine(four))
     }
 
     /** Review w23-5: a dead-end switch target says why, and stays pickable. */

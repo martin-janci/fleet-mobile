@@ -109,6 +109,15 @@ class AutofixTest {
             "Fleet tried this fix 3 times and stopped trying by itself; fix it here.",
             autoWords(open.copy(state = "apply_failed", attempts = 3, autoRuns = false), 1000),
         )
+        // Review w24: a phone that draws no Fix button does not say "fix it here".
+        assertEquals(
+            "Fleet tried this fix 3 times and stopped trying by itself; fix it from the desktop.",
+            autoWords(open.copy(state = "apply_failed", attempts = 3, autoRuns = false), 1000, canApply = false),
+        )
+        assertEquals(
+            "Fleet will not run this fix by itself (automatic fixes are off or paused); fix it from the desktop.",
+            autoWords(open.copy(autoRuns = false), 1000, canApply = false),
+        )
     }
 
     @Test
@@ -186,6 +195,8 @@ class AutofixTest {
         val actions = FakeAutofixActions().apply { canApply = false }
         val vm = opened(actions = actions)
         assertFalse(vm.state.value.canApply)
+        // A write token the hub does not trust: a fix card must not tell it to apply here.
+        assertTrue(fixCardNote(autofix = true, canApply = vm.state.value.canApply).startsWith("Review it in More › Problems & fixes"))
         vm.apply(HOOKS)
         vm.later(HOOKS)
         runCurrent()
@@ -219,9 +230,9 @@ class AutofixTest {
         assertFalse(fixRunning(HOOKS.copy(state = "verifying", lastAttemptAt = 1000), 1100))
         assertEquals("What fleet found broken, and its fixes", autofixLine(AutofixUiState()))
         assertEquals("No problems found", autofixLine(AutofixUiState(loaded = true)))
-        assertEquals("Review and apply its fix in More › Problems & fixes.", fixCardNote(autofix = true, canWrite = true))
-        assertTrue(fixCardNote(autofix = true, canWrite = false).startsWith("Review it in More › Problems & fixes"))
-        assertEquals("Review and apply its fix in fleet on the desktop.", fixCardNote(autofix = false, canWrite = true))
+        assertEquals("Review and apply its fix in More › Problems & fixes.", fixCardNote(autofix = true, canApply = true))
+        assertTrue(fixCardNote(autofix = true, canApply = false).startsWith("Review it in More › Problems & fixes"))
+        assertEquals("Review and apply its fix in fleet on the desktop.", fixCardNote(autofix = false, canApply = true))
     }
 
     @Test
