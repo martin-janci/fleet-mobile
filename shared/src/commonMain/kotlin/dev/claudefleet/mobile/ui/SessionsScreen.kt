@@ -1000,8 +1000,10 @@ private fun SelectionBar(bulk: BulkUiState, handlers: SessionsHandlers) {
             IconButton(onClick = handlers.onClearSelection) { Icon(FleetIcons.Close, contentDescription = "Clear selection") }
             Text(if (bulk.selected.isEmpty()) "Tap sessions to pick" else "${bulk.selected.size} selected", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             if (rememberLoaderVisible(bulk.running)) Comet(size = 16.dp)
-            TextButton(onClick = { sending = true }, enabled = !bulk.running && bulk.selected.isNotEmpty()) { Text("Send") }
-            DangerTextButton(onClick = { killing = true }, enabled = !bulk.running && bulk.killable > 0) { Text("Kill") }
+            // Offline every call would fail (review w22-8): the New layout's bar
+            // greys its buttons the same way.
+            TextButton(onClick = { sending = true }, enabled = !bulk.running && bulk.online && bulk.selected.isNotEmpty()) { Text("Send") }
+            DangerTextButton(onClick = { killing = true }, enabled = !bulk.running && bulk.online && bulk.killable > 0) { Text("Kill") }
         }
     }
     if (sending) {
@@ -1019,7 +1021,8 @@ private fun SelectionBar(bulk: BulkUiState, handlers: SessionsHandlers) {
                 )
             },
             confirmButton = {
-                TextButton(onClick = { handlers.onBulkSend(text); sending = false }, enabled = text.isNotBlank()) { Text("Send") }
+                // Kept open with the words while offline, rather than dropping them.
+                TextButton(onClick = { handlers.onBulkSend(text); sending = false }, enabled = text.isNotBlank() && bulk.online) { Text("Send") }
             },
             dismissButton = { TextButton(onClick = { sending = false }) { Text("Cancel") } },
         )

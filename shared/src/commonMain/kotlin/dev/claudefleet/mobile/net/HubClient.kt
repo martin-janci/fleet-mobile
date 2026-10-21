@@ -224,7 +224,7 @@ class HubClient(
         }
         val deadline = when (tool) {
             in LONG_POLL_TOOLS -> HUB_LONG_POLL_TIMEOUT_MS
-            in LIFECYCLE_TOOLS -> HUB_LIFECYCLE_TIMEOUT_MS
+            in LIFECYCLE_TOOLS, in LIFECYCLE_JSON_TOOLS -> HUB_LIFECYCLE_TIMEOUT_MS
             else -> null
         }
         val framed = tool in FRAMED_TOOLS || tool in LIFECYCLE_TOOLS || tool in LONG_POLL_TOOLS
@@ -324,7 +324,17 @@ class HubClient(
             put("params", params)
         }
         val payload = json.encodeToString(JsonObject.serializer(), envelope)
-        var (status, body) = send(mountFor(framed), payload, authenticated = true, requestTimeoutMs = requestTimeoutMs)
+        // A long deadline on the JSON mount has no keep-alive to hold the
+        // socket open, so the idle timeout moves with it there
+        // ([LIFECYCLE_JSON_TOOLS]); on `/mcp` the 15 s keep-alive does that.
+        val idleTimeoutMs = requestTimeoutMs.takeIf { !framed && !framedOnly }
+        var (status, body) = send(
+            mountFor(framed),
+            payload,
+            authenticated = true,
+            requestTimeoutMs = requestTimeoutMs,
+            socketTimeoutMs = idleTimeoutMs,
+        )
         if (status == 404 && !framedOnly) {
             // The hub predates the JSON mount. Note it once and never ask
             // again: a 404 here is a property of the hub, not of the call.
@@ -562,13 +572,16 @@ class HubClient(
      * `restart_session { profile }`): [profile] is a credential profile's
      * name, or "" for the host's own login. The conversation is resumed under
      * it; a running `claude` cannot change its login, so a switch is a restart.
+     * [overLimitOk]: the person picked a login past `accounts.pause_at`
+     * knowing it; without it the hub may refuse `E_ACCOUNT_LIMIT`.
      */
-    suspend fun restartUnder(sessionId: Long, profile: String): SessionRow =
+    suspend fun restartUnder(sessionId: Long, profile: String, overLimitOk: Boolean = false): SessionRow =
         call(
             "restart_session",
             buildJsonObject {
                 put("session_id", sessionId)
                 put("profile", profile)
+                if (overLimitOk) put("over_limit_ok", true)
             },
         ) { json.decodeFromJsonElement(SessionRow.serializer(), it) }
 
@@ -2584,12 +2597,18 @@ class HubClient(
         body: String,
         authenticated: Boolean,
         requestTimeoutMs: Long? = null,
+        socketTimeoutMs: Long? = null,
     ): Pair<Int, String> = try {
         val response: HttpResponse = http.post(url) {
-            // Only the whole-request deadline moves. The socket timeout stays
-            // the ordinary one, because on the framed mount the hub's 15 s
-            // keep-alive is what keeps the socket from going idle.
-            if (requestTimeoutMs != null) timeout { requestTimeoutMillis = requestTimeoutMs }
+            // On the framed mount only the whole-request deadline moves: the
+            // hub's 15 s keep-alive is what keeps the socket from going idle.
+            // A slow call on the JSON mount moves the socket timeout too.
+            if (requestTimeoutMs != null || socketTimeoutMs != null) {
+                timeout {
+                    if (requestTimeoutMs != null) requestTimeoutMillis = requestTimeoutMs
+                    if (socketTimeoutMs != null) socketTimeoutMillis = socketTimeoutMs
+                }
+            }
             contentType(ContentType.Application.Json)
             // rmcp's streamable-HTTP transport requires both, and answers 406
             // without them.
@@ -2804,6 +2823,18 @@ class HubClient(
             "safe_kill_session",
             "add_host",
             "propose_host_placement",
+        )
+
+        /**
+         * Tools the hub bounds at `Deadline::Lifecycle` that stay on the
+         * JSON mount: they get [HUB_LIFECYCLE_TIMEOUT_MS] (and the socket
+         * timeout with it) but not the framing. The two transcript reads
+         * (review w24-2) are the phone's largest and most frequent replies —
+         * every turn of an open session, every older page, every tool tap —
+         * and `/mcp` answers `text/event-stream`, which no proxy compresses:
+         * about six times the bytes on mobile data for nothing.
+         */
+        val LIFECYCLE_JSON_TOOLS = setOf(
             "session_conversation",
             "session_tool_detail",
         )

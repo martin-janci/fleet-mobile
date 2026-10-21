@@ -117,6 +117,23 @@ class ChatBlockKindsTest {
             UiBlock.DesktopOnly("dashboard", "Release 4.2", null),
             block("""{"spec":"fleet.ui/1","kind":"dashboard","id":"dash.r42","title":"Release 4.2","widgets":[{"kind":"stat","title":"Open","value":"open"}]}"""),
         )
+        // Review w24: `definition` is a key, as the hub and the desktop check it.
+        assertEquals(
+            listOf("`definition` must be letters, digits and . _ : -"),
+            assertIs<UiCheck.Bad>(checkUiBlock("""{"spec":"fleet.ui/1","kind":"wizard","wizard":"fleet_agent","definition":"L2 support"}""")).problems,
+        )
+        assertEquals(
+            listOf("`definition` is empty"),
+            assertIs<UiCheck.Bad>(checkUiBlock("""{"spec":"fleet.ui/1","kind":"wizard","wizard":"fleet_agent","definition":""}""")).problems,
+        )
+        assertEquals(
+            listOf("a `fleet_agent` wizard names its `definition`"),
+            assertIs<UiCheck.Bad>(checkUiBlock("""{"spec":"fleet.ui/1","kind":"wizard","wizard":"fleet_agent"}""")).problems,
+        )
+        assertEquals(
+            listOf("`definition` is for the `fleet_agent` wizard"),
+            assertIs<UiCheck.Bad>(checkUiBlock("""{"spec":"fleet.ui/1","kind":"wizard","wizard":"add_project","definition":"x"}""")).problems,
+        )
         val bad = assertIs<UiCheck.Bad>(checkUiBlock("""{"spec":"fleet.ui/1","kind":"dashboard","id":"d","title":"T","widgets":[]}"""))
         assertEquals(listOf("`widgets` needs at least 1 entry"), bad.problems)
     }
