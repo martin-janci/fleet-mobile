@@ -232,6 +232,9 @@ const val SEND_LATER_WHEN_TAG = "session.sendLater.when."
 const val SEND_LATER_AT_TAG = "session.sendLater.at"
 const val SEND_LATER_SKIP_TAG = "session.sendLater.skip"
 
+/** A refusal of the sheet's own Schedule tap, said inside the sheet (review w24). */
+const val SEND_LATER_ERROR_TAG = "session.sendLater.error"
+
 /**
  * Send later (redesign 14.14): a prompt the hub keeps and types as a new turn
  * — never into a dialog, and whether or not this phone is still running.
@@ -261,6 +264,11 @@ internal fun SendLaterSheet(
     var clock by remember { mutableStateOf("") }
     // On by default, as the desktop's sheet: a prompt for a session archived meanwhile is dropped (review w22-9).
     var skip by remember { mutableStateOf(true) }
+    // The error on screen when Schedule was last tapped: the session screen's
+    // banner sits under this sheet's scrim, so a refusal of *this* tap is
+    // said here, and an older one from before the sheet is not (review w24).
+    var errorAtTap by remember { mutableStateOf<Friendly?>(null) }
+    var tapped by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { host.onLoadQueued() }
     val o = Fleet.colors
     val choices = sendLaterChoices(
@@ -286,6 +294,8 @@ internal fun SendLaterSheet(
         ) {
             val timing = sendLaterTiming(choice, now(), utcOffset, clock, skip && state.sendLaterSkipAvailable)
             if (timing != null) {
+                errorAtTap = state.error
+                tapped = true
                 val sent = text
                 // Let go of the text only once the hub has it (review w22-3).
                 host.onSendLater(sent, timing) {
@@ -339,6 +349,14 @@ internal fun SendLaterSheet(
         }
         state.sendLaterNotice?.let {
             Text(it, style = Fleet.type.textSm, color = o.fg, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+        }
+        state.error?.takeIf { tapped && !state.busy && it !== errorAtTap }?.let {
+            Text(
+                "${it.title}. ${it.body}",
+                style = Fleet.type.textSm,
+                color = if (it.isError) o.usageWarn else o.fg,
+                modifier = Modifier.testTag(SEND_LATER_ERROR_TAG).semantics { liveRegion = LiveRegionMode.Polite },
+            )
         }
         if (state.queued.isNotEmpty()) {
             Text("Waiting · ${state.queued.size}", style = Fleet.type.textXs, color = o.fgMuted)

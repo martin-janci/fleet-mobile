@@ -31,6 +31,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -154,6 +155,25 @@ class HostsInstallWizardsTest {
         never.open("pine").join()
         runCurrent()
         assertFalse(never.state.value.canRunWhenBack, "a host never checked is not back from anything")
+    }
+
+    /** Review w24: the scan the sheet promised for when the host answers runs when it does. */
+    @Test
+    fun a_lost_host_that_answers_again_is_scanned_then() = runTest {
+        val fleet = G58Fleet(listOf(HostRow(alias = "pine", reachable = false, lastPingedAt = 1)), RESTORE_TOOLS)
+        val actions = Restores()
+        val vm = HostDetailViewModel(fleet, actions, backgroundScope, canWrite = true)
+        vm.open("pine").join()
+        runCurrent()
+        assertFalse("discover" in actions.calls)
+        fleet.hosts.value = listOf(HostRow(alias = "pine", reachable = true, lastPingedAt = 2))
+        runCurrent()
+        assertEquals(1, actions.calls.count { it == "discover" }, "${actions.calls}")
+        assertNull(vm.state.value.discoverNote)
+        assertNotNull(vm.state.value.candidates)
+        fleet.hosts.value = listOf(HostRow(alias = "pine", reachable = true, lastPingedAt = 3))
+        runCurrent()
+        assertEquals(1, actions.calls.count { it == "discover" }, "once, not on every re-list")
     }
 
     @Test

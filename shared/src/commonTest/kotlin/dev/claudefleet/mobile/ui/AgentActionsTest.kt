@@ -172,6 +172,23 @@ class AgentActionsTest {
         assertEquals("l2-prod revoked.", vm.state.value.ruleNotice)
     }
 
+    /** Review w08-10: another definition's run promises the Inbox, not the self-debug card. */
+    @Test
+    fun run_of_another_definition_says_its_proposals_reach_the_inbox() = runTest {
+        val l2 = AgentRule(id = 12, agent = "fleet", scope = "l2-prod", level = "propose", hostAlias = "m", definition = "l2-support")
+        val agents = object : BuiltInAgentActions by FakeAgents() {
+            override suspend fun status() = AgentsStatus(rules = listOf(l2))
+            override suspend fun run(id: Long, form: AgentRunForm): AgentRunStarted = AgentRunStarted(id, "r12:manual:1:abcd")
+        }
+        val vm = AgentActionsViewModel(AgentsFleet(withAgents), agents, backgroundScope, canWrite = true)
+        runCurrent()
+        vm.refresh()?.join()
+        runCurrent()
+        vm.run(l2, AgentRunForm(request = "look", minutes = 60))?.join()
+        runCurrent()
+        assertEquals("l2-support queued. What it proposes reaches the Inbox when it is done.", vm.state.value.ruleNotice)
+    }
+
     @Test
     fun run_starts_a_manual_fleet_agent_and_the_card_follows_its_job() = runTest {
         val selfDebug = AgentRule(id = 4, agent = "fleet", scope = "me", level = "watch", hostAlias = "m", definition = SELF_DEBUG)

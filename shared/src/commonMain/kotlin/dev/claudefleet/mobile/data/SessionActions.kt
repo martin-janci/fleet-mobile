@@ -96,8 +96,9 @@ interface SessionActions {
      * Restart under another login: [profile] a credential profile, "" for the
      * host's own (step 4.4's Switch account). The defaults below are a hub
      * without the call; the screen asks only where `tools/list` names it.
+     * [overLimitOk]: the person picked a login past the pause line (`over_limit_ok`).
      */
-    suspend fun restartUnder(sessionId: Long, profile: String): Unit =
+    suspend fun restartUnder(sessionId: Long, profile: String, overLimitOk: Boolean = false): Unit =
         throw UnsupportedOperationException("restart_session { profile }")
 
     /** Relaunch under another model and/or effort (`restart_session { model, effort }`). */
@@ -225,8 +226,8 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
     override suspend fun restart(sessionId: Long) =
         session.withClient { it.restart(sessionId) }
 
-    override suspend fun restartUnder(sessionId: Long, profile: String) {
-        session.withClient { it.restartUnder(sessionId, profile) }
+    override suspend fun restartUnder(sessionId: Long, profile: String, overLimitOk: Boolean) {
+        session.withClient { it.restartUnder(sessionId, profile, overLimitOk) }
     }
 
     override suspend fun restartWith(sessionId: Long, model: String?, effort: String?) {

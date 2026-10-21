@@ -1030,6 +1030,8 @@ private fun ControlTab(
     scope: CoroutineScope,
     help: HelpState,
     helpSettings: HelpSettings,
+    /** The hub lets this device apply a fix (`autofix list`'s `can_apply`), for a chat `fix` card's wording. */
+    autofixCanApply: Boolean = false,
 ) {
     // The Control tab is Control's conversation (redesign 9.8,
     // 14.7). New bar only: the Classic bar has no Control tab.
@@ -1088,9 +1090,7 @@ private fun ControlTab(
     if (autonomyOn) LaunchedEffect(autonomy) { autonomy.load() }
     // The escalation cards: the rows Needs you reads (shared-in sessions are their owners' to answer).
     val laterKeys by container.escalationLater.later.collectAsState()
-    val controlHosts by repository.hosts.collectAsState()
-    // A host that answers again ends its Later, so its next outage is a card (review w21-1).
-    LaunchedEffect(controlHosts) { container.escalationLater.forgetRecoveredHosts(controlHosts) }
+    // A host that answers again ends its Later at FleetRoute, whichever tab is on screen (review w21-1, w24).
     val escalationCards = remember(controlRows, controlAccess, controlState.sessionId, laterKeys, settingsCaps.ask) {
         escalations(controlRows.filter { controlAccess.levelFor(it) == null }, controlState.sessionId, laterKeys.toSet(), formsShown = settingsCaps.ask)
     }
@@ -1119,6 +1119,7 @@ private fun ControlTab(
                 onOpenSession = nav::open,
                 onOpenRepo = nav::openRepo,
                 callScope = scope,
+                autofixCanApply = autofixCanApply,
                 control = ControlChrome(
                     header = {
                         ControlHeader(subtitle, views)
@@ -1227,6 +1228,14 @@ private fun FleetRoute(
         }
     }
 
+    // A host that answers again ends its Later, so its next outage is a card
+    // (review w21-1). Here, not in the Control tab: on the phone Control is
+    // one tab of several, and a host that came back and went down again
+    // while another tab was on screen stayed put off (review w24).
+    LaunchedEffect(repository) {
+        repository.hosts.collect { container.escalationLater.forgetRecoveredHosts(it) }
+    }
+
     // A platform with no always-on watcher (iOS): while the app is open, keep
     // the seen set the background check reads, so the first check after
     // closing the app does not announce what the person just looked at.
@@ -1315,6 +1324,11 @@ private fun FleetRoute(
     val debugDevicesState by debugDevices.state.collectAsState()
     val autofix = remember(repository, scope) { AutofixViewModel(repository, container.autofixActions, scope, credentials.canWrite) }
     val autofixState by autofix.state.collectAsState()
+    // Read once the hub serves it, whichever screen is first: a chat `fix`
+    // card's wording keys on its `can_apply`, and a trusted phone that went
+    // straight to a session or Control was told someone else applies the
+    // fix until More was opened (review w24).
+    LaunchedEffect(autofix, autofixState.available) { if (autofixState.available) autofix.refresh() }
     val today = remember(repository, scope) {
         TodayViewModel(
             fleet = repository,
@@ -1717,6 +1731,7 @@ private fun FleetRoute(
                         callScope = scope,
                         // The New bar draws the session as tabs (redesign 14.4).
                         newLayout = layout == PhoneLayout.New,
+                        autofixCanApply = autofixState.canApply,
                     )
                 }
                 Screen.Work -> {
@@ -2146,6 +2161,7 @@ private fun FleetRoute(
                     scope = scope,
                     help = help,
                     helpSettings = helpSettings,
+                    autofixCanApply = autofixState.canApply,
                 )
                 Screen.More -> {
                     val hostRows by repository.hosts.collectAsState()
@@ -3114,6 +3130,12 @@ private fun SessionRoute(
     onOpenRepo: (Long) -> Unit,
     callScope: CoroutineScope,
     newLayout: Boolean = false,
+    /**
+     * The hub lets this device apply a fix: `autofix list`'s `can_apply` (a
+     * trusted, full-access device), not merely a write token. False until
+     * the list is read, so a fix card falls back to the neutral wording.
+     */
+    autofixCanApply: Boolean = false,
     /** Control's header and confirms in place of the session's own bar (redesign 9.8). */
     control: ControlChrome? = null,
 ) {
@@ -3386,7 +3408,7 @@ private fun SessionRoute(
             devices = if (caps.debugDevices) devicesVm::devices else null,
             screenshot = if (caps.debugDevices && credentials.canWrite) devicesVm::takeScreenshot else null,
             autofix = caps.autofix,
-            autofixWrite = credentials.canWrite,
+            autofixCanApply = autofixCanApply,
         ),
         devices = sessionDevices,
         devicesHandlers = SessionDevicesHandlers(
