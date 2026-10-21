@@ -44,6 +44,7 @@ import dev.claudefleet.mobile.model.isQuestion
 import dev.claudefleet.mobile.model.key
 import dev.claudefleet.mobile.model.line
 import dev.claudefleet.mobile.model.missionWaitLabel
+import dev.claudefleet.mobile.model.openCards
 import dev.claudefleet.mobile.model.options
 import dev.claudefleet.mobile.model.pauseMove
 import dev.claudefleet.mobile.model.summary
@@ -221,9 +222,10 @@ private fun MissionBody(detail: MissionDetail, state: MissionsUiState, handlers:
             missionSessions(detail, handlers)
             return@LazyColumn
         }
-        if (plan.cards.isNotEmpty()) {
-            item(key = "cards-h") { SectionTitle("Waiting for you (${plan.cards.size})") }
-            items(plan.cards, key = { "card:${it.id}" }) { c -> CardRow(c, state, detail.mayChange, handlers) }
+        val cards = plan.openCards
+        if (cards.isNotEmpty()) {
+            item(key = "cards-h") { SectionTitle("Waiting for you (${cards.size})") }
+            items(cards, key = { "card:${it.id}" }) { c -> CardRow(c, state, detail.mayChange, handlers) }
         }
         item(key = "steps-h") { SectionTitle("Next steps") }
         if (plan.steps.isEmpty()) {
