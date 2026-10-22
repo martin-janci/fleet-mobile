@@ -4,6 +4,7 @@ import dev.claudefleet.mobile.model.ConvItem
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.network.sockets.SocketTimeoutException
 import io.ktor.client.plugins.HttpTimeoutCapability
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpHeaders
@@ -860,6 +861,49 @@ class HubClientTest {
         assertEquals(HUB_LIFECYCLE_TIMEOUT_MS, timeout?.requestTimeoutMillis)
         assertTrue(HUB_LIFECYCLE_TIMEOUT_MS > 300_000L, "at or under the hub's own cap would cut a clone short")
         assertEquals(HUB_CALL_TIMEOUT_MS, timeout?.socketTimeoutMillis, "the keep-alive, not a longer idle, holds the socket")
+    }
+
+    /**
+     * A transcript read keeps the compressed JSON mount and the lifecycle
+     * deadline, but not a longer idle timeout: that mount sends nothing until
+     * the reply is whole, so the ordinary one is what notices a dead socket.
+     * A read that goes silent that long is asked once more on `/mcp`, whose
+     * keep-alive holds the socket while the hub finishes.
+     */
+    @Test
+    fun a_silent_transcript_read_times_out_at_the_ordinary_idle_and_is_asked_again_framed() = runTest {
+        val calls = Calls()
+        val engine = MockEngine { request ->
+            calls.requests += request
+            if (request.url.encodedPath == "/mcp/json") throw SocketTimeoutException("silent")
+            respond(sse(okResult("""{"ok":true}""")), HttpStatusCode.OK, sseHeaders)
+        }
+        val hub = HubClient(HttpClient(engine).withHubTimeouts(), BASE, "tok-phone")
+
+        hub.call("session_conversation", buildJsonObject { put("session_id", 1) }) { it }
+
+        assertEquals(listOf("/mcp/json", "/mcp"), calls.requests.map { it.url.encodedPath })
+        for (request in calls.requests) {
+            val timeout = request.getCapabilityOrNull(HttpTimeoutCapability)
+            assertEquals(HUB_LIFECYCLE_TIMEOUT_MS, timeout?.requestTimeoutMillis)
+            assertEquals(HUB_CALL_TIMEOUT_MS, timeout?.socketTimeoutMillis, "a dead socket must surface in 45 s, not 330")
+        }
+    }
+
+    /** Any other transport failure on a transcript read is not asked twice. */
+    @Test
+    fun a_transcript_read_that_fails_otherwise_is_not_retried() = runTest {
+        val calls = Calls()
+        val engine = MockEngine { request ->
+            calls.requests += request
+            throw IllegalStateException("reset")
+        }
+        val hub = HubClient(HttpClient(engine).withHubTimeouts(), BASE, "tok-phone")
+
+        assertFailsWith<HubError.Transport> {
+            hub.call("session_tool_detail", buildJsonObject { put("session_id", 1) }) { it }
+        }
+        assertEquals(1, calls.requests.size)
     }
 
     // ---- the work graph (M8) ----

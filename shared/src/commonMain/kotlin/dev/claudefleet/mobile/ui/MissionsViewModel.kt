@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 
 data class MissionsUiState(
@@ -171,7 +172,9 @@ class MissionsViewModel(
     }
 
     fun close() {
-        local.update { it.copy(open = false, detail = null, results = null, notice = null, pick = it.pick + 1) }
+        // `loading = false`: a read still in flight answers for what is no
+        // longer on screen, and a stale answer leaves the spinner alone.
+        local.update { it.copy(open = false, loading = false, detail = null, results = null, notice = null, pick = it.pick + 1) }
     }
 
     fun refresh(): Job = scope.launch { read() }
@@ -183,7 +186,7 @@ class MissionsViewModel(
 
     /** Back from a mission to the list. */
     fun back() {
-        local.update { it.copy(detail = null, results = null, notice = null, pick = it.pick + 1) }
+        local.update { it.copy(loading = false, detail = null, results = null, notice = null, pick = it.pick + 1) }
     }
 
     fun dismissError() {
@@ -296,15 +299,18 @@ class MissionsViewModel(
     private fun act(busy: String, call: suspend (Long) -> Unit): Job = scope.launch {
         val id = local.value.detail?.mission?.id ?: return@launch
         if (local.value.busy != null) return@launch
-        local.update { it.copy(busy = busy, error = null, results = null, notice = null, pick = it.pick + 1) }
-        try {
+        val mine = local.updateAndGet { it.copy(busy = busy, error = null, results = null, notice = null, pick = it.pick + 1) }.pick
+        val after = try {
             call(id)
-            local.update { it.copy(busy = null, pick = it.pick + 1) }
+            local.updateAndGet { it.copy(busy = null, pick = it.pick + 1) }.pick
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(busy = null, error = friendly(t), pick = it.pick + 1) }
+            local.updateAndGet { it.copy(busy = null, error = friendly(t), pick = it.pick + 1) }.pick
         }
+        // The person went Back, picked another mission or closed the sheet
+        // while the press ran: its read would pull them back into this one.
+        if (after != mine + 1) return@launch
         readOne(id)
     }
 
@@ -332,12 +338,12 @@ class MissionsViewModel(
         try {
             val detail = actions.mission(missionId)
             local.update { l ->
-                val loading = if (quiet) l.loading else false
                 // The person moved, or a press ran, since this read began:
-                // what it answers is no longer what the sheet shows.
-                if (l.pick != pick) return@update l.copy(loading = loading)
+                // what it answers is no longer what the sheet shows, and the
+                // spinner belongs to whatever read the move started.
+                if (l.pick != pick) return@update l
                 l.copy(
-                    loading = loading,
+                    loading = if (quiet) l.loading else false,
                     detail = detail,
                     // The list line follows the mission's state; its counts
                     // are the list's own, which the detail may not carry.
@@ -349,7 +355,8 @@ class MissionsViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            if (!quiet) local.update { it.copy(loading = false, error = friendly(t)) }
+            // A stale failure is about a mission no longer on screen.
+            if (!quiet) local.update { if (it.pick != pick) it else it.copy(loading = false, error = friendly(t)) }
         }
     }
 }

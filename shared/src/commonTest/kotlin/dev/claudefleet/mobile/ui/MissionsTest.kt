@@ -43,6 +43,7 @@ import dev.claudefleet.mobile.ui.kit.listBody
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -366,6 +367,67 @@ class MissionsTest {
         runCurrent()
         assertNull(vm.state.value.error)
         assertFalse(vm.state.value.listFailed)
+    }
+
+    /** Review 7: a pick's read that answers after the person picked another raises no banner and keeps the new spinner. */
+    @Test
+    fun a_stale_mission_read_leaves_the_new_picks_spinner_and_banner_alone() = runTest {
+        val fake = FakeMissionActions()
+        val gates = mutableMapOf<Long, CompletableDeferred<Unit>>()
+        val actions = object : MissionActions by fake {
+            override suspend fun mission(missionId: Long): MissionDetail {
+                gates[missionId]?.await()
+                if (missionId == 1L) throw HubError.Tool("E_NOTFOUND", "gone")
+                return fake.mission(missionId)
+            }
+        }
+        val vm = MissionsViewModel(MissionsFleet(loop), actions, backgroundScope, canWrite = true)
+        vm.open().join()
+        val a = CompletableDeferred<Unit>().also { gates[1L] = it }
+        val b = CompletableDeferred<Unit>().also { gates[2L] = it }
+        vm.select(1)
+        runCurrent()
+        vm.back()
+        vm.select(2)
+        runCurrent()
+        assertTrue(vm.state.value.loading)
+
+        a.complete(Unit)
+        runCurrent()
+        assertNull(vm.state.value.error, "A's failure is not about B")
+        assertTrue(vm.state.value.loading, "B is still loading")
+
+        b.complete(Unit)
+        runCurrent()
+        assertFalse(vm.state.value.loading)
+        assertNotNull(vm.state.value.detail)
+    }
+
+    /** Review 7: Back during a press does not reopen the mission when the press answers. */
+    @Test
+    fun back_during_a_press_stays_back() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val fake = FakeMissionActions()
+        val actions = object : MissionActions by fake {
+            override suspend fun start(missionId: Long, step: String?): StartOutcome {
+                gate.await()
+                return fake.start(missionId, step)
+            }
+        }
+        val vm = MissionsViewModel(MissionsFleet(loop), actions, backgroundScope, canWrite = true)
+        vm.open().join()
+        vm.select(1).join()
+        runCurrent()
+        fake.calls.clear()
+        val press = vm.start()
+        runCurrent()
+        vm.back()
+        gate.complete(Unit)
+        press.join()
+        runCurrent()
+        assertNull(vm.state.value.detail, "Back stays back")
+        assertFalse(vm.state.value.loading)
+        assertEquals(listOf("start 1 all"), fake.calls, "no read of the mission left")
     }
 
     @Test
