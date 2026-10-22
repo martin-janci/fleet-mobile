@@ -51,6 +51,8 @@ import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.ruleAgentName
 import dev.claudefleet.mobile.model.ruleLine
 import dev.claudefleet.mobile.model.RoutineExplain
+import dev.claudefleet.mobile.model.RoutineMemory
+import dev.claudefleet.mobile.model.RoutineNotebook
 import dev.claudefleet.mobile.model.dollars
 import dev.claudefleet.mobile.model.phaseRail
 import dev.claudefleet.mobile.model.runHasTrace
@@ -75,6 +77,8 @@ data class AutomationHandlers(
     /** Read on from the open run's last step; called while it runs. */
     val onRefreshRun: () -> Unit = {},
     val onToggle: (Routine) -> Unit = {},
+    /** Rewrite one of the open routine's notebooks (`routine` | `project`); `""` clears it. */
+    val onSaveMemory: (String, String) -> Unit = { _, _ -> },
     val onSetPaused: (Boolean) -> Unit = {},
     val onOpenSession: (Long) -> Unit = {},
     /** Missions live beside the routines; null when the hub keeps none. */
@@ -126,6 +130,7 @@ fun AutomationSheet(
                 TextButton(onClick = handlers.onBack) { Text("‹ Routines", color = o.accent) }
                 RoutineRow(detail.routine, nowSeconds, state, handlers, canToggle = state.canToggle && detail.mayChange, open = false)
                 state.explain?.let { WhyCard(it) }
+                state.memory?.let { MemoryCard(it, nowSeconds, canEdit = state.canEditMemory && state.busy == null, onSave = handlers.onSaveMemory) }
                 HorizontalDivider(color = o.border)
                 Text("Last runs · each run opens as a session", color = o.fgMuted, fontSize = 13.sp)
                 if (detail.runs.isEmpty() && !state.loading) Text("No runs yet.", color = o.fgMuted, fontSize = 14.sp)
@@ -164,6 +169,71 @@ private fun WhyCard(why: RoutineExplain) {
     ) {
         Text(why.summary, color = if (why.state == "block") o.danger else o.fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
         for (c in whyLines(why)) Text(c, color = o.fgMuted, fontSize = 13.sp)
+    }
+}
+
+/**
+ * The open routine's notebooks (claude-fleet migration 204): what its runs
+ * read under their prompt and rewrite from their reply, kept by the fleet
+ * outside the repo and the host. Each shows its text and who wrote it last;
+ * Edit and Clear where this device may change the routine. Which notebooks
+ * a routine keeps is chosen on the desktop.
+ */
+@Composable
+private fun MemoryCard(memory: RoutineMemory, nowSeconds: Long, canEdit: Boolean, onSave: (String, String) -> Unit) {
+    val o = Fleet.colors
+    var editing by remember { mutableStateOf<RoutineNotebook?>(null) }
+    var clearing by remember { mutableStateOf<RoutineNotebook?>(null) }
+    Column(
+        modifier = Modifier.fillMaxWidth().background(o.bgPane, RoundedCornerShape(8.dp)).padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text("Memory · ${memoryLine(memory)}", color = o.fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        for (n in memory.notebooks()) {
+            Text(notebookTitle(n.scope), color = o.fgMuted, fontSize = 13.sp)
+            if (n.body.isNotBlank()) {
+                Text(n.body, color = o.fg, fontSize = 13.sp, maxLines = 12, overflow = TextOverflow.Ellipsis)
+            }
+            Text(notebookLine(n, nowSeconds), color = o.fgMuted, fontSize = 12.sp)
+            if (canEdit) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { editing = n }) { Text("Edit", color = o.accent) }
+                    if (n.body.isNotEmpty()) DangerTextButton(onClick = { clearing = n }) { Text("Clear") }
+                }
+            }
+        }
+    }
+    editing?.let { n ->
+        var text by remember(n) { mutableStateOf(n.body) }
+        val over = text.length > memory.maxChars
+        AlertDialog(
+            onDismissRequest = { editing = null },
+            title = { Text(notebookTitle(n.scope)) },
+            text = {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    minLines = 4,
+                    maxLines = 12,
+                    isError = over,
+                    supportingText = { Text("${text.length} / ${memory.maxChars} characters · the next run reads it") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { onSave(n.scope, text.trimEnd()); editing = null }, enabled = !over && text != n.body) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { editing = null }) { Text("Cancel") } },
+        )
+    }
+    clearing?.let { n ->
+        AlertDialog(
+            onDismissRequest = { clearing = null },
+            title = { Text("Clear ${notebookTitle(n.scope).replaceFirstChar { it.lowercase() }}?") },
+            text = { Text("The next run starts with no notes in it. Runs and the fleet may write it again.") },
+            confirmButton = { DangerTextButton(onClick = { onSave(n.scope, ""); clearing = null }) { Text("Clear") } },
+            dismissButton = { TextButton(onClick = { clearing = null }) { Text("Cancel") } },
+        )
     }
 }
 

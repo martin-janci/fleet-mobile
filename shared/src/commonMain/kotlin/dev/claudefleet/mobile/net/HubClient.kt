@@ -70,6 +70,7 @@ import dev.claudefleet.mobile.model.DeviceScreenshot
 import dev.claudefleet.mobile.model.screenshotOf
 import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineExplain
+import dev.claudefleet.mobile.model.RoutineMemory
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.RunTrace
 import dev.claudefleet.mobile.model.RunsPage
@@ -1750,6 +1751,32 @@ class HubClient(
                 limit?.let { put("limit", it) }
             },
         ) { json.decodeFromJsonElement(ListSerializer(RoutineRun.serializer()), it) }
+
+    /**
+     * The notebooks a routine's runs read and rewrite (`routines { memory }`,
+     * claude-fleet migration 204). Asked only for a routine whose row names
+     * its `memory`, which an older hub never sends.
+     */
+    suspend fun routineMemory(routineId: Long): RoutineMemory =
+        call(
+            "routines",
+            buildJsonObject {
+                put("action", "memory")
+                put("routine_id", routineId)
+            },
+        ) { json.decodeFromJsonElement(RoutineMemory.serializer(), it) }
+
+    /** Rewrite one of a routine's notebooks (`routine` or `project`); `""` clears it. Answers them as they now stand. */
+    suspend fun setRoutineMemory(routineId: Long, notebook: String, text: String): RoutineMemory =
+        call(
+            "routines",
+            buildJsonObject {
+                put("action", "set_memory")
+                put("routine_id", routineId)
+                put("notebook", notebook)
+                put("text", text)
+            },
+        ) { json.decodeFromJsonElement(RoutineMemory.serializer(), it) }
 
     /** Turn a routine on or off; answers the routine as it now stands. */
     suspend fun setRoutineEnabled(routineId: Long, enabled: Boolean): Routine =

@@ -262,6 +262,13 @@ fun MissionCard.line(): String {
 /** A question card is answered in words; the rest are applied or dismissed. */
 val MissionCard.isQuestion: Boolean get() = kind == "ask"
 
+/**
+ * The cards still waiting for a person. The hub's plan lists the latest
+ * cards open first and then the decided ones; a decided card is history, and
+ * pressing Answer on it only hears "card N is applied already".
+ */
+val MissionPlan.openCards: List<MissionCard> get() = cards.filter { it.state == "open" }
+
 /** The options a question card offers, if it named any. */
 val MissionCard.options: List<String>
     get() = (payload?.get("options") as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
@@ -350,8 +357,8 @@ fun spendAsk(detail: MissionDetail): SpendAsk? {
     val budget = grant.budgetMicros ?: return null
     val spent = maxOf(plan.costMicros, m.costMicros ?: 0)
     if (spent < budget) return null
-    val card = plan.cards.firstOrNull { c ->
-        c.state == "open" && c.kind == "ask" && c.payload.question()?.startsWith(BUDGET_BRAKE) == true
+    val card = plan.openCards.firstOrNull { c ->
+        c.kind == "ask" && c.payload.question()?.startsWith(BUDGET_BRAKE) == true
     } ?: return null
     val runs = plan.steps.count { it.kind == "run" || it.kind == "retry" }.coerceAtLeast(1)
     val raw = plan.runEstimate?.micros?.takeIf { it > 0 }?.let { it * runs } ?: (budget / 4)

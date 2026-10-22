@@ -37,6 +37,7 @@ import dev.claudefleet.mobile.model.MissionPlan
 import dev.claudefleet.mobile.model.autonomyLabel
 import dev.claudefleet.mobile.model.dollars
 import dev.claudefleet.mobile.model.key
+import dev.claudefleet.mobile.model.openCards
 import dev.claudefleet.mobile.model.pauseMove
 import dev.claudefleet.mobile.model.runEstimateLine
 import dev.claudefleet.mobile.model.SpendAsk
@@ -140,7 +141,7 @@ private fun noteOf(mark: PlanMark, state: String): String? = when (mark) {
  */
 internal fun planRows(detail: MissionDetail): List<PlanRow> {
     val titles = detail.items.associate { it.id to (it.title.ifBlank { it.key ?: "Task ${it.id}" }) }
-    val asked = detail.plan?.cards.orEmpty().filter { it.state == "open" }.mapNotNull { it.workItemId }.toSet()
+    val asked = detail.plan?.openCards.orEmpty().mapNotNull { it.workItemId }.toSet()
     val sessionOf = sessionByItem(detail)
     val nodes = detail.graph.nodes
     val rows = if (nodes.isNotEmpty()) {
@@ -265,7 +266,7 @@ fun OrbitMissionDetail(detail: MissionDetail, state: MissionsUiState, handlers: 
                 }
             }
             // The brake's own card is the spend ask above; it is not listed twice.
-            val cards = plan?.cards.orEmpty().filter { it.id != spend?.cardId }
+            val cards = plan?.openCards.orEmpty().filter { it.id != spend?.cardId }
             if (cards.isNotEmpty()) {
                 item(key = "cards-h") { GroupHeading("Waiting for you", cards.size) }
                 items(cards, key = { "card:${it.id}" }) { c -> CardRow(c, state, detail.mayChange, handlers) }

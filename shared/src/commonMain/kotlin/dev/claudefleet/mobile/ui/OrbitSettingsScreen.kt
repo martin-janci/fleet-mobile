@@ -650,14 +650,10 @@ private fun <T> ChoicePicker(entries: List<T>, current: T, label: (T) -> String,
 }
 
 @Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text.uppercase(),
-        style = Fleet.type.text2xs,
-        color = Fleet.colors.fgMuted,
-        modifier = Modifier.padding(start = OrbitTokens.spacing("phone-gutter").dp, end = 16.dp, top = 20.dp, bottom = 6.dp).semantics { heading() },
-    )
-}
+private fun SectionLabel(text: String) = dev.claudefleet.mobile.ui.components.SectionLabel(
+    text,
+    Modifier.padding(start = OrbitTokens.spacing("phone-gutter").dp, end = 16.dp, top = 20.dp, bottom = 6.dp).semantics { heading() },
+)
 
 @Composable
 private fun KeyValue(label: String, value: String) {
