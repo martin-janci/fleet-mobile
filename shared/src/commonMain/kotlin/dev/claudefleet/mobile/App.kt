@@ -2450,7 +2450,7 @@ private fun FleetRoute(
                         onCloseRun = automation::closeRun,
                         onRefreshRun = { automation.refreshRun() },
                         onToggle = { automation.toggle(it) },
-                        onSaveMemory = { notebook, text -> automation.saveMemory(notebook, text) },
+                        onSaveMemory = { notebook, text, done -> automation.saveMemory(notebook, text, done) },
                         onSetPaused = { automation.setPaused(it) },
                         onOpenSession = { id -> automation.close(); nav.open(id) },
                         onOpenMissions = if (missionsState.available) {

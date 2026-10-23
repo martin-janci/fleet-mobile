@@ -52,6 +52,7 @@ import dev.claudefleet.mobile.model.ruleAgentName
 import dev.claudefleet.mobile.model.ruleLine
 import dev.claudefleet.mobile.model.RoutineExplain
 import dev.claudefleet.mobile.model.RoutineMemory
+import dev.claudefleet.mobile.model.notebookChars
 import dev.claudefleet.mobile.model.RoutineNotebook
 import dev.claudefleet.mobile.model.dollars
 import dev.claudefleet.mobile.model.phaseRail
@@ -77,8 +78,12 @@ data class AutomationHandlers(
     /** Read on from the open run's last step; called while it runs. */
     val onRefreshRun: () -> Unit = {},
     val onToggle: (Routine) -> Unit = {},
-    /** Rewrite one of the open routine's notebooks (`routine` | `project`); `""` clears it. */
-    val onSaveMemory: (String, String) -> Unit = { _, _ -> },
+    /**
+     * Rewrite one of the open routine's notebooks (`routine` | `project`);
+     * `""` clears it. The callback hears null once the hub took it, else why
+     * not, and the editor stays open with the person's text until then.
+     */
+    val onSaveMemory: (String, String, (Friendly?) -> Unit) -> Unit = { _, _, done -> done(null) },
     val onSetPaused: (Boolean) -> Unit = {},
     val onOpenSession: (Long) -> Unit = {},
     /** Missions live beside the routines; null when the hub keeps none. */
@@ -180,7 +185,7 @@ private fun WhyCard(why: RoutineExplain) {
  * a routine keeps is chosen on the desktop.
  */
 @Composable
-private fun MemoryCard(memory: RoutineMemory, nowSeconds: Long, canEdit: Boolean, onSave: (String, String) -> Unit) {
+private fun MemoryCard(memory: RoutineMemory, nowSeconds: Long, canEdit: Boolean, onSave: (String, String, (Friendly?) -> Unit) -> Unit) {
     val o = Fleet.colors
     var editing by remember { mutableStateOf<RoutineNotebook?>(null) }
     var clearing by remember { mutableStateOf<RoutineNotebook?>(null) }
@@ -205,25 +210,51 @@ private fun MemoryCard(memory: RoutineMemory, nowSeconds: Long, canEdit: Boolean
     }
     editing?.let { n ->
         var text by remember(n) { mutableStateOf(n.body) }
-        val over = text.length > memory.maxChars
+        // The editor closes only once the hub took the text: a failed save
+        // keeps what the person typed, and says why, here in the dialog.
+        var saving by remember(n) { mutableStateOf(false) }
+        var failed by remember(n) { mutableStateOf<Friendly?>(null) }
+        val count = notebookChars(text)
+        val over = count > memory.maxChars
         AlertDialog(
-            onDismissRequest = { editing = null },
+            onDismissRequest = { if (!saving) editing = null },
             title = { Text(notebookTitle(n.scope)) },
             text = {
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    minLines = 4,
-                    maxLines = 12,
-                    isError = over,
-                    supportingText = { Text("${text.length} / ${memory.maxChars} characters · the next run reads it") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        minLines = 4,
+                        maxLines = 12,
+                        isError = over,
+                        supportingText = { Text("$count / ${memory.maxChars} characters · the next run reads it") },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    failed?.let {
+                        Text(
+                            "${it.title}: ${it.body}",
+                            color = o.danger,
+                            fontSize = 13.sp,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                        )
+                    }
+                }
             },
             confirmButton = {
-                TextButton(onClick = { onSave(n.scope, text.trimEnd()); editing = null }, enabled = !over && text != n.body) { Text("Save") }
+                TextButton(
+                    onClick = {
+                        saving = true
+                        failed = null
+                        onSave(n.scope, text.trimEnd()) { why ->
+                            saving = false
+                            failed = why
+                            if (why == null) editing = null
+                        }
+                    },
+                    enabled = !saving && !over && text != n.body,
+                ) { Text(if (saving) "Saving…" else "Save") }
             },
-            dismissButton = { TextButton(onClick = { editing = null }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { editing = null }, enabled = !saving) { Text("Cancel") } },
         )
     }
     clearing?.let { n ->
@@ -231,7 +262,7 @@ private fun MemoryCard(memory: RoutineMemory, nowSeconds: Long, canEdit: Boolean
             onDismissRequest = { clearing = null },
             title = { Text("Clear ${notebookTitle(n.scope).replaceFirstChar { it.lowercase() }}?") },
             text = { Text("The next run starts with no notes in it. Runs and the fleet may write it again.") },
-            confirmButton = { DangerTextButton(onClick = { onSave(n.scope, ""); clearing = null }) { Text("Clear") } },
+            confirmButton = { DangerTextButton(onClick = { onSave(n.scope, "") {}; clearing = null }) { Text("Clear") } },
             dismissButton = { TextButton(onClick = { clearing = null }) { Text("Cancel") } },
         )
     }

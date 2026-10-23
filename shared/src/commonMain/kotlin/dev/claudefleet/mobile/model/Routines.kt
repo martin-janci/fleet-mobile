@@ -73,6 +73,15 @@ data class RoutineMemory(
     }
 }
 
+/**
+ * A notebook's length as the hub counts it against [RoutineMemory.maxChars]:
+ * Unicode code points (Rust's `chars().count()`), not UTF-16 units, so an
+ * emoji counts once — the same count the desktop's editor shows.
+ */
+fun notebookChars(text: String): Int = text.length - text.indices.count { i ->
+    i > 0 && text[i].isLowSurrogate() && text[i - 1].isHighSurrogate()
+}
+
 /** One run of a routine (`routine_runs`). */
 @Serializable
 data class RoutineRun(

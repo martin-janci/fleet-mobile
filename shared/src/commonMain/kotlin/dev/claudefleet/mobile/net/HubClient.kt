@@ -1611,17 +1611,19 @@ class HubClient(
      * Re-sign a mission's grant with a new budget (the spend ask's Approve,
      * redesign 14.16): `work_link { mission_grant }` replaces the live grant,
      * so every other term of [grant] — level, hosts, runs at once, login — is
-     * sent again unchanged and only [budgetCents] and [hours] are new. A
+     * sent again unchanged and only [budgetCents] and [hours] are new. A null
+     * [hours] keeps a grant that lasts until the mission completes: it sends
+     * `until_done` and no `hours` (the hub refuses both together). A
      * person's call only; the hub refuses anything else.
      */
-    suspend fun regrantMission(missionId: Long, grant: MissionGrant, budgetCents: Long, hours: Int): MissionGrant =
+    suspend fun regrantMission(missionId: Long, grant: MissionGrant, budgetCents: Long, hours: Int?): MissionGrant =
         call(
             "work_link",
             buildJsonObject {
                 put("action", "mission_grant")
                 put("mission_id", missionId)
                 put("level", grant.level)
-                put("hours", hours)
+                if (hours == null) put("until_done", true) else put("hours", hours)
                 put("budget_cents", budgetCents)
                 grant.hosts?.let { hs -> put("hosts", buildJsonArray { hs.forEach { add(it) } }) }
                 grant.maxParallel?.let { put("max_parallel", it) }

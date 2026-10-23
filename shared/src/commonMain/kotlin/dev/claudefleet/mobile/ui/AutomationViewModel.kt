@@ -233,11 +233,19 @@ class AutomationViewModel(
     /**
      * Rewrite the open routine's [notebook] (`routine` | `project`) with
      * [text]; `""` clears it. The card shows the hub's answer, never the
-     * text as sent.
+     * text as sent. [onDone] hears null once the hub took it, else why it
+     * did not: the editor stays open with the person's text until then.
      */
-    fun saveMemory(notebook: String, text: String): Job = scope.launch {
-        val id = local.value.memory?.routineId ?: return@launch
-        if (!state.value.canEditMemory || local.value.busy != null) return@launch
+    fun saveMemory(notebook: String, text: String, onDone: (Friendly?) -> Unit = {}): Job = scope.launch {
+        val id = local.value.memory?.routineId
+        if (id == null || !state.value.canEditMemory) {
+            onDone(Friendly("Not saved", "This device may not change the routine's notebooks.", isError = true))
+            return@launch
+        }
+        if (local.value.busy != null) {
+            onDone(Friendly("Not saved yet", "Another change is still being sent. Try again in a moment.", isError = true))
+            return@launch
+        }
         local.update { it.copy(busy = "memory:$id", error = null, notice = null) }
         try {
             val saved = actions.setMemory(id, notebook, text)
@@ -245,10 +253,13 @@ class AutomationViewModel(
                 val notice = if (text.isEmpty()) "Notebook cleared." else "Notebook saved."
                 if (it.detail?.routine?.id == id) it.copy(busy = null, memory = saved, notice = notice) else it.copy(busy = null)
             }
+            onDone(null)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(busy = null, error = friendly(t)) }
+            val why = friendly(t)
+            local.update { it.copy(busy = null, error = why) }
+            onDone(why)
         }
     }
 
@@ -357,16 +368,18 @@ class AutomationViewModel(
             }
             local.update { if (it.detail?.routine?.id == routineId) it.copy(explain = why) else it }
             // Its notebooks, only for a routine whose row names them: an
-            // older hub sends no `memory`, and is never asked the action.
+            // older hub sends no `memory`, and is never asked the action. A
+            // hub that names them serves the action, so a failed read says
+            // why rather than hiding the card as if the routine kept none.
             if (detail.routine.memory != null) {
-                val memory = try {
-                    actions.memory(routineId)
+                try {
+                    val memory = actions.memory(routineId)
+                    local.update { if (it.detail?.routine?.id == routineId) it.copy(memory = memory) else it }
                 } catch (e: CancellationException) {
                     throw e
-                } catch (_: Throwable) {
-                    null
+                } catch (t: Throwable) {
+                    local.update { if (it.detail?.routine?.id == routineId) it.copy(error = friendly(t)) else it }
                 }
-                local.update { if (it.detail?.routine?.id == routineId) it.copy(memory = memory) else it }
             }
         } catch (e: CancellationException) {
             throw e

@@ -123,7 +123,19 @@ data class MissionGrant(
     @SerialName("max_parallel") val maxParallel: Int? = null,
     /** The login its runs bill: a credential profile; null = the host's own. */
     val profile: String? = null,
-)
+    /**
+     * The grant lasts until the mission completes (claude-fleet #1003): the
+     * hub stores it with [expiresAt] = [GRANT_UNTIL_DONE_AT] and its budget is
+     * its only bound. A re-sign must say so again, never turn it into hours.
+     */
+    @SerialName("until_done") val untilDone: Boolean = false,
+) {
+    /** Until done by the flag, or by the hub's sentinel expiry when the flag is missing. */
+    val lastsUntilDone: Boolean get() = untilDone || expiresAt >= GRANT_UNTIL_DONE_AT
+}
+
+/** The hub's `expires_at` for a grant that lasts until the mission completes (9999-12-31). */
+const val GRANT_UNTIL_DONE_AT: Long = 253_402_300_799
 
 /** The autonomy that applies: the least of the mission's level, the fleet's ceiling and a live grant. */
 @Serializable
@@ -378,8 +390,13 @@ fun spendAsk(detail: MissionDetail): SpendAsk? {
 
 private fun JsonObject?.question(): String? = (this?.get("question") as? JsonPrimitive)?.contentOrNull
 
-/** The hours a re-signed grant keeps: what is left of the old one, rounded up, 1 to [maxHours]. */
-fun grantHoursLeft(grant: MissionGrant, nowSeconds: Long, maxHours: Int = 168): Int {
+/**
+ * The hours a re-signed grant keeps: what is left of the old one, rounded up,
+ * 1 to [maxHours]; null for a grant that lasts until the mission completes,
+ * which is re-signed as such and not for hours.
+ */
+fun grantHoursLeft(grant: MissionGrant, nowSeconds: Long, maxHours: Int = 168): Int? {
+    if (grant.lastsUntilDone) return null
     val left = grant.expiresAt - nowSeconds
     return ((left + 3_599) / 3_600).toInt().coerceIn(1, maxHours)
 }

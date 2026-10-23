@@ -209,7 +209,8 @@ class MissionsViewModel(
      * The spend ask's Approve (redesign 14.16). Only ever from a person's tap
      * on the card — nothing calls it on a read, and the card has no default
      * answer. Re-signs the live grant with [ask]'s new limit (every other term
-     * unchanged, for what is left of its time), resumes the mission, and
+     * unchanged, for what is left of its time or, for a grant that lasts
+     * until the mission completes, until it completes), resumes the mission, and
      * answers the brake's card so the lead knows.
      */
     fun approveSpend(ask: SpendAsk, nowSeconds: Long): Job = act("spend:${ask.missionId}") { id ->
