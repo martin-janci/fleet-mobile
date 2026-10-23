@@ -36,10 +36,11 @@ interface MissionActions {
 
     /**
      * The spend ask's Approve: re-sign [grant] with a [budgetCents] budget for
-     * [hours]; every other term unchanged. The default is a hub the sheet
-     * never asks (it checks `mission_grant` first).
+     * [hours], or until the mission completes when [hours] is null; every
+     * other term unchanged. The default is a hub the sheet never asks (it
+     * checks `mission_grant` first).
      */
-    suspend fun regrant(missionId: Long, grant: MissionGrant, budgetCents: Long, hours: Int): MissionGrant =
+    suspend fun regrant(missionId: Long, grant: MissionGrant, budgetCents: Long, hours: Int?): MissionGrant =
         throw UnsupportedOperationException("mission_grant")
 
     /**
@@ -71,7 +72,7 @@ class HubMissionActions(private val session: AppSession) : MissionActions {
 
     override suspend fun pauseAll(): List<Long> = session.withClient { it.pauseAllMissions() }
 
-    override suspend fun regrant(missionId: Long, grant: MissionGrant, budgetCents: Long, hours: Int): MissionGrant =
+    override suspend fun regrant(missionId: Long, grant: MissionGrant, budgetCents: Long, hours: Int?): MissionGrant =
         session.withClient { it.regrantMission(missionId, grant, budgetCents, hours) }
 
     override suspend fun signGrant(missionId: Long, level: Int, hours: Int, budgetCents: Long?): MissionGrant =

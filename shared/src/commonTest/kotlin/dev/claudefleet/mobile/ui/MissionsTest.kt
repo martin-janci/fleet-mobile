@@ -11,6 +11,7 @@ import dev.claudefleet.mobile.model.MissionAutonomy
 import dev.claudefleet.mobile.model.MissionGrant
 import dev.claudefleet.mobile.model.RunEstimate
 import dev.claudefleet.mobile.model.spendAsk
+import dev.claudefleet.mobile.model.GRANT_UNTIL_DONE_AT
 import dev.claudefleet.mobile.model.grantHoursLeft
 import dev.claudefleet.mobile.model.MissionPlan
 import dev.claudefleet.mobile.model.MissionStep
@@ -99,7 +100,7 @@ private class FakeMissionActions : MissionActions {
 
     override suspend fun pauseAll(): List<Long> = paused.also { calls += "pause_all" }
 
-    override suspend fun regrant(missionId: Long, grant: MissionGrant, budgetCents: Long, hours: Int): MissionGrant {
+    override suspend fun regrant(missionId: Long, grant: MissionGrant, budgetCents: Long, hours: Int?): MissionGrant {
         calls += "grant $missionId level=${grant.level} cents=$budgetCents hours=$hours hosts=${grant.hosts} parallel=${grant.maxParallel} profile=${grant.profile}"
         return grant.copy(budgetMicros = budgetCents * 10_000)
     }
@@ -569,6 +570,32 @@ class MissionsTest {
             ),
             writes,
             "the same grant re-signed with the new limit only, then resumed, then the lead told",
+        )
+    }
+
+    /**
+     * A grant that lasts until the mission completes (claude-fleet #1003) is
+     * re-signed until done, not for the hours its year-9999 expiry would clamp
+     * to: raising the budget must not turn it into a 7-day grant.
+     */
+    @Test
+    fun an_approve_keeps_a_grant_that_lasts_until_the_mission_completes() = runTest {
+        val grant = braked.plan!!.autonomy.grant!!.copy(expiresAt = GRANT_UNTIL_DONE_AT, untilDone = true)
+        val untilDone = braked.copy(plan = braked.plan!!.copy(autonomy = braked.plan!!.autonomy.copy(grant = grant)))
+        val actions = FakeMissionActions().apply { detail = untilDone; list = listOf(untilDone.mission) }
+        val vm = MissionsViewModel(MissionsFleet(spendLoop), actions, backgroundScope, canWrite = true)
+        vm.openOne(1).join()
+        runCurrent()
+
+        val ask = spendAsk(untilDone)!!
+        assertNull(grantHoursLeft(ask.grant, nowSeconds = 1_000))
+        // The sentinel expiry alone still reads as until done.
+        assertNull(grantHoursLeft(grant.copy(untilDone = false), nowSeconds = 1_000))
+        vm.approveSpend(ask, nowSeconds = 1_000).join()
+        runCurrent()
+        assertEquals(
+            "grant 1 level=2 cents=3980 hours=null hosts=[pine] parallel=2 profile=work",
+            actions.calls.first { it.startsWith("grant") },
         )
     }
 

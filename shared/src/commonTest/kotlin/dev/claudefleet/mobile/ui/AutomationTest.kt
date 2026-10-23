@@ -14,6 +14,7 @@ import dev.claudefleet.mobile.model.RoutineDetail
 import dev.claudefleet.mobile.model.RoutineExplain
 import dev.claudefleet.mobile.model.RoutineMemory
 import dev.claudefleet.mobile.model.RoutineNotebook
+import dev.claudefleet.mobile.model.notebookChars
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.RunTrace
 import dev.claudefleet.mobile.model.RunTraceStep
@@ -125,9 +126,11 @@ private class FakeRoutineActions : RoutineActions {
         mayChange = true,
     )
     var refuseMemory = false
+    var memoryReadFails = false
 
     override suspend fun memory(routineId: Long): RoutineMemory {
         calls += "memory $routineId"
+        if (memoryReadFails) throw HubError.Tool("E_FORBIDDEN", "not yours")
         return notebooks
     }
 
@@ -535,8 +538,10 @@ class AutomationTest {
         runCurrent()
         vm.select(1)
         runCurrent()
-        vm.saveMemory("project", "CI is slow on Mondays.")
+        val answers = mutableListOf<Friendly?>()
+        vm.saveMemory("project", "CI is slow on Mondays.") { answers += it }
         runCurrent()
+        assertEquals(listOf<Friendly?>(null), answers, "the editor hears the hub took it, and closes")
         assertTrue("set_memory 1 project CI is slow on Mondays." in actions.calls)
         assertEquals("CI is slow on Mondays.", vm.state.value.memory?.project?.body)
         assertEquals("Notebook saved.", vm.state.value.notice)
@@ -546,11 +551,39 @@ class AutomationTest {
         assertEquals("Notebook cleared.", vm.state.value.notice)
         // A refusal says why and keeps what the hub last said.
         actions.refuseMemory = true
-        vm.saveMemory("routine", "x")
+        vm.saveMemory("routine", "x") { answers += it }
         runCurrent()
+        assertNotNull(answers.last(), "the editor hears why, and stays open with the text")
         assertNotNull(vm.state.value.error)
         assertEquals("", vm.state.value.memory?.routine?.body)
         assertNull(vm.state.value.busy)
+    }
+
+    @Test
+    fun a_failed_notebook_read_says_why_rather_than_hiding_the_card() = runTest {
+        val actions = FakeRoutineActions().apply { memoryReadFails = true }
+        withMemory(actions)
+        val vm = automation(actions = actions)
+        runCurrent()
+        vm.open()
+        runCurrent()
+        vm.select(1)
+        runCurrent()
+        assertTrue("memory 1" in actions.calls)
+        assertNull(vm.state.value.memory)
+        assertNotNull(vm.state.value.error, "a hub that names the notebooks serves them: a failed read is shown")
+        assertNotNull(vm.state.value.detail, "the routine still shows")
+    }
+
+    @Test
+    fun a_notebook_counts_code_points_as_the_hub_does() {
+        assertEquals(0, notebookChars(""))
+        assertEquals(5, notebookChars("hello"))
+        // An emoji is one code point (two UTF-16 units) on the hub and the desktop.
+        assertEquals(3, notebookChars("a\uD83D\uDD34b"))
+        assertEquals(100, notebookChars("\u2705".repeat(50) + "\uD83D\uDD34".repeat(50)))
+        // A lone surrogate still counts once.
+        assertEquals(2, notebookChars("\uD83Dx"))
     }
 
     @Test
@@ -565,8 +598,10 @@ class AutomationTest {
         runCurrent()
         assertNotNull(vm.state.value.memory)
         assertFalse(vm.state.value.canEditMemory)
-        vm.saveMemory("routine", "x")
+        var why: Friendly? = null
+        vm.saveMemory("routine", "x") { why = it }
         runCurrent()
+        assertNotNull(why)
         assertTrue(actions.calls.none { it.startsWith("set_memory") })
     }
 
