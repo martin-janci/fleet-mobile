@@ -94,9 +94,6 @@ fun escalations(rows: List<SessionRow>, controlId: Long?, later: Set<String>, fo
 /** The most Later keys kept; the oldest go first (a key carries a turn, so old ones never match again). */
 const val LATER_KEPT = 200
 
-/** [key] put off, on top of [later], the oldest dropped past [LATER_KEPT]. */
-fun putOff(later: List<String>, key: String): List<String> = (later.filterNot { it == key } + key).takeLast(LATER_KEPT)
-
 /** A Later older than this lapses, as on the desktop (`LATER_MAX_AGE_SECS`): a week. */
 const val LATER_MAX_AGE_SECS = 7 * 86_400L
 
