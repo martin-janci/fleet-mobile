@@ -190,6 +190,7 @@ const val CONVERSATION_LIST: String = "conversation-list"
 
 /** The quick-reply chip row, for the device test that taps and long-presses it. */
 const val QUICK_REPLY_ROW: String = "quick-reply-row"
+const val PROMPT_SUGGESTION_CHIP: String = "prompt-suggestion-chip"
 
 /** The widest a quick-reply caption draws before it ellipsizes. */
 private val QUICK_REPLY_CAPTION_MAX = 200.dp
@@ -1108,6 +1109,7 @@ fun SessionScreen(
                                     // hidden until turns arrive (ConversationLoading).
                                     QuickRepliesRow(
                                         chips = quickReplies,
+                                        suggestion = state.session?.offeredSuggestion(state.draft),
                                         draft = state.draft,
                                         enabled = state.canSendQuick,
                                         editable = quickRepliesEditable,
@@ -3204,6 +3206,8 @@ private fun HistoryDialog(entries: List<String>, onPick: (String) -> Unit, onDis
 @Composable
 private fun QuickRepliesRow(
     chips: List<QuickReply>,
+    /** Claude Code's own next-prompt suggestion ([SessionRow.offeredSuggestion]): the first chip, filling the box. */
+    suggestion: String?,
     draft: String,
     enabled: Boolean,
     editable: Boolean,
@@ -3222,6 +3226,31 @@ private fun QuickRepliesRow(
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp),
         modifier = Modifier.testTag(QUICK_REPLY_ROW),
     ) {
+        if (suggestion != null) {
+            item(key = "suggestion") {
+                // Like a fill chip: Claude Code's Tab puts it in the box to
+                // edit, so a tap does the same here and Send sends it.
+                SuggestionChip(
+                    onClick = { onFill(suggestion) },
+                    label = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "✦ ",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.clearAndSetSemantics {},
+                            )
+                            Text(
+                                suggestion,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.widthIn(max = QUICK_REPLY_CAPTION_MAX),
+                            )
+                        }
+                    },
+                    modifier = Modifier.testTag(PROMPT_SUGGESTION_CHIP),
+                )
+            }
+        }
         items(chips) { chip ->
             val sends = chip.sendsOnTap
             QuickReplyChip(
