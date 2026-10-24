@@ -20,6 +20,19 @@ class SessionRowTest {
     }
 
     @Test
+    fun claude_codes_suggestion_is_offered_on_an_idle_row_with_an_empty_box() {
+        val row = json.decodeFromString(
+            SessionRow.serializer(),
+            """{"id":1,"tmux_name":"w","claude_status":"idle","prompt_suggestion":" run the tests "}""",
+        )
+        assertEquals("run the tests", row.offeredSuggestion(""))
+        assertNull(row.offeredSuggestion("fix it"))
+        assertNull(row.copy(claudeStatus = "working").offeredSuggestion(""))
+        assertNull(row.copy(promptSuggestion = null).offeredSuggestion(""))
+        assertNull(SessionRow(id = 1, tmuxName = "w", claudeStatus = "idle").offeredSuggestion(""))
+    }
+
+    @Test
     fun a_tmux_row_keeps_its_tmux_name() {
         assertEquals("trust-test", SessionRow(id = 1, tmuxName = "trust-test").displayName)
     }

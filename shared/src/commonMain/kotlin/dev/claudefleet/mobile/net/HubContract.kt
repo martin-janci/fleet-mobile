@@ -91,9 +91,9 @@ package dev.claudefleet.mobile.net
  * `env_target` on a form's secret field. A new tool and optional fields
  * only: this app calls none of them, so a revision-18 hub is safe here.
  * The phone rises first. Since then the hub's rows grew a session's
- * `pinned_at`, a host's load (`HostRow`, `host:pinged`'s `health`) and
- * `runs { trace }`; the phone reads each as an optional field, absent from
- * an older hub, so no revision moved for them.
+ * `pinned_at` and `prompt_suggestion`, a host's load (`HostRow`,
+ * `host:pinged`'s `health`) and `runs { trace }`; the phone reads each as an
+ * optional field, absent from an older hub, so no revision moved for them.
  *
  * [MIN_HUB_CONTRACT] does NOT mirror the desktop's minimum. The desktop
  * raised its own to 3 because a pre-3 hub would silently misperform

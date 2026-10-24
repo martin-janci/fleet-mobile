@@ -141,6 +141,12 @@ data class SessionRow(
      * to kill a pinned session (`E_PINNED`) until it is unpinned.
      */
     @SerialName("pinned_at") val pinnedAt: Long? = null,
+    /**
+     * The next prompt Claude Code proposes after a turn, the dim text in its
+     * own empty prompt box (claude-fleet migration 206). Absent when nothing
+     * is proposed, and from an older hub; the next prompt clears it.
+     */
+    @SerialName("prompt_suggestion") val promptSuggestion: String? = null,
     /** The credential profile the session runs under; absent for the host's own login (accounts, step 4.4). */
     @SerialName("claude_profile") val claudeProfile: String? = null,
     /**
@@ -218,6 +224,14 @@ data class SessionRow(
 
     /** A person pinned it ([pinnedAt]): nothing closes it until it is unpinned. */
     val isPinned: Boolean get() = pinnedAt != null
+
+    /**
+     * [promptSuggestion] when it is worth offering over the composer: the
+     * session is idle (a new turn makes it stale before the hub clears it)
+     * and [draft] is empty (the person is already writing their own).
+     */
+    fun offeredSuggestion(draft: String): String? =
+        promptSuggestion?.trim()?.takeIf { it.isNotEmpty() && claudeStatus == "idle" && draft.isBlank() }
 
     /** The rows the "needs attention" filter keeps, and every needs-you count counts. Never a [isProposed] row. */
     val needsAttention: Boolean get() = attentionReason != null && !isProposed
