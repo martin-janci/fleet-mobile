@@ -61,6 +61,7 @@ class PhoneViewFieldsTest {
             "pr_evidence",
             "pr_url",
             "project_id",
+            "prompt_suggestion",
             "safe_kill_state",
             "started_at",
             "status",
