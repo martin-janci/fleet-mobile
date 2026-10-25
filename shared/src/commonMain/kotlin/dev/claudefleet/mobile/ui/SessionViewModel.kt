@@ -260,6 +260,15 @@ data class SessionUiState(
      * Edit (redesign 14.5, New bar only); the box is left free meanwhile.
      */
     val notSent: NotSent? = null,
+    /**
+     * Claude Code's next-prompt suggestion as the composer offers it
+     * ([SessionRow.offeredSuggestion]), withheld while a send of this
+     * screen's is on its way or kept as not sent, and once one was accepted
+     * until the row moves on: the hub clears it only when the session's own
+     * hook fires, so without this the chip would offer again the prompt
+     * just sent (review10 #31).
+     */
+    val suggestion: String? = null,
     /** The hub keeps a prompt for the session's next idle moment (`queue_prompt`, redesign 14.14). */
     val sendLaterAvailable: Boolean = false,
     /**
@@ -625,6 +634,12 @@ class SessionViewModel(
          */
         val sendError: Friendly? = null,
         val notSent: NotSent? = null,
+        /**
+         * The suggestion that was on offer when a send was accepted: spent by
+         * that send, so not offered again while the row still carries it.
+         * Forgotten once the row leaves idle or drops its suggestion.
+         */
+        val spentSuggestion: String? = null,
         val queued: List<QueuedPrompt> = emptyList(),
         val sendLaterNotice: String? = null,
         val switchTarget: HostLogin? = null,
@@ -762,6 +777,16 @@ class SessionViewModel(
         )
 
     init {
+        // A spent suggestion is forgotten once the row moves on — a new turn
+        // (not idle) or no suggestion — so the next turn's offer shows even
+        // when it happens to read the same.
+        scope.launch {
+            fleet.sessions.map { rows -> rows.firstOrNull { it.id == sessionId }?.offeredSuggestion("") }
+                .distinctUntilChanged()
+                .collect { now ->
+                    local.update { l -> if (l.spentSuggestion != null && l.spentSuggestion != now) l.copy(spentSuggestion = null) else l }
+                }
+        }
         // This screen's own repair steps, by its token; another device's
         // repair is not this screen's business.
         scope.launch {
@@ -1450,6 +1475,7 @@ class SessionViewModel(
         // Out of the box at once and shown as pending: the box is free and the
         // prompt is visibly on its way, rather than both frozen until the hub
         // answers. A failure puts it back.
+        val offered = row()?.offeredSuggestion("")
         local.update {
             it.copy(
                 sending = true,
@@ -1461,8 +1487,11 @@ class SessionViewModel(
         try {
             actions.sendPrompt(sessionId, text)
             quickReplies.remember(text)
+            // Any accepted prompt starts a new turn, so the suggestion on offer
+            // is spent — unless the row has already moved on to another one.
+            val spent = offered?.takeIf { row()?.offeredSuggestion("") == it }
             // What was sent lands in the current conversation: show that one.
-            local.update { it.copy(sending = false, pending = null, viewing = null, earlier = null) }
+            local.update { it.copy(sending = false, pending = null, viewing = null, earlier = null, spentSuggestion = spent ?: it.spentSuggestion) }
             requestRead(first = false)
         } catch (e: CancellationException) {
             local.update { it.copy(sending = false, pending = null, draft = if (clearDraft && it.draft.isEmpty()) text else it.draft) }
@@ -2457,6 +2486,9 @@ class SessionViewModel(
         pending = l.pending,
         errorFromSend = l.error != null && l.error === l.sendError,
         notSent = l.notSent,
+        suggestion = row?.offeredSuggestion(l.draft)?.takeIf {
+            !l.sending && l.pending == null && l.notSent == null && it != l.spentSuggestion
+        },
         sendLaterAvailable = fleet.capabilities.value.sendLater,
         queuesWhileWorking = queueWhileWorking && fleet.capabilities.value.sendLater && !readOnlyFor(access.levelFor(row)),
         queued = l.queued,

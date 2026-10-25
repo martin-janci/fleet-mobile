@@ -594,6 +594,54 @@ class SessionViewModelTest {
         assertFalse(vm.state.value.sending)
     }
 
+    /** Review10 #31: the chip never offers again the prompt on its way, kept as not sent, or just sent. */
+    @Test
+    fun the_suggestion_is_not_offered_while_a_send_is_pending_or_once_it_was_spent() = runTest {
+        val actions = FakeActions()
+        val gate = CompletableDeferred<Unit>()
+        actions.sendGate = gate
+        val suggesting = row(status = "idle").copy(promptSuggestion = "run the tests")
+        val fleet = FakeFleetState(rows = listOf(suggesting))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+        assertEquals("run the tests", vm.state.value.suggestion)
+
+        vm.onDraftChange("run the tests")
+        val job = vm.send()
+        runCurrent()
+        assertEquals("", vm.state.value.draft)
+        assertNull(vm.state.value.suggestion, "not beside its own pending bubble")
+
+        gate.complete(Unit)
+        job.join()
+        runCurrent()
+        assertNull(vm.state.value.suggestion, "spent: the row has not caught up with the send yet")
+
+        fleet.sessions.value = listOf(suggesting.copy(claudeStatus = "working", promptSuggestion = null))
+        runCurrent()
+        fleet.sessions.value = listOf(suggesting)
+        runCurrent()
+        assertEquals("run the tests", vm.state.value.suggestion, "the next turn's offer shows, even when it reads the same")
+    }
+
+    @Test
+    fun the_suggestion_is_not_offered_beside_a_prompt_kept_as_not_sent() = runTest {
+        val actions = FakeActions()
+        actions.sendFails = HubError.Tool("E_BUSY", "mid-turn")
+        val fleet = FakeFleetState(rows = listOf(row(status = "idle").copy(promptSuggestion = "run the tests")))
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope, keepNotSent = true)
+        vm.onDraftChange("run the tests")
+        vm.send().join()
+        runCurrent()
+        assertEquals("run the tests", vm.state.value.notSent?.text)
+        assertNull(vm.state.value.suggestion)
+
+        vm.editNotSent()
+        vm.onDraftChange("")
+        runCurrent()
+        assertEquals("run the tests", vm.state.value.suggestion, "never sent, so not spent")
+    }
+
     @Test
     fun a_prompt_leaves_the_box_at_once_and_is_shown_pending_until_it_lands() = runTest {
         val actions = FakeActions()

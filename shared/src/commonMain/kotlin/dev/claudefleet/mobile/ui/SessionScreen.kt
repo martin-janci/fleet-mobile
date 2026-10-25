@@ -1109,7 +1109,7 @@ fun SessionScreen(
                                     // hidden until turns arrive (ConversationLoading).
                                     QuickRepliesRow(
                                         chips = quickReplies,
-                                        suggestion = state.session?.offeredSuggestion(state.draft),
+                                        suggestion = state.suggestion,
                                         draft = state.draft,
                                         enabled = state.canSendQuick,
                                         editable = quickRepliesEditable,
@@ -3206,7 +3206,7 @@ private fun HistoryDialog(entries: List<String>, onPick: (String) -> Unit, onDis
 @Composable
 private fun QuickRepliesRow(
     chips: List<QuickReply>,
-    /** Claude Code's own next-prompt suggestion ([SessionRow.offeredSuggestion]): the first chip, filling the box. */
+    /** Claude Code's own next-prompt suggestion ([SessionUiState.suggestion]): the first chip, filling the box. */
     suggestion: String?,
     draft: String,
     enabled: Boolean,
@@ -3247,7 +3247,12 @@ private fun QuickRepliesRow(
                             )
                         }
                     },
-                    modifier = Modifier.testTag(PROMPT_SUGGESTION_CHIP),
+                    // The ✦ is the only visual mark that this is Claude's
+                    // one-off proposal, not a saved quick reply: say so to
+                    // TalkBack in words, as the desktop chip's title does.
+                    modifier = Modifier.testTag(PROMPT_SUGGESTION_CHIP).semantics {
+                        contentDescription = "Claude suggests: $suggestion"
+                    },
                 )
             }
         }
