@@ -105,11 +105,15 @@ private fun questionOf(key: String?): String? = key?.substringAfter('#', "")?.if
 /**
  * What a session is announced for: the hub's attention reason, else
  * [DONE_REASON] for one that finished its task (`completed`, the hub's word
- * for a background agent done) — never for one running outside fleet, and
- * never for Jev's proposal ([SessionRow.isProposed], contract 15).
+ * for a background agent done) — never for one running outside fleet, never
+ * for Jev's proposal ([SessionRow.isProposed], contract 15), and never for a
+ * routine's run that finished ([SessionRow.isRoutineRun]: the routine's news,
+ * read in its runs; its failures and questions still announce), as the
+ * desktop does.
  */
 internal val SessionRow.notifyReason: String?
-    get() = attentionReason?.takeUnless { isProposed } ?: DONE_REASON.takeIf { claudeStatus == "completed" && kind != "external" }
+    get() = attentionReason?.takeUnless { isProposed }
+        ?: DONE_REASON.takeIf { claudeStatus == "completed" && kind != "external" && !isRoutineRun }
 
 /** The hub's attention reason as the notification says it — the app's one table, [reasonLabel]. */
 fun reasonWords(reason: String): String = reasonLabel(reason)

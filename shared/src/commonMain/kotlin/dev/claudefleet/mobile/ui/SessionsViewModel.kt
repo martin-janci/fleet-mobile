@@ -49,6 +49,38 @@ import kotlinx.coroutines.launch
 import dev.claudefleet.mobile.model.relativeTime
 
 /**
+ * One routine's runs, newest first: a session per run (claude-fleet
+ * `routine_sessions.ts`). [key] is `routine:<id>`, or `routine:?` for rows
+ * that name none; [name] the routine's, as its sessions carry it.
+ */
+data class RoutineGroup(
+    val key: String,
+    val routineId: Long?,
+    val name: String,
+    val sessions: List<SessionRow>,
+) {
+    /** How many of its runs want a person: said on the folded line. */
+    val attentionCount: Int get() = sessions.count { it.needsAttention }
+}
+
+/**
+ * The routine runs of [rows], a group per routine: the group with the newest
+ * run first, and inside one the newest run first.
+ */
+internal fun routineGroups(rows: List<SessionRow>): List<RoutineGroup> {
+    val startedAt = { s: SessionRow -> s.startedAt ?: s.createdAt ?: 0L }
+    return rows.filter { it.isRoutineRun }
+        .groupBy { it.originRef?.trim()?.toLongOrNull() }
+        .map { (id, runs) ->
+            val sorted = runs.sortedWith(compareByDescending<SessionRow> { startedAt(it) }.thenByDescending { it.id })
+            val name = sorted.firstNotNullOfOrNull { r -> r.friendlyName?.trim()?.takeIf { it.isNotEmpty() } }
+                ?: if (id != null) "Routine $id" else "Routine"
+            RoutineGroup(key = "routine:${id ?: "?"}", routineId = id, name = name, sessions = sorted)
+        }
+        .sortedWith(compareByDescending<RoutineGroup> { startedAt(it.sessions.first()) }.thenBy { it.key })
+}
+
+/**
  * The sessions of one project on one host — or, with *by work* on, of one
  * piece of work on one host, when [work] is set.
  */
@@ -206,6 +238,12 @@ data class SessionsUiState(
      * (every row is one).
      */
     val pinned: List<SessionRow> = emptyList(),
+    /**
+     * The sessions routines started, a group per routine, out of [groups]
+     * (one per run would flood the tree); empty in the urgency view, whose
+     * queue keeps them. One that needs a person is in [pinned] too.
+     */
+    val routineGroups: List<RoutineGroup> = emptyList(),
     /** Never yet connected, nothing to show: "connecting", not "no sessions". */
     val connecting: Boolean = false,
     /** While not live: how old the rows on screen are ("12 min"); null when live or never. */
@@ -250,7 +288,7 @@ data class SessionsUiState(
     /** How many of [archivedHidden] want a person — said on that row, since the banner does not count them. */
     val archivedAttention: Int = 0,
 ) {
-    val isEmpty: Boolean get() = groups.isEmpty() && urgent.isEmpty()
+    val isEmpty: Boolean get() = groups.isEmpty() && urgent.isEmpty() && routineGroups.isEmpty()
 
     // The screen and its tests ask these of the state, not of the filters:
     // they were fields here before the filters were gathered into one value,
@@ -876,11 +914,13 @@ class SessionsViewModel(
         } else {
             rows.filter { it.triageBucket(now = nowSeconds).needsYou && kept(it, applied) }.byTriage(now = nowSeconds)
         }
+        val (routineRuns, ownRows) = if (urgency) emptyList<SessionRow>() to rows else rows.partition { it.isRoutineRun }
+        val routines = routineGroups(routineRuns.filter { kept(it, applied) })
         val groups = if (urgency) {
             emptyList()
         } else {
             groupSessions(
-                rows,
+                ownRows,
                 hosts,
                 projects,
                 applied,
@@ -899,7 +939,7 @@ class SessionsViewModel(
             filters = filters,
             attentionCount = sessions.count { it.needsAttention },
             hiddenAttention = hiddenAttention,
-            shown = if (urgency) urgent.size else groups.sumOf { it.sessionCount },
+            shown = if (urgency) urgent.size else groups.sumOf { it.sessionCount } + routines.sumOf { it.sessions.size },
             total = sessions.size,
             refreshing = l.refreshing,
             error = l.error,
@@ -908,6 +948,7 @@ class SessionsViewModel(
             groupMode = groupMode,
             urgent = urgent,
             pinned = pinned,
+            routineGroups = routines,
             // Never while refused: that hub will not connect however long the
             // spinner turns, and the banner above already says why.
             connecting = l.liveAt == null && sessions.isEmpty() && status !is ConnectionStatus.Refused,
