@@ -391,8 +391,8 @@ private fun AutomationList(
                     PhoneRow(
                         title = loop.label.ifBlank { loop.name },
                         line = loopLine(loop, nowSeconds, state.paused == true),
-                        word = loopWord(loop, state.paused == true),
-                        dot = loopWord(loop, state.paused == true) != null,
+                        word = loopWord(loop, state.paused == true, nowSeconds),
+                        dot = loopWord(loop, state.paused == true, nowSeconds) != null,
                         divider = i < state.loops.lastIndex,
                     )
                 }

@@ -569,14 +569,39 @@ fun loopLine(loop: LoopHealth, nowSeconds: Long, paused: Boolean): String {
         parts += "not run yet here"
     }
     val next = loop.nextRunAt
-    if (next != null && !stopped) parts += if (next > nowSeconds) "next in ${span(next - nowSeconds)}" else "due now"
+    if (next != null && !stopped) {
+        parts += when {
+            loopStalled(loop, nowSeconds) -> "overdue by ${span(nowSeconds - next)}; it may have stopped"
+            next > nowSeconds -> "next in ${span(next - nowSeconds)}"
+            else -> "due now"
+        }
+    }
     return parts.joinToString(" · ")
 }
 
-/** A built-in routine's word: Failed after an error, Paused under Pause all, else none (it is the fleet's own). */
-fun loopWord(loop: LoopHealth, paused: Boolean): StatusWord? = when {
+/** Least time past its due run before a loop reads stalled, whatever its period. */
+const val LOOP_STALL_GRACE_SECONDS = 600L
+
+/**
+ * Whether a loop missed its next run by more than a whole period (and at
+ * least [LOOP_STALL_GRACE_SECONDS]), the desktop's `loopStalled`: a loop whose
+ * task died still shows its last good run, and read "due now" forever.
+ */
+fun loopStalled(loop: LoopHealth, nowSeconds: Long): Boolean {
+    val last = loop.lastRunAt ?: return false
+    val next = loop.nextRunAt ?: return false
+    val period = maxOf(0L, next - last)
+    return nowSeconds - next > maxOf(period, LOOP_STALL_GRACE_SECONDS)
+}
+
+/**
+ * A built-in routine's word: Failed after an error or once it stopped running
+ * ([loopStalled]), Paused under Pause all, else none (it is the fleet's own).
+ */
+fun loopWord(loop: LoopHealth, paused: Boolean, nowSeconds: Long): StatusWord? = when {
     paused && loop.pausable -> StatusWord.PAUSED
     loop.result == "error" -> StatusWord.FAILED
+    loopStalled(loop, nowSeconds) -> StatusWord.FAILED
     else -> null
 }
 
