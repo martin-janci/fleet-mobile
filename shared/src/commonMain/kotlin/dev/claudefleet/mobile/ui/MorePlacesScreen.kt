@@ -354,13 +354,26 @@ internal fun nearLimit(w: LimitWindow, nowSeconds: Long): Boolean =
     !hasReset(w, nowSeconds) && 100.0 - w.utilization < LOW_BELOW_PCT
 
 /**
+ * A good read older than this is not current: the desktop's stale limit for
+ * the 5-hour window (`STALE_LIMIT_SECS` in claude-fleet's
+ * `src/lib/account_usage.ts`). The hub reads every account each 5 minutes, so
+ * an `ok` this old is one it no longer reads (no host has the account any
+ * more) or the reading it kept over a restart.
+ */
+internal const val STALE_READ_SECS = 30 * 60L
+
+/**
  * What a read that did not come back says, in words, and how old the meters
- * above it are; null when the latest read is good.
+ * above it are; null when the latest read is good and recent.
  */
 internal fun limitsNote(snap: AccountUsageSnapshot?, nowSeconds: Long): String? {
     if (snap == null) return "Not read yet."
     val why = when (snap.status) {
-        "ok" -> return null
+        "ok" -> {
+            val at = snap.fetchedAt ?: return null
+            if (snap.usage == null || nowSeconds - at <= STALE_READ_SECS) return null
+            return relativeAgo(at, nowSeconds)?.let { "Not re-read since · meters from $it." }
+        }
         "never_fetched" -> "Not read yet"
         "no_credentials" -> "No Claude login on its host"
         // The hub refreshes an expired access token by itself (attention.rs).
