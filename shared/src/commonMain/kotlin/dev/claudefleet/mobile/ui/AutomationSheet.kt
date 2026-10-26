@@ -63,6 +63,7 @@ import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.kit.BottomSheet
 import dev.claudefleet.mobile.ui.kit.DotWave
 import dev.claudefleet.mobile.ui.kit.PhoneRow
+import dev.claudefleet.mobile.ui.kit.StatusWord
 import dev.claudefleet.mobile.ui.kit.rememberLoaderVisible
 import dev.claudefleet.mobile.ui.theme.Fleet
 import kotlinx.coroutines.delay
@@ -384,6 +385,10 @@ private fun AutomationList(
             agents.selfDebug?.let { SelfDebugCard(it, handlers.onRefreshAgents) }
         }
         AutomationTab.Routines -> {
+            // The hub's own disk and backups, above the loops that keep them.
+            storageWarnings(state.storage, nowSeconds).forEach { w ->
+                PhoneRow(title = w.title, line = w.line, word = StatusWord.FAILED, dot = true)
+            }
             if (state.loops.isNotEmpty()) {
                 // The fleet's own loops (8.1), read-only: Pause all stops the pausable ones.
                 Text("Built in", color = o.fgMuted, fontSize = 13.sp)

@@ -11,6 +11,7 @@ import dev.claudefleet.mobile.model.RoutineMemory
 import dev.claudefleet.mobile.model.RoutineNotebook
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.RunTraceStep
+import dev.claudefleet.mobile.model.StorageHealth
 import dev.claudefleet.mobile.model.dollars
 import dev.claudefleet.mobile.model.relativeAgo
 import dev.claudefleet.mobile.model.relativeTime
@@ -80,6 +81,8 @@ data class AutomationUiState(
     val paused: Boolean? = null,
     /** The hub's built-in routines (8.1's loops), read-only; empty from an older hub. */
     val loops: List<LoopHealth> = emptyList(),
+    /** The hub's own disk and backups; null from an older hub. */
+    val storage: StorageHealth? = null,
     /** What the routines spent today, micro-USD (`routines { budget }`); null from a hub that does not say. */
     val spentToday: Long? = null,
     /** What is being sent: `routine:<id>` or `pause`. */
@@ -118,6 +121,7 @@ class AutomationViewModel(
         val memory: RoutineMemory? = null,
         val paused: Boolean? = null,
         val loops: List<LoopHealth> = emptyList(),
+        val storage: StorageHealth? = null,
         val spentToday: Long? = null,
         val busy: String? = null,
         val notice: String? = null,
@@ -145,6 +149,7 @@ class AutomationViewModel(
             canEditMemory = canWrite && caps.routines && l.memory?.mayChange == true,
             paused = l.paused,
             loops = l.loops,
+            storage = l.storage,
             spentToday = l.spentToday,
             busy = l.busy,
             notice = l.notice,
@@ -319,6 +324,9 @@ class AutomationViewModel(
                     routines = routines,
                     paused = health?.automationPaused ?: it.paused,
                     loops = health?.loops ?: it.loops,
+                    // A failed health read keeps the last; a hub that answers
+                    // without it (an older one) has none.
+                    storage = if (health != null) health.storage else it.storage,
                     spentToday = budget?.spentMicros ?: it.spentToday,
                 )
             }
@@ -577,6 +585,35 @@ fun loopLine(loop: LoopHealth, nowSeconds: Long, paused: Boolean): String {
         }
     }
     return parts.joinToString(" · ")
+}
+
+/** One warning about the hub's own storage: a title and its line. */
+data class StorageWarning(val title: String, val line: String)
+
+/**
+ * The hub's disk and backup warnings, as the desktop's Attention items say
+ * them (`storageAttentionItems`): one per flag the hub raised.
+ */
+fun storageWarnings(s: StorageHealth?, nowSeconds: Long): List<StorageWarning> {
+    if (s == null) return emptyList()
+    val out = mutableListOf<StorageWarning>()
+    if (s.lowDisk) {
+        val free = s.freeBytes?.let { gb(it) } ?: "little"
+        val of = s.totalBytes?.let { " of ${gb(it)}" } ?: ""
+        out += StorageWarning("Hub disk almost full", "$free free$of; its database stops saving when the disk fills.")
+    }
+    if (s.backupStale) {
+        val last = s.lastBackupAt
+        val whenSaid = if (last != null) "The newest backup is ${span(nowSeconds - last)} old" else "The hub has no backup"
+        out += StorageWarning("Hub backup stale", "$whenSaid; it takes one daily. Check its log and its backups folder.")
+    }
+    return out
+}
+
+/** Bytes as "1.5 GB", rounded to a tenth. */
+private fun gb(bytes: Long): String {
+    val tenths = (bytes * 10 + 512L * 1024 * 1024) / (1024L * 1024 * 1024)
+    return "${tenths / 10}.${tenths % 10} GB"
 }
 
 /** Least time past its due run before a loop reads stalled, whatever its period. */

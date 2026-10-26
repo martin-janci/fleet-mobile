@@ -19,6 +19,7 @@ import dev.claudefleet.mobile.model.notebookChars
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.RunTrace
 import dev.claudefleet.mobile.model.RunTraceStep
+import dev.claudefleet.mobile.model.StorageHealth
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
@@ -640,5 +641,22 @@ class AutomationTest {
         assertEquals(StatusWord.PAUSED, loopWord(dead, paused = true, nowSeconds = now))
         // Every 6 h, due 4 h ago: within a period.
         assertFalse(loopStalled(LoopHealth(lastRunAt = now - 36_000, nextRunAt = now - 14_400), now))
+    }
+
+    @Test
+    fun theHubsDiskAndBackupWarningsSayTheNumbers() {
+        val gb = 1024L * 1024 * 1024
+        val now = 1_800_000_000L
+        assertEquals(emptyList(), storageWarnings(null, now))
+        assertEquals(emptyList(), storageWarnings(StorageHealth(freeBytes = 50 * gb, totalBytes = 100 * gb, lastBackupAt = now - 60), now))
+        val (disk, backup) = storageWarnings(
+            StorageHealth(freeBytes = 3 * gb / 2, totalBytes = 100 * gb, lowDisk = true, lastBackupAt = now - 3 * 86_400, backupStale = true),
+            now,
+        )
+        assertEquals("Hub disk almost full", disk.title)
+        assertTrue(disk.line.startsWith("1.5 GB free of 100.0 GB"), disk.line)
+        assertEquals("Hub backup stale", backup.title)
+        assertTrue(backup.line.startsWith("The newest backup is 3 d old"), backup.line)
+        assertTrue(storageWarnings(StorageHealth(backupStale = true), now).single().line.startsWith("The hub has no backup"))
     }
 }
