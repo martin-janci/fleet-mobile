@@ -81,16 +81,24 @@ private class FakeMissionActions : MissionActions {
         return StartOutcome(missionId, listOf(StepResult(step = s, ok = true, detail = "task 7")))
     }
 
+    /** What `decideCard` throws, when set. */
+    var decideFails: Throwable? = null
+
     override suspend fun decideCard(cardId: Long, ok: Boolean, note: String?): MissionCard {
         calls += "decide $cardId $ok ${note ?: "-"}"
+        decideFails?.let { throw it }
         return MissionCard(id = cardId, state = if (ok) "applied" else "dismissed")
     }
 
     /** How many `setState` calls answer E_CONFLICT before one goes through. */
     var stateConflicts = 0
 
+    /** What every `setState` throws, when set. */
+    var stateFails: Throwable? = null
+
     override suspend fun setState(missionId: Long, state: String, expectedVersion: Long): Mission {
         calls += "state $missionId $state $expectedVersion"
+        stateFails?.let { throw it }
         if (stateConflicts > 0) {
             stateConflicts -= 1
             throw dev.claudefleet.mobile.net.HubError.Tool("E_CONFLICT", "the mission moved on")
@@ -618,6 +626,36 @@ class MissionsTest {
         assertEquals(2, writes.count { it.startsWith("state 1 active") }, "$writes")
         assertTrue(writes.last().startsWith("decide 77 true"), "$writes")
         assertNull(vm.state.value.error)
+    }
+
+    /**
+     * An approve that goes partway says what went through: the card is gone
+     * with the ask, so a bare error hid that the limit had moved and whether
+     * the mission still waits for Resume.
+     */
+    @Test
+    fun an_approve_that_goes_partway_says_the_limit_moved_and_what_is_left() = runTest {
+        val failure = dev.claudefleet.mobile.net.HubError.Tool("E_INTERNAL", "boom")
+        val notResumed = FakeMissionActions().apply { detail = braked; list = listOf(braked.mission); stateFails = failure }
+        val vm = MissionsViewModel(MissionsFleet(spendLoop), notResumed, backgroundScope, canWrite = true)
+        vm.openOne(1).join()
+        runCurrent()
+        vm.approveSpend(spendAsk(braked)!!, nowSeconds = 1_000).join()
+        runCurrent()
+        val error = vm.state.value.error!!
+        assertEquals("The limit is \$39.80 now", error.title)
+        assertTrue("Press Resume" in error.body, error.body)
+        assertNull(vm.state.value.notice)
+
+        val unanswered = FakeMissionActions().apply { detail = braked; list = listOf(braked.mission); decideFails = failure }
+        val vm2 = MissionsViewModel(MissionsFleet(spendLoop), unanswered, backgroundScope, canWrite = true)
+        vm2.openOne(1).join()
+        runCurrent()
+        vm2.approveSpend(spendAsk(braked)!!, nowSeconds = 1_000).join()
+        runCurrent()
+        val error2 = vm2.state.value.error!!
+        assertEquals("The limit is \$39.80 now", error2.title)
+        assertTrue("runs again" in error2.body, error2.body)
     }
 
     @Test

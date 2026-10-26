@@ -222,14 +222,27 @@ class MissionsViewModel(
         // ask). A resume that loses a version race must not leave the mission
         // paused behind a raised budget with no button left to resume it, so
         // it is tried once more against the version as it is now.
+        //
+        // Past the regrant a failure is a partial one: the card is gone with
+        // the ask, so a bare error left the person not knowing the budget had
+        // moved, or which step to take again. It says what went through.
+        var resumed = false
         try {
-            actions.setState(id, "active", m.version)
-        } catch (e: HubError.Tool) {
-            if (e.code != "E_CONFLICT") throw e
-            val now = actions.mission(id).mission
-            if (now.state != "active") actions.setState(id, "active", now.version)
+            try {
+                actions.setState(id, "active", m.version)
+            } catch (e: HubError.Tool) {
+                if (e.code != "E_CONFLICT") throw e
+                val now = actions.mission(id).mission
+                if (now.state != "active") actions.setState(id, "active", now.version)
+            }
+            resumed = true
+            actions.decideCard(ask.cardId, ok = true, note = "Approved ${dollars(ask.moreMicros)} more; the new limit is ${dollars(ask.newLimitMicros)}.")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(error = spendPartlyApproved(friendly(t), ask, resumed)) }
+            return@act
         }
-        actions.decideCard(ask.cardId, ok = true, note = "Approved ${dollars(ask.moreMicros)} more; the new limit is ${dollars(ask.newLimitMicros)}.")
         local.update { it.copy(notice = "Approved ${dollars(ask.moreMicros)} more. The mission runs again.") }
     }
 
@@ -367,3 +380,17 @@ private const val WORK_REREAD_MS = 2_000L
 
 /** A grant runs at most a week (the hub's `GRANT_MAX_SECS`). */
 const val GRANT_MAX_HOURS: Int = 168
+
+/**
+ * The error after an approved spend ask went partway: the budget is raised by
+ * then, and [resumed] says whether the mission runs again (only the brake's
+ * card was left unanswered) or still waits for Resume.
+ */
+internal fun spendPartlyApproved(cause: Friendly, ask: SpendAsk, resumed: Boolean): Friendly = cause.copy(
+    title = "The limit is ${dollars(ask.newLimitMicros)} now",
+    body = if (resumed) {
+        "The mission runs again, but its spend card was not answered: ${cause.body}"
+    } else {
+        "The mission did not resume: ${cause.body} Press Resume to run it again."
+    },
+)

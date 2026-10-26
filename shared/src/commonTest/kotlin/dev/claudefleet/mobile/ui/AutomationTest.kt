@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.data.RoutineActions
 import dev.claudefleet.mobile.model.FleetRun
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.HubHealth
+import dev.claudefleet.mobile.model.LoopHealth
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.RoutineBudget
@@ -18,6 +19,7 @@ import dev.claudefleet.mobile.model.notebookChars
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.RunTrace
 import dev.claudefleet.mobile.model.RunTraceStep
+import dev.claudefleet.mobile.model.StorageHealth
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
@@ -619,5 +621,42 @@ class AutomationTest {
         )
         assertEquals(listOf("b"), m.notebooks().map { it.body })
         assertEquals(5L, m.project?.updatedRunId)
+    }
+
+    @Test
+    fun aLoopThatMissedItsRunByMoreThanAPeriodMayHaveStopped() {
+        val now = 1_000_000L
+        // Every 5 min, due 3 min ago: late, not stalled.
+        val late = LoopHealth(name = "gc", pausable = true, lastRunAt = now - 480, nextRunAt = now - 180, result = "ok")
+        assertFalse(loopStalled(late, now))
+        assertEquals("last run 8 min ago · due now", loopLine(late, now, paused = false))
+        assertNull(loopWord(late, paused = false, nowSeconds = now))
+        // Every 5 min, due 2 h ago: its task died with its last good run on show.
+        val dead = late.copy(lastRunAt = now - 7_500, nextRunAt = now - 7_200)
+        assertTrue(loopStalled(dead, now))
+        assertEquals("last run 2 h ago · overdue by 2 h; it may have stopped", loopLine(dead, now, paused = false))
+        assertEquals(StatusWord.FAILED, loopWord(dead, paused = false, nowSeconds = now))
+        // Paused, it is not due at all.
+        assertEquals("paused · last run 2 h ago", loopLine(dead, now, paused = true))
+        assertEquals(StatusWord.PAUSED, loopWord(dead, paused = true, nowSeconds = now))
+        // Every 6 h, due 4 h ago: within a period.
+        assertFalse(loopStalled(LoopHealth(lastRunAt = now - 36_000, nextRunAt = now - 14_400), now))
+    }
+
+    @Test
+    fun theHubsDiskAndBackupWarningsSayTheNumbers() {
+        val gb = 1024L * 1024 * 1024
+        val now = 1_800_000_000L
+        assertEquals(emptyList(), storageWarnings(null, now))
+        assertEquals(emptyList(), storageWarnings(StorageHealth(freeBytes = 50 * gb, totalBytes = 100 * gb, lastBackupAt = now - 60), now))
+        val (disk, backup) = storageWarnings(
+            StorageHealth(freeBytes = 3 * gb / 2, totalBytes = 100 * gb, lowDisk = true, lastBackupAt = now - 3 * 86_400, backupStale = true),
+            now,
+        )
+        assertEquals("Hub disk almost full", disk.title)
+        assertTrue(disk.line.startsWith("1.5 GB free of 100.0 GB"), disk.line)
+        assertEquals("Hub backup stale", backup.title)
+        assertTrue(backup.line.startsWith("The newest backup is 3 d old"), backup.line)
+        assertTrue(storageWarnings(StorageHealth(backupStale = true), now).single().line.startsWith("The hub has no backup"))
     }
 }

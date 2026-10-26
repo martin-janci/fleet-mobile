@@ -55,6 +55,26 @@ data class HubHealth(
     @SerialName("playbooks_week") val playbooksWeek: Map<String, Int> = emptyMap(),
     /** Jev's health; only its week is read here. Absent for a client the hub keeps it from. */
     val decide: DecideHealth? = null,
+    /**
+     * The hub's own disk and backups (claude-fleet hardening survey
+     * 2026-10-26). Absent from an older hub and for a client the hub keeps it
+     * from.
+     */
+    val storage: StorageHealth? = null,
+)
+
+/**
+ * `fleet_health.storage`: free space under the hub's data folder and its
+ * newest backup, each flagged by the hub past its warning line.
+ */
+@Serializable
+@JsonIgnoreUnknownKeys
+data class StorageHealth(
+    @SerialName("free_bytes") val freeBytes: Long? = null,
+    @SerialName("total_bytes") val totalBytes: Long? = null,
+    @SerialName("low_disk") val lowDisk: Boolean = false,
+    @SerialName("last_backup_at") val lastBackupAt: Long? = null,
+    @SerialName("backup_stale") val backupStale: Boolean = false,
 )
 
 /** `fleet_health.decide`: the one part this app reads, the last seven days' answers. */
