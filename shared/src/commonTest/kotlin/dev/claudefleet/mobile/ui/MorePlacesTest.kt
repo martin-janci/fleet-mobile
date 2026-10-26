@@ -269,6 +269,12 @@ class MorePlacesTest {
         val now = 1_000_000L
         val ok = AccountUsageSnapshot(accountUuid = "u1", usage = AccountLimits(), fetchedAt = now - 60, status = "ok")
         assertNull(limitsNote(ok, now))
+        assertNull(limitsNote(ok.copy(fetchedAt = now - STALE_READ_SECS), now), "a good read up to the stale limit is current")
+        assertEquals(
+            "Not re-read since · meters from 3 h ago.",
+            limitsNote(ok.copy(fetchedAt = now - 3 * 3_600), now),
+            "an old good read says how old it is, as the desktop's age line does",
+        )
         assertEquals("Not read yet.", limitsNote(null, now))
         assertEquals(
             "Its login expired; sign in again on the host · meters from 3 h ago.",
