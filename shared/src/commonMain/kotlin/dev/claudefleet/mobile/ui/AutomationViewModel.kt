@@ -473,6 +473,9 @@ fun eventLabel(event: String?): String = when (event) {
     "login_signed_out" -> "a Claude login is signed out"
     "mission_done" -> "a mission completes"
     "mission_failed" -> "a mission fails"
+    "ticket_done" -> "a ticket is marked done"
+    "check_passed" -> "an AI check passes"
+    "check_failed" -> "an AI check fails"
     null, "" -> "an event"
     else -> event.replace('_', ' ')
 }

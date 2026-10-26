@@ -329,6 +329,18 @@ internal class FakeWorkActions : WorkActions {
         return dev.claudefleet.mobile.model.WorkItem(id = itemId)
     }
 
+    override suspend fun runTicketCheck(itemId: Long) {
+        write("check $itemId")
+    }
+
+    override suspend fun acceptTicketCheck(itemId: Long, note: String?) {
+        write("accept_check $itemId note=\"${note.orEmpty()}\"")
+    }
+
+    override suspend fun setTicketCheck(projectId: Long, mode: String, command: String?) {
+        write("check_setup $projectId $mode \"${command.orEmpty()}\"")
+    }
+
     override suspend fun editItem(
         itemId: Long,
         title: String?,

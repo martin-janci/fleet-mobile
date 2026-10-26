@@ -674,6 +674,7 @@ fun PhoneTaskScreen(
                     state.detail?.notes?.takeIf { it.isNotBlank() && task.editable }?.let { MarkdownText(it) }
                     TaskHierarchy(state, h)
                     OwnTaskControls(state, h)
+                    TicketCheckCard(state, h)
                     task.url?.takeIf { it.isNotBlank() }?.let { url ->
                         val uri = LocalUriHandler.current
                         Text(

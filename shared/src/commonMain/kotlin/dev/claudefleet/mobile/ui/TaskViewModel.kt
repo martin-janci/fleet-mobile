@@ -12,6 +12,7 @@ import dev.claudefleet.mobile.model.LinkState
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.OrgSource
 import dev.claudefleet.mobile.model.StatusCategory
+import dev.claudefleet.mobile.model.TicketCheck
 import dev.claudefleet.mobile.model.TaskDetail
 import dev.claudefleet.mobile.model.WorkTaskLink
 import dev.claudefleet.mobile.model.subtaskRollup
@@ -26,6 +27,7 @@ import dev.claudefleet.mobile.utcOffsetSeconds
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -131,6 +133,14 @@ data class TaskUiState(
      */
     val canAddSubtask: Boolean = false,
     val subtaskOpen: Boolean = false,
+    /** The AI check of the task's finished work, when the hub has one to show. */
+    val check: TicketCheck? = null,
+    /** **Test now** / **Rerun**: the hub offers it, a full token, `work_link check`, a connection. */
+    val canRunCheck: Boolean = false,
+    /** **Accept anyway**: a failed check, `work_link verify`. */
+    val canAcceptCheck: Boolean = false,
+    /** The project's switch can be changed here (`work_link check_setup`). */
+    val canSetupCheck: Boolean = false,
 ) {
     val task get() = detail?.task
 }
@@ -201,6 +211,9 @@ class TaskViewModel(
 
     private val local = MutableStateFlow(Local())
 
+    /** The re-read while an AI check runs on the hub. */
+    private var checkPoll: Job? = null
+
     val state: StateFlow<TaskUiState> =
         combine(fleet.capabilities, fleet.status, fleet.orgs, local) { caps, status, orgs, l -> assemble(caps, status, orgs, l) }
             .stateIn(scope, SharingStarted.Eagerly, assemble(fleet.capabilities.value, fleet.status.value, fleet.orgs.value, local.value))
@@ -227,6 +240,7 @@ class TaskViewModel(
         try {
             val detail = actions.task(taskId)
             local.update { it.copy(loading = false, detail = detail, asOf = clock(), gone = false, error = null, conflict = false) }
+            pollWhileChecking(detail.check)
             // The parent's name, for "Under …": a second read, and a parent
             // this token may not see (or one that is gone) just stays unnamed.
             val parent = detail.task.parentTaskId
@@ -481,6 +495,36 @@ class TaskViewModel(
         return itemWrite(SET_STATUS) { actions.setStatus(itemId, status.wire) }
     }
 
+    /** A running check finishes on the hub: read the task again until it does. */
+    private fun pollWhileChecking(check: TicketCheck?) {
+        if (check?.state != "running" || checkPoll?.isActive == true) return
+        checkPoll = scope.launch {
+            delay(CHECK_POLL_MS)
+            checkPoll = null
+            if (fleet.status.value.isConnected()) load()
+        }
+    }
+
+    /** **Test now** / **Rerun**: the AI check of the item's finished work. */
+    fun runCheck(): Job? {
+        val itemId = state.value.task?.itemId ?: return null
+        if (!state.value.canRunCheck) return null
+        return itemWrite(CHECK) { actions.runTicketCheck(itemId) }
+    }
+
+    /** **Accept anyway**: the failed check, with the person's note. */
+    fun acceptCheck(note: String): Job? {
+        val itemId = state.value.task?.itemId ?: return null
+        if (!state.value.canAcceptCheck) return null
+        return itemWrite(VERIFY) { actions.acceptTicketCheck(itemId, note) }
+    }
+
+    /** The project's switch: `off`, `ask` or `auto`, and its test command. */
+    fun setCheck(mode: String, command: String): Job? {
+        val setup = state.value.check?.setup ?: return null
+        return itemWrite(CHECK_SETUP) { actions.setTicketCheck(setup.projectId, mode, command) }
+    }
+
     /** One write about the item, then the task re-read. */
     private fun itemWrite(action: String, call: suspend () -> Unit): Job? {
         if (local.value.busy) return null
@@ -570,6 +614,10 @@ class TaskViewModel(
             editFields = detail?.let {
                 TaskEditFields(title = it.task.title, notes = it.notes.orEmpty(), assignees = it.task.assignees, dueAt = it.task.dueAt.orEmpty())
             } ?: TaskEditFields(),
+            check = detail?.check,
+            canRunCheck = detail?.check?.canRun == true && allowed(caps, status, CHECK),
+            canAcceptCheck = detail?.check?.acceptable == true && allowed(caps, status, VERIFY),
+            canSetupCheck = detail?.check?.setup != null && allowed(caps, status, CHECK_SETUP),
             criteria = acceptanceCriteria(detail?.description?.takeIf { it.isNotBlank() } ?: detail?.notes.orEmpty()),
         )
     }
@@ -603,5 +651,9 @@ class TaskViewModel(
         const val EDIT = "edit"
         const val SET_STATUS = "set_status"
         const val CREATE = "create"
+        const val CHECK = "check"
+        const val VERIFY = "verify"
+        const val CHECK_SETUP = "check_setup"
+        const val CHECK_POLL_MS = 10_000L
     }
 }

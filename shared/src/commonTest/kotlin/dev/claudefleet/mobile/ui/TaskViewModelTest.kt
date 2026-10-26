@@ -504,6 +504,68 @@ class TaskViewModelTest {
         assertEquals(listOf("set_status 12 done"), actions.calls)
     }
 
+    // ---- the AI check on done (claude-fleet work-graph.md, *AI check on done*) ----
+
+    private val setup = dev.claudefleet.mobile.model.CheckSetup(projectId = 7, project = "acme/api", mode = "ask", command = "cargo test")
+
+    /** A failed check offers Rerun and Accept anyway; each is one write, then the task re-read. */
+    @Test
+    fun a_failed_check_reruns_or_is_accepted_with_a_note() = runTest {
+        val failed = dev.claudefleet.mobile.model.TicketCheck(
+            state = "failed",
+            setup = setup,
+            blockers = listOf("login() returns 500"),
+            canRun = true,
+        )
+        val actions = FakeWorkActions().apply { taskAnswer = local.copy(check = failed) }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        val s = vm.state.value
+        assertTrue(s.canRunCheck && s.canAcceptCheck && s.canSetupCheck)
+        assertEquals("Rerun", s.check?.runLabel)
+        assertEquals(dev.claudefleet.mobile.ui.kit.StatusWord.FAILED to "Failed · not ready", ticketCheckHeadline(failed))
+
+        vm.runCheck()
+        runCurrent()
+        vm.acceptCheck("flaky on CI only")
+        runCurrent()
+        vm.setCheck("auto", "cargo test")
+        runCurrent()
+        assertEquals(
+            listOf("check 12", "accept_check 12 note=\"flaky on CI only\"", "check_setup 7 auto \"cargo test\""),
+            actions.calls,
+        )
+    }
+
+    /** No check from the hub (or an older hub): no card and nothing to tap; a passed one offers no Accept anyway. */
+    @Test
+    fun no_check_draws_no_card() = runTest {
+        val none = taskVm(actions = FakeWorkActions().apply { taskAnswer = local })
+        runCurrent()
+        assertNull(none.state.value.check)
+        assertFalse(none.state.value.canRunCheck || none.state.value.canAcceptCheck)
+        assertNull(none.runCheck())
+
+        val passed = dev.claudefleet.mobile.model.TicketCheck(state = "passed", canRun = false, whyNot = "the newest work is already checked")
+        val vm = taskVm(actions = FakeWorkActions().apply { taskAnswer = local.copy(check = passed) })
+        runCurrent()
+        assertFalse(vm.state.value.canAcceptCheck || vm.state.value.canRunCheck)
+        assertEquals("Done · tests passed", ticketCheckHeadline(passed).second)
+    }
+
+    /** The hub's `check` on `work { task }` decodes with its snake_case keys. */
+    @Test
+    fun the_check_decodes_from_the_hub() {
+        val c = json.decodeFromString(
+            dev.claudefleet.mobile.model.TicketCheck.serializer(),
+            """{"state":"ready","setup":{"project_id":7,"project":"acme/api","mode":"auto"},"tests_run":["cargo test"],"can_run":true,"why_not":null}""",
+        )
+        assertEquals("Test now", c.runLabel)
+        assertEquals(7L, c.setup?.projectId)
+        assertEquals(listOf("cargo test"), c.testsRun)
+        assertEquals("When done", checkModeLabel("auto"))
+    }
+
     // ---- epics: epic → task → subtask (claude-fleet: local work three levels deep) ----
 
     private fun own(level: Int, parent: String? = null, epic: Boolean = false, total: Int = 0, done: Int = 0) = local.copy(
