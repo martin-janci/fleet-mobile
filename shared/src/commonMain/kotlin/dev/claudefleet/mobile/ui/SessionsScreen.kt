@@ -259,6 +259,8 @@ fun SessionsScreen(
         // gesture. `OrbitPullToRefresh` needs a scrollable child to receive the
         // drag, which a bare `Box` is not, so the message rides as a single
         // item filling the viewport.
+        // The routine groups opened (by key): each starts folded to its line.
+        var openRoutines by remember { mutableStateOf(emptySet<String>()) }
         OrbitPullToRefresh(
             isRefreshing = state.refreshing,
             onRefresh = handlers.onRefresh,
@@ -348,6 +350,33 @@ fun SessionsScreen(
                                 selected = row.id in bulk.selected,
                                 onLongClick = select?.let { { it(row.id) } },
                             )
+                        }
+                    }
+                }
+                // A routine starts a session per run: they sit here, a line
+                // per routine, out of the tree (claude-fleet's Routines section).
+                if (state.routineGroups.isNotEmpty()) {
+                    item(key = "routines-heading") { RoutinesHeading(state.routineGroups.sumOf { it.sessions.size }) }
+                    for (group in state.routineGroups) {
+                        val open = group.key in openRoutines
+                        item(key = "routine-${group.key}") {
+                            RoutineGroupHeader(group, open) {
+                                openRoutines = if (open) openRoutines - group.key else openRoutines + group.key
+                            }
+                        }
+                        if (open) {
+                            items(group.sessions, key = { "routine-run-${it.id}" }) { row ->
+                                SessionRowItem(
+                                    row = row,
+                                    nowSeconds = state.nowSeconds,
+                                    showWork = true,
+                                    showHost = true,
+                                    orgColor = row.orgOf?.let(state.orgColors::get),
+                                    onClick = { tap(row.id) },
+                                    selected = row.id in bulk.selected,
+                                    onLongClick = select?.let { { it(row.id) } },
+                                )
+                            }
                         }
                     }
                 }
@@ -691,6 +720,64 @@ private fun PinnedHeading(count: Int) {
         modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp).semantics { heading() },
     )
 }
+
+/** Over the routine groups: how many runs they hold. */
+@Composable
+private fun RoutinesHeading(runs: Int) {
+    Text(
+        text = "Routines · ${routineRunsWord(runs)}",
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.secondary,
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp).semantics { heading() },
+    )
+}
+
+/** One routine's runs, folded to a line: its name, how many, how many need you. */
+@Composable
+private fun RoutineGroupHeader(group: RoutineGroup, open: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp)
+            .clearAndSetSemantics { contentDescription = routineGroupDescription(group, open) },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+            Icon(
+                FleetIcons.ArrowBack,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp).rotate(if (open) -90f else 180f),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(text = group.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (group.attentionCount > 0) {
+                Badge(containerColor = MaterialTheme.colorScheme.error) { Text("${group.attentionCount} need you") }
+            }
+            Text(
+                text = routineRunsWord(group.sessions.size),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** "1 run", "3 runs". */
+internal fun routineRunsWord(n: Int): String = if (n == 1) "1 run" else "$n runs"
+
+/** What a screen reader hears for a routine's folded line. */
+internal fun routineGroupDescription(group: RoutineGroup, open: Boolean): String = buildList {
+    add("Routine ${group.name}")
+    add(routineRunsWord(group.sessions.size))
+    if (group.attentionCount > 0) add("${group.attentionCount} need you")
+    add(if (open) "tap to fold" else "tap to show its runs")
+}.joinToString(", ")
 
 @Composable
 private fun ProjectHeader(label: String) {
