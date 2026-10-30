@@ -11,12 +11,16 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import dev.claudefleet.mobile.data.ChatFormActions
+import dev.claudefleet.mobile.model.ConfirmAbout
+import dev.claudefleet.mobile.model.ConfirmBody
+import dev.claudefleet.mobile.model.ConfirmFact
 import dev.claudefleet.mobile.model.ConfirmRequest
 import dev.claudefleet.mobile.model.FormDraft
 import dev.claudefleet.mobile.model.FormView
 import dev.claudefleet.mobile.model.PendingForm
 import dev.claudefleet.mobile.ui.CONFIRM_APPROVE_TAG
 import dev.claudefleet.mobile.ui.CONFIRM_DENY_TAG
+import dev.claudefleet.mobile.ui.CONFIRM_DETAILS_TAG
 import dev.claudefleet.mobile.ui.CONTROL_VIEW_TAG
 import dev.claudefleet.mobile.ui.CONTROL_WAKE_TAG
 import dev.claudefleet.mobile.ui.ChatFormCard
@@ -66,6 +70,33 @@ class MobileControlTest {
         compose.onNodeWithTag(CONFIRM_DENY_TAG + "n2").performClick()
         compose.waitForIdle()
         assertEquals(listOf("n1" to true, "n2" to false), answers)
+    }
+
+    @Test
+    fun a_described_confirm_says_what_happens_and_keeps_the_exact_call_behind_details() {
+        val start = ConfirmRequest(
+            nonce = "n3",
+            tool = "work_link",
+            summary = "start key=\"PD-2709\"#6371 host=\"mefistos\"#190c",
+            operator = true,
+            about = ConfirmAbout(
+                title = "Start a session for PD-2709",
+                facts = listOf(ConfirmFact("Ticket", "PD-2709 Fix the login", "https://t/PD-2709"), ConfirmFact("Host", "mefistos")),
+                body = ConfirmBody("Brief", "Fix the login redirect."),
+            ),
+        )
+        compose.setContent {
+            FleetTheme {
+                ConfirmCards(ControlUiState(available = true, canConfirm = true, confirms = listOf(start)), onAnswer = { _, _ -> }, onHide = {})
+            }
+        }
+        compose.onNodeWithText("Start a session for PD-2709").assertExists()
+        compose.onNodeWithText("mefistos").assertExists()
+        compose.onNodeWithText("PD-2709 Fix the login ↗").assertExists()
+        compose.onNodeWithText("Fix the login redirect.").assertExists()
+        compose.onNodeWithText("work_link start key=\"PD-2709\"#6371 host=\"mefistos\"#190c").assertDoesNotExist()
+        compose.onNodeWithTag(CONFIRM_DETAILS_TAG + "n3").performClick()
+        compose.onNodeWithText("work_link start key=\"PD-2709\"#6371 host=\"mefistos\"#190c").assertExists()
     }
 
     @Test
