@@ -32,7 +32,29 @@ data class ConfirmRequest(
     val caller: String = "",
     val operator: Boolean = false,
     @SerialName("asked_at") val askedAt: Long = 0,
+    /** What approving it does, in words; null from an older hub. [summary] stays the exact call. */
+    val about: ConfirmAbout? = null,
 )
+
+/**
+ * A waiting call in words (the hub's `guard::ConfirmAbout`): the card's title,
+ * the ticket, host and project by name, and the brief or prompt itself.
+ * Display only: the approval binds to [ConfirmRequest.summary].
+ */
+@Serializable
+data class ConfirmAbout(
+    val title: String = "",
+    val facts: List<ConfirmFact> = emptyList(),
+    val body: ConfirmBody? = null,
+)
+
+/** One row of [ConfirmAbout.facts]: `Ticket` · `PD-2709 Fix the login`, [url] where it opens. */
+@Serializable
+data class ConfirmFact(val label: String = "", val value: String = "", val url: String? = null)
+
+/** [ConfirmAbout.body]: `Brief` and its text. */
+@Serializable
+data class ConfirmBody(val label: String = "", val text: String = "")
 
 /** A work item as a handoff receipt carries it (the hub's `HandoffItem`, redesign 9.3). */
 @Serializable

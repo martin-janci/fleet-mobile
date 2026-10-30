@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -27,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -445,6 +447,9 @@ internal fun notRecorded(approved: Boolean): Friendly = Friendly(
 const val CONFIRM_APPROVE_TAG = "control.confirm.approve."
 const val CONFIRM_DENY_TAG = "control.confirm.deny."
 const val CONFIRM_HIDE_TAG = "control.confirm.hide."
+const val CONFIRM_TITLE_TAG = "control.confirm.title."
+const val CONFIRM_BODY_TAG = "control.confirm.body."
+const val CONFIRM_DETAILS_TAG = "control.confirm.details."
 const val CONTROL_RETRY_TAG = "control.retry"
 const val CONTROL_FORM_CLOSE_TAG = "control.form.close."
 
@@ -504,7 +509,9 @@ private fun ViewPill(label: String, selected: Boolean, tag: ControlView, onClick
 
 /**
  * Control's calls that wait on this device's yes, oldest first: what it wants
- * done in words, the exact call in mono, and Approve or Deny. Neither is
+ * done in words (the hub's [ConfirmRequest.about]: the ticket, host, project
+ * and brief, the exact call behind Details; an older hub's bound summary
+ * with the tool in mono), and Approve or Deny. Neither is
  * pre-selected; a card answered elsewhere goes on the next read. Hide puts a
  * card away on this phone without answering it ([ControlViewModel.hide]).
  */
@@ -527,13 +534,18 @@ fun ConfirmCards(state: ControlUiState, onAnswer: (String, Boolean) -> Unit, onH
                         style = Fleet.type.textSm,
                         color = o.statusWaiting,
                     )
-                    Text(c.summary.ifBlank { c.tool }, style = Fleet.type.textMd, color = o.fg)
-                    Text(
-                        c.tool,
-                        style = Fleet.type.code,
-                        color = o.fgMuted,
-                        modifier = Modifier.background(o.bgSunk, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
-                    )
+                    val about = c.about
+                    if (about != null && about.title.isNotBlank()) {
+                        ConfirmAboutBlock(c, about)
+                    } else {
+                        Text(c.summary.ifBlank { c.tool }, style = Fleet.type.textMd, color = o.fg)
+                        Text(
+                            c.tool,
+                            style = Fleet.type.code,
+                            color = o.fgMuted,
+                            modifier = Modifier.background(o.bgSunk, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         OutlinedButton(
                             onClick = { onAnswer(c.nonce, false) },
@@ -555,6 +567,67 @@ fun ConfirmCards(state: ControlUiState, onAnswer: (String, Boolean) -> Unit, onH
                 }
             }
         }
+    }
+}
+
+/** A brief or prompt longer than this folds to its first lines until tapped. */
+private const val CONFIRM_BODY_FOLD = 280
+
+/**
+ * A confirm in words: what Approve does, the ticket (tappable), host and
+ * project by name, the brief itself (folded when long), and the exact call
+ * the approval binds to behind "Details".
+ */
+@Composable
+private fun ConfirmAboutBlock(c: ConfirmRequest, about: dev.claudefleet.mobile.model.ConfirmAbout) {
+    val o = Fleet.colors
+    val uri = LocalUriHandler.current
+    var bodyOpen by remember(c.nonce) { mutableStateOf(false) }
+    var detailsOpen by remember(c.nonce) { mutableStateOf(false) }
+    Text(about.title, style = Fleet.type.textMd, color = o.fg, modifier = Modifier.testTag(CONFIRM_TITLE_TAG + c.nonce))
+    for (f in about.facts) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(f.label, style = Fleet.type.textSm, color = o.fgMuted, modifier = Modifier.widthIn(min = 72.dp))
+            val url = f.url
+            if (url.isNullOrBlank()) {
+                Text(f.value, style = Fleet.type.textSm, color = o.fg)
+            } else {
+                Text(
+                    "${f.value} ↗",
+                    style = Fleet.type.textSm,
+                    color = o.accent,
+                    modifier = Modifier.clickable(role = Role.Button) { runCatching { uri.openUri(url) } },
+                )
+            }
+        }
+    }
+    about.body?.takeIf { it.text.isNotBlank() }?.let { b ->
+        val long = b.text.length > CONFIRM_BODY_FOLD
+        val shown = if (long && !bodyOpen) b.text.take(CONFIRM_BODY_FOLD).trimEnd() + "…" else b.text
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(o.bgSunk, RoundedCornerShape(6.dp))
+                .then(if (long) Modifier.clickable(role = Role.Button) { bodyOpen = !bodyOpen } else Modifier)
+                .padding(horizontal = 8.dp, vertical = 6.dp)
+                .testTag(CONFIRM_BODY_TAG + c.nonce),
+        ) {
+            Text(b.label, style = Fleet.type.textSm, color = o.fgMuted)
+            Text(shown, style = Fleet.type.textSm, color = o.fg)
+            if (long) Text(if (bodyOpen) "Show less" else "Show all", style = Fleet.type.textSm, color = o.accent)
+        }
+    }
+    TextButton(
+        onClick = { detailsOpen = !detailsOpen },
+        modifier = Modifier.testTag(CONFIRM_DETAILS_TAG + c.nonce),
+    ) { Text(if (detailsOpen) "Hide details" else "Details") }
+    if (detailsOpen) {
+        Text(
+            listOf(c.tool, c.summary).filter { it.isNotBlank() }.joinToString(" "),
+            style = Fleet.type.code,
+            color = o.fgMuted,
+            modifier = Modifier.background(o.bgSunk, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+        )
     }
 }
 
