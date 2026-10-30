@@ -793,6 +793,21 @@ fun SessionScreen(
                     }
                 }
             } else {
+            // Recovery on the New bar (redesign 14.5): at the foot of the
+            // conversation, where the next step is taken — never behind ⋮.
+            val failed = if (tabs != null && state.card == null && state.viewing == null) {
+                failedSession(state.session, state.conversation.turns)?.takeUnless { it.key == state.dismissedFailure }
+            } else {
+                null
+            }
+            // Everything between the header and the footer, weighted as one: a
+            // Column measures its unweighted children in order, so with the
+            // keyboard up the cards above the composer (Control's handoffs,
+            // autonomy, escalations) used to take the height first and the
+            // footer got what was left — a field squashed to a sliver. Weighted,
+            // the footer is measured first and keeps its full height; this
+            // column, and the list inside it, take what remains.
+            Column(modifier = Modifier.weight(1f).fillMaxWidth()) {
 
             // `weight(1f)`: the list takes what the bar and the footer leave, so
             // it shrinks when the keyboard raises the footer (`App` applies the
@@ -962,19 +977,14 @@ fun SessionScreen(
                     formContext = control?.formContext,
                 )
             }
-            control?.aboveComposer?.invoke()
+            // While the person types, Control's cards step aside for the
+            // conversation; the keyboard going down brings them back.
+            if (!chromeInputs.composing) control?.aboveComposer?.invoke()
             // What the person typed while Control was mid-turn, waiting in the hub's queue (Control review F19).
             if (control != null && state.queuesWhileWorking) {
                 QueuedChips(remember(state.queued) { personQueued(state.queued) }, enabled = state.connected, onCancel = later.onCancelQueued)
             }
 
-            // Recovery on the New bar (redesign 14.5): at the foot of the
-            // conversation, where the next step is taken — never behind ⋮.
-            val failed = if (tabs != null && state.card == null && state.viewing == null) {
-                failedSession(state.session, state.conversation.turns)?.takeUnless { it.key == state.dismissedFailure }
-            } else {
-                null
-            }
             if (tabs != null) {
                 state.repair?.let { report ->
                     RepairResultCard(
@@ -1071,6 +1081,8 @@ fun SessionScreen(
                     // while the card is up, so nothing else gave way.
                     modifier = Modifier.heightIn(max = cardMax),
                 )
+            }
+
             }
 
             // The footer: quick replies and the composer on one surface, the
