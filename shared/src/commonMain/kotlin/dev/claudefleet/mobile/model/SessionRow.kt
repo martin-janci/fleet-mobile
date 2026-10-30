@@ -123,8 +123,8 @@ data class SessionRow(
      * `person`, `operator`, `mission`, `background`, `token` or `routine`;
      * absent for a row fleet did not start (found on a host by reconcile) and
      * from an older hub. [originRef] is what it points at, as text (a person,
-     * session or mission id). The desktop draws no origin chip yet, so
-     * neither does the phone; the field is read for parity and the tests.
+     * session, mission or routine id). The desktop draws no origin chip yet,
+     * so neither does the phone; a routine's runs are grouped ([isRoutineRun]).
      */
     val origin: String? = null,
     @SerialName("origin_ref") val originRef: String? = null,
@@ -235,6 +235,13 @@ data class SessionRow(
 
     /** The rows the "needs attention" filter keeps, and every needs-you count counts. Never a [isProposed] row. */
     val needsAttention: Boolean get() = attentionReason != null && !isProposed
+
+    /**
+     * A routine started it, one session per run ([origin] `routine`, its id in
+     * [originRef]): the Sessions list folds these into one *Routines* section,
+     * a line per routine, as the desktop does (claude-fleet `routine_sessions.ts`).
+     */
+    val isRoutineRun: Boolean get() = origin == "routine"
 
     /**
      * The row's second line: the sanitised activity when there is one, else

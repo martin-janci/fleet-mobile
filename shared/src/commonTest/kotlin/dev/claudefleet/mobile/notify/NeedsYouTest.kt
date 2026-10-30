@@ -90,6 +90,11 @@ class NeedsYouTest {
         assertTrue(external.isEmpty())
         val (asks, _) = needsYouAlerts(emptyMap(), listOf(row(4, "waiting").copy(claudeStatus = "completed")))
         assertEquals("waiting", asks.single().reason, "a session that asks something is Needs you, not Done")
+        // A routine's run finishing is the routine's news; its failure still rings.
+        val (routine, _) = needsYouAlerts(emptyMap(), listOf(done.copy(origin = "routine", originRef = "3")))
+        assertTrue(routine.isEmpty(), "a routine run's Done does not ring")
+        val (routineFailed, _) = needsYouAlerts(emptyMap(), listOf(row(5, "failed").copy(origin = "routine")))
+        assertEquals("failed", routineFailed.single().reason)
     }
 
     @Test

@@ -389,6 +389,30 @@ class SessionsViewModelTest {
         )
     }
 
+    /**
+     * A routine starts a session per run: they leave the tree for one group
+     * per routine, newest run first, named by their sessions (claude-fleet
+     * `routine_sessions.ts`), and still count in "shown".
+     */
+    @Test
+    fun routine_runs_fold_into_a_group_per_routine() = runTest {
+        val mine = session(1)
+        val a1 = session(2).copy(origin = "routine", originRef = "3", friendlyName = "Morning PR sweep", startedAt = 100)
+        val a2 = session(3).copy(origin = "routine", originRef = "3", friendlyName = "Morning PR sweep", startedAt = 200)
+        val b = session(4).copy(origin = "routine", originRef = "7", startedAt = 150)
+        val fleet = FakeFleet(rows = listOf(mine, a1, a2, b))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+        runCurrent()
+        val state = vm.state.value
+        assertEquals(listOf(1L), state.groups.flatMap { h -> h.projects.flatMap { p -> p.sessions.map { it.id } } })
+        assertEquals(
+            listOf("routine:3" to listOf(3L, 2L), "routine:7" to listOf(4L)),
+            state.routineGroups.map { g -> g.key to g.sessions.map { it.id } },
+        )
+        assertEquals(listOf("Morning PR sweep", "Routine 7"), state.routineGroups.map { it.name })
+        assertEquals(4, state.shown)
+    }
+
     /** The pure grouping function, filtered to one host directly — no view model involved. */
     @Test
     fun grouping_can_be_filtered_to_one_host() {
