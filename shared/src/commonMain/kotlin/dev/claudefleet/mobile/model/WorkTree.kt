@@ -576,6 +576,8 @@ data class TaskDetail(
     val placement: Placement? = null,
     /** The ids of the placement rules that match this task. */
     val rules: List<Long> = emptyList(),
+    /** The AI check of its finished work; absent without one (and from an older hub). */
+    val check: TicketCheck? = null,
 )
 
 /** `work { session_tasks }`: every link of one session — live, suggested, rejected and ended. */

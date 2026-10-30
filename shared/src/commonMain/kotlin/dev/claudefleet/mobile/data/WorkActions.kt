@@ -148,6 +148,16 @@ interface WorkActions {
     suspend fun setStatus(itemId: Long, status: String): WorkItem =
         throw UnsupportedOperationException("set_status")
 
+    /** **Test now** / **Rerun**: the AI check of item [itemId]'s finished work. */
+    suspend fun runTicketCheck(itemId: Long): Unit = throw UnsupportedOperationException("check")
+
+    /** **Accept anyway**: a failed AI check, with the person's note. */
+    suspend fun acceptTicketCheck(itemId: Long, note: String?): Unit = throw UnsupportedOperationException("verify")
+
+    /** A project's AI check switch: `off`, `ask` or `auto`, and its test command. */
+    suspend fun setTicketCheck(projectId: Long, mode: String, command: String?): Unit =
+        throw UnsupportedOperationException("check_setup")
+
     /**
      * **Archive** ticket or task [itemId] (`on`), or **Unarchive** it
      * (`work_link { archive_item }`, claude-fleet migration 190). Kept on the
@@ -310,6 +320,13 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
         session.withClient { it.setWorkStatus(itemId, status) }
 
     override suspend fun archiveItem(itemId: Long, on: Boolean) = session.withClient { it.archiveWorkItem(itemId, on) }
+
+    override suspend fun runTicketCheck(itemId: Long) = session.withClient { it.runTicketCheck(itemId) }
+
+    override suspend fun acceptTicketCheck(itemId: Long, note: String?) = session.withClient { it.acceptTicketCheck(itemId, note) }
+
+    override suspend fun setTicketCheck(projectId: Long, mode: String, command: String?) =
+        session.withClient { it.setTicketCheck(projectId, mode, command) }
 
     override suspend fun editItem(itemId: Long, title: String?, notes: String?, assignees: List<String>?, dueAt: String?): WorkItem =
         session.withClient { it.editWorkItem(itemId, title, notes, assignees, dueAt) }

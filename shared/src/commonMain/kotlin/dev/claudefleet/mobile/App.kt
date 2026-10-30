@@ -2967,6 +2967,9 @@ private fun TaskRoute(
         onOpenSubtask = vm::openSubtask,
         onCloseSubtask = vm::closeSubtask,
         onAddSubtask = { title, notes, due -> vm.addSubtask(title, notes, due) },
+        onRunCheck = { vm.runCheck() },
+        onAcceptCheck = { vm.acceptCheck(it) },
+        onSetCheck = { mode, command -> vm.setCheck(mode, command) },
     )
     if (newLayout) {
         val rows by repository.sessions.collectAsState()

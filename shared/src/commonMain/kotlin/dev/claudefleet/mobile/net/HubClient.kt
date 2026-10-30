@@ -2317,6 +2317,45 @@ class HubClient(
         ) { json.decodeFromJsonElement(WorkItem.serializer(), it) }
 
     /**
+     * **Test now** / **Rerun** (`work_link { check }`): the AI check of item
+     * [itemId]'s finished work. A person's ask; the hub answers the check's
+     * task, which the task page reads again.
+     */
+    suspend fun runTicketCheck(itemId: Long): Unit =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "check")
+                put("item_id", itemId)
+            },
+        ) { }
+
+    /** **Accept anyway**: `verify` with the "ai check" line and the person's note. */
+    suspend fun acceptTicketCheck(itemId: Long, note: String?): Unit =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "verify")
+                put("item_id", itemId)
+                put("line", dev.claudefleet.mobile.model.CHECK_LINE)
+                put("ok", true)
+                note?.trim()?.takeIf { it.isNotEmpty() }?.let { put("note", it) }
+            },
+        ) { }
+
+    /** A project's AI check switch (`work_link { check_setup }`): `off`, `ask` or `auto`, and its test command. */
+    suspend fun setTicketCheck(projectId: Long, mode: String, command: String?): Unit =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "check_setup")
+                put("project_id", projectId)
+                put("mode", mode)
+                put("command", command?.trim().orEmpty())
+            },
+        ) { }
+
+    /**
      * Archive a ticket or task (`work_link { archive_item }`), or unarchive
      * it with [on] false. The hub answers `{ item_id, changed }`; nothing in
      * it is needed — the lists are read again.

@@ -89,6 +89,10 @@ data class TaskHandlers(
     val onOpenSubtask: () -> Unit = {},
     val onCloseSubtask: () -> Unit = {},
     val onAddSubtask: (title: String, notes: String, dueAt: String) -> Unit = { _, _, _ -> },
+    /** The AI check: **Test now** / **Rerun**, **Accept anyway** with a note, the project's switch (mode, command). */
+    val onRunCheck: () -> Unit = {},
+    val onAcceptCheck: (String) -> Unit = {},
+    val onSetCheck: (String, String) -> Unit = { _, _ -> },
 )
 
 /**
@@ -170,6 +174,7 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
                     }
                     TaskHierarchy(state, handlers)
                     OwnTaskControls(state, handlers)
+                    TicketCheckCard(state, handlers)
                     state.detail?.lastOutcome?.let { o ->
                         val line = listOfNotNull(o.name, o.host?.let { "on $it" }, o.branch, o.prUrl?.let { "PR $it" }).joinToString(" · ")
                         if (line.isNotBlank()) Text("Last: $line", style = MaterialTheme.typography.bodySmall)

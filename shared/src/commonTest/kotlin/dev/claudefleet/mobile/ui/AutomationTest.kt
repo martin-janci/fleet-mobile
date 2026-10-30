@@ -369,7 +369,7 @@ class AutomationTest {
         assertFalse("budget" in older.calls)
     }
 
-    /** Review w30-5: every hub `routines::EVENTS` kind (fleet-core service/routines/mod.rs, 27) has words, never its raw key. */
+    /** Review w30-5: every hub `routines::EVENTS` kind (fleet-core service/routines/mod.rs, 30) has words, never its raw key. */
     @Test
     fun every_hub_event_has_a_label() {
         val events = listOf(
@@ -377,9 +377,9 @@ class AutomationTest {
             "workspace_repair_failed", "pr_review", "pr_ci_failed", "pr_ci_passed", "pr_merged", "needs_you",
             "auto_restored", "auto_restore_failed", "account_switched", "account_switch_failed", "session_moved",
             "pr_opened", "host_offline", "host_online", "host_low", "account_limited", "account_available",
-            "login_signed_out", "mission_done", "mission_failed",
+            "login_signed_out", "mission_done", "mission_failed", "ticket_done", "check_passed", "check_failed",
         )
-        assertEquals(27, events.toSet().size)
+        assertEquals(30, events.toSet().size)
         for (e in events) assertTrue(eventLabel(e) != e.replace('_', ' '), e)
         assertEquals("a session is not restored after a reboot", eventLabel("session_restore_failed"))
     }
