@@ -240,8 +240,16 @@ data class SessionRow(
      * A routine started it, one session per run ([origin] `routine`, its id in
      * [originRef]): the Sessions list folds these into one *Routines* section,
      * a line per routine, as the desktop does (claude-fleet `routine_sessions.ts`).
+     * An `external` row is never one, whatever it claims.
      */
-    val isRoutineRun: Boolean get() = origin == "routine"
+    val isRoutineRun: Boolean get() = origin == "routine" && kind != "external"
+
+    /**
+     * The routine id in [originRef], digits only as the desktop reads it
+     * (`^\d+$`): "-5" or "+5" names no routine. Null for a ref that names none.
+     */
+    val routineId: Long?
+        get() = originRef?.trim()?.takeIf { ref -> ref.isNotEmpty() && ref.all { it in '0'..'9' } }?.toLongOrNull()
 
     /**
      * The row's second line: the sanitised activity when there is one, else

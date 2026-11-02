@@ -522,7 +522,7 @@ class TaskViewModelTest {
         runCurrent()
         val s = vm.state.value
         assertTrue(s.canRunCheck && s.canAcceptCheck && s.canSetupCheck)
-        assertEquals("Rerun", s.check?.runLabel)
+        assertEquals("Rerun", s.detail?.check?.runLabel)
         assertEquals(dev.claudefleet.mobile.ui.kit.StatusWord.FAILED to "Failed · not ready", ticketCheckHeadline(failed))
 
         vm.runCheck()
@@ -542,7 +542,7 @@ class TaskViewModelTest {
     fun no_check_draws_no_card() = runTest {
         val none = taskVm(actions = FakeWorkActions().apply { taskAnswer = local })
         runCurrent()
-        assertNull(none.state.value.check)
+        assertNull(none.state.value.detail?.check)
         assertFalse(none.state.value.canRunCheck || none.state.value.canAcceptCheck)
         assertNull(none.runCheck())
 

@@ -70,7 +70,7 @@ data class RoutineGroup(
 internal fun routineGroups(rows: List<SessionRow>): List<RoutineGroup> {
     val startedAt = { s: SessionRow -> s.startedAt ?: s.createdAt ?: 0L }
     return rows.filter { it.isRoutineRun }
-        .groupBy { it.originRef?.trim()?.toLongOrNull() }
+        .groupBy { it.routineId }
         .map { (id, runs) ->
             val sorted = runs.sortedWith(compareByDescending<SessionRow> { startedAt(it) }.thenByDescending { it.id })
             val name = sorted.firstNotNullOfOrNull { r -> r.friendlyName?.trim()?.takeIf { it.isNotEmpty() } }

@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.model
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 private const val NOW = 1_700_000_000L
@@ -96,6 +97,30 @@ class TriageTest {
         assertEquals(TriageBucket.CONTEXT_FULL, row(claudeStatus = "working").copy(contextPct = 90.0).triageBucket())
         assertEquals(TriageBucket.CI_FAILING, row(claudeStatus = "idle").copy(ciStatus = "failing").triageBucket())
         assertEquals(TriageBucket.WORKING, row(claudeStatus = "working").copy(ciStatus = "failing").triageBucket())
+    }
+
+    /** claude-fleet #1050 (`attention_states.json`): an idle session's full context waits for nothing. */
+    @Test
+    fun a_full_context_on_an_idle_row_asks_nothing_of_anyone() {
+        for (status in listOf("idle", "completed", "stopped")) {
+            val r = row(claudeStatus = status).copy(contextPct = 95.0)
+            assertEquals(TriageBucket.IDLE, r.triageBucket(), status)
+            assertFalse(r.triageBucket().needsYou, status)
+        }
+        assertEquals(TriageBucket.CONTEXT_FULL, row().copy(contextPct = 92.0).triageBucket(), "a running row still counts")
+    }
+
+    /** claude-fleet #1050: a merged or closed PR's failing checks have nothing left to fix. */
+    @Test
+    fun failing_ci_counts_only_on_an_open_pr() {
+        val failing = row(claudeStatus = "idle").copy(ciStatus = "failing")
+        for (state in listOf("MERGED", "CLOSED")) {
+            val r = failing.copy(prEvidence = PrEvidence(state = state))
+            assertEquals(TriageBucket.IDLE, r.triageBucket(), state)
+            assertFalse(r.triageBucket().needsYou, state)
+        }
+        assertEquals(TriageBucket.CI_FAILING, failing.copy(prEvidence = PrEvidence(state = "OPEN")).triageBucket())
+        assertEquals(TriageBucket.CI_FAILING, failing.copy(prEvidence = PrEvidence()).triageBucket(), "an older reading without a state")
     }
 
     @Test

@@ -593,9 +593,14 @@ private fun isAsciiPunct(c: Char) = c in "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
 
 private fun safeUrl(url: String): Boolean {
     val lower = url.lowercase()
+    return isWebUrl(url) || (lower.startsWith("mailto:") && lower.length > 7)
+}
+
+/** An `http(s)` link with something after the scheme: the only kind a hub-sent link may open. */
+internal fun isWebUrl(url: String): Boolean {
+    val lower = url.lowercase()
     return (lower.startsWith("https://") && lower.length > 8) ||
-        (lower.startsWith("http://") && lower.length > 7) ||
-        (lower.startsWith("mailto:") && lower.length > 7)
+        (lower.startsWith("http://") && lower.length > 7)
 }
 
 private val EMAIL = Regex("^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+$")
