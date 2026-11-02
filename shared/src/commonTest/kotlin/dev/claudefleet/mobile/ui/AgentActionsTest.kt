@@ -134,6 +134,14 @@ class AgentActionsTest {
         assertEquals("Remember NPE in memory", title("record", """{"store":"memory","key":"NPE"}"""))
         assertEquals("Call kb.add_known_error", title("mcp_call", """{"binding":"kb","tool":"add_known_error"}"""))
         assertEquals("Comment on o/r#4", title("pr_comment", """{"repo":"o/r","number":4}"""))
+        assertEquals(
+            "Review o/r#4: request changes, 1 line comment",
+            title("pr_review", """{"repo":"o/r","number":4,"event":"REQUEST_CHANGES","findings":[{"path":"a","line":1,"body":"y"}]}"""),
+        )
+        assertEquals(
+            "Reply in a review thread on o/r#4 and resolve it",
+            title("pr_reply", """{"repo":"o/r","number":4,"root_id":7,"resolve":true}"""),
+        )
         assertEquals("Create a task: Flaky reconnect (2 steps)", title("work_task", """{"title":"Flaky reconnect","steps":["a","b"]}"""))
         assertEquals("Start a session on o/r (htz): Fix backoff", title("fix_session", """{"project":"o/r","host":"htz","title":"Fix backoff"}"""))
         assertEquals("Change hub.probe_secs from 30 to 60", title("setting", """{"key":"hub.probe_secs","value":"60","was":"30"}"""))
@@ -142,12 +150,16 @@ class AgentActionsTest {
             AgentsStatus.serializer(),
             """{"rules":[{"id":12,"agent":"fleet","scope":"l2-prod","level":"propose","host_alias":"mercury",
                "project_id":null,"config":"{}","granted_by":"x","granted_at":1,"expires_at":null,
-               "definition":"l2-support","bindings":"[]","active":true},
+               "definition":"l2-support","bindings":"[]","active":true,
+               "budget_micros":25000000,"spent_today_micros":3204999},
               {"id":3,"agent":"review","scope":"gh:o/r","level":"watch","host_alias":"box","active":false}],
               "jobs":[],"pending":[]}""",
         )
         assertEquals(listOf("l2-support", "PR reviewer"), s.rules.map { ruleAgentName(it) })
-        assertEquals(listOf("l2-prod at propose on mercury", "gh:o/r at watch on box (expired)"), s.rules.map { ruleLine(it) })
+        assertEquals(
+            listOf("l2-prod at propose on mercury · $3.20 of $25.00 today", "gh:o/r at watch on box (expired)"),
+            s.rules.map { ruleLine(it) },
+        )
     }
 
     @Test

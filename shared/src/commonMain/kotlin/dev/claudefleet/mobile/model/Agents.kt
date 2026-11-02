@@ -52,6 +52,10 @@ data class AgentRule(
     val definition: String? = null,
     /** Not expired. */
     val active: Boolean = true,
+    /** A fleet instance with a day budget: the budget (micro-USD); absent otherwise and from an older hub. */
+    @SerialName("budget_micros") val budgetMicros: Long? = null,
+    /** What its jobs cost since the UTC day began (micro-USD). */
+    @SerialName("spent_today_micros") val spentTodayMicros: Long? = null,
 )
 
 /** One run of an agent (`agent_jobs`): what the findings card reads. */
@@ -89,8 +93,20 @@ fun ruleAgentName(r: AgentRule): String = when (r.agent) {
     else -> r.definition ?: r.agent
 }
 
-/** "l2-prod at propose on mercury", the desktop's `ruleLine`. */
-fun ruleLine(r: AgentRule): String = "${r.scope} at ${r.level} on ${r.hostAlias}${if (r.active) "" else " (expired)"}"
+/** Micro-USD as dollars and cents: 3_200_000 is "$3.20". */
+fun usdOfMicros(micros: Long): String {
+    val cents = (micros + 5_000) / 10_000
+    return "$" + (cents / 100) + "." + (cents % 100).toString().padStart(2, '0')
+}
+
+/**
+ * "l2-prod at propose on mercury", with a fleet instance's day budget
+ * ("· $3.20 of $25.00 today"): the desktop's `ruleLine`.
+ */
+fun ruleLine(r: AgentRule): String {
+    val budget = r.budgetMicros?.let { " · ${usdOfMicros(r.spentTodayMicros ?: 0)} of ${usdOfMicros(it)} today" } ?: ""
+    return "${r.scope} at ${r.level} on ${r.hostAlias}${if (r.active) "" else " (expired)"}$budget"
+}
 
 private val lenient = Json { ignoreUnknownKeys = true }
 
@@ -138,6 +154,15 @@ fun agentActionTitle(a: AgentAction): String {
             "record" -> return "Remember ${f("key")} in ${f("store")}"
             "mcp_call" -> return "Call ${f("binding")}.${f("tool")}"
             "pr_comment" -> return "Comment on ${f("repo")}#${f("number")}"
+            "pr_review" -> {
+                val event = f("event").lowercase().replaceFirst('_', ' ')
+                val n = (p["findings"] as? JsonArray)?.size ?: 0
+                return "Review ${f("repo")}#${f("number")}: $event, $n line comment${if (n == 1) "" else "s"}"
+            }
+            "pr_reply" -> {
+                val resolve = (p["resolve"] as? JsonPrimitive)?.booleanOrNull == true
+                return "Reply in a review thread on ${f("repo")}#${f("number")}${if (resolve) " and resolve it" else ""}"
+            }
             // Fleet's own: what an analysis proposes (self debug, proposer, simplify, refactor).
             "work_task" -> {
                 val n = (p["steps"] as? JsonArray)?.size ?: 0
