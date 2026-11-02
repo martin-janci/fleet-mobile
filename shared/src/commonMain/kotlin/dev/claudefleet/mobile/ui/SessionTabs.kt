@@ -235,7 +235,7 @@ fun agentKeys(card: BlockedCard, stuckKind: String?): List<AgentKey> =
         when (answer) {
             Answer.Enter -> AgentKey(answer, "Enter · ${enterMeaning(stuckKind)}")
             Answer.Escape -> AgentKey(answer, "Esc · ${escapeMeaning(stuckKind)}")
-            Answer.Continue -> AgentKey(answer, "Tab · continue")
+            Answer.Continue -> AgentKey(answer, "Continue · keep the ticks")
             else -> null
         }
     }

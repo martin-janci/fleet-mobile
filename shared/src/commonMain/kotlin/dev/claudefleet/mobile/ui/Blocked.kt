@@ -19,10 +19,10 @@ sealed interface Answer {
     data object Enter : Answer
 
     /**
-     * `Tab` on a multi-select question: keeps the ticks and moves on (to the
-     * next question, or to the review step's `1. Submit answers`). A digit
-     * there only TOGGLES a box, so without this the phone could never finish
-     * one.
+     * Moves a multi-select question on with its ticks kept (to the next
+     * question, or to the review step's `1. Submit answers`). A digit there
+     * only TOGGLES a box, so without this the phone could never finish one.
+     * The key depends on the cursor: [multiContinueKey].
      */
     data object Continue : Answer
     data object Escape : Answer
@@ -108,6 +108,22 @@ fun blockedCard(row: SessionRow, hubVersion: String?): BlockedCard? {
         else -> BlockedCard(stuck.replace('_', ' '), keyAnswers, offerRestart = true)
     }
 }
+
+/**
+ * The key [Answer.Continue] presses, from where the multi-select's cursor is
+ * (checked live against Claude Code 2.1.316): `Tab` on an option; `Enter` on
+ * the `Next` / `Submit` row, where no option carries the cursor and `Tab`
+ * does nothing. In the free-text row `Tab` brings the cursor down onto that
+ * row, and the next Continue presses `Enter`.
+ */
+internal fun multiContinueKey(options: List<dev.claudefleet.mobile.model.PendingOption>): String =
+    if (options.none { it.selected }) "Enter" else "Tab"
+
+/**
+ * AskUserQuestion's "Chat about this" row, drawn under every question — a
+ * multi-select's too, with no box. Its digit leaves the questions for the chat.
+ */
+internal fun isChatOption(label: String): Boolean = label.trim().equals("chat about this", ignoreCase = true)
 
 /** Highest option a single keystroke can pick — the hub's `DigitKey` range, `1`..`9`. */
 internal const val ANSWER_MAX_DIGIT: Int = 9

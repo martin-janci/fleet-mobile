@@ -52,9 +52,12 @@ data class QuestionAnswer(val answer: Answer, val label: String)
 fun questionAnswers(card: BlockedCard, stuckKind: String?): List<QuestionAnswer> {
     val options = card.answers.filterIsInstance<Answer.Option>()
     if (options.isNotEmpty()) {
-        val rows = options.map { QuestionAnswer(it, "${it.n}  ${if (card.multi) (if (it.checked) "☑ " else "☐ ") else ""}${it.label}") }
+        val rows = options.map {
+            val box = card.multi && !isChatOption(it.label)
+            QuestionAnswer(it, "${it.n}  ${if (box) (if (it.checked) "☑ " else "☐ ") else ""}${it.label}")
+        }
         // A multi-select is finished by moving on, never by a digit.
-        return if (Answer.Continue in card.answers) rows + QuestionAnswer(Answer.Continue, "Continue with these · Tab") else rows
+        return if (Answer.Continue in card.answers) rows + QuestionAnswer(Answer.Continue, "Continue with these") else rows
     }
     return card.answers.mapNotNull { answer ->
         when (answer) {

@@ -31,7 +31,9 @@ data class PendingInput(
     val options: List<PendingOption> = emptyList(),
     /**
      * A multi-select question: a digit TOGGLES that option's box instead of
-     * answering, and `Tab` moves on. The hub leaves it off when false.
+     * answering, and Continue moves on (`Tab`, or `Enter` with the cursor on
+     * the `Next` / `Submit` row). Its "Chat about this" row has no box. The
+     * hub leaves it off when false.
      */
     val multi: Boolean = false,
     /** The tool call a permission dialog asks about (`Bash(git push)`), or null. */

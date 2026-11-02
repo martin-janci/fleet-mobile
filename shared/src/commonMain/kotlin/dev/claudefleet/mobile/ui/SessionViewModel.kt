@@ -1120,7 +1120,7 @@ class SessionViewModel(
                 is Answer.Option -> a.n.toString()
                 Answer.Enter -> "Enter"
                 Answer.Escape -> "Escape"
-                Answer.Continue -> "Tab"
+                Answer.Continue -> multiContinueKey(row()?.pendingInput?.options.orEmpty())
                 // Drawn by no card (`blockedCard` never offers it), so it
                 // cannot be pressed from a stale one; C-c interrupts rather
                 // than approving anything.
@@ -1140,7 +1140,7 @@ class SessionViewModel(
                     asked?.stuckKind,
                     actions.activity(sessionId),
                     a as? Answer.Option,
-                    enter = a == Answer.Enter,
+                    enter = keyToPress == "Enter",
                 )
                 if (moved != null) {
                     questionGone(asked, moved)
@@ -1161,7 +1161,7 @@ class SessionViewModel(
                 is Answer.Text -> actions.sendPrompt(sessionId, a.text)
                 Answer.Enter -> actions.sendKeys(sessionId, "Enter")
                 Answer.Escape -> actions.sendKeys(sessionId, "Escape")
-                Answer.Continue -> actions.sendKeys(sessionId, "Tab")
+                Answer.Continue -> actions.sendKeys(sessionId, keyToPress!!)
                 Answer.Interrupt -> actions.sendKeys(sessionId, "C-c")
                 }
             }

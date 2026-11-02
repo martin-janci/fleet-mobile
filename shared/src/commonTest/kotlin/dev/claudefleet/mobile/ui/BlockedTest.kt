@@ -43,7 +43,22 @@ class BlockedTest {
             listOf(Answer.Option(1, "Auth", checked = true), Answer.Option(2, "Logging"), Answer.Continue, Answer.Enter, Answer.Escape),
             card.answers,
         )
-        assertEquals(listOf("1  ☑ Auth", "2  ☐ Logging", "Continue with these · Tab"), questionAnswers(card, null).map { it.label })
+        assertEquals(listOf("1  ☑ Auth", "2  ☐ Logging", "Continue with these"), questionAnswers(card, null).map { it.label })
+    }
+
+    /**
+     * Claude Code 2.1.316, live: under a multi-select's boxes sits
+     * "N. Chat about this", with no box, and with the cursor on the `Next` /
+     * `Submit` row `Tab` does nothing — Continue presses Enter there.
+     */
+    @Test
+    fun a_multi_select_continues_with_the_key_the_cursor_needs() {
+        val opts = listOf(PendingOption(1, "Auth", checked = true), PendingOption(2, "Type something"), PendingOption(3, "Chat about this"))
+        assertEquals("Enter", multiContinueKey(opts))
+        assertEquals("Tab", multiContinueKey(opts.map { it.copy(selected = it.n == 1) }))
+        assertEquals("Tab", multiContinueKey(opts.map { it.copy(selected = it.n == 2) }))
+        val card = blockedCard(row(pending = PendingInput("input", "Which features?", opts, multi = true)), HUB_VERSION_DIGIT_KEYS)!!
+        assertEquals(listOf("1  ☑ Auth", "2  ☐ Type something", "3  Chat about this", "Continue with these"), questionAnswers(card, null).map { it.label })
     }
 
     /** The card carries the command a permission dialog asks about. */
