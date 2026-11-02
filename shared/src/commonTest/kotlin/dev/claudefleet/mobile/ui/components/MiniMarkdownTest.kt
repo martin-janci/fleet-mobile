@@ -604,6 +604,16 @@ class MiniMarkdownTest {
         assertTrue(p.text.isNotEmpty())
     }
 
+    /** A confirm card's ticket link opens only http(s): the hub's other schemes read as text. */
+    @Test
+    fun only_an_http_link_is_a_web_url() {
+        assertTrue(isWebUrl("https://linear.app/t/ENG-1"))
+        assertTrue(isWebUrl("HTTP://example.com"))
+        for (url in listOf("javascript:alert(1)", "file:///etc/passwd", "mailto:a@b.c", "intent://x", "https://", "")) {
+            assertFalse(isWebUrl(url), url)
+        }
+    }
+
     // ------------------------------------------------------------ helpers
 
     private fun paragraph(md: String): AnnotatedString = assertIs<MdBlock.Paragraph>(parseMarkdown(md).single()).text

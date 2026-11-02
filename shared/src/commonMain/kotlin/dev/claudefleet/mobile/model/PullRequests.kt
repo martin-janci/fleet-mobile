@@ -113,12 +113,14 @@ data class FailingCheck(val name: String, val url: String? = null)
 
 /**
  * What the PR probe last read as evidence about a session's PR (claude-fleet
- * `outcome::PrEvidence`, a session row's `pr_evidence`). Only the checks are
- * read here; every other key passes by.
+ * `outcome::PrEvidence`, a session row's `pr_evidence`). Only the checks and
+ * the PR's state are read here; every other key passes by.
  */
 @Serializable
 data class PrEvidence(
     val checks: CheckSummary = CheckSummary(),
+    /** OPEN | CLOSED | MERGED; absent from readings stored before the hub added it. */
+    val state: String? = null,
 )
 
 /**

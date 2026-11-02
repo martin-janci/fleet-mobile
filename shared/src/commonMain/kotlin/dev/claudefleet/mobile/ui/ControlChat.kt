@@ -51,6 +51,7 @@ import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
+import dev.claudefleet.mobile.ui.components.isWebUrl
 import dev.claudefleet.mobile.ui.kit.Atom
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
@@ -510,7 +511,7 @@ private fun ViewPill(label: String, selected: Boolean, tag: ControlView, onClick
 /**
  * Control's calls that wait on this device's yes, oldest first: what it wants
  * done in words (the hub's [ConfirmRequest.about]: the ticket, host, project
- * and brief, the exact call behind Details; an older hub's bound summary
+ * and brief, the exact call behind Exact call; an older hub's bound summary
  * with the tool in mono), and Approve or Deny. Neither is
  * pre-selected; a card answered elsewhere goes on the next read. Hide puts a
  * card away on this phone without answering it ([ControlViewModel.hide]).
@@ -576,7 +577,7 @@ private const val CONFIRM_BODY_FOLD = 280
 /**
  * A confirm in words: what Approve does, the ticket (tappable), host and
  * project by name, the brief itself (folded when long), and the exact call
- * the approval binds to behind "Details".
+ * the approval binds to behind "Exact call", the desktop's word (`ConfirmAbout.svelte`).
  */
 @Composable
 private fun ConfirmAboutBlock(c: ConfirmRequest, about: dev.claudefleet.mobile.model.ConfirmAbout) {
@@ -588,8 +589,9 @@ private fun ConfirmAboutBlock(c: ConfirmRequest, about: dev.claudefleet.mobile.m
     for (f in about.facts) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(f.label, style = Fleet.type.textSm, color = o.fgMuted, modifier = Modifier.widthIn(min = 72.dp))
-            val url = f.url
-            if (url.isNullOrBlank()) {
+            // Only an http(s) link opens; anything else reads as plain text.
+            val url = f.url?.trim()?.takeIf(::isWebUrl)
+            if (url == null) {
                 Text(f.value, style = Fleet.type.textSm, color = o.fg)
             } else {
                 Text(
@@ -620,7 +622,7 @@ private fun ConfirmAboutBlock(c: ConfirmRequest, about: dev.claudefleet.mobile.m
     TextButton(
         onClick = { detailsOpen = !detailsOpen },
         modifier = Modifier.testTag(CONFIRM_DETAILS_TAG + c.nonce),
-    ) { Text(if (detailsOpen) "Hide details" else "Details") }
+    ) { Text("Exact call") }
     if (detailsOpen) {
         Text(
             listOf(c.tool, c.summary).filter { it.isNotBlank() }.joinToString(" "),

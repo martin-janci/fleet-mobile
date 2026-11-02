@@ -133,8 +133,6 @@ data class TaskUiState(
      */
     val canAddSubtask: Boolean = false,
     val subtaskOpen: Boolean = false,
-    /** The AI check of the task's finished work, when the hub has one to show. */
-    val check: TicketCheck? = null,
     /** **Test now** / **Rerun**: the hub offers it, a full token, `work_link check`, a connection. */
     val canRunCheck: Boolean = false,
     /** **Accept anyway**: a failed check, `work_link verify`. */
@@ -521,7 +519,7 @@ class TaskViewModel(
 
     /** The project's switch: `off`, `ask` or `auto`, and its test command. */
     fun setCheck(mode: String, command: String): Job? {
-        val setup = state.value.check?.setup ?: return null
+        val setup = state.value.detail?.check?.setup ?: return null
         return itemWrite(CHECK_SETUP) { actions.setTicketCheck(setup.projectId, mode, command) }
     }
 
@@ -614,7 +612,6 @@ class TaskViewModel(
             editFields = detail?.let {
                 TaskEditFields(title = it.task.title, notes = it.notes.orEmpty(), assignees = it.task.assignees, dueAt = it.task.dueAt.orEmpty())
             } ?: TaskEditFields(),
-            check = detail?.check,
             canRunCheck = detail?.check?.canRun == true && allowed(caps, status, CHECK),
             canAcceptCheck = detail?.check?.acceptable == true && allowed(caps, status, VERIFY),
             canSetupCheck = detail?.check?.setup != null && allowed(caps, status, CHECK_SETUP),

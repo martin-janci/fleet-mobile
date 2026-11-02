@@ -413,6 +413,21 @@ class SessionsViewModelTest {
         assertEquals(4, state.shown)
     }
 
+    /** As the desktop's `isRoutineSession`: an external row is never a run, and only digits name a routine. */
+    @Test
+    fun an_external_row_is_never_a_routine_run_and_only_digits_name_one() {
+        val external = session(1).copy(kind = "external", origin = "routine", originRef = "3")
+        val signed = session(2).copy(origin = "routine", originRef = "-5", startedAt = 200)
+        val named = session(3).copy(origin = "routine", originRef = " 5 ", startedAt = 100)
+        assertFalse(external.isRoutineRun)
+        assertNull(signed.routineId)
+        assertEquals(5L, named.routineId)
+        assertEquals(
+            listOf("routine:?" to listOf(2L), "routine:5" to listOf(3L)),
+            routineGroups(listOf(external, signed, named)).map { g -> g.key to g.sessions.map { it.id } },
+        )
+    }
+
     /** The pure grouping function, filtered to one host directly — no view model involved. */
     @Test
     fun grouping_can_be_filtered_to_one_host() {

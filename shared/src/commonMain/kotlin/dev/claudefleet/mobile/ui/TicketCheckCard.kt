@@ -49,7 +49,7 @@ internal fun checkModeLabel(mode: String): String = CHECK_MODES.firstOrNull { it
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun TicketCheckCard(state: TaskUiState, handlers: TaskHandlers, modifier: Modifier = Modifier) {
-    val check = state.check ?: return
+    val check = state.detail?.check ?: return
     var accepting by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf("") }
     var setupOpen by remember { mutableStateOf(false) }

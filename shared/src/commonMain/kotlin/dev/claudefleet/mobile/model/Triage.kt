@@ -87,8 +87,14 @@ fun SessionRow.triageBucket(idleSeconds: Long = 0, now: Long = 0): TriageBucket 
     if (stuckKind != null) return TriageBucket.STUCK
     if (claudeStatus == "failed") return if (kind == "bg") TriageBucket.FAILED else TriageBucket.STOP_FAILED
     val live = status != "ghost" && lostAt == null
-    if (live && (contextPct ?: 0.0) >= CONTEXT_RED_PCT) return TriageBucket.CONTEXT_FULL
-    if (ciStatus == "failing" && claudeStatus in IDLE_STATUSES) return TriageBucket.CI_FAILING
+    // An idle session has nothing running out of room: its context matters
+    // when it is next given work, not before.
+    if (live && claudeStatus !in IDLE_STATUSES && (contextPct ?: 0.0) >= CONTEXT_RED_PCT) {
+        return TriageBucket.CONTEXT_FULL
+    }
+    // A merged or closed PR's checks can fail for good: nobody has anything left to fix.
+    val prFinished = prEvidence?.state.let { it == "MERGED" || it == "CLOSED" }
+    if (ciStatus == "failing" && claudeStatus in IDLE_STATUSES && !prFinished) return TriageBucket.CI_FAILING
     if (isDoneUnread) return TriageBucket.DONE_UNREAD
     if (isLifecycleBroken) return TriageBucket.LIFECYCLE
     if (isIdleLong(idleSeconds, now)) return TriageBucket.IDLE_LONG
