@@ -60,13 +60,12 @@ class OrbitMissionDetailTest {
         )
         assertEquals(listOf(1L, 2L, 3L, 5L, 4L), rows.map { it.itemId })
         assertEquals(
-            listOf(PlanMark.DONE, PlanMark.RUNNING, PlanMark.NEEDS_YOU, PlanMark.NEEDS_YOU, PlanMark.TODO),
+            listOf(PlanMark.DONE, PlanMark.RUNNING, PlanMark.NEEDS_YOU, PlanMark.FAILED, PlanMark.TODO),
             rows.map { it.mark },
         )
         assertEquals("FL-3", rows[2].title, "a task without a title shows its key")
         assertEquals("needs you", rows[2].note)
-        // A blocked task is one whose session is stuck or asks: it needs you, it has not failed.
-        assertEquals("its session needs you", rows[3].note)
+        assertEquals("blocked", rows[3].note)
         assertNull(rows[4].note)
         assertEquals("Running · 1 task", runningLine(rows))
     }
@@ -132,7 +131,7 @@ class OrbitMissionDetailTest {
     fun only_a_failed_task_is_retried() {
         val failed = PlanRow(1, "a", PlanMark.FAILED, "failed")
         assertTrue(retryable(failed, "failed"))
-        assertFalse(retryable(PlanRow(2, "b", PlanMark.NEEDS_YOU, "its session needs you"), "blocked"))
+        assertFalse(retryable(PlanRow(2, "b", PlanMark.FAILED, "blocked"), "blocked"))
         assertFalse(retryable(PlanRow(3, "c", PlanMark.TODO, null), "ready"))
     }
 

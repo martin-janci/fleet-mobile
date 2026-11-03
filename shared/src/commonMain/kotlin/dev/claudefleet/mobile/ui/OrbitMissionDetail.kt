@@ -121,23 +121,18 @@ data class PlanRow(
     val sessionId: Long? = null,
 )
 
-/**
- * A node's state as a plan mark. `blocked` is the hub's word for a task
- * whose session is stuck or waits on a person (`graph.rs`: `stuck_kind` or
- * `claude_status = blocked`), not a task that failed: it needs you, as the
- * rest of the phone says of a blocked session.
- */
+/** A node's state as a plan mark, as the desktop's `toneOf` files them. */
 internal fun planMark(state: String): PlanMark = when (state) {
     "done" -> PlanMark.DONE
     "running", "doing", "verifying" -> PlanMark.RUNNING
-    "failed" -> PlanMark.FAILED
-    // A proposal waits for a person to accept it; a blocked task's session does.
-    "proposed", "blocked" -> PlanMark.NEEDS_YOU
+    "failed", "blocked" -> PlanMark.FAILED
+    // A proposal waits for a person to accept it.
+    "proposed" -> PlanMark.NEEDS_YOU
     else -> PlanMark.TODO
 }
 
 private fun noteOf(mark: PlanMark, state: String): String? = when (mark) {
-    PlanMark.NEEDS_YOU -> if (state == "blocked") "its session needs you" else "needs you"
+    PlanMark.NEEDS_YOU -> "needs you"
     PlanMark.FAILED -> state
     PlanMark.TODO -> state.takeIf { it == "held" }
     else -> null
