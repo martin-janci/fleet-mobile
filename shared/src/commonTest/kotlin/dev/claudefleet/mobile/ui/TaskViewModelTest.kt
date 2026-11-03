@@ -506,6 +506,34 @@ class TaskViewModelTest {
         assertEquals(listOf("set_status 12 done"), actions.calls)
     }
 
+    /**
+     * A ticket whose tracker takes moves (`status_movable`) gets the status
+     * chips, which move it at the tracker; Edit stays off, and the flag is
+     * read off the wire.
+     */
+    @Test
+    fun a_movable_ticket_is_moved_at_its_tracker() = runTest {
+        val wire = json.decodeFromString(
+            TaskDetail.serializer(),
+            WorkTreeJson.TASK.replaceFirst("\"tracker_state\":\"ok\",", "\"tracker_state\":\"ok\",\"status_movable\":true,"),
+        )
+        assertTrue(wire.task.statusMovable && wire.task.movesAtTracker)
+        val actions = FakeWorkActions().apply { taskAnswer = wire }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        val s = vm.state.value
+        assertTrue(s.canSetStatus)
+        assertFalse(s.canEdit)
+        assertEquals("Jira (acme)", s.statusAtTracker)
+        vm.setStatus(dev.claudefleet.mobile.model.StatusCategory.Done)
+        runCurrent()
+        assertEquals(listOf("set_status 12 done"), actions.calls)
+
+        val own = taskVm(actions = FakeWorkActions().apply { taskAnswer = local })
+        runCurrent()
+        assertNull(own.state.value.statusAtTracker, "fleet's own status is not a move anywhere")
+    }
+
     // ---- Promote to ticket (claude-fleet `work_link promote`) ----
 
     private val jira = dev.claudefleet.mobile.model.PromoteTarget(

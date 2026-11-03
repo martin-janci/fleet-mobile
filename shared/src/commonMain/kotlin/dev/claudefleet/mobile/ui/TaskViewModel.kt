@@ -117,6 +117,8 @@ data class TaskUiState(
     val canEdit: Boolean = false,
     /** The status chips set it: the same, for `work_link set_status`. */
     val canSetStatus: Boolean = false,
+    /** The tracker the status chips move the ticket at; null for fleet's own task. */
+    val statusAtTracker: String? = null,
     val editOpen: Boolean = false,
     /** A delegated job's description is its prompt: shown, never edited. */
     val notesLocked: Boolean = false,
@@ -563,7 +565,12 @@ class TaskViewModel(
         }
     }
 
-    /** A status chip: a person's status for fleet's own task, final over the derived one. */
+    /**
+     * A status chip: a person's status for fleet's own task, final over the
+     * derived one; for a tracker's ticket that takes it, a move at the
+     * tracker (the hub reads the ticket back, which may settle on a
+     * neighbouring status).
+     */
     fun setStatus(status: StatusCategory): Job? {
         val s = state.value
         val itemId = s.task?.itemId ?: return null
@@ -756,7 +763,8 @@ class TaskViewModel(
             orgName = task?.orgId?.let { orgs.name(it) },
             orgColor = task?.orgId?.let { orgs.orgs[it]?.color },
             canEdit = task?.editable == true && allowed(caps, status, EDIT),
-            canSetStatus = task?.editable == true && allowed(caps, status, SET_STATUS),
+            canSetStatus = (task?.editable == true || task?.movesAtTracker == true) && allowed(caps, status, SET_STATUS),
+            statusAtTracker = task?.takeIf { it.movesAtTracker }?.let { it.trackerName?.ifBlank { null } ?: "its tracker" },
             editOpen = l.editOpen,
             notesLocked = task?.origin == "agent",
             parentTaskId = task?.parentTaskId,

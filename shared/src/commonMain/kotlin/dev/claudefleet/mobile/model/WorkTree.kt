@@ -386,6 +386,12 @@ data class WorkTask(
     @SerialName("status_category") val statusCategory: StatusCategory? = null,
     @SerialName("status_name") val statusName: String? = null,
     val resolution: String? = null,
+    /**
+     * A tracker's ticket whose tracker takes a person's status move from
+     * fleet (claude-fleet CF-6, `write_back.status`): its status chips move
+     * it AT the tracker. An older hub never sends it.
+     */
+    @SerialName("status_movable") val statusMovable: Boolean = false,
     val unavailable: Boolean = false,
     @SerialName("unavailable_reason") val unavailableReason: String? = null,
     val assignees: List<String> = emptyList(),
@@ -454,6 +460,8 @@ data class WorkTask(
      * tracker's ticket, whose text and status are its tracker's).
      */
     val editable: Boolean get() = kind == TaskKind.Local && itemId != null
+    /** A tracker's ticket a person may move at its tracker ([statusMovable]). */
+    val movesAtTracker: Boolean get() = kind == TaskKind.Tracker && itemId != null && statusMovable
     /** The fleet ticket key, else the key, else the title, else the id. */
     val label: String get() =
         displayKey?.takeIf { it.isNotBlank() } ?: key?.takeIf { it.isNotBlank() } ?: title.ifBlank { taskId }

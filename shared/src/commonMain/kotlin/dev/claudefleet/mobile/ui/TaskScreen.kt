@@ -554,6 +554,9 @@ internal fun OwnTaskControls(state: TaskUiState, handlers: TaskHandlers, modifie
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (state.canSetStatus) {
             TaskStatusChips(current = state.task?.statusCategory, enabled = !state.busy, onPick = handlers.onSetStatus)
+            state.statusAtTracker?.let {
+                Text("Moves it on $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (state.canEdit) {
