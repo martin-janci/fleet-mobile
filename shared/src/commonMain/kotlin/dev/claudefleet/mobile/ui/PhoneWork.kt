@@ -56,6 +56,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.model.priorityLabel
+import dev.claudefleet.mobile.model.estimateLabel
 import dev.claudefleet.mobile.model.GroupSource
 import dev.claudefleet.mobile.model.LinkState
 import dev.claudefleet.mobile.model.PastWorkSummary
@@ -660,6 +662,9 @@ fun PhoneTaskScreen(
                         }
                         for (a in task.assignees.take(2)) OrbitChip(a)
                         task.dueAt?.takeIf { it.isNotBlank() }?.let { OrbitChip("Due $it") }
+                        priorityLabel(task.priority)?.let { OrbitChip("Priority $it") }
+                        estimateLabel(task.estimate, task.estimateUnit)?.let { OrbitChip(it) }
+                        for (l in task.labels.take(4)) OrbitChip(l)
                         task.trackerName?.takeIf { it.isNotBlank() }?.let { OrbitChip(it) }
                     }
                     if (task.unavailable) Text("The tracker no longer answers for this ticket.", color = o.statusFailed, fontSize = 13.sp)

@@ -430,6 +430,12 @@ data class WorkTask(
     @SerialName("due_at") val dueAt: String? = null,
     /** A local item's parent (`item:<id>`): the epic or task it is filed under. */
     @SerialName("parent_task_id") val parentTaskId: String? = null,
+    /** `urgent | high | medium | low` (claude-fleet migration 171): a native task's own, else its tracker's. */
+    val priority: String? = null,
+    val labels: List<String> = emptyList(),
+    /** How big the work is, in [estimateUnit] (`points | hours`). */
+    val estimate: Double? = null,
+    @SerialName("estimate_unit") val estimateUnit: String? = null,
     /** An epic (claude-fleet's sprints design §3). */
     val epic: Boolean = false,
     /** Its children and how many are done: an epic's roll-up. */
@@ -454,6 +460,23 @@ data class WorkTask(
 
     /** The tracker is failing — said as such, never as "no sessions". */
     val trackerDown: Boolean get() = trackerId != null && !trackerState.isNullOrBlank() && trackerState != "ok"
+}
+
+/** A priority as the task page says it ("High"); null for none or one this build does not know (the desktop's `priorityLabel`). */
+fun priorityLabel(p: String?): String? = when (p) {
+    "urgent" -> "Urgent"
+    "high" -> "High"
+    "medium" -> "Medium"
+    "low" -> "Low"
+    else -> null
+}
+
+/** An estimate as the task page says it: "3 pts", "1 pt", "4 h", "2.5 pts"; null for none (the desktop's `estimateLabel`). */
+fun estimateLabel(estimate: Double?, unit: String?): String? {
+    if (estimate == null || !estimate.isFinite() || estimate <= 0.0) return null
+    val r = kotlin.math.round(estimate * 100) / 100
+    val n = if (r == kotlin.math.floor(r)) r.toLong().toString() else r.toString()
+    return if (unit == "hours") "$n h" else "$n ${if (r == 1.0) "pt" else "pts"}"
 }
 
 /** The deepest a local item nests on a hub that reports [WorkTask.level]. */

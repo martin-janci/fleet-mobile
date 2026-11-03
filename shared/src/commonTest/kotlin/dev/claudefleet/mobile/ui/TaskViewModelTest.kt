@@ -693,6 +693,22 @@ class TaskViewModelTest {
         assertEquals("Someone · on Acme Jira · 3 min ago", trackerCommentHeader(t2, "Acme Jira", 400))
     }
 
+    /** A task's priority, estimate and labels decode and read as the desktop words them (claude-fleet migration 171). */
+    @Test
+    fun priority_estimate_and_labels_read_as_the_desktop_words_them() {
+        val d = json.decodeFromString(
+            TaskDetail.serializer(),
+            """{"task":{"task_id":"item:12","priority":"high","labels":["api","bug"],"estimate":2.5,"estimate_unit":"points"}}""",
+        )
+        assertEquals("High", dev.claudefleet.mobile.model.priorityLabel(d.task.priority))
+        assertEquals(listOf("api", "bug"), d.task.labels)
+        assertEquals("2.5 pts", dev.claudefleet.mobile.model.estimateLabel(d.task.estimate, d.task.estimateUnit))
+        assertEquals("1 pt", dev.claudefleet.mobile.model.estimateLabel(1.0, "points"))
+        assertEquals("4 h", dev.claudefleet.mobile.model.estimateLabel(4.0, "hours"))
+        assertNull(dev.claudefleet.mobile.model.estimateLabel(0.0, "points"))
+        assertNull(dev.claudefleet.mobile.model.priorityLabel("p0"), "a value this build does not know says nothing")
+    }
+
     // ---- Under epic… (claude-fleet `work_link set_parent`) ----
 
     /** Fleet's own epics are offered (never itself or where it is), one tap files it, and a filed task can go back to the top. */
