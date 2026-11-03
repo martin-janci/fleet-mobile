@@ -49,6 +49,7 @@ private fun TestScope.taskVm(
     nav: TaskNav = TaskNav(),
     scope: CoroutineScope = backgroundScope,
     callScope: CoroutineScope = scope,
+    epics: List<dev.claudefleet.mobile.model.EpicFacet> = emptyList(),
 ) = TaskViewModel(
     taskId = "item:12",
     fleet = fleet,
@@ -64,6 +65,7 @@ private fun TestScope.taskVm(
             GroupRef("repo:acme/api", "acme/api", GroupSource.Repo),
         )
     },
+    knownEpics = { epics },
     onOpenSession = { nav.opened += it },
     onStartHere = { nav.started += it },
     onOpenTask = { nav.tasks += it },
@@ -689,6 +691,42 @@ class TaskViewModelTest {
         assertEquals(listOf<CommentEntry>(CommentEntry.Tracker(t1), CommentEntry.Fleet(f), CommentEntry.Tracker(t2)), line)
         assertEquals("Ana · on Acme Jira · 5 min ago", trackerCommentHeader(t1, "Acme Jira", 400))
         assertEquals("Someone · on Acme Jira · 3 min ago", trackerCommentHeader(t2, "Acme Jira", 400))
+    }
+
+    // ---- Under epic… (claude-fleet `work_link set_parent`) ----
+
+    /** Fleet's own epics are offered (never itself or where it is), one tap files it, and a filed task can go back to the top. */
+    @Test
+    fun a_task_is_filed_under_an_epic_and_back_to_the_top() = runTest {
+        val epics = listOf(
+            dev.claudefleet.mobile.model.EpicFacet(taskId = "item:40", key = "TASK-40", title = "Payments", count = 3),
+            dev.claudefleet.mobile.model.EpicFacet(taskId = "tracker:1:PAY-1", key = "PAY-1", title = "A ticket epic"),
+            dev.claudefleet.mobile.model.EpicFacet(taskId = "item:12", title = "itself"),
+        )
+        val actions = FakeWorkActions().apply { taskAnswer = local }
+        val vm = taskVm(actions = actions, epics = epics)
+        runCurrent()
+        assertTrue(vm.state.value.canFile)
+        assertEquals(listOf("item:40"), vm.state.value.epicChoices.map { it.taskId })
+        assertEquals("TASK-40 Payments (3)", epicChoiceLabel(vm.state.value.epicChoices.single()))
+        vm.openFile()
+        vm.fileUnder("item:40")
+        runCurrent()
+        assertEquals(listOf("set_parent 12 item:40"), actions.calls)
+        assertFalse(vm.state.value.fileOpen)
+
+        val filed = FakeWorkActions().apply { taskAnswer = local.copy(task = local.task.copy(parentTaskId = "item:40")) }
+        val vm2 = taskVm(actions = filed, epics = epics)
+        runCurrent()
+        assertTrue(vm2.state.value.epicChoices.isEmpty(), "where it already is is not offered")
+        assertNull(vm2.fileUnder("item:40"), "filing it where it is sends nothing")
+        vm2.fileUnder("")
+        runCurrent()
+        assertEquals(listOf("set_parent 12 "), filed.calls)
+
+        val epic = taskVm(actions = FakeWorkActions().apply { taskAnswer = local.copy(task = local.task.copy(epic = true)) }, epics = epics)
+        runCurrent()
+        assertFalse(epic.state.value.canFile, "an epic is not filed under another")
     }
 
     /** The hub's comment fields decode, and read as the desktop words them. */

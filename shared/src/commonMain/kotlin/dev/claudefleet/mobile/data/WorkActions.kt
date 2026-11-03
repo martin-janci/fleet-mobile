@@ -176,6 +176,9 @@ interface WorkActions {
     suspend fun promoteItem(itemId: Long, trackerId: Long?, container: String?): Unit =
         throw UnsupportedOperationException("promote")
 
+    /** **Under epic…**: file local item [itemId] under [parent] (`item:<id>`), or `""` for the top. */
+    suspend fun setParent(itemId: Long, parent: String): Unit = throw UnsupportedOperationException("set_parent")
+
     /** **Comment** on task [itemId] (`work_link { comment }`), and with [postToTracker] on its ticket too. */
     suspend fun comment(itemId: Long, body: String, postToTracker: Boolean): TaskComment =
         throw UnsupportedOperationException("comment")
@@ -343,6 +346,8 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
 
     override suspend fun promoteItem(itemId: Long, trackerId: Long?, container: String?) =
         session.withClient { it.promoteWorkItem(itemId, trackerId, container) }
+
+    override suspend fun setParent(itemId: Long, parent: String) = session.withClient { it.setWorkParent(itemId, parent) }
 
     override suspend fun comment(itemId: Long, body: String, postToTracker: Boolean): TaskComment =
         session.withClient { it.commentOnWorkItem(itemId, body, postToTracker) }

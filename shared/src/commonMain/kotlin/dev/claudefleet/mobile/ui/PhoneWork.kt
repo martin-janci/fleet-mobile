@@ -766,6 +766,7 @@ fun PhoneTaskScreen(
     if (state.editOpen) TaskEditSheetFor(state, h)
     if (state.subtaskOpen) SubtaskSheetFor(state, h)
     if (state.promoteOpen) PromoteSheetFor(state, h)
+    if (state.fileOpen) FileUnderEpicDialog(state, h)
 }
 
 @Composable

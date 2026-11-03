@@ -102,6 +102,10 @@ data class TaskHandlers(
     val onCommentDraft: (String) -> Unit = {},
     val onComment: (postToTracker: Boolean) -> Unit = {},
     val onDeleteComment: (Long) -> Unit = {},
+    /** **Under epic…**: open, close, and file under `item:<id>` (or `""` for the top). */
+    val onOpenFile: () -> Unit = {},
+    val onCloseFile: () -> Unit = {},
+    val onFileUnder: (String) -> Unit = {},
 )
 
 /**
@@ -218,6 +222,7 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
     if (state.editOpen) TaskEditSheetFor(state, handlers)
     if (state.subtaskOpen) SubtaskSheetFor(state, handlers)
     if (state.promoteOpen) PromoteSheetFor(state, handlers)
+    if (state.fileOpen) FileUnderEpicDialog(state, handlers)
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.linkSection(
@@ -533,21 +538,25 @@ internal fun TaskHierarchy(state: TaskUiState, handlers: TaskHandlers, modifier:
  * off with what would bring one; a promotion on its way, or one refused,
  * is said under them.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun OwnTaskControls(state: TaskUiState, handlers: TaskHandlers, modifier: Modifier = Modifier) {
-    if (!state.canSetStatus && !state.canEdit && !state.canAddSubtask && !state.canPromote &&
+    if (!state.canSetStatus && !state.canEdit && !state.canAddSubtask && !state.canPromote && !state.canFile &&
         state.promoteHint == null && state.promotionLine == null
     ) return
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (state.canSetStatus) {
             TaskStatusChips(current = state.task?.statusCategory, enabled = !state.busy, onPick = handlers.onSetStatus)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (state.canEdit) {
                 TextButton(onClick = handlers.onOpenEdit, enabled = !state.busy) { Text("Edit…") }
             }
             if (state.canAddSubtask) {
                 TextButton(onClick = handlers.onOpenSubtask, enabled = !state.busy) { Text("Add subtask") }
+            }
+            if (state.canFile) {
+                TextButton(onClick = handlers.onOpenFile, enabled = !state.busy) { Text("Under epic…") }
             }
             if (state.canPromote || state.promoteHint != null) {
                 TextButton(onClick = handlers.onOpenPromote, enabled = state.canPromote && !state.busy) { Text("Promote to ticket…") }

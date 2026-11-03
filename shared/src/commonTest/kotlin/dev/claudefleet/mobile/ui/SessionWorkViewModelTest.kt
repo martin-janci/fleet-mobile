@@ -348,6 +348,10 @@ internal class FakeWorkActions : WorkActions {
         return trackerCommentsAnswer
     }
 
+    override suspend fun setParent(itemId: Long, parent: String) {
+        write("set_parent $itemId $parent")
+    }
+
     override suspend fun deleteComment(commentId: Long) {
         write("comment_delete $commentId")
     }

@@ -2391,6 +2391,20 @@ class HubClient(
         ) { }
 
     /**
+     * File local item [itemId] under [parent] (`item:<id>`, an epic or a
+     * task), or `""` to take it out to the top (`work_link { set_parent }`).
+     */
+    suspend fun setWorkParent(itemId: Long, parent: String): Unit =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "set_parent")
+                put("item_id", itemId)
+                put("parent", parent)
+            },
+        ) { }
+
+    /**
      * A comment on task [itemId] (`work_link { comment }`), and with
      * [postToTracker] its post to the ticket's tracker too. Answers the comment.
      */

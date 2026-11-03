@@ -15,6 +15,7 @@ import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.model.TicketCheck
 import dev.claudefleet.mobile.model.TaskDetail
 import dev.claudefleet.mobile.model.TaskComment
+import dev.claudefleet.mobile.model.EpicFacet
 import dev.claudefleet.mobile.model.TrackerCommentRow
 import dev.claudefleet.mobile.model.COMMENT_MAX
 import dev.claudefleet.mobile.model.PromoteTarget
@@ -173,6 +174,15 @@ data class TaskUiState(
     val trackerComments: List<TrackerCommentRow> = emptyList(),
     /** Reading them failed: said in one line, the fleet comments still show. */
     val trackerCommentsFailed: Boolean = false,
+    /**
+     * **Under epic…**: fleet's own task that is not an epic itself, a full
+     * token, `work_link set_parent`, a connection. The hub refuses a filing
+     * that would nest too deep, naming why.
+     */
+    val canFile: Boolean = false,
+    /** The epics it may go under: fleet's own (`item:<id>`), never itself or where it already is. */
+    val epicChoices: List<EpicFacet> = emptyList(),
+    val fileOpen: Boolean = false,
 ) {
     val task get() = detail?.task
 }
@@ -213,6 +223,8 @@ class TaskViewModel(
     private val knownGroups: () -> List<GroupRef> = { emptyList() },
     /** Tasks per placeable group label, for the rows of *Place in group…* ("4 tasks"). */
     private val groupCounts: () -> Map<String, Int> = { emptyMap() },
+    /** The epics the Work tree knows, for *Under epic…*. */
+    private val knownEpics: () -> List<EpicFacet> = { emptyList() },
     private val onOpenSession: (Long) -> Unit = {},
     /** The New session form in ticket mode, for this key. */
     private val onStartHere: (String) -> Unit = {},
@@ -245,6 +257,7 @@ class TaskViewModel(
         val trackerCommentsFailed: Boolean = false,
         /** The key whose tracker comments were read, so a re-read of the task does not ask the tracker again. */
         val trackerCommentsFor: String? = null,
+        val fileOpen: Boolean = false,
     )
 
     private val local = MutableStateFlow(Local())
@@ -584,6 +597,26 @@ class TaskViewModel(
         }
     }
 
+    fun openFile() {
+        if (state.value.canFile) local.update { it.copy(fileOpen = true, error = null, conflict = false) }
+    }
+
+    fun closeFile() {
+        local.update { it.copy(fileOpen = false) }
+    }
+
+    /** File the task under epic [parent] (`item:<id>`), or `""` to take it out to the top; then re-read. */
+    fun fileUnder(parent: String): Job? {
+        val s = state.value
+        val itemId = s.task?.itemId ?: return null
+        if (!s.canFile) return null.also { refuseOffline(SET_PARENT) }
+        if (parent == (s.parentTaskId ?: "")) return null.also { closeFile() }
+        return itemWrite(SET_PARENT) {
+            actions.setParent(itemId, parent)
+            local.update { it.copy(fileOpen = false) }
+        }
+    }
+
     fun setCommentDraft(text: String) {
         local.update { it.copy(commentDraft = text.take(COMMENT_MAX)) }
     }
@@ -750,6 +783,9 @@ class TaskViewModel(
             canPostToTracker = detail?.commentsTracker != null && detail.canPostToTracker && allowed(caps, status, COMMENT),
             canDeleteComment = allowed(caps, status, COMMENT_DELETE),
             commentDraft = l.commentDraft,
+            canFile = task?.editable == true && !task.epic && allowed(caps, status, SET_PARENT),
+            epicChoices = knownEpics().filter { it.taskId.startsWith("item:") && it.taskId != task?.taskId && it.taskId != task?.parentTaskId },
+            fileOpen = l.fileOpen,
             trackerComments = l.trackerComments.takeIf { detail?.commentsTracker != null }.orEmpty(),
             trackerCommentsFailed = l.trackerCommentsFailed && detail?.commentsTracker != null,
             criteria = acceptanceCriteria(detail?.description?.takeIf { it.isNotBlank() } ?: detail?.notes.orEmpty()),
@@ -790,6 +826,7 @@ class TaskViewModel(
         const val CHECK_SETUP = "check_setup"
         const val PROMOTE = "promote"
         const val COMMENT = "comment"
+        const val SET_PARENT = "set_parent"
         const val COMMENT_DELETE = "comment_delete"
         const val TRACKER_COMMENTS = "tracker_comments"
         const val CHECK_POLL_MS = 10_000L
