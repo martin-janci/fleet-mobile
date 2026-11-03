@@ -157,6 +157,17 @@ class FilterFacetsTest {
         assertEquals("low", wire.normalized().priority)
     }
 
+    /** Sorting by priority is offered only to a hub that takes it: an older one refuses an unknown sort. */
+    @Test
+    fun the_priority_sort_waits_for_a_hub_that_takes_it() {
+        assertFalse("priority" in WorkTreeFilters.sortsFor(null))
+        assertFalse("priority" in WorkTreeFilters.sortsFor("0.6.4"))
+        assertTrue("priority" in WorkTreeFilters.sortsFor("0.6.5"))
+        assertTrue("priority" in WorkTreeFilters.sortsFor("v0.7.0-rc.1"))
+        assertEquals("Priority", WorkTreeFilters.sortLabel("priority"))
+        assertEquals("priority", WorkTreeFilters(sort = "priority").normalized().sort)
+    }
+
     @Test
     fun defaults_are_not_filters_and_group_and_archived_are_not_either() {
         val f = WorkTreeFilters(status = "any", has = "any", mine = false, query = " ", group = "x", archived = true)

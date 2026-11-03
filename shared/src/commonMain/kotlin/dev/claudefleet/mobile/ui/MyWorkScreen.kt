@@ -549,7 +549,7 @@ internal fun WorkFiltersSheet(
             }
             FilterGroup("Sort") {
                 ChipFlow {
-                    for (s in WorkTreeFilters.SORTS) {
+                    for (s in state.sorts) {
                         ChoiceChip(WorkTreeFilters.sortLabel(s), (f.sort ?: "activity") == s, { handlers.onSetSort(s.takeIf { it != "activity" }) })
                     }
                 }
