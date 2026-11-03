@@ -648,6 +648,10 @@ class MyWorkViewModelTest {
         val tasks = page(WorkTreeJson.TREE).tasks
         assertEquals("In Review · Jira (acme) · 1 active · 2 past · 1 suggested · to review", taskCardLine(tasks[0]))
         assertEquals("no sessions · tracker down", taskCardLine(tasks[1]))
+        // Urgent and high lead the line; medium and low are the usual case.
+        assertEquals("Urgent · no sessions · tracker down", taskCardLine(tasks[1].copy(priority = "urgent")))
+        assertEquals("High · no sessions · tracker down", taskCardLine(tasks[1].copy(priority = "high")))
+        assertEquals("no sessions · tracker down", taskCardLine(tasks[1].copy(priority = "low")))
     }
 
     // ---- a new task ----
