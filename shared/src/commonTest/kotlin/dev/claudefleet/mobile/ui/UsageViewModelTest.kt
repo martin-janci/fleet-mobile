@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
+import kotlin.test.assertNull
+import kotlin.test.assertNotNull
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -40,8 +42,10 @@ private class UsageFleet(tools: Set<String>) : FleetState {
 private class UsageCalls : UsageActions {
     val windows = mutableListOf<Long?>()
     var accountReads = 0
+    var failReports = false
     override suspend fun report(sinceSecs: Long?): UsageReport {
         windows += sinceSecs
+        if (failReports) throw IllegalStateException("report failed")
         return UsageReport(total = UsageTotals(costMicros = 1_230_000))
     }
     override suspend fun accounts(): List<AccountRow> {
@@ -105,6 +109,21 @@ class UsageViewModelTest {
 
         assertEquals(listOf<Long?>(UsageWindow.Week.seconds, UsageWindow.Day.seconds), calls.windows)
         assertEquals(1, calls.accountReads)
+    }
+
+    /** Review M6: the old window's totals never stand under the new chip. */
+    @Test
+    fun another_window_whose_read_fails_shows_no_old_totals() = runTest {
+        val calls = UsageCalls()
+        val vm = UsageViewModel(UsageFleet(both), calls, backgroundScope)
+        vm.attach()
+        runCurrent()
+        assertNotNull(vm.state.value.report)
+        calls.failReports = true
+        vm.select(UsageWindow.Day).join()
+        runCurrent()
+        assertNull(vm.state.value.report)
+        assertTrue(vm.state.value.error != null)
     }
 
     @Test

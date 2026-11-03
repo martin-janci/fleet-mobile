@@ -119,7 +119,9 @@ class UsageViewModel(
 
     fun select(window: UsageWindow): Job = scope.launch {
         if (local.value.window == window) return@launch
-        local.update { it.copy(window = window) }
+        // The old window's totals never stand under the new chip, even when
+        // the new read fails (review M6).
+        local.update { it.copy(window = window, report = null) }
         read(withAccounts = false)
     }
 

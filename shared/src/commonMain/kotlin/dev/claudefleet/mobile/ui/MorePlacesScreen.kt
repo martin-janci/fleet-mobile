@@ -285,6 +285,9 @@ fun OrbitUsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: L
         ErrorBanner(state.error, onDismiss = handlers.onDismissError)
         OrbitPullToRefresh(isRefreshing = state.loading, onRefresh = handlers.onRefresh, modifier = Modifier.fillMaxSize()) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
+                if (state.accountsAvailable && state.accounts.isEmpty() && !state.loading) {
+                    item(key = "no-accounts") { Quiet(NO_ACCOUNTS_YET, small = true) }
+                }
                 if (state.accountsAvailable && state.accounts.isNotEmpty()) {
                     items(state.accounts, key = { "account:${it.uuid}" }) {
                         Column {
@@ -295,6 +298,7 @@ fun OrbitUsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: L
                     }
                     if (!state.limitsAvailable && state.capsKnown) item(key = "limits") { Quiet(LIMITS_ON_DESKTOP, small = true) }
                 }
+                if (state.accountsAvailable) item(key = "add-account") { Quiet(ADD_ACCOUNT_ON_DESKTOP, small = true) }
                 state.autoSwitch?.let { view ->
                     item(key = "auto-switch") { AutoSwitchRows(view, state, handlers) }
                 }
@@ -390,7 +394,7 @@ internal fun limitsNote(snap: AccountUsageSnapshot?, nowSeconds: Long): String? 
 }
 
 @Composable
-private fun AccountLimitsBlock(snap: AccountUsageSnapshot?, nowSeconds: Long) {
+internal fun AccountLimitsBlock(snap: AccountUsageSnapshot?, nowSeconds: Long) {
     val o = Fleet.colors
     Column(modifier = Modifier.fillMaxWidth().padding(start = gutter(), end = gutter(), bottom = 10.dp)) {
         for ((name, w) in snap?.usage?.let(::limitRows).orEmpty()) {
@@ -454,7 +458,7 @@ private fun LazyListScope.orbitUsage(report: UsageReport, handlers: UsageHandler
         }
     }
     if (report.byDay.isNotEmpty()) {
-        item(key = "by-day") { GroupHeading("By day", null) }
+        item(key = "by-day") { GroupHeading("By day (UTC)", null) }
         val days = report.byDay.sortedByDescending { it.day }
         val top = days.maxOf { it.costMicros }.coerceAtLeast(1)
         items(days, key = { "day:${it.day}" }) { d ->
