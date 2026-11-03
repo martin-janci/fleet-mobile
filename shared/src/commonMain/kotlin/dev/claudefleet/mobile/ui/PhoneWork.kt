@@ -761,6 +761,7 @@ fun PhoneTaskScreen(
     if (state.placeOpen) PlaceSheet(state, h)
     if (state.editOpen) TaskEditSheetFor(state, h)
     if (state.subtaskOpen) SubtaskSheetFor(state, h)
+    if (state.promoteOpen) PromoteSheetFor(state, h)
 }
 
 @Composable

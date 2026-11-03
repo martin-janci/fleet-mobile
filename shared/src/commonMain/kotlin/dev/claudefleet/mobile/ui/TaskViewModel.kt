@@ -14,6 +14,8 @@ import dev.claudefleet.mobile.model.OrgSource
 import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.model.TicketCheck
 import dev.claudefleet.mobile.model.TaskDetail
+import dev.claudefleet.mobile.model.PromoteTarget
+import dev.claudefleet.mobile.model.PromotionView
 import dev.claudefleet.mobile.model.WorkTaskLink
 import dev.claudefleet.mobile.model.subtaskRollup
 import dev.claudefleet.mobile.model.takesSubtask
@@ -139,6 +141,19 @@ data class TaskUiState(
     val canAcceptCheck: Boolean = false,
     /** The project's switch can be changed here (`work_link check_setup`). */
     val canSetupCheck: Boolean = false,
+    /**
+     * **Promote to ticket…**: fleet's own task, a tracker the hub offers
+     * ([promoteTargets]), none on its way already, a full token,
+     * `work_link promote`, a connection.
+     */
+    val canPromote: Boolean = false,
+    val promoteTargets: List<PromoteTarget> = emptyList(),
+    val promoteOpen: Boolean = false,
+    /** No tracker takes it yet: what would bring Promote (shown with the button off). */
+    val promoteHint: String? = null,
+    /** "Creating the ticket in Acme Jira…", or why it was not created. */
+    val promotionLine: String? = null,
+    val promotionFailed: Boolean = false,
 ) {
     val task get() = detail?.task
 }
@@ -205,6 +220,7 @@ class TaskViewModel(
         val editOpen: Boolean = false,
         val parentLabel: String? = null,
         val subtaskOpen: Boolean = false,
+        val promoteOpen: Boolean = false,
     )
 
     private val local = MutableStateFlow(Local())
@@ -493,6 +509,32 @@ class TaskViewModel(
         return itemWrite(SET_STATUS) { actions.setStatus(itemId, status.wire) }
     }
 
+    fun openPromote() {
+        if (state.value.canPromote) local.update { it.copy(promoteOpen = true, error = null, conflict = false) }
+    }
+
+    fun closePromote() {
+        local.update { it.copy(promoteOpen = false) }
+    }
+
+    /**
+     * **Create ticket** in the Promote sheet: [target] with [container] (a
+     * subtask of a ticket sends neither — it goes under that ticket). The
+     * hub queues it; the task page then says it is being created, and the
+     * task becomes the ticket — same sessions, comments and subtasks — once
+     * the tracker answers. A refusal stays in the sheet with the hub's reason.
+     */
+    fun promote(target: PromoteTarget, container: String?): Job? {
+        val s = state.value
+        val itemId = s.task?.itemId ?: return null
+        if (!s.canPromote) return null.also { refuseOffline(PROMOTE) }
+        val under = target.parentKey != null
+        return itemWrite(PROMOTE) {
+            actions.promoteItem(itemId, if (under) null else target.trackerId, if (under) null else container?.trim()?.ifBlank { null })
+            local.update { it.copy(promoteOpen = false) }
+        }
+    }
+
     /** A running check finishes on the hub: read the task again until it does. */
     private fun pollWhileChecking(check: TicketCheck?) {
         if (check?.state != "running" || checkPoll?.isActive == true) return
@@ -569,6 +611,9 @@ class TaskViewModel(
         val orgLine = task?.orgId?.let { "${orgs.name(it)} · ${orgSourceWords(task.orgSource)}" }
             ?: task?.takeIf { it.orgSource != OrgSource.None }?.let { orgSourceWords(it.orgSource) }
         val group = task?.group
+        val promoteTargets = detail?.promoteTargets.orEmpty()
+        val promotion = detail?.promotion
+        val promoting = promotion?.state == "pending"
         return TaskUiState(
             taskId = taskId,
             loading = l.loading,
@@ -615,6 +660,14 @@ class TaskViewModel(
             canRunCheck = detail?.check?.canRun == true && allowed(caps, status, CHECK),
             canAcceptCheck = detail?.check?.acceptable == true && allowed(caps, status, VERIFY),
             canSetupCheck = detail?.check?.setup != null && allowed(caps, status, CHECK_SETUP),
+            canPromote = task?.itemId != null && promoteTargets.isNotEmpty() && !promoting && allowed(caps, status, PROMOTE),
+            promoteTargets = promoteTargets,
+            promoteOpen = l.promoteOpen,
+            promoteHint = detail?.promoteHint?.takeIf {
+                task?.itemId != null && promoteTargets.isEmpty() && !promoting && canWrite && caps.has(WORK_LINK, PROMOTE)
+            },
+            promotionLine = promotion?.let(::promotionLine),
+            promotionFailed = promotion?.state == "failed",
             criteria = acceptanceCriteria(detail?.description?.takeIf { it.isNotBlank() } ?: detail?.notes.orEmpty()),
         )
     }
@@ -651,6 +704,17 @@ class TaskViewModel(
         const val CHECK = "check"
         const val VERIFY = "verify"
         const val CHECK_SETUP = "check_setup"
+        const val PROMOTE = "promote"
         const val CHECK_POLL_MS = 10_000L
+    }
+}
+
+/** What the task page says about a promotion on its way, or one that was not made (the desktop's words). */
+internal fun promotionLine(p: PromotionView): String? {
+    val where = p.tracker.ifBlank { "the tracker" }
+    return when (p.state) {
+        "pending" -> "Creating the ticket in $where…"
+        "failed" -> "Not created in $where: ${p.error ?: "the tracker refused it"}"
+        else -> null
     }
 }

@@ -93,6 +93,10 @@ data class TaskHandlers(
     val onRunCheck: () -> Unit = {},
     val onAcceptCheck: (String) -> Unit = {},
     val onSetCheck: (String, String) -> Unit = { _, _ -> },
+    /** Fleet's own task: **Promote to ticket…**, its sheet, and the tracker and container picked. */
+    val onOpenPromote: () -> Unit = {},
+    val onClosePromote: () -> Unit = {},
+    val onPromote: (dev.claudefleet.mobile.model.PromoteTarget, String?) -> Unit = { _, _ -> },
 )
 
 /**
@@ -207,6 +211,7 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
     if (state.placeOpen) PlaceSheet(state, handlers)
     if (state.editOpen) TaskEditSheetFor(state, handlers)
     if (state.subtaskOpen) SubtaskSheetFor(state, handlers)
+    if (state.promoteOpen) PromoteSheetFor(state, handlers)
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.linkSection(
@@ -478,6 +483,21 @@ internal fun SubtaskSheetFor(state: TaskUiState, handlers: TaskHandlers) {
     )
 }
 
+/** **Promote to ticket**: the sheet over a task screen (either layout). */
+@Composable
+internal fun PromoteSheetFor(state: TaskUiState, handlers: TaskHandlers) {
+    PromoteSheet(
+        title = state.task?.title ?: "",
+        targets = state.promoteTargets,
+        busy = state.busy,
+        connected = state.connected,
+        error = state.error,
+        onDismissError = handlers.onDismissError,
+        onCancel = handlers.onClosePromote,
+        onPromote = handlers.onPromote,
+    )
+}
+
 /**
  * Where a task sits among fleet's own work: *Epic*, the task it is filed
  * under (a tap opens it), and its subtasks' roll-up.
@@ -501,10 +521,17 @@ internal fun TaskHierarchy(state: TaskUiState, handlers: TaskHandlers, modifier:
     }
 }
 
-/** Fleet's own task: its status chips and **Edit…**, where the person may. */
+/**
+ * Fleet's own task: its status chips, **Edit…** and **Promote to ticket…**,
+ * where the person may. With no tracker to promote it to, the button shows
+ * off with what would bring one; a promotion on its way, or one refused,
+ * is said under them.
+ */
 @Composable
 internal fun OwnTaskControls(state: TaskUiState, handlers: TaskHandlers, modifier: Modifier = Modifier) {
-    if (!state.canSetStatus && !state.canEdit && !state.canAddSubtask) return
+    if (!state.canSetStatus && !state.canEdit && !state.canAddSubtask && !state.canPromote &&
+        state.promoteHint == null && state.promotionLine == null
+    ) return
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (state.canSetStatus) {
             TaskStatusChips(current = state.task?.statusCategory, enabled = !state.busy, onPick = handlers.onSetStatus)
@@ -516,6 +543,19 @@ internal fun OwnTaskControls(state: TaskUiState, handlers: TaskHandlers, modifie
             if (state.canAddSubtask) {
                 TextButton(onClick = handlers.onOpenSubtask, enabled = !state.busy) { Text("Add subtask") }
             }
+            if (state.canPromote || state.promoteHint != null) {
+                TextButton(onClick = handlers.onOpenPromote, enabled = state.canPromote && !state.busy) { Text("Promote to ticket…") }
+            }
+        }
+        state.promoteHint?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        state.promotionLine?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (state.promotionFailed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

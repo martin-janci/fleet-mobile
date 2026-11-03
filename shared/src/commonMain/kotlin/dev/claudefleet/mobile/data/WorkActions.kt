@@ -166,6 +166,14 @@ interface WorkActions {
     suspend fun archiveItem(itemId: Long, on: Boolean): Unit =
         throw UnsupportedOperationException("archive_item")
 
+    /**
+     * **Promote to ticket**: fleet's own task [itemId] becomes a ticket in
+     * [trackerId] (inside [container]), or — for a subtask of a ticket, with
+     * neither — that ticket's subtask (`work_link { promote }`).
+     */
+    suspend fun promoteItem(itemId: Long, trackerId: Long?, container: String?): Unit =
+        throw UnsupportedOperationException("promote")
+
     /** **Edit** local item [itemId]: a null field stays as it is; `""` / empty clears it. */
     suspend fun editItem(
         itemId: Long,
@@ -320,6 +328,9 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
         session.withClient { it.setWorkStatus(itemId, status) }
 
     override suspend fun archiveItem(itemId: Long, on: Boolean) = session.withClient { it.archiveWorkItem(itemId, on) }
+
+    override suspend fun promoteItem(itemId: Long, trackerId: Long?, container: String?) =
+        session.withClient { it.promoteWorkItem(itemId, trackerId, container) }
 
     override suspend fun runTicketCheck(itemId: Long) = session.withClient { it.runTicketCheck(itemId) }
 

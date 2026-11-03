@@ -329,6 +329,10 @@ internal class FakeWorkActions : WorkActions {
         return dev.claudefleet.mobile.model.WorkItem(id = itemId)
     }
 
+    override suspend fun promoteItem(itemId: Long, trackerId: Long?, container: String?) {
+        write("promote $itemId tracker=$trackerId container=$container")
+    }
+
     override suspend fun runTicketCheck(itemId: Long) {
         write("check $itemId")
     }

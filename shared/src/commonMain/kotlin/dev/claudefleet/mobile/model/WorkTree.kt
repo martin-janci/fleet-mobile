@@ -578,7 +578,51 @@ data class TaskDetail(
     val rules: List<Long> = emptyList(),
     /** The AI check of its finished work; absent without one (and from an older hub). */
     val check: TicketCheck? = null,
+    /** Fleet's own task on its way to a tracker, or why it did not get there; absent once it is the ticket. */
+    val promotion: PromotionView? = null,
+    /** Where this reader may promote fleet's own task (*Promote to ticket…*); empty for a ticket or an agent. */
+    @SerialName("promote_targets") val promoteTargets: List<PromoteTarget> = emptyList(),
+    /** With no target: what would bring one (Create tickets off on the tracker, none connected, a parent of fleet's own). */
+    @SerialName("promote_hint") val promoteHint: String? = null,
 )
+
+/** `service::work::promote::PromotionView`: `pending` or `failed` (with the tracker's reason). */
+@Serializable
+data class PromotionView(
+    val state: String = "",
+    val tracker: String = "",
+    val error: String? = null,
+)
+
+/**
+ * `service::work::promote::PromoteTarget`: a tracker fleet's own task may
+ * become a ticket in. A subtask of a ticket has [parentKey] and nothing to
+ * pick; a task at the top picks one of [containers] (`[id, name]`: a Jira
+ * project, a Linear team, an Asana project, a GitHub repository), required
+ * unless Asana.
+ */
+@Serializable
+data class PromoteTarget(
+    @SerialName("tracker_id") val trackerId: Long = 0,
+    val tracker: String = "",
+    val provider: String = "",
+    @SerialName("parent_key") val parentKey: String? = null,
+    val containers: List<List<String>> = emptyList(),
+    @SerialName("container_required") val containerRequired: Boolean = false,
+) {
+    /** `(id, name)` pairs, a malformed entry left out. */
+    val choices: List<Pair<String, String>>
+        get() = containers.mapNotNull { c -> c.getOrNull(0)?.let { id -> id to (c.getOrNull(1) ?: id) } }
+
+    /** What a container is called on this tracker. */
+    val containerLabel: String
+        get() = when (provider) {
+            "asana" -> "Project (optional)"
+            "linear" -> "Team"
+            "github" -> "Repository"
+            else -> "Project"
+        }
+}
 
 /** `work { session_tasks }`: every link of one session — live, suggested, rejected and ended. */
 @Serializable

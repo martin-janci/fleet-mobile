@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import dev.claudefleet.mobile.model.PromoteTarget
 import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 
@@ -272,6 +273,102 @@ internal fun NewTaskSheet(
 }
 
 /** Cancel and the verb, at the thumb. */
+/**
+ * The container a Promote sheet starts with on [target]: the only one when a
+ * container is required and there is just one, else none picked.
+ */
+internal fun initialContainer(target: PromoteTarget?): String =
+    if (target?.containerRequired == true && target.choices.size == 1) target.choices[0].first else ""
+
+/** Create ticket may be pressed: a target, and a container where one is required. */
+internal fun canPromoteTo(target: PromoteTarget?, container: String): Boolean =
+    target != null && (target.parentKey != null || !target.containerRequired || container.isNotBlank())
+
+/**
+ * **Promote to ticket**: fleet's own task becomes a ticket — the same row, so
+ * its sessions, comments, subtasks and sprint stay with it and its fleet key
+ * still finds it. A subtask of a ticket goes under that ticket (nothing to
+ * pick); a task at the top picks a tracker and where in it, as the desktop's
+ * dialog does.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+internal fun PromoteSheet(
+    title: String,
+    targets: List<PromoteTarget>,
+    busy: Boolean,
+    connected: Boolean,
+    error: Friendly?,
+    onDismissError: () -> Unit,
+    onCancel: () -> Unit,
+    onPromote: (PromoteTarget, String?) -> Unit,
+) {
+    var trackerId by remember { mutableStateOf(targets.firstOrNull()?.trackerId) }
+    val target = targets.firstOrNull { it.trackerId == trackerId }
+    var container by remember(trackerId) { mutableStateOf(initialContainer(target)) }
+    val canCreate = connected && !busy && canPromoteTo(target, container)
+    ModalBottomSheet(onDismissRequest = onCancel) {
+        Column(
+            modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Promote to a ticket", style = MaterialTheme.typography.titleLarge)
+            ErrorBanner(error, onDismiss = onDismissError)
+            Text(
+                "“$title” becomes a ticket. Its sessions, comments, subtasks and sprint stay with it; its fleet key still finds it.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            val under = target?.parentKey
+            if (target != null && under != null) {
+                Text("A subtask of $under in ${target.tracker}.", style = MaterialTheme.typography.bodyMedium)
+            } else {
+                if (targets.size > 1) {
+                    Text("Tracker", style = MaterialTheme.typography.labelMedium)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (t in targets) {
+                            FilterChip(selected = t.trackerId == trackerId, onClick = { trackerId = t.trackerId }, label = { Text(t.tracker) })
+                        }
+                    }
+                } else if (target != null) {
+                    Text("In ${target.tracker}.", style = MaterialTheme.typography.bodyMedium)
+                }
+                if (target != null && target.choices.isNotEmpty()) {
+                    Text(target.containerLabel, style = MaterialTheme.typography.labelMedium)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (!target.containerRequired) {
+                            FilterChip(selected = container.isEmpty(), onClick = { container = "" }, label = { Text("None: my tasks") })
+                        }
+                        for ((id, name) in target.choices) {
+                            FilterChip(selected = container == id, onClick = { container = id }, label = { Text(name) })
+                        }
+                    }
+                } else if (target != null && target.containerRequired) {
+                    // A GitHub tracker narrowed to no repositories: any in its scope.
+                    OutlinedTextField(
+                        value = container,
+                        onValueChange = { container = it },
+                        label = { Text(target.containerLabel) },
+                        placeholder = { Text(if (target.provider == "github") "owner/repo" else "") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+            Text("The description goes with it, signed with your name. The tracker numbers it.", style = MaterialTheme.typography.bodySmall)
+            if (!connected) {
+                Text("Offline — nothing is sent until the hub is back; nothing is queued.", style = MaterialTheme.typography.bodySmall)
+            }
+            SheetButtons(
+                verb = if (busy) "Creating…" else "Create ticket",
+                enabled = canCreate,
+                onCancel = onCancel,
+                onConfirm = { target?.let { onPromote(it, container.ifBlank { null }) } },
+            )
+        }
+    }
+}
+
 @Composable
 private fun SheetButtons(verb: String, enabled: Boolean, onCancel: () -> Unit, onConfirm: () -> Unit) {
     Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, androidx.compose.ui.Alignment.End)) {

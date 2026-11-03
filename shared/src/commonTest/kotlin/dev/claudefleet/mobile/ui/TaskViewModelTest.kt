@@ -504,6 +504,91 @@ class TaskViewModelTest {
         assertEquals(listOf("set_status 12 done"), actions.calls)
     }
 
+    // ---- Promote to ticket (claude-fleet `work_link promote`) ----
+
+    private val jira = dev.claudefleet.mobile.model.PromoteTarget(
+        trackerId = 3,
+        tracker = "Acme Jira",
+        provider = "jira",
+        containers = listOf(listOf("ABC", "ABC"), listOf("OPS", "OPS")),
+        containerRequired = true,
+    )
+
+    /** A tracker the hub offers: Promote opens the sheet and sends the tracker and project picked, then re-reads. */
+    @Test
+    fun fleets_own_task_is_promoted_to_the_tracker_and_project_picked() = runTest {
+        val actions = FakeWorkActions().apply { taskAnswer = local.copy(promoteTargets = listOf(jira)) }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        assertTrue(vm.state.value.canPromote)
+        assertNull(vm.state.value.promoteHint)
+        vm.openPromote()
+        assertTrue(vm.state.value.promoteOpen)
+        assertFalse(canPromoteTo(jira, ""), "Jira needs a project")
+        assertEquals("", initialContainer(jira))
+        assertEquals("ABC", initialContainer(jira.copy(containers = listOf(listOf("ABC", "ABC")))))
+        vm.promote(jira, "OPS")
+        runCurrent()
+        assertEquals(listOf("promote 12 tracker=3 container=OPS"), actions.calls)
+        assertFalse(vm.state.value.promoteOpen)
+        assertEquals(2, actions.taskCalls, "the answer is followed by a re-read")
+    }
+
+    /** A subtask of a ticket goes under it: neither tracker nor container is sent. */
+    @Test
+    fun a_subtask_of_a_ticket_is_promoted_under_it() = runTest {
+        val under = jira.copy(parentKey = "ABC-1", containers = emptyList(), containerRequired = false)
+        val actions = FakeWorkActions().apply { taskAnswer = local.copy(promoteTargets = listOf(under)) }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        assertTrue(canPromoteTo(under, ""))
+        vm.promote(under, "ignored")
+        runCurrent()
+        assertEquals(listOf("promote 12 tracker=null container=null"), actions.calls)
+    }
+
+    /** Nowhere to go: the button stays off with the hub's hint; one on its way says so and offers nothing. */
+    @Test
+    fun with_no_tracker_the_hint_shows_and_a_pending_one_is_said() = runTest {
+        val hint = "To promote it, a tracker admin turns on Create tickets for Acme Jira in Settings → Trackers."
+        val vm = taskVm(actions = FakeWorkActions().apply { taskAnswer = local.copy(promoteHint = hint) })
+        runCurrent()
+        assertFalse(vm.state.value.canPromote)
+        assertEquals(hint, vm.state.value.promoteHint)
+        assertNull(vm.promote(jira, "ABC"))
+
+        val pending = taskVm(
+            actions = FakeWorkActions().apply {
+                taskAnswer = local.copy(
+                    promoteTargets = listOf(jira),
+                    promotion = dev.claudefleet.mobile.model.PromotionView(state = "pending", tracker = "Acme Jira"),
+                )
+            },
+        )
+        runCurrent()
+        assertFalse(pending.state.value.canPromote)
+        assertEquals("Creating the ticket in Acme Jira…", pending.state.value.promotionLine)
+
+        // A read-only token is told nothing about it.
+        val ro = taskVm(actions = FakeWorkActions().apply { taskAnswer = local.copy(promoteHint = hint) }, canWrite = false)
+        runCurrent()
+        assertNull(ro.state.value.promoteHint)
+    }
+
+    /** The hub's `work { task }` promote fields decode with their snake_case keys. */
+    @Test
+    fun the_promote_fields_decode_from_the_hub() {
+        val d = json.decodeFromString(
+            TaskDetail.serializer(),
+            """{"task":{"task_id":"item:12"},"promote_targets":[{"tracker_id":3,"tracker":"Acme Jira","provider":"jira",""" +
+                """"containers":[["ABC","ABC"]],"container_required":true}],"promotion":{"state":"failed","tracker":"Acme Jira",""" +
+                """"error":"403"},"promote_hint":null}""",
+        )
+        assertEquals(listOf("ABC" to "ABC"), d.promoteTargets.single().choices)
+        assertTrue(d.promoteTargets.single().containerRequired)
+        assertEquals("Not created in Acme Jira: 403", d.promotion?.let(::promotionLine))
+    }
+
     // ---- the AI check on done (claude-fleet work-graph.md, *AI check on done*) ----
 
     private val setup = dev.claudefleet.mobile.model.CheckSetup(projectId = 7, project = "acme/api", mode = "ask", command = "cargo test")
