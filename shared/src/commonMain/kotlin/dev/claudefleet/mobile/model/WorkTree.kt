@@ -101,6 +101,8 @@ data class WorkTreeFilters(
     val epic: String? = null,
     /** The tracker's type name (Story, Bug …). */
     @SerialName("item_type") val itemType: String? = null,
+    /** One of [PRIORITIES], `none` meaning tasks with none. An older hub ignores it. */
+    val priority: String? = null,
     /** The order inside each section, one of [SORTS]; absent is `activity`. */
     val sort: String? = null,
 ) {
@@ -124,6 +126,7 @@ data class WorkTreeFilters(
         iteration = iteration?.trim()?.takeIf { it.isNotEmpty() },
         epic = epic?.trim()?.takeIf { it.isNotEmpty() },
         itemType = itemType?.trim()?.takeIf { it.isNotEmpty() },
+        priority = priority?.takeIf { it in PRIORITIES },
         sort = sort?.takeIf { it in SORTS && it != "activity" },
     )
 
@@ -132,7 +135,7 @@ data class WorkTreeFilters(
      * *Show archived* (it widens the tree) are not counted.
      */
     val count: Int get() = with(normalized()) {
-        listOfNotNull(org, tracker, status, mine, has, review, iteration, epic, itemType).size
+        listOfNotNull(org, tracker, status, mine, has, review, iteration, epic, itemType, priority).size
     }
 
     /**
@@ -141,7 +144,7 @@ data class WorkTreeFilters(
      * review* are toggles on screen and show their own state.
      */
     val sheetCount: Int get() = with(normalized()) {
-        listOfNotNull(org, tracker, status, has, iteration, epic, itemType).size
+        listOfNotNull(org, tracker, status, has, iteration, epic, itemType, priority).size
     }
 
     /** Nothing narrows the tree (search included). Showing archived tasks is not a narrowing. */
@@ -151,6 +154,19 @@ data class WorkTreeFilters(
         const val ANY = "any"
         val STATUSES = listOf("open", "todo", "in_progress", "done")
         val HAS = listOf("active", "past_only", "none", "suggested")
+        /** The desktop's `WORK_PRIORITY_FILTERS`. */
+        val PRIORITIES = listOf("urgent", "high", "medium", "low", "none")
+
+        /** The desktop's `WORK_PRIORITY_FILTER_LABELS`. */
+        fun priorityFilterLabel(p: String): String = when (p) {
+            "urgent" -> "Urgent"
+            "high" -> "High"
+            "medium" -> "Medium"
+            "low" -> "Low"
+            "none" -> "No priority"
+            else -> p
+        }
+
         /** The desktop's `WORK_SORTS`. */
         val SORTS = listOf("activity", "updated", "key", "title", "due")
 

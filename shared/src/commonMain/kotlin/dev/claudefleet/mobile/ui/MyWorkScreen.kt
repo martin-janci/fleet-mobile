@@ -87,6 +87,7 @@ data class MyWorkHandlers(
     val onSetEpic: (String?) -> Unit = {},
     val onSetItemType: (String?) -> Unit = {},
     val onSetSort: (String?) -> Unit = {},
+    val onSetPriority: (String?) -> Unit = {},
     val onToggleMine: () -> Unit = {},
     val onToggleReview: () -> Unit = {},
     val onClearFilters: () -> Unit = {},
@@ -535,6 +536,14 @@ internal fun WorkFiltersSheet(
                         ChoiceChip("Any", f.itemType == null, { handlers.onClearFacet(WorkFacetId.ITEM_TYPE) })
                         val types = planning.itemTypes + listOfNotNull(f.itemType?.takeIf { v -> planning.itemTypes.none { it.equals(v, ignoreCase = true) } })
                         for (t in types) ChoiceChip(t, f.itemType.equals(t, ignoreCase = true), { handlers.onSetItemType(t) })
+                    }
+                }
+            }
+            FilterGroup("Priority") {
+                ChipFlow {
+                    ChoiceChip("Any", f.priority == null, { handlers.onSetPriority(null) })
+                    for (p in WorkTreeFilters.PRIORITIES) {
+                        ChoiceChip(WorkTreeFilters.priorityFilterLabel(p), f.priority == p, { handlers.onSetPriority(p) })
                     }
                 }
             }

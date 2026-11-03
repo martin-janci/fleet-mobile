@@ -1765,6 +1765,7 @@ private fun FleetRoute(
                         onSetEpic = myWork::setEpic,
                         onSetItemType = myWork::setItemType,
                         onSetSort = myWork::setSort,
+                        onSetPriority = myWork::setPriority,
                         onToggleMine = myWork::toggleMine,
                         onToggleReview = myWork::toggleReview,
                         onClearFilters = myWork::clearFilters,

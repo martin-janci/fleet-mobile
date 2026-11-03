@@ -145,6 +145,18 @@ class FilterFacetsTest {
         assertEquals(listOf("Org: #3", "Tracker: #4"), workFacets(WorkTreeFilters(org = IdOrWord.of(3), tracker = IdOrWord.of(4))).map { it.label })
     }
 
+    /** The desktop's priority chip; a value this build does not know is dropped, not shown. */
+    @Test
+    fun a_priority_filter_is_one_chip_and_counts_in_the_sheet() {
+        assertEquals(listOf("Priority: Urgent"), workFacets(WorkTreeFilters(priority = "urgent")).map { it.label })
+        assertEquals(listOf("No priority"), workFacets(WorkTreeFilters(priority = "none")).map { it.label })
+        assertEquals(emptyList(), workFacets(WorkTreeFilters(priority = "asap")))
+        assertEquals(1, WorkTreeFilters(priority = "high").sheetCount)
+        assertEquals(WorkTreeFilters(), WorkTreeFilters(priority = "high").without(WorkFacetId.PRIORITY))
+        val wire = dev.claudefleet.mobile.net.json.decodeFromString(WorkTreeFilters.serializer(), """{"priority":"low","sort":"key"}""")
+        assertEquals("low", wire.normalized().priority)
+    }
+
     @Test
     fun defaults_are_not_filters_and_group_and_archived_are_not_either() {
         val f = WorkTreeFilters(status = "any", has = "any", mine = false, query = " ", group = "x", archived = true)

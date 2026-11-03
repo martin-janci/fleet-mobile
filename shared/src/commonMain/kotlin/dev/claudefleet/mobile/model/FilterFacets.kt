@@ -111,6 +111,7 @@ enum class WorkFacetId {
     ITERATION,
     EPIC,
     ITEM_TYPE,
+    PRIORITY,
     QUERY,
     ;
 
@@ -145,6 +146,9 @@ fun workFacets(
         n.iteration?.let { add(Facet(WorkFacetId.ITERATION, WorkTreeFilters.iterationLabel(it))) }
         n.epic?.let { e -> add(Facet(WorkFacetId.EPIC, "Epic: " + (epicTitle(e)?.let { "$e $it" } ?: e))) }
         n.itemType?.let { add(Facet(WorkFacetId.ITEM_TYPE, "Type: $it")) }
+        n.priority?.let {
+            add(Facet(WorkFacetId.PRIORITY, if (it == "none") "No priority" else "Priority: ${WorkTreeFilters.priorityFilterLabel(it)}"))
+        }
         n.query?.let { add(Facet(WorkFacetId.QUERY, "Search: “$it”")) }
     }
 }
@@ -162,6 +166,7 @@ fun WorkTreeFilters.without(id: WorkFacetId): WorkTreeFilters {
         WorkFacetId.ITERATION -> n.copy(iteration = null)
         WorkFacetId.EPIC -> n.copy(epic = null)
         WorkFacetId.ITEM_TYPE -> n.copy(itemType = null)
+        WorkFacetId.PRIORITY -> n.copy(priority = null)
         WorkFacetId.QUERY -> n.copy(query = null)
     }
 }
