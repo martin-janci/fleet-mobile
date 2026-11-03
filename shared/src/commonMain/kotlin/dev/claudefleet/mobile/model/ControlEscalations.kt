@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.model
 
+import dev.claudefleet.mobile.log.civilFromDays
+
 /*
  * What in the fleet needs the person, as amber cards in Control's chat (the
  * desktop's `src/lib/control_escalations.ts`, claude-fleet #921): a session
@@ -97,17 +99,8 @@ fun escalations(rows: List<SessionRow>, controlId: Long?, later: Set<String>, fo
  * person's own day, not the hub's (the desktop's `dayLabel` is UTC; review D18).
  */
 fun dayLabel(at: Long, offsetSeconds: Int): String {
-    val days = (at + offsetSeconds).floorDiv(86_400L)
-    // Civil-from-days (Howard Hinnant), no java.time in common code.
-    val z = days + 719_468
-    val era = z.floorDiv(146_097L)
-    val doe = z - era * 146_097
-    val yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365
-    val doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
-    val mp = (5 * doy + 2) / 153
-    val d = doy - (153 * mp + 2) / 5 + 1
-    val m = if (mp < 10) mp + 3 else mp - 9
-    return "${MONTHS[(m - 1).toInt()]} $d"
+    val date = civilFromDays((at + offsetSeconds).floorDiv(86_400L))
+    return "${MONTHS[(date.month - 1).toInt()]} ${date.day}"
 }
 
 private val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")

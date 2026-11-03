@@ -45,7 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.loginLabel
 import dev.claudefleet.mobile.model.relativeWithin
-import dev.claudefleet.mobile.model.usedText
+import dev.claudefleet.mobile.model.roomText
 import dev.claudefleet.mobile.ui.kit.BottomSheet
 import dev.claudefleet.mobile.ui.kit.SheetAction
 import dev.claudefleet.mobile.ui.theme.Fleet
@@ -120,7 +120,7 @@ internal fun LimitCard(state: SessionUiState, host: SessionLaterHost, modifier: 
             when {
                 target != null -> {
                     Text(
-                        "Resume under ${loginLabel(target, host.accountName)} · ${usedText(target)}?",
+                        "Resume under ${loginLabel(target, host.accountName)} · ${roomText(target)}?",
                         style = Fleet.type.textXs,
                         color = o.fgMuted,
                     )
@@ -401,7 +401,7 @@ data class AccountSwitch(
  */
 fun switchLoginSub(l: HostLogin, sessionAccount: String?, pauseAtPct: Double, signedOut: Boolean): String =
     listOfNotNull(
-        usedText(l),
+        roomText(l),
         "same account, shares its limit".takeIf { sessionAccount != null && l.accountUuid == sessionAccount },
         "past the pause line".takeIf { (l.usedPct ?: 0.0) >= pauseAtPct },
         "signed out".takeIf { signedOut },

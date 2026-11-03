@@ -79,6 +79,8 @@ class EscalationLater(private val prefs: Prefs? = null, private val now: () -> L
 
 const val ESCALATION_CARD_TAG = "control.escalation."
 const val ESCALATION_OPEN_TAG = "control.escalation.open."
+/** A login card's Copy (its sign-in command), keyed like Open. */
+const val ESCALATION_COPY_TAG = "control.escalation.copy."
 const val ESCALATION_LATER_TAG = "control.escalation.later."
 const val ESCALATIONS_MORE_TAG = "control.escalations.more"
 
@@ -137,7 +139,7 @@ fun EscalationCards(
                         if (command != null) {
                             OutlinedButton(
                                 onClick = { clipboard.setText(AnnotatedString(command)) },
-                                modifier = Modifier.heightIn(min = 36.dp).testTag(ESCALATION_OPEN_TAG + e.key),
+                                modifier = Modifier.heightIn(min = 36.dp).testTag(ESCALATION_COPY_TAG + e.key),
                             ) { Text("Copy") }
                         }
                     }
