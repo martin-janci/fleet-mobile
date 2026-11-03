@@ -2356,6 +2356,24 @@ class HubClient(
         ) { }
 
     /**
+     * Promote fleet's own task to a tracker's ticket (`work_link { promote }`):
+     * a subtask of a ticket goes under it with neither [trackerId] nor
+     * [container]; a task at the top into [container] on [trackerId]. The hub
+     * queues the create and answers the task as it stands (still fleet's own
+     * until the tracker answers); nothing in it is needed — the task is read again.
+     */
+    suspend fun promoteWorkItem(itemId: Long, trackerId: Long?, container: String?): Unit =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "promote")
+                put("item_id", itemId)
+                trackerId?.let { put("tracker_id", it) }
+                container?.takeIf { it.isNotBlank() }?.let { put("container", it.trim()) }
+            },
+        ) { }
+
+    /**
      * Archive a ticket or task (`work_link { archive_item }`), or unarchive
      * it with [on] false. The hub answers `{ item_id, changed }`; nothing in
      * it is needed — the lists are read again.

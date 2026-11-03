@@ -2975,6 +2975,9 @@ private fun TaskRoute(
         onRunCheck = { vm.runCheck() },
         onAcceptCheck = { vm.acceptCheck(it) },
         onSetCheck = { mode, command -> vm.setCheck(mode, command) },
+        onOpenPromote = vm::openPromote,
+        onClosePromote = vm::closePromote,
+        onPromote = { target, container -> vm.promote(target, container) },
     )
     if (newLayout) {
         val rows by repository.sessions.collectAsState()
