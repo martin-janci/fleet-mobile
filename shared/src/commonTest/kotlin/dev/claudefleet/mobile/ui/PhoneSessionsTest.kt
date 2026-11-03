@@ -10,6 +10,7 @@ import dev.claudefleet.mobile.ui.theme.StatusTone
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * Row parity for the New Sessions tab and the Inbox (redesign 14.3,
@@ -160,6 +161,14 @@ class PhoneSessionsTest {
         assertEquals("2 killed", bulkOutcomeLine(BulkAction.Kill, outcome.take(2)))
         assertEquals("Archived 2 sessions", bulkOutcomeTitle(BulkAction.Archive, 2))
         assertEquals("2 archived", bulkOutcomeLine(BulkAction.Archive, outcome.take(2)))
+    }
+
+    /** A grey Kill… with sessions picked says why; it says nothing otherwise. */
+    @Test
+    fun a_grey_kill_with_sessions_picked_says_why() {
+        assertEquals(null, bulkKillNote(selected = 0, killable = 0))
+        assertEquals(null, bulkKillNote(selected = 2, killable = 1))
+        assertTrue(bulkKillNote(selected = 2, killable = 0)!!.startsWith("Kill… skips every picked session"))
     }
 
     /** Review w22-7: Select all picks what is on screen, never a folded host's sessions. */
