@@ -1685,9 +1685,19 @@ class SessionViewModel(
     /** Take a waiting prompt back before the session gets it. */
     fun cancelQueued(id: Long): Job = scope.launch {
         if (!fleet.capabilities.value.sendLater || readOnly || !connected()) return@launch
+        // Taking a prompt back keeps its words: into an empty box, to edit
+        // and send again, rather than gone (UX antipatterns 2026-11-03).
+        val body = local.value.queued.firstOrNull { it.id == id }?.body
         try {
             val left = actions.queuedPrompts(sessionId, cancel = id)
-            local.update { it.copy(queued = left.filter { q -> q.waiting }, sendLaterNotice = "Taken back.") }
+            local.update {
+                val refill = body != null && it.draft.isBlank()
+                it.copy(
+                    queued = left.filter { q -> q.waiting },
+                    draft = if (refill) body.orEmpty() else it.draft,
+                    sendLaterNotice = if (refill) "Taken back. It is in the box to edit." else "Taken back.",
+                )
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {

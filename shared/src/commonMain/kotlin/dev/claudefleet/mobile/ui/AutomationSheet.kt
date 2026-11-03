@@ -465,6 +465,20 @@ private fun AgentRules(
     asking?.let { r ->
         if (onRun != null) RunAgentDialog(r, onRun = { form -> asking = null; onRun(r, form) }, onDismiss = { asking = null })
     }
+    // A revoke deletes the instance and its settings: it asks first, as the
+    // desktop's does (UX antipatterns 2026-11-03).
+    var revoking by remember { mutableStateOf<AgentRule?>(null) }
+    revoking?.let { r ->
+        if (onRevoke != null) {
+            AlertDialog(
+                onDismissRequest = { revoking = null },
+                title = { Text("Revoke ${ruleAgentName(r)}?") },
+                text = { Text("${ruleLine(r)}. It stops running and its settings are deleted.") },
+                confirmButton = { DangerTextButton(onClick = { revoking = null; onRevoke(r) }) { Text("Revoke") } },
+                dismissButton = { TextButton(onClick = { revoking = null }) { Text("Keep") } },
+            )
+        }
+    }
     if (agents.rules.isEmpty()) return
     Text("Instances", color = o.fgMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp))
     agents.rules.forEachIndexed { i, r ->
@@ -485,9 +499,9 @@ private fun AgentRules(
             }
             if (onRevoke != null && agents.canAnswer) {
                 TextButton(
-                    onClick = { onRevoke(r) },
+                    onClick = { revoking = r },
                     modifier = Modifier.semantics { contentDescription = "Revoke ${r.scope}" },
-                ) { Text("Revoke") }
+                ) { Text("Revoke…") }
             }
         }
     }
