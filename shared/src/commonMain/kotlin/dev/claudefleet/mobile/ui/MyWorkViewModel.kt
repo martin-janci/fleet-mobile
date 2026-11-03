@@ -93,6 +93,8 @@ data class MyWorkUiState(
     val filterTrackers: List<TreeTracker> = emptyList(),
     /** Every sprint, epic and type the caller sees: the Planning chips. */
     val planning: WorkTreeFacets = WorkTreeFacets(),
+    /** The Sort chips this hub takes ([WorkTreeFilters.sortsFor]). */
+    val sorts: List<String> = WorkTreeFilters.sortsFor(null),
     val viewsAvailable: Boolean = false,
     val views: List<WorkView> = emptyList(),
     /** The saved view whose filters are the ones showing, if any. */
@@ -676,6 +678,7 @@ class MyWorkViewModel(
             orgs = orgs,
             total = page?.total ?: 0,
             filters = l.filters,
+            sorts = WorkTreeFilters.sortsFor((status as? ConnectionStatus.Connected)?.hubVersion ?: fleet.hubVersion.value),
             queryText = l.queryText,
             searchOpen = l.searchOpen || l.filters.query != null,
             filtersOpen = l.filtersOpen,

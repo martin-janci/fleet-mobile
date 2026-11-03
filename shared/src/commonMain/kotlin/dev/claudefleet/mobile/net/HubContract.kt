@@ -186,6 +186,13 @@ const val HUB_VERSION_KEYS: String = "0.2.35"
 const val HUB_VERSION_DIGIT_KEYS: String = "0.2.36"
 
 /**
+ * The first hub release that takes `filters.sort: priority` (claude-fleet
+ * #1066). An older hub refuses an unknown sort, so the phone offers it only
+ * from here on; a hub that names no version does not get it.
+ */
+const val HUB_VERSION_PRIORITY_SORT: String = "0.6.5"
+
+/**
  * Whether [version] is at or above [floor], read as `major.minor.patch`.
  *
  * Both strings are parsed by taking the leading `major.minor.patch` digits —

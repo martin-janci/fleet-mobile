@@ -167,8 +167,12 @@ data class WorkTreeFilters(
             else -> p
         }
 
-        /** The desktop's `WORK_SORTS`. */
-        val SORTS = listOf("activity", "updated", "key", "title", "due")
+        /** The desktop's `WORK_SORTS`; `priority` only from [HUB_VERSION_PRIORITY_SORT] on ([sortsFor]). */
+        val SORTS = listOf("activity", "updated", "key", "title", "due", "priority")
+
+        /** The sorts a hub at [hubVersion] takes. */
+        fun sortsFor(hubVersion: String?): List<String> =
+            if (dev.claudefleet.mobile.net.semverAtLeast(hubVersion, dev.claudefleet.mobile.net.HUB_VERSION_PRIORITY_SORT)) SORTS else SORTS - "priority"
 
         /** The desktop's `WORK_SORT_LABELS`. */
         fun sortLabel(sort: String): String = when (sort) {
@@ -177,6 +181,7 @@ data class WorkTreeFilters(
             "key" -> "Key"
             "title" -> "Title"
             "due" -> "Due date"
+            "priority" -> "Priority"
             else -> sort
         }
 
