@@ -282,7 +282,20 @@ class MissionsViewModel(
         val m = local.value.detail?.mission ?: return@act
         val to = m.pauseMove() ?: return@act
         actions.setState(id, to, m.version)
-        local.update { it.copy(notice = if (to == "paused") "Paused." else "Resumed.") }
+        val said = when {
+            to == "paused" -> "Paused."
+            m.state == "draft" -> "Started."
+            else -> "Resumed."
+        }
+        local.update { it.copy(notice = said) }
+    }
+
+    /** Throw a draft away (`mission_state` → cancelled); only ever after the confirm. */
+    fun discardDraft(): Job = act("state") { id ->
+        val m = local.value.detail?.mission ?: return@act
+        if (m.state != "draft") return@act
+        actions.setState(id, "cancelled", m.version)
+        local.update { it.copy(notice = "Draft discarded.") }
     }
 
     /** Pause every mission this person may change, and end their grants. */

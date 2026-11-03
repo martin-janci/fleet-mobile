@@ -60,7 +60,10 @@ data class MissionsHandlers(
     /** One step; null takes every next step. */
     val onStart: (MissionStep?) -> Unit = {},
     val onDecide: (MissionCard, Boolean, String?) -> Unit = { _, _, _ -> },
+    /** Start a draft, pause a running mission or resume a paused one ([pauseMove]). */
     val onTogglePause: () -> Unit = {},
+    /** Throw a draft away, after its confirm. */
+    val onDiscardDraft: () -> Unit = {},
     val onPauseAll: () -> Unit = {},
     val onDismissError: () -> Unit = {},
     /** The spend ask's two answers (redesign 14.16); each only ever from a tap. */
@@ -207,13 +210,13 @@ private fun MissionBody(detail: MissionDetail, state: MissionsUiState, handlers:
                     onClick = handlers.onTogglePause,
                     enabled = state.busy == null,
                     modifier = Modifier.padding(horizontal = 12.dp),
-                ) { Text(if (m.state == "active") "Pause" else "Resume") }
+                ) { Text(m.pauseMoveLabel().orEmpty()) }
             }
         }
         if (plan == null) {
             item(key = "noplan") {
                 Text(
-                    if (m.state == "draft") "A draft: start it on the desktop." else "This mission takes no more steps.",
+                    if (m.state == "draft") "A draft: Start it, or ask Control to plan it." else "This mission takes no more steps.",
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
                 )

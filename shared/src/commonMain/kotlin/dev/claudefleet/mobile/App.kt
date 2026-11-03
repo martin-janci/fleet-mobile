@@ -2519,6 +2519,7 @@ private fun FleetRoute(
                         onStart = { missions.start(it) },
                         onDecide = { card, ok, note -> missions.decide(card, ok, note) },
                         onTogglePause = { missions.togglePause() },
+                        onDiscardDraft = { missions.discardDraft() },
                         onPauseAll = { missions.pauseAll() },
                         onDismissError = missions::dismissError,
                         onApproveSpend = { missions.approveSpend(it, epochSeconds()) },

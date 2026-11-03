@@ -24,6 +24,8 @@ import dev.claudefleet.mobile.model.isQuestion
 import dev.claudefleet.mobile.model.key
 import dev.claudefleet.mobile.model.line
 import dev.claudefleet.mobile.model.options
+import dev.claudefleet.mobile.model.pauseMove
+import dev.claudefleet.mobile.model.pauseMoveLabel
 import dev.claudefleet.mobile.model.summary
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.json
@@ -472,6 +474,43 @@ class MissionsTest {
         runCurrent()
         assertTrue("state 1 paused 4" in actions.calls, "${actions.calls}")
         assertEquals("Paused.", vm.state.value.notice)
+    }
+
+    @Test
+    fun a_draft_is_started_or_discarded_from_the_phone() = runTest {
+        // Review w21-6: the desktop's draft moves, Start and Cancel.
+        val draft = Mission(id = 1, name = "Ship", state = "draft", version = 2)
+        assertEquals("active", draft.pauseMove())
+        assertEquals("Start", draft.pauseMoveLabel())
+        assertEquals("Resume", draft.copy(state = "paused").pauseMoveLabel())
+        assertNull(draft.copy(state = "completed").pauseMove())
+
+        val actions = FakeMissionActions()
+        actions.list = listOf(draft)
+        actions.detail = MissionDetail(mission = draft, mayChange = true)
+        val vm = MissionsViewModel(MissionsFleet(loop), actions, backgroundScope, canWrite = true)
+        vm.open().join()
+        vm.select(1).join()
+        runCurrent()
+
+        vm.togglePause().join()
+        runCurrent()
+        assertTrue("state 1 active 2" in actions.calls, "${actions.calls}")
+        assertEquals("Started.", vm.state.value.notice)
+
+        vm.discardDraft().join()
+        runCurrent()
+        assertTrue("state 1 cancelled 2" in actions.calls, "${actions.calls}")
+        assertEquals("Draft discarded.", vm.state.value.notice)
+
+        // Only a draft is discarded.
+        actions.detail = MissionDetail(mission = draft.copy(state = "active"), mayChange = true)
+        vm.select(1).join()
+        runCurrent()
+        val before = actions.calls.count { it.startsWith("state") }
+        vm.discardDraft().join()
+        runCurrent()
+        assertEquals(before, actions.calls.count { it.startsWith("state") })
     }
 
     @Test
