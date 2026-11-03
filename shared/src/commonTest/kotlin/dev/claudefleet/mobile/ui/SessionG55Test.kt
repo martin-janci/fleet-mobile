@@ -122,10 +122,10 @@ class SessionG55Test {
     @Test
     fun a_switch_target_names_what_makes_it_a_dead_end() {
         val same = HostLogin(profile = "work2", accountUuid = "acc-a", usedPct = 100.0)
-        assertEquals("100% used · same account, shares its limit · at its limit", switchLoginSub(same, "acc-a", 95.0, signedOut = false))
+        assertEquals("0% left · same account, shares its limit · past the pause line", switchLoginSub(same, "acc-a", 95.0, signedOut = false))
         val fine = HostLogin(profile = "home", accountUuid = "acc-b", usedPct = 12.0)
-        assertEquals("12% used", switchLoginSub(fine, "acc-a", 95.0, signedOut = false))
-        assertEquals("12% used · signed out", switchLoginSub(fine, "acc-a", 95.0, signedOut = true))
+        assertEquals("88% left", switchLoginSub(fine, "acc-a", 95.0, signedOut = false))
+        assertEquals("88% left · signed out", switchLoginSub(fine, "acc-a", 95.0, signedOut = true))
     }
 
     /** Review w23-7: a reading the hub could not refresh says why and how old it is. */

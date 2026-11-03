@@ -325,6 +325,57 @@ class NewSessionStartTest {
         assertTrue(actions.requests.last().overLimitOk, "the person chose a login past the line, knowing it")
     }
 
+    /** Review M1/F4: unpicked, the row shows the freest signed-in login and that login is sent. */
+    @Test
+    fun the_default_is_the_freest_signed_in_login_and_it_is_sent() = runTest {
+        val actions = StartActions()
+        actions.headroomAnswer = Headroom(
+            pauseAtPct = 90.0,
+            chosen = HostLogin(profile = null, accountUuid = "acc-1", usedPct = 95.0),
+            logins = listOf(
+                HostLogin(profile = null, accountUuid = "acc-1", usedPct = 95.0),
+                HostLogin(profile = "gone", accountUuid = "acc-3", usedPct = 5.0, signedOut = true),
+                HostLogin(profile = "team", accountUuid = "acc-2", usedPct = 30.0),
+            ),
+        )
+        val vm = vm(StartFleet(), actions, backgroundScope)
+        vm.selectProject(3)
+        runCurrent()
+        val account = assertNotNull(vm.state.value.account)
+        assertEquals("team", account.profile, "not the host login past the line, nor the signed-out one")
+        vm.create()
+        runCurrent()
+        assertEquals("team", actions.requests.last().profile)
+        assertFalse(actions.requests.last().overLimitOk)
+    }
+
+    /** Review M1/M2: a default the hub would refuse, or that opens /login, waits for a pick. */
+    @Test
+    fun a_default_past_the_line_or_signed_out_waits_for_a_pick() = runTest {
+        val actions = StartActions()
+        actions.headroomAnswer = Headroom(
+            pauseAtPct = 90.0,
+            chosen = HostLogin(profile = null, accountUuid = "acc-1", usedPct = 95.0),
+            logins = listOf(
+                HostLogin(profile = null, accountUuid = "acc-1", usedPct = 95.0),
+                HostLogin(profile = "gone", accountUuid = "acc-3", usedPct = null, signedOut = true),
+            ),
+        )
+        val vm = vm(StartFleet(), actions, backgroundScope)
+        vm.selectProject(3)
+        runCurrent()
+        assertFalse(vm.state.value.canCreate)
+        assertTrue(vm.state.value.missing.orEmpty().startsWith("Pick a login:"), vm.state.value.missing)
+        val signedOut = assertNotNull(vm.state.value.logins.firstOrNull { it.profile == "gone" })
+        assertTrue(accountLine(signedOut).endsWith(" · signed out"))
+        vm.pickLogin(null)
+        runCurrent()
+        assertTrue(vm.state.value.canCreate, "picked knowing it")
+        vm.create()
+        runCurrent()
+        assertTrue(actions.requests.last().overLimitOk)
+    }
+
     @Test
     fun a_login_the_host_does_not_have_is_ignored() = runTest {
         val vm = vm(StartFleet(), StartActions(), backgroundScope)

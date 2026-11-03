@@ -36,6 +36,14 @@ private fun friendlyWords(t: Throwable): Friendly {
             "E_CONFIRM_REQUIRED" -> Friendly("Needs a yes", "Approve it in Control; this screen will follow.", isError = true, details = raw)
             "E_BG_SESSION" -> Friendly("Runs outside tmux", "This session has no terminal to type into.", isError = true, details = raw)
             "E_PINNED" -> Friendly("This session is pinned", "Unpin it on the desktop first.", isError = true, details = raw)
+            // The hub's text is written for agents ("pass over_limit_ok"); the
+            // person picks another account, or picks this one knowing it.
+            "E_ACCOUNT_LIMIT" -> Friendly(
+                "That account is at its limit",
+                "Pick another account under Account, or pick this one again to start anyway.",
+                isError = true,
+                details = raw,
+            )
             else -> Friendly("The hub refused that", t.message, isError = true, details = raw)
         }
         // Every branch carries `details`, and these four used to carry none —

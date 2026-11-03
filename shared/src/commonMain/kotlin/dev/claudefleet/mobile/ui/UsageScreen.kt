@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
@@ -32,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -124,18 +126,28 @@ fun UsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: Long, 
                     }
                 }
                 state.report?.let { report -> usageSections(report, handlers) }
-            } else {
+            } else if (state.capsKnown) {
                 item { Note("This hub does not report usage.") }
+            } else {
+                // Not "does not report" while the hub's tools are still unknown (r13 P20, review M13).
+                item { Note("Connecting to the hub…") }
             }
             state.autoSwitch?.let { view ->
                 item { Heading("When an account runs out") }
                 item { AutoSwitchRows(view, state, handlers) }
             }
-            if (state.accountsAvailable && state.accounts.isNotEmpty()) {
+            if (state.accountsAvailable) {
                 item { Heading("Claude accounts") }
+                if (state.accounts.isEmpty() && !state.loading) item { Note(NO_ACCOUNTS_YET) }
                 items(state.accounts, key = { "account:${it.uuid}" }) { a ->
-                    AccountLine(a, nowSeconds, onClick = { naming = a }.takeIf { state.canRename })
+                    Column {
+                        AccountLine(a, nowSeconds, onClick = { naming = a }.takeIf { state.canRename })
+                        // The 5-hour and weekly meters, as the new layout draws them (review M14).
+                        if (state.limitsAvailable) AccountLimitsBlock(state.limits[a.uuid], nowSeconds)
+                    }
                 }
+                if (state.accounts.isNotEmpty() && !state.limitsAvailable && state.capsKnown) item { Note(LIMITS_ON_DESKTOP) }
+                item { Note(ADD_ACCOUNT_ON_DESKTOP) }
             }
         }
     }
@@ -160,7 +172,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.usageSections(report:
         }
     }
     if (report.byDay.isNotEmpty()) {
-        item { Heading("By day") }
+        // The hub buckets days in UTC (`DayUsage`), which may not be the phone's day (review M18).
+        item { Heading("By day (UTC)") }
         val days = report.byDay.sortedByDescending { it.day }
         val top = days.maxOf { it.costMicros }.coerceAtLeast(1)
         items(days, key = { "day:${it.day}" }) { d ->
@@ -201,7 +214,8 @@ internal fun AutoSwitchRows(view: AutoSwitchView, state: UsageUiState, handlers:
         ToggleRow(
             title = "Switch my sessions automatically",
             sub = when {
-                !view.fleetEnabled -> "Off for this fleet: the owner turns it on in Settings › Limits."
+                !view.fleetEnabled -> "Off for this fleet: the owner turns it on in Settings › Sessions › Limits."
+                !state.canChangeAutoSwitch -> (if (view.enabled) "On. " else "Off. ") + "Only a full pairing can change this."
                 view.enabled -> "A paused session resumes under the login on its host with the most room."
                 else -> "Paused sessions wait for you to switch them."
             },
@@ -221,14 +235,24 @@ internal fun AutoSwitchRows(view: AutoSwitchView, state: UsageUiState, handlers:
     }
 }
 
+/**
+ * A labelled switch: the whole row toggles and reads as one switch with its
+ * title (TalkBack said only "Switch, on"; review M11), as Settings' rows do.
+ */
 @Composable
 private fun ToggleRow(title: String, sub: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onChange)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
             Text(title, style = MaterialTheme.typography.bodyMedium)
             Text(sub, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Switch(checked = checked, onCheckedChange = if (enabled) onChange else null, enabled = enabled)
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
 
@@ -278,3 +302,9 @@ private fun AccountLine(account: AccountRow, nowSeconds: Long, onClick: (() -> U
         )
     }
 }
+
+/** An accounts list the hub serves but that has nothing in it yet (review M15). */
+internal const val NO_ACCOUNTS_YET = "No Claude account seen on the fleet's hosts yet."
+
+/** Where a second account is added, while the phone cannot run the sign-in itself (review F13). */
+internal const val ADD_ACCOUNT_ON_DESKTOP = "Add an account on the desktop: Accounts › + Add account."

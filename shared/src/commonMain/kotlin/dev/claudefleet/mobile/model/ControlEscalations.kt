@@ -40,7 +40,8 @@ data class Escalation(
      * host is one card keyed by the host.
      */
     val key: String,
-    val sessionId: Long,
+    /** The session Open shows; null for a card about a host's login, which no session needs to be on. */
+    val sessionId: Long?,
     val bucket: TriageBucket,
     /** "fed-v2 is waiting for your answer". */
     val line: String,
@@ -89,6 +90,61 @@ fun escalations(rows: List<SessionRow>, controlId: Long?, later: Set<String>, fo
         out += Escalation("host:$host", first.id, TriageBucket.HOST_DOWN, line)
     }
     return out.sortedWith(compareBy<Escalation> { rank(it.bucket) }.thenBy { it.sessionId })
+}
+
+/**
+ * The month and day of [at] (unix seconds) at [offsetSeconds] from UTC: the
+ * person's own day, not the hub's (the desktop's `dayLabel` is UTC; review D18).
+ */
+fun dayLabel(at: Long, offsetSeconds: Int): String {
+    val days = (at + offsetSeconds).floorDiv(86_400L)
+    // Civil-from-days (Howard Hinnant), no java.time in common code.
+    val z = days + 719_468
+    val era = z.floorDiv(146_097L)
+    val doe = z - era * 146_097
+    val yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365
+    val doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+    val mp = (5 * doy + 2) / 153
+    val d = doy - (153 * mp + 2) / 5 + 1
+    val m = if (mp < 10) mp + 3 else mp - 9
+    return "${MONTHS[(m - 1).toInt()]} $d"
+}
+
+private val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+/** A string as one shell word: bare when it is safe, else single-quoted (claude-fleet's `shell::quote`). */
+private fun shq(s: String): String =
+    if (s.isNotEmpty() && s.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it in "_.@%+=:,/-" }) s else "'" + s.replace("'", "'\\''") + "'"
+
+/**
+ * The sign-in command a person can paste into a terminal: `ssh -t htz
+ * 'CLAUDE_CONFIG_DIR=~/.claude-profiles/work claude /login'`, or the bare
+ * line for the hub's own `local` host (the desktop's `loginShellCommand`).
+ */
+fun loginShellCommand(host: String, profile: String?): String {
+    val inner = profile?.let { "CLAUDE_CONFIG_DIR=~/.claude-profiles/$it claude /login" } ?: "claude /login"
+    return if (host == "local") inner else "ssh -t ${shq(host)} ${shq(inner)}"
+}
+
+/**
+ * One card per signed-out login on a visible host, minus those put off (the
+ * desktop's `loginEscalations`, review M3): a login can be signed out before
+ * any session lands on it, and nothing else on the phone would say so. The
+ * key carries `since`, so a Later ends when the login signs out again.
+ */
+fun loginEscalations(hosts: List<HostRow>, later: Set<String>, offsetSeconds: (Long) -> Int): List<Escalation> {
+    val out = mutableListOf<Escalation>()
+    for (h in hosts) {
+        if (h.hidden) continue
+        for (l in h.signedOutLogins) {
+            val key = "login:${h.alias}:${l.profile.orEmpty()}:${l.since}"
+            if (key in later) continue
+            val whose = l.profile?.let { "${h.alias} ($it)" } ?: h.alias
+            val since = if (l.since > 0) " since ${dayLabel(l.since, offsetSeconds(l.since))}" else ""
+            out += Escalation(key, null, TriageBucket.NO_CREDENTIALS, "Claude login on $whose is signed out$since", loginShellCommand(h.alias, l.profile))
+        }
+    }
+    return out
 }
 
 /** The most Later keys kept; the oldest go first (a key carries a turn, so old ones never match again). */

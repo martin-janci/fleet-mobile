@@ -216,6 +216,10 @@ internal fun hostFacts(host: HostRow): String? = listOfNotNull(
     host.diskHomeFreeKb?.takeIf { it >= 0 }?.let { "${gigabytes(it)} free" },
     host.cpuCount?.takeIf { it > 0 }?.let { if (it == 1) "1 CPU" else "$it CPUs" },
     host.memTotalKb?.takeIf { it > 0 }?.let { "${gigabytes(it)} memory" },
+    // Review M3: a signed-out login shows on the host even before a session lands on it.
+    host.signedOutLogins.takeIf { it.isNotEmpty() }?.let { out ->
+        "signed out: " + out.joinToString(", ") { it.profile ?: "host login" }
+    },
 ).joinToString(" · ").ifEmpty { null }
 
 /** [kb] kibibytes as "212 GB", or "3.4 GB" under ten; "0.2 GB" rather than "0 GB" for a nearly full disk. */

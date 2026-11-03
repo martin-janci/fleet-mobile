@@ -16,13 +16,18 @@ class MoreLinesTest {
     @Test
     fun accounts_name_a_limit_first_then_the_busiest_week() {
         assertNull(accountsLine(emptyList(), 1_000))
-        assertEquals("Weekly 86% on the busiest account", accountsLine(listOf(account("a", 40.0), account("b", 86.2)), 1_000))
+        assertEquals("Weekly: 14% left on the busiest account", accountsLine(listOf(account("a", 40.0), account("b", 86.2)), 1_000))
         assertEquals("An account is at its weekly limit · resets in 16 min", accountsLine(listOf(account("a", 100.0), account("b", 10.0)), 1_000))
         // Review w23-8: one account at its limit is named.
         assertEquals("Work is at its weekly limit · resets in 16 min", accountsLine(listOf(account("a", 100.0), account("b", 10.0)), 1_000) { if (it == "a") "Work" else null })
         assertEquals("2 accounts at a limit", accountsLine(listOf(account("a", 100.0), account("b", 100.0)), 1_000))
         assertNull(accountsLine(listOf(account("a", 100.0, resetsAt = 500)), 1_000), "a window that reset is no limit, and no reading of now")
-        assertEquals("Weekly 40% on the busiest account", accountsLine(listOf(account("a", 90.0, resetsAt = 500), account("b", 40.0)), 1_000))
+        assertEquals("Weekly: 60% left on the busiest account", accountsLine(listOf(account("a", 90.0, resetsAt = 500), account("b", 40.0)), 1_000))
+        // Review M5: a failed or old reading is not shown as now; an expired login is named.
+        val old = account("a", 90.0).copy(status = "ok", fetchedAt = 1_000 - 2 * 3_600)
+        assertEquals("Weekly: 60% left on the busiest account", accountsLine(listOf(old, account("b", 40.0)), 1_000))
+        val expired = account("a", 20.0).copy(status = "login_expired")
+        assertEquals("Work: login expired", accountsLine(listOf(expired, account("b", 40.0)), 1_000) { if (it == "a") "Work" else null })
     }
 
     @Test

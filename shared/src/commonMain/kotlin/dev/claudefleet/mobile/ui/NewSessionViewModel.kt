@@ -11,6 +11,8 @@ import dev.claudefleet.mobile.model.backgroundAgents
 import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.HostLogin
 import dev.claudefleet.mobile.model.loginLabel
+import dev.claudefleet.mobile.model.freestLogin
+import dev.claudefleet.mobile.model.leftText
 import dev.claudefleet.mobile.model.NO_START_STEPS
 import dev.claudefleet.mobile.model.StartStepState
 import dev.claudefleet.mobile.model.folding
@@ -183,6 +185,8 @@ data class AccountChoice(
     val room: String,
     /** At or past the hub's pause line: starting under it takes the person's say-so. */
     val over: Boolean,
+    /** Fleet knows this login is signed out: a session started on it opens `/login`. */
+    val signedOut: Boolean = false,
 )
 
 /** The confirm sheet: what will start, how many, and in which organisation. */
@@ -808,7 +812,24 @@ class NewSessionViewModel(
         val orgLabel = ticketKey?.let { key ->
             work.tickets.firstOrNull { it.key == key }?.let(work.orgs::orgOf)?.let(work.orgs::name)
         }
-        val canCreate = canWrite && !l.creating && host != null && ready
+        val names = fleet.accountNames.value
+        val headroom = l.headroom?.takeIf { l.headroomHost == host && host != null && ticketKey == null }
+        val pauseAt = headroom?.pauseAtPct ?: 100.0
+        val logins = headroom?.logins.orEmpty().map { accountChoice(it, pauseAt, names) }
+        // Unpicked, the row shows the login the start will use: the signed-in
+        // one with the most room, as the desktop's New session defaults
+        // (`freestLogin`), else the hub's own choice (review M1/F4).
+        val account = headroom?.let { h ->
+            if (l.loginPicked) logins.firstOrNull { it.profile == l.pickedProfile }
+            else (freestLogin(h.logins) ?: h.chosen)?.let { accountChoice(it, h.pauseAtPct, names) }
+        }
+        // A default the hub would refuse (past the pause line) or that opens
+        // `/login` (signed out) waits for the person to pick a login.
+        val accountBlock = account?.takeIf { !l.loginPicked && (it.over || it.signedOut) }?.let {
+            if (it.signedOut) "Pick a login: ${it.label} is signed out on $host."
+            else "Pick a login: ${it.label} is past the pause line."
+        }
+        val canCreate = canWrite && !l.creating && host != null && ready && accountBlock == null
         val branchInvalid = (l.newWorktree || fromBranch) && l.branch.isNotBlank() && !branchOk
         val missing = when {
             !canWrite || l.creating || canCreate -> null
@@ -818,15 +839,8 @@ class NewSessionViewModel(
             fromBranch && !branchOk -> branchProblem(l.branch.trim(), "Name the branch to start from.")
             ticketKey == null && !branchOk -> if (l.branch.isBlank()) "Name the new branch." else "A branch name has no spaces."
             ticketKey != null && !ticketBranchOk -> branchProblem(ticketBranch.trim(), "Name the branch.")
+            accountBlock != null -> accountBlock
             else -> null
-        }
-        val names = fleet.accountNames.value
-        val headroom = l.headroom?.takeIf { l.headroomHost == host && host != null && ticketKey == null }
-        val pauseAt = headroom?.pauseAtPct ?: 100.0
-        val logins = headroom?.logins.orEmpty().map { accountChoice(it, pauseAt, names) }
-        val account = headroom?.let { h ->
-            if (l.loginPicked) logins.firstOrNull { it.profile == l.pickedProfile }
-            else h.chosen?.let { accountChoice(it, h.pauseAtPct, names) }
         }
         // A draft is shown only for what it was planned for: a changed host
         // or project waits for its own.
@@ -889,7 +903,10 @@ class NewSessionViewModel(
     private fun requestFrom(s: NewSessionUiState): NewSessionRequest? {
         if (!s.canCreate) return null
         val l = local.value
-        val login = s.account?.takeIf { l.loginPicked }
+        // The login the row shows is the one sent, picked or defaulted; only a
+        // picked one may start past the pause line (the person chose it).
+        val login = s.account
+        val overOk = l.loginPicked && login?.over == true
         if (s.startFrom == StartFrom.Branch) {
             // An existing branch: its own worktree, checked out rather than
             // forked — the hub's script takes `base == name` as "this branch".
@@ -901,7 +918,7 @@ class NewSessionViewModel(
                 baseBranch = branch,
                 friendlyName = s.friendlyName.trim().ifEmpty { null },
                 profile = login?.profile,
-                overLimitOk = login?.over == true,
+                overLimitOk = overOk,
             )
         }
         return NewSessionRequest(
@@ -912,7 +929,7 @@ class NewSessionViewModel(
             friendlyName = s.friendlyName.trim().ifEmpty { null },
             worktreeId = s.worktreeId.takeIf { !s.newWorktree },
             profile = login?.profile,
-            overLimitOk = login?.over == true,
+            overLimitOk = overOk,
         )
     }
 }
@@ -940,8 +957,9 @@ internal fun accountChoice(l: HostLogin, pauseAtPct: Double, names: Map<String, 
     return AccountChoice(
         profile = l.profile,
         label = loginLabel(l) { names[it] },
-        room = used?.let { "${(100 - kotlin.math.round(it).toInt()).coerceAtLeast(0)}% left" } ?: "no reading",
+        room = used?.let { leftText(it) } ?: "no reading",
         over = used != null && used >= pauseAtPct,
+        signedOut = l.signedOut,
     )
 }
 

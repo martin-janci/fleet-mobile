@@ -4673,6 +4673,24 @@ class SessionViewModelTest {
         assertTrue(actions.restartedUnder.isEmpty())
     }
 
+    /** Review M9: a session on a signed-out login gets the card too, offering a signed-in login. */
+    @Test
+    fun a_signed_out_session_is_offered_a_signed_in_login() = runTest {
+        val signedOut = limited.copy(attention = Attention("no_credentials"))
+        val fleet = FakeFleetState(listOf(signedOut)).apply {
+            capabilities.value = HubCapabilities(tools = switchTools, params = mapOf("restart_session" to setOf("session_id", "profile")))
+        }
+        val actions = FakeActions().apply {
+            headroom = Headroom(pauseAtPct = 95.0, logins = listOf(HostLogin("work", "acc-a", 10.0), HostLogin(null, "acc-b", 40.0)))
+        }
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+        assertTrue(vm.state.value.canSwitchAccount)
+        vm.proposeSwitch().join()
+        runCurrent()
+        assertEquals(HostLogin(null, "acc-b", 40.0), vm.state.value.switchTarget, "not its own signed-out login, though it has more room")
+    }
+
     @Test
     fun switch_account_is_not_offered_where_the_hub_cannot_restart_under_a_profile() = runTest {
         val actions = FakeActions()

@@ -15,7 +15,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.epochSeconds
@@ -102,6 +104,7 @@ fun EscalationCards(
 ) {
     if (all.isEmpty()) return
     val o = Fleet.colors
+    val clipboard = LocalClipboardManager.current
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         for (e in all.take(ESCALATIONS_SHOWN)) {
             Surface(
@@ -119,13 +122,25 @@ fun EscalationCards(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(e.line, style = Fleet.type.textSm, color = o.fg)
                         e.detail?.let {
-                            Text(it, style = Fleet.type.textSm, color = o.fgMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            // A login card's detail is the sign-in command: shown whole, to copy.
+                            Text(it, style = Fleet.type.textSm, color = o.fgMuted, maxLines = if (e.sessionId == null) 3 else 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
-                    OutlinedButton(
-                        onClick = { onOpen(e.sessionId) },
-                        modifier = Modifier.heightIn(min = 36.dp).testTag(ESCALATION_OPEN_TAG + e.key),
-                    ) { Text("Open") }
+                    val sessionId = e.sessionId
+                    if (sessionId != null) {
+                        OutlinedButton(
+                            onClick = { onOpen(sessionId) },
+                            modifier = Modifier.heightIn(min = 36.dp).testTag(ESCALATION_OPEN_TAG + e.key),
+                        ) { Text("Open") }
+                    } else {
+                        val command = e.detail
+                        if (command != null) {
+                            OutlinedButton(
+                                onClick = { clipboard.setText(AnnotatedString(command)) },
+                                modifier = Modifier.heightIn(min = 36.dp).testTag(ESCALATION_OPEN_TAG + e.key),
+                            ) { Text("Copy") }
+                        }
+                    }
                     TextButton(
                         onClick = { onLater(e.key) },
                         modifier = Modifier.testTag(ESCALATION_LATER_TAG + e.key),

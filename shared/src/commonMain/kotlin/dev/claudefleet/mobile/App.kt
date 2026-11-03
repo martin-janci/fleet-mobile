@@ -137,6 +137,7 @@ import dev.claudefleet.mobile.ui.ControlChrome
 import dev.claudefleet.mobile.ui.EscalationCards
 import dev.claudefleet.mobile.ui.EscalationLater
 import dev.claudefleet.mobile.model.escalations
+import dev.claudefleet.mobile.model.loginEscalations
 import dev.claudefleet.mobile.ui.FormContext
 import dev.claudefleet.mobile.ui.ControlForms
 import dev.claudefleet.mobile.ui.ControlHeader
@@ -1091,8 +1092,12 @@ private fun ControlTab(
     // The escalation cards: the rows Needs you reads (shared-in sessions are their owners' to answer).
     val laterKeys by container.escalationLater.later.collectAsState()
     // A host that answers again ends its Later at FleetRoute, whichever tab is on screen (review w21-1, w24).
-    val escalationCards = remember(controlRows, controlAccess, controlState.sessionId, laterKeys, settingsCaps.ask) {
-        escalations(controlRows.filter { controlAccess.levelFor(it) == null }, controlState.sessionId, laterKeys.toSet(), formsShown = settingsCaps.ask)
+    val controlHosts by repository.hosts.collectAsState()
+    val escalationCards = remember(controlRows, controlAccess, controlState.sessionId, laterKeys, settingsCaps.ask, controlHosts) {
+        val later = laterKeys.toSet()
+        // A signed-out login is a card even with no session on it yet (review M3), after the sessions' own cards.
+        escalations(controlRows.filter { controlAccess.levelFor(it) == null }, controlState.sessionId, later, formsShown = settingsCaps.ask) +
+            loginEscalations(controlHosts, later) { utcOffsetSeconds(it) }
     }
     var threadsOpen by remember { mutableStateOf(false) }
     if (threadsOpen) {

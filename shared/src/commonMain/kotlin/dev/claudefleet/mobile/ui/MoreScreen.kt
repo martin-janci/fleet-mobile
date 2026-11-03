@@ -66,10 +66,23 @@ fun accountsLine(usage: Collection<AccountUsageSnapshot>, now: Long, accountName
         val who = accountName(uuid)?.let { "$it is" } ?: "An account is"
         return "$who at its $window limit$resets"
     }
-    // A window whose reset has passed says nothing about now.
-    val weekly = usage.mapNotNull { s -> s.usage?.sevenDay?.takeIf { w -> w.resetsAt.let { it == null || it > now } }?.utilization }.maxOrNull()
+    // A login that needs signing in again outranks a figure (review M5).
+    val expired = usage.filter { it.status == "login_expired" || it.status == "token_rejected" }
+    if (expired.isNotEmpty()) {
+        if (expired.size > 1) return "${expired.size} accounts need signing in again"
+        val who = accountName(expired.single().accountUuid) ?: "An account"
+        return "$who: login expired"
+    }
+    // A window whose reset has passed says nothing about now, nor does a
+    // reading the last try failed to refresh or one older than half an hour
+    // (`limitsNote`'s rule, review M5).
+    val fresh = usage.filter { s ->
+        (s.status == null || s.status == "ok") && s.fetchedAt.let { it == null || now - it <= STALE_READ_SECS }
+    }
+    val weekly = fresh.mapNotNull { s -> s.usage?.sevenDay?.takeIf { w -> w.resetsAt.let { it == null || it > now } }?.utilization }.maxOrNull()
         ?: return null
-    return "Weekly ${weekly.roundToInt()}% on the busiest account"
+    // Room is said as what is left, as everywhere else (review M4).
+    return "Weekly: ${(100 - weekly.roundToInt()).coerceAtLeast(0)}% left on the busiest account"
 }
 
 /** Files' live line (MobileNav): the count, and the transfer in flight with how far it got. */

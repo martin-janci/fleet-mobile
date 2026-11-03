@@ -191,8 +191,9 @@ class PhoneSessionsTest {
         assertEquals("Paused · limit on tech.silvester", waitsOn(limited, "tech.silvester"))
         assertEquals("Paused · limit", waitsOn(limited))
         val signedOut = row(status = "idle", attention = Attention("no_credentials"))
-        assertEquals("tech.silvester is signed out", waitsOn(signedOut, "tech.silvester"))
-        assertEquals("Signed out", waitsOn(signedOut))
+        // Review M10: the login on a host is signed out, not the account.
+        assertEquals("Signed out on mercury", waitsOn(signedOut, "tech.silvester"))
+        assertEquals("Signed out on mercury (work)", waitsOn(signedOut.copy(claudeProfile = "work")))
         assertEquals("hetzner-1 is down", waitsOn(row(host = "hetzner-1", attention = Attention("host_down"))))
         assertNull(blockedLine(row(attention = Attention("waiting")), "tech.silvester"))
     }
