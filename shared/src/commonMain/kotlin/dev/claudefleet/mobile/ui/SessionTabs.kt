@@ -56,6 +56,7 @@ private val AGENT_NAMES: Map<String, String> = mapOf(
     "claude" to DEFAULT_AGENT_NAME,
     "codex" to "Codex",
     "agy" to "Agy",
+    "hermes" to "Hermes",
     "shell" to "Shell",
 )
 

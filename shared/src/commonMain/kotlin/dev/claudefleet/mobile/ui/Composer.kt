@@ -78,9 +78,46 @@ val CODEX_SLASH_COMMANDS: List<SlashCommand> = listOf(
     SlashCommand("exit", "Quit Codex (the tmux session stays)"),
 )
 
+/** The hub's `agent` value for Nous Research's Hermes Agent. */
+const val AGENT_HERMES = "hermes"
+
+/**
+ * Hermes Agent's commands worth offering — the desktop's
+ * `HERMES_SLASH_COMMANDS`, from fleet's Hermes adapter. Hermes' `/model`
+ * takes a name and switches the session's model in place.
+ */
+val HERMES_SLASH_COMMANDS: List<SlashCommand> = listOf(
+    SlashCommand("model", "Switch model for this session", args = true),
+    SlashCommand("reasoning", "Set reasoning effort and display", args = true),
+    SlashCommand("new", "Start a new session"),
+    SlashCommand("title", "Set a title for the current session", args = true),
+    SlashCommand("compress", "Compress conversation context"),
+    SlashCommand("status", "Show session, model, token and context info"),
+    SlashCommand("usage", "Show token usage and rate limits"),
+    SlashCommand("context", "Show what fills the context window"),
+    SlashCommand("retry", "Resend the last message"),
+    SlashCommand("undo", "Back up one user turn"),
+    SlashCommand("branch", "Branch the current session"),
+    SlashCommand("queue", "Queue a prompt for the next turn", args = true),
+    SlashCommand("steer", "Steer after the next tool call", args = true),
+    SlashCommand("goal", "Set a standing goal for this session", args = true),
+    SlashCommand("background", "Run a prompt in the background", args = true),
+    SlashCommand("agents", "Show active agents and running tasks"),
+    SlashCommand("stop", "Kill all running background processes"),
+    SlashCommand("rollback", "List or restore filesystem checkpoints"),
+    SlashCommand("skills", "Search, install or manage skills", args = true),
+    SlashCommand("tools", "List, enable or disable tools", args = true),
+    SlashCommand("yolo", "Toggle skipping dangerous-command approvals"),
+    SlashCommand("help", "Show available commands"),
+    SlashCommand("quit", "Quit Hermes (the tmux session stays)"),
+)
+
 /** The built-in commands a session of [agent] (the row's `agent`) offers. */
-fun slashCommandsFor(agent: String?): List<SlashCommand> =
-    if (agent == AGENT_CODEX) CODEX_SLASH_COMMANDS else SLASH_COMMANDS
+fun slashCommandsFor(agent: String?): List<SlashCommand> = when (agent) {
+    AGENT_CODEX -> CODEX_SLASH_COMMANDS
+    AGENT_HERMES -> HERMES_SLASH_COMMANDS
+    else -> SLASH_COMMANDS
+}
 
 /** What accepting a suggestion puts in the box: a trailing space where an argument follows. */
 fun completeSlashCommand(c: SlashCommand): String = if (c.args) "/${c.name} " else "/${c.name}"
@@ -132,8 +169,22 @@ val CODEX_EFFORT_OPTIONS: List<PickerOption> = listOf(
     PickerOption("max", "Max"),
 )
 
+/**
+ * Hermes' model hint list (provider slugs) — fleet's Hermes adapter's. Which
+ * ones work depends on the provider the host's Hermes is set up with.
+ */
+val HERMES_MODEL_OPTIONS: List<PickerOption> = listOf(
+    PickerOption("anthropic/claude-opus-4.8", "Claude Opus 4.8"),
+    PickerOption("anthropic/claude-sonnet-5", "Claude Sonnet 5"),
+    PickerOption("openai/gpt-5.6-sol", "GPT-5.6-Sol"),
+    PickerOption("google/gemini-3.1-pro-preview", "Gemini 3.1 Pro"),
+    PickerOption("deepseek/deepseek-v4-pro", "DeepSeek V4 Pro"),
+    PickerOption("qwen/qwen3.7-max", "Qwen3.7 Max"),
+)
+
 /** The model or effort ([command]) picker's entries for a session of [agent]. */
 fun pickerOptionsFor(agent: String?, command: String): List<PickerOption> = when {
+    agent == AGENT_HERMES && command == "model" -> HERMES_MODEL_OPTIONS
     agent == AGENT_CODEX && command == "model" -> CODEX_MODEL_OPTIONS
     agent == AGENT_CODEX -> CODEX_EFFORT_OPTIONS
     command == "model" -> MODEL_OPTIONS
