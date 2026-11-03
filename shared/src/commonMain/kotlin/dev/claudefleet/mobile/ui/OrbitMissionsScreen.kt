@@ -154,10 +154,16 @@ internal fun missionSpendFraction(m: Mission): Float? {
     return ((m.costMicros ?: 0).toDouble() / budget).toFloat().coerceIn(0f, 1f)
 }
 
-/** What Pause all says it stops, before it stops it. */
+/**
+ * What Pause all says it stops, before it stops it. The hub also revokes
+ * every paused mission's grant (`pause_all`, §7.5), so a mission resumed
+ * later waits for a person again until a grant is signed: said here, not
+ * found out after.
+ */
 internal fun pauseAllMeta(running: Int): String =
     "${if (running == 1) "1 mission stops" else "$running missions stop"} starting new steps. " +
-        "Sessions already working finish their current turn, then wait."
+        "Sessions already working finish their current turn, then wait. " +
+        "${if (running == 1) "Its grant ends" else "Their grants end"}: a resumed mission waits for you until you sign a new one."
 
 internal fun pauseAllLabel(running: Int): String = if (running == 1) "Pause 1 mission" else "Pause $running missions"
 
@@ -253,7 +259,7 @@ fun OrbitMissionsScreen(
             for (m in groups.running) {
                 PhoneRow(title = m.name.ifBlank { "Mission ${m.id}" }, line = missionRowLine(m), word = missionWord(m), divider = false)
             }
-            Text("Resume from here or from Control; nothing is lost.", color = o.fgMuted, fontSize = 13.sp)
+            Text("Resume from here or from Control. Tasks and sessions stay as they are.", color = o.fgMuted, fontSize = 13.sp)
         }
     }
 }

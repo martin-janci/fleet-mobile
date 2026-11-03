@@ -56,10 +56,12 @@ class OrbitMissionsTest {
     @Test
     fun pause_all_says_what_stops_and_what_finishes_before_it_stops_anything() {
         assertEquals(
-            "3 missions stop starting new steps. Sessions already working finish their current turn, then wait.",
+            "3 missions stop starting new steps. Sessions already working finish their current turn, then wait. " +
+                "Their grants end: a resumed mission waits for you until you sign a new one.",
             pauseAllMeta(3),
         )
         assertTrue(pauseAllMeta(1).startsWith("1 mission stops"))
+        assertTrue(pauseAllMeta(1).contains("Its grant ends"), "the hub revokes the grants: said before the press")
         assertEquals("Pause 3 missions", pauseAllLabel(3))
         assertEquals("Pause 1 mission", pauseAllLabel(1))
     }

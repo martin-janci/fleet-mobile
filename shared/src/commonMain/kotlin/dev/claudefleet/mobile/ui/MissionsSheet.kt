@@ -279,8 +279,13 @@ private fun SectionTitle(text: String) {
     Text(text, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 24.dp, top = 12.dp, bottom = 4.dp).semantics { heading() })
 }
 
+/**
+ * One next step. `showGo = false` leaves the button out where this pairing
+ * may not press a step at all (`mission_start` not listed): a Go that is
+ * never enabled explains nothing, so the detail says why in one line instead.
+ */
 @Composable
-internal fun StepRow(s: MissionStep, item: String?, enabled: Boolean, handlers: MissionsHandlers) {
+internal fun StepRow(s: MissionStep, item: String?, enabled: Boolean, handlers: MissionsHandlers, showGo: Boolean = true) {
     Row(modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         // A step that names a task opens it; Go stays the step's own button.
         val open = s.itemId?.let { id -> handlers.onOpenItem?.let { o -> { o(id) } } }
@@ -289,7 +294,7 @@ internal fun StepRow(s: MissionStep, item: String?, enabled: Boolean, handlers: 
             item?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         // Go on an ask puts its question in the cards, where it is answered.
-        TextButton(onClick = { handlers.onStart(s) }, enabled = enabled) { Text("Go") }
+        if (showGo) TextButton(onClick = { handlers.onStart(s) }, enabled = enabled) { Text("Go") }
     }
 }
 
