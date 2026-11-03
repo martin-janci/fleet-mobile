@@ -322,9 +322,9 @@ class AutomationViewModel(
         local.update { it.copy(loading = true) }
         try {
             val routines = actions.routines()
-            val health = runCatching { actions.health() }.getOrNull()
+            val health = orNullUnlessCancelled { actions.health() }
             // Today's spend, for More's line; a hub without `budget` says nothing and the line names none.
-            val budget = if (fleet.capabilities.value.has(HubCapabilities.ROUTINES, "budget")) runCatching { actions.budget() }.getOrNull() else null
+            val budget = if (fleet.capabilities.value.has(HubCapabilities.ROUTINES, "budget")) orNullUnlessCancelled { actions.budget() } else null
             local.update {
                 it.copy(
                     routines = routines,

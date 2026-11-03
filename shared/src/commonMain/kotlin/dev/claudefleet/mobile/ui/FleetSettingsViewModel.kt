@@ -194,7 +194,7 @@ class FleetSettingsViewModel(
                 // A readonly token may read proposals; a hub without the tool,
                 // or one that refuses it, leaves the review empty and this
                 // device read-only rather than failing the whole screen.
-                val pending = async { runCatching { actions.pending() }.getOrNull() }
+                val pending = async { orNullUnlessCancelled { actions.pending() } }
                 // every await inside the boundary, so none of them can escape
                 Triple(pages.await(), described.await(), pending.await())
             }
@@ -441,7 +441,7 @@ class FleetSettingsViewModel(
                 )
                 val failed = d.failed.firstOrNull()?.error
                 val descs = if (d.applied.isNotEmpty()) actions.describe() else null
-                val pending = runCatching { actions.pending() }.getOrNull()
+                val pending = orNullUnlessCancelled { actions.pending() }
                 _state.update {
                     it.copy(
                         busy = it.busy - tag,

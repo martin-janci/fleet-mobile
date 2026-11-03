@@ -154,7 +154,7 @@ class ProjectToolsViewModel(
             val row = call(host)
             local.update { it.copy(adding = false, addingOn = null, addingWhat = null, addingWhere = null) }
             // The new row reaches the list with the hub's project event; ask now too.
-            runCatching { fleet.refresh() }
+            orNullUnlessCancelled { fleet.refresh() }
             onAdded(row.id)
         } catch (e: CancellationException) {
             throw e

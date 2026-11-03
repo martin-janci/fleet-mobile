@@ -258,7 +258,7 @@ class TrackersViewModel(
     fun dismissNotice() = local.update { it.copy(notice = null) }
 
     private suspend fun reload() {
-        runCatching { actions.list() }.onSuccess { rows -> local.update { it.copy(trackers = rows, loaded = true) } }
+        orNullUnlessCancelled { actions.list() }?.let { rows -> local.update { it.copy(trackers = rows, loaded = true) } }
     }
 
     private fun editWizard(change: (TrackerWizard) -> TrackerWizard) {
