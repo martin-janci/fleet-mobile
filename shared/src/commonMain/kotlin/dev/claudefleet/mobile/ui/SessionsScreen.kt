@@ -808,7 +808,7 @@ private fun WorkHeader(work: WorkSummary, attention: Int, orgLabel: String? = nu
             },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        work.statusCategory?.let { WorkStatusDot(it) }
+        work.shownStatus?.let { WorkStatusDot(it) }
         Text(
             text = if (work.key != null && work.title.isNotBlank()) "${work.shownLabel} · ${work.title}" else work.shownLabel,
             style = MaterialTheme.typography.labelLarge,

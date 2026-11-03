@@ -544,14 +544,6 @@ internal fun titleProblem(title: String): Friendly? = when {
 }
 
 /**
- * Local work is an item with no ticket behind it: no tracker status and no
- * link to open — the desktop's test too. The hub refuses renaming a ticket
- * anyway.
- */
-val WorkSummary.isLocal: Boolean
-    get() = itemId != null && statusCategory == null && url == null
-
-/**
  * A naming refusal, said for what it means here. The hub's `E_EXISTS` has
  * two meanings: the key belongs to a **ticket** (details `tracker: true`) —
  * that work already exists and wants *Set work…* — or to other local work.

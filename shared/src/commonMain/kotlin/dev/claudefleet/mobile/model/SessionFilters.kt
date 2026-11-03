@@ -61,11 +61,10 @@ enum class StatusFilter(val label: String, val wire: String?) {
  * A ticket's status bucket, as the filter sheet offers it — the desktop's
  * work-filter status chips (`STATUS_FILTERS` in `src/lib/work_filters.ts`).
  *
- * Asked of the session's primary link ([WorkSummary.statusCategory], refreshed
- * from the ticket cache), so a session with no work, or with work the tracker
- * has not given a status, matches none of them — the desktop's rule too: a
- * status filter is a question about tickets, and a row without one is not an
- * answer to it. Selections are OR-ed, like [StatusFilter]'s; the desktop's
+ * Asked of the session's primary link ([WorkSummary.shownStatus]: the hub's
+ * live status, local work included, as the desktop's filter reads it), so a
+ * session with no work, or with work that has no status, matches none of
+ * them. Selections are OR-ed, like [StatusFilter]'s; the desktop's
  * single choice is the one-chip case of that.
  */
 @Serializable
@@ -226,7 +225,7 @@ fun SessionRow.matches(filters: SessionFilters, nowSeconds: Long, projectLabel: 
 /** OR across the chosen ticket buckets and status names; none chosen asks nothing. */
 private fun SessionRow.matchesWorkStatus(filters: SessionFilters): Boolean {
     if (filters.workStatuses.isEmpty() && filters.workStatusNames.isEmpty()) return true
-    if (filters.workStatuses.any { it.category == work?.statusCategory }) return true
+    if (filters.workStatuses.any { it.category == work?.shownStatus }) return true
     val name = work?.statusName?.trim()?.lowercase() ?: return false
     return filters.workStatusNames.any { it.trim().lowercase() == name }
 }

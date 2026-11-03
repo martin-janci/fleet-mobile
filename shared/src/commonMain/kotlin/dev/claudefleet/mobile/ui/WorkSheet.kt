@@ -146,7 +146,7 @@ internal fun WorkTicketBody(state: SessionWorkUiState, handlers: SessionWorkHand
 @Composable
 private fun WorkHeading(work: WorkSummary, style: TextStyle) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        work.statusCategory?.let { WorkStatusDot(it) }
+        work.shownStatus?.let { WorkStatusDot(it) }
         Text(
             text = work.shownLabel,
             style = style,
