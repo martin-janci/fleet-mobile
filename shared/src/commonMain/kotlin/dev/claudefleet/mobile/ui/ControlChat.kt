@@ -960,7 +960,13 @@ const val QUEUED_CANCEL_TAG = "control.queued.cancel."
  * and the hub types it. Cancel takes it back before Control gets it.
  */
 @Composable
-fun QueuedChips(queued: List<QueuedPrompt>, enabled: Boolean, onCancel: (Long) -> Unit) {
+fun QueuedChips(
+    queued: List<QueuedPrompt>,
+    enabled: Boolean,
+    onCancel: (Long) -> Unit,
+    /** When each goes, after its text ("tomorrow 09:00"); none by default (Control's queue goes at its next idle). */
+    caption: (QueuedPrompt) -> String? = { null },
+) {
     if (queued.isEmpty()) return
     val o = Fleet.colors
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -972,7 +978,13 @@ fun QueuedChips(queued: List<QueuedPrompt>, enabled: Boolean, onCancel: (Long) -
                 modifier = Modifier.heightIn(min = 32.dp).testTag(QUEUED_CHIP_TAG + q.id),
             ) {
                 Row(modifier = Modifier.padding(start = 12.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(queuedChipText(q), style = Fleet.type.textSm, color = o.fg2, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                    Text(
+                        queuedChipText(q) + (caption(q)?.let { " · $it" } ?: ""),
+                        style = Fleet.type.textSm,
+                        color = o.fg2,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
                     TextButton(
                         onClick = { onCancel(q.id) },
                         enabled = enabled,

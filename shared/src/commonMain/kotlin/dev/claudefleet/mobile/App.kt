@@ -3208,6 +3208,10 @@ private fun SessionRoute(
         LaunchedEffect(sessionId, state.session?.claudeStatus, state.session?.turnSeq, state.queuesWhileWorking) {
             if (state.queuesWhileWorking) vm.loadQueued()
         }
+    } else {
+        // Review w22-10: what Send later keeps for this session, read with
+        // the first read and again as its turns move (a delivered one leaves).
+        LaunchedEffect(sessionId, state.session?.turnSeq) { vm.loadQueued() }
     }
     // The Details tab's Review… and Force kill… ask here (r09 B18); ⋮ keeps its own.
     var detailsAsk by remember { mutableStateOf<DetailsAsk?>(null) }
@@ -3543,7 +3547,7 @@ private fun SessionRoute(
                         sessions = rows,
                         // The Account row and its meter (MobileSession, gap plan G5.5).
                         account = details.session?.accountUuid?.let { uuid ->
-                            accountMeter(uuid, names[uuid], usage[uuid], details.nowSeconds)
+                            accountMeter(uuid, names[uuid], usage[uuid], details.nowSeconds, details.session?.claudeProfile)
                         },
                         // What Switch account… did; the paused card says it itself.
                         notice = state.limitNotice?.takeIf { !state.canSwitchAccount },

@@ -136,6 +136,7 @@ import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.FleetNote
 import dev.claudefleet.mobile.model.parseFleetPrompt
 import dev.claudefleet.mobile.model.personQueued
+import dev.claudefleet.mobile.utcOffsetSeconds
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.tailMarker
 import dev.claudefleet.mobile.model.thinkingLine
@@ -986,6 +987,15 @@ fun SessionScreen(
             // What the person typed while Control was mid-turn, waiting in the hub's queue (Control review F19).
             if (control != null && state.queuesWhileWorking) {
                 QueuedChips(remember(state.queued) { personQueued(state.queued) }, enabled = state.connected, onCancel = later.onCancelQueued)
+            } else if (control == null) {
+                // Review w22-10: a prompt kept with Send later shows on its
+                // session, with when it goes, and can be taken back here.
+                QueuedChips(
+                    remember(state.queued) { personQueued(state.queued) },
+                    enabled = state.connected && !state.readOnly,
+                    onCancel = later.onCancelQueued,
+                    caption = { q -> queuedWhen(q, state.nowSeconds, { utcOffsetSeconds(it) }) },
+                )
             }
 
             if (tabs != null) {

@@ -137,6 +137,13 @@ class SessionG55Test {
     }
 
     @Test
+    fun the_account_row_leads_with_the_login_profile() {
+        val m = assertNotNull(accountMeter("acc-a", "m@work", null, now, profile = "work"))
+        assertEquals("work (m@work)", m.name)
+        assertEquals("m@work", assertNotNull(accountMeter("acc-a", "m@work", null, now, profile = "")).name)
+    }
+
+    @Test
     fun the_account_row_names_the_account_and_what_is_left() {
         val m = assertNotNull(accountMeter("acc-a", "m@work", snapshot(UsageWindow(25.0, now + 100), UsageWindow(40.0, now + 9_000)), now))
         assertEquals("m@work", m.name)
