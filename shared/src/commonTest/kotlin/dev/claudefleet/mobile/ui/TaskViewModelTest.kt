@@ -523,6 +523,7 @@ class TaskViewModelTest {
         assertTrue(vm.state.value.canPromote)
         assertNull(vm.state.value.promoteHint)
         vm.openPromote()
+        runCurrent()
         assertTrue(vm.state.value.promoteOpen)
         assertFalse(canPromoteTo(jira, ""), "Jira needs a project")
         assertEquals("", initialContainer(jira))
