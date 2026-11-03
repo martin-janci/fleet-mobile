@@ -680,7 +680,7 @@ fun PhoneTaskScreen(
                     TaskHierarchy(state, h)
                     OwnTaskControls(state, h)
                     TicketCheckCard(state, h)
-                    TaskResultBlock(state, nowSeconds)
+                    TaskResultBlock(state, h, nowSeconds)
                     task.url?.takeIf { it.isNotBlank() }?.let { url ->
                         val uri = LocalUriHandler.current
                         Text(

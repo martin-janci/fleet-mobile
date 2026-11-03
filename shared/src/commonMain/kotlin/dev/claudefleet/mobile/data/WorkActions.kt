@@ -190,6 +190,9 @@ interface WorkActions {
     /** The item's result (`work { result }`): `null` while no finished task left a report. */
     suspend fun result(itemId: Long): TaskResult? = throw UnsupportedOperationException("result")
 
+    /** **Make a task** from a result's follow-up line (`work_link { followup }`). */
+    suspend fun followup(taskId: Long, index: Int): Unit = throw UnsupportedOperationException("followup")
+
     /** **Delete** this reader's own comment (`work_link { comment_delete }`). */
     suspend fun deleteComment(commentId: Long): Unit = throw UnsupportedOperationException("comment_delete")
 
@@ -361,6 +364,8 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
     override suspend fun trackerComments(key: String): TrackerComments = session.withClient { it.workTrackerComments(key) }
 
     override suspend fun result(itemId: Long): TaskResult? = session.withClient { it.workResult(itemId) }
+
+    override suspend fun followup(taskId: Long, index: Int) = session.withClient { it.createFollowup(taskId, index) }
 
     override suspend fun runTicketCheck(itemId: Long) = session.withClient { it.runTicketCheck(itemId) }
 

@@ -2988,6 +2988,7 @@ private fun TaskRoute(
         onOpenFile = vm::openFile,
         onCloseFile = vm::closeFile,
         onFileUnder = { vm.fileUnder(it) },
+        onMakeFollowup = { vm.makeFollowup(it) },
     )
     if (newLayout) {
         val rows by repository.sessions.collectAsState()

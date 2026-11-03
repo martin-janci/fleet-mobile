@@ -542,7 +542,7 @@ class TaskViewModelTest {
  "prs":[{"url":"https://github.com/acme/api/pull/9","number":9,"state":"OPEN"},{"url":"javascript:alert(1)"}],
  "gate":{"state":"blocked","checks":[{"line":"tests pass","kind":"tests","state":"fail","detail":"2 failing"},{"line":"PR open","kind":"pr","state":"pass","detail":""}],
          "open_children":[{"id":13,"title":"Docs"}]},
- "followups":[]}
+ "followups":[{"text":"Add a retry test","item_id":88},{"text":""},{"text":"Document the refresh"}]}
 """
 
     /** The result decodes leniently: the report, the failed checks, the open subtasks, and only https PRs. */
@@ -560,6 +560,14 @@ class TaskViewModelTest {
         assertEquals("Checks passed", dev.claudefleet.mobile.model.resultGateLine(r.copy(gate = "passed")))
         assertEquals("Not verified yet", dev.claudefleet.mobile.model.resultGateLine(r.copy(gate = "unverified")))
         assertEquals("Implement · 1 h ago", resultHeader(r, 1790003600))
+        assertEquals(
+            listOf(
+                dev.claudefleet.mobile.model.ResultFollowup("Add a retry test", 88, 0),
+                dev.claudefleet.mobile.model.ResultFollowup("Document the refresh", null, 2),
+            ),
+            r.followups,
+            "a blank line is dropped and the rest keep the hub's index",
+        )
         assertNull(dev.claudefleet.mobile.model.taskResultFrom(kotlinx.serialization.json.JsonNull), "no result yet is no card")
     }
 
@@ -572,6 +580,13 @@ class TaskViewModelTest {
         runCurrent()
         assertEquals(listOf(12L), actions.resultItems)
         assertEquals(501L, vm.state.value.result?.taskId)
+        assertTrue(vm.state.value.canFollowup)
+        vm.makeFollowup(0)
+        runCurrent()
+        assertTrue(actions.calls.isEmpty(), "a follow-up already made is not made again")
+        vm.makeFollowup(2)
+        runCurrent()
+        assertEquals(listOf("followup 501 2"), actions.calls)
 
         val failing = FakeWorkActions().apply { taskAnswer = DETAIL; failResult = HubError.Tool("E_INTERNAL", "boom") }
         val quiet = taskVm(actions = failing)
