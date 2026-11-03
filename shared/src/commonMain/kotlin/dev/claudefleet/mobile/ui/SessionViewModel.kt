@@ -378,7 +378,7 @@ data class SessionUiState(
 
     /**
      * ⋮ Pin / Unpin (the desktop's pin, migration 189): kept above the
-     * groups, and the hub refuses Safe remove and Kill until it is unpinned.
+     * groups, and the hub refuses Clean up and Kill until it is unpinned.
      * Not on a ghost, which has nothing left to keep.
      */
     val canPin: Boolean

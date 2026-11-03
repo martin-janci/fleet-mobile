@@ -58,7 +58,7 @@ data class OrbitMenuFacts(
     val review: Boolean = false,
     val archive: Boolean = false,
     val kill: Boolean = false,
-    /** A person pinned it: the hub refuses Safe remove (`E_PINNED`) until it is unpinned. */
+    /** A person pinned it: the hub refuses Clean up (`E_PINNED`) until it is unpinned. */
     val pinned: Boolean = false,
     /** This person may pin or unpin it (`pin_session`). */
     val pin: Boolean = false,
@@ -72,7 +72,7 @@ data class OrbitMenuFacts(
 /** The command that attaches a terminal to the session on its host, as the desktop's Details copies it. */
 fun tmuxAttachCommand(tmuxName: String): String = "tmux attach -t $tmuxName"
 
-/** The menu's lines, in order. */
+/** The menu's lines, in order. An item that asks first, or opens a sheet, ends in "…", as Kill session… does. */
 fun orbitMenuItems(f: OrbitMenuFacts): List<OrbitMenuItem> = buildList {
     if (f.manage) add(OrbitMenuItem(OrbitItem.Rename, "Rename", null, 0))
     if (f.ticket || f.tasks) add(OrbitMenuItem(OrbitItem.Ticket, "Ticket and tasks", f.ticketKey ?: "link a ticket", 0, writes = false))
@@ -85,13 +85,13 @@ fun orbitMenuItems(f: OrbitMenuFacts): List<OrbitMenuItem> = buildList {
     if (f.sendLater) add(OrbitMenuItem(OrbitItem.SendLater, "Send later…", "goes in when the session is next idle", 1))
     if (f.background) add(OrbitMenuItem(OrbitItem.Background, "Background agent…", "runs without a pane; the result lands in Inbox", 1))
     if (f.move) add(OrbitMenuItem(OrbitItem.Move, "Move to host…", f.hostAlias?.let { "now on $it" }, 2))
-    if (f.repair) add(OrbitMenuItem(OrbitItem.Repair, "Repair workspace", "fix the worktree, re-attach the pane", 2))
-    if (f.recreate) add(OrbitMenuItem(OrbitItem.Recreate, "Recreate", if (f.ghost) "bring it back in its worktree" else "new pane, same worktree and conversation", 2))
-    if (f.restart) add(OrbitMenuItem(OrbitItem.Restart, "Restart", "kill and recreate the tmux session", 2))
-    if (f.dismissGhost) add(OrbitMenuItem(OrbitItem.DismissGhost, "Dismiss lost session", "forget this row; the conversation stays", 2))
+    if (f.repair) add(OrbitMenuItem(OrbitItem.Repair, "Repair workspace…", "fix the worktree, re-attach the pane; asks first", 2))
+    if (f.recreate) add(OrbitMenuItem(OrbitItem.Recreate, "Recreate…", if (f.ghost) "bring it back in its worktree" else "new pane, same worktree and conversation", 2))
+    if (f.restart) add(OrbitMenuItem(OrbitItem.Restart, "Restart…", "kill and recreate the tmux session; asks first", 2))
+    if (f.dismissGhost) add(OrbitMenuItem(OrbitItem.DismissGhost, "Dismiss lost session…", "forget this row; the conversation stays", 2))
     if (f.pin) {
         add(
-            if (f.pinned) OrbitMenuItem(OrbitItem.Pin, "Unpin", "Safe remove and Kill work again", 2)
+            if (f.pinned) OrbitMenuItem(OrbitItem.Pin, "Unpin", "Clean up and Kill work again", 2)
             else OrbitMenuItem(OrbitItem.Pin, "Pin", "kept on top; nothing removes it until unpinned", 2),
         )
     }
@@ -101,7 +101,7 @@ fun orbitMenuItems(f: OrbitMenuFacts): List<OrbitMenuItem> = buildList {
     add(OrbitMenuItem(OrbitItem.Details, "Details", "host, branch, model, timeline", 3, writes = false))
     if (f.worktree) add(OrbitMenuItem(OrbitItem.Worktree, "Files", "changes, history, the worktree", 3, writes = false))
     if (f.archive) add(OrbitMenuItem(OrbitItem.Archive, "Archive", "off the work board", 4))
-    if (f.manage && !f.pinned) add(OrbitMenuItem(OrbitItem.Retire, "Safe remove", "commit and push, then remove", 4))
+    if (f.manage && !f.pinned) add(OrbitMenuItem(OrbitItem.Retire, "Clean up…", "commit and push, then remove; asks first", 4))
     if (f.kill) add(OrbitMenuItem(OrbitItem.Kill, "Kill session…", "asks first", 4, danger = true))
 }
 

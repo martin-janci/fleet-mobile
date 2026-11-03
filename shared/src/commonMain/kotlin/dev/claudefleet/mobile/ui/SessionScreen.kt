@@ -1938,7 +1938,7 @@ private fun SessionOverflowMenu(
         if (manage) {
             HorizontalDivider()
             if (state.session?.isPinned == true) {
-                // The hub refuses Safe remove and Kill on a pinned session
+                // The hub refuses Clean up and Kill on a pinned session
                 // (`E_PINNED`): Unpin where this hub and pairing can, else said why.
                 if (state.canPin) {
                     DropdownMenuItem(text = { Text("Unpin") }, enabled = actionable, onClick = { expanded = false; onSetPinned(false) })
@@ -1950,7 +1950,7 @@ private fun SessionOverflowMenu(
                     DropdownMenuItem(text = { Text("Pin") }, enabled = actionable, onClick = { expanded = false; onSetPinned(true) })
                 }
                 DropdownMenuItem(
-                    text = { Text("Safe remove") },
+                    text = { Text("Clean up") },
                     enabled = actionable,
                     onClick = { expanded = false; showSafeKillConfirm = true },
                 )
@@ -2109,14 +2109,16 @@ private fun ManageDialogs(
             onDismiss = hideRestartConfirm,
         )
     }
-    // Retiring ends the session once its work is saved: asked first, like
-    // Restart. No delayed enable — that is Kill now's, which cannot wait.
+    // Clean up ends the session once its work is saved: asked first, like
+    // Restart. No delayed enable — that is Kill now's, which cannot wait. One
+    // name on every surface: the menu item, this sheet and the desktop all
+    // say "Clean up" (it read "Retire" here and "Safe remove" in the menu: three names for one action).
     if (showSafeKillConfirm) {
         ConfirmSheet(
-            title = "Retire this session?",
+            title = "Clean up this session?",
             body = "Claude is asked to commit and push its work. Once the tree is clean, " +
                 "the session and its worktree are removed.",
-            confirm = "Retire",
+            confirm = "Clean up",
             onConfirm = { hideSafeKillConfirm(); onSafeKill() },
             onDismiss = hideSafeKillConfirm,
         )
@@ -2250,7 +2252,7 @@ internal fun killChangesLine(files: List<ChangedFile>): String {
     val names = files.take(3).joinToString(", ") { it.path.substringAfterLast('/') }
     val more = if (files.size > 3) " and ${files.size - 3} more" else ""
     val n = if (files.size == 1) "1 uncommitted file" else "${files.size} uncommitted files"
-    return "Leaves $n: $names$more. Safe remove commits and pushes them first."
+    return "Leaves $n: $names$more. Clean up commits and pushes them first."
 }
 
 /**
