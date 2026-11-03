@@ -84,6 +84,7 @@ const val MISSION_RUNNING_TAG = "mission.running."
 const val MISSION_GRANT_REVIEW_TAG = "mission.grant.review"
 const val MISSION_RETRY_TAG = "mission.retry."
 const val MISSION_STEP_TAG = "mission.step."
+const val MISSION_STEPS_READONLY_TAG = "mission.steps.readonly"
 const val MISSION_SESSION_TAG = "mission.session."
 const val MISSION_ITEM_SESSION_TAG = "mission.item.session."
 
@@ -336,8 +337,23 @@ fun OrbitMissionDetail(detail: MissionDetail, state: MissionsUiState, handlers: 
                 if (plan.steps.isEmpty()) {
                     item(key = "steps-none") { Text("Nothing is ready.", color = o.fgMuted, fontSize = 14.sp, modifier = Modifier.padding(horizontal = gutter)) }
                 }
+                // Go stays off the rows where this pairing or this person may not press
+                // a step; the reason is said once instead of a button that never works.
+                val mayPress = state.canStart && detail.mayChange
+                if (!mayPress && plan.steps.isNotEmpty()) {
+                    item(key = "steps-readonly") {
+                        Text(
+                            if (!detail.mayChange) "Only someone who may change this mission can press its steps."
+                            else "Press steps in Control on the desktop: this pairing cannot start them.",
+                            color = o.fgMuted,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                            modifier = Modifier.padding(horizontal = gutter, vertical = 4.dp).testTag(MISSION_STEPS_READONLY_TAG),
+                        )
+                    }
+                }
                 items(plan.steps, key = { "step:${it.key()}" }) { s ->
-                    StepRow(s, s.itemId?.let { titles[it] }, state.canStart && detail.mayChange && state.busy == null, handlers)
+                    StepRow(s, s.itemId?.let { titles[it] }, mayPress && state.busy == null, handlers, showGo = mayPress)
                 }
                 item(key = "spent") {
                     val a = plan.autonomy
