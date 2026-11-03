@@ -1913,14 +1913,14 @@ private fun SessionOverflowMenu(
             // A ghost first: bringing it back, or letting it go, is what it is for.
             if (state.canRecreate) {
                 DropdownMenuItem(
-                    text = { Text(if (state.ghost) "Recreate" else "Recreate (resume in a new pane)") },
+                    text = { Text(if (state.ghost) "Recreate…" else "Recreate (resume in a new pane)…") },
                     enabled = actionable,
                     onClick = { expanded = false; showRecreateConfirm = true },
                 )
             }
             if (state.canDismissGhost) {
                 DropdownMenuItem(
-                    text = { Text("Dismiss lost session") },
+                    text = { Text("Dismiss lost session…") },
                     enabled = actionable,
                     onClick = { expanded = false; showDismissGhostConfirm = true },
                 )
@@ -1929,10 +1929,10 @@ private fun SessionOverflowMenu(
                 DropdownMenuItem(text = { Text("Move to host…") }, enabled = actionable, onClick = { expanded = false; onMove() })
             }
             if (state.canRepair) {
-                DropdownMenuItem(text = { Text("Repair workspace") }, enabled = actionable, onClick = { expanded = false; showRepairConfirm = true })
+                DropdownMenuItem(text = { Text("Repair workspace…") }, enabled = actionable, onClick = { expanded = false; showRepairConfirm = true })
             }
             if (manage && state.canRestart) {
-                DropdownMenuItem(text = { Text("Restart") }, enabled = actionable, onClick = { expanded = false; showRestartConfirm = true })
+                DropdownMenuItem(text = { Text("Restart…") }, enabled = actionable, onClick = { expanded = false; showRestartConfirm = true })
             }
         }
         if (manage) {
@@ -1950,7 +1950,7 @@ private fun SessionOverflowMenu(
                     DropdownMenuItem(text = { Text("Pin") }, enabled = actionable, onClick = { expanded = false; onSetPinned(true) })
                 }
                 DropdownMenuItem(
-                    text = { Text("Clean up") },
+                    text = { Text("Clean up…") },
                     enabled = actionable,
                     onClick = { expanded = false; showSafeKillConfirm = true },
                 )

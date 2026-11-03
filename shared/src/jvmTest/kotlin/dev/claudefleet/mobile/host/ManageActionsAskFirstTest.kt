@@ -28,7 +28,7 @@ class ManageActionsAskFirstTest {
     @Test
     fun every_ending_action_opens_a_question_rather_than_calling() {
         val direct = mapOf(
-            "Restart" to "onRestart",
+            "Restart…" to "onRestart",
             "Clean up" to "onSafeKill",
         ).filter { (label, call) -> call in menuClick(label) }
 
