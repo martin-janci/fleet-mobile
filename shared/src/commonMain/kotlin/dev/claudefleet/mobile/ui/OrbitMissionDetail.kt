@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import dev.claudefleet.mobile.ui.components.DangerTextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,6 +41,7 @@ import dev.claudefleet.mobile.model.dollars
 import dev.claudefleet.mobile.model.key
 import dev.claudefleet.mobile.model.openCards
 import dev.claudefleet.mobile.model.pauseMove
+import dev.claudefleet.mobile.model.pauseMoveLabel
 import dev.claudefleet.mobile.model.runEstimateLine
 import dev.claudefleet.mobile.model.SpendAsk
 import dev.claudefleet.mobile.model.spendAsk
@@ -219,6 +222,16 @@ fun OrbitMissionDetail(detail: MissionDetail, state: MissionsUiState, handlers: 
     val spend = remember(detail) { spendAsk(detail) }
     var notNow by rememberSaveable(m.id) { mutableStateOf(false) }
     var reviewing by remember(m.id) { mutableStateOf(false) }
+    var discarding by remember(m.id) { mutableStateOf(false) }
+    if (discarding) {
+        AlertDialog(
+            onDismissRequest = { discarding = false },
+            title = { Text("Discard ${m.name.ifBlank { "this draft" }}?") },
+            text = { Text("The draft is cancelled. Its tasks stay.") },
+            confirmButton = { DangerTextButton(onClick = { discarding = false; handlers.onDiscardDraft() }) { Text("Discard") } },
+            dismissButton = { TextButton(onClick = { discarding = false }) { Text("Keep") } },
+        )
+    }
     val nodeState = remember(detail.graph) { detail.graph.nodes.associate { it.itemId to it.state } }
     val gutter = OrbitTokens.spacing("phone-gutter").dp
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -312,7 +325,7 @@ fun OrbitMissionDetail(detail: MissionDetail, state: MissionsUiState, handlers: 
             if (plan == null) {
                 item(key = "noplan") {
                     Text(
-                        if (m.state == "draft") "A draft: plan and start it in Control on the desktop." else "This mission takes no more steps.",
+                        if (m.state == "draft") "A draft: Start it, or ask Control to plan it." else "This mission takes no more steps.",
                         color = o.fgMuted,
                         fontSize = 14.sp,
                         modifier = Modifier.padding(horizontal = gutter, vertical = 8.dp),
@@ -344,8 +357,11 @@ fun OrbitMissionDetail(detail: MissionDetail, state: MissionsUiState, handlers: 
                     }
                     if (state.canPause && detail.mayChange && m.pauseMove() != null) {
                         TextButton(onClick = handlers.onTogglePause, enabled = state.busy == null) {
-                            Text(if (m.state == "active") "Pause" else "Resume", color = o.fg2)
+                            Text(m.pauseMoveLabel().orEmpty(), color = if (m.state == "draft") o.accent else o.fg2)
                         }
+                    }
+                    if (state.canPause && detail.mayChange && m.state == "draft") {
+                        TextButton(onClick = { discarding = true }, enabled = state.busy == null) { Text("Discard draft", color = o.fg2) }
                     }
                 }
             }

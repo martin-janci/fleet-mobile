@@ -27,7 +27,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import dev.claudefleet.mobile.utcOffsetSeconds
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.HostCheck
@@ -98,9 +101,10 @@ fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowS
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    host?.let(::hostFacts)?.let { facts ->
+                    host?.let { hostFacts(it, logins = false) }?.let { facts ->
                         Text(facts, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                    host?.let { h -> LoginsBlock(remember(h.alias, h.signedOutLogins) { loginLines(h) { utcOffsetSeconds(it) } }) }
                     // Host health (claude-fleet #913): the load now, and what it means when it is trouble.
                     host?.takeIf { it.healthAt != null }?.let { hostLoad(it, nowSeconds) }?.let { load ->
                         Text(
@@ -276,6 +280,28 @@ private fun PlanEntryRow(entry: RestorePlanEntry) {
 }
 
 /** The health checklist's lines, or why the host could not be asked. */
+/**
+ * The host's signed-out Claude logins, each with its sign-in command to copy
+ * and run in a terminal (review w23-2, the desktop host sheet's Logins).
+ */
+@Composable
+private fun LoginsBlock(lines: List<LoginLine>) {
+    if (lines.isEmpty()) return
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf<String?>(null) }
+    Column(modifier = Modifier.padding(top = 8.dp)) {
+        Text("Logins", style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
+        for (l in lines) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(l.text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                TextButton(onClick = { clipboard.setText(AnnotatedString(l.command)); copied = l.command }) {
+                    Text(if (copied == l.command) "Copied" else "Copy login command")
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun HealthLines(check: HostCheck) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp)) {

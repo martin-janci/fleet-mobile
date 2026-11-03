@@ -20,6 +20,8 @@ import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.RunTrace
 import dev.claudefleet.mobile.model.RunTraceStep
 import dev.claudefleet.mobile.model.StorageHealth
+import dev.claudefleet.mobile.model.UpdateAttention
+import dev.claudefleet.mobile.model.UpdatesHealth
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
@@ -658,5 +660,35 @@ class AutomationTest {
         assertEquals("Hub backup stale", backup.title)
         assertTrue(backup.line.startsWith("The newest backup is 3 d old"), backup.line)
         assertTrue(storageWarnings(StorageHealth(backupStale = true), now).single().line.startsWith("The hub has no backup"))
+    }
+
+    @Test
+    fun theFleetsUpdatesThatNeedAPersonShowOnThePhone() {
+        // Review w26-3: the hub's `fleet_health.updates`, read off the wire.
+        val health = dev.claudefleet.mobile.net.json.decodeFromString(
+            HubHealth.serializer(),
+            """{"db_ready":true,"version":"0.6.4","updates":{"channel":"stale","attention":[
+              {"reason":"update_rolled_back","target":"hub:self","component":"hub","version":"0.6.4","detail":"health check failed"},
+              {"reason":"update_rolled_back","target":"hub:self","component":"hub"},
+              {"reason":"rollback_failed","target":"hub:self"},
+              {"reason":"update_required","target":"client:3","component":"android","version":"0.6.1"},
+              {"reason":"channel_stale","target":"channel:stable"},
+              {"reason":"something_new","target":"agent:mercury"}]}}""",
+        )
+        val w = updateWarnings(health.updates)
+        assertEquals(
+            listOf(
+                "Update rolled back: the hub",
+                "Hub update: rollback failed, hub stopped",
+                "Update required: phone 3",
+                "Release channel stale",
+                "Update: something new: agent on mercury",
+            ),
+            w.map { it.title },
+        )
+        assertEquals("hub:self runs 0.6.4 · health check failed · See Settings, Updates on the desktop", w.first().line)
+        assertEquals(emptyList(), updateWarnings(null))
+        assertEquals(emptyList(), updateWarnings(UpdatesHealth(channel = "fresh")))
+        assertEquals("Rollback failed: agent on pine", updateWarnings(UpdatesHealth(attention = listOf(UpdateAttention("rollback_failed", "agent:pine")))).single().title)
     }
 }

@@ -161,6 +161,10 @@ interface SessionActions {
     /** Delete a ghost's row for good. */
     suspend fun dismissGhost(sessionId: Long)
 
+    /** Pin or unpin the session; the default (a fake, an older seam) refuses. */
+    suspend fun setPinned(sessionId: Long, pinned: Boolean): Unit =
+        throw UnsupportedOperationException("pin_session")
+
     /** Ask the session to persist its work, then arm deletion once it is clean. */
     suspend fun safeKill(sessionId: Long)
 
@@ -267,6 +271,10 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
     override suspend fun recreate(sessionId: Long): SessionRow = session.withClient { it.recreateSession(sessionId) }
 
     override suspend fun dismissGhost(sessionId: Long) = session.withClient { it.dismissGhost(sessionId) }
+
+    override suspend fun setPinned(sessionId: Long, pinned: Boolean) {
+        session.withClient { it.pinSession(sessionId, pinned) }
+    }
 
     override suspend fun safeKill(sessionId: Long) =
         session.withClient { it.safeKill(sessionId) }

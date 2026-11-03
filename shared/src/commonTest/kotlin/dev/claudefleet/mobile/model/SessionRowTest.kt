@@ -161,6 +161,36 @@ class SessionRowTest {
         assertEquals(3, guess.suggestions)
     }
 
+    /** fleet-mobile #68: the hub's `kind` and `effective_status`, with the old shape kept for an older hub. */
+    @Test
+    fun local_work_shows_its_live_status_and_stays_renamable() {
+        val local = json.decodeFromString(
+            WorkSummary.serializer(),
+            """{"link_id":1,"item_id":7,"key":"CF-7","title":"Tidy","source":"named","kind":"local","effective_status":"in_progress"}""",
+        )
+        assertTrue(local.isLocal)
+        assertNull(local.statusCategory, "status_category stays tracker-only")
+        assertEquals(StatusCategory.InProgress, local.shownStatus)
+
+        val ticket = json.decodeFromString(
+            WorkSummary.serializer(),
+            """{"link_id":2,"item_id":8,"key":"PAY-7","source":"branch","kind":"tracker","status_category":"todo","effective_status":"done"}""",
+        )
+        assertFalse(ticket.isLocal)
+        assertEquals(StatusCategory.Done, ticket.shownStatus, "the effective status wins")
+        assertFalse(WorkSummary(itemId = 9, kind = "tracker").isLocal, "kind says so even with no status or URL")
+
+        // An older hub sends no kind and no effective_status: the shape decides, as before.
+        val old = json.decodeFromString(WorkSummary.serializer(), """{"link_id":3,"item_id":9,"key":"CF-9","source":"named"}""")
+        assertEquals("", old.kind)
+        assertTrue(old.isLocal)
+        assertNull(old.shownStatus)
+        assertFalse(WorkSummary(itemId = 9, statusCategory = StatusCategory.Todo).isLocal)
+        assertFalse(WorkSummary(itemId = 9, url = "https://x/1").isLocal)
+        assertFalse(WorkSummary(key = "PAY-7").isLocal, "a bare key is no item")
+        assertEquals(StatusCategory.Todo, WorkSummary(statusCategory = StatusCategory.Todo).shownStatus)
+    }
+
     @Test
     fun a_row_without_work_has_none() {
         val bare = json.decodeFromString(SessionRow.serializer(), """{"id":9}""")

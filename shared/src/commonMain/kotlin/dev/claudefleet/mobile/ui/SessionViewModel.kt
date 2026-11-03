@@ -234,6 +234,8 @@ data class SessionUiState(
     /** The hub can recreate a session / dismiss a ghost (`recreate_session`, `dismiss_ghost_session`). */
     val recreateAvailable: Boolean = false,
     val dismissGhostAvailable: Boolean = false,
+    /** The hub pins sessions (`pin_session`). */
+    val pinAvailable: Boolean = false,
     val reviewAvailable: Boolean = false,
     val repairAvailable: Boolean = false,
     /** The keys the full-screen agent's bar may press in the pane ([HubCapabilities.paneKeys]). */
@@ -373,6 +375,14 @@ data class SessionUiState(
 
     val canDismissGhost: Boolean
         get() = canManage && ghost && dismissGhostAvailable && session?.isPinned != true
+
+    /**
+     * ⋮ Pin / Unpin (the desktop's pin, migration 189): kept above the
+     * groups, and the hub refuses Safe remove and Kill until it is unpinned.
+     * Not on a ghost, which has nothing left to keep.
+     */
+    val canPin: Boolean
+        get() = canManage && pinAvailable && !ghost
     /**
      * Whether the ⋮ menu is offered at all: a readonly credential may not
      * call any of these tools, a session that has left the fleet has nothing
@@ -2115,6 +2125,9 @@ class SessionViewModel(
     /** Replace the session's tags with [tags]. */
     fun setTags(tags: List<String>): Job = runManaged(::canManageNow) { actions.setTags(sessionId, tags) }
 
+    /** Pin or unpin the session ([SessionUiState.canPin]). */
+    fun setPinned(pinned: Boolean): Job = runManaged(::canManageNow) { actions.setPinned(sessionId, pinned) }
+
     /** Set the session's friendly display name to [name]. */
     fun rename(name: String): Job = runManaged(::canManageNow) { actions.rename(sessionId, name) }
 
@@ -2484,6 +2497,7 @@ class SessionViewModel(
         loadingOlder = l.loadingOlder,
         recreateAvailable = fleet.capabilities.value.recreateSession,
         dismissGhostAvailable = fleet.capabilities.value.dismissGhost,
+        pinAvailable = fleet.capabilities.value.pinSession,
         reviewAvailable = fleet.capabilities.value.spawnReview,
         repairAvailable = fleet.capabilities.value.repairSession,
         paneKeys = fleet.capabilities.value.paneKeys,

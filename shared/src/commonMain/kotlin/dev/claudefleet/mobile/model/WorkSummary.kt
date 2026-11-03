@@ -37,7 +37,23 @@ data class WorkSummary(
     val title: String = "",
     /** How the link was made: `manual`, `agent`, `branch`, `started`, … */
     val source: String = "",
+    /**
+     * The tracker item's own status bucket: tracker-only on purpose (a local
+     * item has none here, see [isLocal]). What to show is [shownStatus].
+     */
     @SerialName("status_category") val statusCategory: StatusCategory? = null,
+    /**
+     * `local` | `tracker` | `ref`: which kind of work this is (claude-fleet
+     * #394). Empty from an older hub, where [isLocal] falls back to the shape.
+     */
+    val kind: String = "",
+    /**
+     * The status after the hub's precedence (claude-fleet #394): a person's
+     * setting, else a merged PR's `done`, else `in_progress` while a session
+     * works on it, else the stored value; for local work too. Null from an
+     * older hub and for a bare key.
+     */
+    @SerialName("effective_status") val effectiveStatus: StatusCategory? = null,
     /** The tracker's own status name ("In Review"). */
     @SerialName("status_name") val statusName: String? = null,
     val url: String? = null,
@@ -72,6 +88,18 @@ data class WorkSummary(
      * nor title.
      */
     val groupKey: String? get() = label.takeIf { it.isNotBlank() }?.uppercase()
+
+    /** The status a chip, a dot or a filter shows: [effectiveStatus], else the tracker's [statusCategory] (an older hub). */
+    val shownStatus: StatusCategory? get() = effectiveStatus ?: statusCategory
+
+    /**
+     * Work with no ticket behind it (fleet's own item), which a person may
+     * rename. The hub's [kind] says so; an older hub sends none, and then the
+     * shape does: an item with neither a tracker status nor a URL
+     * (fleet-mobile #68).
+     */
+    val isLocal: Boolean
+        get() = if (kind.isNotEmpty()) kind == "local" && itemId != null else itemId != null && statusCategory == null && url == null
 }
 
 /**

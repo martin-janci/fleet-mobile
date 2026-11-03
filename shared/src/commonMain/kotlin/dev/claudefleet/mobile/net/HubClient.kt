@@ -1014,6 +1014,15 @@ class HubClient(
             json.decodeFromJsonElement(ListSerializer(AgentInstall.serializer()), it)
         }
 
+    /**
+     * Pin or unpin a session (`pin_session`): a pinned one is kept above the
+     * groups, and Safe remove, Kill and tidy-up refuse it (`E_PINNED`).
+     */
+    suspend fun pinSession(sessionId: Long, pinned: Boolean): SessionRow =
+        call("pin_session", buildJsonObject { put("session_id", sessionId); put("pinned", pinned) }) {
+            json.decodeFromJsonElement(SessionRow.serializer(), it)
+        }
+
     /** Delete a ghost's row for good (`dismiss_ghost_session`). */
     suspend fun dismissGhost(sessionId: Long): Unit =
         call("dismiss_ghost_session", buildJsonObject { put("session_id", sessionId) }) { }

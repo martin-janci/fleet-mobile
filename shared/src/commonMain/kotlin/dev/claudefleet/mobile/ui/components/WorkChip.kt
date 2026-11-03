@@ -80,7 +80,7 @@ fun WorkChip(
             .padding(horizontal = 6.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        work.statusCategory?.let { WorkStatusDot(it) }
+        work.shownStatus?.let { WorkStatusDot(it) }
         if (!suggested && isAutoLinked(work)) {
             Box(
                 Modifier
@@ -126,7 +126,7 @@ fun workChipDescription(work: WorkSummary, suggested: Boolean, showTitle: Boolea
     add(if (suggested) "Suggested work ${work.shownLabel}, not confirmed" else "Work ${work.shownLabel}")
     if (showTitle && work.key != null && work.title.isNotBlank()) add(work.title)
     if (!suggested && isAutoLinked(work)) add("linked automatically")
-    (work.statusName ?: work.statusCategory?.spoken())?.let { add(it) }
+    (work.statusName ?: work.shownStatus?.spoken())?.let { add(it) }
     if (work.unavailable) add("ticket unavailable")
 }.joinToString(", ")
 

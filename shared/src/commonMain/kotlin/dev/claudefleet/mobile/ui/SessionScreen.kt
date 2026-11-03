@@ -136,6 +136,7 @@ import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.FleetNote
 import dev.claudefleet.mobile.model.parseFleetPrompt
 import dev.claudefleet.mobile.model.personQueued
+import dev.claudefleet.mobile.utcOffsetSeconds
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.tailMarker
 import dev.claudefleet.mobile.model.thinkingLine
@@ -303,6 +304,8 @@ fun SessionScreen(
     /** Recreate the session / let a ghost go; the defaults do nothing. */
     onRecreate: () -> Unit = {},
     onDismissGhost: () -> Unit = {},
+    /** ⋮ Pin / Unpin ([SessionUiState.canPin]); the default does nothing. */
+    onSetPinned: (Boolean) -> Unit = {},
     /** Start a review session with a prompt; repair the workspace; close a repair's report. */
     onReview: (String) -> Unit = {},
     onRepair: () -> Unit = {},
@@ -704,6 +707,7 @@ fun SessionScreen(
                         onOpenRepo = onOpenRepo,
                         onRecreate = onRecreate,
                         onDismissGhost = onDismissGhost,
+                        onSetPinned = onSetPinned,
                         onReview = onReview,
                         onRepair = onRepair,
                         onFind = { findOpen = !findOpen; if (!findOpen) { findQuery = ""; findScope = FindScope.Everything } },
@@ -983,6 +987,15 @@ fun SessionScreen(
             // What the person typed while Control was mid-turn, waiting in the hub's queue (Control review F19).
             if (control != null && state.queuesWhileWorking) {
                 QueuedChips(remember(state.queued) { personQueued(state.queued) }, enabled = state.connected, onCancel = later.onCancelQueued)
+            } else if (control == null) {
+                // Review w22-10: a prompt kept with Send later shows on its
+                // session, with when it goes, and can be taken back here.
+                QueuedChips(
+                    remember(state.queued) { personQueued(state.queued) },
+                    enabled = state.connected && !state.readOnly,
+                    onCancel = later.onCancelQueued,
+                    caption = { q -> queuedWhen(q, state.nowSeconds, { utcOffsetSeconds(it) }) },
+                )
             }
 
             if (tabs != null) {
@@ -1503,6 +1516,7 @@ private fun SessionBar(
     onOpenRepo: (() -> Unit)?,
     onRecreate: () -> Unit,
     onDismissGhost: () -> Unit,
+    onSetPinned: (Boolean) -> Unit,
     onReview: (String) -> Unit,
     onRepair: () -> Unit,
     onFind: () -> Unit,
@@ -1581,6 +1595,7 @@ private fun SessionBar(
                     onRepo = onOpenRepo,
                     onRecreate = onRecreate,
                     onDismissGhost = onDismissGhost,
+                    onSetPinned = onSetPinned,
                     onReview = onReview,
                     onRepair = onRepair,
                     onSendCommand = onSendCommand,
@@ -1735,6 +1750,7 @@ private fun SessionOverflowMenu(
     onRepo: (() -> Unit)? = null,
     onRecreate: () -> Unit = {},
     onDismissGhost: () -> Unit = {},
+    onSetPinned: (Boolean) -> Unit = {},
     onReview: (String) -> Unit = {},
     onRepair: () -> Unit = {},
     onSendCommand: (String) -> Unit = {},
@@ -1806,6 +1822,7 @@ private fun SessionOverflowMenu(
                     archive = orbit.onArchive != null,
                     kill = manage && state.canKill,
                     pinned = session?.isPinned == true,
+                    pin = state.canPin,
                     worktree = onRepo != null,
                     sendLater = state.canSendLater,
                     background = state.canStartBackground,
@@ -1832,6 +1849,7 @@ private fun SessionOverflowMenu(
                             OrbitItem.Recreate -> showRecreateConfirm = true
                             OrbitItem.Restart -> showRestartConfirm = true
                             OrbitItem.DismissGhost -> showDismissGhostConfirm = true
+                            OrbitItem.Pin -> onSetPinned(session?.isPinned != true)
                             OrbitItem.CopyAttach -> session?.let { clipboard.setText(AnnotatedString(tmuxAttachCommand(it.tmuxName))) }
                             OrbitItem.Details -> onDetails()
                             OrbitItem.Worktree -> onRepo?.invoke()
@@ -1920,10 +1938,17 @@ private fun SessionOverflowMenu(
         if (manage) {
             HorizontalDivider()
             if (state.session?.isPinned == true) {
-                // Said rather than hidden: the hub refuses Safe remove and Kill
-                // on a pinned session (`E_PINNED`), and the phone cannot unpin.
-                DropdownMenuItem(text = { Text("Pinned: unpin on the desktop") }, enabled = false, onClick = {})
+                // The hub refuses Safe remove and Kill on a pinned session
+                // (`E_PINNED`): Unpin where this hub and pairing can, else said why.
+                if (state.canPin) {
+                    DropdownMenuItem(text = { Text("Unpin") }, enabled = actionable, onClick = { expanded = false; onSetPinned(false) })
+                } else {
+                    DropdownMenuItem(text = { Text("Pinned: unpin on the desktop") }, enabled = false, onClick = {})
+                }
             } else {
+                if (state.canPin) {
+                    DropdownMenuItem(text = { Text("Pin") }, enabled = actionable, onClick = { expanded = false; onSetPinned(true) })
+                }
                 DropdownMenuItem(
                     text = { Text("Safe remove") },
                     enabled = actionable,

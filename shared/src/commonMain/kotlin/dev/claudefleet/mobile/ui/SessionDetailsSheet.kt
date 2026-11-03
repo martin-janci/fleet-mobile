@@ -98,11 +98,14 @@ data class AccountMeter(val name: String, val line: String?, val leftFraction: F
  * The Account row for a session on [accountUuid], named [name] (from
  * `list_accounts`), with [usage] its last reading; null when the row names
  * no account (an older hub, a host login fleet has not read). A window whose
- * reset has passed counts as whole again.
+ * reset has passed counts as whole again. A session on a named Claude
+ * login ([profile]) leads with it, as the desktop's loginLabel does:
+ * "work (m@work)" (review w23-7).
  */
-fun accountMeter(accountUuid: String?, name: String?, usage: AccountUsageSnapshot?, now: Long): AccountMeter? {
+fun accountMeter(accountUuid: String?, name: String?, usage: AccountUsageSnapshot?, now: Long, profile: String? = null): AccountMeter? {
     val uuid = accountUuid ?: return null
-    val label = name ?: uuid.take(8)
+    val account = name ?: uuid.take(8)
+    val label = profile?.takeIf { it.isNotBlank() }?.let { "$it ($account)" } ?: account
     // A reading the last try failed to refresh says so, and how old it is
     // (review w23-7): an expired login's meters are not current.
     val stale = usage?.takeIf { it.usage != null && it.status != null }?.let { limitsNote(it, now) }?.removeSuffix(".")

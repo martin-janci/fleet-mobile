@@ -319,10 +319,23 @@ fun Mission.summary(): String = buildList {
     if (mode == "continuous") add("continuous")
 }.joinToString(" · ")
 
-/** The single-mission moves the phone offers: pause a running one, resume a paused one. */
+/**
+ * The single-mission move the phone offers inline (the desktop's
+ * `MISSION_MOVES`, review w21-6): start a draft, pause a running one,
+ * resume a paused one.
+ */
 fun Mission.pauseMove(): String? = when (state) {
+    "draft" -> "active"
     "active" -> "paused"
     "paused" -> "active"
+    else -> null
+}
+
+/** [pauseMove]'s button: "Start", "Pause" or "Resume". */
+fun Mission.pauseMoveLabel(): String? = when (state) {
+    "draft" -> "Start"
+    "active" -> "Pause"
+    "paused" -> "Resume"
     else -> null
 }
 

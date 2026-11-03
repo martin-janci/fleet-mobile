@@ -414,6 +414,12 @@ private class FakeActions : SessionActions {
         dismissed += sessionId
     }
 
+    /** Every `pin_session` call, as (session, pinned). */
+    val pins = mutableListOf<Pair<Long, Boolean>>()
+    override suspend fun setPinned(sessionId: Long, pinned: Boolean) {
+        pins += sessionId to pinned
+    }
+
     /** Every `rewind_conversation` call, as (anchor, mode, new worktree). */
     val rewound = mutableListOf<Triple<String?, String, String?>>()
     var rewindFails: Throwable? = null
@@ -3716,6 +3722,22 @@ class SessionViewModelTest {
 
         assertEquals(listOf(ID), actions.dismissed)
         assertTrue(gone)
+    }
+
+    @Test
+    fun a_session_is_pinned_and_unpinned_where_the_hub_pins() = runTest {
+        val actions = FakeActions()
+        val pinTools = setOf(HubCapabilities.PIN_SESSION)
+        val vm = SessionViewModel(ID, FakeFleetState(tools = pinTools), actions, backgroundScope)
+        assertTrue(vm.state.value.canPin)
+        vm.setPinned(true).join()
+        runCurrent()
+        assertEquals(listOf(ID to true), actions.pins)
+
+        // An older hub without the tool, and a ghost, offer no pin.
+        assertFalse(SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope).state.value.canPin)
+        val ghost = SessionViewModel(ID, FakeFleetState(listOf(row().copy(lostAt = 100)), tools = pinTools), FakeActions(), backgroundScope)
+        assertFalse(ghost.state.value.canPin)
     }
 
     @Test

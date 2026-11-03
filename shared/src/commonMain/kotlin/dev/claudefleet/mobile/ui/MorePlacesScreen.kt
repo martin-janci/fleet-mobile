@@ -292,7 +292,7 @@ fun OrbitUsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: L
                     items(state.accounts, key = { "account:${it.uuid}" }) {
                         Column {
                             val a = it
-                            AccountItem(a, nowSeconds, onClick = { naming = a }.takeIf { state.canRename })
+                            AccountItem(a, nowSeconds, state.sessions[a.uuid], onClick = { naming = a }.takeIf { state.canRename })
                             if (state.limitsAvailable) AccountLimitsBlock(state.limits[it.uuid], nowSeconds)
                         }
                     }
@@ -421,10 +421,12 @@ internal fun AccountLimitsBlock(snap: AccountUsageSnapshot?, nowSeconds: Long) {
 }
 
 @Composable
-private fun AccountItem(account: AccountRow, nowSeconds: Long, onClick: (() -> Unit)? = null) {
+private fun AccountItem(account: AccountRow, nowSeconds: Long, sessions: AccountSessions?, onClick: (() -> Unit)? = null) {
     PhoneRow(
         title = account.label,
         line = listOfNotNull(
+            // Which sessions bill this account, and how many wait on it (F11).
+            accountSessionsLine(sessions),
             account.email?.takeIf { it != account.label },
             account.organizationName,
             account.seatTier,
