@@ -386,7 +386,7 @@ private fun AutomationList(
         }
         AutomationTab.Routines -> {
             // The hub's own disk and backups, above the loops that keep them.
-            storageWarnings(state.storage, nowSeconds).forEach { w ->
+            (storageWarnings(state.storage, nowSeconds) + updateWarnings(state.updates)).forEach { w ->
                 PhoneRow(title = w.title, line = w.line, word = StatusWord.FAILED, dot = true)
             }
             if (state.loops.isNotEmpty()) {

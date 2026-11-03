@@ -61,6 +61,35 @@ data class HubHealth(
      * from.
      */
     val storage: StorageHealth? = null,
+    /**
+     * The fleet's own software updates that need a person (claude-fleet
+     * `fleet_health.updates`, review w26-3): a failed or rolled-back update,
+     * a failed rollback, a stale channel, a paused rollout. Absent from an
+     * older hub.
+     */
+    val updates: UpdatesHealth? = null,
+)
+
+/** `fleet_health.updates` (`service::update::UpdatesHealth`). */
+@Serializable
+@JsonIgnoreUnknownKeys
+data class UpdatesHealth(
+    /** `fresh`, `stale` or `none`. */
+    val channel: String? = null,
+    val attention: List<UpdateAttention> = emptyList(),
+)
+
+/** One target's update that needs a person (`service::update::UpdateAttention`). */
+@Serializable
+@JsonIgnoreUnknownKeys
+data class UpdateAttention(
+    /** `update_required` | `update_failed` | `update_rolled_back` | `rollback_failed` | `channel_stale` | `rollout_paused`. */
+    val reason: String = "",
+    /** `client:3`, `agent:<host>`, `hub:self`, `channel:<track>`, … */
+    val target: String = "",
+    val component: String? = null,
+    val version: String? = null,
+    val detail: String? = null,
 )
 
 /**

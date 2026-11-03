@@ -12,6 +12,8 @@ import dev.claudefleet.mobile.model.RoutineNotebook
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.model.RunTraceStep
 import dev.claudefleet.mobile.model.StorageHealth
+import dev.claudefleet.mobile.model.UpdateAttention
+import dev.claudefleet.mobile.model.UpdatesHealth
 import dev.claudefleet.mobile.model.dollars
 import dev.claudefleet.mobile.model.relativeAgo
 import dev.claudefleet.mobile.model.relativeTime
@@ -83,6 +85,8 @@ data class AutomationUiState(
     val loops: List<LoopHealth> = emptyList(),
     /** The hub's own disk and backups; null from an older hub. */
     val storage: StorageHealth? = null,
+    /** The fleet's updates that need a person ([updateWarnings]); null from an older hub. */
+    val updates: UpdatesHealth? = null,
     /** What the routines spent today, micro-USD (`routines { budget }`); null from a hub that does not say. */
     val spentToday: Long? = null,
     /** What is being sent: `routine:<id>` or `pause`. */
@@ -122,6 +126,7 @@ class AutomationViewModel(
         val paused: Boolean? = null,
         val loops: List<LoopHealth> = emptyList(),
         val storage: StorageHealth? = null,
+        val updates: UpdatesHealth? = null,
         val spentToday: Long? = null,
         val busy: String? = null,
         val notice: String? = null,
@@ -150,6 +155,7 @@ class AutomationViewModel(
             paused = l.paused,
             loops = l.loops,
             storage = l.storage,
+            updates = l.updates,
             spentToday = l.spentToday,
             busy = l.busy,
             notice = l.notice,
@@ -327,6 +333,7 @@ class AutomationViewModel(
                     // A failed health read keeps the last; a hub that answers
                     // without it (an older one) has none.
                     storage = if (health != null) health.storage else it.storage,
+                    updates = if (health != null) health.updates else it.updates,
                     spentToday = budget?.spentMicros ?: it.spentToday,
                 )
             }
@@ -611,6 +618,44 @@ fun storageWarnings(s: StorageHealth?, nowSeconds: Long): List<StorageWarning> {
         out += StorageWarning("Hub backup stale", "$whenSaid; it takes one daily. Check its log and its backups folder.")
     }
     return out
+}
+
+/** "the hub", "agent on mercury", "phone 3": who an update entry is about, as the desktop says it. */
+private fun updateWho(a: UpdateAttention): String {
+    val kind = a.target.substringBefore(':')
+    val rest = a.target.substringAfter(':', "")
+    return when (kind) {
+        "hub" -> "the hub"
+        "agent" -> "agent on $rest"
+        "client" -> if (a.component == "android" || a.component == "ios") "phone $rest" else "device $rest"
+        else -> a.target
+    }
+}
+
+/**
+ * The fleet's update entries that need a person, one warning each, as the
+ * desktop's Attention items say them (`update_health.ts`, review w26-3):
+ * an update that failed or rolled back overnight shows on the phone too.
+ */
+fun updateWarnings(u: UpdatesHealth?): List<StorageWarning> {
+    val seen = mutableSetOf<String>()
+    return (u?.attention ?: emptyList()).filter { seen.add("${it.reason}:${it.target}") }.map { a ->
+        val title = when (a.reason) {
+            "rollback_failed" -> if (a.target == "hub:self") "Hub update: rollback failed, hub stopped" else "Rollback failed: ${updateWho(a)}"
+            "update_failed" -> "Update failed: ${updateWho(a)}"
+            "update_rolled_back" -> "Update rolled back: ${updateWho(a)}"
+            "update_required" -> "Update required: ${updateWho(a)}"
+            "channel_stale" -> "Release channel stale"
+            "rollout_paused" -> "Rollout paused: ${a.component ?: a.target}"
+            else -> "Update: ${a.reason.replace('_', ' ')}: ${updateWho(a)}"
+        }
+        val line = listOfNotNull(
+            a.version?.let { "${a.target} runs $it" } ?: a.target,
+            a.detail?.takeIf { it.isNotBlank() },
+            "See Settings, Updates on the desktop",
+        ).joinToString(" · ")
+        StorageWarning(title, line)
+    }
 }
 
 /** Bytes as "1.5 GB", rounded to a tenth. */
