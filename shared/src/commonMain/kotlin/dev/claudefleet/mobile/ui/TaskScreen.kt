@@ -195,6 +195,7 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
                     TaskHierarchy(state, handlers)
                     OwnTaskControls(state, handlers)
                     TicketCheckCard(state, handlers)
+                    TaskResultBlock(state, epochSeconds())
                     state.detail?.lastOutcome?.let { o ->
                         val line = listOfNotNull(o.name, o.host?.let { "on $it" }, o.branch, o.prUrl?.let { "PR $it" }).joinToString(" · ")
                         if (line.isNotBlank()) Text("Last: $line", style = MaterialTheme.typography.bodySmall)

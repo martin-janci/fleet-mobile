@@ -348,6 +348,16 @@ internal class FakeWorkActions : WorkActions {
         return trackerCommentsAnswer
     }
 
+    var resultAnswer: dev.claudefleet.mobile.model.TaskResult? = null
+    var failResult: Throwable? = null
+    val resultItems = mutableListOf<Long>()
+
+    override suspend fun result(itemId: Long): dev.claudefleet.mobile.model.TaskResult? {
+        resultItems += itemId
+        failResult?.let { throw it }
+        return resultAnswer
+    }
+
     override suspend fun setParent(itemId: Long, parent: String) {
         write("set_parent $itemId $parent")
     }
