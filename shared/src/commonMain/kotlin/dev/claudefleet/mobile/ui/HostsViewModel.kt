@@ -6,6 +6,8 @@ import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.HostLoad
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.hostLoad
+import dev.claudefleet.mobile.model.dayLabel
+import dev.claudefleet.mobile.model.loginShellCommand
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.ui.kit.StatusWord
 import kotlinx.coroutines.CancellationException
@@ -212,15 +214,28 @@ private const val LOCAL = "local"
  * left out, and null means it read none of them. The hub probes no
  * toolchains (a JDK, an SDK), so none is claimed.
  */
-internal fun hostFacts(host: HostRow): String? = listOfNotNull(
+internal fun hostFacts(host: HostRow, logins: Boolean = true): String? = listOfNotNull(
     host.diskHomeFreeKb?.takeIf { it >= 0 }?.let { "${gigabytes(it)} free" },
     host.cpuCount?.takeIf { it > 0 }?.let { if (it == 1) "1 CPU" else "$it CPUs" },
     host.memTotalKb?.takeIf { it > 0 }?.let { "${gigabytes(it)} memory" },
     // Review M3: a signed-out login shows on the host even before a session lands on it.
-    host.signedOutLogins.takeIf { it.isNotEmpty() }?.let { out ->
+    host.signedOutLogins.takeIf { logins && it.isNotEmpty() }?.let { out ->
         "signed out: " + out.joinToString(", ") { it.profile ?: "host login" }
     },
 ).joinToString(" · ").ifEmpty { null }
+
+/** One signed-out login in the host sheet's Logins block: what it says, and the command that signs it in again. */
+data class LoginLine(val text: String, val command: String)
+
+/**
+ * [host]'s signed-out logins for its sheet (review w23-2): "work · signed out
+ * since 2 Nov", with the `claude /login` command to copy (the Control card's
+ * [loginShellCommand]). The host's own login reads "Host login".
+ */
+internal fun loginLines(host: HostRow, offsetSeconds: (Long) -> Int): List<LoginLine> = host.signedOutLogins.map { l ->
+    val since = if (l.since > 0) " since ${dayLabel(l.since, offsetSeconds(l.since))}" else ""
+    LoginLine("${l.profile ?: "Host login"} · signed out$since", loginShellCommand(host.alias, l.profile))
+}
 
 /** [kb] kibibytes as "212 GB", or "3.4 GB" under ten; "0.2 GB" rather than "0 GB" for a nearly full disk. */
 internal fun gigabytes(kb: Long): String {

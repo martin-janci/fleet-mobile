@@ -267,6 +267,26 @@ class HostsInstallWizardsTest {
         assertEquals("3.4 GB free", hostFacts(HostRow(alias = "x", diskHomeFreeKb = 3_330_000)))
     }
 
+    /** Review w23-2: the host sheet lists each signed-out login with its sign-in command. */
+    @Test
+    fun the_host_sheet_lists_signed_out_logins_with_their_sign_in_command() {
+        val h = HostRow(
+            alias = "htz",
+            diskHomeFreeKb = 3_330_000,
+            signedOutLogins = listOf(SignedOutLogin(profile = "work", since = 1_762_100_000), SignedOutLogin(profile = null)),
+        )
+        assertEquals(
+            listOf(
+                LoginLine("work · signed out since Nov 2", "ssh -t htz 'CLAUDE_CONFIG_DIR=~/.claude-profiles/work claude /login'"),
+                LoginLine("Host login · signed out", "ssh -t htz 'claude /login'"),
+            ),
+            loginLines(h) { 0 },
+        )
+        assertEquals("3.4 GB free", hostFacts(h, logins = false), "the sheet says it in its Logins block instead")
+        assertEquals("3.4 GB free · signed out: work, host login", hostFacts(h))
+        assertTrue(loginLines(HostRow(alias = "x")) { 0 }.isEmpty())
+    }
+
     @Test
     fun the_where_step_shows_each_hosts_facts_and_why_one_cannot_be_picked() {
         val pine = HostChoice(alias = "pine", reachable = true, facts = "227 GB free · 16 CPUs")
