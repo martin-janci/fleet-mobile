@@ -115,7 +115,9 @@ import dev.claudefleet.mobile.model.RulePreview
 import dev.claudefleet.mobile.model.SessionTasks
 import dev.claudefleet.mobile.model.TaskDetail
 import dev.claudefleet.mobile.model.TaskComment
+import dev.claudefleet.mobile.model.TaskResult
 import dev.claudefleet.mobile.model.TrackerComments
+import dev.claudefleet.mobile.model.taskResultFrom
 import dev.claudefleet.mobile.model.WorkDecision
 import dev.claudefleet.mobile.model.WorkRule
 import dev.claudefleet.mobile.model.WorkRuleDraft
@@ -2065,6 +2067,10 @@ class HubClient(
         call("work", buildJsonObject { put("action", "tracker_comments"); put("key", key) }) {
             json.decodeFromJsonElement(TrackerComments.serializer(), it)
         }
+
+    /** A work item's result (`work { result }`): `null` while no finished task of it left a report. */
+    suspend fun workResult(itemId: Long): TaskResult? =
+        call("work", buildJsonObject { put("action", "result"); put("item_id", itemId) }) { taskResultFrom(it) }
 
     /** Every link of one session — live, suggested, rejected and ended — with its task. */
     suspend fun workSessionTasks(sessionId: Long): SessionTasks =

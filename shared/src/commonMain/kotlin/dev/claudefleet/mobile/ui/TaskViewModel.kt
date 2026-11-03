@@ -15,6 +15,7 @@ import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.model.TicketCheck
 import dev.claudefleet.mobile.model.TaskDetail
 import dev.claudefleet.mobile.model.TaskComment
+import dev.claudefleet.mobile.model.TaskResult
 import dev.claudefleet.mobile.model.EpicFacet
 import dev.claudefleet.mobile.model.TrackerCommentRow
 import dev.claudefleet.mobile.model.COMMENT_MAX
@@ -117,6 +118,8 @@ data class TaskUiState(
     val canEdit: Boolean = false,
     /** The status chips set it: the same, for `work_link set_status`. */
     val canSetStatus: Boolean = false,
+    /** The tracker the status chips move the ticket at; null for fleet's own task. */
+    val statusAtTracker: String? = null,
     val editOpen: Boolean = false,
     /** A delegated job's description is its prompt: shown, never edited. */
     val notesLocked: Boolean = false,
@@ -174,6 +177,8 @@ data class TaskUiState(
     val trackerComments: List<TrackerCommentRow> = emptyList(),
     /** Reading them failed: said in one line, the fleet comments still show. */
     val trackerCommentsFailed: Boolean = false,
+    /** The item's result (`work { result }`): the newest finished task's report, gate and PRs. */
+    val result: TaskResult? = null,
     /**
      * **Under epic…**: fleet's own task that is not an epic itself, a full
      * token, `work_link set_parent`, a connection. The hub refuses a filing
@@ -258,6 +263,7 @@ class TaskViewModel(
         /** The key whose tracker comments were read, so a re-read of the task does not ask the tracker again. */
         val trackerCommentsFor: String? = null,
         val fileOpen: Boolean = false,
+        val result: TaskResult? = null,
     )
 
     private val local = MutableStateFlow(Local())
@@ -309,6 +315,7 @@ class TaskViewModel(
             }
             local.update { it.copy(parentLabel = label) }
             loadTrackerComments(detail)
+            loadResult(detail)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -337,6 +344,25 @@ class TaskViewModel(
             null
         }
         local.update { it.copy(trackerComments = read.orEmpty(), trackerCommentsFailed = read == null) }
+    }
+
+    /**
+     * The item's result: fleet's own read, so with every load (a worker that
+     * finishes changes it). A hub without the action, or a failed read,
+     * leaves the last one shown.
+     */
+    private suspend fun loadResult(detail: TaskDetail) {
+        val itemId = detail.task.itemId ?: return
+        if (!fleet.capabilities.value.has(WORK, RESULT)) return
+        val read = try {
+            actions.result(itemId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            if (t is HubError.Tool && t.isUnknownAction()) fleet.actionMissing(WORK, RESULT)
+            return
+        }
+        local.update { it.copy(result = read) }
     }
 
     /** **Open**: a live session of the task. */
@@ -563,7 +589,12 @@ class TaskViewModel(
         }
     }
 
-    /** A status chip: a person's status for fleet's own task, final over the derived one. */
+    /**
+     * A status chip: a person's status for fleet's own task, final over the
+     * derived one; for a tracker's ticket that takes it, a move at the
+     * tracker (the hub reads the ticket back, which may settle on a
+     * neighbouring status).
+     */
     fun setStatus(status: StatusCategory): Job? {
         val s = state.value
         val itemId = s.task?.itemId ?: return null
@@ -756,7 +787,8 @@ class TaskViewModel(
             orgName = task?.orgId?.let { orgs.name(it) },
             orgColor = task?.orgId?.let { orgs.orgs[it]?.color },
             canEdit = task?.editable == true && allowed(caps, status, EDIT),
-            canSetStatus = task?.editable == true && allowed(caps, status, SET_STATUS),
+            canSetStatus = (task?.editable == true || task?.movesAtTracker == true) && allowed(caps, status, SET_STATUS),
+            statusAtTracker = task?.takeIf { it.movesAtTracker }?.let { it.trackerName?.ifBlank { null } ?: "its tracker" },
             editOpen = l.editOpen,
             notesLocked = task?.origin == "agent",
             parentTaskId = task?.parentTaskId,
@@ -789,6 +821,7 @@ class TaskViewModel(
             fileOpen = l.fileOpen,
             trackerComments = l.trackerComments.takeIf { detail?.commentsTracker != null }.orEmpty(),
             trackerCommentsFailed = l.trackerCommentsFailed && detail?.commentsTracker != null,
+            result = l.result?.takeIf { detail?.task?.itemId != null },
             criteria = acceptanceCriteria(detail?.description?.takeIf { it.isNotBlank() } ?: detail?.notes.orEmpty()),
         )
     }
@@ -830,6 +863,7 @@ class TaskViewModel(
         const val SET_PARENT = "set_parent"
         const val COMMENT_DELETE = "comment_delete"
         const val TRACKER_COMMENTS = "tracker_comments"
+        const val RESULT = "result"
         const val CHECK_POLL_MS = 10_000L
     }
 }

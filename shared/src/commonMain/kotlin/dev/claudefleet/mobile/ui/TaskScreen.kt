@@ -195,6 +195,7 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
                     TaskHierarchy(state, handlers)
                     OwnTaskControls(state, handlers)
                     TicketCheckCard(state, handlers)
+                    TaskResultBlock(state, epochSeconds())
                     state.detail?.lastOutcome?.let { o ->
                         val line = listOfNotNull(o.name, o.host?.let { "on $it" }, o.branch, o.prUrl?.let { "PR $it" }).joinToString(" · ")
                         if (line.isNotBlank()) Text("Last: $line", style = MaterialTheme.typography.bodySmall)
@@ -554,6 +555,9 @@ internal fun OwnTaskControls(state: TaskUiState, handlers: TaskHandlers, modifie
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (state.canSetStatus) {
             TaskStatusChips(current = state.task?.statusCategory, enabled = !state.busy, onPick = handlers.onSetStatus)
+            state.statusAtTracker?.let {
+                Text("Moves it on $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (state.canEdit) {

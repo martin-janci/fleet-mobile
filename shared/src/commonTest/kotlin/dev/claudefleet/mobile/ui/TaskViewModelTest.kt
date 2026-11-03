@@ -506,6 +506,80 @@ class TaskViewModelTest {
         assertEquals(listOf("set_status 12 done"), actions.calls)
     }
 
+    /**
+     * A ticket whose tracker takes moves (`status_movable`) gets the status
+     * chips, which move it at the tracker; Edit stays off, and the flag is
+     * read off the wire.
+     */
+    @Test
+    fun a_movable_ticket_is_moved_at_its_tracker() = runTest {
+        val wire = json.decodeFromString(
+            TaskDetail.serializer(),
+            WorkTreeJson.TASK.replaceFirst("\"tracker_state\":\"ok\",", "\"tracker_state\":\"ok\",\"status_movable\":true,"),
+        )
+        assertTrue(wire.task.statusMovable && wire.task.movesAtTracker)
+        val actions = FakeWorkActions().apply { taskAnswer = wire }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        val s = vm.state.value
+        assertTrue(s.canSetStatus)
+        assertFalse(s.canEdit)
+        assertEquals("Jira (acme)", s.statusAtTracker)
+        vm.setStatus(dev.claudefleet.mobile.model.StatusCategory.Done)
+        runCurrent()
+        assertEquals(listOf("set_status 12 done"), actions.calls)
+
+        val own = taskVm(actions = FakeWorkActions().apply { taskAnswer = local })
+        runCurrent()
+        assertNull(own.state.value.statusAtTracker, "fleet's own status is not a move anywhere")
+    }
+
+    // ---- Result (claude-fleet `work { result }`) ----
+
+    private val resultJson = """
+{"task_id":501,"item_id":12,"session_id":7,"role":"implement","at":1790000000,"marker":"FLEET_TASK_DONE_ab12",
+ "report":{"summary":"Fixed the token refresh.","outcome":"done","done":["Retry on 401"],"tests_run":["cargo test auth"]},
+ "prs":[{"url":"https://github.com/acme/api/pull/9","number":9,"state":"OPEN"},{"url":"javascript:alert(1)"}],
+ "gate":{"state":"blocked","checks":[{"line":"tests pass","kind":"tests","state":"fail","detail":"2 failing"},{"line":"PR open","kind":"pr","state":"pass","detail":""}],
+         "open_children":[{"id":13,"title":"Docs"}]},
+ "followups":[]}
+"""
+
+    /** The result decodes leniently: the report, the failed checks, the open subtasks, and only https PRs. */
+    @Test
+    fun a_result_is_read_with_its_gate_and_prs() {
+        val r = dev.claudefleet.mobile.model.taskResultFrom(json.parseToJsonElement(resultJson))!!
+        assertEquals(501, r.taskId)
+        assertEquals("Fixed the token refresh.", r.report.summary)
+        assertEquals(listOf("Retry on 401"), r.report.done)
+        assertEquals(listOf("tests pass: 2 failing"), r.failedChecks)
+        assertEquals(listOf("Docs"), r.openChildren)
+        assertEquals(listOf("https://github.com/acme/api/pull/9"), r.prs.map { it.url })
+        assertEquals("PR #9 · open", dev.claudefleet.mobile.model.resultPrLabel(r.prs[0]))
+        assertEquals("Blocked: 1 check failed, 1 subtask open", dev.claudefleet.mobile.model.resultGateLine(r))
+        assertEquals("Checks passed", dev.claudefleet.mobile.model.resultGateLine(r.copy(gate = "passed")))
+        assertEquals("Not verified yet", dev.claudefleet.mobile.model.resultGateLine(r.copy(gate = "unverified")))
+        assertEquals("Implement · 1 h ago", resultHeader(r, 1790003600))
+        assertNull(dev.claudefleet.mobile.model.taskResultFrom(kotlinx.serialization.json.JsonNull), "no result yet is no card")
+    }
+
+    /** The task screen reads the item's result with the task; a failed read leaves the screen as it was. */
+    @Test
+    fun the_task_screen_shows_the_items_result() = runTest {
+        val r = dev.claudefleet.mobile.model.taskResultFrom(json.parseToJsonElement(resultJson))
+        val actions = FakeWorkActions().apply { taskAnswer = DETAIL; resultAnswer = r }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        assertEquals(listOf(12L), actions.resultItems)
+        assertEquals(501L, vm.state.value.result?.taskId)
+
+        val failing = FakeWorkActions().apply { taskAnswer = DETAIL; failResult = HubError.Tool("E_INTERNAL", "boom") }
+        val quiet = taskVm(actions = failing)
+        runCurrent()
+        assertNull(quiet.state.value.result)
+        assertNull(quiet.state.value.error, "a result that could not be read is not the screen's error")
+    }
+
     // ---- Promote to ticket (claude-fleet `work_link promote`) ----
 
     private val jira = dev.claudefleet.mobile.model.PromoteTarget(

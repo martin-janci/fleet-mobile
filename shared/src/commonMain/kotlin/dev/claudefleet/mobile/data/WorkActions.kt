@@ -14,6 +14,7 @@ import dev.claudefleet.mobile.model.RulePreview
 import dev.claudefleet.mobile.model.SessionTasks
 import dev.claudefleet.mobile.model.TaskDetail
 import dev.claudefleet.mobile.model.TaskComment
+import dev.claudefleet.mobile.model.TaskResult
 import dev.claudefleet.mobile.model.TrackerComments
 import dev.claudefleet.mobile.model.WorkDecision
 import dev.claudefleet.mobile.model.WorkItem
@@ -186,6 +187,9 @@ interface WorkActions {
     /** The ticket's own comments at its tracker (`work { tracker_comments }`). */
     suspend fun trackerComments(key: String): TrackerComments = throw UnsupportedOperationException("tracker_comments")
 
+    /** The item's result (`work { result }`): `null` while no finished task left a report. */
+    suspend fun result(itemId: Long): TaskResult? = throw UnsupportedOperationException("result")
+
     /** **Delete** this reader's own comment (`work_link { comment_delete }`). */
     suspend fun deleteComment(commentId: Long): Unit = throw UnsupportedOperationException("comment_delete")
 
@@ -355,6 +359,8 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
     override suspend fun deleteComment(commentId: Long) = session.withClient { it.deleteWorkComment(commentId) }
 
     override suspend fun trackerComments(key: String): TrackerComments = session.withClient { it.workTrackerComments(key) }
+
+    override suspend fun result(itemId: Long): TaskResult? = session.withClient { it.workResult(itemId) }
 
     override suspend fun runTicketCheck(itemId: Long) = session.withClient { it.runTicketCheck(itemId) }
 
