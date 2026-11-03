@@ -2072,6 +2072,20 @@ class HubClient(
     suspend fun workResult(itemId: Long): TaskResult? =
         call("work", buildJsonObject { put("action", "result"); put("item_id", itemId) }) { taskResultFrom(it) }
 
+    /**
+     * **Make a task** from line [index] of a result's follow-ups (`work_link
+     * { followup }`): a new sibling item; asking twice answers the same one.
+     */
+    suspend fun createFollowup(taskId: Long, index: Int): Unit =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "followup")
+                put("task_id", taskId.toString())
+                put("index", index)
+            },
+        ) { }
+
     /** Every link of one session — live, suggested, rejected and ended — with its task. */
     suspend fun workSessionTasks(sessionId: Long): SessionTasks =
         call("work", buildJsonObject { put("action", "session_tasks"); put("session_id", sessionId) }) {

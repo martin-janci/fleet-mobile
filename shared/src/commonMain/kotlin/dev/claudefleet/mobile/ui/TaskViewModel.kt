@@ -179,6 +179,8 @@ data class TaskUiState(
     val trackerCommentsFailed: Boolean = false,
     /** The item's result (`work { result }`): the newest finished task's report, gate and PRs. */
     val result: TaskResult? = null,
+    /** **Make a task** on a result's follow-up: `work_link followup`. */
+    val canFollowup: Boolean = false,
     /**
      * **Under epic…**: fleet's own task that is not an epic itself, a full
      * token, `work_link set_parent`, a connection. The hub refuses a filing
@@ -363,6 +365,13 @@ class TaskViewModel(
             return
         }
         local.update { it.copy(result = read) }
+    }
+
+    /** **Make a task** from follow-up [index] of the result; the re-read shows it made. */
+    fun makeFollowup(index: Int): Job? {
+        val r = state.value.result ?: return null
+        if (r.followups.firstOrNull { it.index == index }?.itemId != null) return null
+        return itemWrite(FOLLOWUP) { actions.followup(r.taskId, index) }
     }
 
     /** **Open**: a live session of the task. */
@@ -822,6 +831,7 @@ class TaskViewModel(
             trackerComments = l.trackerComments.takeIf { detail?.commentsTracker != null }.orEmpty(),
             trackerCommentsFailed = l.trackerCommentsFailed && detail?.commentsTracker != null,
             result = l.result?.takeIf { detail?.task?.itemId != null },
+            canFollowup = l.result != null && allowed(caps, status, FOLLOWUP),
             criteria = acceptanceCriteria(detail?.description?.takeIf { it.isNotBlank() } ?: detail?.notes.orEmpty()),
         )
     }
@@ -864,6 +874,7 @@ class TaskViewModel(
         const val COMMENT_DELETE = "comment_delete"
         const val TRACKER_COMMENTS = "tracker_comments"
         const val RESULT = "result"
+        const val FOLLOWUP = "followup"
         const val CHECK_POLL_MS = 10_000L
     }
 }

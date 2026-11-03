@@ -352,6 +352,10 @@ internal class FakeWorkActions : WorkActions {
     var failResult: Throwable? = null
     val resultItems = mutableListOf<Long>()
 
+    override suspend fun followup(taskId: Long, index: Int) {
+        write("followup $taskId $index")
+    }
+
     override suspend fun result(itemId: Long): dev.claudefleet.mobile.model.TaskResult? {
         resultItems += itemId
         failResult?.let { throw it }

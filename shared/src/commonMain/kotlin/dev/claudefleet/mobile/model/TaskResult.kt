@@ -27,7 +27,12 @@ data class TaskResult(
     /** Subtasks still open, by title. */
     val openChildren: List<String>,
     val prs: List<ResultPr>,
+    /** The report's follow-ups, each with the task it became (`itemId`), if any. */
+    val followups: List<ResultFollowup> = emptyList(),
 )
+
+/** One follow-up line; [index] is its place in the hub's list, what Make a task sends. */
+data class ResultFollowup(val text: String, val itemId: Long?, val index: Int = 0)
 
 data class ResultPr(val url: String, val number: Long?, val state: String?)
 
@@ -59,6 +64,11 @@ fun taskResultFrom(v: JsonElement): TaskResult? {
             val o = p as? JsonObject ?: return@mapNotNull null
             val url = o["url"].str()?.takeIf { it.startsWith("https://") } ?: return@mapNotNull null
             ResultPr(url, (o["number"] as? JsonPrimitive)?.longOrNull, o["state"].str())
+        },
+        followups = (v["followups"] as? JsonArray).orEmpty().mapIndexedNotNull { i, f ->
+            val o = f as? JsonObject ?: return@mapIndexedNotNull null
+            val text = o["text"].str()?.takeIf { it.isNotBlank() } ?: return@mapIndexedNotNull null
+            ResultFollowup(text, (o["item_id"] as? JsonPrimitive)?.longOrNull, i)
         },
     )
 }
