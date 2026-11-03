@@ -629,7 +629,8 @@ class TaskViewModel(
     fun comment(postToTracker: Boolean = false): Job? {
         val s = state.value
         val itemId = s.task?.itemId ?: return null
-        val body = s.commentDraft.trim().ifEmpty { return null }
+        // The box's text as typed, not [state]'s: that copy follows a beat later.
+        val body = local.value.commentDraft.trim().ifEmpty { return null }
         if (!s.canComment) return null.also { refuseOffline(COMMENT) }
         return itemWrite(COMMENT) {
             actions.comment(itemId, body, postToTracker && s.canPostToTracker)
