@@ -157,6 +157,9 @@ data class HubCapabilities(
     val recreateSession: Boolean get() = RECREATE_SESSION in tools
     val dismissGhost: Boolean get() = DISMISS_GHOST_SESSION in tools
 
+    /** Pin or unpin a session (`pin_session`, claude-fleet migration 189). */
+    val pinSession: Boolean get() = PIN_SESSION in tools
+
     /** Plain shells beside a session: its Terminals tab (redesign 14.14). */
     val shellSessions: Boolean get() = NEW_SHELL_SESSION in tools
 
@@ -431,6 +434,7 @@ data class HubCapabilities(
         const val DISCOVER_LOST_SESSIONS = "discover_lost_sessions"
         const val RECREATE_SESSION = "recreate_session"
         const val DISMISS_GHOST_SESSION = "dismiss_ghost_session"
+        const val PIN_SESSION = "pin_session"
         const val LIST_ACCOUNTS = "list_accounts"
         const val SET_ACCOUNT_NICKNAME = "set_account_nickname"
         const val CHECK_HOST = "check_host"

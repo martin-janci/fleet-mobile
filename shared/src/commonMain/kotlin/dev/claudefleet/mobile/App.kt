@@ -3442,6 +3442,7 @@ private fun SessionRoute(
         onMove = { moveVm.open(fresh = newLayout) }.takeIf { move.available },
         // A dismissed ghost has no screen left to show: back to where it was opened from.
         onDismissGhost = { vm.dismissGhost(onBack) },
+        onSetPinned = { vm.setPinned(it) },
         onOpenRepo = (if (newLayout) ({ selectTab(SessionTab.Files) }) else ({ onOpenRepo(sessionId) })).takeIf { hasWorktree },
         showFoldHint = foldHintOwed,
         onFoldHintShown = { container.hints.markShown(Hints.DOUBLE_TAP) },

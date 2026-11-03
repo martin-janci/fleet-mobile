@@ -185,6 +185,9 @@ class ToolsTheAppMayCallTest {
         "discover_lost_sessions",
         "recreate_session",
         "dismiss_ghost_session",
+        // ⋮ Pin / Unpin: a write, `Access::Client`, offered only to a token
+        // that may write and called only when `tools/list` names it.
+        "pin_session",
         // A review session, a workspace repair, a background agent: writes,
         // `Access::Client`, offered only to a token that may write.
         // `repair_session` is `confirm: true` on the hub and may answer

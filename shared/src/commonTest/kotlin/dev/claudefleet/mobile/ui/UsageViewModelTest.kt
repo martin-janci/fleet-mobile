@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.data.UsageActions
 import dev.claudefleet.mobile.model.AccountRow
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.AccountUsageWindows
+import dev.claudefleet.mobile.model.Attention
 import dev.claudefleet.mobile.model.AutoSwitchView
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.ProjectRow
@@ -135,6 +136,34 @@ class UsageViewModelTest {
         assertTrue(calls.windows.isEmpty())
         assertEquals(0, calls.accountReads)
         assertFalse(vm.state.value.limitsAvailable)
+    }
+
+    @Test
+    fun each_account_shows_its_live_sessions_and_how_many_are_paused_on_it() = runTest {
+        val calls = UsageCalls()
+        val fleet = UsageFleet(both)
+        fleet.sessions.value = listOf(
+            SessionRow(id = 1, accountUuid = "u1", claudeStatus = "working"),
+            SessionRow(id = 2, accountUuid = "u1", claudeStatus = "idle", attention = Attention("no_credentials")),
+            SessionRow(id = 3, accountUuid = "u1", lostAt = 5),
+            SessionRow(id = 4, accountUuid = "u1", status = "ghost"),
+            SessionRow(id = 5, accountUuid = "u1", kind = "shell"),
+            SessionRow(id = 6, accountUuid = "u2", attention = Attention("account_limit")),
+            SessionRow(id = 7),
+        )
+        val vm = UsageViewModel(fleet, calls, backgroundScope)
+        vm.attach()
+        runCurrent()
+
+        assertEquals(AccountSessions(live = 2, paused = 1), vm.state.value.sessions["u1"])
+        assertEquals("2 sessions · 1 paused", accountSessionsLine(vm.state.value.sessions["u1"]))
+        assertEquals("1 session · 1 paused", accountSessionsLine(vm.state.value.sessions["u2"]))
+        assertNull(accountSessionsLine(vm.state.value.sessions["u3"]))
+
+        // A session ending moves the count.
+        fleet.sessions.value = fleet.sessions.value.filter { it.id != 1L }
+        runCurrent()
+        assertEquals("1 session · 1 paused", accountSessionsLine(vm.state.value.sessions["u1"]))
     }
 
     @Test

@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.data.UsageActions
 import dev.claudefleet.mobile.model.AccountRow
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.AutoSwitchView
+import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.UsageReport
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -26,6 +27,33 @@ enum class UsageWindow(val label: String, val seconds: Long) {
     Month("30 days", 30 * 86_400),
 }
 
+/** What an account's live sessions are doing, for its Accounts row (review 2026-11-03 F11). */
+data class AccountSessions(val live: Int = 0, val paused: Int = 0)
+
+/**
+ * Each account's live sessions, by its uuid: neither lost nor a ghost, and
+ * not a shell or an external pane (those carry no account). [AccountSessions.paused]
+ * counts the ones paused on their login: at the account's limit or signed out.
+ */
+fun sessionsByAccount(rows: List<SessionRow>): Map<String, AccountSessions> =
+    rows.asSequence()
+        .filter { it.lostAt == null && it.status != "ghost" && it.kind != "shell" && it.kind != "external" }
+        .mapNotNull { r -> r.accountUuid?.let { it to r } }
+        .groupBy({ it.first }, { it.second })
+        .mapValues { (_, rs) ->
+            AccountSessions(
+                live = rs.size,
+                paused = rs.count { it.attention?.reason == "account_limit" || it.attention?.reason == "no_credentials" },
+            )
+        }
+
+/** "2 sessions · 1 paused", or null for an account with none running. */
+fun accountSessionsLine(s: AccountSessions?): String? {
+    if (s == null || s.live == 0) return null
+    val n = if (s.live == 1) "1 session" else "${s.live} sessions"
+    return if (s.paused > 0) "$n · ${s.paused} paused" else n
+}
+
 data class UsageUiState(
     val available: Boolean = false,
     /** The hub has said what it serves; before that nothing reads as "not offered" (r13 P20). */
@@ -40,6 +68,8 @@ data class UsageUiState(
     val limitsAvailable: Boolean = false,
     /** Each account's limits, by its uuid. */
     val limits: Map<String, AccountUsageSnapshot> = emptyMap(),
+    /** Each account's live sessions, by its uuid ([sessionsByAccount]). */
+    val sessions: Map<String, AccountSessions> = emptyMap(),
     /** The person's answer to automatic switching; null until read or where the hub has no such tool. */
     val autoSwitch: AutoSwitchView? = null,
     /** The hub takes "continue after a switch" too. */
@@ -74,7 +104,9 @@ class UsageViewModel(
 
     private val local = MutableStateFlow(Local())
 
-    val state: StateFlow<UsageUiState> = combine(local, fleet.capabilities, fleet.accountUsage) { l, caps, limits ->
+    private val accountSessions = fleet.sessions.map(::sessionsByAccount).distinctUntilChanged()
+
+    val state: StateFlow<UsageUiState> = combine(local, fleet.capabilities, fleet.accountUsage, accountSessions) { l, caps, limits, sessions ->
         UsageUiState(
             available = caps.usage,
             capsKnown = caps.known,
@@ -85,6 +117,7 @@ class UsageViewModel(
             accounts = l.accounts,
             limitsAvailable = caps.accountUsage,
             limits = limits,
+            sessions = sessions,
             autoSwitch = l.autoSwitch.takeIf { caps.autoSwitch },
             autoSwitchContinueAvailable = caps.autoSwitchContinue,
             canChangeAutoSwitch = canWrite && caps.autoSwitch,

@@ -309,6 +309,16 @@ class SessionExtrasTest {
     }
 
     @Test
+    fun pin_and_unpin_are_offered_where_the_hub_pins() {
+        assertTrue(orbitMenuItems(OrbitMenuFacts(manage = true)).none { it.id == OrbitItem.Pin })
+        val pin = orbitMenuItems(OrbitMenuFacts(manage = true, pin = true)).first { it.id == OrbitItem.Pin }
+        assertEquals("Pin", pin.label)
+        assertTrue(pin.writes)
+        val unpin = orbitMenuItems(OrbitMenuFacts(manage = true, pin = true, pinned = true)).first { it.id == OrbitItem.Pin }
+        assertEquals("Unpin", unpin.label)
+    }
+
+    @Test
     fun the_menu_offers_only_what_this_session_can_do() {
         val items = orbitMenuItems(OrbitMenuFacts(tmuxName = "s")).map { it.id }
         assertEquals(listOf(OrbitItem.CopyAttach, OrbitItem.Details), items)

@@ -24,7 +24,7 @@ class OrbitMenu(
 enum class OrbitItem {
     Rename, Ticket, Tags,
     Model, Effort, Review, SendLater, Background,
-    Move, Repair, Recreate, Restart, DismissGhost,
+    Move, Repair, Recreate, Restart, DismissGhost, Pin,
     CopyAttach, Details, Worktree,
     Archive, Retire, Kill,
 }
@@ -60,6 +60,8 @@ data class OrbitMenuFacts(
     val kill: Boolean = false,
     /** A person pinned it: the hub refuses Safe remove (`E_PINNED`) until it is unpinned. */
     val pinned: Boolean = false,
+    /** This person may pin or unpin it (`pin_session`). */
+    val pin: Boolean = false,
     val worktree: Boolean = false,
     /** The hub keeps prompts for later and this person may drive the session. */
     val sendLater: Boolean = false,
@@ -87,6 +89,12 @@ fun orbitMenuItems(f: OrbitMenuFacts): List<OrbitMenuItem> = buildList {
     if (f.recreate) add(OrbitMenuItem(OrbitItem.Recreate, "Recreate", if (f.ghost) "bring it back in its worktree" else "new pane, same worktree and conversation", 2))
     if (f.restart) add(OrbitMenuItem(OrbitItem.Restart, "Restart", "kill and recreate the tmux session", 2))
     if (f.dismissGhost) add(OrbitMenuItem(OrbitItem.DismissGhost, "Dismiss lost session", "forget this row; the conversation stays", 2))
+    if (f.pin) {
+        add(
+            if (f.pinned) OrbitMenuItem(OrbitItem.Pin, "Unpin", "Safe remove and Kill work again", 2)
+            else OrbitMenuItem(OrbitItem.Pin, "Pin", "kept on top; nothing removes it until unpinned", 2),
+        )
+    }
     f.tmuxName?.takeIf { it.isNotBlank() }?.let {
         add(OrbitMenuItem(OrbitItem.CopyAttach, "Copy tmux attach command", tmuxAttachCommand(it), 3, writes = false))
     }
