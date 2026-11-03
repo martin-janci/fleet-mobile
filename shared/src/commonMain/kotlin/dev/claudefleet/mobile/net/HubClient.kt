@@ -114,6 +114,7 @@ import dev.claudefleet.mobile.model.ReviewPage
 import dev.claudefleet.mobile.model.RulePreview
 import dev.claudefleet.mobile.model.SessionTasks
 import dev.claudefleet.mobile.model.TaskDetail
+import dev.claudefleet.mobile.model.TaskComment
 import dev.claudefleet.mobile.model.WorkDecision
 import dev.claudefleet.mobile.model.WorkRule
 import dev.claudefleet.mobile.model.WorkRuleDraft
@@ -2379,6 +2380,31 @@ class HubClient(
                 put("item_id", itemId)
                 trackerId?.let { put("tracker_id", it) }
                 container?.takeIf { it.isNotBlank() }?.let { put("container", it.trim()) }
+            },
+        ) { }
+
+    /**
+     * A comment on task [itemId] (`work_link { comment }`), and with
+     * [postToTracker] its post to the ticket's tracker too. Answers the comment.
+     */
+    suspend fun commentOnWorkItem(itemId: Long, body: String, postToTracker: Boolean): TaskComment =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "comment")
+                put("item_id", itemId)
+                put("notes", body)
+                if (postToTracker) put("post_to_tracker", true)
+            },
+        ) { json.decodeFromJsonElement(TaskComment.serializer(), it) }
+
+    /** Delete this reader's own comment (`work_link { comment_delete }`); a pending post to the tracker is cancelled. */
+    suspend fun deleteWorkComment(commentId: Long): Unit =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "comment_delete")
+                put("comment_id", commentId)
             },
         ) { }
 

@@ -333,6 +333,15 @@ internal class FakeWorkActions : WorkActions {
         write("promote $itemId tracker=$trackerId container=$container")
     }
 
+    override suspend fun comment(itemId: Long, body: String, postToTracker: Boolean): dev.claudefleet.mobile.model.TaskComment {
+        write("comment $itemId \"$body\" tracker=$postToTracker")
+        return dev.claudefleet.mobile.model.TaskComment(id = 1, itemId = itemId, body = body, mine = true)
+    }
+
+    override suspend fun deleteComment(commentId: Long) {
+        write("comment_delete $commentId")
+    }
+
     override suspend fun runTicketCheck(itemId: Long) {
         write("check $itemId")
     }

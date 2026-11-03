@@ -590,6 +590,82 @@ class TaskViewModelTest {
         assertEquals("Not created in Acme Jira: 403", d.promotion?.let(::promotionLine))
     }
 
+    // ---- comments (claude-fleet `work_link comment`, the task page's Comments tab) ----
+
+    /** A comment goes with the box's text (trimmed), the box empties, and the task is read again. */
+    @Test
+    fun a_comment_is_sent_and_the_box_empties() = runTest {
+        val actions = FakeWorkActions().apply { taskAnswer = local.copy(commentsTracker = "Acme Jira", canPostToTracker = true) }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        assertTrue(vm.state.value.canComment)
+        assertTrue(vm.state.value.canPostToTracker)
+        assertNull(vm.comment(), "an empty box sends nothing")
+        vm.setCommentDraft("  looks done  ")
+        vm.comment(postToTracker = true)
+        runCurrent()
+        assertEquals(listOf("comment 12 \"looks done\" tracker=true"), actions.calls)
+        assertEquals("", vm.state.value.commentDraft)
+        assertEquals(2, actions.taskCalls, "the answer is followed by a re-read")
+    }
+
+    /** A refusal keeps the text; with no tracker to post to the flag is never sent; a read-only token cannot comment. */
+    @Test
+    fun a_refused_comment_keeps_its_text_and_the_tracker_flag_needs_the_hubs_offer() = runTest {
+        val actions = FakeWorkActions().apply {
+            taskAnswer = local
+            failWrite = HubError.Tool("E_INVALID", "too long")
+        }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        assertFalse(vm.state.value.canPostToTracker)
+        vm.setCommentDraft("note")
+        vm.comment(postToTracker = true)
+        runCurrent()
+        assertEquals(listOf("comment 12 \"note\" tracker=false"), actions.calls)
+        assertEquals("note", vm.state.value.commentDraft)
+
+        val ro = taskVm(actions = FakeWorkActions().apply { taskAnswer = local }, canWrite = false)
+        runCurrent()
+        assertFalse(ro.state.value.canComment)
+    }
+
+    /** Only the reader's own comment is deleted. */
+    @Test
+    fun only_the_readers_own_comment_is_deleted() = runTest {
+        val mine = dev.claudefleet.mobile.model.TaskComment(id = 5, itemId = 12, body = "mine", mine = true)
+        val theirs = dev.claudefleet.mobile.model.TaskComment(id = 6, itemId = 12, author = "client:ana", body = "theirs")
+        val actions = FakeWorkActions().apply { taskAnswer = local.copy(comments = listOf(mine, theirs)) }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        assertNull(vm.deleteComment(6))
+        vm.deleteComment(5)
+        runCurrent()
+        assertEquals(listOf("comment_delete 5"), actions.calls)
+    }
+
+    /** The hub's comment fields decode, and read as the desktop words them. */
+    @Test
+    fun comments_decode_and_read_as_the_desktop_words_them() {
+        val d = json.decodeFromString(
+            TaskDetail.serializer(),
+            """{"task":{"task_id":"item:12"},"comments":[{"id":1,"item_id":12,"author":"client:phone","body":"first","created_at":100,""" +
+                """"mine":true,"tracker_post":{"state":"failed","error":"403"}},{"id":2,"item_id":12,"author":"host:htz","body":"b",""" +
+                """"created_at":200}],"comments_tracker":"Acme Jira","can_post_to_tracker":true}""",
+        )
+        assertEquals(2, d.comments.size)
+        assertTrue(d.canPostToTracker)
+        assertEquals("You · 5 min ago", commentHeader(d.comments[0], 400))
+        assertEquals("An agent on htz", dev.claudefleet.mobile.model.commentAuthor(d.comments[1]))
+        assertEquals("phone", dev.claudefleet.mobile.model.commentAuthor(d.comments[0].copy(mine = false)))
+        assertEquals("Someone", dev.claudefleet.mobile.model.commentAuthor(dev.claudefleet.mobile.model.TaskComment()))
+        assertEquals("Not sent: 403", dev.claudefleet.mobile.model.commentPostLine(d.comments[0].trackerPost, "Acme Jira"))
+        assertEquals(
+            "Sent to Acme Jira",
+            dev.claudefleet.mobile.model.commentPostLine(dev.claudefleet.mobile.model.CommentPost(state = "done"), "Acme Jira"),
+        )
+    }
+
     // ---- the AI check on done (claude-fleet work-graph.md, *AI check on done*) ----
 
     private val setup = dev.claudefleet.mobile.model.CheckSetup(projectId = 7, project = "acme/api", mode = "ask", command = "cargo test")

@@ -14,6 +14,8 @@ import dev.claudefleet.mobile.model.OrgSource
 import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.model.TicketCheck
 import dev.claudefleet.mobile.model.TaskDetail
+import dev.claudefleet.mobile.model.TaskComment
+import dev.claudefleet.mobile.model.COMMENT_MAX
 import dev.claudefleet.mobile.model.PromoteTarget
 import dev.claudefleet.mobile.model.PromotionView
 import dev.claudefleet.mobile.model.WorkTaskLink
@@ -154,6 +156,18 @@ data class TaskUiState(
     /** "Creating the ticket in Acme Jira…", or why it was not created. */
     val promotionLine: String? = null,
     val promotionFailed: Boolean = false,
+    /** Fleet's comments on the task, oldest first. */
+    val comments: List<TaskComment> = emptyList(),
+    /** The ticket's tracker by name, when a comment can be posted there too ([canPostToTracker]). */
+    val commentsTracker: String? = null,
+    /** **Comment**: a task fleet has an item for, a full token, `work_link comment`, a connection. */
+    val canComment: Boolean = false,
+    /** *Also post to <tracker>* is offered beside Comment. */
+    val canPostToTracker: Boolean = false,
+    /** **Delete** on the reader's own comments: `work_link comment_delete`. */
+    val canDeleteComment: Boolean = false,
+    /** What is typed in the comment box, kept across a failed send. */
+    val commentDraft: String = "",
 ) {
     val task get() = detail?.task
 }
@@ -221,6 +235,7 @@ class TaskViewModel(
         val parentLabel: String? = null,
         val subtaskOpen: Boolean = false,
         val promoteOpen: Boolean = false,
+        val commentDraft: String = "",
     )
 
     private val local = MutableStateFlow(Local())
@@ -535,6 +550,33 @@ class TaskViewModel(
         }
     }
 
+    fun setCommentDraft(text: String) {
+        local.update { it.copy(commentDraft = text.take(COMMENT_MAX)) }
+    }
+
+    /**
+     * **Comment**: the box's text on the task, and with [postToTracker] (where
+     * offered) on its ticket too. The box empties once the hub took it; a
+     * refusal keeps it, with the hub's reason.
+     */
+    fun comment(postToTracker: Boolean = false): Job? {
+        val s = state.value
+        val itemId = s.task?.itemId ?: return null
+        val body = s.commentDraft.trim().ifEmpty { return null }
+        if (!s.canComment) return null.also { refuseOffline(COMMENT) }
+        return itemWrite(COMMENT) {
+            actions.comment(itemId, body, postToTracker && s.canPostToTracker)
+            local.update { it.copy(commentDraft = "") }
+        }
+    }
+
+    /** **Delete** one of the reader's own comments. */
+    fun deleteComment(id: Long): Job? {
+        val c = state.value.comments.firstOrNull { it.id == id } ?: return null
+        if (!c.mine) return null
+        return itemWrite(COMMENT_DELETE) { actions.deleteComment(id) }
+    }
+
     /** A running check finishes on the hub: read the task again until it does. */
     private fun pollWhileChecking(check: TicketCheck?) {
         if (check?.state != "running" || checkPoll?.isActive == true) return
@@ -668,6 +710,12 @@ class TaskViewModel(
             },
             promotionLine = promotion?.let(::promotionLine),
             promotionFailed = promotion?.state == "failed",
+            comments = detail?.comments.orEmpty(),
+            commentsTracker = detail?.commentsTracker,
+            canComment = task?.itemId != null && allowed(caps, status, COMMENT),
+            canPostToTracker = detail?.commentsTracker != null && detail.canPostToTracker && allowed(caps, status, COMMENT),
+            canDeleteComment = allowed(caps, status, COMMENT_DELETE),
+            commentDraft = l.commentDraft,
             criteria = acceptanceCriteria(detail?.description?.takeIf { it.isNotBlank() } ?: detail?.notes.orEmpty()),
         )
     }
@@ -705,6 +753,8 @@ class TaskViewModel(
         const val VERIFY = "verify"
         const val CHECK_SETUP = "check_setup"
         const val PROMOTE = "promote"
+        const val COMMENT = "comment"
+        const val COMMENT_DELETE = "comment_delete"
         const val CHECK_POLL_MS = 10_000L
     }
 }

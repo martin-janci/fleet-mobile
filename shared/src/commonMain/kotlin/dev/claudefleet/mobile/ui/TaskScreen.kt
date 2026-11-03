@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.epochSeconds
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -97,6 +98,10 @@ data class TaskHandlers(
     val onOpenPromote: () -> Unit = {},
     val onClosePromote: () -> Unit = {},
     val onPromote: (dev.claudefleet.mobile.model.PromoteTarget, String?) -> Unit = { _, _ -> },
+    /** The comment box's text, and **Comment** (with *Also post to the tracker*). */
+    val onCommentDraft: (String) -> Unit = {},
+    val onComment: (postToTracker: Boolean) -> Unit = {},
+    val onDeleteComment: (Long) -> Unit = {},
 )
 
 /**
@@ -206,6 +211,7 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
                     Text("…and ${task.sessionsMore} more on the desktop.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
                 }
             }
+            item(key = "comments") { TaskCommentsBlock(state, handlers, epochSeconds(), Modifier.padding(16.dp)) }
         }
     }
     if (state.placeOpen) PlaceSheet(state, handlers)

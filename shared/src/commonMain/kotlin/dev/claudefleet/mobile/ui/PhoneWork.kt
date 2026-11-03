@@ -731,6 +731,10 @@ fun PhoneTaskScreen(
             if (task.sessionsMore > 0) {
                 item(key = "more") { Text("…and ${task.sessionsMore} more on the desktop.", color = o.fgMuted, fontSize = 13.sp, modifier = Modifier.padding(gutter)) }
             }
+            item(key = "comments") {
+                HorizontalDivider(color = o.border)
+                TaskCommentsBlock(state, h, nowSeconds, Modifier.padding(horizontal = gutter, vertical = 12.dp))
+            }
         }
         // The actions, last and in thumb reach.
         HorizontalDivider(color = o.border)

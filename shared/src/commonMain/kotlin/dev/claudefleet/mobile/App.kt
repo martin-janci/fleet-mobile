@@ -2979,6 +2979,9 @@ private fun TaskRoute(
         onOpenPromote = vm::openPromote,
         onClosePromote = vm::closePromote,
         onPromote = { target, container -> vm.promote(target, container) },
+        onCommentDraft = vm::setCommentDraft,
+        onComment = { vm.comment(it) },
+        onDeleteComment = { vm.deleteComment(it) },
     )
     if (newLayout) {
         val rows by repository.sessions.collectAsState()
