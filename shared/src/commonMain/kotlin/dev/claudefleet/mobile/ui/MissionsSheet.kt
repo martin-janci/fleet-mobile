@@ -47,6 +47,7 @@ import dev.claudefleet.mobile.model.missionWaitLabel
 import dev.claudefleet.mobile.model.openCards
 import dev.claudefleet.mobile.model.options
 import dev.claudefleet.mobile.model.pauseMove
+import dev.claudefleet.mobile.model.pauseMoveLabel
 import dev.claudefleet.mobile.model.summary
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import dev.claudefleet.mobile.ui.components.ErrorBanner

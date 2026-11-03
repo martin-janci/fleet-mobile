@@ -41,6 +41,7 @@ import dev.claudefleet.mobile.model.dollars
 import dev.claudefleet.mobile.model.key
 import dev.claudefleet.mobile.model.openCards
 import dev.claudefleet.mobile.model.pauseMove
+import dev.claudefleet.mobile.model.pauseMoveLabel
 import dev.claudefleet.mobile.model.runEstimateLine
 import dev.claudefleet.mobile.model.SpendAsk
 import dev.claudefleet.mobile.model.spendAsk
