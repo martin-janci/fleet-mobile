@@ -14,6 +14,7 @@ import dev.claudefleet.mobile.model.RulePreview
 import dev.claudefleet.mobile.model.SessionTasks
 import dev.claudefleet.mobile.model.TaskDetail
 import dev.claudefleet.mobile.model.TaskComment
+import dev.claudefleet.mobile.model.TrackerComments
 import dev.claudefleet.mobile.model.WorkDecision
 import dev.claudefleet.mobile.model.WorkItem
 import dev.claudefleet.mobile.model.WorkRule
@@ -178,6 +179,9 @@ interface WorkActions {
     /** **Comment** on task [itemId] (`work_link { comment }`), and with [postToTracker] on its ticket too. */
     suspend fun comment(itemId: Long, body: String, postToTracker: Boolean): TaskComment =
         throw UnsupportedOperationException("comment")
+
+    /** The ticket's own comments at its tracker (`work { tracker_comments }`). */
+    suspend fun trackerComments(key: String): TrackerComments = throw UnsupportedOperationException("tracker_comments")
 
     /** **Delete** this reader's own comment (`work_link { comment_delete }`). */
     suspend fun deleteComment(commentId: Long): Unit = throw UnsupportedOperationException("comment_delete")
@@ -344,6 +348,8 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
         session.withClient { it.commentOnWorkItem(itemId, body, postToTracker) }
 
     override suspend fun deleteComment(commentId: Long) = session.withClient { it.deleteWorkComment(commentId) }
+
+    override suspend fun trackerComments(key: String): TrackerComments = session.withClient { it.workTrackerComments(key) }
 
     override suspend fun runTicketCheck(itemId: Long) = session.withClient { it.runTicketCheck(itemId) }
 

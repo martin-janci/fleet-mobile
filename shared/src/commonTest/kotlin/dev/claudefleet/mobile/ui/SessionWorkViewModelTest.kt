@@ -338,6 +338,16 @@ internal class FakeWorkActions : WorkActions {
         return dev.claudefleet.mobile.model.TaskComment(id = 1, itemId = itemId, body = body, mine = true)
     }
 
+    var trackerCommentsAnswer: dev.claudefleet.mobile.model.TrackerComments = dev.claudefleet.mobile.model.TrackerComments()
+    var failTrackerComments: Throwable? = null
+    val trackerCommentKeys = mutableListOf<String>()
+
+    override suspend fun trackerComments(key: String): dev.claudefleet.mobile.model.TrackerComments {
+        trackerCommentKeys += key
+        failTrackerComments?.let { throw it }
+        return trackerCommentsAnswer
+    }
+
     override suspend fun deleteComment(commentId: Long) {
         write("comment_delete $commentId")
     }

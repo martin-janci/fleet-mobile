@@ -115,6 +115,7 @@ import dev.claudefleet.mobile.model.RulePreview
 import dev.claudefleet.mobile.model.SessionTasks
 import dev.claudefleet.mobile.model.TaskDetail
 import dev.claudefleet.mobile.model.TaskComment
+import dev.claudefleet.mobile.model.TrackerComments
 import dev.claudefleet.mobile.model.WorkDecision
 import dev.claudefleet.mobile.model.WorkRule
 import dev.claudefleet.mobile.model.WorkRuleDraft
@@ -2057,6 +2058,12 @@ class HubClient(
     suspend fun workTask(taskId: String): TaskDetail =
         call("work", buildJsonObject { put("action", "task"); put("task_id", taskId) }) {
             json.decodeFromJsonElement(TaskDetail.serializer(), it)
+        }
+
+    /** The ticket's own comments at its tracker (`work { tracker_comments }`), read live from the tracker. */
+    suspend fun workTrackerComments(key: String): TrackerComments =
+        call("work", buildJsonObject { put("action", "tracker_comments"); put("key", key) }) {
+            json.decodeFromJsonElement(TrackerComments.serializer(), it)
         }
 
     /** Every link of one session — live, suggested, rejected and ended — with its task. */

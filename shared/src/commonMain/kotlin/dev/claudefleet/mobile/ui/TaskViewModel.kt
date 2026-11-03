@@ -15,6 +15,7 @@ import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.model.TicketCheck
 import dev.claudefleet.mobile.model.TaskDetail
 import dev.claudefleet.mobile.model.TaskComment
+import dev.claudefleet.mobile.model.TrackerCommentRow
 import dev.claudefleet.mobile.model.COMMENT_MAX
 import dev.claudefleet.mobile.model.PromoteTarget
 import dev.claudefleet.mobile.model.PromotionView
@@ -168,6 +169,10 @@ data class TaskUiState(
     val canDeleteComment: Boolean = false,
     /** What is typed in the comment box, kept across a failed send. */
     val commentDraft: String = "",
+    /** The ticket's own comments at [commentsTracker], read once per visit (and on Refresh). */
+    val trackerComments: List<TrackerCommentRow> = emptyList(),
+    /** Reading them failed: said in one line, the fleet comments still show. */
+    val trackerCommentsFailed: Boolean = false,
 ) {
     val task get() = detail?.task
 }
@@ -236,6 +241,10 @@ class TaskViewModel(
         val subtaskOpen: Boolean = false,
         val promoteOpen: Boolean = false,
         val commentDraft: String = "",
+        val trackerComments: List<TrackerCommentRow> = emptyList(),
+        val trackerCommentsFailed: Boolean = false,
+        /** The key whose tracker comments were read, so a re-read of the task does not ask the tracker again. */
+        val trackerCommentsFor: String? = null,
     )
 
     private val local = MutableStateFlow(Local())
@@ -261,7 +270,10 @@ class TaskViewModel(
         }
     }
 
-    fun refresh(): Job = scope.launch { load() }
+    fun refresh(): Job = scope.launch {
+        local.update { it.copy(trackerCommentsFor = null) }
+        load()
+    }
 
     private suspend fun load() {
         if (!fleet.capabilities.value.has(WORK, TASK)) return
@@ -283,6 +295,7 @@ class TaskViewModel(
                 }
             }
             local.update { it.copy(parentLabel = label) }
+            loadTrackerComments(detail)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -290,6 +303,27 @@ class TaskViewModel(
             val gone = t is HubError.Tool && t.code == "E_NOTFOUND"
             local.update { it.copy(loading = false, gone = gone, error = if (gone) null else friendlyWork(t)) }
         }
+    }
+
+    /**
+     * The ticket's own comments at its tracker, beside fleet's: read live from
+     * the tracker, so once per key while this screen lives (Refresh reads
+     * again), never on every `work:changed`. A failure is one quiet line.
+     */
+    private suspend fun loadTrackerComments(detail: TaskDetail) {
+        val key = detail.task.key?.takeIf { it.isNotBlank() } ?: return
+        if (detail.commentsTracker == null || !fleet.capabilities.value.has(WORK, TRACKER_COMMENTS)) return
+        if (local.value.trackerCommentsFor == key) return
+        local.update { it.copy(trackerCommentsFor = key) }
+        val read = try {
+            actions.trackerComments(key).comments
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            if (t is HubError.Tool && t.isUnknownAction()) fleet.actionMissing(WORK, TRACKER_COMMENTS)
+            null
+        }
+        local.update { it.copy(trackerComments = read.orEmpty(), trackerCommentsFailed = read == null) }
     }
 
     /** **Open**: a live session of the task. */
@@ -716,6 +750,8 @@ class TaskViewModel(
             canPostToTracker = detail?.commentsTracker != null && detail.canPostToTracker && allowed(caps, status, COMMENT),
             canDeleteComment = allowed(caps, status, COMMENT_DELETE),
             commentDraft = l.commentDraft,
+            trackerComments = l.trackerComments.takeIf { detail?.commentsTracker != null }.orEmpty(),
+            trackerCommentsFailed = l.trackerCommentsFailed && detail?.commentsTracker != null,
             criteria = acceptanceCriteria(detail?.description?.takeIf { it.isNotBlank() } ?: detail?.notes.orEmpty()),
         )
     }
@@ -755,6 +791,7 @@ class TaskViewModel(
         const val PROMOTE = "promote"
         const val COMMENT = "comment"
         const val COMMENT_DELETE = "comment_delete"
+        const val TRACKER_COMMENTS = "tracker_comments"
         const val CHECK_POLL_MS = 10_000L
     }
 }

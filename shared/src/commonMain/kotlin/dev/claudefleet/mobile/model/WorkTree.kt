@@ -639,6 +639,25 @@ fun commentPostLine(post: CommentPost?, tracker: String): String? = when (post?.
     else -> null
 }
 
+/** `work { tracker_comments }`: the ticket's own comments at its tracker, oldest first. */
+@Serializable
+data class TrackerComments(
+    val key: String = "",
+    val tracker: String = "",
+    val provider: String = "",
+    val comments: List<TrackerCommentRow> = emptyList(),
+)
+
+/** One comment at the tracker: its author's name there, plain text. */
+@Serializable
+data class TrackerCommentRow(
+    val id: String = "",
+    val author: String = "",
+    val body: String = "",
+    @SerialName("created_at") val createdAt: Long = 0,
+    val url: String? = null,
+)
+
 /** The longest comment the hub keeps (`COMMENT_MAX_CHARS`). */
 const val COMMENT_MAX = 4000
 

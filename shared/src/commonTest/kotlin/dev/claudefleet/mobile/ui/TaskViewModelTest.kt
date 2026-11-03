@@ -644,6 +644,53 @@ class TaskViewModelTest {
         assertEquals(listOf("comment_delete 5"), actions.calls)
     }
 
+    /** The ticket's own comments are read from its tracker once, beside fleet's; Refresh reads them again; a failure is one line. */
+    @Test
+    fun the_trackers_comments_are_read_once_and_again_on_refresh() = runTest {
+        val row = dev.claudefleet.mobile.model.TrackerCommentRow(id = "9", author = "Ana", body = "on it", createdAt = 150)
+        val actions = FakeWorkActions().apply {
+            taskAnswer = DETAIL.copy(commentsTracker = "Acme Jira")
+            trackerCommentsAnswer = dev.claudefleet.mobile.model.TrackerComments(key = "ABC-12", tracker = "Acme Jira", comments = listOf(row))
+        }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        assertEquals(listOf(row), vm.state.value.trackerComments)
+        vm.setCommentDraft("x")
+        vm.comment()
+        runCurrent()
+        assertEquals(listOf("ABC-12"), actions.trackerCommentKeys, "a re-read of the task does not ask the tracker again")
+        vm.refresh()
+        runCurrent()
+        assertEquals(listOf("ABC-12", "ABC-12"), actions.trackerCommentKeys)
+
+        val failing = FakeWorkActions().apply {
+            taskAnswer = DETAIL.copy(commentsTracker = "Acme Jira")
+            failTrackerComments = HubError.Tool("E_UNAVAILABLE", "jira down")
+        }
+        val vm2 = taskVm(actions = failing)
+        runCurrent()
+        assertTrue(vm2.state.value.trackerCommentsFailed)
+        assertFalse(vm2.state.value.gone)
+
+        // No tracker that reads comments: nothing is asked.
+        val none = FakeWorkActions().apply { taskAnswer = DETAIL }
+        taskVm(actions = none)
+        runCurrent()
+        assertTrue(none.trackerCommentKeys.isEmpty())
+    }
+
+    /** One timeline, oldest first; at the same second fleet's comment first. */
+    @Test
+    fun fleets_and_the_trackers_comments_share_one_timeline() {
+        val f = dev.claudefleet.mobile.model.TaskComment(id = 1, body = "f", createdAt = 200)
+        val t1 = dev.claudefleet.mobile.model.TrackerCommentRow(id = "a", author = "Ana", body = "t", createdAt = 100)
+        val t2 = dev.claudefleet.mobile.model.TrackerCommentRow(id = "b", author = "", body = "t", createdAt = 200)
+        val line = commentTimeline(listOf(f), listOf(t2, t1))
+        assertEquals(listOf<CommentEntry>(CommentEntry.Tracker(t1), CommentEntry.Fleet(f), CommentEntry.Tracker(t2)), line)
+        assertEquals("Ana · on Acme Jira · 5 min ago", trackerCommentHeader(t1, "Acme Jira", 400))
+        assertEquals("Someone · on Acme Jira · 3 min ago", trackerCommentHeader(t2, "Acme Jira", 400))
+    }
+
     /** The hub's comment fields decode, and read as the desktop words them. */
     @Test
     fun comments_decode_and_read_as_the_desktop_words_them() {
