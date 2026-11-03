@@ -49,6 +49,7 @@ private fun TestScope.taskVm(
     nav: TaskNav = TaskNav(),
     scope: CoroutineScope = backgroundScope,
     callScope: CoroutineScope = scope,
+    epics: List<dev.claudefleet.mobile.model.EpicFacet> = emptyList(),
 ) = TaskViewModel(
     taskId = "item:12",
     fleet = fleet,
@@ -64,6 +65,7 @@ private fun TestScope.taskVm(
             GroupRef("repo:acme/api", "acme/api", GroupSource.Repo),
         )
     },
+    knownEpics = { epics },
     onOpenSession = { nav.opened += it },
     onStartHere = { nav.started += it },
     onOpenTask = { nav.tasks += it },
@@ -588,6 +590,181 @@ class TaskViewModelTest {
         assertEquals(listOf("ABC" to "ABC"), d.promoteTargets.single().choices)
         assertTrue(d.promoteTargets.single().containerRequired)
         assertEquals("Not created in Acme Jira: 403", d.promotion?.let(::promotionLine))
+    }
+
+    // ---- comments (claude-fleet `work_link comment`, the task page's Comments tab) ----
+
+    /** A comment goes with the box's text (trimmed), the box empties, and the task is read again. */
+    @Test
+    fun a_comment_is_sent_and_the_box_empties() = runTest {
+        val actions = FakeWorkActions().apply { taskAnswer = local.copy(commentsTracker = "Acme Jira", canPostToTracker = true) }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        assertTrue(vm.state.value.canComment)
+        assertTrue(vm.state.value.canPostToTracker)
+        assertNull(vm.comment(), "an empty box sends nothing")
+        vm.setCommentDraft("  looks done  ")
+        vm.comment(postToTracker = true)
+        runCurrent()
+        assertEquals(listOf("comment 12 \"looks done\" tracker=true"), actions.calls)
+        assertEquals("", vm.state.value.commentDraft)
+        assertEquals(2, actions.taskCalls, "the answer is followed by a re-read")
+    }
+
+    /** A refusal keeps the text; with no tracker to post to the flag is never sent; a read-only token cannot comment. */
+    @Test
+    fun a_refused_comment_keeps_its_text_and_the_tracker_flag_needs_the_hubs_offer() = runTest {
+        val actions = FakeWorkActions().apply {
+            taskAnswer = local
+            failWrite = HubError.Tool("E_INVALID", "too long")
+        }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        assertFalse(vm.state.value.canPostToTracker)
+        vm.setCommentDraft("note")
+        vm.comment(postToTracker = true)
+        runCurrent()
+        assertEquals(listOf("comment 12 \"note\" tracker=false"), actions.calls)
+        assertEquals("note", vm.state.value.commentDraft)
+
+        val ro = taskVm(actions = FakeWorkActions().apply { taskAnswer = local }, canWrite = false)
+        runCurrent()
+        assertFalse(ro.state.value.canComment)
+    }
+
+    /** Only the reader's own comment is deleted. */
+    @Test
+    fun only_the_readers_own_comment_is_deleted() = runTest {
+        val mine = dev.claudefleet.mobile.model.TaskComment(id = 5, itemId = 12, body = "mine", mine = true)
+        val theirs = dev.claudefleet.mobile.model.TaskComment(id = 6, itemId = 12, author = "client:ana", body = "theirs")
+        val actions = FakeWorkActions().apply { taskAnswer = local.copy(comments = listOf(mine, theirs)) }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        assertNull(vm.deleteComment(6))
+        vm.deleteComment(5)
+        runCurrent()
+        assertEquals(listOf("comment_delete 5"), actions.calls)
+    }
+
+    /** The ticket's own comments are read from its tracker once, beside fleet's; Refresh reads them again; a failure is one line. */
+    @Test
+    fun the_trackers_comments_are_read_once_and_again_on_refresh() = runTest {
+        val row = dev.claudefleet.mobile.model.TrackerCommentRow(id = "9", author = "Ana", body = "on it", createdAt = 150)
+        val actions = FakeWorkActions().apply {
+            taskAnswer = DETAIL.copy(commentsTracker = "Acme Jira")
+            trackerCommentsAnswer = dev.claudefleet.mobile.model.TrackerComments(key = "ABC-12", tracker = "Acme Jira", comments = listOf(row))
+        }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        assertEquals(listOf(row), vm.state.value.trackerComments)
+        vm.setCommentDraft("x")
+        vm.comment()
+        runCurrent()
+        assertEquals(listOf("ABC-12"), actions.trackerCommentKeys, "a re-read of the task does not ask the tracker again")
+        vm.refresh()
+        runCurrent()
+        assertEquals(listOf("ABC-12", "ABC-12"), actions.trackerCommentKeys)
+
+        val failing = FakeWorkActions().apply {
+            taskAnswer = DETAIL.copy(commentsTracker = "Acme Jira")
+            failTrackerComments = HubError.Tool("E_UNAVAILABLE", "jira down")
+        }
+        val vm2 = taskVm(actions = failing)
+        runCurrent()
+        assertTrue(vm2.state.value.trackerCommentsFailed)
+        assertFalse(vm2.state.value.gone)
+
+        // No tracker that reads comments: nothing is asked.
+        val none = FakeWorkActions().apply { taskAnswer = DETAIL }
+        taskVm(actions = none)
+        runCurrent()
+        assertTrue(none.trackerCommentKeys.isEmpty())
+    }
+
+    /** One timeline, oldest first; at the same second fleet's comment first. */
+    @Test
+    fun fleets_and_the_trackers_comments_share_one_timeline() {
+        val f = dev.claudefleet.mobile.model.TaskComment(id = 1, body = "f", createdAt = 200)
+        val t1 = dev.claudefleet.mobile.model.TrackerCommentRow(id = "a", author = "Ana", body = "t", createdAt = 100)
+        val t2 = dev.claudefleet.mobile.model.TrackerCommentRow(id = "b", author = "", body = "t", createdAt = 200)
+        val line = commentTimeline(listOf(f), listOf(t2, t1))
+        assertEquals(listOf<CommentEntry>(CommentEntry.Tracker(t1), CommentEntry.Fleet(f), CommentEntry.Tracker(t2)), line)
+        assertEquals("Ana · on Acme Jira · 5 min ago", trackerCommentHeader(t1, "Acme Jira", 400))
+        assertEquals("Someone · on Acme Jira · 3 min ago", trackerCommentHeader(t2, "Acme Jira", 400))
+    }
+
+    /** A task's priority, estimate and labels decode and read as the desktop words them (claude-fleet migration 171). */
+    @Test
+    fun priority_estimate_and_labels_read_as_the_desktop_words_them() {
+        val d = json.decodeFromString(
+            TaskDetail.serializer(),
+            """{"task":{"task_id":"item:12","priority":"high","labels":["api","bug"],"estimate":2.5,"estimate_unit":"points"}}""",
+        )
+        assertEquals("High", dev.claudefleet.mobile.model.priorityLabel(d.task.priority))
+        assertEquals(listOf("api", "bug"), d.task.labels)
+        assertEquals("2.5 pts", dev.claudefleet.mobile.model.estimateLabel(d.task.estimate, d.task.estimateUnit))
+        assertEquals("1 pt", dev.claudefleet.mobile.model.estimateLabel(1.0, "points"))
+        assertEquals("4 h", dev.claudefleet.mobile.model.estimateLabel(4.0, "hours"))
+        assertNull(dev.claudefleet.mobile.model.estimateLabel(0.0, "points"))
+        assertNull(dev.claudefleet.mobile.model.priorityLabel("p0"), "a value this build does not know says nothing")
+    }
+
+    // ---- Under epic… (claude-fleet `work_link set_parent`) ----
+
+    /** Fleet's own epics are offered (never itself or where it is), one tap files it, and a filed task can go back to the top. */
+    @Test
+    fun a_task_is_filed_under_an_epic_and_back_to_the_top() = runTest {
+        val epics = listOf(
+            dev.claudefleet.mobile.model.EpicFacet(taskId = "item:40", key = "TASK-40", title = "Payments", count = 3),
+            dev.claudefleet.mobile.model.EpicFacet(taskId = "tracker:1:PAY-1", key = "PAY-1", title = "A ticket epic"),
+            dev.claudefleet.mobile.model.EpicFacet(taskId = "item:12", title = "itself"),
+        )
+        val actions = FakeWorkActions().apply { taskAnswer = local }
+        val vm = taskVm(actions = actions, epics = epics)
+        runCurrent()
+        assertTrue(vm.state.value.canFile)
+        assertEquals(listOf("item:40"), vm.state.value.epicChoices.map { it.taskId })
+        assertEquals("TASK-40 Payments (3)", epicChoiceLabel(vm.state.value.epicChoices.single()))
+        vm.openFile()
+        vm.fileUnder("item:40")
+        runCurrent()
+        assertEquals(listOf("set_parent 12 item:40"), actions.calls)
+        assertFalse(vm.state.value.fileOpen)
+
+        val filed = FakeWorkActions().apply { taskAnswer = local.copy(task = local.task.copy(parentTaskId = "item:40")) }
+        val vm2 = taskVm(actions = filed, epics = epics)
+        runCurrent()
+        assertTrue(vm2.state.value.epicChoices.isEmpty(), "where it already is is not offered")
+        assertNull(vm2.fileUnder("item:40"), "filing it where it is sends nothing")
+        vm2.fileUnder("")
+        runCurrent()
+        assertEquals(listOf("set_parent 12 "), filed.calls)
+
+        val epic = taskVm(actions = FakeWorkActions().apply { taskAnswer = local.copy(task = local.task.copy(epic = true)) }, epics = epics)
+        runCurrent()
+        assertFalse(epic.state.value.canFile, "an epic is not filed under another")
+    }
+
+    /** The hub's comment fields decode, and read as the desktop words them. */
+    @Test
+    fun comments_decode_and_read_as_the_desktop_words_them() {
+        val d = json.decodeFromString(
+            TaskDetail.serializer(),
+            """{"task":{"task_id":"item:12"},"comments":[{"id":1,"item_id":12,"author":"client:phone","body":"first","created_at":100,""" +
+                """"mine":true,"tracker_post":{"state":"failed","error":"403"}},{"id":2,"item_id":12,"author":"host:htz","body":"b",""" +
+                """"created_at":200}],"comments_tracker":"Acme Jira","can_post_to_tracker":true}""",
+        )
+        assertEquals(2, d.comments.size)
+        assertTrue(d.canPostToTracker)
+        assertEquals("You · 5 min ago", commentHeader(d.comments[0], 400))
+        assertEquals("An agent on htz", dev.claudefleet.mobile.model.commentAuthor(d.comments[1]))
+        assertEquals("phone", dev.claudefleet.mobile.model.commentAuthor(d.comments[0].copy(mine = false)))
+        assertEquals("Someone", dev.claudefleet.mobile.model.commentAuthor(dev.claudefleet.mobile.model.TaskComment()))
+        assertEquals("Not sent: 403", dev.claudefleet.mobile.model.commentPostLine(d.comments[0].trackerPost, "Acme Jira"))
+        assertEquals(
+            "Sent to Acme Jira",
+            dev.claudefleet.mobile.model.commentPostLine(dev.claudefleet.mobile.model.CommentPost(state = "done"), "Acme Jira"),
+        )
     }
 
     // ---- the AI check on done (claude-fleet work-graph.md, *AI check on done*) ----

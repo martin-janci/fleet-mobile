@@ -14,6 +14,10 @@ import dev.claudefleet.mobile.model.OrgSource
 import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.model.TicketCheck
 import dev.claudefleet.mobile.model.TaskDetail
+import dev.claudefleet.mobile.model.TaskComment
+import dev.claudefleet.mobile.model.EpicFacet
+import dev.claudefleet.mobile.model.TrackerCommentRow
+import dev.claudefleet.mobile.model.COMMENT_MAX
 import dev.claudefleet.mobile.model.PromoteTarget
 import dev.claudefleet.mobile.model.PromotionView
 import dev.claudefleet.mobile.model.WorkTaskLink
@@ -154,6 +158,31 @@ data class TaskUiState(
     /** "Creating the ticket in Acme Jira…", or why it was not created. */
     val promotionLine: String? = null,
     val promotionFailed: Boolean = false,
+    /** Fleet's comments on the task, oldest first. */
+    val comments: List<TaskComment> = emptyList(),
+    /** The ticket's tracker by name, when a comment can be posted there too ([canPostToTracker]). */
+    val commentsTracker: String? = null,
+    /** **Comment**: a task fleet has an item for, a full token, `work_link comment`, a connection. */
+    val canComment: Boolean = false,
+    /** *Also post to <tracker>* is offered beside Comment. */
+    val canPostToTracker: Boolean = false,
+    /** **Delete** on the reader's own comments: `work_link comment_delete`. */
+    val canDeleteComment: Boolean = false,
+    /** What is typed in the comment box, kept across a failed send. */
+    val commentDraft: String = "",
+    /** The ticket's own comments at [commentsTracker], read once per visit (and on Refresh). */
+    val trackerComments: List<TrackerCommentRow> = emptyList(),
+    /** Reading them failed: said in one line, the fleet comments still show. */
+    val trackerCommentsFailed: Boolean = false,
+    /**
+     * **Under epic…**: fleet's own task that is not an epic itself, a full
+     * token, `work_link set_parent`, a connection. The hub refuses a filing
+     * that would nest too deep, naming why.
+     */
+    val canFile: Boolean = false,
+    /** The epics it may go under: fleet's own (`item:<id>`), never itself or where it already is. */
+    val epicChoices: List<EpicFacet> = emptyList(),
+    val fileOpen: Boolean = false,
 ) {
     val task get() = detail?.task
 }
@@ -194,6 +223,8 @@ class TaskViewModel(
     private val knownGroups: () -> List<GroupRef> = { emptyList() },
     /** Tasks per placeable group label, for the rows of *Place in group…* ("4 tasks"). */
     private val groupCounts: () -> Map<String, Int> = { emptyMap() },
+    /** The epics the Work tree knows, for *Under epic…*. */
+    private val knownEpics: () -> List<EpicFacet> = { emptyList() },
     private val onOpenSession: (Long) -> Unit = {},
     /** The New session form in ticket mode, for this key. */
     private val onStartHere: (String) -> Unit = {},
@@ -221,6 +252,12 @@ class TaskViewModel(
         val parentLabel: String? = null,
         val subtaskOpen: Boolean = false,
         val promoteOpen: Boolean = false,
+        val commentDraft: String = "",
+        val trackerComments: List<TrackerCommentRow> = emptyList(),
+        val trackerCommentsFailed: Boolean = false,
+        /** The key whose tracker comments were read, so a re-read of the task does not ask the tracker again. */
+        val trackerCommentsFor: String? = null,
+        val fileOpen: Boolean = false,
     )
 
     private val local = MutableStateFlow(Local())
@@ -246,7 +283,10 @@ class TaskViewModel(
         }
     }
 
-    fun refresh(): Job = scope.launch { load() }
+    fun refresh(): Job = scope.launch {
+        local.update { it.copy(trackerCommentsFor = null) }
+        load()
+    }
 
     private suspend fun load() {
         if (!fleet.capabilities.value.has(WORK, TASK)) return
@@ -268,6 +308,7 @@ class TaskViewModel(
                 }
             }
             local.update { it.copy(parentLabel = label) }
+            loadTrackerComments(detail)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -275,6 +316,27 @@ class TaskViewModel(
             val gone = t is HubError.Tool && t.code == "E_NOTFOUND"
             local.update { it.copy(loading = false, gone = gone, error = if (gone) null else friendlyWork(t)) }
         }
+    }
+
+    /**
+     * The ticket's own comments at its tracker, beside fleet's: read live from
+     * the tracker, so once per key while this screen lives (Refresh reads
+     * again), never on every `work:changed`. A failure is one quiet line.
+     */
+    private suspend fun loadTrackerComments(detail: TaskDetail) {
+        val key = detail.task.key?.takeIf { it.isNotBlank() } ?: return
+        if (detail.commentsTracker == null || !fleet.capabilities.value.has(WORK, TRACKER_COMMENTS)) return
+        if (local.value.trackerCommentsFor == key) return
+        local.update { it.copy(trackerCommentsFor = key) }
+        val read = try {
+            actions.trackerComments(key).comments
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            if (t is HubError.Tool && t.isUnknownAction()) fleet.actionMissing(WORK, TRACKER_COMMENTS)
+            null
+        }
+        local.update { it.copy(trackerComments = read.orEmpty(), trackerCommentsFailed = read == null) }
     }
 
     /** **Open**: a live session of the task. */
@@ -535,6 +597,54 @@ class TaskViewModel(
         }
     }
 
+    fun openFile() {
+        if (state.value.canFile) local.update { it.copy(fileOpen = true, error = null, conflict = false) }
+    }
+
+    fun closeFile() {
+        local.update { it.copy(fileOpen = false) }
+    }
+
+    /** File the task under epic [parent] (`item:<id>`), or `""` to take it out to the top; then re-read. */
+    fun fileUnder(parent: String): Job? {
+        val s = state.value
+        val itemId = s.task?.itemId ?: return null
+        if (!s.canFile) return null.also { refuseOffline(SET_PARENT) }
+        if (parent == (s.parentTaskId ?: "")) return null.also { closeFile() }
+        return itemWrite(SET_PARENT) {
+            actions.setParent(itemId, parent)
+            local.update { it.copy(fileOpen = false) }
+        }
+    }
+
+    fun setCommentDraft(text: String) {
+        local.update { it.copy(commentDraft = text.take(COMMENT_MAX)) }
+    }
+
+    /**
+     * **Comment**: the box's text on the task, and with [postToTracker] (where
+     * offered) on its ticket too. The box empties once the hub took it; a
+     * refusal keeps it, with the hub's reason.
+     */
+    fun comment(postToTracker: Boolean = false): Job? {
+        val s = state.value
+        val itemId = s.task?.itemId ?: return null
+        // The box's text as typed, not [state]'s: that copy follows a beat later.
+        val body = local.value.commentDraft.trim().ifEmpty { return null }
+        if (!s.canComment) return null.also { refuseOffline(COMMENT) }
+        return itemWrite(COMMENT) {
+            actions.comment(itemId, body, postToTracker && s.canPostToTracker)
+            local.update { it.copy(commentDraft = "") }
+        }
+    }
+
+    /** **Delete** one of the reader's own comments. */
+    fun deleteComment(id: Long): Job? {
+        val c = state.value.comments.firstOrNull { it.id == id } ?: return null
+        if (!c.mine) return null
+        return itemWrite(COMMENT_DELETE) { actions.deleteComment(id) }
+    }
+
     /** A running check finishes on the hub: read the task again until it does. */
     private fun pollWhileChecking(check: TicketCheck?) {
         if (check?.state != "running" || checkPoll?.isActive == true) return
@@ -668,6 +778,17 @@ class TaskViewModel(
             },
             promotionLine = promotion?.let(::promotionLine),
             promotionFailed = promotion?.state == "failed",
+            comments = detail?.comments.orEmpty(),
+            commentsTracker = detail?.commentsTracker,
+            canComment = task?.itemId != null && allowed(caps, status, COMMENT),
+            canPostToTracker = detail?.commentsTracker != null && detail.canPostToTracker && allowed(caps, status, COMMENT),
+            canDeleteComment = allowed(caps, status, COMMENT_DELETE),
+            commentDraft = l.commentDraft,
+            canFile = task?.editable == true && !task.epic && allowed(caps, status, SET_PARENT),
+            epicChoices = knownEpics().filter { it.taskId.startsWith("item:") && it.taskId != task?.taskId && it.taskId != task?.parentTaskId },
+            fileOpen = l.fileOpen,
+            trackerComments = l.trackerComments.takeIf { detail?.commentsTracker != null }.orEmpty(),
+            trackerCommentsFailed = l.trackerCommentsFailed && detail?.commentsTracker != null,
             criteria = acceptanceCriteria(detail?.description?.takeIf { it.isNotBlank() } ?: detail?.notes.orEmpty()),
         )
     }
@@ -705,6 +826,10 @@ class TaskViewModel(
         const val VERIFY = "verify"
         const val CHECK_SETUP = "check_setup"
         const val PROMOTE = "promote"
+        const val COMMENT = "comment"
+        const val SET_PARENT = "set_parent"
+        const val COMMENT_DELETE = "comment_delete"
+        const val TRACKER_COMMENTS = "tracker_comments"
         const val CHECK_POLL_MS = 10_000L
     }
 }

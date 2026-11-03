@@ -1934,6 +1934,7 @@ private fun FleetRoute(
                         credentials = credentials,
                         knownGroups = myWork::knownGroups,
                         groupCounts = myWork::groupCounts,
+                        knownEpics = myWork::knownEpics,
                         // The fleet's scope: a placement or a resume is not
                         // cancelled by backing out of the task.
                         callScope = scope,
@@ -2925,6 +2926,7 @@ private fun TaskRoute(
     credentials: Credentials,
     knownGroups: () -> List<GroupRef>,
     groupCounts: () -> Map<String, Int>,
+    knownEpics: () -> List<dev.claudefleet.mobile.model.EpicFacet> = { emptyList() },
     callScope: CoroutineScope,
     onOpenSession: (Long) -> Unit,
     onStartHere: (String) -> Unit,
@@ -2944,6 +2946,7 @@ private fun TaskRoute(
             canWrite = credentials.canWrite,
             knownGroups = knownGroups,
             groupCounts = groupCounts,
+            knownEpics = knownEpics,
             onOpenSession = onOpenSession,
             onStartHere = onStartHere,
             onOpenTask = onOpenTask,
@@ -2979,6 +2982,12 @@ private fun TaskRoute(
         onOpenPromote = vm::openPromote,
         onClosePromote = vm::closePromote,
         onPromote = { target, container -> vm.promote(target, container) },
+        onCommentDraft = vm::setCommentDraft,
+        onComment = { vm.comment(it) },
+        onDeleteComment = { vm.deleteComment(it) },
+        onOpenFile = vm::openFile,
+        onCloseFile = vm::closeFile,
+        onFileUnder = { vm.fileUnder(it) },
     )
     if (newLayout) {
         val rows by repository.sessions.collectAsState()

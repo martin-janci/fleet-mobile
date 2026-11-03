@@ -333,6 +333,29 @@ internal class FakeWorkActions : WorkActions {
         write("promote $itemId tracker=$trackerId container=$container")
     }
 
+    override suspend fun comment(itemId: Long, body: String, postToTracker: Boolean): dev.claudefleet.mobile.model.TaskComment {
+        write("comment $itemId \"$body\" tracker=$postToTracker")
+        return dev.claudefleet.mobile.model.TaskComment(id = 1, itemId = itemId, body = body, mine = true)
+    }
+
+    var trackerCommentsAnswer: dev.claudefleet.mobile.model.TrackerComments = dev.claudefleet.mobile.model.TrackerComments()
+    var failTrackerComments: Throwable? = null
+    val trackerCommentKeys = mutableListOf<String>()
+
+    override suspend fun trackerComments(key: String): dev.claudefleet.mobile.model.TrackerComments {
+        trackerCommentKeys += key
+        failTrackerComments?.let { throw it }
+        return trackerCommentsAnswer
+    }
+
+    override suspend fun setParent(itemId: Long, parent: String) {
+        write("set_parent $itemId $parent")
+    }
+
+    override suspend fun deleteComment(commentId: Long) {
+        write("comment_delete $commentId")
+    }
+
     override suspend fun runTicketCheck(itemId: Long) {
         write("check $itemId")
     }

@@ -430,6 +430,12 @@ data class WorkTask(
     @SerialName("due_at") val dueAt: String? = null,
     /** A local item's parent (`item:<id>`): the epic or task it is filed under. */
     @SerialName("parent_task_id") val parentTaskId: String? = null,
+    /** `urgent | high | medium | low` (claude-fleet migration 171): a native task's own, else its tracker's. */
+    val priority: String? = null,
+    val labels: List<String> = emptyList(),
+    /** How big the work is, in [estimateUnit] (`points | hours`). */
+    val estimate: Double? = null,
+    @SerialName("estimate_unit") val estimateUnit: String? = null,
     /** An epic (claude-fleet's sprints design §3). */
     val epic: Boolean = false,
     /** Its children and how many are done: an epic's roll-up. */
@@ -454,6 +460,23 @@ data class WorkTask(
 
     /** The tracker is failing — said as such, never as "no sessions". */
     val trackerDown: Boolean get() = trackerId != null && !trackerState.isNullOrBlank() && trackerState != "ok"
+}
+
+/** A priority as the task page says it ("High"); null for none or one this build does not know (the desktop's `priorityLabel`). */
+fun priorityLabel(p: String?): String? = when (p) {
+    "urgent" -> "Urgent"
+    "high" -> "High"
+    "medium" -> "Medium"
+    "low" -> "Low"
+    else -> null
+}
+
+/** An estimate as the task page says it: "3 pts", "1 pt", "4 h", "2.5 pts"; null for none (the desktop's `estimateLabel`). */
+fun estimateLabel(estimate: Double?, unit: String?): String? {
+    if (estimate == null || !estimate.isFinite() || estimate <= 0.0) return null
+    val r = kotlin.math.round(estimate * 100) / 100
+    val n = if (r == kotlin.math.floor(r)) r.toLong().toString() else r.toString()
+    return if (unit == "hours") "$n h" else "$n ${if (r == 1.0) "pt" else "pts"}"
 }
 
 /** The deepest a local item nests on a hub that reports [WorkTask.level]. */
@@ -584,7 +607,82 @@ data class TaskDetail(
     @SerialName("promote_targets") val promoteTargets: List<PromoteTarget> = emptyList(),
     /** With no target: what would bring one (Create tickets off on the tracker, none connected, a parent of fleet's own). */
     @SerialName("promote_hint") val promoteHint: String? = null,
+    /** What people and agents said about the task in fleet, oldest first; absent from an older hub. */
+    val comments: List<TaskComment> = emptyList(),
+    /** The task's tracker by name, when its provider reads comments. */
+    @SerialName("comments_tracker") val commentsTracker: String? = null,
+    /** This reader may ask for a comment to be posted to that tracker too. */
+    @SerialName("can_post_to_tracker") val canPostToTracker: Boolean = false,
 )
+
+/** A comment on a task in fleet (`store::CommentRow`): plain text, never markup. */
+@Serializable
+data class TaskComment(
+    val id: Long = 0,
+    @SerialName("item_id") val itemId: Long = 0,
+    /** Who wrote it as the hub names a caller (`client:phone`); empty when withheld from this reader. */
+    val author: String = "",
+    val body: String = "",
+    @SerialName("created_at") val createdAt: Long = 0,
+    /** This reader wrote it, so may delete it. */
+    val mine: Boolean = false,
+    @SerialName("tracker_post") val trackerPost: CommentPost? = null,
+)
+
+/** A comment's post to its tracker: `pending` | `done` | `failed`. */
+@Serializable
+data class CommentPost(
+    val state: String = "",
+    val error: String? = null,
+    val url: String? = null,
+)
+
+/** Who wrote a comment, as a person reads it (the desktop's `commentAuthor`): `client:phone` → `phone`. */
+fun commentAuthor(c: TaskComment): String {
+    if (c.mine) return "You"
+    val a = c.author.trim()
+    if (a.isEmpty()) return "Someone"
+    if (a == "desktop") return "This desktop"
+    if (a == "master") return "The hub"
+    val i = a.indexOf(':')
+    if (i <= 0 || i == a.length - 1) return a
+    val (kind, name) = a.substring(0, i) to a.substring(i + 1)
+    return when (kind) {
+        "host" -> "An agent on $name"
+        "client", "token" -> name
+        else -> a
+    }
+}
+
+/** What a fleet comment's post to the tracker says beside it (the desktop's `postStateLabel`). */
+fun commentPostLine(post: CommentPost?, tracker: String): String? = when (post?.state) {
+    "done" -> "Sent to $tracker"
+    "pending" -> post.error?.let { "Sending… (retrying: $it)" } ?: "Sending…"
+    "failed" -> "Not sent: ${post.error ?: "the tracker refused it"}"
+    else -> null
+}
+
+/** `work { tracker_comments }`: the ticket's own comments at its tracker, oldest first. */
+@Serializable
+data class TrackerComments(
+    val key: String = "",
+    val tracker: String = "",
+    val provider: String = "",
+    val comments: List<TrackerCommentRow> = emptyList(),
+)
+
+/** One comment at the tracker: its author's name there, plain text. */
+@Serializable
+data class TrackerCommentRow(
+    val id: String = "",
+    val author: String = "",
+    val body: String = "",
+    @SerialName("created_at") val createdAt: Long = 0,
+    val url: String? = null,
+)
+
+/** The longest comment the hub keeps (`COMMENT_MAX_CHARS`). */
+const val COMMENT_MAX = 4000
 
 /** `service::work::promote::PromotionView`: `pending` or `failed` (with the tracker's reason). */
 @Serializable

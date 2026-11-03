@@ -114,6 +114,8 @@ import dev.claudefleet.mobile.model.ReviewPage
 import dev.claudefleet.mobile.model.RulePreview
 import dev.claudefleet.mobile.model.SessionTasks
 import dev.claudefleet.mobile.model.TaskDetail
+import dev.claudefleet.mobile.model.TaskComment
+import dev.claudefleet.mobile.model.TrackerComments
 import dev.claudefleet.mobile.model.WorkDecision
 import dev.claudefleet.mobile.model.WorkRule
 import dev.claudefleet.mobile.model.WorkRuleDraft
@@ -2058,6 +2060,12 @@ class HubClient(
             json.decodeFromJsonElement(TaskDetail.serializer(), it)
         }
 
+    /** The ticket's own comments at its tracker (`work { tracker_comments }`), read live from the tracker. */
+    suspend fun workTrackerComments(key: String): TrackerComments =
+        call("work", buildJsonObject { put("action", "tracker_comments"); put("key", key) }) {
+            json.decodeFromJsonElement(TrackerComments.serializer(), it)
+        }
+
     /** Every link of one session — live, suggested, rejected and ended — with its task. */
     suspend fun workSessionTasks(sessionId: Long): SessionTasks =
         call("work", buildJsonObject { put("action", "session_tasks"); put("session_id", sessionId) }) {
@@ -2379,6 +2387,45 @@ class HubClient(
                 put("item_id", itemId)
                 trackerId?.let { put("tracker_id", it) }
                 container?.takeIf { it.isNotBlank() }?.let { put("container", it.trim()) }
+            },
+        ) { }
+
+    /**
+     * File local item [itemId] under [parent] (`item:<id>`, an epic or a
+     * task), or `""` to take it out to the top (`work_link { set_parent }`).
+     */
+    suspend fun setWorkParent(itemId: Long, parent: String): Unit =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "set_parent")
+                put("item_id", itemId)
+                put("parent", parent)
+            },
+        ) { }
+
+    /**
+     * A comment on task [itemId] (`work_link { comment }`), and with
+     * [postToTracker] its post to the ticket's tracker too. Answers the comment.
+     */
+    suspend fun commentOnWorkItem(itemId: Long, body: String, postToTracker: Boolean): TaskComment =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "comment")
+                put("item_id", itemId)
+                put("notes", body)
+                if (postToTracker) put("post_to_tracker", true)
+            },
+        ) { json.decodeFromJsonElement(TaskComment.serializer(), it) }
+
+    /** Delete this reader's own comment (`work_link { comment_delete }`); a pending post to the tracker is cancelled. */
+    suspend fun deleteWorkComment(commentId: Long): Unit =
+        call(
+            "work_link",
+            buildJsonObject {
+                put("action", "comment_delete")
+                put("comment_id", commentId)
             },
         ) { }
 

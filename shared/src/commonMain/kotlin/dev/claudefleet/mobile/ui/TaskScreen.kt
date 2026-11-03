@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.epochSeconds
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -34,6 +35,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.model.priorityLabel
+import dev.claudefleet.mobile.model.estimateLabel
 import dev.claudefleet.mobile.model.LinkState
 import dev.claudefleet.mobile.model.WorkTaskLink
 import dev.claudefleet.mobile.ui.components.ConnectionBanner
@@ -97,6 +100,14 @@ data class TaskHandlers(
     val onOpenPromote: () -> Unit = {},
     val onClosePromote: () -> Unit = {},
     val onPromote: (dev.claudefleet.mobile.model.PromoteTarget, String?) -> Unit = { _, _ -> },
+    /** The comment box's text, and **Comment** (with *Also post to the tracker*). */
+    val onCommentDraft: (String) -> Unit = {},
+    val onComment: (postToTracker: Boolean) -> Unit = {},
+    val onDeleteComment: (Long) -> Unit = {},
+    /** **Under epic…**: open, close, and file under `item:<id>` (or `""` for the top). */
+    val onOpenFile: () -> Unit = {},
+    val onCloseFile: () -> Unit = {},
+    val onFileUnder: (String) -> Unit = {},
 )
 
 /**
@@ -158,6 +169,11 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
                     }
                     if (task.assignees.isNotEmpty()) Text("Assigned: ${task.assignees.joinToString()}", style = MaterialTheme.typography.bodySmall)
                     task.dueAt?.takeIf { it.isNotBlank() }?.let { Text("Due: $it", style = MaterialTheme.typography.bodySmall) }
+                    listOfNotNull(
+                        priorityLabel(task.priority)?.let { "Priority: $it" },
+                        estimateLabel(task.estimate, task.estimateUnit)?.let { "Estimate: $it" },
+                        task.labels.takeIf { it.isNotEmpty() }?.joinToString(", ")?.let { "Labels: $it" },
+                    ).takeIf { it.isNotEmpty() }?.let { Text(it.joinToString(" · "), style = MaterialTheme.typography.bodySmall) }
                     task.url?.let { Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                     state.orgLine?.let { Text("Organisation: $it", style = MaterialTheme.typography.bodySmall) }
                     Text("Group: ${state.groupLine}", style = MaterialTheme.typography.bodySmall)
@@ -206,12 +222,14 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
                     Text("…and ${task.sessionsMore} more on the desktop.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
                 }
             }
+            item(key = "comments") { TaskCommentsBlock(state, handlers, epochSeconds(), Modifier.padding(16.dp)) }
         }
     }
     if (state.placeOpen) PlaceSheet(state, handlers)
     if (state.editOpen) TaskEditSheetFor(state, handlers)
     if (state.subtaskOpen) SubtaskSheetFor(state, handlers)
     if (state.promoteOpen) PromoteSheetFor(state, handlers)
+    if (state.fileOpen) FileUnderEpicDialog(state, handlers)
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.linkSection(
@@ -527,21 +545,25 @@ internal fun TaskHierarchy(state: TaskUiState, handlers: TaskHandlers, modifier:
  * off with what would bring one; a promotion on its way, or one refused,
  * is said under them.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun OwnTaskControls(state: TaskUiState, handlers: TaskHandlers, modifier: Modifier = Modifier) {
-    if (!state.canSetStatus && !state.canEdit && !state.canAddSubtask && !state.canPromote &&
+    if (!state.canSetStatus && !state.canEdit && !state.canAddSubtask && !state.canPromote && !state.canFile &&
         state.promoteHint == null && state.promotionLine == null
     ) return
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (state.canSetStatus) {
             TaskStatusChips(current = state.task?.statusCategory, enabled = !state.busy, onPick = handlers.onSetStatus)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (state.canEdit) {
                 TextButton(onClick = handlers.onOpenEdit, enabled = !state.busy) { Text("Edit…") }
             }
             if (state.canAddSubtask) {
                 TextButton(onClick = handlers.onOpenSubtask, enabled = !state.busy) { Text("Add subtask") }
+            }
+            if (state.canFile) {
+                TextButton(onClick = handlers.onOpenFile, enabled = !state.busy) { Text("Under epic…") }
             }
             if (state.canPromote || state.promoteHint != null) {
                 TextButton(onClick = handlers.onOpenPromote, enabled = state.canPromote && !state.busy) { Text("Promote to ticket…") }

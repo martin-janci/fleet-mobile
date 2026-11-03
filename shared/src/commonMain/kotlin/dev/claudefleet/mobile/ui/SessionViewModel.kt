@@ -1371,7 +1371,7 @@ class SessionViewModel(
         try {
             val r = actions.queuePrompt(sessionId, body, SendLaterTiming())
             quickReplies.remember(body)
-            val queued = runCatching { actions.queuedPrompts(sessionId) }.getOrNull()
+            val queued = orNullUnlessCancelled { actions.queuedPrompts(sessionId) }
             local.update { it.copy(sending = false, pending = null, queued = queued?.filter { q -> q.waiting } ?: it.queued) }
             if (r.delivered) requestRead(first = false)
         } catch (e: CancellationException) {
@@ -1646,7 +1646,7 @@ class SessionViewModel(
                 timing.notBefore != null || timing.untilLimitReset -> "Kept: it goes in when its time comes and the session is idle."
                 else -> "It goes in when the session is next idle."
             }
-            val queued = runCatching { actions.queuedPrompts(sessionId) }.getOrNull()
+            val queued = orNullUnlessCancelled { actions.queuedPrompts(sessionId) }
             local.update { it.copy(sendLaterNotice = notice, queued = queued?.filter { q -> q.waiting } ?: it.queued) }
             if (r.delivered) requestRead(first = false)
         } catch (e: CancellationException) {

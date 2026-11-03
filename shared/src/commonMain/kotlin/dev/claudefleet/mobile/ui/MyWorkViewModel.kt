@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.data.WorkActions
 import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.Facet
 import dev.claudefleet.mobile.model.GroupRef
+import dev.claudefleet.mobile.model.EpicFacet
 import dev.claudefleet.mobile.model.IdOrWord
 import dev.claudefleet.mobile.model.TreeGroup
 import dev.claudefleet.mobile.model.TreeOrg
@@ -591,6 +592,9 @@ class MyWorkViewModel(
      * group…* lists: `label:` groups a person or a rule made, never a
      * tracker's container, a repository or a key ([placeableGroups]).
      */
+    /** The epics the last page named (its facets), for a task's *Under epic…*. */
+    fun knownEpics(): List<EpicFacet> = local.value.page?.facets?.epics.orEmpty()
+
     fun knownGroups(): List<GroupRef> =
         local.value.page?.groups.orEmpty().map { it.group }.filter { it.isPlaceable }.distinctBy { it.title }
 
