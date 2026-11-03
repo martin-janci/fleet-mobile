@@ -247,7 +247,7 @@ class MorePlacesTest {
     @Test
     fun a_meter_says_how_much_is_used_and_when_it_starts_over() {
         val now = 1_000_000L
-        assertEquals("62% used · resets in 2 h", limitFigure(LimitWindow(62.4, resetsAt = now + 2 * 3_600), now))
+        assertEquals("38% left · resets in 2 h", limitFigure(LimitWindow(62.4, resetsAt = now + 2 * 3_600), now))
         // The desktop's "low": under 20% left (review r05).
         assertTrue(nearLimit(LimitWindow(85.0), now))
         assertTrue(nearLimit(LimitWindow(80.5), now))

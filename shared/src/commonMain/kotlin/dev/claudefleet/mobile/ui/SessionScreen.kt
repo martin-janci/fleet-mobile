@@ -1034,7 +1034,7 @@ fun SessionScreen(
             // A row paused at its account's limit (4.10): Switch account and
             // Wait, as the desktop's row offers them. Not on a readonly device,
             // which may switch nothing.
-            if (state.session?.attention?.reason == "account_limit" && !state.readOnly && state.card == null &&
+            if (state.session?.attention?.reason.let { it == "account_limit" || it == "no_credentials" } && !state.readOnly && state.card == null &&
                 (state.canSwitchAccount || later.limitResetsAt != null || state.switchTarget != null || state.waitingUntil != null)
             ) {
                 LimitCard(state, later)

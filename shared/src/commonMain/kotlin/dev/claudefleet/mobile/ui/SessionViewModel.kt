@@ -15,6 +15,7 @@ import dev.claudefleet.mobile.data.STOPPED
 import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.loginLabel
 import dev.claudefleet.mobile.model.forAccount
+import dev.claudefleet.mobile.model.signedInElsewhere
 import dev.claudefleet.mobile.model.isSignedOut
 import dev.claudefleet.mobile.model.QueuedPrompt
 import dev.claudefleet.mobile.model.HostLogin
@@ -318,11 +319,12 @@ data class SessionUiState(
         get() = sendLaterAvailable && !readOnly && session != null && connected
 
     /**
-     * The row is paused at its account's limit (the hub's `account_limit`),
-     * and this person may restart it under another login: Switch account.
+     * The row is paused at its account's limit (the hub's `account_limit`)
+     * or on a signed-out login (`no_credentials`, review M9), and this person
+     * may restart it under another login: Switch account.
      */
     val canSwitchAccount: Boolean
-        get() = switchAccountAvailable && canRestart && session?.attention?.reason == "account_limit"
+        get() = switchAccountAvailable && canRestart && session?.attention?.reason.let { it == "account_limit" || it == "no_credentials" }
 
     /**
      * Details › Switch account… (gap plan G5.5, the desktop's G1.11 action):
@@ -1793,10 +1795,15 @@ class SessionViewModel(
         try {
             // Never a login the hub knows is signed out (review w23-3).
             val host = fleet.hosts.value.firstOrNull { it.alias == r.hostAlias }
-            val h = actions.accountHeadroom(r.hostAlias, r.claudeProfile).forAccount(r.accountUuid) { l -> host?.isSignedOut(l.profile) == true }
-            val target = h.suggestion
+            val out = { l: HostLogin -> host?.isSignedOut(l.profile) == true }
+            val h = actions.accountHeadroom(r.hostAlias, r.claudeProfile)
+            // A signed-out session needs any signed-in login with room, as the
+            // Inbox offers it (review M9); a paused one, another account.
+            val signedOutRow = r.attention?.reason == "no_credentials"
+            val target = if (signedOutRow) h.signedInElsewhere(r.claudeProfile, out) else h.forAccount(r.accountUuid, out).suggestion
             local.update {
                 if (target != null) it.copy(switchTarget = target)
+                else if (signedOutRow) it.copy(limitNotice = "No other login on ${r.hostAlias} is signed in with room left.")
                 else it.copy(limitNotice = "No other login on ${r.hostAlias} has room left.")
             }
         } catch (e: CancellationException) {

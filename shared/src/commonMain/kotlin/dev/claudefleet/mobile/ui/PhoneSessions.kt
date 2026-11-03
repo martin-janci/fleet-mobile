@@ -133,7 +133,7 @@ internal fun waitsOn(
 
 /**
  * A Blocked row's line (redesign step 4.10), as the desktop words it:
- * "Paused · limit on tech.silvester", "tech.silvester is signed out",
+ * "Paused · limit on tech.silvester", "Signed out on htz (work)",
  * "Host down", and a lost row's "Lost · host rebooted". Null for any other row. With the account's usage reading
  * ([limit], from `account_usage`) a paused row also says which window and
  * when it resets: "Paused · weekly limit on tech.silvester · resets in 3 d".
@@ -150,7 +150,9 @@ internal fun blockedLine(
         val resets = relativeWithin(limit?.resetsAt, nowSeconds)?.let { " · resets in $it" } ?: ""
         "$what$on$resets"
     }
-    "no_credentials" -> accountName?.let { "$it is signed out" } ?: "Signed out"
+    // A login (one profile on one host) is signed out, not the account: the
+    // same account may be working on other hosts (review M10).
+    "no_credentials" -> "Signed out on ${row.hostAlias.ifBlank { "its host" }}" + (row.claudeProfile?.let { " ($it)" } ?: "")
     "host_down" -> "${row.hostAlias.ifBlank { "Host" }} is down"
     // A lost row says why (claude-fleet migration 193 added `process_died`,
     // out of memory), not the activity it had before it went.
@@ -281,7 +283,7 @@ internal fun rowChips(
     val work = row.work?.takeIf { showWork }?.let { it.label to null }
     val host = row.hostAlias.takeIf { showHost && it.isNotBlank() }?.let { it to null }
     val chips = if (host != null) listOfNotNull(pr ?: work, host) else listOfNotNull(work, pr)
-    val named = row.attention?.reason == "account_limit" || row.attention?.reason == "no_credentials"
+    val named = row.attention?.reason == "account_limit"
     val account = accountName?.takeIf { it.isNotBlank() && !named }?.let { it to null }
     return if (account != null && chips.size < 2) chips + account else chips
 }

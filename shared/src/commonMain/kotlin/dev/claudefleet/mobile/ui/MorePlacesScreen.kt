@@ -331,14 +331,14 @@ internal fun limitRows(usage: AccountLimits): List<Pair<String, LimitWindow>> = 
 )
 
 /**
- * "62% used · resets in 2 h"; the figure always beside the bar, never the
+ * "38% left · resets in 2 h" (room left, as every meter says it); the figure always beside the bar, never the
  * colour alone. A window past its reset says so instead of its old figure
  * (the desktop's `freshness` calls it expired): the reading is from before
  * the reset, and the next one has not come in.
  */
 internal fun limitFigure(w: LimitWindow, nowSeconds: Long): String {
     if (hasReset(w, nowSeconds)) return "Reset · not re-read yet"
-    val pct = "${kotlin.math.round(w.utilization.coerceIn(0.0, 100.0)).toInt()}% used"
+    val pct = "${100 - kotlin.math.round(w.utilization.coerceIn(0.0, 100.0)).toInt()}% left"
     val resets = relativeWithin(w.resetsAt, nowSeconds)?.let { "resets in $it" }
     return listOfNotNull(pct, resets).joinToString(" · ")
 }

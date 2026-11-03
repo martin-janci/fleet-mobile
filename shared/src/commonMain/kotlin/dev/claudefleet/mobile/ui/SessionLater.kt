@@ -107,8 +107,9 @@ internal fun LimitCard(state: SessionUiState, host: SessionLaterHost, modifier: 
         border = BorderStroke(1.dp, o.border),
     ) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            val signedOut = state.session?.attention?.reason == "no_credentials"
             Text(
-                "Paused · its account is at its usage limit",
+                if (signedOut) "Paused · its login is signed out" else "Paused · its account is at its usage limit",
                 style = Fleet.type.textSm,
                 color = o.fg,
             )
@@ -139,7 +140,8 @@ internal fun LimitCard(state: SessionUiState, host: SessionLaterHost, modifier: 
                             Text("Switch account")
                         }
                     }
-                    val resets = host.limitResetsAt
+                    // Waiting does not sign a login back in.
+                    val resets = host.limitResetsAt.takeIf { !signedOut }
                     waitLabel(resets, state.nowSeconds)?.let { label ->
                         TextButton(onClick = { if (resets != null) host.onWait(resets) }, modifier = Modifier.testTag(LIMIT_WAIT_TAG)) { Text(label) }
                     }
@@ -401,7 +403,7 @@ fun switchLoginSub(l: HostLogin, sessionAccount: String?, pauseAtPct: Double, si
     listOfNotNull(
         usedText(l),
         "same account, shares its limit".takeIf { sessionAccount != null && l.accountUuid == sessionAccount },
-        "at its limit".takeIf { (l.usedPct ?: 0.0) >= pauseAtPct },
+        "past the pause line".takeIf { (l.usedPct ?: 0.0) >= pauseAtPct },
         "signed out".takeIf { signedOut },
     ).joinToString(" · ")
 
@@ -426,7 +428,9 @@ internal fun SwitchAccountSheet(
     val o = Fleet.colors
     BottomSheet(
         title = "Switch account",
-        meta = "Restarts the agent in ${session?.tmuxName ?: "this session"} under another login and resumes the same conversation.",
+        meta = "Restarts the agent in ${session?.displayName ?: "this session"} under another login and resumes the same conversation." +
+            // The desktop's confirm says so too (review M7): a restart ends the turn.
+            if (session?.claudeStatus == "working") " The turn in progress is lost." else "",
         onDismiss = onDismiss,
         modifier = Modifier.testTag(SWITCH_ACCOUNT_SHEET_TAG),
         primary = SheetAction("Switch", enabled = switch.picked != null && !busy && connected, onClick = onConfirm),
