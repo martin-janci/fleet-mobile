@@ -4467,6 +4467,8 @@ class SessionViewModelTest {
         runCurrent()
         assertEquals(listOf(1L), actions.cancelled)
         assertTrue(vm.state.value.queued.isEmpty())
+        assertEquals("run the tests again", vm.state.value.draft, "taken back into the empty box, not lost")
+        assertEquals("Taken back. It is in the box to edit.", vm.state.value.sendLaterNotice)
     }
 
     @Test
