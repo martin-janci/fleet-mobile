@@ -113,4 +113,34 @@ class ControlEscalationsTest {
         assertEquals("Queued: aaaaaaaaa…", text)
         assertEquals("plain words", withoutUntrustedMarker("plain words"))
     }
+
+    /** Review M3: a signed-out login is a card with a command that runs, even with no session on it. */
+    @Test
+    fun a_signed_out_login_is_a_card_with_its_sign_in_command() {
+        val aug9 = 1_754_740_800L // 2025-08-09T12:00:00Z
+        val hosts = listOf(
+            HostRow(alias = "htz", signedOutLogins = listOf(SignedOutLogin(profile = "work", since = aug9))),
+            HostRow(alias = "local", signedOutLogins = listOf(SignedOutLogin(profile = null, since = aug9))),
+            HostRow(alias = "gone", hidden = true, signedOutLogins = listOf(SignedOutLogin(profile = null, since = aug9))),
+        )
+        val cards = loginEscalations(hosts, emptySet()) { 0 }
+        assertEquals(listOf("login:htz:work:$aug9", "login:local::$aug9"), cards.map { it.key })
+        assertEquals("Claude login on htz (work) is signed out since Aug 9", cards[0].line)
+        assertEquals("ssh -t htz 'CLAUDE_CONFIG_DIR=~/.claude-profiles/work claude /login'", cards[0].detail)
+        assertEquals("claude /login", cards[1].detail)
+        assertNull(cards[0].sessionId)
+        assertEquals(TriageBucket.NO_CREDENTIALS, cards[0].bucket)
+        assertTrue(loginEscalations(hosts, setOf("login:htz:work:$aug9", "login:local::$aug9")) { 0 }.isEmpty())
+    }
+
+    /** Review D18: the day is the person's, not UTC's. */
+    @Test
+    fun the_signed_out_day_is_local() {
+        val late = 1_754_778_600L // 2025-08-09T22:30:00Z
+        assertEquals("Aug 9", dayLabel(late, 0))
+        assertEquals("Aug 10", dayLabel(late, 2 * 3_600))
+        assertEquals("Jan 1", dayLabel(0, 0))
+        assertEquals("Dec 31", dayLabel(0, -3_600))
+        assertEquals("Feb 29", dayLabel(1_709_208_000L, 0)) // 2024-02-29T12:00:00Z
+    }
 }

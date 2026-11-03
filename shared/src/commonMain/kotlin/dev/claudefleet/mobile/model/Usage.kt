@@ -162,6 +162,11 @@ data class HostLogin(
     @SerialName("account_uuid") val accountUuid: String,
     /** Percent used of the account's tighter live window; null without a reading. */
     @SerialName("used_pct") val usedPct: Double? = null,
+    /**
+     * Fleet knows this login is signed out (`hosts.signed_out_logins`): a
+     * start or switch onto it opens `/login`. The hub leaves it out when false.
+     */
+    @SerialName("signed_out") val signedOut: Boolean = false,
 )
 
 /**
@@ -229,5 +234,16 @@ fun loginLabel(l: HostLogin, accountName: (String) -> String?): String {
     return l.profile?.let { "$it ($who)" } ?: who
 }
 
-/** "95% used" or "no reading". */
-fun usedText(l: HostLogin): String = l.usedPct?.let { "${kotlin.math.round(it).toInt()}% used" } ?: "no reading"
+/** "5% left" or "no reading": room is always said as what is left, as the desktop's meters do. */
+fun usedText(l: HostLogin): String = l.usedPct?.let { leftText(it) } ?: "no reading"
+
+/** "38% left" for a reading of 62% used. */
+fun leftText(usedPct: Double): String = "${(100 - kotlin.math.round(usedPct).toInt()).coerceAtLeast(0)}% left"
+
+/**
+ * The signed-in login with a reading and the most room: the default the
+ * desktop's New session picks (`freestLogin`, account_limits.ts). Null when
+ * no login has a reading.
+ */
+fun freestLogin(logins: List<HostLogin>): HostLogin? =
+    logins.filter { it.usedPct != null && !it.signedOut }.minByOrNull { it.usedPct ?: Double.MAX_VALUE }
