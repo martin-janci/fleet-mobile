@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.IdOrWord
 import dev.claudefleet.mobile.model.WorkFacetId
 import dev.claudefleet.mobile.model.facetSentence
+import dev.claudefleet.mobile.model.priorityLabel
 import dev.claudefleet.mobile.model.WorkRule
 import dev.claudefleet.mobile.model.WorkTask
 import dev.claudefleet.mobile.model.WorkTreeFilters
@@ -383,6 +384,8 @@ internal fun TaskCard(task: WorkTask, onClick: () -> Unit, onOpenSession: (() ->
 
 /** The card's second line, in words — out here so it can be asserted. */
 internal fun taskCardLine(task: WorkTask): String = buildList {
+    // Urgent and high only, as on the desktop's row: the rest is the usual case.
+    if (task.priority == "urgent" || task.priority == "high") priorityLabel(task.priority)?.let { add(it) }
     task.statusName?.takeIf { it.isNotBlank() }?.let { add(it) }
     task.trackerName?.takeIf { it.isNotBlank() }?.let { add(it) }
     val c = task.counts
