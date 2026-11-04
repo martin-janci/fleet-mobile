@@ -564,7 +564,6 @@ class TaskViewModel(
         val itemId = state.value.task?.itemId ?: return null
         if (edit.isEmpty) return null.also { closeEdit() }
         return itemWrite(EDIT) {
-<<<<<<< HEAD
             actions.editItem(
                 itemId,
                 title = edit.title,
@@ -576,9 +575,6 @@ class TaskViewModel(
                 estimate = edit.estimate,
                 estimateUnit = edit.estimateUnit,
             )
-=======
-            actions.editItem(itemId, title = edit.title, notes = edit.notes, assignees = edit.assignees, dueAt = edit.dueAt, priority = edit.priority)
->>>>>>> origin/claude/project-thread-wr3w4a
             local.update { it.copy(editOpen = false) }
         }
     }
@@ -831,12 +827,9 @@ class TaskViewModel(
                     assignees = it.task.assignees,
                     dueAt = it.task.dueAt.orEmpty(),
                     priority = it.task.priority.orEmpty(),
-<<<<<<< HEAD
                     labels = it.task.labels,
                     estimate = it.task.estimate?.takeIf { e -> e > 0.0 } ?: 0.0,
                     estimateUnit = it.task.estimateUnit?.takeIf { u -> u == "hours" } ?: "points",
-=======
->>>>>>> origin/claude/project-thread-wr3w4a
                 )
             } ?: TaskEditFields(),
             canRunCheck = detail?.check?.canRun == true && allowed(caps, status, CHECK),
