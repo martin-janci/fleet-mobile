@@ -40,6 +40,16 @@ data class OrbitMenuItem(
     val danger: Boolean = false,
 )
 
+/**
+ * Why every item that writes is grey, said at the top of the menu: the hub
+ * is away, or the last action has not finished. Null while they work.
+ */
+internal fun orbitMenuNote(busy: Boolean, connected: Boolean): String? = when {
+    !connected -> "Not connected to the hub: the grey items work once it answers."
+    busy -> "Waiting for the last action to finish: the grey items work then."
+    else -> null
+}
+
 /** What decides which items the menu shows; each flag is the Classic menu's own condition for it. */
 data class OrbitMenuFacts(
     val manage: Boolean = false,
