@@ -2974,6 +2974,7 @@ private fun TaskRoute(
         onSaveEdit = { vm.saveEdit(it) },
         onSetStatus = { vm.setStatus(it) },
         onOpenParent = vm::openParent,
+        onOpenChild = vm::openChild,
         onOpenSubtask = vm::openSubtask,
         onCloseSubtask = vm::closeSubtask,
         onAddSubtask = { title, notes, due -> vm.addSubtask(title, notes, due) },

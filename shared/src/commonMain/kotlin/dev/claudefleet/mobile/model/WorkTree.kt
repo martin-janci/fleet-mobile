@@ -642,7 +642,44 @@ data class TaskDetail(
     @SerialName("comments_tracker") val commentsTracker: String? = null,
     /** This reader may ask for a comment to be posted to that tracker too. */
     @SerialName("can_post_to_tracker") val canPostToTracker: Boolean = false,
+    /** Its subtasks, in the hub's order (`SubtaskView`); empty from a hub that sends none. */
+    val subtasks: List<SubtaskView> = emptyList(),
 )
+
+/** One subtask on its parent's page (claude-fleet `SubtaskView`). */
+@Serializable
+data class SubtaskView(
+    @SerialName("task_id") val taskId: String = "",
+    @SerialName("item_id") val itemId: Long = 0,
+    val key: String? = null,
+    val title: String = "",
+    /** `manual | proposed | agent`. */
+    val origin: String = "",
+    /** `todo | in_progress | done`. */
+    val status: String? = null,
+    @SerialName("live_sessions") val liveSessions: Int = 0,
+    /** `YYYY-MM-DD`; absent from a hub before claude-fleet #1078. */
+    @SerialName("due_at") val dueAt: String? = null,
+    val priority: String? = null,
+)
+
+/** A subtask's mark, as the desktop's list draws it: ✓ done, ◐ in progress, ○ to do. */
+fun subtaskMark(status: String?): String = when (status) {
+    "done" -> "✓"
+    "in_progress" -> "◐"
+    else -> "○"
+}
+
+/**
+ * The words after a subtask's title: its key, an urgent or high priority, its
+ * due date (none once it is done), and how many sessions work on it.
+ */
+fun subtaskLine(s: SubtaskView, todayEpochDay: Long): String = buildList {
+    s.key?.takeIf { it.isNotBlank() }?.let { add(it) }
+    if (s.priority == "urgent" || s.priority == "high") priorityLabel(s.priority)?.let { add(it) }
+    if (s.status != "done") dueChip(s.dueAt, todayEpochDay, done = false)?.let { add(it.text) }
+    if (s.liveSessions > 0) add(if (s.liveSessions == 1) "1 live" else "${s.liveSessions} live")
+}.joinToString(" · ")
 
 /** A comment on a task in fleet (`store::CommentRow`): plain text, never markup. */
 @Serializable
