@@ -896,6 +896,11 @@ private fun BulkActionBar(bulk: BulkUiState, onSend: () -> Unit, onKill: () -> U
             if (!bulk.online) {
                 Text("Not connected to the hub: these act once it answers.", color = o.fgMuted, fontSize = 12.sp, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
             }
+            // A grey Kill… with sessions picked said nothing; the Kill sheet
+            // would have, but it cannot open. The reason sits where the button is.
+            bulkKillNote(bulk.selected.size, bulk.killable)?.let {
+                Text(it, color = o.fgMuted, fontSize = 12.sp, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
+            }
             val ready = !bulk.running && bulk.online
             Row(
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 8.dp),
@@ -954,6 +959,14 @@ private fun KillSheet(killable: List<String>, skipped: Int, onDismiss: () -> Uni
         }
     }
 }
+
+/**
+ * Why Kill… is grey with sessions picked: none of them is killed from here
+ * (`killRefusal`: the controller, an external session, a pinned one). Null
+ * while nothing is picked or at least one could be killed.
+ */
+internal fun bulkKillNote(selected: Int, killable: Int): String? =
+    if (selected > 0 && killable == 0) "Kill… skips every picked session: the controller, external and pinned sessions are not killed from here." else null
 
 /** "Sent to 3 sessions": the outcome's title, naming the action. */
 internal fun bulkOutcomeTitle(action: BulkAction?, count: Int): String = when (action) {

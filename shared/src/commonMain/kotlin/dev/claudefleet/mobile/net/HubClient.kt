@@ -1020,7 +1020,7 @@ class HubClient(
 
     /**
      * Pin or unpin a session (`pin_session`): a pinned one is kept above the
-     * groups, and Safe remove, Kill and tidy-up refuse it (`E_PINNED`).
+     * groups, and Clean up, Kill and tidy-up refuse it (`E_PINNED`).
      */
     suspend fun pinSession(sessionId: Long, pinned: Boolean): SessionRow =
         call("pin_session", buildJsonObject { put("session_id", sessionId); put("pinned", pinned) }) {
