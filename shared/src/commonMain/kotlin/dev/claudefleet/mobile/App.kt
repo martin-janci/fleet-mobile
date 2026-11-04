@@ -1766,6 +1766,7 @@ private fun FleetRoute(
                         onSetItemType = myWork::setItemType,
                         onSetSort = myWork::setSort,
                         onSetPriority = myWork::setPriority,
+                        onSetLabel = myWork::setLabel,
                         onToggleMine = myWork::toggleMine,
                         onToggleReview = myWork::toggleReview,
                         onClearFilters = myWork::clearFilters,

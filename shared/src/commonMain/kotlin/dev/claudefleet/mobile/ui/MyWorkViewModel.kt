@@ -434,6 +434,7 @@ class MyWorkViewModel(
     fun setItemType(type: String?) = setFilters(local.value.filters.copy(itemType = type))
     fun setSort(sort: String?) = setFilters(local.value.filters.copy(sort = sort))
     fun setPriority(priority: String?) = setFilters(local.value.filters.copy(priority = priority))
+    fun setLabel(label: String?) = setFilters(local.value.filters.copy(label = label))
     fun toggleArchived() = setArchived(local.value.filters.archived != true)
 
     /** One chip's ✕: that filter back to *Any*, the rest kept. */

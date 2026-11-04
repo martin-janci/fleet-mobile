@@ -157,6 +157,19 @@ class FilterFacetsTest {
         assertEquals("low", wire.normalized().priority)
     }
 
+    /** The desktop's label chip; the page's labels come from the hub's facets. */
+    @Test
+    fun a_label_filter_is_one_chip_and_counts_in_the_sheet() {
+        assertEquals(listOf("Label: ui"), workFacets(WorkTreeFilters(label = " ui ")).map { it.label })
+        assertEquals(emptyList(), workFacets(WorkTreeFilters(label = " ")))
+        assertEquals(1, WorkTreeFilters(label = "ui").sheetCount)
+        assertEquals(WorkTreeFilters(), WorkTreeFilters(label = "ui").without(WorkFacetId.LABEL))
+        val wire = dev.claudefleet.mobile.net.json.decodeFromString(WorkTreeFilters.serializer(), """{"label":"auth"}""")
+        assertEquals("auth", wire.normalized().label)
+        val facets = dev.claudefleet.mobile.net.json.decodeFromString(WorkTreeFacets.serializer(), """{"labels":["auth","ui"]}""")
+        assertEquals(listOf("auth", "ui"), facets.labels)
+    }
+
     /** Sorting by priority is offered only to a hub that takes it: an older one refuses an unknown sort. */
     @Test
     fun the_priority_sort_waits_for_a_hub_that_takes_it() {
