@@ -574,6 +574,11 @@ class TaskViewModel(
         state.value.parentTaskId?.let(onOpenTask)
     }
 
+    /** A subtask in the list: its own page. */
+    fun openChild(taskId: String) {
+        if (taskId.isNotBlank()) onOpenTask(taskId)
+    }
+
     fun openSubtask() {
         if (state.value.canAddSubtask) local.update { it.copy(subtaskOpen = true, error = null, conflict = false) }
     }

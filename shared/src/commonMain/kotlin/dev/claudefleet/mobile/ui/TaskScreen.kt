@@ -4,6 +4,9 @@ import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.utcOffsetSeconds
 import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.model.dueLine
+import dev.claudefleet.mobile.model.dueLabel
+import dev.claudefleet.mobile.model.subtaskLine
+import dev.claudefleet.mobile.model.subtaskMark
 import dev.claudefleet.mobile.model.localEpochDay
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.foundation.clickable
@@ -93,6 +96,8 @@ data class TaskHandlers(
     val onSetStatus: (dev.claudefleet.mobile.model.StatusCategory) -> Unit = {},
     /** Epics: the task this one is filed under, and **Add subtask** with its sheet. */
     val onOpenParent: () -> Unit = {},
+    /** A subtask in the list, by task id. */
+    val onOpenChild: (String) -> Unit = {},
     val onOpenSubtask: () -> Unit = {},
     val onCloseSubtask: () -> Unit = {},
     val onAddSubtask: (title: String, notes: String, dueAt: String) -> Unit = { _, _, _ -> },
@@ -533,7 +538,8 @@ internal fun PromoteSheetFor(state: TaskUiState, handlers: TaskHandlers) {
 internal fun TaskHierarchy(state: TaskUiState, handlers: TaskHandlers, modifier: Modifier = Modifier) {
     val task = state.task ?: return
     val parent = state.parentTaskId
-    if (!task.epic && parent == null && state.subtaskRollup == null) return
+    val children = state.detail?.subtasks.orEmpty()
+    if (!task.epic && parent == null && state.subtaskRollup == null && children.isEmpty()) return
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         if (task.epic) Text("Epic", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         if (parent != null) {
@@ -545,6 +551,30 @@ internal fun TaskHierarchy(state: TaskUiState, handlers: TaskHandlers, modifier:
             )
         }
         state.subtaskRollup?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        if (children.isNotEmpty()) {
+            val today = remember { epochSeconds().let { localEpochDay(it, utcOffsetSeconds(it)) } }
+            for (c in children) {
+                val line = subtaskLine(c, today)
+                val overdue = c.status != "done" && dueLabel(c.dueAt, today)?.overdue == true
+                Row(
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable { handlers.onOpenChild(c.taskId) }.padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(subtaskMark(c.status), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(c.title, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        if (line.isNotEmpty()) {
+                            Text(
+                                line,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
