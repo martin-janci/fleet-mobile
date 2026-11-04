@@ -29,11 +29,11 @@ class ManageActionsAskFirstTest {
     fun every_ending_action_opens_a_question_rather_than_calling() {
         val direct = mapOf(
             "Restart…" to "onRestart",
-            "Clean up" to "onSafeKill",
+            "Clean up…" to "onSafeKill",
         ).filter { (label, call) -> call in menuClick(label) }
 
         assertEquals(emptyMap(), direct, "a menu item that ends the session without asking")
-        assertTrue("showSafeKillConfirm = true" in menuClick("Clean up"))
+        assertTrue("showSafeKillConfirm = true" in menuClick("Clean up…"))
     }
 
     @Test
