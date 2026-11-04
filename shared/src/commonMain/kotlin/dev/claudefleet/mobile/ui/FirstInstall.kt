@@ -28,6 +28,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -197,8 +201,12 @@ fun NoHubScreen(onBack: () -> Unit, onPair: () -> Unit, onShare: (String) -> Uni
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 12.dp)) {
                         Text(HUB_SERVE_COMMAND, style = Fleet.type.code, color = o.fg, modifier = Modifier.weight(1f))
-                        IconButton(onClick = { clipboard.setText(AnnotatedString(HUB_SERVE_COMMAND)) }) {
-                            Icon(FleetIcons.Copy, contentDescription = "Copy $HUB_SERVE_COMMAND")
+                        var copied by remember { mutableStateOf(false) }
+                        IconButton(onClick = { clipboard.setText(AnnotatedString(HUB_SERVE_COMMAND)); copied = true }) {
+                            Icon(
+                                if (copied) FleetIcons.Check else FleetIcons.Copy,
+                                contentDescription = if (copied) "Copied" else "Copy $HUB_SERVE_COMMAND",
+                            )
                         }
                     }
                 }

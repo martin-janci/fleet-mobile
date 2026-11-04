@@ -722,7 +722,8 @@ private fun CommitPane(hash: String, detail: CommitDetail?, state: RepoUiState, 
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f),
                         )
-                        TextButton(onClick = { clipboard.setText(AnnotatedString(detail.hash)) }) { Text("Copy hash") }
+                        var copied by remember(detail.hash) { mutableStateOf(false) }
+                        TextButton(onClick = { clipboard.setText(AnnotatedString(detail.hash)); copied = true }) { Text(if (copied) "Copied" else "Copy hash") }
                     }
                     if (detail.body.isNotBlank()) {
                         Text(withTicketLinks(detail.body.trim(), state), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))

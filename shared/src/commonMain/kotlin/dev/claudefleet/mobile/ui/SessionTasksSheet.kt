@@ -299,7 +299,9 @@ internal fun CrossOrgPanel(choice: CrossOrgChoice, state: SessionTasksUiState, h
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(command, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-            OutlinedButton(onClick = { clipboard.setText(AnnotatedString(command)) }) { Text("Copy command") }
+            // The label answers the tap: the clipboard alone says nothing on iOS.
+            var copied by remember(command) { mutableStateOf(false) }
+            OutlinedButton(onClick = { clipboard.setText(AnnotatedString(command)); copied = true }) { Text(if (copied) "Copied" else "Copy command") }
         }
         Text(
             "Or on the desktop: Settings → Work → Organisations. Once the session is in $task, add the task again.",
