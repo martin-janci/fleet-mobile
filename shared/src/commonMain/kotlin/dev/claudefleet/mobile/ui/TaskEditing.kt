@@ -84,6 +84,7 @@ data class TaskEdit(
     val dueAt: String? = null,
     /** One of [TASK_PRIORITIES]' values; `""` clears it. */
     val priority: String? = null,
+<<<<<<< HEAD
     /** Empty clears them. */
     val labels: List<String>? = null,
     /** 0 clears it (and its unit). */
@@ -124,6 +125,12 @@ internal fun taskSizeError(labels: String, estimate: String): String? {
     return null
 }
 
+=======
+) {
+    val isEmpty: Boolean get() = title == null && notes == null && assignees == null && dueAt == null && priority == null
+}
+
+>>>>>>> origin/claude/project-thread-wr3w4a
 /** The priorities a person sets, most pressing first, `""` for none (the desktop's Edit task). */
 internal val TASK_PRIORITIES: List<Pair<String, String>> = listOf(
     "" to "None",
@@ -142,6 +149,7 @@ internal fun taskEditOf(
     before: TaskEditFields,
     notesLocked: Boolean,
     priority: String = before.priority,
+<<<<<<< HEAD
     labels: String = before.labels.joinToString(", "),
     estimate: String = estimateFieldText(before.estimate),
     unit: String = before.estimateUnit,
@@ -161,6 +169,15 @@ internal fun taskEditOf(
         estimateUnit = unit.takeIf { size > 0.0 && (sizeChanged || it != before.estimateUnit) },
     )
 }
+=======
+): TaskEdit = TaskEdit(
+    title = title.trim().takeIf { it != before.title },
+    notes = notes.trim().takeIf { !notesLocked && it != before.notes.trim() },
+    assignees = parseAssigneesText(assignees).takeIf { it != before.assignees },
+    dueAt = due.trim().takeIf { it != before.dueAt },
+    priority = priority.takeIf { it != before.priority },
+)
+>>>>>>> origin/claude/project-thread-wr3w4a
 
 /** The fields of a task as the Edit sheet starts them. */
 data class TaskEditFields(
@@ -170,11 +187,14 @@ data class TaskEditFields(
     val dueAt: String = "",
     /** `urgent | high | medium | low`, or `""` for none. */
     val priority: String = "",
+<<<<<<< HEAD
     val labels: List<String> = emptyList(),
     /** 0: no estimate. */
     val estimate: Double = 0.0,
     /** `points | hours`; points when the task has no estimate. */
     val estimateUnit: String = "points",
+=======
+>>>>>>> origin/claude/project-thread-wr3w4a
 )
 
 /** The three statuses as chips: the current one selected, a tap sets another. */
@@ -194,8 +214,12 @@ internal fun TaskStatusChips(current: StatusCategory?, enabled: Boolean, onPick:
 }
 
 /**
+<<<<<<< HEAD
  * **Edit task**: title, description, assignees, due date, priority, labels
  * and estimate of a
+=======
+ * **Edit task**: title, description, assignees, due date and priority of a
+>>>>>>> origin/claude/project-thread-wr3w4a
  * local item. A delegated job's description is its prompt: shown, not
  * editable. Save is off until something changed and the fields are valid.
  */
@@ -216,6 +240,7 @@ internal fun TaskEditSheet(
     var assignees by remember { mutableStateOf(before.assignees.joinToString(", ")) }
     var due by remember { mutableStateOf(before.dueAt) }
     var priority by remember { mutableStateOf(before.priority) }
+<<<<<<< HEAD
     var labels by remember { mutableStateOf(before.labels.joinToString(", ")) }
     var estimate by remember { mutableStateOf(estimateFieldText(before.estimate)) }
     var unit by remember { mutableStateOf(before.estimateUnit) }
@@ -224,6 +249,12 @@ internal fun TaskEditSheet(
     val sizeError = taskSizeError(labels, estimate)
     val edit = taskEditOf(title, notes, assignees, due, before, notesLocked, priority, labels, estimate, unit)
     val canSave = connected && !busy && titleError == null && dueError == null && sizeError == null && !edit.isEmpty
+=======
+    val titleError = taskTitleError(title)
+    val dueError = dueDateError(due)
+    val edit = taskEditOf(title, notes, assignees, due, before, notesLocked, priority)
+    val canSave = connected && !busy && titleError == null && dueError == null && !edit.isEmpty
+>>>>>>> origin/claude/project-thread-wr3w4a
     ModalBottomSheet(onDismissRequest = onCancel) {
         Column(
             modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
@@ -274,6 +305,7 @@ internal fun TaskEditSheet(
                     FilterChip(selected = priority == value, onClick = { priority = value }, label = { Text(label) })
                 }
             }
+<<<<<<< HEAD
             OutlinedTextField(
                 value = labels,
                 onValueChange = { labels = it },
@@ -297,6 +329,8 @@ internal fun TaskEditSheet(
                     FilterChip(selected = unit == value, onClick = { unit = value }, label = { Text(label) })
                 }
             }
+=======
+>>>>>>> origin/claude/project-thread-wr3w4a
             if (!connected) {
                 Text("Offline — nothing is saved until the hub is back; nothing is queued.", style = MaterialTheme.typography.bodySmall)
             }

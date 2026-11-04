@@ -2466,9 +2466,14 @@ class HubClient(
 
     /**
      * A person's edit of a local item (`work_link { edit }`): each field left
+<<<<<<< HEAD
      * null stays as it is; `notes` / `dueAt` / `priority` `""`, `assignees` /
      * `labels` empty and `estimate` 0 clear them; `estimateUnit` alone
      * re-units the estimate the item has. A tracker's ticket is refused, naming it.
+=======
+     * null stays as it is; `notes` / `dueAt` / `priority` `""` and `assignees`
+     * empty clear them. A tracker's ticket is refused, naming it.
+>>>>>>> origin/claude/project-thread-wr3w4a
      */
     suspend fun editWorkItem(
         itemId: Long,
@@ -2477,9 +2482,12 @@ class HubClient(
         assignees: List<String>? = null,
         dueAt: String? = null,
         priority: String? = null,
+<<<<<<< HEAD
         labels: List<String>? = null,
         estimate: Double? = null,
         estimateUnit: String? = null,
+=======
+>>>>>>> origin/claude/project-thread-wr3w4a
     ): WorkItem =
         call(
             "work_link",
@@ -2491,9 +2499,12 @@ class HubClient(
                 assignees?.let { list -> put("assignees", JsonArray(list.map(::JsonPrimitive))) }
                 dueAt?.let { put("due_at", it) }
                 priority?.let { put("priority", it) }
+<<<<<<< HEAD
                 labels?.let { list -> put("labels", JsonArray(list.map(::JsonPrimitive))) }
                 estimate?.let { put("estimate", it) }
                 estimateUnit?.let { put("estimate_unit", it) }
+=======
+>>>>>>> origin/claude/project-thread-wr3w4a
             },
         ) { json.decodeFromJsonElement(WorkItem.serializer(), it) }
 

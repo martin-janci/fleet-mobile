@@ -389,6 +389,7 @@ internal class FakeWorkActions : WorkActions {
         assignees: List<String>?,
         dueAt: String?,
         priority: String?,
+<<<<<<< HEAD
         labels: List<String>?,
         estimate: Double?,
         estimateUnit: String?,
@@ -400,6 +401,10 @@ internal class FakeWorkActions : WorkActions {
                 (estimate?.let { " estimate=$it" } ?: "") +
                 (estimateUnit?.let { " unit=$it" } ?: ""),
         )
+=======
+    ): dev.claudefleet.mobile.model.WorkItem {
+        write("edit $itemId title=$title notes=$notes assignees=$assignees due=$dueAt" + (priority?.let { " priority=$it" } ?: ""))
+>>>>>>> origin/claude/project-thread-wr3w4a
         return dev.claudefleet.mobile.model.WorkItem(id = itemId)
     }
 

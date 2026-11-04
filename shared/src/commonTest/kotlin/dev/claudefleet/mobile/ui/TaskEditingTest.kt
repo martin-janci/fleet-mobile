@@ -52,6 +52,7 @@ class TaskEditingTest {
         assertEquals(TaskEdit(priority = ""), taskEditOf("Fix login", "", "", "", before, notesLocked = false, priority = ""))
         assertEquals(listOf("", "urgent", "high", "medium", "low"), TASK_PRIORITIES.map { it.first })
     }
+<<<<<<< HEAD
 
     @Test
     fun labels_are_sent_tidied_when_they_changed_and_empty_clears_them() {
@@ -98,4 +99,6 @@ class TaskEditingTest {
         assertEquals("An estimate is a number from 0 to 1000.", taskSizeError("", "1001"))
         assertEquals("An estimate is a number from 0 to 1000.", taskSizeError("", "-1"))
     }
+=======
+>>>>>>> origin/claude/project-thread-wr3w4a
 }
