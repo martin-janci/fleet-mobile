@@ -58,6 +58,8 @@ data class HostsUiState(
     val error: Friendly? = null,
     /** Hosts a Try again or Check now is probing right now. */
     val checking: Set<String> = emptySet(),
+    /** [error] came from the re-list itself, so its banner offers Try again (14.12). */
+    val listFailed: Boolean = false,
 ) {
     val isEmpty: Boolean get() = hosts.isEmpty()
 
@@ -93,6 +95,7 @@ class HostsViewModel(
         val refreshing: Boolean = false,
         val error: Friendly? = null,
         val checking: Set<String> = emptySet(),
+        val listFailed: Boolean = false,
     )
 
     private val local = MutableStateFlow(Local())
@@ -109,7 +112,7 @@ class HostsViewModel(
 
     /** Clear the banner. See [SessionsViewModel.dismissError]. */
     fun dismissError() {
-        local.update { it.copy(error = null) }
+        local.update { it.copy(error = null, listFailed = false) }
     }
     /**
      * Re-list. The rows stay put if it fails; the last picture is still the best one.
@@ -130,7 +133,7 @@ class HostsViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { Local(error = friendly(t), checking = it.checking) }
+            local.update { Local(error = friendly(t), checking = it.checking, listFailed = true) }
         }
     }
 
@@ -144,14 +147,14 @@ class HostsViewModel(
         val probe = actions ?: return null
         if (!fleet.capabilities.value.probeHost || alias in local.value.checking) return null
         return scope.launch {
-            local.update { it.copy(checking = it.checking + alias, error = null) }
+            local.update { it.copy(checking = it.checking + alias, error = null, listFailed = false) }
             try {
                 probe.probe(alias)
                 fleet.refresh()
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {
-                local.update { it.copy(error = friendly(t)) }
+                local.update { it.copy(error = friendly(t), listFailed = false) }
             } finally {
                 local.update { it.copy(checking = it.checking - alias) }
             }
@@ -187,6 +190,7 @@ class HostsViewModel(
             refreshing = l.refreshing,
             error = l.error,
             checking = l.checking,
+            listFailed = l.listFailed,
         )
     }
 }

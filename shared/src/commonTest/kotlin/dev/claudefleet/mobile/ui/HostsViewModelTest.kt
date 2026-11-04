@@ -183,6 +183,13 @@ class HostsViewModelTest {
         )
         assertEquals(listOf("box"), vm.state.value.hosts.map { it.alias }, "the last picture is still the best one")
         assertFalse(vm.state.value.refreshing)
+        assertTrue(vm.state.value.listFailed, "a failed re-list offers Try again on its banner")
+
+        fleet.failWith = null
+        vm.refresh()
+        runCurrent()
+        assertNull(vm.state.value.error)
+        assertFalse(vm.state.value.listFailed)
     }
 
 
