@@ -51,3 +51,34 @@ fun dueLabel(due: String?, todayEpochDay: Long): DueLabel? {
         else -> DueLabel(date, false)
     }
 }
+
+/**
+ * The task screen's due line: "Due Fri · 2026-11-06", or "Overdue · was due
+ * 2026-10-30" once the date has passed. A done task's date is history:
+ * "Due: 2026-10-30", never overdue. A date the phone cannot read is shown as
+ * the hub sent it.
+ */
+fun dueLine(due: String?, todayEpochDay: Long, done: Boolean): DueLabel? {
+    val d = due?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val label = dueLabel(d, todayEpochDay)
+    return when {
+        done || label == null -> DueLabel("Due: $d", false)
+        label.overdue -> DueLabel("Overdue · was due $d", true)
+        else -> DueLabel("Due ${label.text} · $d", false)
+    }
+}
+
+/**
+ * The short form for a chip or a card line: "Due Fri", or "Overdue Oct 30"
+ * once the date has passed. A done task's, or a date the phone cannot read,
+ * is shown as the hub sent it ("Due 2026-10-30"), never overdue.
+ */
+fun dueChip(due: String?, todayEpochDay: Long, done: Boolean): DueLabel? {
+    val d = due?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val label = dueLabel(d, todayEpochDay)
+    return when {
+        done || label == null -> DueLabel("Due $d", false)
+        label.overdue -> DueLabel("Overdue ${label.text}", true)
+        else -> DueLabel("Due ${label.text}", false)
+    }
+}

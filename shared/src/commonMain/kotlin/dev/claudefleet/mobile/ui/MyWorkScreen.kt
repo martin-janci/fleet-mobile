@@ -59,7 +59,7 @@ import dev.claudefleet.mobile.model.WorkFacetId
 import dev.claudefleet.mobile.model.facetSentence
 import dev.claudefleet.mobile.model.priorityLabel
 import dev.claudefleet.mobile.model.StatusCategory
-import dev.claudefleet.mobile.model.dueLabel
+import dev.claudefleet.mobile.model.dueChip
 import dev.claudefleet.mobile.model.localEpochDay
 import dev.claudefleet.mobile.model.WorkRule
 import dev.claudefleet.mobile.model.WorkTask
@@ -397,7 +397,7 @@ internal fun taskCardLine(task: WorkTask, todayEpochDay: Long? = null): String =
     // Urgent and high only, as on the desktop's row: the rest is the usual case.
     if (task.priority == "urgent" || task.priority == "high") priorityLabel(task.priority)?.let { add(it) }
     if (todayEpochDay != null && task.statusCategory != StatusCategory.Done) {
-        dueLabel(task.dueAt, todayEpochDay)?.let { add(if (it.overdue) "Overdue ${it.text}" else "Due ${it.text}") }
+        dueChip(task.dueAt, todayEpochDay, done = false)?.let { add(it.text) }
     }
     task.statusName?.takeIf { it.isNotBlank() }?.let { add(it) }
     task.trackerName?.takeIf { it.isNotBlank() }?.let { add(it) }
