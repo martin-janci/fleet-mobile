@@ -309,6 +309,10 @@ class SessionExtrasTest {
     @Test
     fun a_pinned_session_is_not_offered_safe_remove() {
         assertTrue(orbitMenuItems(OrbitMenuFacts(manage = true)).any { it.id == OrbitItem.Retire })
+        // A menu whose writing items are grey says why, once, at the top.
+        assertEquals(null, orbitMenuNote(busy = false, connected = true))
+        assertTrue(orbitMenuNote(busy = false, connected = false)!!.startsWith("Not connected"))
+        assertTrue(orbitMenuNote(busy = true, connected = true)!!.startsWith("Waiting"))
         assertTrue(orbitMenuItems(OrbitMenuFacts(manage = true, pinned = true)).none { it.id == OrbitItem.Retire })
     }
 
