@@ -52,10 +52,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.claudefleet.mobile.epochSeconds
+import dev.claudefleet.mobile.utcOffsetSeconds
 import dev.claudefleet.mobile.model.IdOrWord
 import dev.claudefleet.mobile.model.WorkFacetId
 import dev.claudefleet.mobile.model.facetSentence
 import dev.claudefleet.mobile.model.priorityLabel
+import dev.claudefleet.mobile.model.StatusCategory
+import dev.claudefleet.mobile.model.dueLabel
+import dev.claudefleet.mobile.model.localEpochDay
 import dev.claudefleet.mobile.model.WorkRule
 import dev.claudefleet.mobile.model.WorkTask
 import dev.claudefleet.mobile.model.WorkTreeFilters
@@ -372,7 +377,7 @@ internal fun TaskCard(task: WorkTask, onClick: () -> Unit, onOpenSession: (() ->
     WorkRow(
         label = task.label,
         title = if (task.key != null) task.title else "",
-        details = taskCardLine(task),
+        details = taskCardLine(task, remember { epochSeconds().let { localEpochDay(it, utcOffsetSeconds(it)) } }),
         onClick = onClick,
         status = task.statusCategory,
         unavailable = task.unavailable,
@@ -382,10 +387,18 @@ internal fun TaskCard(task: WorkTask, onClick: () -> Unit, onOpenSession: (() ->
     )
 }
 
-/** The card's second line, in words — out here so it can be asserted. */
-internal fun taskCardLine(task: WorkTask): String = buildList {
+/**
+ * The card's second line, in words — out here so it can be asserted. With
+ * [todayEpochDay] (the local day), a due date shows as the desktop's row
+ * says it: "Due Fri", or "Overdue Oct 30" once it has passed; a done task's
+ * is history.
+ */
+internal fun taskCardLine(task: WorkTask, todayEpochDay: Long? = null): String = buildList {
     // Urgent and high only, as on the desktop's row: the rest is the usual case.
     if (task.priority == "urgent" || task.priority == "high") priorityLabel(task.priority)?.let { add(it) }
+    if (todayEpochDay != null && task.statusCategory != StatusCategory.Done) {
+        dueLabel(task.dueAt, todayEpochDay)?.let { add(if (it.overdue) "Overdue ${it.text}" else "Due ${it.text}") }
+    }
     task.statusName?.takeIf { it.isNotBlank() }?.let { add(it) }
     task.trackerName?.takeIf { it.isNotBlank() }?.let { add(it) }
     val c = task.counts
