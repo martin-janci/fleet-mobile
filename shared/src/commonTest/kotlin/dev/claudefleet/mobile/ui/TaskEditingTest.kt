@@ -43,4 +43,13 @@ class TaskEditingTest {
         // A delegated job's description is its prompt: never sent.
         assertEquals(TaskEdit(), taskEditOf("Fix login", "changed", "Ana", "2026-10-16", before, notesLocked = true))
     }
+
+    @Test
+    fun a_priority_is_sent_when_it_changed_and_none_clears_it() {
+        val before = TaskEditFields(title = "Fix login", priority = "high")
+        assertTrue(taskEditOf("Fix login", "", "", "", before, notesLocked = false, priority = "high").isEmpty)
+        assertEquals(TaskEdit(priority = "urgent"), taskEditOf("Fix login", "", "", "", before, notesLocked = false, priority = "urgent"))
+        assertEquals(TaskEdit(priority = ""), taskEditOf("Fix login", "", "", "", before, notesLocked = false, priority = ""))
+        assertEquals(listOf("", "urgent", "high", "medium", "low"), TASK_PRIORITIES.map { it.first })
+    }
 }

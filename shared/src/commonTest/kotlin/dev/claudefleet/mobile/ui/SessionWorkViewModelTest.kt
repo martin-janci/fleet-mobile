@@ -388,8 +388,9 @@ internal class FakeWorkActions : WorkActions {
         notes: String?,
         assignees: List<String>?,
         dueAt: String?,
+        priority: String?,
     ): dev.claudefleet.mobile.model.WorkItem {
-        write("edit $itemId title=$title notes=$notes assignees=$assignees due=$dueAt")
+        write("edit $itemId title=$title notes=$notes assignees=$assignees due=$dueAt" + (priority?.let { " priority=$it" } ?: ""))
         return dev.claudefleet.mobile.model.WorkItem(id = itemId)
     }
 

@@ -2466,8 +2466,8 @@ class HubClient(
 
     /**
      * A person's edit of a local item (`work_link { edit }`): each field left
-     * null stays as it is; `notes` / `dueAt` `""` and `assignees` empty clear
-     * them. A tracker's ticket is refused, naming it.
+     * null stays as it is; `notes` / `dueAt` / `priority` `""` and `assignees`
+     * empty clear them. A tracker's ticket is refused, naming it.
      */
     suspend fun editWorkItem(
         itemId: Long,
@@ -2475,6 +2475,7 @@ class HubClient(
         notes: String? = null,
         assignees: List<String>? = null,
         dueAt: String? = null,
+        priority: String? = null,
     ): WorkItem =
         call(
             "work_link",
@@ -2485,6 +2486,7 @@ class HubClient(
                 notes?.let { put("notes", it) }
                 assignees?.let { list -> put("assignees", JsonArray(list.map(::JsonPrimitive))) }
                 dueAt?.let { put("due_at", it) }
+                priority?.let { put("priority", it) }
             },
         ) { json.decodeFromJsonElement(WorkItem.serializer(), it) }
 

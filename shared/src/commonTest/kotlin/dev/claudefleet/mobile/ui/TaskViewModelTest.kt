@@ -478,6 +478,20 @@ class TaskViewModelTest {
         assertEquals(2, actions.taskCalls, "the answer is followed by a re-read")
     }
 
+    /** A priority picked in the sheet goes with the edit. */
+    @Test
+    fun an_edit_sends_a_new_priority() = runTest {
+        val actions = FakeWorkActions().apply { taskAnswer = local }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        vm.openEdit()
+        runCurrent()
+        val before = vm.state.value.editFields
+        vm.saveEdit(taskEditOf(before.title, before.notes, before.assignees.joinToString(", "), before.dueAt, before, notesLocked = false, priority = "urgent"))
+        runCurrent()
+        assertEquals(listOf("edit 12 title=null notes=null assignees=null due=null priority=urgent"), actions.calls)
+    }
+
     /** A refused edit keeps the sheet open, with the hub's reason in it. */
     @Test
     fun a_refused_edit_stays_in_the_sheet() = runTest {

@@ -80,9 +80,20 @@ data class TaskEdit(
     val notes: String? = null,
     val assignees: List<String>? = null,
     val dueAt: String? = null,
+    /** One of [TASK_PRIORITIES]' values; `""` clears it. */
+    val priority: String? = null,
 ) {
-    val isEmpty: Boolean get() = title == null && notes == null && assignees == null && dueAt == null
+    val isEmpty: Boolean get() = title == null && notes == null && assignees == null && dueAt == null && priority == null
 }
+
+/** The priorities a person sets, most pressing first, `""` for none (the desktop's Edit task). */
+internal val TASK_PRIORITIES: List<Pair<String, String>> = listOf(
+    "" to "None",
+    "urgent" to "Urgent",
+    "high" to "High",
+    "medium" to "Medium",
+    "low" to "Low",
+)
 
 /** What a form holds against what it started from: only a changed field is sent. */
 internal fun taskEditOf(
@@ -92,11 +103,13 @@ internal fun taskEditOf(
     due: String,
     before: TaskEditFields,
     notesLocked: Boolean,
+    priority: String = before.priority,
 ): TaskEdit = TaskEdit(
     title = title.trim().takeIf { it != before.title },
     notes = notes.trim().takeIf { !notesLocked && it != before.notes.trim() },
     assignees = parseAssigneesText(assignees).takeIf { it != before.assignees },
     dueAt = due.trim().takeIf { it != before.dueAt },
+    priority = priority.takeIf { it != before.priority },
 )
 
 /** The fields of a task as the Edit sheet starts them. */
@@ -105,6 +118,8 @@ data class TaskEditFields(
     val notes: String = "",
     val assignees: List<String> = emptyList(),
     val dueAt: String = "",
+    /** `urgent | high | medium | low`, or `""` for none. */
+    val priority: String = "",
 )
 
 /** The three statuses as chips: the current one selected, a tap sets another. */
@@ -124,11 +139,11 @@ internal fun TaskStatusChips(current: StatusCategory?, enabled: Boolean, onPick:
 }
 
 /**
- * **Edit task**: title, description, assignees and due date of a local item.
- * A delegated job's description is its prompt: shown, not editable. Save is
- * off until something changed and the fields are valid.
+ * **Edit task**: title, description, assignees, due date and priority of a
+ * local item. A delegated job's description is its prompt: shown, not
+ * editable. Save is off until something changed and the fields are valid.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun TaskEditSheet(
     before: TaskEditFields,
@@ -144,9 +159,10 @@ internal fun TaskEditSheet(
     var notes by remember { mutableStateOf(before.notes) }
     var assignees by remember { mutableStateOf(before.assignees.joinToString(", ")) }
     var due by remember { mutableStateOf(before.dueAt) }
+    var priority by remember { mutableStateOf(before.priority) }
     val titleError = taskTitleError(title)
     val dueError = dueDateError(due)
-    val edit = taskEditOf(title, notes, assignees, due, before, notesLocked)
+    val edit = taskEditOf(title, notes, assignees, due, before, notesLocked, priority)
     val canSave = connected && !busy && titleError == null && dueError == null && !edit.isEmpty
     ModalBottomSheet(onDismissRequest = onCancel) {
         Column(
@@ -192,6 +208,12 @@ internal fun TaskEditSheet(
                 supportingText = { Text(dueError ?: "Blank: no due date.") },
                 modifier = Modifier.fillMaxWidth(),
             )
+            Text("Priority", style = MaterialTheme.typography.labelMedium)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for ((value, label) in TASK_PRIORITIES) {
+                    FilterChip(selected = priority == value, onClick = { priority = value }, label = { Text(label) })
+                }
+            }
             if (!connected) {
                 Text("Offline — nothing is saved until the hub is back; nothing is queued.", style = MaterialTheme.typography.bodySmall)
             }
