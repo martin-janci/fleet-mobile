@@ -49,7 +49,7 @@ import dev.claudefleet.mobile.model.missionWaitLabel
 import dev.claudefleet.mobile.model.loginLabel
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.model.relativeWithin
-import dev.claudefleet.mobile.model.usedText
+import dev.claudefleet.mobile.model.roomText
 import dev.claudefleet.mobile.ui.kit.OrbitChip
 import dev.claudefleet.mobile.ui.kit.PhoneRow
 
@@ -438,7 +438,7 @@ private fun InboxRowButtons(
     Column(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp)) {
         when {
             target != null -> {
-                Text("Resume under ${loginLabel(target, accountName)} · ${usedText(target)}?", color = o.fg2, fontSize = 13.sp)
+                Text("Resume under ${loginLabel(target, accountName)} · ${roomText(target)}?", color = o.fg2, fontSize = 13.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { handlers.onConfirmSwitch(row) }, enabled = !busy) { Text("Switch") }
                     TextButton(onClick = { handlers.onCancelSwitch(row.id) }, enabled = !busy) { Text("Cancel") }

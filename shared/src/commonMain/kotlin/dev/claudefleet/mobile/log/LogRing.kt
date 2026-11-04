@@ -157,11 +157,11 @@ fun redactLog(text: String): String {
     return out
 }
 
-/** [millis] since the epoch as `2026-10-17T10:15:40.123Z`, without a date library. */
-fun logStamp(millis: Long): String {
-    val days = millis.floorDiv(86_400_000L)
-    val ms = millis.mod(86_400_000L)
-    // Howard Hinnant's civil_from_days.
+/** A calendar date: [month] 1-12, [day] 1-31. */
+internal data class CivilDate(val year: Long, val month: Long, val day: Long)
+
+/** The date [days] after 1970-01-01 (Howard Hinnant's civil_from_days), without a date library. */
+internal fun civilFromDays(days: Long): CivilDate {
     val z = days + 719_468L
     val era = z.floorDiv(146_097L)
     val doe = z - era * 146_097L
@@ -170,7 +170,13 @@ fun logStamp(millis: Long): String {
     val mp = (5 * doy + 2) / 153
     val day = doy - (153 * mp + 2) / 5 + 1
     val month = if (mp < 10) mp + 3 else mp - 9
-    val year = yoe + era * 400 + if (month <= 2) 1 else 0
+    return CivilDate(yoe + era * 400 + if (month <= 2) 1 else 0, month, day)
+}
+
+/** [millis] since the epoch as `2026-10-17T10:15:40.123Z`, without a date library. */
+fun logStamp(millis: Long): String {
+    val ms = millis.mod(86_400_000L)
+    val (year, month, day) = civilFromDays(millis.floorDiv(86_400_000L))
     fun two(n: Long) = n.toString().padStart(2, '0')
     return "${year.toString().padStart(4, '0')}-${two(month)}-${two(day)}" +
         "T${two(ms / 3_600_000)}:${two(ms / 60_000 % 60)}:${two(ms / 1000 % 60)}.${(ms % 1000).toString().padStart(3, '0')}Z"

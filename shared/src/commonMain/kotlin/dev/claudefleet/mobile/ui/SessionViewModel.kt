@@ -326,7 +326,7 @@ data class SessionUiState(
      * may restart it under another login: Switch account.
      */
     val canSwitchAccount: Boolean
-        get() = switchAccountAvailable && canRestart && session?.attention?.reason.let { it == "account_limit" || it == "no_credentials" }
+        get() = switchAccountAvailable && canRestart && session?.pausedOnLogin == true
 
     /**
      * Details › Switch account… (gap plan G5.5, the desktop's G1.11 action):

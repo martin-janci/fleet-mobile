@@ -245,6 +245,13 @@ data class SessionRow(
     val isRoutineRun: Boolean get() = origin == "routine" && kind != "external"
 
     /**
+     * Paused on its login: its account is at its limit (`account_limit`) or
+     * the login is signed out (`no_credentials`). Either way another login
+     * gets it going again: Switch account.
+     */
+    val pausedOnLogin: Boolean get() = attention?.reason.let { it == "account_limit" || it == "no_credentials" }
+
+    /**
      * The routine id in [originRef], digits only as the desktop reads it
      * (`^\d+$`): "-5" or "+5" names no routine. Null for a ref that names none.
      */

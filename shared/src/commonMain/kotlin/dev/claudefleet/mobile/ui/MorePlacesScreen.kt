@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.model.LOW_BELOW_PCT
+import dev.claudefleet.mobile.model.leftText
 import dev.claudefleet.mobile.model.AccountUsageWindows as AccountLimits
 import dev.claudefleet.mobile.model.AccountRow
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
@@ -342,7 +343,7 @@ internal fun limitRows(usage: AccountLimits): List<Pair<String, LimitWindow>> = 
  */
 internal fun limitFigure(w: LimitWindow, nowSeconds: Long): String {
     if (hasReset(w, nowSeconds)) return "Reset · not re-read yet"
-    val pct = "${100 - kotlin.math.round(w.utilization.coerceIn(0.0, 100.0)).toInt()}% left"
+    val pct = leftText(w.utilization.coerceIn(0.0, 100.0))
     val resets = relativeWithin(w.resetsAt, nowSeconds)?.let { "resets in $it" }
     return listOfNotNull(pct, resets).joinToString(" · ")
 }

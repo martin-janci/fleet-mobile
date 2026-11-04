@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.leftText
 import dev.claudefleet.mobile.model.isSignalLost
 import dev.claudefleet.mobile.model.limitAt
 import dev.claudefleet.mobile.model.relativeWithin
@@ -82,7 +83,7 @@ fun accountsLine(usage: Collection<AccountUsageSnapshot>, now: Long, accountName
     val weekly = fresh.mapNotNull { s -> s.usage?.sevenDay?.takeIf { w -> w.resetsAt.let { it == null || it > now } }?.utilization }.maxOrNull()
         ?: return null
     // Room is said as what is left, as everywhere else (review M4).
-    return "Weekly: ${(100 - weekly.roundToInt()).coerceAtLeast(0)}% left on the busiest account"
+    return "Weekly: ${leftText(weekly)} on the busiest account"
 }
 
 /** Files' live line (MobileNav): the count, and the transfer in flight with how far it got. */

@@ -235,7 +235,7 @@ fun loginLabel(l: HostLogin, accountName: (String) -> String?): String {
 }
 
 /** "5% left" or "no reading": room is always said as what is left, as the desktop's meters do. */
-fun usedText(l: HostLogin): String = l.usedPct?.let { leftText(it) } ?: "no reading"
+fun roomText(l: HostLogin): String = l.usedPct?.let { leftText(it) } ?: "no reading"
 
 /** "38% left" for a reading of 62% used. */
 fun leftText(usedPct: Double): String = "${(100 - kotlin.math.round(usedPct).toInt()).coerceAtLeast(0)}% left"
@@ -246,4 +246,4 @@ fun leftText(usedPct: Double): String = "${(100 - kotlin.math.round(usedPct).toI
  * no login has a reading.
  */
 fun freestLogin(logins: List<HostLogin>): HostLogin? =
-    logins.filter { it.usedPct != null && !it.signedOut }.minByOrNull { it.usedPct ?: Double.MAX_VALUE }
+    logins.filter { !it.signedOut }.mapNotNull { l -> l.usedPct?.let { l to it } }.minByOrNull { it.second }?.first
