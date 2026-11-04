@@ -1828,6 +1828,10 @@ private fun SessionOverflowMenu(
                     background = state.canStartBackground,
                 ),
             )
+            // Grey items said nothing: the reason sits above them, once.
+            orbitMenuNote(busy = state.busy, connected = state.connected)?.let {
+                Text(it, style = Fleet.type.textXs, color = Fleet.colors.fgMuted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).testTag(ORBIT_MENU_TAG + "note"))
+            }
             for ((i, item) in items.withIndex()) {
                 if (i > 0 && items[i - 1].group != item.group) HorizontalDivider()
                 DropdownMenuItem(
