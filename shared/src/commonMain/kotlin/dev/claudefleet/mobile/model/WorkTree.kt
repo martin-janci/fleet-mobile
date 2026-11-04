@@ -103,6 +103,12 @@ data class WorkTreeFilters(
     @SerialName("item_type") val itemType: String? = null,
     /** One of [PRIORITIES], `none` meaning tasks with none. An older hub ignores it. */
     val priority: String? = null,
+    /**
+     * Tasks carrying this label, any case (claude-fleet #1082). Offered only
+     * when the page lists labels ([WorkTreeFacets.labels]): an older hub
+     * lists none and ignores the filter.
+     */
+    val label: String? = null,
     /** The order inside each section, one of [SORTS]; absent is `activity`. */
     val sort: String? = null,
 ) {
@@ -127,6 +133,7 @@ data class WorkTreeFilters(
         epic = epic?.trim()?.takeIf { it.isNotEmpty() },
         itemType = itemType?.trim()?.takeIf { it.isNotEmpty() },
         priority = priority?.takeIf { it in PRIORITIES },
+        label = label?.trim()?.takeIf { it.isNotEmpty() },
         sort = sort?.takeIf { it in SORTS && it != "activity" },
     )
 
@@ -135,7 +142,7 @@ data class WorkTreeFilters(
      * *Show archived* (it widens the tree) are not counted.
      */
     val count: Int get() = with(normalized()) {
-        listOfNotNull(org, tracker, status, mine, has, review, iteration, epic, itemType, priority).size
+        listOfNotNull(org, tracker, status, mine, has, review, iteration, epic, itemType, priority, label).size
     }
 
     /**
@@ -144,7 +151,7 @@ data class WorkTreeFilters(
      * review* are toggles on screen and show their own state.
      */
     val sheetCount: Int get() = with(normalized()) {
-        listOfNotNull(org, tracker, status, has, iteration, epic, itemType, priority).size
+        listOfNotNull(org, tracker, status, has, iteration, epic, itemType, priority, label).size
     }
 
     /** Nothing narrows the tree (search included). Showing archived tasks is not a narrowing. */
@@ -569,6 +576,8 @@ data class WorkTreeFacets(
     val iterations: List<IterationFacet> = emptyList(),
     val epics: List<EpicFacet> = emptyList(),
     @SerialName("item_types") val itemTypes: List<String> = emptyList(),
+    /** The tasks' labels, each once; empty from a hub before claude-fleet #1082. */
+    val labels: List<String> = emptyList(),
 )
 
 @Serializable
