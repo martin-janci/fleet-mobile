@@ -60,7 +60,7 @@ fun HostsScreen(
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(title = "Hosts")
         ConnectionBanner(state.status)
-        ErrorBanner(state.error, onDismiss = onDismissError)
+        ErrorBanner(state.error, onDismiss = onDismissError, onRetry = onRefresh.takeIf { state.listFailed })
 
         // Inside the pull-to-refresh, not instead of it: an empty host list is
         // exactly when a person pulls to ask whether the hub is answering, and

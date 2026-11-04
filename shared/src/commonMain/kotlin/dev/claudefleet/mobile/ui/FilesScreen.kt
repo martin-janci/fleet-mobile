@@ -79,7 +79,9 @@ fun FilesScreen(
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(title = "Files", subtitle = state.usage)
         ConnectionBanner(status)
-        ErrorBanner(state.error, onDismiss = handlers.onDismissError)
+        // A failed list read offers Try again (14.12); a failed action does not,
+        // since re-listing would not redo it.
+        ErrorBanner(state.error, onDismiss = handlers.onDismissError, onRetry = handlers.onRefresh.takeIf { state.listFailed && state.error != null })
         state.notice?.let { notice ->
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
