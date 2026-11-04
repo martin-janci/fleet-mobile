@@ -564,7 +564,7 @@ class TaskViewModel(
         val itemId = state.value.task?.itemId ?: return null
         if (edit.isEmpty) return null.also { closeEdit() }
         return itemWrite(EDIT) {
-            actions.editItem(itemId, title = edit.title, notes = edit.notes, assignees = edit.assignees, dueAt = edit.dueAt)
+            actions.editItem(itemId, title = edit.title, notes = edit.notes, assignees = edit.assignees, dueAt = edit.dueAt, priority = edit.priority)
             local.update { it.copy(editOpen = false) }
         }
     }
@@ -811,7 +811,13 @@ class TaskViewModel(
             canAddSubtask = task != null && takesSubtask(task) && allowed(caps, status, CREATE),
             subtaskOpen = l.subtaskOpen,
             editFields = detail?.let {
-                TaskEditFields(title = it.task.title, notes = it.notes.orEmpty(), assignees = it.task.assignees, dueAt = it.task.dueAt.orEmpty())
+                TaskEditFields(
+                    title = it.task.title,
+                    notes = it.notes.orEmpty(),
+                    assignees = it.task.assignees,
+                    dueAt = it.task.dueAt.orEmpty(),
+                    priority = it.task.priority.orEmpty(),
+                )
             } ?: TaskEditFields(),
             canRunCheck = detail?.check?.canRun == true && allowed(caps, status, CHECK),
             canAcceptCheck = detail?.check?.acceptable == true && allowed(caps, status, VERIFY),

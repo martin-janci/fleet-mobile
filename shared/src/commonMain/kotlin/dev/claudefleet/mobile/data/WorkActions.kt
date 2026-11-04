@@ -203,6 +203,7 @@ interface WorkActions {
         notes: String? = null,
         assignees: List<String>? = null,
         dueAt: String? = null,
+        priority: String? = null,
     ): WorkItem = throw UnsupportedOperationException("edit")
 
     // ---- the Work view (claude-fleet M14): reads are `work`, writes `work_link` ----
@@ -374,8 +375,8 @@ class HubWorkActions(private val session: AppSession) : WorkActions {
     override suspend fun setTicketCheck(projectId: Long, mode: String, command: String?) =
         session.withClient { it.setTicketCheck(projectId, mode, command) }
 
-    override suspend fun editItem(itemId: Long, title: String?, notes: String?, assignees: List<String>?, dueAt: String?): WorkItem =
-        session.withClient { it.editWorkItem(itemId, title, notes, assignees, dueAt) }
+    override suspend fun editItem(itemId: Long, title: String?, notes: String?, assignees: List<String>?, dueAt: String?, priority: String?): WorkItem =
+        session.withClient { it.editWorkItem(itemId, title, notes, assignees, dueAt, priority) }
 
     override suspend fun tree(filters: WorkTreeFilters, cursor: String?, limit: Int?, perTask: Int?): WorkTreePage =
         session.withClient { it.workTree(filters, cursor, limit, perTask) }
