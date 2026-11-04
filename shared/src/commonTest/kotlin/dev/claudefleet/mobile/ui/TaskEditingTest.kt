@@ -94,6 +94,10 @@ class TaskEditingTest {
         assertNull(taskSizeError("", ""))
         assertEquals("At most 20 labels.", taskSizeError((1..21).joinToString(",") { "l$it" }, ""))
         assertEquals("A label is at most 40 characters.", taskSizeError("x".repeat(41), ""))
+        // 40 emoji are 40 characters to the hub (80 UTF-16 units).
+        assertNull(taskSizeError("\uD83D\uDE80".repeat(40), ""))
+        assertEquals("A label is at most 40 characters.", taskSizeError("\uD83D\uDE80".repeat(41), ""))
+        assertEquals("A label has no control characters.", taskSizeError("tab\there", ""))
         assertEquals("An estimate is a number from 0 to 1000.", taskSizeError("", "lots"))
         assertEquals("An estimate is a number from 0 to 1000.", taskSizeError("", "1001"))
         assertEquals("An estimate is a number from 0 to 1000.", taskSizeError("", "-1"))

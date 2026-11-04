@@ -118,7 +118,9 @@ internal fun parseEstimate(raw: String): Double? = raw.trim().let { if (it.isEmp
 internal fun taskSizeError(labels: String, estimate: String): String? {
     val tags = parseAssigneesText(labels)
     if (tags.size > LABELS_MAX) return "At most $LABELS_MAX labels."
-    if (tags.any { it.length > LABEL_MAX_CHARS }) return "A label is at most $LABEL_MAX_CHARS characters."
+    // Characters as the hub counts them (code points: an emoji is one).
+    if (tags.any { t -> t.count { !it.isLowSurrogate() } > LABEL_MAX_CHARS }) return "A label is at most $LABEL_MAX_CHARS characters."
+    if (tags.any { t -> t.any { it.isISOControl() } }) return "A label has no control characters."
     val e = parseEstimate(estimate)
     if (e == null || !e.isFinite() || e < 0.0 || e > ESTIMATE_MAX) return "An estimate is a number from 0 to ${ESTIMATE_MAX.toLong()}."
     return null
