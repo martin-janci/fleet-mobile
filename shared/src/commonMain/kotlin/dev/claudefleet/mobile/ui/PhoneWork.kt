@@ -57,6 +57,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.model.priorityLabel
+import dev.claudefleet.mobile.model.StatusCategory
+import dev.claudefleet.mobile.model.dueChip
+import dev.claudefleet.mobile.model.localEpochDay
+import dev.claudefleet.mobile.epochSeconds
+import dev.claudefleet.mobile.utcOffsetSeconds
 import dev.claudefleet.mobile.model.estimateLabel
 import dev.claudefleet.mobile.model.GroupSource
 import dev.claudefleet.mobile.model.LinkState
@@ -661,7 +666,9 @@ fun PhoneTaskScreen(
                             OrbitChip(listOfNotNull(g.title, groupChipWords(g.source)).joinToString(" · "))
                         }
                         for (a in task.assignees.take(2)) OrbitChip(a)
-                        task.dueAt?.takeIf { it.isNotBlank() }?.let { OrbitChip("Due $it") }
+                        dueChip(task.dueAt, localEpochDay(epochSeconds(), utcOffsetSeconds(epochSeconds())), task.statusCategory == StatusCategory.Done)?.let {
+                            OrbitChip(it.text, word = if (it.overdue) StatusWord.FAILED else null)
+                        }
                         priorityLabel(task.priority)?.let { OrbitChip("Priority $it") }
                         estimateLabel(task.estimate, task.estimateUnit)?.let { OrbitChip(it) }
                         for (l in task.labels.take(4)) OrbitChip(l)

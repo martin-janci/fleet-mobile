@@ -40,4 +40,18 @@ class DueDateTest {
         assertNull(dueLabel("", today))
         assertNull(dueLabel("soon", today))
     }
+
+    @Test
+    fun the_task_screen_line_and_the_chip_flag_a_date_that_has_passed() {
+        assertEquals(DueLabel("Due Fri · 2026-11-06", false), dueLine("2026-11-06", today, done = false))
+        assertEquals(DueLabel("Overdue · was due 2026-10-30", true), dueLine("2026-10-30", today, done = false))
+        assertEquals(DueLabel("Due: 2026-10-30", false), dueLine("2026-10-30", today, done = true))
+        assertEquals(DueLabel("Due: next week", false), dueLine("next week", today, done = false))
+        assertNull(dueLine(" ", today, done = false))
+
+        assertEquals(DueLabel("Due Tomorrow", false), dueChip("2026-11-05", today, done = false))
+        assertEquals(DueLabel("Overdue Oct 30", true), dueChip("2026-10-30", today, done = false))
+        assertEquals(DueLabel("Due 2026-10-30", false), dueChip("2026-10-30", today, done = true))
+        assertNull(dueChip(null, today, done = false))
+    }
 }

@@ -1,6 +1,10 @@
 package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.epochSeconds
+import dev.claudefleet.mobile.utcOffsetSeconds
+import dev.claudefleet.mobile.model.StatusCategory
+import dev.claudefleet.mobile.model.dueLine
+import dev.claudefleet.mobile.model.localEpochDay
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -170,7 +174,9 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
                         Text("Its tracker is failing to sync — sessions below are what fleet last knew.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     }
                     if (task.assignees.isNotEmpty()) Text("Assigned: ${task.assignees.joinToString()}", style = MaterialTheme.typography.bodySmall)
-                    task.dueAt?.takeIf { it.isNotBlank() }?.let { Text("Due: $it", style = MaterialTheme.typography.bodySmall) }
+                    dueLine(task.dueAt, localEpochDay(epochSeconds(), utcOffsetSeconds(epochSeconds())), task.statusCategory == StatusCategory.Done)?.let {
+                        Text(it.text, style = MaterialTheme.typography.bodySmall, color = if (it.overdue) MaterialTheme.colorScheme.error else Color.Unspecified)
+                    }
                     listOfNotNull(
                         priorityLabel(task.priority)?.let { "Priority: $it" },
                         estimateLabel(task.estimate, task.estimateUnit)?.let { "Estimate: $it" },
