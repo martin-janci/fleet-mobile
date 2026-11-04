@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -23,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.PromoteTarget
 import dev.claudefleet.mobile.model.StatusCategory
@@ -82,8 +84,44 @@ data class TaskEdit(
     val dueAt: String? = null,
     /** One of [TASK_PRIORITIES]' values; `""` clears it. */
     val priority: String? = null,
+    /** Empty clears them. */
+    val labels: List<String>? = null,
+    /** 0 clears it (and its unit). */
+    val estimate: Double? = null,
+    /** `points | hours`: with [estimate], or alone to re-unit the estimate the task has. */
+    val estimateUnit: String? = null,
 ) {
-    val isEmpty: Boolean get() = title == null && notes == null && assignees == null && dueAt == null && priority == null
+    val isEmpty: Boolean get() =
+        title == null && notes == null && assignees == null && dueAt == null && priority == null &&
+            labels == null && estimate == null && estimateUnit == null
+}
+
+/** The hub's limits on labels and estimates (claude-fleet `work_tasks.rs`). */
+internal const val LABELS_MAX = 20
+internal const val LABEL_MAX_CHARS = 40
+internal const val ESTIMATE_MAX = 1000.0
+
+/** What an estimate counts, as the sheet offers it. */
+internal val ESTIMATE_UNITS: List<Pair<String, String>> = listOf("points" to "Points", "hours" to "Hours")
+
+/** An estimate as its field starts: `""` for none, `3` not `3.0`. */
+internal fun estimateFieldText(estimate: Double): String = when {
+    estimate <= 0.0 -> ""
+    estimate == kotlin.math.floor(estimate) -> estimate.toLong().toString()
+    else -> estimate.toString()
+}
+
+/** The estimate field as a number: 0 when blank (no estimate), null when it is not a number. */
+internal fun parseEstimate(raw: String): Double? = raw.trim().let { if (it.isEmpty()) 0.0 else it.toDoubleOrNull() }
+
+/** Why the labels or the estimate cannot be saved, as the hub checks them; null when they can. */
+internal fun taskSizeError(labels: String, estimate: String): String? {
+    val tags = parseAssigneesText(labels)
+    if (tags.size > LABELS_MAX) return "At most $LABELS_MAX labels."
+    if (tags.any { it.length > LABEL_MAX_CHARS }) return "A label is at most $LABEL_MAX_CHARS characters."
+    val e = parseEstimate(estimate)
+    if (e == null || !e.isFinite() || e < 0.0 || e > ESTIMATE_MAX) return "An estimate is a number from 0 to ${ESTIMATE_MAX.toLong()}."
+    return null
 }
 
 /** The priorities a person sets, most pressing first, `""` for none (the desktop's Edit task). */
@@ -104,13 +142,25 @@ internal fun taskEditOf(
     before: TaskEditFields,
     notesLocked: Boolean,
     priority: String = before.priority,
-): TaskEdit = TaskEdit(
-    title = title.trim().takeIf { it != before.title },
-    notes = notes.trim().takeIf { !notesLocked && it != before.notes.trim() },
-    assignees = parseAssigneesText(assignees).takeIf { it != before.assignees },
-    dueAt = due.trim().takeIf { it != before.dueAt },
-    priority = priority.takeIf { it != before.priority },
-)
+    labels: String = before.labels.joinToString(", "),
+    estimate: String = estimateFieldText(before.estimate),
+    unit: String = before.estimateUnit,
+): TaskEdit {
+    // The desktop's rule: a new size carries its unit; the same size in
+    // another unit re-units it; a cleared one sends 0 alone.
+    val size = parseEstimate(estimate) ?: before.estimate
+    val sizeChanged = size != before.estimate
+    return TaskEdit(
+        title = title.trim().takeIf { it != before.title },
+        notes = notes.trim().takeIf { !notesLocked && it != before.notes.trim() },
+        assignees = parseAssigneesText(assignees).takeIf { it != before.assignees },
+        dueAt = due.trim().takeIf { it != before.dueAt },
+        priority = priority.takeIf { it != before.priority },
+        labels = parseAssigneesText(labels).takeIf { it != before.labels },
+        estimate = size.takeIf { sizeChanged },
+        estimateUnit = unit.takeIf { size > 0.0 && (sizeChanged || it != before.estimateUnit) },
+    )
+}
 
 /** The fields of a task as the Edit sheet starts them. */
 data class TaskEditFields(
@@ -120,6 +170,11 @@ data class TaskEditFields(
     val dueAt: String = "",
     /** `urgent | high | medium | low`, or `""` for none. */
     val priority: String = "",
+    val labels: List<String> = emptyList(),
+    /** 0: no estimate. */
+    val estimate: Double = 0.0,
+    /** `points | hours`; points when the task has no estimate. */
+    val estimateUnit: String = "points",
 )
 
 /** The three statuses as chips: the current one selected, a tap sets another. */
@@ -139,7 +194,8 @@ internal fun TaskStatusChips(current: StatusCategory?, enabled: Boolean, onPick:
 }
 
 /**
- * **Edit task**: title, description, assignees, due date and priority of a
+ * **Edit task**: title, description, assignees, due date, priority, labels
+ * and estimate of a
  * local item. A delegated job's description is its prompt: shown, not
  * editable. Save is off until something changed and the fields are valid.
  */
@@ -160,10 +216,14 @@ internal fun TaskEditSheet(
     var assignees by remember { mutableStateOf(before.assignees.joinToString(", ")) }
     var due by remember { mutableStateOf(before.dueAt) }
     var priority by remember { mutableStateOf(before.priority) }
+    var labels by remember { mutableStateOf(before.labels.joinToString(", ")) }
+    var estimate by remember { mutableStateOf(estimateFieldText(before.estimate)) }
+    var unit by remember { mutableStateOf(before.estimateUnit) }
     val titleError = taskTitleError(title)
     val dueError = dueDateError(due)
-    val edit = taskEditOf(title, notes, assignees, due, before, notesLocked, priority)
-    val canSave = connected && !busy && titleError == null && dueError == null && !edit.isEmpty
+    val sizeError = taskSizeError(labels, estimate)
+    val edit = taskEditOf(title, notes, assignees, due, before, notesLocked, priority, labels, estimate, unit)
+    val canSave = connected && !busy && titleError == null && dueError == null && sizeError == null && !edit.isEmpty
     ModalBottomSheet(onDismissRequest = onCancel) {
         Column(
             modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
@@ -212,6 +272,29 @@ internal fun TaskEditSheet(
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for ((value, label) in TASK_PRIORITIES) {
                     FilterChip(selected = priority == value, onClick = { priority = value }, label = { Text(label) })
+                }
+            }
+            OutlinedTextField(
+                value = labels,
+                onValueChange = { labels = it },
+                label = { Text("Labels") },
+                placeholder = { Text("Comma-separated") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = estimate,
+                onValueChange = { estimate = it },
+                label = { Text("Estimate") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                isError = sizeError != null,
+                supportingText = { Text(sizeError ?: "Blank: no estimate.") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for ((value, label) in ESTIMATE_UNITS) {
+                    FilterChip(selected = unit == value, onClick = { unit = value }, label = { Text(label) })
                 }
             }
             if (!connected) {

@@ -52,4 +52,50 @@ class TaskEditingTest {
         assertEquals(TaskEdit(priority = ""), taskEditOf("Fix login", "", "", "", before, notesLocked = false, priority = ""))
         assertEquals(listOf("", "urgent", "high", "medium", "low"), TASK_PRIORITIES.map { it.first })
     }
+
+    @Test
+    fun labels_are_sent_tidied_when_they_changed_and_empty_clears_them() {
+        val before = TaskEditFields(title = "Fix login", labels = listOf("ui", "auth"))
+        assertTrue(taskEditOf("Fix login", "", "", "", before, notesLocked = false, labels = "ui, auth").isEmpty)
+        assertEquals(TaskEdit(labels = listOf("ui", "api")), taskEditOf("Fix login", "", "", "", before, notesLocked = false, labels = " ui, api,, UI "))
+        assertEquals(TaskEdit(labels = emptyList()), taskEditOf("Fix login", "", "", "", before, notesLocked = false, labels = ""))
+    }
+
+    /** The desktop's rule: a new size carries its unit, the same size in another unit re-units it, a blank sends 0 alone. */
+    @Test
+    fun an_estimate_carries_its_unit_and_blank_clears_it() {
+        val before = TaskEditFields(title = "Fix login", estimate = 3.0, estimateUnit = "points")
+        assertEquals("3", estimateFieldText(3.0))
+        assertEquals("2.5", estimateFieldText(2.5))
+        assertEquals("", estimateFieldText(0.0))
+        assertTrue(taskEditOf("Fix login", "", "", "", before, notesLocked = false, estimate = "3").isEmpty)
+        assertEquals(
+            TaskEdit(estimate = 5.0, estimateUnit = "points"),
+            taskEditOf("Fix login", "", "", "", before, notesLocked = false, estimate = "5"),
+        )
+        assertEquals(
+            TaskEdit(estimateUnit = "hours"),
+            taskEditOf("Fix login", "", "", "", before, notesLocked = false, estimate = "3", unit = "hours"),
+        )
+        assertEquals(TaskEdit(estimate = 0.0), taskEditOf("Fix login", "", "", "", before, notesLocked = false, estimate = " ", unit = "hours"))
+        // A first estimate on a task with none, in hours.
+        val none = TaskEditFields(title = "Fix login")
+        assertEquals(
+            TaskEdit(estimate = 4.0, estimateUnit = "hours"),
+            taskEditOf("Fix login", "", "", "", none, notesLocked = false, estimate = "4", unit = "hours"),
+        )
+        // Switching the unit with no estimate sends nothing.
+        assertTrue(taskEditOf("Fix login", "", "", "", none, notesLocked = false, unit = "hours").isEmpty)
+    }
+
+    @Test
+    fun labels_and_estimates_past_the_hubs_limits_are_named_before_saving() {
+        assertNull(taskSizeError("ui, auth", "3.5"))
+        assertNull(taskSizeError("", ""))
+        assertEquals("At most 20 labels.", taskSizeError((1..21).joinToString(",") { "l$it" }, ""))
+        assertEquals("A label is at most 40 characters.", taskSizeError("x".repeat(41), ""))
+        assertEquals("An estimate is a number from 0 to 1000.", taskSizeError("", "lots"))
+        assertEquals("An estimate is a number from 0 to 1000.", taskSizeError("", "1001"))
+        assertEquals("An estimate is a number from 0 to 1000.", taskSizeError("", "-1"))
+    }
 }

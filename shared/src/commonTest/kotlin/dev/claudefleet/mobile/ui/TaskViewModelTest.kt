@@ -492,6 +492,28 @@ class TaskViewModelTest {
         assertEquals(listOf("edit 12 title=null notes=null assignees=null due=null priority=urgent"), actions.calls)
     }
 
+    /** Labels and an estimate typed in the sheet go with the edit. */
+    @Test
+    fun an_edit_sends_labels_and_an_estimate() = runTest {
+        val actions = FakeWorkActions().apply { taskAnswer = local }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        vm.openEdit()
+        runCurrent()
+        val before = vm.state.value.editFields
+        vm.saveEdit(
+            taskEditOf(
+                before.title, before.notes, before.assignees.joinToString(", "), before.dueAt, before,
+                notesLocked = false, labels = "ui, auth", estimate = "2", unit = "hours",
+            ),
+        )
+        runCurrent()
+        assertEquals(
+            listOf("edit 12 title=null notes=null assignees=null due=null labels=[ui, auth] estimate=2.0 unit=hours"),
+            actions.calls,
+        )
+    }
+
     /** A refused edit keeps the sheet open, with the hub's reason in it. */
     @Test
     fun a_refused_edit_stays_in_the_sheet() = runTest {
