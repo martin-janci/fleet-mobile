@@ -206,6 +206,13 @@ data class HubCapabilities(
     val accountNickname: Boolean get() = SET_ACCOUNT_NICKNAME in tools
 
     /**
+     * Forbidding an account for some projects (`set_account_projects`,
+     * claude-fleet migration 217): listed to the hub owner's own devices, as
+     * the nickname is.
+     */
+    val accountProjects: Boolean get() = SET_ACCOUNT_PROJECTS in tools
+
+    /**
      * A host's health checklist on its sheet (`check_host`, claude-fleet
      * revision 17): the hub owner's devices, as on the desktop's Host detail.
      */
@@ -437,6 +444,7 @@ data class HubCapabilities(
         const val PIN_SESSION = "pin_session"
         const val LIST_ACCOUNTS = "list_accounts"
         const val SET_ACCOUNT_NICKNAME = "set_account_nickname"
+        const val SET_ACCOUNT_PROJECTS = "set_account_projects"
         const val CHECK_HOST = "check_host"
         const val WORK_ADMIN = "work_admin"
         const val ACCOUNT_USAGE = "account_usage"

@@ -235,6 +235,10 @@ class ToolsTheAppMayCallTest {
         // device only; called only when the hub lists it
         // (`HubCapabilities.accountNickname`) and the token is full.
         "set_account_nickname",
+        // The projects an account is forbidden for, on the same dialog:
+        // `Access::Person`, called only when the hub lists it
+        // (`HubCapabilities.accountProjects`).
+        "set_account_projects",
         // A host's health checklist on its sheet (revision 17): readonly and
         // `Access::Person`, called only when the hub lists it (`checkHost`).
         "check_host",

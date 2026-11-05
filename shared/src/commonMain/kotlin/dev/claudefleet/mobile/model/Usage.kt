@@ -68,6 +68,12 @@ data class AccountRow(
     @SerialName("last_seen_at") val lastSeenAt: Long? = null,
     val nickname: String? = null,
     @SerialName("has_extra_usage") val hasExtraUsage: Boolean = false,
+    /**
+     * The projects this account is forbidden for (claude-fleet migration
+     * 217, docs/accounts.md "Keep an account off a project"): no work in one
+     * starts, resumes or switches onto a login on it. Empty from an older hub.
+     */
+    @SerialName("forbidden_project_ids") val forbiddenProjectIds: List<Long> = emptyList(),
 ) {
     /**
      * The desktop's rule (`accountLabel` in claude-fleet's `src/lib/accounts.ts`):

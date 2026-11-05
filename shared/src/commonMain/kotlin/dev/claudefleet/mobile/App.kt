@@ -1859,6 +1859,7 @@ private fun FleetRoute(
                         onOpenSession = nav::open,
                         onDismissError = usage::dismissError,
                         onRename = { uuid, name -> usage.rename(uuid, name); Unit },
+                        onSetProjects = { uuid, ids -> usage.setForbiddenProjects(uuid, ids); Unit },
                         onAutoSwitch = { usage.setAutoSwitch(enabled = it); Unit },
                         onAutoSwitchContinue = { usage.setAutoSwitch(continueAfter = it); Unit },
                     )

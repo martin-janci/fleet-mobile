@@ -276,7 +276,7 @@ private fun HostRowItem(host: HostLine, nowSeconds: Long, behind: Boolean, check
 @Composable
 fun OrbitUsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: Long, modifier: Modifier = Modifier) {
     var naming by remember { mutableStateOf<AccountRow?>(null) }
-    naming?.let { a -> AccountNameDialog(a, onSave = { handlers.onRename(a.uuid, it) }, onDismiss = { naming = null }) }
+    naming?.let { a -> AccountDialogFor(a, state, handlers) { naming = null } }
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
             title = "Accounts and usage",
@@ -293,7 +293,13 @@ fun OrbitUsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: L
                     items(state.accounts, key = { "account:${it.uuid}" }) {
                         Column {
                             val a = it
-                            AccountItem(a, nowSeconds, state.sessions[a.uuid], onClick = { naming = a }.takeIf { state.canRename })
+                            AccountItem(
+                                a,
+                                nowSeconds,
+                                state.sessions[a.uuid],
+                                onClick = { naming = a }.takeIf { state.canRename || state.canSetProjects },
+                                forbidden = forbiddenProjectsLine(a, state.projects),
+                            )
                             if (state.limitsAvailable) AccountLimitsBlock(state.limits[it.uuid], nowSeconds)
                         }
                     }
@@ -422,7 +428,13 @@ internal fun AccountLimitsBlock(snap: AccountUsageSnapshot?, nowSeconds: Long) {
 }
 
 @Composable
-private fun AccountItem(account: AccountRow, nowSeconds: Long, sessions: AccountSessions?, onClick: (() -> Unit)? = null) {
+private fun AccountItem(
+    account: AccountRow,
+    nowSeconds: Long,
+    sessions: AccountSessions?,
+    onClick: (() -> Unit)? = null,
+    forbidden: String? = null,
+) {
     PhoneRow(
         title = account.label,
         line = listOfNotNull(
@@ -432,6 +444,7 @@ private fun AccountItem(account: AccountRow, nowSeconds: Long, sessions: Account
             account.organizationName,
             account.seatTier,
             if (account.hasExtraUsage) "extra usage on" else null,
+            forbidden,
         ).joinToString(" · "),
         lead = null,
         dot = false,

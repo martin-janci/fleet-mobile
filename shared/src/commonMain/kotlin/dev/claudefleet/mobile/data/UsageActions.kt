@@ -9,6 +9,9 @@ interface UsageActions {
     suspend fun report(sinceSecs: Long?): UsageReport
     suspend fun accounts(): List<AccountRow>
     suspend fun setNickname(uuid: String, nickname: String?): AccountRow
+    /** Replace the projects [uuid] is forbidden for (`set_account_projects`). */
+    suspend fun setForbiddenProjects(uuid: String, projectIds: List<Long>): AccountRow =
+        error("set_account_projects is not offered")
     /** Read (no arguments) or change the person's automatic-switching answer. */
     suspend fun autoSwitch(enabled: Boolean? = null, continueAfter: Boolean? = null): AutoSwitchView =
         error("auto_switch_account is not offered")
@@ -19,6 +22,8 @@ class HubUsageActions(private val session: AppSession) : UsageActions {
     override suspend fun accounts(): List<AccountRow> = session.withClient { it.listAccounts() }
     override suspend fun setNickname(uuid: String, nickname: String?): AccountRow =
         session.withClient { it.setAccountNickname(uuid, nickname) }
+    override suspend fun setForbiddenProjects(uuid: String, projectIds: List<Long>): AccountRow =
+        session.withClient { it.setAccountProjects(uuid, projectIds) }
     override suspend fun autoSwitch(enabled: Boolean?, continueAfter: Boolean?): AutoSwitchView =
         session.withClient { it.autoSwitchAccount(enabled, continueAfter) }
 }

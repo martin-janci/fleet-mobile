@@ -11,12 +11,16 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
@@ -39,6 +43,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.AccountRow
 import dev.claudefleet.mobile.model.AutoSwitchView
+import dev.claudefleet.mobile.model.ProjectRow
+import dev.claudefleet.mobile.model.unnamedProject
 import dev.claudefleet.mobile.model.UsageReport
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.components.ErrorBanner
@@ -55,6 +61,8 @@ data class UsageHandlers(
     val onDismissError: () -> Unit = {},
     /** Name an account (uuid, name; blank clears). Offered where [UsageUiState.canRename]. */
     val onRename: (String, String) -> Unit = { _, _ -> },
+    /** Forbid an account for exactly these projects. Offered where [UsageUiState.canSetProjects]. */
+    val onSetProjects: (String, List<Long>) -> Unit = { _, _ -> },
     /** Turn automatic switching on or off for my sessions. */
     val onAutoSwitch: (Boolean) -> Unit = {},
     /** …and whether a switched session is told to carry on. */
@@ -65,34 +73,119 @@ data class UsageHandlers(
 internal const val NICKNAME_MAX = 32
 
 /**
+ * "Not for acme/api, acme/web": the projects [account] is forbidden for, by
+ * name, or null when none is.
+ */
+internal fun forbiddenProjectsLine(account: AccountRow, projects: List<ProjectRow>): String? {
+    if (account.forbiddenProjectIds.isEmpty()) return null
+    val names = account.forbiddenProjectIds
+        .map { id -> projects.firstOrNull { it.id == id }?.label ?: unnamedProject(id) }
+        .sorted()
+    return "not for " + names.joinToString(", ")
+}
+
+/**
  * Name [account]: the label the desktop and every device show for it. Blank
- * clears it, so the email shows again.
+ * clears it, so the email shows again. Where the hub takes it
+ * ([canSetProjects]), also the projects the account is forbidden for
+ * (claude-fleet docs/accounts.md, "Keep an account off a project"); Save
+ * sends only what changed.
  */
 @Composable
-internal fun AccountNameDialog(account: AccountRow, onSave: (String) -> Unit, onDismiss: () -> Unit) {
+internal fun AccountNameDialog(
+    account: AccountRow,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit,
+    canRename: Boolean = true,
+    canSetProjects: Boolean = false,
+    projects: List<ProjectRow> = emptyList(),
+    onSaveProjects: (List<Long>) -> Unit = {},
+) {
     var name by remember(account.uuid) { mutableStateOf(account.nickname.orEmpty()) }
+    var forbidden by remember(account.uuid) { mutableStateOf(account.forbiddenProjectIds.toSet()) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Name this account") },
+        title = { Text(if (canRename) "Name this account" else account.label) },
         text = {
             Column {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it.take(NICKNAME_MAX) },
-                    singleLine = true,
-                    label = { Text("Name") },
-                    placeholder = { Text(account.email ?: account.uuid.take(8)) },
-                )
-                Text(
-                    "Shown on every device. Empty shows the email again.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
+                if (canRename) {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it.take(NICKNAME_MAX) },
+                        singleLine = true,
+                        label = { Text("Name") },
+                        placeholder = { Text(account.email ?: account.uuid.take(8)) },
+                    )
+                    Text(
+                        "Shown on every device. Empty shows the email again.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                if (canSetProjects) {
+                    Text(
+                        "Not for these projects",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(top = 16.dp),
+                    )
+                    Text(
+                        "Work in a ticked project never starts, resumes or switches onto this account.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    // Every project the fleet knows, and any it no longer lists that is still ticked.
+                    val shown = (projects.map { it.id to it.label } +
+                        (forbidden - projects.map { it.id }.toSet()).map { it to unnamedProject(it) })
+                        .sortedBy { it.second }
+                    if (shown.isEmpty()) {
+                        Text(
+                            "No projects yet.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                    Column(Modifier.fillMaxWidth().heightIn(max = 280.dp).verticalScroll(rememberScrollState())) {
+                        for ((id, label) in shown) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth()
+                                    .toggleable(value = id in forbidden, role = Role.Checkbox) { on ->
+                                        forbidden = if (on) forbidden + id else forbidden - id
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(checked = id in forbidden, onCheckedChange = null)
+                                Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = 8.dp))
+                            }
+                        }
+                    }
+                }
             }
         },
-        confirmButton = { TextButton(onClick = { onSave(name); onDismiss() }) { Text("Save") } },
+        confirmButton = {
+            TextButton(onClick = {
+                if (canRename && name.trim() != account.nickname.orEmpty().trim()) onSave(name)
+                if (canSetProjects && forbidden != account.forbiddenProjectIds.toSet()) onSaveProjects(forbidden.sorted())
+                onDismiss()
+            }) { Text("Save") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** [AccountNameDialog] for [account] with what [state] lets this pairing change. */
+@Composable
+internal fun AccountDialogFor(account: AccountRow, state: UsageUiState, handlers: UsageHandlers, onDismiss: () -> Unit) {
+    AccountNameDialog(
+        account,
+        onSave = { handlers.onRename(account.uuid, it) },
+        onDismiss = onDismiss,
+        canRename = state.canRename,
+        canSetProjects = state.canSetProjects,
+        projects = state.projects,
+        onSaveProjects = { handlers.onSetProjects(account.uuid, it) },
     )
 }
 
@@ -104,7 +197,7 @@ internal fun AccountNameDialog(account: AccountRow, onSave: (String) -> Unit, on
 @Composable
 fun UsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: Long, modifier: Modifier = Modifier) {
     var naming by remember { mutableStateOf<AccountRow?>(null) }
-    naming?.let { a -> AccountNameDialog(a, onSave = { handlers.onRename(a.uuid, it) }, onDismiss = { naming = null }) }
+    naming?.let { a -> AccountDialogFor(a, state, handlers) { naming = null } }
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
             title = "Usage",
@@ -141,7 +234,12 @@ fun UsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: Long, 
                 if (state.accounts.isEmpty() && !state.loading) item { Note(NO_ACCOUNTS_YET) }
                 items(state.accounts, key = { "account:${it.uuid}" }) { a ->
                     Column {
-                        AccountLine(a, nowSeconds, onClick = { naming = a }.takeIf { state.canRename })
+                        AccountLine(
+                            a,
+                            nowSeconds,
+                            onClick = { naming = a }.takeIf { state.canRename || state.canSetProjects },
+                            forbidden = forbiddenProjectsLine(a, state.projects),
+                        )
                         // The 5-hour and weekly meters, as the new layout draws them (review M14).
                         if (state.limitsAvailable) AccountLimitsBlock(state.limits[a.uuid], nowSeconds)
                     }
@@ -282,7 +380,7 @@ private fun Bar(label: String, figure: String, fraction: Float) {
 }
 
 @Composable
-private fun AccountLine(account: AccountRow, nowSeconds: Long, onClick: (() -> Unit)? = null) {
+private fun AccountLine(account: AccountRow, nowSeconds: Long, onClick: (() -> Unit)? = null, forbidden: String? = null) {
     Column(
         modifier = Modifier.fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable(onClickLabel = "Name this account", onClick = onClick) else Modifier)
@@ -295,6 +393,7 @@ private fun AccountLine(account: AccountRow, nowSeconds: Long, onClick: (() -> U
                 account.organizationName,
                 account.seatTier,
                 if (account.hasExtraUsage) "extra usage on" else null,
+                forbidden,
                 relativeAgo(account.lastSeenAt, nowSeconds)?.let { "seen $it" },
             ).joinToString(" · "),
             style = MaterialTheme.typography.labelSmall,
