@@ -74,6 +74,8 @@ data class AccountRow(
      * starts, resumes or switches onto a login on it. Empty from an older hub.
      */
     @SerialName("forbidden_project_ids") val forbiddenProjectIds: List<Long> = emptyList(),
+    /** The orgs it is forbidden for: every project of one, later ones too (claude-fleet migration 218). */
+    @SerialName("forbidden_org_ids") val forbiddenOrgIds: List<Long> = emptyList(),
 ) {
     /**
      * The desktop's rule (`accountLabel` in claude-fleet's `src/lib/accounts.ts`):

@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.data.UsageActions
 import dev.claudefleet.mobile.model.AccountRow
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.AutoSwitchView
+import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.UsageReport
@@ -66,6 +67,8 @@ data class UsageUiState(
     val canSetProjects: Boolean = false,
     /** The fleet's projects, for an account's "Not for these projects" list. */
     val projects: List<ProjectRow> = emptyList(),
+    /** The fleet's orgs, for "Not for these orgs" (read only where [canSetProjects]). */
+    val orgs: List<OrgDetail> = emptyList(),
     val window: UsageWindow = UsageWindow.Week,
     val report: UsageReport? = null,
     val accounts: List<AccountRow> = emptyList(),
@@ -103,6 +106,7 @@ class UsageViewModel(
         val report: UsageReport? = null,
         val accounts: List<AccountRow> = emptyList(),
         val autoSwitch: AutoSwitchView? = null,
+        val orgs: List<OrgDetail> = emptyList(),
         val loading: Boolean = false,
         val error: Friendly? = null,
     )
@@ -125,6 +129,7 @@ class UsageViewModel(
             canRename = canWrite && caps.accountNickname,
             canSetProjects = canWrite && caps.accountProjects,
             projects = projects,
+            orgs = l.orgs,
             window = l.window,
             report = l.report,
             accounts = l.accounts,
@@ -202,6 +207,22 @@ class UsageViewModel(
         }
     }
 
+    /**
+     * Forbid [uuid] for every project of exactly [orgIds], later ones too
+     * (empty clears); the row takes the hub's answer.
+     */
+    fun setForbiddenOrgs(uuid: String, orgIds: List<Long>): Job = scope.launch {
+        if (!state.value.canSetProjects) return@launch
+        try {
+            val row = actions.setForbiddenOrgs(uuid, orgIds.distinct().sorted())
+            local.update { l -> l.copy(accounts = l.accounts.map { if (it.uuid == row.uuid) row else it }) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(error = friendly(t)) }
+        }
+    }
+
     /** Change the person's automatic-switching answer; the screen takes the hub's. */
     fun setAutoSwitch(enabled: Boolean? = null, continueAfter: Boolean? = null): Job = scope.launch {
         if (!state.value.canChangeAutoSwitch) return@launch
@@ -247,6 +268,17 @@ class UsageViewModel(
                 } catch (t: Throwable) {
                     if (failure == null) failure = t
                 }
+            }
+            if (withAccounts && canWrite && caps.accountProjects) {
+                // Quiet on failure: the org list only feeds the account dialog.
+                val orgs = try {
+                    actions.orgs().sortedBy { it.name.lowercase() }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Throwable) {
+                    null
+                }
+                if (orgs != null) local.update { it.copy(orgs = orgs) }
             }
             if (withAccounts && caps.autoSwitch) {
                 // Quiet on failure: a pairing that speaks for no person is

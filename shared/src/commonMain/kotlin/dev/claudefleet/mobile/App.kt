@@ -1860,6 +1860,7 @@ private fun FleetRoute(
                         onDismissError = usage::dismissError,
                         onRename = { uuid, name -> usage.rename(uuid, name); Unit },
                         onSetProjects = { uuid, ids -> usage.setForbiddenProjects(uuid, ids); Unit },
+                        onSetOrgs = { uuid, ids -> usage.setForbiddenOrgs(uuid, ids); Unit },
                         onAutoSwitch = { usage.setAutoSwitch(enabled = it); Unit },
                         onAutoSwitchContinue = { usage.setAutoSwitch(continueAfter = it); Unit },
                     )

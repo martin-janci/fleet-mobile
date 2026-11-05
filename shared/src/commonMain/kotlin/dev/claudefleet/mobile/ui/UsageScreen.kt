@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.AccountRow
 import dev.claudefleet.mobile.model.AutoSwitchView
+import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.unnamedProject
 import dev.claudefleet.mobile.model.UsageReport
@@ -63,6 +64,8 @@ data class UsageHandlers(
     val onRename: (String, String) -> Unit = { _, _ -> },
     /** Forbid an account for exactly these projects. Offered where [UsageUiState.canSetProjects]. */
     val onSetProjects: (String, List<Long>) -> Unit = { _, _ -> },
+    /** Forbid an account for every project of exactly these orgs. Offered where [UsageUiState.canSetProjects]. */
+    val onSetOrgs: (String, List<Long>) -> Unit = { _, _ -> },
     /** Turn automatic switching on or off for my sessions. */
     val onAutoSwitch: (Boolean) -> Unit = {},
     /** …and whether a switched session is told to carry on. */
@@ -73,15 +76,22 @@ data class UsageHandlers(
 internal const val NICKNAME_MAX = 32
 
 /**
- * "Not for acme/api, acme/web": the projects [account] is forbidden for, by
- * name, or null when none is.
+ * "Not for all of SalesTwins, acme/api": the orgs and projects [account] is
+ * forbidden for, by name, or null when none is.
  */
-internal fun forbiddenProjectsLine(account: AccountRow, projects: List<ProjectRow>): String? {
-    if (account.forbiddenProjectIds.isEmpty()) return null
+internal fun forbiddenProjectsLine(
+    account: AccountRow,
+    projects: List<ProjectRow>,
+    orgs: List<OrgDetail> = emptyList(),
+): String? {
+    if (account.forbiddenProjectIds.isEmpty() && account.forbiddenOrgIds.isEmpty()) return null
+    val orgNames = account.forbiddenOrgIds
+        .map { id -> "all of " + (orgs.firstOrNull { it.id == id }?.name ?: "org #$id") }
+        .sorted()
     val names = account.forbiddenProjectIds
         .map { id -> projects.firstOrNull { it.id == id }?.label ?: unnamedProject(id) }
         .sorted()
-    return "not for " + names.joinToString(", ")
+    return "not for " + (orgNames + names).joinToString(", ")
 }
 
 /**
@@ -100,9 +110,12 @@ internal fun AccountNameDialog(
     canSetProjects: Boolean = false,
     projects: List<ProjectRow> = emptyList(),
     onSaveProjects: (List<Long>) -> Unit = {},
+    orgs: List<OrgDetail> = emptyList(),
+    onSaveOrgs: (List<Long>) -> Unit = {},
 ) {
     var name by remember(account.uuid) { mutableStateOf(account.nickname.orEmpty()) }
     var forbidden by remember(account.uuid) { mutableStateOf(account.forbiddenProjectIds.toSet()) }
+    var forbiddenOrgs by remember(account.uuid) { mutableStateOf(account.forbiddenOrgIds.toSet()) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (canRename) "Name this account" else account.label) },
@@ -147,6 +160,23 @@ internal fun AccountNameDialog(
                         )
                     }
                     Column(Modifier.fillMaxWidth().heightIn(max = 280.dp).verticalScroll(rememberScrollState())) {
+                        // Whole orgs first: every project of a ticked one, later ones too.
+                        val shownOrgs = (orgs.map { it.id to it.name } +
+                            (forbiddenOrgs - orgs.map { it.id }.toSet()).map { it to "org #$it" })
+                            .sortedBy { it.second.lowercase() }
+                        for ((id, orgName) in shownOrgs) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth()
+                                    .toggleable(value = id in forbiddenOrgs, role = Role.Checkbox) { on ->
+                                        forbiddenOrgs = if (on) forbiddenOrgs + id else forbiddenOrgs - id
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(checked = id in forbiddenOrgs, onCheckedChange = null)
+                                Text("All of $orgName", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = 8.dp))
+                            }
+                        }
                         for ((id, label) in shown) {
                             Row(
                                 modifier = Modifier.fillMaxWidth()
@@ -168,6 +198,7 @@ internal fun AccountNameDialog(
             TextButton(onClick = {
                 if (canRename && name.trim() != account.nickname.orEmpty().trim()) onSave(name)
                 if (canSetProjects && forbidden != account.forbiddenProjectIds.toSet()) onSaveProjects(forbidden.sorted())
+                if (canSetProjects && forbiddenOrgs != account.forbiddenOrgIds.toSet()) onSaveOrgs(forbiddenOrgs.sorted())
                 onDismiss()
             }) { Text("Save") }
         },
@@ -186,6 +217,8 @@ internal fun AccountDialogFor(account: AccountRow, state: UsageUiState, handlers
         canSetProjects = state.canSetProjects,
         projects = state.projects,
         onSaveProjects = { handlers.onSetProjects(account.uuid, it) },
+        orgs = state.orgs,
+        onSaveOrgs = { handlers.onSetOrgs(account.uuid, it) },
     )
 }
 
@@ -238,7 +271,7 @@ fun UsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: Long, 
                             a,
                             nowSeconds,
                             onClick = { naming = a }.takeIf { state.canRename || state.canSetProjects },
-                            forbidden = forbiddenProjectsLine(a, state.projects),
+                            forbidden = forbiddenProjectsLine(a, state.projects, state.orgs),
                         )
                         // The 5-hour and weekly meters, as the new layout draws them (review M14).
                         if (state.limitsAvailable) AccountLimitsBlock(state.limits[a.uuid], nowSeconds)
