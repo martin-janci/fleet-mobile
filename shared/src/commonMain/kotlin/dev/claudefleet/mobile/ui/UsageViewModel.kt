@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.data.UsageActions
 import dev.claudefleet.mobile.model.AccountRow
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.AutoSwitchView
+import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.UsageReport
 import kotlinx.coroutines.CancellationException
@@ -61,6 +62,10 @@ data class UsageUiState(
     val accountsAvailable: Boolean = false,
     /** This pairing may name an account (`set_account_nickname`, a full token). */
     val canRename: Boolean = false,
+    /** This pairing may forbid an account for projects (`set_account_projects`, a full token). */
+    val canSetProjects: Boolean = false,
+    /** The fleet's projects, for an account's "Not for these projects" list. */
+    val projects: List<ProjectRow> = emptyList(),
     val window: UsageWindow = UsageWindow.Week,
     val report: UsageReport? = null,
     val accounts: List<AccountRow> = emptyList(),
@@ -106,12 +111,20 @@ class UsageViewModel(
 
     private val accountSessions = fleet.sessions.map(::sessionsByAccount).distinctUntilChanged()
 
-    val state: StateFlow<UsageUiState> = combine(local, fleet.capabilities, fleet.accountUsage, accountSessions) { l, caps, limits, sessions ->
+    val state: StateFlow<UsageUiState> = combine(
+        local,
+        fleet.capabilities,
+        fleet.accountUsage,
+        accountSessions,
+        fleet.projects,
+    ) { l, caps, limits, sessions, projects ->
         UsageUiState(
             available = caps.usage,
             capsKnown = caps.known,
             accountsAvailable = caps.accounts,
             canRename = canWrite && caps.accountNickname,
+            canSetProjects = canWrite && caps.accountProjects,
+            projects = projects,
             window = l.window,
             report = l.report,
             accounts = l.accounts,
@@ -165,6 +178,22 @@ class UsageViewModel(
         if (!state.value.canRename) return@launch
         try {
             val row = actions.setNickname(uuid, nickname.trim().ifEmpty { null })
+            local.update { l -> l.copy(accounts = l.accounts.map { if (it.uuid == row.uuid) row else it }) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            local.update { it.copy(error = friendly(t)) }
+        }
+    }
+
+    /**
+     * Forbid [uuid] for exactly [projectIds] (empty allows every project
+     * again); the row takes the hub's answer.
+     */
+    fun setForbiddenProjects(uuid: String, projectIds: List<Long>): Job = scope.launch {
+        if (!state.value.canSetProjects) return@launch
+        try {
+            val row = actions.setForbiddenProjects(uuid, projectIds.distinct().sorted())
             local.update { l -> l.copy(accounts = l.accounts.map { if (it.uuid == row.uuid) row else it }) }
         } catch (e: CancellationException) {
             throw e

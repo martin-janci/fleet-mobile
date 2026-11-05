@@ -58,6 +58,11 @@ private class UsageCalls : UsageActions {
         renames += uuid to nickname
         return AccountRow(uuid = uuid, email = "a@b.c", nickname = nickname)
     }
+    val forbids = mutableListOf<Pair<String, List<Long>>>()
+    override suspend fun setForbiddenProjects(uuid: String, projectIds: List<Long>): AccountRow {
+        forbids += uuid to projectIds
+        return AccountRow(uuid = uuid, email = "a@b.c", forbiddenProjectIds = projectIds)
+    }
     var auto = AutoSwitchView(enabled = true, continueAfter = false, fleetEnabled = true)
     val autoCalls = mutableListOf<Pair<Boolean?, Boolean?>>()
     override suspend fun autoSwitch(enabled: Boolean?, continueAfter: Boolean?): AutoSwitchView {
@@ -231,6 +236,44 @@ class UsageViewModelTest {
         runCurrent()
         assertEquals("u1" to null, calls.renames.last())
         assertEquals(listOf("a@b.c"), vm.state.value.accounts.map { it.label })
+    }
+
+    // Keep an account off a project (claude-fleet migration 217).
+    @Test
+    fun forbidding_an_account_for_projects_takes_the_hubs_row() = runTest {
+        val calls = UsageCalls()
+        val fleet = UsageFleet(both + HubCapabilities.SET_ACCOUNT_PROJECTS)
+        fleet.projects.value = listOf(ProjectRow(id = 3, owner = "acme", repo = "web"), ProjectRow(id = 1, owner = "acme", repo = "api"))
+        val vm = UsageViewModel(fleet, calls, backgroundScope)
+        vm.attach()
+        runCurrent()
+        assertTrue(vm.state.value.canSetProjects)
+        assertFalse(vm.state.value.canRename)
+        assertEquals(2, vm.state.value.projects.size)
+
+        vm.setForbiddenProjects("u1", listOf(3, 1, 3))
+        runCurrent()
+        assertEquals(listOf("u1" to listOf(1L, 3L)), calls.forbids)
+        val row = vm.state.value.accounts.single()
+        assertEquals(listOf(1L, 3L), row.forbiddenProjectIds)
+        assertEquals("not for acme/api, acme/web", forbiddenProjectsLine(row, vm.state.value.projects))
+        // A project the phone holds no row for still reads by its id.
+        assertEquals("not for project #9", forbiddenProjectsLine(row.copy(forbiddenProjectIds = listOf(9)), emptyList()))
+        assertNull(forbiddenProjectsLine(row.copy(forbiddenProjectIds = emptyList()), emptyList()))
+    }
+
+    @Test
+    fun no_project_list_change_without_the_tool_or_from_a_readonly_pairing() = runTest {
+        val calls = UsageCalls()
+        val unlisted = UsageViewModel(UsageFleet(both), calls, backgroundScope)
+        val readonly = UsageViewModel(UsageFleet(both + HubCapabilities.SET_ACCOUNT_PROJECTS), calls, backgroundScope, canWrite = false)
+        runCurrent()
+        assertFalse(unlisted.state.value.canSetProjects)
+        assertFalse(readonly.state.value.canSetProjects)
+        unlisted.setForbiddenProjects("u1", listOf(1))
+        readonly.setForbiddenProjects("u1", listOf(1))
+        runCurrent()
+        assertTrue(calls.forbids.isEmpty())
     }
 
     @Test
