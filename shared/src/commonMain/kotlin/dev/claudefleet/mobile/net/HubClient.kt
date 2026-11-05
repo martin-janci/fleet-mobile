@@ -762,6 +762,20 @@ class HubClient(
         ) { json.decodeFromJsonElement(AccountRow.serializer(), it) }
 
     /**
+     * Forbid account [uuid] for every project of [orgIds] (`set_account_projects`
+     * with only the org list): the whole list, replaced, empty clears; the
+     * project list stays as it is. Returns the account as the hub now has it.
+     */
+    suspend fun setAccountOrgs(uuid: String, orgIds: List<Long>): AccountRow =
+        call(
+            "set_account_projects",
+            buildJsonObject {
+                put("uuid", uuid)
+                put("forbidden_org_ids", buildJsonArray { orgIds.distinct().forEach { add(JsonPrimitive(it)) } })
+            },
+        ) { json.decodeFromJsonElement(AccountRow.serializer(), it) }
+
+    /**
      * The signed-in person's answer to automatic account switching
      * (`auto_switch_account`); only what is set is changed, nothing to read.
      */

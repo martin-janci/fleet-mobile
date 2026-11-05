@@ -9,6 +9,7 @@ import dev.claudefleet.mobile.model.AccountUsageWindows
 import dev.claudefleet.mobile.model.Attention
 import dev.claudefleet.mobile.model.AutoSwitchView
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.UsageReport
@@ -63,6 +64,13 @@ private class UsageCalls : UsageActions {
         forbids += uuid to projectIds
         return AccountRow(uuid = uuid, email = "a@b.c", forbiddenProjectIds = projectIds)
     }
+    val orgForbids = mutableListOf<Pair<String, List<Long>>>()
+    override suspend fun setForbiddenOrgs(uuid: String, orgIds: List<Long>): AccountRow {
+        orgForbids += uuid to orgIds
+        return AccountRow(uuid = uuid, email = "a@b.c", forbiddenOrgIds = orgIds)
+    }
+    var orgList = listOf(OrgDetail(id = 7, name = "SalesTwins"), OrgDetail(id = 2, name = "acme"))
+    override suspend fun orgs(): List<OrgDetail> = orgList
     var auto = AutoSwitchView(enabled = true, continueAfter = false, fleetEnabled = true)
     val autoCalls = mutableListOf<Pair<Boolean?, Boolean?>>()
     override suspend fun autoSwitch(enabled: Boolean?, continueAfter: Boolean?): AutoSwitchView {
@@ -260,6 +268,35 @@ class UsageViewModelTest {
         // A project the phone holds no row for still reads by its id.
         assertEquals("not for project #9", forbiddenProjectsLine(row.copy(forbiddenProjectIds = listOf(9)), emptyList()))
         assertNull(forbiddenProjectsLine(row.copy(forbiddenProjectIds = emptyList()), emptyList()))
+    }
+
+    // Keep an account off a whole org (claude-fleet migration 218).
+    @Test
+    fun forbidding_an_account_for_an_org_reads_the_orgs_and_takes_the_hubs_row() = runTest {
+        val calls = UsageCalls()
+        val vm = UsageViewModel(UsageFleet(both + HubCapabilities.SET_ACCOUNT_PROJECTS), calls, backgroundScope)
+        vm.attach()
+        runCurrent()
+        assertEquals(listOf("acme", "SalesTwins"), vm.state.value.orgs.map { it.name })
+
+        vm.setForbiddenOrgs("u1", listOf(7, 7))
+        runCurrent()
+        assertEquals(listOf("u1" to listOf(7L)), calls.orgForbids)
+        val row = vm.state.value.accounts.single()
+        assertEquals(listOf(7L), row.forbiddenOrgIds)
+        assertEquals("not for all of SalesTwins", forbiddenProjectsLine(row, emptyList(), vm.state.value.orgs))
+        assertEquals(
+            "not for all of org #5, project #9",
+            forbiddenProjectsLine(row.copy(forbiddenOrgIds = listOf(5), forbiddenProjectIds = listOf(9)), emptyList()),
+        )
+        // A pairing that may not change the lists never reads the orgs.
+        val readonly = UsageViewModel(UsageFleet(both + HubCapabilities.SET_ACCOUNT_PROJECTS), calls, backgroundScope, canWrite = false)
+        readonly.attach()
+        runCurrent()
+        assertTrue(readonly.state.value.orgs.isEmpty())
+        readonly.setForbiddenOrgs("u1", listOf(1))
+        runCurrent()
+        assertEquals(1, calls.orgForbids.size)
     }
 
     @Test

@@ -298,7 +298,7 @@ fun OrbitUsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: L
                                 nowSeconds,
                                 state.sessions[a.uuid],
                                 onClick = { naming = a }.takeIf { state.canRename || state.canSetProjects },
-                                forbidden = forbiddenProjectsLine(a, state.projects),
+                                forbidden = forbiddenProjectsLine(a, state.projects, state.orgs),
                             )
                             if (state.limitsAvailable) AccountLimitsBlock(state.limits[it.uuid], nowSeconds)
                         }
