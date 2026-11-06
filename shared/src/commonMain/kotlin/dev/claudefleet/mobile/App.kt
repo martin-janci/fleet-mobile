@@ -2095,6 +2095,8 @@ private fun FleetRoute(
                         agentActions = agentActionsState,
                         onApproveAction = { agentActionsVm.approve(it) },
                         onRejectAction = { agentActionsVm.reject(it) },
+                        onApproveActions = { agentActionsVm.approveAll(it) },
+                        onRejectActions = { agentActionsVm.rejectAll(it) },
                         inbox = inboxState,
                         rowActions = { row ->
                             inboxRowActions(

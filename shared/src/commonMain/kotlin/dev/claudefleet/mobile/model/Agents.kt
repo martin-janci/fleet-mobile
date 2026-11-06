@@ -80,7 +80,78 @@ data class AgentsStatus(
     val pending: List<AgentAction> = emptyList(),
     val rules: List<AgentRule> = emptyList(),
     val jobs: List<AgentJob> = emptyList(),
+    /** Each of [pending] in words, by id; empty from a hub older than 2026-11-06. */
+    @SerialName("pending_about") val pendingAbout: List<ActionAbout> = emptyList(),
 )
+
+/**
+ * A waiting action explained by the hub (claude-fleet `service::agents::about`):
+ * which agent asked, on what, and what the write changes.
+ */
+@Serializable
+data class ActionAbout(
+    val id: Long,
+    @SerialName("rule_id") val ruleId: Long? = null,
+    /** "PR reviewer", "jira-triage · PD board". */
+    val from: String = "",
+    /** "PD-2709", "a scheduled run". */
+    val subject: String? = null,
+    /** The hub's title when it says more than [agentActionTitle] can: "Jira: update issue PD-2709 (status)". */
+    val title: String? = null,
+    /** The write in general, a group's heading: "Jira: update issue". */
+    val what: String = "",
+    /** The same key: the same agent's proposals of the same write. */
+    val group: String = "",
+)
+
+/** One Inbox card of the waiting actions: one, or one agent's repeats of the same write folded together. */
+data class AgentActionGroup(
+    val key: String,
+    /** "jira-triage · PD board"; null from an older hub. */
+    val from: String?,
+    val what: String,
+    val items: List<Pair<AgentAction, ActionAbout?>>,
+)
+
+/**
+ * The waiting actions as cards, the desktop's `groupActions`: newest group
+ * first, each group's items in [pending]'s order. Without the hub's key only
+ * tool calls fold (an older hub's other proposals may be about anything).
+ */
+fun groupAgentActions(pending: List<AgentAction>, about: List<ActionAbout>): List<AgentActionGroup> {
+    val byId = about.associateBy { it.id }
+    val order = mutableListOf<String>()
+    val items = mutableMapOf<String, MutableList<Pair<AgentAction, ActionAbout?>>>()
+    for (a in pending) {
+        val ab = byId[a.id]
+        val key = ab?.group?.takeIf { it.isNotEmpty() } ?: if (a.kind == "mcp_call") {
+            val p = payloadOf(a)
+            fun f(k: String) = (p?.get(k) as? JsonPrimitive)?.contentOrNull.orEmpty()
+            "mcp_call:${f("binding")}.${f("tool")}"
+        } else {
+            "id:${a.id}"
+        }
+        if (key !in items) order += key
+        items.getOrPut(key) { mutableListOf() } += (a to ab)
+    }
+    return order.map { key ->
+        val list = items.getValue(key)
+        val first = list.first()
+        AgentActionGroup(
+            key = key,
+            from = first.second?.from?.takeIf { it.isNotEmpty() },
+            what = first.second?.what?.takeIf { it.isNotEmpty() } ?: first.first.kind.replace('_', ' '),
+            items = list,
+        )
+    }
+}
+
+/** "jira-triage · PD board · on PD-2709": who asked and on what, either part left out when unknown. */
+fun actionOrigin(about: ActionAbout?, withFrom: Boolean = true): String =
+    listOfNotNull(
+        about?.from?.takeIf { withFrom && it.isNotEmpty() },
+        about?.subject?.takeIf { it.isNotEmpty() }?.let { "on $it" },
+    ).joinToString(" · ")
 
 /** `agents { action: run }`'s answer: the rule, and the queued job's dedup key. */
 @Serializable
@@ -117,7 +188,8 @@ private fun payloadOf(a: AgentAction): JsonObject? =
  * What an action will do, the desktop's `actionTitle`: "Post a review on
  * o/r#4: request changes, 2 comments"; another kind by its words.
  */
-fun agentActionTitle(a: AgentAction): String {
+fun agentActionTitle(a: AgentAction, about: ActionAbout? = null): String {
+    about?.title?.takeIf { it.isNotEmpty() }?.let { return it }
     val p = payloadOf(a)
     if (a.kind == "post_review" && p != null) {
         val repo = (p["repo"] as? JsonPrimitive)?.contentOrNull ?: "?"
