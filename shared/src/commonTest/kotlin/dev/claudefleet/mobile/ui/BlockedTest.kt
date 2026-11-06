@@ -131,4 +131,39 @@ class BlockedTest {
         val old = blockedCard(row(stuck = "trust_prompt"), hubVersion = "0.2.34")!!
         assertTrue(old.answers.isEmpty()); assertTrue(old.terminalAvailable)
     }
+
+    /**
+     * Plan v2 R4: "don't ask again for: <rule> in <folder>" is saved for every
+     * later session in that folder, so the phone does not offer it and says
+     * why; the session-only variant stays an ordinary answer.
+     */
+    @Test
+    fun a_folder_wide_rule_is_not_offered_on_the_phone() {
+        val p = PendingInput(
+            "permission",
+            "Do you want to proceed?",
+            listOf(
+                PendingOption(1, "Yes", true),
+                PendingOption(2, "Yes, and don’t ask again for: git push:* in /home/user/claude-fleet"),
+                PendingOption(3, "No"),
+            ),
+        )
+        val card = blockedCard(row(pending = p), HUB_VERSION_DIGIT_KEYS)!!
+        assertEquals(listOf(1, 3), card.answers.filterIsInstance<Answer.Option>().map { it.n })
+        assertEquals(FOLDER_RULE_ON_DESKTOP, card.explain)
+
+        val session = p.copy(options = listOf(PendingOption(1, "Yes", true), PendingOption(2, "Yes, and don't ask again this session"), PendingOption(3, "No")))
+        val kept = blockedCard(row(pending = session), HUB_VERSION_DIGIT_KEYS)!!
+        assertEquals(listOf(1, 2, 3), kept.answers.filterIsInstance<Answer.Option>().map { it.n })
+        assertNull(kept.explain)
+    }
+
+    @Test
+    fun only_a_rule_that_outlives_the_session_counts_as_folder_wide() {
+        assertTrue(isFolderRule("Yes, and don't ask again"))
+        assertTrue(isFolderRule("Yes, and don’t ask again for: ls * in /tmp"))
+        assertTrue(!isFolderRule("Yes, and don't ask again this session"))
+        assertTrue(!isFolderRule("Yes, allow all edits during this session"))
+        assertTrue(!isFolderRule("Yes"))
+    }
 }

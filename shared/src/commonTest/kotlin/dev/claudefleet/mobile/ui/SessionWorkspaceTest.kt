@@ -97,7 +97,10 @@ class SessionWorkspaceTest {
         val card = blockedCard(row(pending = permission), HUB_VERSION_DIGIT_KEYS)!!
         val answers = questionAnswers(card, stuckKind = null)
 
-        assertEquals(listOf(1, 2, 3), answers.map { (it.answer as Answer.Option).n })
+        // 2 is "don't ask again for …": a rule for every later session in the
+        // folder, which the phone does not offer (plan v2 R4); the card says so.
+        assertEquals(listOf(1, 3), answers.map { (it.answer as Answer.Option).n })
+        assertEquals(FOLDER_RULE_ON_DESKTOP, card.explain)
         assertTrue(answers.none { it.answer == Answer.Enter || it.answer == Answer.Escape })
         assertEquals("1  Yes", answers.first().label)
     }
