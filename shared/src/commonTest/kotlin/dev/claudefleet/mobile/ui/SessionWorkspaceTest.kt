@@ -47,6 +47,7 @@ class SessionWorkspaceTest {
         assertEquals("Claude Code", agentName(row().copy(agent = "claude")))
         assertEquals("Codex", agentName(row().copy(agent = "codex")))
         assertEquals("Agy", agentName(row().copy(agent = "agy")))
+        assertEquals("Hermes", agentName(row().copy(agent = "hermes")))
         assertEquals("Shell", agentName(row().copy(agent = "shell")))
         // A hub older than contract 11 sends no agent; a blank one says nothing either.
         assertEquals("Claude Code", agentName(row().copy(agent = null)))

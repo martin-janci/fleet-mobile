@@ -62,4 +62,14 @@ class ComposerTest {
         assertTrue(switchesByRelaunch(AGENT_CODEX))
         assertTrue(!switchesByRelaunch("claude") && !switchesByRelaunch(null))
     }
+
+    @Test
+    fun a_hermes_session_suggests_hermes_commands_and_models_in_place() {
+        assertEquals(listOf("compress", "context"), matchSlashCommands("/co", AGENT_HERMES).map { it.name })
+        assertTrue(matchSlashCommands("/effort", AGENT_HERMES).isEmpty())
+        assertEquals(HERMES_MODEL_OPTIONS, pickerOptionsFor(AGENT_HERMES, "model"))
+        assertTrue(HERMES_MODEL_OPTIONS.all { "/" in it.value })
+        // Hermes' `/model <name>` switches in place: no relaunch.
+        assertTrue(!switchesByRelaunch(AGENT_HERMES))
+    }
 }
