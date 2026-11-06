@@ -50,6 +50,7 @@ import dev.claudefleet.mobile.data.AppSession
 import dev.claudefleet.mobile.data.HubWizardDrafts
 import dev.claudefleet.mobile.data.WizardDrafts
 import dev.claudefleet.mobile.data.AuthState
+import dev.claudefleet.mobile.model.PrFeedback
 import dev.claudefleet.mobile.model.limitAt
 import dev.claudefleet.mobile.model.isSignedOut
 import dev.claudefleet.mobile.ui.SessionLaterHost
@@ -316,6 +317,7 @@ import dev.claudefleet.mobile.ui.sessionTabs
 import dev.claudefleet.mobile.ui.SessionExtrasViewModel
 import dev.claudefleet.mobile.ui.TerminalsHandlers
 import dev.claudefleet.mobile.ui.TerminalsPane
+import dev.claudefleet.mobile.ui.DEFAULT_AGENT_NAME
 import dev.claudefleet.mobile.ui.agentName
 import dev.claudefleet.mobile.ui.appendToDraft
 import dev.claudefleet.mobile.ui.RepoBody
@@ -3562,6 +3564,12 @@ private fun SessionRoute(
                     val rows by repository.sessions.collectAsState()
                     val names by repository.accountNames.collectAsState()
                     val usage by repository.accountUsage.collectAsState()
+                    // Plan v2 R10: send the PR's failing checks or review comments
+                    // to the agent. Once per PR reading: a new reading offers them again.
+                    val prRow = details.session
+                    var prSent by remember(prRow?.prEvidence) { mutableStateOf(setOf<String>()) }
+                    val prAgent = agentName(prRow).let { if (it == DEFAULT_AGENT_NAME) "Claude" else it }
+                    val prOffered = prRow != null && PrFeedback.offered(prRow) && state.connected && !state.readOnly
                     SessionDetailsList(
                         state = details,
                         sessions = rows,
@@ -3570,7 +3578,7 @@ private fun SessionRoute(
                             accountMeter(uuid, names[uuid], usage[uuid], details.nowSeconds, details.session?.claudeProfile)
                         },
                         // What Switch account… did; the paused card says it itself.
-                        notice = state.limitNotice?.takeIf { !state.canSwitchAccount },
+                        notice = state.limitNotice?.takeIf { !state.canSwitchAccount } ?: state.sendLaterNotice?.takeIf { prSent.isNotEmpty() },
                         handlers = SessionDetailsHandlers(
                             onReload = { detailsVm.reload() },
                             onToggle = detailsVm::toggle,
@@ -3580,6 +3588,29 @@ private fun SessionRoute(
                             onOpenRepo = { selectTab(SessionTab.Files) }.takeIf { hasWorktree },
                         ),
                         actions = listOfNotNull(
+                            prRow?.takeIf { prOffered && (it.prEvidence?.checks?.failingTotal ?: 0) > 0 }?.let { r ->
+                                val checks = r.prEvidence!!.checks
+                                DetailsAction(
+                                    if ("checks" in prSent) "Failing checks sent ✓" else "Send failing checks to $prAgent",
+                                    {
+                                        if ("checks" !in prSent) {
+                                            vm.sendLater(PrFeedback.failingChecksPrompt(r.prUrl!!, checks.failing, checks.failingTotal)) {
+                                                prSent = prSent + "checks"
+                                            }
+                                        }
+                                    },
+                                )
+                            },
+                            prRow?.takeIf { prOffered }?.let { r ->
+                                DetailsAction(
+                                    if ("review" in prSent) "Review comments sent ✓" else "Send review comments to $prAgent",
+                                    {
+                                        if ("review" !in prSent) {
+                                            vm.sendLater(PrFeedback.reviewCommentsPrompt(r.prUrl!!)) { prSent = prSent + "review" }
+                                        }
+                                    },
+                                )
+                            },
                             DetailsAction("Move to host…", { moveVm.open(fresh = true) }).takeIf { move.available && state.canManage },
                             DetailsAction("Share…", { shareVm.open(sessionId) }).takeIf { canShare },
                             DetailsAction(if (tasks.count > 0) "Tasks ${tasks.count}" else "Tasks", tasksVm::openSheet).takeIf { tasks.available },

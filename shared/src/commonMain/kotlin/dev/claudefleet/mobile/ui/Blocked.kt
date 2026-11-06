@@ -103,7 +103,11 @@ fun blockedCard(row: SessionRow, hubVersion: String?): BlockedCard? {
             }
             val multi = p?.multi == true
             val continueKey = if (multi && digits) listOf(Answer.Continue) else emptyList()
-            BlockedCard(headline, options + continueKey + keyAnswers, detail = p?.detail, multi = multi)
+            // A rule Claude Code saves for the folder answers every later
+            // session there: not a one-tap choice on a phone (plan v2 R4).
+            val kept = if (multi) options else options.filterNot { isFolderRule(it.label) }
+            val explain = if (kept.size < options.size) FOLDER_RULE_ON_DESKTOP else null
+            BlockedCard(headline, kept + continueKey + keyAnswers, explain = explain, detail = p?.detail, multi = multi)
         }
         else -> BlockedCard(stuck.replace('_', ' '), keyAnswers, offerRestart = true)
     }
@@ -127,3 +131,20 @@ internal fun isChatOption(label: String): Boolean = label.trim().equals("chat ab
 
 /** Highest option a single keystroke can pick — the hub's `DigitKey` range, `1`..`9`. */
 internal const val ANSWER_MAX_DIGIT: Int = 9
+
+/**
+ * Claude Code's "Yes, and don't ask again for: <rule> in <folder>": saved in
+ * the folder's settings, so it answers every LATER session there, not only
+ * this one. The phone never offers it (plan v2 R4); the desktop asks before
+ * it sends. "…don't ask again this session" ends with the session and stays.
+ * Mirrors the desktop's `answer_guard.ts::persistentRule`.
+ */
+internal fun isFolderRule(label: String): Boolean =
+    DONT_ASK_AGAIN.containsMatchIn(label) && !SESSION_ONLY.containsMatchIn(label)
+
+private val DONT_ASK_AGAIN = Regex("""don['’]?t ask again""", RegexOption.IGNORE_CASE)
+private val SESSION_ONLY = Regex("""\b(?:this|the) session\b|\bduring this\b""", RegexOption.IGNORE_CASE)
+
+/** Said on the card when [isFolderRule] took an answer off it. */
+internal const val FOLDER_RULE_ON_DESKTOP: String =
+    "“Always allow in this folder” is a desktop choice: it answers every later session there."

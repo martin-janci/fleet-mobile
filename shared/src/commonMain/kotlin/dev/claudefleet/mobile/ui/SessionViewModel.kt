@@ -1114,6 +1114,8 @@ class SessionViewModel(
      */
     fun answer(a: Answer): Job = scope.launch {
         if (!canAnswerNow(local.value, keys = a.isKey)) return@launch
+        // Never from the phone, whatever drew it (plan v2 R4): see [isFolderRule].
+        if (a is Answer.Option && isFolderRule(a.label) && row()?.pendingInput?.multi != true) return@launch
         local.update { it.copy(answering = true, stillWaiting = false, error = null) }
         try {
             // Every KEY is pressed only after re-reading the pane. The hub

@@ -20,6 +20,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,6 +37,10 @@ import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.relativeAgo
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
+import kotlinx.coroutines.delay
+
+/** How long a new or changed question card ignores taps (the desktop's `answerArm`). */
+internal const val ANSWER_ARM_MS: Long = 600L
 
 /** One answer the question card offers, as the words on its row. */
 data class QuestionAnswer(val answer: Answer, val label: String)
@@ -145,6 +154,13 @@ internal fun QuestionCard(
                 Text("Sent. Still waiting for $agent to move on…", style = Fleet.type.textXs, color = Fleet.colors.fg2)
             }
             val answers = questionAnswers(card, state.session?.stuckKind).filter { state.mayAnswerWith(it.answer) }
+            // A tap in the first moments after the card appears or changes was
+            // aimed at what was there before: ignored (plan v2 §3).
+            var armed by remember(card) { mutableStateOf(false) }
+            LaunchedEffect(card) {
+                delay(ANSWER_ARM_MS)
+                armed = true
+            }
             if (answers.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -152,7 +168,12 @@ internal fun QuestionCard(
                         AnswerRow(
                             label = answer.label,
                             enabled = state.canAnswer,
-                            onClick = { haptics.performHapticFeedback(HapticFeedbackType.LongPress); onAnswer(answer.answer) },
+                            onClick = {
+                                if (armed) {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onAnswer(answer.answer)
+                                }
+                            },
                         )
                     }
                 }
