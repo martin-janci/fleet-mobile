@@ -135,6 +135,8 @@ import dev.claudefleet.mobile.model.RepairReport
 import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.FleetNote
 import dev.claudefleet.mobile.model.parseFleetPrompt
+import dev.claudefleet.mobile.model.PromptChip
+import dev.claudefleet.mobile.model.promptParts
 import dev.claudefleet.mobile.model.personQueued
 import dev.claudefleet.mobile.utcOffsetSeconds
 import dev.claudefleet.mobile.model.QuickReply
@@ -2441,7 +2443,11 @@ private enum class ReplyAsk { Rewind, Retry, Fork }
  * open when its turn scrolls off and back.
  */
 @Composable
-private fun PromptBubble(prompt: String) {
+private fun PromptBubble(sent: String) {
+    // The desktop's context line, mission prefix and dashboard change
+    // instructions read as chips; the bubble's text is what the person typed.
+    val parts = remember(sent) { promptParts(sent) }
+    val prompt = parts.text
     var expanded by rememberSaveable { mutableStateOf(false) }
     var folds by remember { mutableStateOf(false) }
     Surface(
@@ -2454,6 +2460,7 @@ private fun PromptBubble(prompt: String) {
         ) { expanded = !expanded },
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
+            if (parts.chips.isNotEmpty()) PromptChips(parts.chips)
             // A match inside a folded prompt opens it, or Find would land on
             // a bubble whose matching line is cut off.
             val find = LocalFindQuery.current
@@ -2473,6 +2480,33 @@ private fun PromptBubble(prompt: String) {
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+        }
+    }
+}
+
+/** What the desktop put in front of the person's words, one small label each. */
+@Composable
+private fun PromptChips(chips: List<PromptChip>) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.padding(bottom = 6.dp),
+    ) {
+        for (c in chips) {
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.semantics { contentDescription = "${c.about}: ${c.label}" },
+            ) {
+                Text(
+                    text = c.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
         }
