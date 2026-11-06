@@ -2,12 +2,15 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.BuiltInAgentActions
 import dev.claudefleet.mobile.data.FleetState
+import dev.claudefleet.mobile.model.ActionAbout
 import dev.claudefleet.mobile.model.AgentAction
+import dev.claudefleet.mobile.model.AgentActionGroup
 import dev.claudefleet.mobile.model.AgentJob
 import dev.claudefleet.mobile.model.AgentRule
 import dev.claudefleet.mobile.model.AgentRunForm
 import dev.claudefleet.mobile.model.SELF_DEBUG
 import dev.claudefleet.mobile.model.SelfDebugReport
+import dev.claudefleet.mobile.model.groupAgentActions
 import dev.claudefleet.mobile.model.ruleAgentName
 import dev.claudefleet.mobile.model.ruleRunnable
 import dev.claudefleet.mobile.model.selfDebugJob
@@ -38,6 +41,8 @@ data class AgentActionsUiState(
     /** This device may approve or reject (a write token; the hub still checks trust). */
     val canAnswer: Boolean = false,
     val pending: List<AgentAction> = emptyList(),
+    /** [pending] as Inbox cards: one agent's repeats of the same write fold into one. */
+    val groups: List<AgentActionGroup> = emptyList(),
     /** The standing rules: built-in agents' and fleet agents' instances (Automation › Agents). */
     val rules: List<AgentRule> = emptyList(),
     /** Actions with a press on the wire. */
@@ -65,6 +70,7 @@ class AgentActionsViewModel(
 ) {
     private data class Local(
         val pending: List<AgentAction> = emptyList(),
+        val about: List<ActionAbout> = emptyList(),
         val rules: List<AgentRule> = emptyList(),
         val jobs: List<AgentJob> = emptyList(),
         /** The job key of the last Run… started here, which the findings card follows. */
@@ -86,6 +92,7 @@ class AgentActionsViewModel(
             available = available,
             canAnswer = available && canWrite && caps.has(TOOL, "approve"),
             pending = if (available) l.pending else emptyList(),
+            groups = if (available) groupAgentActions(l.pending, l.about) else emptyList(),
             rules = if (available) l.rules else emptyList(),
             busy = l.busy,
             notices = l.notices,
@@ -102,7 +109,7 @@ class AgentActionsViewModel(
         return scope.launch {
             try {
                 val s = actions.status()
-                local.update { it.copy(pending = s.pending, rules = s.rules, jobs = s.jobs) }
+                local.update { it.copy(pending = s.pending, about = s.pendingAbout, rules = s.rules, jobs = s.jobs) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: HubError.Tool) {
@@ -161,6 +168,42 @@ class AgentActionsViewModel(
     }
 
     fun approve(a: AgentAction): Job? = answer(a, true)
+
+    /** Approve every action of [g], one after another. */
+    fun approveAll(g: AgentActionGroup): Job? = answerAll(g, true)
+
+    /** Reject every action of [g]. */
+    fun rejectAll(g: AgentActionGroup): Job? = answerAll(g, false)
+
+    private fun answerAll(g: AgentActionGroup, approve: Boolean): Job? {
+        val s = state.value
+        val ids = g.items.map { it.first.id }
+        if (!s.canAnswer || ids.isEmpty() || ids.any { it in s.busy }) return null
+        local.update { it.copy(busy = it.busy + ids, notices = it.notices - ids.toSet()) }
+        return scope.launch {
+            var done = 0
+            var failure: String? = null
+            for (id in ids) {
+                try {
+                    val d = actions.decide(id, approve)
+                    done += 1
+                    local.update { l -> l.copy(pending = l.pending.filterNot { it.id == d.id }) }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    if (failure == null) failure = friendly(t).body
+                }
+            }
+            val said = when {
+                done == 0 -> failure ?: "Nothing changed."
+                approve -> "Approved $done: they run within a minute."
+                else -> "Rejected $done."
+            }
+            val notice = if (done > 0 && failure != null) "$said Some failed: $failure" else said
+            // The notice stays under what is left of the group, or its first item.
+            local.update { it.copy(busy = it.busy - ids.toSet(), notices = it.notices + (ids.first() to notice)) }
+        }
+    }
 
     fun reject(a: AgentAction): Job? = answer(a, false)
 

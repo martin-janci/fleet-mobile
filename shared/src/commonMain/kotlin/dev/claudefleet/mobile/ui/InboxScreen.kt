@@ -17,6 +17,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -44,6 +45,8 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.OutlinedButton
 import dev.claudefleet.mobile.model.Mission
 import dev.claudefleet.mobile.model.AgentAction
+import dev.claudefleet.mobile.model.AgentActionGroup
+import dev.claudefleet.mobile.model.actionOrigin
 import dev.claudefleet.mobile.model.agentActionTitle
 import dev.claudefleet.mobile.model.missionWaitLabel
 import dev.claudefleet.mobile.model.loginLabel
@@ -187,6 +190,9 @@ fun InboxScreen(
     agentActions: AgentActionsUiState = AgentActionsUiState(),
     onApproveAction: (AgentAction) -> Unit = {},
     onRejectAction: (AgentAction) -> Unit = {},
+    /** Approve or reject every action of a folded card. */
+    onApproveActions: (AgentActionGroup) -> Unit = {},
+    onRejectActions: (AgentActionGroup) -> Unit = {},
     /** The rows' inline answers (G5.4): what each row offers, and what was pressed. */
     inbox: InboxUiState = InboxUiState(),
     rowActions: (SessionRow) -> InboxRowActions = { InboxRowActions() },
@@ -288,18 +294,34 @@ fun InboxScreen(
                         )
                     }
                 }
-                items(agentActions.pending, key = { "agent-action-${it.id}" }) { a ->
-                    Column {
-                        PhoneRow(
-                            title = agentActionTitle(a),
-                            line = "proposed by an agent",
-                            word = StatusWord.NEEDS_YOU,
-                            lead = phoneLead(StatusWord.NEEDS_YOU, live),
-                            age = relativeTime(a.createdAt.takeIf { it > 0 }, nowSeconds),
-                            onClick = {},
-                            chips = { OrbitChip("Agent") },
+                // One agent's repeats of the same write fold into one card
+                // (2026-11-06: seven "Call jira.jira_update_issue" rows).
+                items(agentActions.groups, key = { "agent-group-${it.key}" }) { g ->
+                    if (g.items.size == 1) {
+                        val (a, about) = g.items.first()
+                        Column {
+                            PhoneRow(
+                                title = agentActionTitle(a, about),
+                                line = actionOrigin(about).ifEmpty { "proposed by an agent" },
+                                word = StatusWord.NEEDS_YOU,
+                                lead = phoneLead(StatusWord.NEEDS_YOU, live),
+                                age = relativeTime(a.createdAt.takeIf { it > 0 }, nowSeconds),
+                                onClick = {},
+                                chips = { OrbitChip("Agent") },
+                            )
+                            AgentActionButtons(a, agentActions, onApproveAction, onRejectAction)
+                        }
+                    } else {
+                        AgentActionGroupCard(
+                            g = g,
+                            state = agentActions,
+                            live = live,
+                            nowSeconds = nowSeconds,
+                            onApprove = onApproveAction,
+                            onReject = onRejectAction,
+                            onApproveAll = onApproveActions,
+                            onRejectAll = onRejectActions,
                         )
-                        AgentActionButtons(a, agentActions, onApproveAction, onRejectAction)
                     }
                 }
                 items(missionRows, key = { "mission-${it.id}" }) { m ->
@@ -415,6 +437,67 @@ private fun AgentActionButtons(
             }
         }
         notice?.let { Text(it, color = Fleet.colors.fg2, fontSize = 12.sp) }
+    }
+}
+
+/**
+ * One agent's proposals of the same write: "6 proposals: Jira: update issue",
+ * from whom, Approve all / Reject all, and each item (which issue, which
+ * fields) under Show each with its own Approve and Reject.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AgentActionGroupCard(
+    g: AgentActionGroup,
+    state: AgentActionsUiState,
+    live: Boolean,
+    nowSeconds: Long,
+    onApprove: (AgentAction) -> Unit,
+    onReject: (AgentAction) -> Unit,
+    onApproveAll: (AgentActionGroup) -> Unit,
+    onRejectAll: (AgentActionGroup) -> Unit,
+) {
+    var open by remember(g.key) { mutableStateOf(false) }
+    val newest = g.items.first().first
+    val busy = g.items.any { it.first.id in state.busy }
+    val notice = g.items.firstNotNullOfOrNull { state.notices[it.first.id] }
+    Column {
+        PhoneRow(
+            title = "${g.items.size} proposals: ${g.what}",
+            line = g.from?.let { "from $it" } ?: "proposed by an agent",
+            word = StatusWord.NEEDS_YOU,
+            lead = phoneLead(StatusWord.NEEDS_YOU, live),
+            age = relativeTime(newest.createdAt.takeIf { it > 0 }, nowSeconds),
+            onClick = { open = !open },
+            chips = { OrbitChip("Agent") },
+        )
+        Column(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (state.canAnswer) {
+                    OutlinedButton(onClick = { onApproveAll(g) }, enabled = !busy) { Text("Approve all ${g.items.size}") }
+                    TextButton(onClick = { onRejectAll(g) }, enabled = !busy) { Text("Reject all") }
+                }
+                TextButton(onClick = { open = !open }) { Text(if (open) "Hide" else "Show each") }
+            }
+            notice?.let { Text(it, color = Fleet.colors.fg2, fontSize = 12.sp) }
+            if (open) {
+                for ((a, about) in g.items) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                        Text(agentActionTitle(a, about), color = Fleet.colors.fg, fontSize = 14.sp)
+                        val age = relativeTime(a.createdAt.takeIf { it > 0 }, nowSeconds)
+                        val line = listOf(actionOrigin(about, withFrom = false), age.orEmpty()).filter { it.isNotEmpty() }
+                        if (line.isNotEmpty()) Text(line.joinToString(" · "), color = Fleet.colors.fgMuted, fontSize = 12.sp)
+                        if (state.canAnswer) {
+                            val itemBusy = a.id in state.busy
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = { onApprove(a) }, enabled = !itemBusy) { Text("Approve") }
+                                TextButton(onClick = { onReject(a) }, enabled = !itemBusy) { Text("Reject") }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

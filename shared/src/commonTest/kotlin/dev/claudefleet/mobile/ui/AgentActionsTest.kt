@@ -15,6 +15,8 @@ import dev.claudefleet.mobile.model.SELF_DEBUG
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.agentRunArgs
 import dev.claudefleet.mobile.model.agentActionTitle
+import dev.claudefleet.mobile.model.actionOrigin
+import dev.claudefleet.mobile.model.groupAgentActions
 import dev.claudefleet.mobile.model.ruleAgentName
 import dev.claudefleet.mobile.model.ruleLine
 import dev.claudefleet.mobile.net.HubCapabilities
@@ -78,6 +80,44 @@ private class FakeAgents(
 private val withAgents = HubCapabilities(tools = setOf(AgentActionsViewModel.TOOL))
 
 class AgentActionsTest {
+    /** 2026-11-06: seven identical "Call jira.jira_update_issue" rows. One agent's repeats fold into one card that names each issue. */
+    @Test
+    fun one_agents_repeats_fold_into_one_card_that_names_each_item() = runTest {
+        val s = json.decodeFromString(
+            AgentsStatus.serializer(),
+            """{"rules":[],"jobs":[],
+               "pending":[{"id":3,"kind":"mcp_call","payload":"{\"binding\":\"jira\",\"tool\":\"jira_update_issue\"}","created_at":30},
+                          {"id":2,"kind":"kb_learn","payload":"{}","created_at":20},
+                          {"id":1,"kind":"mcp_call","payload":"{\"binding\":\"jira\",\"tool\":\"jira_update_issue\"}","created_at":10}],
+               "pending_about":[
+                 {"id":3,"rule_id":4,"from":"jira-triage · PD board","subject":"a scheduled run",
+                  "title":"Jira: update issue PD-2 (status)","what":"Jira: update issue","group":"4:mcp_call:jira_update_issue"},
+                 {"id":1,"rule_id":4,"from":"jira-triage · PD board","subject":"a scheduled run",
+                  "title":"Jira: update issue PD-1 (status)","what":"Jira: update issue","group":"4:mcp_call:jira_update_issue"}]}""",
+        )
+        val groups = groupAgentActions(s.pending, s.pendingAbout)
+        assertEquals(listOf(listOf(3L, 1L), listOf(2L)), groups.map { g -> g.items.map { it.first.id } })
+        assertEquals("Jira: update issue", groups[0].what)
+        assertEquals("jira-triage · PD board", groups[0].from)
+        assertEquals("Jira: update issue PD-2 (status)", agentActionTitle(groups[0].items[0].first, groups[0].items[0].second))
+        assertEquals("jira-triage · PD board · on a scheduled run", actionOrigin(groups[0].items[0].second))
+        assertEquals("on a scheduled run", actionOrigin(groups[0].items[0].second, withFrom = false))
+        // An older hub: tool calls still fold by tool, the rest stay apart.
+        assertEquals(listOf(2, 1), groupAgentActions(s.pending, emptyList()).map { it.items.size })
+
+        // Approve all answers each, and the card leaves the Inbox.
+        val agents = FakeAgents(pending = s.pending)
+        val vm = AgentActionsViewModel(AgentsFleet(withAgents), agents, backgroundScope, canWrite = true)
+        runCurrent()
+        vm.refresh()?.join()
+        runCurrent()
+        vm.approveAll(groups[0])?.join()
+        runCurrent()
+        assertEquals(listOf("status", "decide 3 true", "decide 1 true"), agents.calls)
+        assertEquals(listOf(2L), vm.state.value.pending.map { it.id })
+        assertEquals("Approved 2: they run within a minute.", vm.state.value.notices[3L])
+    }
+
     @Test
     fun an_action_says_what_it_will_post() {
         assertEquals("Post a review on o/r#4: request changes, 2 comments", agentActionTitle(action()))
