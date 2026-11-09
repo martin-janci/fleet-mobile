@@ -2317,7 +2317,7 @@ internal fun Turn(turn: ConvTurn, live: Boolean = false, footer: (@Composable ()
             // Fleet's own digest or restart note (claude-fleet #913) is not
             // the person's words: one folded line, not a bubble.
             val note = remember(prompt) { parseFleetPrompt(prompt) }
-            if (note != null) FleetNoteLine(note) else PromptBubble(prompt.orEmpty())
+            if (note != null) FleetNoteLine(note) else PromptBubble(prompt.orEmpty(), turn.otherAuthor())
             Spacer(Modifier.height(8.dp))
         }
         // Within a live turn, only its last text acts: a card the agent wrote
@@ -2443,7 +2443,7 @@ private enum class ReplyAsk { Rewind, Retry, Fork }
  * open when its turn scrolls off and back.
  */
 @Composable
-private fun PromptBubble(sent: String) {
+private fun PromptBubble(sent: String, from: String? = null) {
     // The desktop's context line, mission prefix and dashboard change
     // instructions read as chips; the bubble's text is what the person typed.
     val parts = remember(sent) { promptParts(sent) }
@@ -2460,6 +2460,16 @@ private fun PromptBubble(sent: String) {
         ) { expanded = !expanded },
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
+            // A colleague's prompt names them (claude-fleet migration 224);
+            // the reader's own goes unlabelled, as before.
+            if (from != null) {
+                Text(
+                    text = from,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
             if (parts.chips.isNotEmpty()) PromptChips(parts.chips)
             // A match inside a folded prompt opens it, or Find would land on
             // a bubble whose matching line is cut off.
