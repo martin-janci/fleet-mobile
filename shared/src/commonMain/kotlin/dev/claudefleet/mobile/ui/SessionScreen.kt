@@ -129,6 +129,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.BackgroundOptions
 import dev.claudefleet.mobile.model.ConvItem
+import dev.claudefleet.mobile.model.otherAuthor
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.model.ConversationSummary
 import dev.claudefleet.mobile.model.RepairReport
