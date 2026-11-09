@@ -99,6 +99,8 @@ import dev.claudefleet.mobile.data.SearchActions
 import dev.claudefleet.mobile.data.HubMissionActions
 import dev.claudefleet.mobile.data.BuiltInAgentActions
 import dev.claudefleet.mobile.data.HubBuiltInAgentActions
+import dev.claudefleet.mobile.data.HubReviewRequestActions
+import dev.claudefleet.mobile.data.ReviewRequestActions
 import dev.claudefleet.mobile.data.MissionActions
 import dev.claudefleet.mobile.data.HubRoutineActions
 import dev.claudefleet.mobile.data.RoutineActions
@@ -373,6 +375,7 @@ import dev.claudefleet.mobile.ui.OrbitMissionsHandlers
 import dev.claudefleet.mobile.ui.OrbitMissionsScreen
 import dev.claudefleet.mobile.ui.MissionsViewModel
 import dev.claudefleet.mobile.ui.AgentActionsViewModel
+import dev.claudefleet.mobile.ui.ReviewRequestsViewModel
 import dev.claudefleet.mobile.ui.OrbitTrackersHandlers
 import dev.claudefleet.mobile.ui.OrbitTrackersScreen
 import dev.claudefleet.mobile.ui.TrackerWizardHandlers
@@ -693,6 +696,9 @@ class AppContainer(
 
     /** The agents' waiting actions (claude-fleet agents step 5), through the same `withClient`. */
     val builtInAgentActions: BuiltInAgentActions = HubBuiltInAgentActions(session)
+
+    /** Reviews colleagues asked of this person ("Ask for review…"), through the same `withClient`. */
+    val reviewRequestActions: ReviewRequestActions = HubReviewRequestActions(session)
 
     /** Routines and Pause all (redesign 8.9), through the same `withClient`. */
     val routineActions: RoutineActions = HubRoutineActions(session)
@@ -1311,6 +1317,8 @@ private fun FleetRoute(
     val missions = remember(repository, scope) { MissionsViewModel(repository, container.missionActions, scope, credentials.canWrite) }
     val agentActionsVm = remember(repository, scope) { AgentActionsViewModel(repository, container.builtInAgentActions, scope, credentials.canWrite) }
     val agentActionsState by agentActionsVm.state.collectAsState()
+    val reviewRequestsVm = remember(scope) { ReviewRequestsViewModel(container.reviewRequestActions, scope) }
+    val reviewRequestsState by reviewRequestsVm.state.collectAsState()
     val missionsState by missions.state.collectAsState()
     // The Inbox rows' inline answers (G5.4): the session screen's own calls.
     // Here, not under the Inbox, so a Not waiting outlives a tab switch.
@@ -2084,6 +2092,8 @@ private fun FleetRoute(
                     LaunchedEffect(missionsState.available) { if (missionsState.available) missions.refresh() }
                     // So is an agent's action waiting for an answer (agents step 5).
                     LaunchedEffect(agentActionsState.available) { agentActionsVm.refresh() }
+                    // So is a review a colleague asked of this person ("Ask for review…").
+                    LaunchedEffect(Unit) { reviewRequestsVm.refresh() }
                     val missionRows = remember(missionsState.missions, missionsState.available) {
                         if (missionsState.available) missionWaits(missionsState.missions) else emptyList()
                     }
@@ -2094,6 +2104,9 @@ private fun FleetRoute(
                         proposedList = proposedList,
                         missionRows = missionRows,
                         onOpenMission = { missions.openOne(it) },
+                        reviews = reviewRequestsState,
+                        onReviewDone = { reviewRequestsVm.done(it) },
+                        sessionTitle = { id -> all.firstOrNull { it.id == id }?.let { it.friendlyName ?: it.tmuxName } },
                         agentActions = agentActionsState,
                         onApproveAction = { agentActionsVm.approve(it) },
                         onRejectAction = { agentActionsVm.reject(it) },

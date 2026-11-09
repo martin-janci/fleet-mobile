@@ -4,6 +4,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -44,6 +45,8 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.OutlinedButton
 import dev.claudefleet.mobile.model.Mission
+import dev.claudefleet.mobile.model.ReviewRequest
+import dev.claudefleet.mobile.model.reviewAskLine
 import dev.claudefleet.mobile.model.AgentAction
 import dev.claudefleet.mobile.model.AgentActionGroup
 import dev.claudefleet.mobile.model.actionOrigin
@@ -186,6 +189,11 @@ fun InboxScreen(
     /** Missions that wait on a person ([missionWaits]), rows of their own under the sessions (G5.4). */
     missionRows: List<Mission> = emptyList(),
     onOpenMission: (Long) -> Unit = {},
+    /** Reviews a colleague asked of this person (claude-fleet "Ask for review…"), with Done. */
+    reviews: ReviewRequestsUiState = ReviewRequestsUiState(),
+    onReviewDone: (ReviewRequest) -> Unit = {},
+    /** A session's name by id, for a review ask's title; null falls back to its number. */
+    sessionTitle: (Long) -> String? = { null },
     /** The agents' actions waiting for a person (claude-fleet agents step 5), with Approve and Reject. */
     agentActions: AgentActionsUiState = AgentActionsUiState(),
     onApproveAction: (AgentAction) -> Unit = {},
@@ -201,7 +209,7 @@ fun InboxScreen(
     var view by rememberSaveable { mutableStateOf(InboxView.NeedsYou) }
     // A mission waiting on a person is one more thing that needs you (G5.4).
     // So is an agent's action waiting for an answer (agents step 5).
-    val needYou = rows.size + missionRows.size + agentActions.pending.size
+    val needYou = rows.size + missionRows.size + agentActions.pending.size + reviews.asks.size
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
             title = "Inbox",
@@ -254,7 +262,7 @@ fun InboxScreen(
             }
         } else OrbitPullToRefresh(isRefreshing = refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                if (rows.isEmpty() && shared.isEmpty() && missionRows.isEmpty() && proposedList.isEmpty()) {
+                if (rows.isEmpty() && shared.isEmpty() && missionRows.isEmpty() && proposedList.isEmpty() && reviews.asks.isEmpty()) {
                     item(key = "empty") {
                         Box(modifier = Modifier.fillParentMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                             Text(inboxEmptyText(connection), color = Fleet.colors.fgMuted, fontSize = 15.sp, textAlign = TextAlign.Center)
@@ -322,6 +330,28 @@ fun InboxScreen(
                             onApproveAll = onApproveActions,
                             onRejectAll = onRejectActions,
                         )
+                    }
+                }
+                items(reviews.asks, key = { "review-${it.id}" }) { r ->
+                    Column {
+                        PhoneRow(
+                            title = sessionTitle(r.sessionId) ?: "Session ${r.sessionId}",
+                            line = reviewAskLine(r) + (r.note?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+                            word = StatusWord.NEEDS_YOU,
+                            lead = phoneLead(StatusWord.NEEDS_YOU, live),
+                            age = relativeTime(r.createdAt.takeIf { it > 0 }, nowSeconds),
+                            onClick = { onOpenSession(r.sessionId) },
+                            chips = { OrbitChip("Review") },
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, bottom = 4.dp),
+                        ) {
+                            reviews.notices[r.id]?.let {
+                                Text(it, color = Fleet.colors.fgMuted, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                            } ?: Spacer(Modifier.weight(1f))
+                            TextButton(onClick = { onReviewDone(r) }, enabled = r.id !in reviews.busy) { Text("Done") }
+                        }
                     }
                 }
                 items(missionRows, key = { "mission-${it.id}" }) { m ->
