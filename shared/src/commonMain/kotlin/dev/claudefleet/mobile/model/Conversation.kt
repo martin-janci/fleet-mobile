@@ -245,7 +245,26 @@ data class ConvTurn(
      * an image. Retry would then send something other than what was asked.
      */
     @SerialName("prompt_partial") val promptPartial: Boolean = false,
+    /**
+     * Who sent [prompt], when a hub tool typed it (claude-fleet migration
+     * 224): a colleague's prompt names them. Null for a prompt typed in the
+     * terminal and on an older hub.
+     */
+    val author: TurnAuthor? = null,
 )
+
+/** Who sent a turn's prompt (`transcript::TurnAuthor`). */
+@Serializable
+data class TurnAuthor(
+    /** "Ada · phone". */
+    val name: String,
+    @SerialName("person_id") val personId: Long? = null,
+    /** The reader sent it. */
+    val mine: Boolean = false,
+)
+
+/** The name to draw over a prompt: null for the reader's own (and for one with no author). */
+fun ConvTurn.otherAuthor(): String? = author?.takeIf { !it.mine }?.name
 
 /**
  * One item inside a turn. The hub tags these with `kind`
