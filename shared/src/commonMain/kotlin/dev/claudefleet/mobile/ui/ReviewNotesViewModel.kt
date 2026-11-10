@@ -30,7 +30,7 @@ data class ReviewNotesUiState(
     val sending: Boolean = false,
     /** A resolve on the wire, by note. */
     val resolving: Set<Long> = emptySet(),
-    val error: String? = null,
+    val error: Friendly? = null,
     /** What the last send did: typed now, or queued behind the agent's turn. */
     val notice: String? = null,
 ) {
@@ -103,7 +103,7 @@ class ReviewNotesViewModel(
         val s = _state.value
         if (s.sending || s.drafts.isEmpty()) return null
         if (s.drafts.size > REVIEW_NOTES_MAX) {
-            _state.update { it.copy(error = "At most $REVIEW_NOTES_MAX notes go in one message; delete some first.") }
+            _state.update { it.copy(error = Friendly("Too many notes", "At most $REVIEW_NOTES_MAX notes go in one message; delete some first.", isError = true)) }
             return null
         }
         val id = pendingSendId ?: newNotesSendId(now()).also { pendingSendId = it }
@@ -128,10 +128,10 @@ class ReviewNotesViewModel(
             } catch (e: HubError.Tool) {
                 // A refusal is an answer: the next try is a new send.
                 pendingSendId = null
-                _state.update { it.copy(sending = false, error = e.message ?: "The hub refused the notes.") }
+                _state.update { it.copy(sending = false, error = friendly(e)) }
             } catch (e: Throwable) {
                 // No answer: keep the id, so Send again cannot type them twice.
-                _state.update { it.copy(sending = false, error = e.message ?: "Could not send the notes. Try again.") }
+                _state.update { it.copy(sending = false, error = friendly(e)) }
             }
         }
     }
@@ -146,7 +146,7 @@ class ReviewNotesViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                _state.update { it.copy(resolving = it.resolving - note.id, error = e.message ?: "Could not change the note.") }
+                _state.update { it.copy(resolving = it.resolving - note.id, error = friendly(e)) }
             }
         }
     }
