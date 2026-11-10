@@ -111,6 +111,17 @@ class PlanFirstTest {
                 "Plan ready. I split it: 2026-11-01-old.md, 2026-11-09-a.md and 2026-11-10-b.md",
             ),
         )
+        // The edited one sorts last by name here, and the new one still wins.
+        assertEquals(
+            "docs/plans/2026-11-10-b.md",
+            planFile(
+                listOf(file("docs/plans/2026-11-12-later.md", "modified"), file("docs/plans/2026-11-10-b.md")),
+                "Plan ready: 2026-11-10-b.md. I also fixed a link in 2026-11-12-later.md",
+            ),
+        )
+        // A plan that was committed and then changed is announced as an edited file.
+        assertEquals(plan, planFile(listOf(file(plan, "modified"), file("src/a.kt", "modified")), reply))
+        assertEquals("docs/plans/b.md", planFile(listOf(file("docs/plans/a.md", "modified"), file("docs/plans/b.md", "modified")), "Plan ready: a.md and b.md"))
     }
 
     // ---- answered on this phone ----
