@@ -294,6 +294,11 @@ class ToolsTheAppMayCallTest {
         // 17, gap plan G7.2): `wizard_state`, a person's own rows, called
         // only where `tools/list` names it (`HubCapabilities.wizardState`).
         "wizard_state",
+        // Reviews a colleague asked of this person (claude-fleet "Ask for
+        // review…", HumanLayer R11): `review_request` with `list` and `done`
+        // only, the person's own asks. The phone never sends `ask`; a hub
+        // without the tool refuses it and the Inbox shows no Review rows.
+        "review_request",
     )
 
     @Test

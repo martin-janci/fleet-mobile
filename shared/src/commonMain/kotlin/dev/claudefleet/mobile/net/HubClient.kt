@@ -58,6 +58,7 @@ import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.TidyReport
 import dev.claudefleet.mobile.model.Mission
+import dev.claudefleet.mobile.model.ReviewRequest
 import dev.claudefleet.mobile.model.FailingRoutine
 import dev.claudefleet.mobile.model.RoutineBudget
 import dev.claudefleet.mobile.model.SuggestedHost
@@ -1598,6 +1599,20 @@ class HubClient(
     /** Run a manual fleet agent's instance now (`agents { action: run, id, request?, run_scope? }`). */
     suspend fun runAgentRule(id: Long, form: AgentRunForm): AgentRunStarted =
         call("agents", agentRunArgs(id, form)) { json.decodeFromJsonElement(AgentRunStarted.serializer(), it) }
+
+    // ---- review requests (claude-fleet "Ask for review…", migration 225) ----
+
+    /** The open reviews asked of this person (`review_request { action: list }`). */
+    suspend fun reviewRequests(): List<ReviewRequest> =
+        call("review_request", buildJsonObject { put("action", "list") }) {
+            json.decodeFromJsonElement(ListSerializer(ReviewRequest.serializer()), it)
+        }
+
+    /** Mark an ask to this person done (`review_request { action: done, id }`). */
+    suspend fun finishReviewRequest(id: Long): ReviewRequest =
+        call("review_request", buildJsonObject { put("action", "done"); put("id", id); put("done", true) }) {
+            json.decodeFromJsonElement(ReviewRequest.serializer(), it)
+        }
 
     // ---- missions (claude-fleet orchestration O1–O8) ----
 
