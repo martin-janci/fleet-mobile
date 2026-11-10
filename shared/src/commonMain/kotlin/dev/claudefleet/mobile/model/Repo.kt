@@ -12,13 +12,30 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class ChangedFile(
     val path: String,
-    /** git's status: M, A, D, R, ?, … */
+    /** git's status as the hub words it: modified, added, deleted, renamed, copied, untracked, conflict ([gitStatusLetter]). */
     val status: String = "",
     val staged: Boolean = false,
     @SerialName("orig_path") val origPath: String? = null,
     val added: Int? = null,
     val removed: Int? = null,
 )
+
+/**
+ * A file's git status as one letter: `M`, `A`, `D`, `R`, `C`, `U` (in
+ * conflict), `?` (untracked). The hub sends the word (`modified`, `added`,
+ * `deleted`, `renamed`, `copied`, `conflict`, `untracked`); a letter is taken
+ * as it is.
+ */
+fun gitStatusLetter(status: String): String = when (status.trim().lowercase()) {
+    "modified" -> "M"
+    "added" -> "A"
+    "deleted" -> "D"
+    "renamed" -> "R"
+    "copied" -> "C"
+    "conflict", "conflicted" -> "U"
+    "untracked" -> "?"
+    else -> status.trim().take(1).uppercase().ifEmpty { "?" }
+}
 
 /** "+12 −3" for a file's line counts; null when the hub sent none. */
 fun lineCounts(f: ChangedFile): String? {
