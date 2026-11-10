@@ -1,19 +1,26 @@
 package dev.claudefleet.mobile.model
 
+import dev.claudefleet.mobile.epochSeconds
+import dev.claudefleet.mobile.utcOffsetSeconds
+
 /** A due date in words, and whether it has passed. */
 data class DueLabel(val text: String, val overdue: Boolean)
-
-private val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 /** Day 0 (1970-01-01) was a Thursday. */
 private val WEEKDAYS = listOf("Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed")
 
+/** `YYYY-MM-DD`, the only shape a due date has on the wire. Built once, not per row. */
+internal val ISO_DATE = Regex("""^(\d{4})-(\d{2})-(\d{2})$""")
+
 /** The local calendar day of [nowSeconds], counted from 1970-01-01. */
 fun localEpochDay(nowSeconds: Long, utcOffsetSeconds: Int): Long = (nowSeconds + utcOffsetSeconds).floorDiv(86_400L)
 
+/** Today's local calendar day: what every due date on a screen is read against. */
+internal fun todayEpochDay(nowSeconds: Long = epochSeconds()): Long = localEpochDay(nowSeconds, utcOffsetSeconds(nowSeconds))
+
 /** `YYYY-MM-DD` as days from 1970-01-01 (Howard Hinnant's days_from_civil); null when it is not a real date. */
 internal fun epochDayOf(date: String): Long? {
-    val m = Regex("""^(\d{4})-(\d{2})-(\d{2})$""").find(date) ?: return null
+    val m = ISO_DATE.find(date) ?: return null
     val (ys, ms, ds) = m.destructured
     val y0 = ys.toLong()
     val mo = ms.toInt()
@@ -41,8 +48,8 @@ fun dueLabel(due: String?, todayEpochDay: Long): DueLabel? {
     if (due == null) return null
     val day = epochDayOf(due) ?: return null
     val days = day - todayEpochDay
-    val month = due.substring(5, 7).toInt()
-    val date = "${MONTHS[month - 1]} ${due.substring(8, 10).toInt()}"
+    // "Oct 23": the same month-and-day words the rest of the phone uses.
+    val date = dayLabel(day * 86_400L, 0)
     return when {
         days < 0 -> DueLabel(date, overdue = true)
         days == 0L -> DueLabel("Today", false)
@@ -54,31 +61,29 @@ fun dueLabel(due: String?, todayEpochDay: Long): DueLabel? {
 
 /**
  * The task screen's due line: "Due Fri · 2026-11-06", or "Overdue · was due
- * 2026-10-30" once the date has passed. A done task's date is history:
- * "Due: 2026-10-30", never overdue. A date the phone cannot read is shown as
- * the hub sent it.
+ * 2026-10-30" once the date has passed. A done task shows no due date: it
+ * is history, never overdue (the desktop's `openDue`). A date the phone
+ * cannot read is shown as the hub sent it.
  */
 fun dueLine(due: String?, todayEpochDay: Long, done: Boolean): DueLabel? {
+    if (done) return null
     val d = due?.trim()?.takeIf { it.isNotEmpty() } ?: return null
     val label = dueLabel(d, todayEpochDay)
     return when {
-        done || label == null -> DueLabel("Due: $d", false)
+        label == null -> DueLabel("Due: $d", false)
         label.overdue -> DueLabel("Overdue · was due $d", true)
         else -> DueLabel("Due ${label.text} · $d", false)
     }
 }
 
 /**
- * The short form for a chip or a card line: "Due Fri", or "Overdue Oct 30"
- * once the date has passed. A done task's, or a date the phone cannot read,
- * is shown as the hub sent it ("Due 2026-10-30"), never overdue.
+ * A task's due date as every chip and row line says it, or null (the
+ * desktop's `openDue` in `work.ts`): "Due Fri", or "Overdue · Oct 30" once
+ * it has passed. A done task shows no due date: it is history, never
+ * overdue. Null for no date or one that does not parse, as on the desktop.
  */
-fun dueChip(due: String?, todayEpochDay: Long, done: Boolean): DueLabel? {
-    val d = due?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-    val label = dueLabel(d, todayEpochDay)
-    return when {
-        done || label == null -> DueLabel("Due $d", false)
-        label.overdue -> DueLabel("Overdue ${label.text}", true)
-        else -> DueLabel("Due ${label.text}", false)
-    }
+fun openDue(due: String?, done: Boolean, todayEpochDay: Long): DueLabel? {
+    if (done) return null
+    val label = dueLabel(due?.trim(), todayEpochDay) ?: return null
+    return DueLabel(if (label.overdue) "Overdue · ${label.text}" else "Due ${label.text}", label.overdue)
 }

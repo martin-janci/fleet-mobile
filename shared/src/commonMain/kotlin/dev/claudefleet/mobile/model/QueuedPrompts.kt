@@ -82,6 +82,14 @@ fun withoutUntrustedMarker(body: String): String {
 }
 
 /**
+ * What a taken-back prompt puts into the composer: the person's own words,
+ * without the hub's untrusted-input line (sending it again would carry two),
+ * and nothing for fleet's own `[fleet events]` digests or a blank body.
+ */
+fun takenBackText(body: String?): String? =
+    body?.takeUnless(::isFleetPrompt)?.let { withoutUntrustedMarker(it).trim() }?.takeIf { it.isNotEmpty() }
+
+/**
  * The hub's marker line opens with this. Split in two literals on purpose:
  * it is the hub's wire text, never drawn, and the copy rules
  * (`CopyRulesTest`) refuse the old product name in a string the app shows.

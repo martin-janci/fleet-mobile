@@ -98,6 +98,26 @@ class PhoneWorkTest {
         assertEquals("PR #118 · 1 past session", past.line)
     }
 
+    /** The default layout's row says an urgent or high priority and the due date, as the Classic card and the desktop row do. */
+    @Test
+    fun a_task_row_says_a_hot_priority_and_its_due_date() {
+        val today = 20_761L // 2026-11-04
+        val hot = task(status = "To Do").copy(priority = "urgent", dueAt = "2026-10-30")
+        assertEquals("Urgent · Overdue · Oct 30 · No session yet · To Do", taskLine(hot, { null }, todayEpochDay = today).line)
+        assertEquals(
+            "High · Due Fri · No session yet · To Do",
+            taskLine(hot.copy(priority = "high", dueAt = "2026-11-06"), { null }, todayEpochDay = today).line,
+        )
+        assertEquals("No session yet · To Do", taskLine(hot.copy(priority = "low", dueAt = null), { null }, todayEpochDay = today).line)
+        assertEquals(
+            "No session yet · Done",
+            taskLine(hot.copy(priority = null, statusName = "Done", statusCategory = dev.claudefleet.mobile.model.StatusCategory.Done), { null }, todayEpochDay = today).line,
+            "a done task's date is history",
+        )
+        // The Classic card leads with the same words.
+        assertEquals("Urgent · Overdue · Oct 30", taskFacts(hot, today).text)
+    }
+
     @Test
     fun a_blocked_task_reads_needs_you_with_what_it_waits_on() {
         // Redesign 6.7: Blocked shows as Needs you, its reason on the line.

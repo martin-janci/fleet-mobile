@@ -40,6 +40,7 @@ import dev.claudefleet.mobile.model.lines
 import dev.claudefleet.mobile.model.RestorePlanEntry
 import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.ui.components.ErrorBanner
+import dev.claudefleet.mobile.ui.components.rememberCopied
 import dev.claudefleet.mobile.ui.kit.OrbitChip
 import dev.claudefleet.mobile.ui.kit.StatusWord
 import dev.claudefleet.mobile.model.checkedAgo
@@ -288,14 +289,14 @@ private fun PlanEntryRow(entry: RestorePlanEntry) {
 private fun LoginsBlock(lines: List<LoginLine>) {
     if (lines.isEmpty()) return
     val clipboard = LocalClipboardManager.current
-    var copied by remember { mutableStateOf<String?>(null) }
+    val copied = rememberCopied(lines)
     Column(modifier = Modifier.padding(top = 8.dp)) {
         Text("Logins", style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
         for (l in lines) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(l.text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
-                TextButton(onClick = { clipboard.setText(AnnotatedString(l.command)); copied = l.command }) {
-                    Text(if (copied == l.command) "Copied" else "Copy login command")
+                TextButton(onClick = { clipboard.setText(AnnotatedString(l.command)); copied.mark(l.command) }) {
+                    Text(if (copied.isCopied(l.command)) "Copied" else "Copy login command")
                 }
             }
         }

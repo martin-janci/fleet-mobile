@@ -1708,7 +1708,7 @@ private fun SessionBar(
                         // Information, not a control: drawn as a label, so it does not invite a tap that does nothing.
                         Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
                             Text(
-                                "retire: $retiring",
+                                cleanUpChip(retiring),
                                 maxLines = 1,
                                 style = MaterialTheme.typography.labelMedium,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
@@ -1780,7 +1780,9 @@ private fun SessionOverflowMenu(
     var showKillConfirm by remember { mutableStateOf(false) }
     var showSendLater by remember { mutableStateOf(false) }
     var showBackground by remember { mutableStateOf(false) }
-    val actionable = !state.busy && state.connected
+    // The view model runs an item only when idle(sending, answering, busy);
+    // an item that would do nothing is grey, and the note says why.
+    val actionable = idle(state.sending, state.answering, state.busy) && state.connected
     // MobileFormsSession: the New session form's background agent, started
     // from here on this session's host and in its project.
     if (showBackground) {
@@ -1821,6 +1823,7 @@ private fun SessionOverflowMenu(
                     dismissGhost = state.canDismissGhost,
                     restart = manage && state.canRestart,
                     steer = state.canSendQuick,
+                    effort = hasEffortPicker(session?.agent),
                     review = state.canReview,
                     archive = orbit.onArchive != null,
                     kill = manage && state.canKill,
@@ -1832,7 +1835,7 @@ private fun SessionOverflowMenu(
                 ),
             )
             // Grey items said nothing: the reason sits above them, once.
-            orbitMenuNote(busy = state.busy, connected = state.connected)?.let {
+            orbitMenuNote(busy = state.busy, connected = state.connected, sending = state.sending, answering = state.answering)?.let {
                 Text(it, style = Fleet.type.textXs, color = Fleet.colors.fgMuted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).testTag(ORBIT_MENU_TAG + "note"))
             }
             for ((i, item) in items.withIndex()) {
@@ -1901,7 +1904,9 @@ private fun SessionOverflowMenu(
             // or `/effort <level>` like a typed command.
             if (state.canSendQuick) {
                 DropdownMenuItem(text = { Text("Model…") }, onClick = { expanded = false; picking = "model" })
-                DropdownMenuItem(text = { Text("Effort…") }, onClick = { expanded = false; picking = "effort" })
+                if (hasEffortPicker(state.session?.agent)) {
+                    DropdownMenuItem(text = { Text("Effort…") }, onClick = { expanded = false; picking = "effort" })
+                }
             }
             if (state.canReview) {
                 DropdownMenuItem(text = { Text("Review…") }, enabled = actionable, onClick = { expanded = false; showReview = true })
@@ -3233,6 +3238,14 @@ private fun PromptBox(
             onDismiss = { showHistory = false },
         )
     }
+}
+
+/** The status strip's word for a row's `safe_kill_state`, in the desktop's "Clean up" words (SessionDetails.svelte). */
+internal fun cleanUpChip(state: String): String = when (state) {
+    "requested" -> "Clean up in progress"
+    "failed" -> "Clean up failed"
+    "ready" -> "Clean up ready"
+    else -> "Clean up: $state"
 }
 
 /** [text] after what is already typed, a blank line between, as the

@@ -50,35 +50,44 @@ sealed interface PromptChip {
 data class PromptParts(val chips: List<PromptChip>, /** What the person typed. */ val text: String)
 
 private val SESSION_CONTEXT = Regex(
-    """^\[context\] the person is looking at session "(.*)" on host (\S+?)(?: \(branch (.+)\))?\. "this one" and "here" mean that session unless they say otherwise\.(?:\n\n|$)""",
+    """^\[context\] the person is looking at session "(.*?)" on host (\S+?)(?: \(branch (.+)\))?\. "this one" and "here" mean that session unless they say otherwise\.(?:\n\n|\z)""",
 )
 private val HOST_CONTEXT = Regex(
-    """^\[context\] the person is looking at host (\S+) with no session selected\. "here" means that host\.(?:\n\n|$)""",
+    """^\[context\] the person is looking at host (\S+) with no session selected\. "here" means that host\.(?:\n\n|\z)""",
 )
-private val MISSION = Regex("""^About mission #(\d+) "(.*)":(?:\n\n|$)""")
+// `\z`, not `$`: in Java's regex `$` also matches before a final newline,
+// which the desktop's JS does not, and the two must read a head alike.
+private val MISSION = Regex("""^About mission #(\d+) "(.*?)":(?:\n\n|\z)""")
 private val DASHBOARD = Regex(
-    """^(?:My pinned dashboard "(.*)", as it is now:|The built-in dashboard "(.*)", to make my own copy of \(keep the id [A-Za-z0-9._:-]+\):)\n\n```fleet-ui\n[\s\S]*?\n```\n\n""" +
-        """(?:Save the change with `dashboards \{ pin \}` under the same id, then answer with the `dashboard` block\.|Answer with a `dashboard` block with the same id\.) (?:Change the widget "(.*)": |Change it: )""",
+    """^(?:My pinned dashboard "(.*?)", as it is now:|The built-in dashboard "(.*?)", to make my own copy of \(keep the id [A-Za-z0-9._:-]+\):)\n\n```fleet-ui\n[\s\S]*?\n```\n\n""" +
+        """(?:Save the change with `dashboards \{ pin \}` under the same id, then answer with the `dashboard` block\.|Answer with a `dashboard` block with the same id\.) (?:Change the widget "(.*?)":|Change it:)(?: |\n|\z)""",
 )
 
-/** [prompt] with the desktop's own head lines read into chips. */
+/**
+ * [prompt] with the desktop's own head lines read into chips: at most one
+ * context or mission head, then at most one dashboard head, as the desktop
+ * writes them (`promptParts` in its `src/lib/prompt_parts.ts`, the same
+ * patterns). A second head is the person's own words. Names are matched
+ * non-greedily, so a person's own `": ` after the head stays theirs.
+ */
 fun promptParts(prompt: String): PromptParts {
     val chips = mutableListOf<PromptChip>()
-    var rest = prompt
-    while (true) {
-        val m = SESSION_CONTEXT.find(rest)?.also {
-            val g = it.groups
-            chips += PromptChip.Session(g[1]!!.value, g[2]!!.value, g[3]?.value)
-        } ?: HOST_CONTEXT.find(rest)?.also {
-            chips += PromptChip.Host(it.groupValues[1])
-        } ?: MISSION.find(rest)?.also {
-            chips += PromptChip.Mission(it.groupValues[1].toLong(), it.groupValues[2])
-        } ?: DASHBOARD.find(rest)?.also {
-            val g = it.groups
-            val copy = g[2] != null
-            chips += PromptChip.Dashboard((if (copy) g[2] else g[1])?.value.orEmpty(), g[3]?.value, copy)
-        } ?: break
-        rest = rest.substring(m.value.length)
+    var rest = prompt.replace("\r\n", "\n").replace('\r', '\n')
+    val head = SESSION_CONTEXT.find(rest)?.also {
+        val g = it.groups
+        chips += PromptChip.Session(g[1]!!.value, g[2]!!.value, g[3]?.value)
+    } ?: HOST_CONTEXT.find(rest)?.also {
+        chips += PromptChip.Host(it.groupValues[1])
+    } ?: MISSION.find(rest)?.also {
+        // An id past Long's range must not crash composition; the phone never reads it.
+        chips += PromptChip.Mission(it.groupValues[1].toLongOrNull() ?: 0, it.groupValues[2])
+    }
+    if (head != null) rest = rest.substring(head.value.length)
+    DASHBOARD.find(rest)?.let {
+        val g = it.groups
+        val copy = g[2] != null
+        chips += PromptChip.Dashboard((if (copy) g[2] else g[1])?.value.orEmpty(), g[3]?.value, copy)
+        rest = rest.substring(it.value.length)
     }
     return PromptParts(chips, if (chips.isEmpty()) prompt else rest.trim())
 }

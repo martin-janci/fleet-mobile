@@ -8,7 +8,9 @@ import dev.claudefleet.mobile.model.GroupSource
 import dev.claudefleet.mobile.model.LinkState
 import dev.claudefleet.mobile.model.TaskDetail
 import dev.claudefleet.mobile.model.WorkTask
+import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
+import dev.claudefleet.mobile.net.ToolCatalog
 import dev.claudefleet.mobile.net.json
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -478,11 +480,18 @@ class TaskViewModelTest {
         assertEquals(2, actions.taskCalls, "the answer is followed by a re-read")
     }
 
+    /** A hub whose `work_link` names `priority` (and labels and estimate): what the Edit sheet needs to offer them. */
+    private val sized = HubCapabilities.of(
+        ToolCatalog(setOf("work", "work_link"), params = mapOf("work_link" to setOf("action", "item_id", "priority", "labels", "estimate", "estimate_unit"))),
+    )
+
     /** A priority picked in the sheet goes with the edit. */
     @Test
     fun an_edit_sends_a_new_priority() = runTest {
         val actions = FakeWorkActions().apply { taskAnswer = local }
-        val vm = taskVm(actions = actions)
+        val vm = taskVm(fleet = WorkFleet(caps = sized), actions = actions)
+        runCurrent()
+        assertTrue(vm.state.value.editSizes)
         runCurrent()
         vm.openEdit()
         runCurrent()
@@ -496,7 +505,7 @@ class TaskViewModelTest {
     @Test
     fun an_edit_sends_labels_and_an_estimate() = runTest {
         val actions = FakeWorkActions().apply { taskAnswer = local }
-        val vm = taskVm(actions = actions)
+        val vm = taskVm(fleet = WorkFleet(caps = sized), actions = actions)
         runCurrent()
         vm.openEdit()
         runCurrent()
@@ -512,6 +521,160 @@ class TaskViewModelTest {
             listOf("edit 12 title=null notes=null assignees=null due=null labels=[ui, auth] estimate=2.0 unit=hours"),
             actions.calls,
         )
+    }
+
+    /**
+     * A hub whose `edit` predates priority, labels and estimate (it would drop
+     * them and call the edit saved): the sheet does not offer them, and they
+     * are never sent — an edit of nothing else sends nothing.
+     */
+    @Test
+    fun an_older_hub_is_never_sent_priority_labels_or_estimate() = runTest {
+        val actions = FakeWorkActions().apply { taskAnswer = local }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        assertFalse(vm.state.value.editSizes)
+        vm.openEdit()
+        assertNull(vm.saveEdit(TaskEdit(priority = "urgent", labels = listOf("api"))))
+        assertFalse(vm.state.value.editOpen)
+        vm.openEdit()
+        vm.saveEdit(TaskEdit(title = "Login fails often", priority = "urgent", estimate = 2.0, estimateUnit = "hours"))
+        runCurrent()
+        assertEquals(listOf("edit 12 title=Login fails often notes=null assignees=null due=null"), actions.calls)
+    }
+
+    /**
+     * A refusal stays in its sheet while the task is re-read around it: a
+     * read (any work change fleet-wide) answers for itself, never for a write.
+     */
+    @Test
+    fun a_reread_does_not_wipe_a_refusal_the_sheet_is_showing() = runTest {
+        val fleet = WorkFleet()
+        val actions = FakeWorkActions().apply {
+            taskAnswer = local
+            failWrite = HubError.Tool("E_INVALID", "local work nests three levels deep at most")
+        }
+        val vm = taskVm(fleet = fleet, actions = actions)
+        runCurrent()
+        vm.openFile()
+        vm.fileUnder("item:40")
+        runCurrent()
+        assertEquals("local work nests three levels deep at most", vm.state.value.error?.body)
+
+        fleet.workChanges.tryEmit(1)
+        runCurrent()
+        assertEquals(2, actions.taskCalls)
+        assertEquals("local work nests three levels deep at most", vm.state.value.error?.body, "still there for the sheet")
+        assertTrue(vm.state.value.fileOpen)
+
+        // A failed read is its own line, and leaves the refusal alone too.
+        actions.failTask = HubError.Tool("E_INVALID", "db locked")
+        vm.refresh()
+        runCurrent()
+        assertEquals("db locked", vm.state.value.loadError?.body)
+        assertEquals("local work nests three levels deep at most", vm.state.value.error?.body)
+        vm.dismissError()
+        vm.dismissError()
+        runCurrent()
+        assertNull(vm.state.value.error)
+        assertNull(vm.state.value.loadError)
+    }
+
+    /** Latest wins: an earlier read that answers after a later one is not shown over it. */
+    @Test
+    fun an_earlier_read_landing_late_is_dropped() = runTest {
+        val fleet = WorkFleet()
+        val old = local.copy(task = local.task.copy(priority = "low"))
+        val new = local.copy(task = local.task.copy(priority = "urgent"))
+        val first = CompletableDeferred<Unit>()
+        val actions = FakeWorkActions().apply {
+            taskAnswer = old
+            taskGate = { n -> if (n == 1) first.await() }
+        }
+        val vm = taskVm(fleet = fleet, actions = actions)
+        runCurrent()
+        actions.taskAnswer = new
+        fleet.workChanges.tryEmit(1)
+        runCurrent()
+        assertEquals("urgent", vm.state.value.task?.priority)
+
+        actions.taskAnswer = old
+        first.complete(Unit)
+        runCurrent()
+        assertEquals("urgent", vm.state.value.task?.priority, "the first read's late answer is dropped")
+        assertFalse(vm.state.value.loading)
+    }
+
+    /** Fleet's own result is read before the live call to the tracker: the Result card never waits on it. */
+    @Test
+    fun the_result_does_not_wait_for_the_trackers_comments() = runTest {
+        val r = dev.claudefleet.mobile.model.taskResultFrom(json.parseToJsonElement(resultJson))
+        val tracker = CompletableDeferred<Unit>()
+        val actions = FakeWorkActions().apply {
+            taskAnswer = DETAIL.copy(commentsTracker = "Acme Jira")
+            resultAnswer = r
+            trackerCommentsGate = { tracker.await() }
+        }
+        val vm = taskVm(actions = actions)
+        runCurrent()
+        assertEquals(1, actions.trackerCommentKeys.size, "the tracker is being asked")
+        assertEquals(501L, vm.state.value.result?.taskId, "and the result is already showing")
+        tracker.complete(Unit)
+        runCurrent()
+    }
+
+    /**
+     * *Under epic…* reads the epics as the desktop does — the tree grouped by
+     * epic, archived too, one task — so a childless epic is offered; a read
+     * that names none leaves the ones the Work tree knew.
+     */
+    @Test
+    fun under_epic_reads_every_epic_the_way_the_desktop_does() = runTest {
+        val actions = FakeWorkActions().apply {
+            taskAnswer = local
+            treeAnswer = { f, _ ->
+                if (f.groupBy == "epic") {
+                    dev.claudefleet.mobile.model.WorkTreePage(
+                        groups = listOf(
+                            dev.claudefleet.mobile.model.TreeGroup(1, null, GroupRef("epic:41", "Empty so far"), 0),
+                            dev.claudefleet.mobile.model.TreeGroup(1, null, GroupRef("epic:12", "itself"), 0),
+                        ),
+                    )
+                } else {
+                    dev.claudefleet.mobile.model.WorkTreePage()
+                }
+            }
+        }
+        val known = listOf(dev.claudefleet.mobile.model.EpicFacet(taskId = "item:40", title = "Payments"))
+        val vm = taskVm(actions = actions, epics = known)
+        runCurrent()
+        assertEquals(listOf("item:40"), vm.state.value.epicChoices.map { it.taskId }, "before the read, what the tree knew")
+        vm.openFile()
+        runCurrent()
+        val read = actions.treeCalls.single()
+        assertEquals(dev.claudefleet.mobile.model.WorkTreeFilters(archived = true, groupBy = "epic"), read.filters)
+        assertEquals(1, read.limit)
+        assertEquals(listOf("item:41"), vm.state.value.epicChoices.map { it.taskId }, "a childless epic, never itself")
+
+        val none = FakeWorkActions().apply { taskAnswer = local }
+        val vm2 = taskVm(actions = none, epics = known)
+        runCurrent()
+        vm2.openFile()
+        runCurrent()
+        assertEquals(listOf("item:40"), vm2.state.value.epicChoices.map { it.taskId }, "an answer with no epic sections keeps the known ones")
+    }
+
+    /** A Result's PR on an http forge is kept, and named as a session's PR is on the same screen. */
+    @Test
+    fun a_result_pr_reads_like_a_session_pr() {
+        val r = dev.claudefleet.mobile.model.taskResultFrom(
+            json.parseToJsonElement(
+                """{"task_id":1,"report":{"summary":"x"},"prs":[{"url":"http://forge.lan/acme/api/pull/12"},{"url":"ftp://x/pull/3"}]}""",
+            ),
+        )!!
+        assertEquals(listOf("http://forge.lan/acme/api/pull/12"), r.prs.map { it.url })
+        assertEquals("PR #12", dev.claudefleet.mobile.model.resultPrLabel(r.prs[0]))
+        assertEquals(dev.claudefleet.mobile.model.prLabel(r.prs[0].url), dev.claudefleet.mobile.model.resultPrLabel(r.prs[0]))
     }
 
     /** A refused edit keeps the sheet open, with the hub's reason in it. */

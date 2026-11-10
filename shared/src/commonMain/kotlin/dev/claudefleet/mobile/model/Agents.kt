@@ -115,26 +115,28 @@ data class AgentActionGroup(
 
 /**
  * The waiting actions as cards, the desktop's `groupActions`: newest group
- * first, each group's items in [pending]'s order. Without the hub's key only
- * tool calls fold (an older hub's other proposals may be about anything).
+ * first, each group's items in [pending]'s order. Only tool calls fold, by
+ * the hub's key as given (or binding and tool from an older hub): two other
+ * proposals of one kind may be about anything (two reviews on two PRs), and
+ * a hub that keyed them by kind alone folded them under one Approve all.
  */
 fun groupAgentActions(pending: List<AgentAction>, about: List<ActionAbout>): List<AgentActionGroup> {
     val byId = about.associateBy { it.id }
-    val order = mutableListOf<String>()
-    val items = mutableMapOf<String, MutableList<Pair<AgentAction, ActionAbout?>>>()
+    val items = linkedMapOf<String, MutableList<Pair<AgentAction, ActionAbout?>>>()
     for (a in pending) {
         val ab = byId[a.id]
-        val key = ab?.group?.takeIf { it.isNotEmpty() } ?: if (a.kind == "mcp_call") {
-            val p = payloadOf(a)
-            fun f(k: String) = (p?.get(k) as? JsonPrimitive)?.contentOrNull.orEmpty()
-            "mcp_call:${f("binding")}.${f("tool")}"
+        val key = if (a.kind == "mcp_call") {
+            ab?.group?.takeIf { it.isNotEmpty() } ?: run {
+                val p = payloadOf(a)
+                fun f(k: String) = (p?.get(k) as? JsonPrimitive)?.contentOrNull.orEmpty()
+                "mcp_call:${f("binding")}.${f("tool")}"
+            }
         } else {
             "id:${a.id}"
         }
-        if (key !in items) order += key
         items.getOrPut(key) { mutableListOf() } += (a to ab)
     }
-    return order.map { key ->
+    return items.keys.map { key ->
         val list = items.getValue(key)
         val first = list.first()
         AgentActionGroup(

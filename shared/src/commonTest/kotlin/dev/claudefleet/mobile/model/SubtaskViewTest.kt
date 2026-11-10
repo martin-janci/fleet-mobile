@@ -27,11 +27,11 @@ class SubtaskViewTest {
     @Test
     fun a_subtask_line_says_key_priority_due_and_live_sessions() {
         val s = SubtaskView("item:2", 2, "FLT-2", "Changelog", "manual", "todo", 1, "2026-10-30", "urgent")
-        assertEquals("FLT-2 · Urgent · Overdue Oct 30 · 1 live", subtaskLine(s, today))
-        assertEquals("High · Due Fri", subtaskLine(s.copy(key = null, priority = "high", dueAt = "2026-11-06", liveSessions = 0), today))
-        // Medium is the usual case; a done subtask's date is history.
-        assertEquals("FLT-2", subtaskLine(s.copy(priority = "medium", status = "done", liveSessions = 0), today))
-        assertEquals("2 live", subtaskLine(s.copy(key = null, priority = null, dueAt = null, liveSessions = 2), today))
+        assertEquals(FactLine("FLT-2 · Urgent · Overdue · Oct 30 · 1 live", overdue = true), subtaskLine(s, today))
+        assertEquals(FactLine("High · Due Fri"), subtaskLine(s.copy(key = null, priority = "high", dueAt = "2026-11-06", liveSessions = 0), today))
+        // Medium is the usual case; a done subtask's date is history, never overdue.
+        assertEquals(FactLine("FLT-2"), subtaskLine(s.copy(priority = "medium", status = "done", liveSessions = 0), today))
+        assertEquals(FactLine("2 live"), subtaskLine(s.copy(key = null, priority = null, dueAt = null, liveSessions = 2), today))
         assertEquals(listOf("✓", "◐", "○", "○"), listOf("done", "in_progress", "todo", null).map(::subtaskMark))
     }
 }

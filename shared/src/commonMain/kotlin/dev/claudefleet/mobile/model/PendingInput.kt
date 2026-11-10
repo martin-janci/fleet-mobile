@@ -15,6 +15,12 @@ data class PendingOption(
     val label: String,
     val selected: Boolean = false,
     val checked: Boolean = false,
+    /**
+     * The hub's own word that this answer is saved beyond this session (a
+     * folder rule, "switch to auto mode"); omitted when false and by older
+     * hubs, which the label rule still covers.
+     */
+    val persists: Boolean = false,
 )
 
 /**

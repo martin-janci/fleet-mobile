@@ -49,6 +49,17 @@ class PromptPartsTest {
     }
 
     @Test
+    fun aHugeMissionIdDoesNotCrashAndAFinalNewlineIsNotTheEnd() {
+        // Review requests 9: NumberFormatException in composition; `$` matched before a final "\n".
+        assertEquals(
+            PromptParts(listOf(PromptChip.Mission(0, "Payments")), "Split the refunds step"),
+            promptParts("About mission #99999999999999999999 \"Payments\":\n\nSplit the refunds step"),
+        )
+        val t = "About mission #4 \"Payments v2\":\n"
+        assertEquals(PromptParts(emptyList(), t), promptParts(t), "as the desktop reads it")
+    }
+
+    @Test
     fun aPersonsOwnWordsStayAsTheyWrote() {
         for (t in listOf("About mission #4 Payments: go", "  [context] the person is looking at host x with no session selected. \"here\" means that host.", "Change it: bigger")) {
             assertEquals(PromptParts(emptyList(), t), promptParts(t))

@@ -79,9 +79,16 @@ data class MyWorkUiState(
     val loading: Boolean = false,
     /** A page has answered — "nothing here" is only said after one has. */
     val loaded: Boolean = false,
+    /**
+     * The page showing was read with the filters showing. A new filter keeps
+     * the old page on screen until its own arrives, and that page cannot say
+     * "No tasks match" the new filter.
+     */
+    val pageCurrent: Boolean = true,
     val orgs: List<WorkOrgSection> = emptyList(),
     /** Tasks under the filters, across every section. */
     val total: Int = 0,
+    /** The filters in use, as this hub acts on them ([WorkTreeFilters.forHub]). */
     val filters: WorkTreeFilters = WorkTreeFilters(),
     /** The search box as typed: [filters] holds it trimmed, so a space
      *  between two words survives until the next one is typed. */
@@ -95,6 +102,8 @@ data class MyWorkUiState(
     val planning: WorkTreeFacets = WorkTreeFacets(),
     /** The Sort chips this hub takes ([WorkTreeFilters.sortsFor]). */
     val sorts: List<String> = WorkTreeFilters.sortsFor(null),
+    /** The Priority group is drawn: the hub acts on `filters.priority` ([WorkTreeFilters.takesPriority]). */
+    val priorityFilter: Boolean = false,
     val viewsAvailable: Boolean = false,
     val views: List<WorkView> = emptyList(),
     /** The saved view whose filters are the ones showing, if any. */
@@ -128,7 +137,7 @@ data class MyWorkUiState(
     /** Why the hub refused the new task: said in its sheet, which stays open. */
     val newTaskError: Friendly? = null,
 ) {
-    val isEmpty: Boolean get() = loaded && orgs.isEmpty()
+    val isEmpty: Boolean get() = loaded && pageCurrent && orgs.isEmpty()
 
     /** Archived tasks are being shown ([WorkTreeFilters.archived]). */
     val showArchived: Boolean get() = filters.archived == true
@@ -201,6 +210,8 @@ class MyWorkViewModel(
 
     private data class Local(
         val page: WorkTreePage? = null,
+        /** The filters [page] was read with: until a new filter's page arrives, the old one says nothing about it. */
+        val readWith: WorkTreeFilters? = null,
         val sections: Map<String, SectionData> = emptyMap(),
         /** When [page] was read, in unix seconds. */
         val asOf: Long? = null,
@@ -304,7 +315,10 @@ class MyWorkViewModel(
     private suspend fun load() {
         val caps = fleet.capabilities.value
         if (!caps.lists(WORK, TREE)) return
-        val filters = local.value.filters
+        val wanted = local.value.filters
+        // What this hub acts on: a filter it would drop (or a sort it would
+        // refuse) is not sent, and not shown as on ([assemble]).
+        val filters = wanted.forHub(hubVersion())
         local.update { it.copy(loading = true) }
         try {
             val extended = local.value.sections.filterValues { it.extended }
@@ -331,6 +345,7 @@ class MyWorkViewModel(
             local.update {
                 it.copy(
                     page = page,
+                    readWith = wanted,
                     sections = distribute(page) + refreshed,
                     asOf = page.generatedAt ?: clock(),
                     loading = false,
@@ -364,7 +379,7 @@ class MyWorkViewModel(
         val generation = l.generation
         return scope.launch {
             try {
-                val answer = actions.tree(sectionFilters(filters, group), cursor = data.cursor, limit = pageSize, perTask = PER_TASK)
+                val answer = actions.tree(sectionFilters(filters.forHub(hubVersion()), group), cursor = data.cursor, limit = pageSize, perTask = PER_TASK)
                 local.update { now ->
                     // The filters changed while this was out, or a refresh
                     // replaced the list: its answer is for a list no longer
@@ -644,14 +659,11 @@ class MyWorkViewModel(
         }
     }
 
-    private suspend fun <T> readOrNull(action: String, read: suspend () -> T): T? = try {
-        read()
-    } catch (e: CancellationException) {
-        throw e
-    } catch (t: Throwable) {
-        if (t is HubError.Tool && t.isUnknownAction()) fleet.actionMissing(WORK, action)
-        null
-    }
+    private suspend fun <T> readOrNull(action: String, read: suspend () -> T): T? = fleet.readOrNull(action, read = read)
+
+    /** The hub's version, as the connection or the last snapshot names it. */
+    private fun hubVersion(status: ConnectionStatus = fleet.status.value): String? =
+        (status as? ConnectionStatus.Connected)?.hubVersion ?: fleet.hubVersion.value
 
     private fun readFilters(): WorkTreeFilters {
         val stored = prefs?.getStringList(FILTERS_KEY)?.firstOrNull() ?: return WorkTreeFilters()
@@ -672,16 +684,22 @@ class MyWorkViewModel(
         val connected = status.isConnected()
         val page = l.page
         val orgs = page?.let { sections(it, l) }.orEmpty()
+        val version = hubVersion(status)
+        // What this hub acts on; a remembered filter it would drop stays
+        // remembered (for a hub that takes it) but is not shown as on.
+        val shown = l.filters.forHub(version)
         return MyWorkUiState(
             available = true,
             loading = l.loading,
             loaded = page != null,
+            pageCurrent = l.readWith == l.filters,
             orgs = orgs,
             total = page?.total ?: 0,
-            filters = l.filters,
-            sorts = WorkTreeFilters.sortsFor((status as? ConnectionStatus.Connected)?.hubVersion ?: fleet.hubVersion.value),
+            filters = shown,
+            sorts = WorkTreeFilters.sortsFor(version),
+            priorityFilter = WorkTreeFilters.takesPriority(version),
             queryText = l.queryText,
-            searchOpen = l.searchOpen || l.filters.query != null,
+            searchOpen = l.searchOpen || shown.query != null,
             filtersOpen = l.filtersOpen,
             filterOrgs = page?.orgs.orEmpty(),
             filterTrackers = page?.trackers.orEmpty(),
@@ -706,7 +724,7 @@ class MyWorkViewModel(
             newTaskBusy = l.newTaskBusy,
             newTaskError = l.newTaskError,
             facets = workFacets(
-                l.filters,
+                shown,
                 orgName = { id -> page?.orgs?.firstOrNull { it.id == id }?.name?.takeIf { it.isNotBlank() } },
                 trackerName = { id -> page?.trackers?.firstOrNull { it.id == id }?.name?.takeIf { it.isNotBlank() } },
                 epicTitle = { ref -> page?.facets?.epics?.firstOrNull { it.ref.equals(ref, ignoreCase = true) }?.title },

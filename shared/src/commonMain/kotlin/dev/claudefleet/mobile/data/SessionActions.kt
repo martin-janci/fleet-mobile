@@ -109,6 +109,10 @@ interface SessionActions {
     suspend fun accountHeadroom(hostAlias: String, profile: String?): Headroom =
         throw UnsupportedOperationException("check_account_headroom")
 
+    /** [accountHeadroom] for work in [projectId]: the hub suggests no account the project forbids. */
+    suspend fun accountHeadroomIn(hostAlias: String, profile: String?, projectId: Long?): Headroom =
+        accountHeadroom(hostAlias, profile)
+
     /**
      * Send later: typed now if idle, else kept by the hub for the next idle
      * moment (`queue_prompt`); [timing] holds it until a time, until the
@@ -240,6 +244,9 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
 
     override suspend fun accountHeadroom(hostAlias: String, profile: String?): Headroom =
         session.withClient { it.checkAccountHeadroom(hostAlias, profile) }
+
+    override suspend fun accountHeadroomIn(hostAlias: String, profile: String?, projectId: Long?): Headroom =
+        session.withClient { it.checkAccountHeadroom(hostAlias, profile, projectId) }
 
     override suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming): QueuePromptResult =
         session.withClient { it.queuePrompt(sessionId, prompt, timing) }

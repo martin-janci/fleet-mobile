@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.model.prLabel
 import dev.claudefleet.mobile.ui.components.formatUsd
 import kotlin.test.Test
 import kotlin.test.assertEquals

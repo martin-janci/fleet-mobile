@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.model
 
+import dev.claudefleet.mobile.ui.components.isWebUrl
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -62,7 +63,8 @@ fun taskResultFrom(v: JsonElement): TaskResult? {
             .mapNotNull { (it as? JsonObject)?.get("title").str() },
         prs = (v["prs"] as? JsonArray).orEmpty().mapNotNull { p ->
             val o = p as? JsonObject ?: return@mapNotNull null
-            val url = o["url"].str()?.takeIf { it.startsWith("https://") } ?: return@mapNotNull null
+            // http(s) only, the rule every hub-sent link on the phone opens under.
+            val url = o["url"].str()?.takeIf(::isWebUrl) ?: return@mapNotNull null
             ResultPr(url, (o["number"] as? JsonPrimitive)?.longOrNull, o["state"].str())
         },
         followups = (v["followups"] as? JsonArray).orEmpty().mapIndexedNotNull { i, f ->
@@ -83,6 +85,12 @@ fun resultGateLine(r: TaskResult): String = when (r.gate) {
     else -> "Not verified yet"
 }
 
-/** "PR #12 · merged", or the URL's tail when the hub sent no number. */
+/** A pull request's URL as the few characters a row has room for: "PR #9", or "PR" when it has no number. */
+fun prLabel(url: String): String =
+    PR_NUMBER.find(url)?.groupValues?.get(1)?.let { "PR #$it" } ?: "PR"
+
+private val PR_NUMBER = Regex("""/(?:pull|merge_requests)/(\d+)""")
+
+/** "PR #12 · merged": the hub's number, else the URL's ([prLabel]) — the same words as a session's PR on the same screen. */
 fun resultPrLabel(p: ResultPr): String =
-    listOfNotNull(p.number?.let { "PR #$it" } ?: p.url.substringAfterLast('/').let { "PR $it" }, p.state?.lowercase()).joinToString(" · ")
+    listOfNotNull(p.number?.let { "PR #$it" } ?: prLabel(p.url), p.state?.lowercase()).joinToString(" · ")

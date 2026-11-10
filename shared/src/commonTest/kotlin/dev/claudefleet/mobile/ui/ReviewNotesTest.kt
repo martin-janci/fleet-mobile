@@ -69,7 +69,101 @@ class ReviewNotesTest {
         assertEquals(2, fake.sends.single().size)
         assertTrue(vm.state.value.drafts.isEmpty())
         assertEquals(setOf(a, b), vm.state.value.sentByAnchor.keys)
-        assertEquals("●1", noteBadge(a, vm.state.value))
+        assertEquals("●1", noteBadge(a, "x", vm.state.value))
+        assertNull(noteBadge(a, "x changed", vm.state.value), "a note sits only where the line still says what it quoted")
+    }
+
+    @Test
+    fun drafts_and_the_pending_id_outlive_the_visit_and_the_process() = runTest {
+        // Review notes 7: tapping back dropped the drafts and the retry id.
+        val prefs = dev.claudefleet.mobile.store.FakePrefs()
+        val memory = NoteDraftMemory(prefs).apply { forHub("https://hub") }
+        val fake = Fake(failSend = RuntimeException("timeout"))
+        val first = ReviewNotesViewModel(7, fake, backgroundScope, now = { 1000 }, memory = memory)
+        first.openLine(a, "x"); first.saveDraft("one")
+        first.send()?.join()
+
+        // A new visit, in a new process: the same drafts, and a retry reuses the id.
+        val reloaded = NoteDraftMemory(prefs).apply { forHub("https://hub") }
+        val second = ReviewNotesViewModel(7, fake, backgroundScope, now = { 2000 }, memory = reloaded)
+        assertEquals(NoteDraft(a, "x", "one"), second.state.value.drafts[a])
+        fake.failSend = null
+        second.send()?.join()
+        assertEquals(fake.sendIds[0], fake.sendIds[1], "same notes, same id: the hub types nothing twice")
+        assertTrue(second.state.value.drafts.isEmpty())
+        assertTrue(NoteDraftMemory(prefs).apply { forHub("https://hub") }.drafts(7).isEmpty())
+
+        // Another hub's session 7 is not this one's.
+        memory.keepDrafts(7, mapOf(a to NoteDraft(a, "x", "kept")))
+        memory.forHub("https://other")
+        assertTrue(memory.drafts(7).isEmpty())
+    }
+
+    @Test
+    fun a_retry_reuses_the_id_only_for_the_same_notes_and_drops_only_what_it_carried() = runTest {
+        // Review notes 3: an id reused for edited notes came back `repeat` and
+        // took every draft, the new one too.
+        val fake = Fake(failSend = RuntimeException("timeout"))
+        val vm = ReviewNotesViewModel(7, fake, backgroundScope, now = { 1000 }, memory = NoteDraftMemory())
+        vm.openLine(a, "x"); vm.saveDraft("one")
+        vm.send()?.join()
+        vm.openLine(b, "y"); vm.saveDraft("two")
+        fake.failSend = null
+        vm.send()?.join()
+        assertTrue(fake.sendIds[0] != fake.sendIds[1], "other notes are a new send")
+
+        val repeating = object : ReviewNoteActions by Fake() {
+            override suspend fun send(sessionId: Long, clientMsgId: String, drafts: List<NoteDraft>): ReviewNotesSent =
+                ReviewNotesSent(sessionId, emptyList(), delivered = true, repeat = true)
+        }
+        val memory = NoteDraftMemory()
+        memory.keepDrafts(7, mapOf(a to NoteDraft(a, "x", "one")))
+        val vm2 = ReviewNotesViewModel(7, repeating, backgroundScope, now = { 1000 }, memory = memory)
+        val job = vm2.send()
+        vm2.openLine(b, "y"); vm2.saveDraft("written meanwhile")
+        job?.join()
+        assertEquals(setOf(b), vm2.state.value.drafts.keys, "only the drafts that were in that send go")
+    }
+
+    @Test
+    fun the_hubs_in_flight_and_conflict_refusals_keep_the_drafts_in_plain_words() = runTest {
+        val memory = NoteDraftMemory()
+        val fake = Fake(failSend = HubError.Tool("E_IN_FLIGHT", "client_msg_id rn-1 is still being typed"))
+        val vm = ReviewNotesViewModel(7, fake, backgroundScope, now = { 1000 }, memory = memory)
+        vm.openLine(a, "x"); vm.saveDraft("one")
+        vm.send()?.join()
+        assertEquals("Still being typed", vm.state.value.error?.title)
+        assertEquals(1, vm.state.value.drafts.size)
+        assertNotNull(memory.pending(7), "the hub still types this send: its id stays")
+
+        fake.failSend = HubError.Tool("E_CONFLICT", "client_msg_id rn-1 carried other notes")
+        vm.send()?.join()
+        assertEquals("Notes changed since the last try", vm.state.value.error?.title)
+        assertEquals(1, vm.state.value.drafts.size)
+        assertNull(memory.pending(7), "the next send is a new one")
+    }
+
+    @Test
+    fun a_failed_resolve_is_said_in_the_sheet() = runTest {
+        val note = ReviewNote(id = 5, path = a.path, line = a.line, side = a.side, quote = "x", body = "b")
+        val failing = object : ReviewNoteActions by Fake(sent = listOf(note)) {
+            override suspend fun resolve(sessionId: Long, noteId: Long, resolved: Boolean): ReviewNote = throw HubError.Tool("E_FORBIDDEN", "no")
+        }
+        val vm = ReviewNotesViewModel(7, failing, backgroundScope, now = { 1000 })
+        vm.refresh().join()
+        vm.resolve(note)?.join()
+        assertNotNull(vm.state.value.resolveError)
+        assertNull(vm.state.value.error)
+    }
+
+    @Test
+    fun notes_whose_line_changed_or_that_sit_elsewhere_are_listed_above_the_diff() {
+        val lines = diffLines("@@ -1,2 +1,2 @@\n-old\n+let x = 2;\n same")
+        val on = ReviewNote(id = 1, path = "f", line = 1, side = NoteSide.NEW, quote = "let x = 2;", body = "on")
+        val moved = ReviewNote(id = 2, path = "f", line = 2, side = NoteSide.NEW, quote = "let y = 1;", body = "changed since")
+        val whole = ReviewNote(id = 3, path = "f", line = null, body = "whole file")
+        val other = ReviewNote(id = 4, path = "g", line = 1, quote = "let x = 2;", body = "other file")
+        assertEquals(listOf(2L, 3L, 4L), notesElsewhere("f", lines, listOf(on, moved, whole, other)).map { it.id })
     }
 
     @Test
@@ -103,7 +197,7 @@ class ReviewNotesTest {
         val vm = ReviewNotesViewModel(7, Fake(sent = listOf(note), delivered = false), backgroundScope, now = { 1000 })
         vm.refresh().join()
         vm.resolve(note)?.join()
-        assertEquals("✓", noteBadge(a, vm.state.value))
+        assertEquals("✓", noteBadge(a, "", vm.state.value))
         vm.openLine(b, "y"); vm.saveDraft("two")
         vm.send()?.join()
         assertEquals("Queued: it goes in when the agent's turn ends.", vm.state.value.notice)

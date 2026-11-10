@@ -198,6 +198,17 @@ class RepoViewModelTest {
             listOf(LineKind.Meta, LineKind.Meta, LineKind.Meta, LineKind.Hunk, LineKind.Removed, LineKind.Added, LineKind.Plain),
             kinds,
         )
+        // Review notes 11: inside a hunk, `--- x` is a removed `-- x` line and counts.
+        val sql = diffLines("diff --git a/m.sql b/m.sql\n--- a/m.sql\n+++ b/m.sql\n@@ -3,3 +3,2 @@\n--- old comment\n-DROP x;\n+++y\n keep")
+        assertEquals(
+            listOf(LineKind.Meta, LineKind.Meta, LineKind.Meta, LineKind.Hunk, LineKind.Removed, LineKind.Removed, LineKind.Added, LineKind.Plain),
+            sql.map { it.kind },
+        )
+        assertEquals(4, sql[5].old, "the line after a removed `-- ` keeps its number")
+        assertEquals(3, sql[6].new)
+        assertEquals(5 to 4, sql[7].old to sql[7].new)
+        // A second file's headers are headers again.
+        assertEquals(LineKind.Meta, diffLines("@@ -1 +1 @@\n-a\ndiff --git a/y b/y\n--- a/y\n+++ b/y").last().kind)
         assertEquals("2026-10-04 18:10", shortDate("2026-10-04T18:10:13+02:00"))
         assertEquals("yesterday", shortDate("yesterday"))
     }

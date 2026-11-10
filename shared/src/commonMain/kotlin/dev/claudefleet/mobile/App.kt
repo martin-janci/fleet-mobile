@@ -404,6 +404,7 @@ import dev.claudefleet.mobile.ui.SessionsTab
 import dev.claudefleet.mobile.ui.BulkHandlers
 import dev.claudefleet.mobile.ui.SessionsSheet
 import dev.claudefleet.mobile.ui.DraftMemory
+import dev.claudefleet.mobile.ui.NoteDraftMemory
 import dev.claudefleet.mobile.ui.SessionsViewModel
 import dev.claudefleet.mobile.ui.FleetSettingsSection
 import dev.claudefleet.mobile.ui.FleetSaveBar
@@ -745,6 +746,9 @@ class AppContainer(
 
     /** Unsent text per session, across visits to it and across a killed process. */
     val drafts: DraftMemory = DraftMemory(prefs)
+
+    /** Review-note drafts and the pending send's id per session, beside [drafts]. */
+    val noteDrafts: NoteDraftMemory = NoteDraftMemory(prefs)
     val hints: Hints = Hints(prefs)
 
     /** This phone's own settings: notification kinds and the theme (redesign 14.11). */
@@ -773,6 +777,7 @@ class AppContainer(
     fun repository(credentials: Credentials, scope: CoroutineScope): FleetRepository {
         // Another hub's session ids are not this one's: its drafts go (review w22-5).
         drafts.forHub(credentials.hub)
+        noteDrafts.forHub(credentials.hub)
         return FleetRepository(
             client = HubClient(http, credentials.hub, credentials.token),
             events = HubEventStream(http, credentials.hub, credentials.token),
@@ -1322,8 +1327,15 @@ private fun FleetRoute(
     val missions = remember(repository, scope) { MissionsViewModel(repository, container.missionActions, scope, credentials.canWrite) }
     val agentActionsVm = remember(repository, scope) { AgentActionsViewModel(repository, container.builtInAgentActions, scope, credentials.canWrite) }
     val agentActionsState by agentActionsVm.state.collectAsState()
-    val reviewRequestsVm = remember(scope) { ReviewRequestsViewModel(container.reviewRequestActions, scope) }
+    val reviewRequestsVm = remember(repository, scope) { ReviewRequestsViewModel(container.reviewRequestActions, scope, repository.capabilities) }
     val reviewRequestsState by reviewRequestsVm.state.collectAsState()
+    // Review asks count on the Inbox badge, so they are read on every
+    // connect (and once the hub's tools are known), not only on opening Inbox.
+    val reviewAsksLive = repository.status.collectAsState().value is ConnectionStatus.Connected
+    val reviewAsksServed = repository.capabilities.collectAsState().value.has("review_request", "list")
+    LaunchedEffect(reviewRequestsVm, reviewAsksLive, reviewAsksServed) {
+        if (reviewAsksLive && reviewAsksServed) reviewRequestsVm.refresh()
+    }
     val missionsState by missions.state.collectAsState()
     // The Inbox rows' inline answers (G5.4): the session screen's own calls.
     // Here, not under the Inbox, so a Not waiting outlives a tab switch.
@@ -1562,10 +1574,12 @@ private fun FleetRoute(
                     val barAccess by repository.access.collectAsState()
                     // The Inbox's own rows, so the badge, the Inbox and Today agree (review r09 B1).
                     // A mission waiting on a person counts too (G5.4), as the Inbox's header does.
-                    val needYou = remember(barRows, barAccess, missionsState.missions, missionsState.available, agentActionsState.pending) {
+                    // And a review a colleague asked of this person, as the Inbox's header counts it.
+                    val needYou = remember(barRows, barAccess, missionsState.missions, missionsState.available, agentActionsState.pending, reviewRequestsState.asks) {
                         inboxRows(barRows, barAccess).size +
                             (if (missionsState.available) missionWaits(missionsState.missions).size else 0) +
-                            agentActionsState.pending.size
+                            agentActionsState.pending.size +
+                            reviewRequestsState.asks.size
                     }
                     // The Orbit Fleet bar: one badge, the Needs you count, on
                     // Inbox. Work's To review count stays on the Work screen.
@@ -1874,8 +1888,7 @@ private fun FleetRoute(
                         onOpenSession = nav::open,
                         onDismissError = usage::dismissError,
                         onRename = { uuid, name -> usage.rename(uuid, name); Unit },
-                        onSetProjects = { uuid, ids -> usage.setForbiddenProjects(uuid, ids); Unit },
-                        onSetOrgs = { uuid, ids -> usage.setForbiddenOrgs(uuid, ids); Unit },
+                        onSetBlocks = { uuid, projects, orgs -> usage.setAccountBlocks(uuid, projects, orgs); Unit },
                         onAutoSwitch = { usage.setAutoSwitch(enabled = it); Unit },
                         onAutoSwitchContinue = { usage.setAutoSwitch(continueAfter = it); Unit },
                     )
@@ -2145,6 +2158,7 @@ private fun FleetRoute(
                         onRefresh = {
                             sessions.refresh()
                             if (missionsState.available) missions.refresh()
+                            reviewRequestsVm.refresh()
                         },
                         onOpenSession = nav::open,
                         // Today opens here, and from Control when asked about the day (TodayLink).
@@ -3334,7 +3348,9 @@ private fun SessionRoute(
     val repoFiles = repoVm?.state?.collectAsState()?.value
     // Notes on the diff's lines (claude-fleet review notes), where the hub serves them.
     val notesVm = if (repoVm != null && caps.reviewNotes) {
-        remember(sessionId, scope) { ReviewNotesViewModel(sessionId, container.reviewNoteActions, scope) }
+        // Drafts and the pending send id live in the container, per hub and
+        // session: this view model is made per visit (review notes 3, 7).
+        remember(sessionId, scope) { ReviewNotesViewModel(sessionId, container.reviewNoteActions, scope, memory = container.noteDrafts) }
     } else {
         null
     }
@@ -3597,6 +3613,7 @@ private fun SessionRoute(
                                     onResolve = { notesVm.resolve(it) },
                                     onDismissError = notesVm::dismissError,
                                     onDismissNotice = notesVm::dismissNotice,
+                                    onDismissResolveError = notesVm::dismissResolveError,
                                 )
                             } else {
                                 null

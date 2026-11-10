@@ -70,4 +70,23 @@ class TurnNavTest {
         kotlin.test.assertEquals(emptyList(), findTurns(rows, "  "))
         kotlin.test.assertEquals(emptyList(), findTurns(rows, "deploy"))
     }
+
+    @Test
+    fun find_searches_what_the_bubble_shows_and_my_messages_are_mine() {
+        // Review requests 9: a word only in a chip's head matched with nothing
+        // highlighted; My messages matched a colleague's prompt.
+        val head = "[context] the person is looking at host staging with no session selected. \"here\" means that host.\n\n"
+        val turns = listOf(
+            dev.claudefleet.mobile.model.ConvTurn(prompt = head + "restart the api", at = "t1"),
+            dev.claudefleet.mobile.model.ConvTurn(
+                prompt = "restart the db",
+                at = "t2",
+                author = dev.claudefleet.mobile.model.TurnAuthor("Ada · phone", personId = 2, mine = false),
+            ),
+        )
+        val rows = newestFirst(turns)
+        kotlin.test.assertEquals(emptyList(), findTurns(rows, "staging"), "the host is a chip, not text")
+        kotlin.test.assertEquals(listOf(0, 1), findTurns(rows, "restart"))
+        kotlin.test.assertEquals(listOf(1), findTurns(rows, "restart", FindScope.Mine))
+    }
 }

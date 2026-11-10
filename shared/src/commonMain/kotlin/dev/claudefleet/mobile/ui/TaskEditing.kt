@@ -26,8 +26,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import dev.claudefleet.mobile.model.ISO_DATE
 import dev.claudefleet.mobile.model.PromoteTarget
 import dev.claudefleet.mobile.model.StatusCategory
+import dev.claudefleet.mobile.model.epochDayOf
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 
 /*
@@ -56,11 +58,9 @@ internal const val TASK_TITLE_MAX = 120
 internal fun dueDateError(raw: String): String? {
     val s = raw.trim()
     if (s.isEmpty()) return null
-    val m = Regex("""^(\d{4})-(\d{2})-(\d{2})$""").matchEntire(s) ?: return "A date is YYYY-MM-DD, like 2026-10-23."
-    val (y, mo, d) = m.destructured.toList().map { it.toInt() }
-    val leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
-    val days = intArrayOf(31, if (leap) 29 else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
-    return if (y in 1970..9999 && mo in 1..12 && d in 1..days[mo - 1]) null else "That day does not exist."
+    if (!ISO_DATE.matches(s)) return "A date is YYYY-MM-DD, like 2026-10-23."
+    // The calendar is [epochDayOf]'s; 1970 on, as the hub keeps it.
+    return if (s.take(4).toInt() >= 1970 && epochDayOf(s) != null) null else "That day does not exist."
 }
 
 /** What is wrong with a typed title, or null. */
@@ -111,19 +111,26 @@ internal fun estimateFieldText(estimate: Double): String = when {
     else -> estimate.toString()
 }
 
-/** The estimate field as a number: 0 when blank (no estimate), null when it is not a number. */
-internal fun parseEstimate(raw: String): Double? = raw.trim().let { if (it.isEmpty()) 0.0 else it.toDoubleOrNull() }
+/**
+ * The estimate field as a number: 0 when blank (no estimate), null when it is
+ * not a number. A decimal comma ("2,5"), what many keypads offer, is a point.
+ */
+internal fun parseEstimate(raw: String): Double? = raw.trim().replace(',', '.').let { if (it.isEmpty()) 0.0 else it.toDoubleOrNull() }
 
-/** Why the labels or the estimate cannot be saved, as the hub checks them; null when they can. */
-internal fun taskSizeError(labels: String, estimate: String): String? {
+/** Why the labels cannot be saved, as the hub checks them; null when they can. Said under the Labels field. */
+internal fun taskLabelsError(labels: String): String? {
     val tags = parseAssigneesText(labels)
     if (tags.size > LABELS_MAX) return "At most $LABELS_MAX labels."
     // Characters as the hub counts them (code points: an emoji is one).
     if (tags.any { t -> t.count { !it.isLowSurrogate() } > LABEL_MAX_CHARS }) return "A label is at most $LABEL_MAX_CHARS characters."
     if (tags.any { t -> t.any { it.isISOControl() } }) return "A label has no control characters."
-    val e = parseEstimate(estimate)
-    if (e == null || !e.isFinite() || e < 0.0 || e > ESTIMATE_MAX) return "An estimate is a number from 0 to ${ESTIMATE_MAX.toLong()}."
     return null
+}
+
+/** Why the estimate cannot be saved, as the hub checks it; null when it can. Said under the Estimate field. */
+internal fun taskEstimateError(estimate: String): String? {
+    val e = parseEstimate(estimate)
+    return if (e == null || !e.isFinite() || e < 0.0 || e > ESTIMATE_MAX) "An estimate is a number from 0 to ${ESTIMATE_MAX.toLong()}." else null
 }
 
 /** The priorities a person sets, most pressing first, `""` for none (the desktop's Edit task). */
@@ -147,6 +154,12 @@ internal fun taskEditOf(
     labels: String = before.labels.joinToString(", "),
     estimate: String = estimateFieldText(before.estimate),
     unit: String = before.estimateUnit,
+    /**
+     * The hub's `work_link` takes priority, labels and estimate
+     * (`caps.accepts(WORK_LINK, "priority")`). An older one would drop them
+     * and call the edit saved, so without it they are never sent.
+     */
+    sizes: Boolean = true,
 ): TaskEdit {
     // The desktop's rule: a new size carries its unit; the same size in
     // another unit re-units it; a cleared one sends 0 alone.
@@ -157,12 +170,15 @@ internal fun taskEditOf(
         notes = notes.trim().takeIf { !notesLocked && it != before.notes.trim() },
         assignees = parseAssigneesText(assignees).takeIf { it != before.assignees },
         dueAt = due.trim().takeIf { it != before.dueAt },
-        priority = priority.takeIf { it != before.priority },
-        labels = parseAssigneesText(labels).takeIf { it != before.labels },
-        estimate = size.takeIf { sizeChanged },
-        estimateUnit = unit.takeIf { size > 0.0 && (sizeChanged || it != before.estimateUnit) },
+        priority = priority.takeIf { sizes && it != before.priority },
+        labels = parseAssigneesText(labels).takeIf { sizes && it != before.labels },
+        estimate = size.takeIf { sizes && sizeChanged },
+        estimateUnit = unit.takeIf { sizes && size > 0.0 && (sizeChanged || it != before.estimateUnit) },
     )
 }
+
+/** [edit] as a hub that takes no priority, labels or estimate gets it: those three left out. */
+internal fun TaskEdit.withoutSizes(): TaskEdit = copy(priority = null, labels = null, estimate = null, estimateUnit = null)
 
 /** The fields of a task as the Edit sheet starts them. */
 data class TaskEditFields(
@@ -212,20 +228,27 @@ internal fun TaskEditSheet(
     onDismissError: () -> Unit,
     onCancel: () -> Unit,
     onSave: (TaskEdit) -> Unit,
+    /** Priority, labels and estimate are offered (and sent): the hub's `work_link` takes them. */
+    sizes: Boolean = true,
 ) {
-    var title by remember { mutableStateOf(before.title) }
-    var notes by remember { mutableStateOf(before.notes) }
-    var assignees by remember { mutableStateOf(before.assignees.joinToString(", ")) }
-    var due by remember { mutableStateOf(before.dueAt) }
-    var priority by remember { mutableStateOf(before.priority) }
-    var labels by remember { mutableStateOf(before.labels.joinToString(", ")) }
-    var estimate by remember { mutableStateOf(estimateFieldText(before.estimate)) }
-    var unit by remember { mutableStateOf(before.estimateUnit) }
+    // What the sheet opened on, once: [before] follows every re-read of the
+    // task, and diffing against a later one would send this sheet's stale
+    // copy of a field someone else changed meanwhile (the desktop's `initial`).
+    val start = remember { before }
+    var title by remember { mutableStateOf(start.title) }
+    var notes by remember { mutableStateOf(start.notes) }
+    var assignees by remember { mutableStateOf(start.assignees.joinToString(", ")) }
+    var due by remember { mutableStateOf(start.dueAt) }
+    var priority by remember { mutableStateOf(start.priority) }
+    var labels by remember { mutableStateOf(start.labels.joinToString(", ")) }
+    var estimate by remember { mutableStateOf(estimateFieldText(start.estimate)) }
+    var unit by remember { mutableStateOf(start.estimateUnit) }
     val titleError = taskTitleError(title)
     val dueError = dueDateError(due)
-    val sizeError = taskSizeError(labels, estimate)
-    val edit = taskEditOf(title, notes, assignees, due, before, notesLocked, priority, labels, estimate, unit)
-    val canSave = connected && !busy && titleError == null && dueError == null && sizeError == null && !edit.isEmpty
+    val labelsError = if (sizes) taskLabelsError(labels) else null
+    val estimateError = if (sizes) taskEstimateError(estimate) else null
+    val edit = taskEditOf(title, notes, assignees, due, start, notesLocked, priority, labels, estimate, unit, sizes)
+    val canSave = connected && !busy && titleError == null && dueError == null && labelsError == null && estimateError == null && !edit.isEmpty
     ModalBottomSheet(onDismissRequest = onCancel) {
         Column(
             modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
@@ -270,33 +293,37 @@ internal fun TaskEditSheet(
                 supportingText = { Text(dueError ?: "Blank: no due date.") },
                 modifier = Modifier.fillMaxWidth(),
             )
-            Text("Priority", style = MaterialTheme.typography.labelMedium)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                for ((value, label) in TASK_PRIORITIES) {
-                    FilterChip(selected = priority == value, onClick = { priority = value }, label = { Text(label) })
+            if (sizes) {
+                Text("Priority", style = MaterialTheme.typography.labelMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for ((value, label) in TASK_PRIORITIES) {
+                        FilterChip(selected = priority == value, onClick = { priority = value }, label = { Text(label) })
+                    }
                 }
-            }
-            OutlinedTextField(
-                value = labels,
-                onValueChange = { labels = it },
-                label = { Text("Labels") },
-                placeholder = { Text("Comma-separated") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = estimate,
-                onValueChange = { estimate = it },
-                label = { Text("Estimate") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                isError = sizeError != null,
-                supportingText = { Text(sizeError ?: "Blank: no estimate.") },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                for ((value, label) in ESTIMATE_UNITS) {
-                    FilterChip(selected = unit == value, onClick = { unit = value }, label = { Text(label) })
+                OutlinedTextField(
+                    value = labels,
+                    onValueChange = { labels = it },
+                    label = { Text("Labels") },
+                    placeholder = { Text("Comma-separated") },
+                    singleLine = true,
+                    isError = labelsError != null,
+                    supportingText = labelsError?.let { { Text(it) } },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = estimate,
+                    onValueChange = { estimate = it },
+                    label = { Text("Estimate") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    isError = estimateError != null,
+                    supportingText = { Text(estimateError ?: "Blank: no estimate.") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for ((value, label) in ESTIMATE_UNITS) {
+                        FilterChip(selected = unit == value, onClick = { unit = value }, label = { Text(label) })
+                    }
                 }
             }
             if (!connected) {

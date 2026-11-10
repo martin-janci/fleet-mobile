@@ -58,10 +58,12 @@ import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.model.priorityLabel
 import dev.claudefleet.mobile.model.StatusCategory
-import dev.claudefleet.mobile.model.dueChip
-import dev.claudefleet.mobile.model.localEpochDay
-import dev.claudefleet.mobile.epochSeconds
-import dev.claudefleet.mobile.utcOffsetSeconds
+import dev.claudefleet.mobile.model.FactLine
+import dev.claudefleet.mobile.model.labelChips
+import dev.claudefleet.mobile.model.openDue
+import dev.claudefleet.mobile.model.prLabel
+import dev.claudefleet.mobile.model.rowFacts
+import dev.claudefleet.mobile.model.todayEpochDay
 import dev.claudefleet.mobile.model.estimateLabel
 import dev.claudefleet.mobile.model.GroupSource
 import dev.claudefleet.mobile.model.LinkState
@@ -144,7 +146,21 @@ private fun countWords(word: StatusWord, n: Int): String = "$n ${word.label.lowe
  */
 data class TaskLine(val word: StatusWord?, val lead: String?, val line: String)
 
-internal fun taskLine(task: WorkTask, rowOf: (Long) -> SessionRow?, labelOf: (String) -> String? = { null }): TaskLine {
+/**
+ * What a My work row says first on either layout, the desktop row's chips:
+ * an urgent or high priority, and the due date ("Overdue · Oct 30"), none
+ * once the task is done. [todayEpochDay] null leaves the date out.
+ */
+internal fun taskFacts(task: WorkTask, todayEpochDay: Long?): FactLine =
+    rowFacts(task.priority, task.dueAt, task.statusCategory == StatusCategory.Done, todayEpochDay)
+
+internal fun taskLine(
+    task: WorkTask,
+    rowOf: (Long) -> SessionRow?,
+    labelOf: (String) -> String? = { null },
+    /** The local day, for the due date ([taskFacts]); null leaves it out. */
+    todayEpochDay: Long? = null,
+): TaskLine {
     val live = task.sessions.filter { it.state == LinkState.Active }
     val words = live.mapNotNull { link -> linkWord(link, link.sessionId?.let(rowOf)) }
     val counts = BAND_ORDER.filterNotNull().mapNotNull { w -> words.count { it == w }.takeIf { it > 0 }?.let { w to it } }
@@ -159,6 +175,7 @@ internal fun taskLine(task: WorkTask, rowOf: (Long) -> SessionRow?, labelOf: (St
         else -> blocked
     }
     val rest = buildList {
+        taskFacts(task, todayEpochDay).text.takeIf { it.isNotEmpty() }?.let { add(it) }
         if (blocked != null && blocked != lead) add(blocked)
         if (quiet) {
             val past = task.sessions.filter { it.state == LinkState.Ended }
@@ -445,7 +462,7 @@ internal fun PhoneTaskRow(
     /** The task's live session, one tap away whatever the row itself opens. Null draws nothing. */
     onOpenSession: (() -> Unit)? = null,
 ) {
-    val line = taskLine(task, rowOf, labelOf)
+    val line = taskLine(task, rowOf, labelOf, todayEpochDay(nowSeconds))
     val chips = buildList {
         if (task.review) add("Suggested link")
         if (task.orgMixed) add("Two organisations")
@@ -632,7 +649,7 @@ fun PhoneTaskScreen(
             },
         )
         HubBanner(connection, asOf = state.stale?.substringAfter("as of ", "")?.takeIf { it.isNotBlank() }, onRetry = h.onRefresh)
-        ErrorBanner(state.error, onDismiss = h.onDismissError)
+        ErrorBanner(state.error ?: state.loadError, onDismiss = h.onDismissError)
         if (state.error != null && state.conflict) ReloadRow(h.onRefresh)
         if ((state.loading || state.busy) && rememberLoaderVisible(true)) DotWave(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
 
@@ -666,12 +683,12 @@ fun PhoneTaskScreen(
                             OrbitChip(listOfNotNull(g.title, groupChipWords(g.source)).joinToString(" · "))
                         }
                         for (a in task.assignees.take(2)) OrbitChip(a)
-                        dueChip(task.dueAt, localEpochDay(epochSeconds(), utcOffsetSeconds(epochSeconds())), task.statusCategory == StatusCategory.Done)?.let {
+                        openDue(task.dueAt, task.statusCategory == StatusCategory.Done, todayEpochDay(nowSeconds))?.let {
                             OrbitChip(it.text, word = if (it.overdue) StatusWord.FAILED else null)
                         }
                         priorityLabel(task.priority)?.let { OrbitChip("Priority $it") }
                         estimateLabel(task.estimate, task.estimateUnit)?.let { OrbitChip(it) }
-                        for (l in task.labels.take(4)) OrbitChip(l)
+                        for (l in labelChips(task.labels)) OrbitChip(l)
                         task.trackerName?.takeIf { it.isNotBlank() }?.let { OrbitChip(it) }
                     }
                     if (task.unavailable) Text("The tracker no longer answers for this ticket.", color = o.statusFailed, fontSize = 13.sp)

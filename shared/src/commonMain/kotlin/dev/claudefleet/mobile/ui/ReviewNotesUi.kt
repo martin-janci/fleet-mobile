@@ -52,6 +52,7 @@ data class ReviewNotesUi(
     val onResolve: (ReviewNote) -> Unit,
     val onDismissError: () -> Unit,
     val onDismissNotice: () -> Unit,
+    val onDismissResolveError: () -> Unit = {},
 )
 
 internal const val NOTES_SEND_TAG = "review-notes-send"
@@ -59,12 +60,13 @@ internal const val NOTE_SHEET_FIELD_TAG = "review-note-field"
 
 /**
  * What the gutter shows beside a line: ✎ for a draft here, a dot with the
- * number of open sent notes, ✓ when every sent note on it is resolved.
+ * number of open sent notes, ✓ when every sent note on it is resolved. A
+ * sent note counts only where the row's text, [rowQuote], is what it quoted.
  */
-internal fun noteBadge(anchor: NoteAnchor?, s: ReviewNotesUiState): String? {
+internal fun noteBadge(anchor: NoteAnchor?, rowQuote: String, s: ReviewNotesUiState): String? {
     if (anchor == null) return null
     if (anchor in s.drafts) return "✎"
-    val sent = s.sentByAnchor[anchor].orEmpty()
+    val sent = s.sentOn(anchor, rowQuote)
     if (sent.isEmpty()) return null
     val open = sent.count { !it.resolved }
     return if (open == 0) "✓" else "●$open"
@@ -128,7 +130,9 @@ internal fun ReviewNoteSheet(notes: ReviewNotesUi) {
                 )
             }
         }
-        for (n in s.sentByAnchor[anchor].orEmpty()) SentNote(n, notes, busy = n.id in s.resolving)
+        // A failed Resolve is said here: the diff's banner is under this sheet.
+        ErrorBanner(s.resolveError, onDismiss = notes.onDismissResolveError)
+        for (n in s.sentOn(anchor, s.openQuote)) SentNote(n, notes, busy = n.id in s.resolving)
         OutlinedTextField(
             value = text,
             onValueChange = { text = it.take(REVIEW_NOTE_BODY_MAX) },
@@ -138,6 +142,47 @@ internal fun ReviewNoteSheet(notes: ReviewNotesUi) {
         )
         if (draft != null) {
             TextButton(onClick = { notes.onDelete(anchor) }) { Text("Delete draft") }
+        }
+    }
+}
+
+internal const val NOTES_ELSEWHERE_TAG = "review-notes-elsewhere"
+
+/**
+ * Sent notes no row of this diff shows (review notes 4): the line changed
+ * since, the note is on the whole file or on another file. Listed above the
+ * diff with where they were written and what they quoted, so each can still
+ * be read and resolved. Folded to its heading until opened.
+ */
+@Composable
+internal fun NotesElsewhere(elsewhere: List<ReviewNote>, notes: ReviewNotesUi) {
+    if (elsewhere.isEmpty()) return
+    var open by remember { mutableStateOf(false) }
+    val s = notes.state
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth().testTag(NOTES_ELSEWHERE_TAG)) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+            val openCount = elsewhere.count { !it.resolved }
+            TextButton(onClick = { open = !open }) {
+                Text(
+                    (if (open) "▾ " else "▸ ") + "Notes not on a line here (${elsewhere.size}" +
+                        (if (openCount in 1 until elsewhere.size) ", $openCount open" else "") + ")",
+                )
+            }
+            if (open) {
+                ErrorBanner(s.resolveError, onDismiss = notes.onDismissResolveError)
+                for (n in elsewhere) {
+                    Text(
+                        n.path + (n.line?.let { ":$it${if (n.side == NoteSide.OLD) " (removed)" else ""}" } ?: " (whole file)"),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    n.quote?.takeIf { it.isNotBlank() }?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    SentNote(n, notes, busy = n.id in s.resolving)
+                }
+            }
         }
     }
 }

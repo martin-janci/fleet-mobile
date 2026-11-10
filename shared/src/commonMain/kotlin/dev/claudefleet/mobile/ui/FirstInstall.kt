@@ -49,6 +49,7 @@ import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.AgentInstall
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.ui.components.ErrorBanner
+import dev.claudefleet.mobile.ui.components.rememberCopied
 import dev.claudefleet.mobile.ui.kit.BottomSheet
 import dev.claudefleet.mobile.ui.kit.LoaderStep
 import dev.claudefleet.mobile.ui.kit.OrbitMark
@@ -201,11 +202,11 @@ fun NoHubScreen(onBack: () -> Unit, onPair: () -> Unit, onShare: (String) -> Uni
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 12.dp)) {
                         Text(HUB_SERVE_COMMAND, style = Fleet.type.code, color = o.fg, modifier = Modifier.weight(1f))
-                        var copied by remember { mutableStateOf(false) }
-                        IconButton(onClick = { clipboard.setText(AnnotatedString(HUB_SERVE_COMMAND)); copied = true }) {
+                        val copied = rememberCopied()
+                        IconButton(onClick = { clipboard.setText(AnnotatedString(HUB_SERVE_COMMAND)); copied.mark() }) {
                             Icon(
-                                if (copied) FleetIcons.Check else FleetIcons.Copy,
-                                contentDescription = if (copied) "Copied" else "Copy $HUB_SERVE_COMMAND",
+                                if (copied.copied) FleetIcons.Check else FleetIcons.Copy,
+                                contentDescription = if (copied.copied) "Copied" else "Copy $HUB_SERVE_COMMAND",
                             )
                         }
                     }

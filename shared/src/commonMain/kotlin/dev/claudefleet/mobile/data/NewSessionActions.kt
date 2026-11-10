@@ -57,6 +57,9 @@ interface NewSessionActions {
      */
     suspend fun headroom(hostAlias: String): Headroom = throw UnsupportedOperationException("check_account_headroom")
 
+    /** [headroom] for a start in [projectId]: the hub suggests no account the project forbids. */
+    suspend fun headroomIn(hostAlias: String, projectId: Long?): Headroom = headroom(hostAlias)
+
     /**
      * The optional first message, once the session exists (`queue_prompt`):
      * typed as soon as Claude is idle, kept by the hub until then. `new_session`
@@ -97,6 +100,9 @@ class HubNewSessionActions(private val session: AppSession) : NewSessionActions 
 
     override suspend fun headroom(hostAlias: String): Headroom =
         session.withClient { it.checkAccountHeadroom(hostAlias, null) }
+
+    override suspend fun headroomIn(hostAlias: String, projectId: Long?): Headroom =
+        session.withClient { it.checkAccountHeadroom(hostAlias, null, projectId) }
 
     override suspend fun proposeHost(projectId: Long): SuggestedHost? =
         session.withClient { it.proposeHostPlacement(projectId) }

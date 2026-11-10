@@ -236,6 +236,25 @@ fun Headroom.signedInElsewhere(exceptProfile: String?, signedOut: (HostLogin) ->
     logins.filter { l -> l.profile != exceptProfile && !signedOut(l) && (l.usedPct ?: 0.0) < pauseAtPct }
         .minByOrNull { it.usedPct ?: Double.MAX_VALUE }
 
+/** What an account is forbidden for (`AccountRow.forbiddenProjectIds` / `forbiddenOrgIds`). */
+data class AccountBlocks(val projects: Set<Long> = emptySet(), val orgs: Set<Long> = emptySet()) {
+    val isEmpty: Boolean get() = projects.isEmpty() && orgs.isEmpty()
+}
+
+fun AccountRow.blocks(): AccountBlocks = AccountBlocks(forbiddenProjectIds.toSet(), forbiddenOrgIds.toSet())
+
+/**
+ * The accounts work in [projectId] (filed under [orgId], when the phone
+ * knows it) may not run on, as far as the phone can tell: the hub refuses
+ * a start or switch onto one (`E_ACCOUNT_FORBIDDEN`), so it is never the
+ * default nor the pre-picked login. The hub resolves a project's org itself;
+ * without [orgId] only the project's own blocks count here.
+ */
+fun forbiddenAccounts(blocks: Map<String, AccountBlocks>, projectId: Long?, orgId: Long? = null): Set<String> {
+    if (projectId == null) return emptySet()
+    return blocks.filterValues { b -> projectId in b.projects || (orgId != null && orgId in b.orgs) }.keys
+}
+
 /** "work (m.janci@…)" or the account alone: how a login reads in the switch question. */
 fun loginLabel(l: HostLogin, accountName: (String) -> String?): String {
     val who = accountName(l.accountUuid) ?: l.accountUuid.take(8)

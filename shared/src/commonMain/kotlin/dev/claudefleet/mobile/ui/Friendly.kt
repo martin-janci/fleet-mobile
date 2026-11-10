@@ -35,7 +35,7 @@ private fun friendlyWords(t: Throwable): Friendly {
             // hub has no desktop at all.
             "E_CONFIRM_REQUIRED" -> Friendly("Needs a yes", "Approve it in Control; this screen will follow.", isError = true, details = raw)
             "E_BG_SESSION" -> Friendly("Runs outside tmux", "This session has no terminal to type into.", isError = true, details = raw)
-            "E_PINNED" -> Friendly("This session is pinned", "Unpin it on the desktop first.", isError = true, details = raw)
+            "E_PINNED" -> Friendly("This session is pinned", "Unpin it first: ⋮ › Unpin, or on the desktop.", isError = true, details = raw)
             // The hub's text is written for agents ("pass over_limit_ok"); the
             // person picks another account, or picks this one knowing it.
             "E_ACCOUNT_LIMIT" -> Friendly(
