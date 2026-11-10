@@ -51,6 +51,8 @@ import dev.claudefleet.mobile.data.HubWizardDrafts
 import dev.claudefleet.mobile.data.WizardDrafts
 import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.model.PrFeedback
+import dev.claudefleet.mobile.model.planApprovedPrompt
+import dev.claudefleet.mobile.model.planSaid
 import dev.claudefleet.mobile.model.limitAt
 import dev.claudefleet.mobile.model.isSignedOut
 import dev.claudefleet.mobile.ui.SessionLaterHost
@@ -379,6 +381,9 @@ import dev.claudefleet.mobile.ui.MissionsViewModel
 import dev.claudefleet.mobile.ui.AgentActionsViewModel
 import dev.claudefleet.mobile.ui.ReviewNotesUi
 import dev.claudefleet.mobile.ui.ReviewNotesViewModel
+import dev.claudefleet.mobile.ui.PlanReadyHost
+import dev.claudefleet.mobile.ui.PlanReadyViewModel
+import dev.claudefleet.mobile.ui.PlanSettled
 import dev.claudefleet.mobile.ui.ReviewRequestsViewModel
 import dev.claudefleet.mobile.ui.OrbitTrackersHandlers
 import dev.claudefleet.mobile.ui.OrbitTrackersScreen
@@ -745,6 +750,9 @@ class AppContainer(
 
     /** Unsent text per session, across visits to it and across a killed process. */
     val drafts: DraftMemory = DraftMemory(prefs)
+
+    /** The "Plan ready" cards answered on this phone (claude-fleet docs/plan-first.md). */
+    val planSettled: PlanSettled = PlanSettled(prefs)
     val hints: Hints = Hints(prefs)
 
     /** This phone's own settings: notification kinds and the theme (redesign 14.11). */
@@ -773,6 +781,7 @@ class AppContainer(
     fun repository(credentials: Credentials, scope: CoroutineScope): FleetRepository {
         // Another hub's session ids are not this one's: its drafts go (review w22-5).
         drafts.forHub(credentials.hub)
+        planSettled.forHub(credentials.hub)
         return FleetRepository(
             client = HubClient(http, credentials.hub, credentials.token),
             events = HubEventStream(http, credentials.hub, credentials.token),
@@ -2929,6 +2938,7 @@ private fun NewSessionRoute(
         extras = NewSessionExtras(
             onStartFrom = vm::setStartFrom,
             onFirstMessage = vm::onFirstMessageChange,
+            onPlanFirst = vm::onPlanFirstChange,
             onPickLogin = vm::pickLogin,
             onTicketBranch = vm::onTicketBranchChange,
             onClearDraft = vm::clearBranchDraft,
@@ -3341,6 +3351,20 @@ private fun SessionRoute(
     val notesState = notesVm?.state?.collectAsState()?.value
     val openDiffPath = (repoFiles?.top as? RepoView.Diff)?.path
     LaunchedEffect(notesVm, openDiffPath) { if (openDiffPath != null) notesVm?.refresh() }
+    // Plan first (claude-fleet docs/plan-first.md): once the agent has said
+    // "Plan ready" and stopped, the session's changes are read for the file
+    // it names. Its words are the signal, so a session started on the
+    // desktop shows the card here too.
+    val planVm = if (newLayout && caps.repo) {
+        remember(sessionId, scope) { PlanReadyViewModel(sessionId, container.repoActions, container.planSettled, scope) }
+    } else {
+        null
+    }
+    val planTurns = state.conversation.turns
+    val planHeard = remember(planTurns, state.viewing) { if (state.viewing == null) planSaid(planTurns) else null }
+    val planWorking = state.session?.claudeStatus == "working"
+    LaunchedEffect(planVm, planHeard, planWorking) { planVm?.heard(planHeard, planWorking) }
+    val planReady = planVm?.plan?.collectAsState()?.value
     fun selectTab(next: SessionTab) {
         val was = sessionTab
         if (next == was) return
@@ -3537,6 +3561,24 @@ private fun SessionRoute(
         full = full,
         onFull = { full = it },
         control = control,
+        plan = if (planVm != null && planReady != null && !planWorking) {
+            PlanReadyHost(
+                plan = planReady,
+                blocked = when {
+                    state.readOnly -> "This pairing only reads: it cannot answer."
+                    !state.connected -> "Not connected: it cannot be sent now."
+                    else -> null
+                },
+                sending = state.busy,
+                // Rendered, in the Files tab.
+                onRead = if (repoVm != null && caps.repoFiles) ({ selectTab(SessionTab.Files); repoVm.openFile(planReady.path); Unit }) else null,
+                // One prompt, kept by the hub until the agent is idle; the card goes once it is taken.
+                onApprove = if (caps.sendLater) ({ vm.sendLater(planApprovedPrompt(planReady.path)) { planVm.settle(planReady) }; Unit }) else null,
+                onDismiss = { planVm.settle(planReady) },
+            )
+        } else {
+            null
+        },
         tabs = if (!newLayout) {
             null
         } else {

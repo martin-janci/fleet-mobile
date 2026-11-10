@@ -10,6 +10,7 @@ import dev.claudefleet.mobile.model.BackgroundOptions
 import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.SuggestedHost
 import dev.claudefleet.mobile.model.hostProposalLine
+import dev.claudefleet.mobile.model.planFirstBrief
 import dev.claudefleet.mobile.model.suggestedHostOf
 import dev.claudefleet.mobile.net.json
 import kotlinx.serialization.json.JsonNull
@@ -135,7 +136,7 @@ class NewSessionStartTest {
         drafts: DraftMemory? = null,
     ) = NewSessionViewModel(
         fleet, actions, scope, canWrite = true, initialHost = "pine", onCreated = { opened += it },
-        drafts = drafts, now = { 1_000L },
+        drafts = drafts, now = { 1_000L }, utcOffset = { 0 },
     )
 
     // ---- start from a branch ----
@@ -280,6 +281,74 @@ class NewSessionStartTest {
         vm.create()
         runCurrent()
         assertTrue(actions.messages.isEmpty())
+    }
+
+    // ---- Plan first (claude-fleet docs/plan-first.md) ----
+
+    @Test
+    fun plan_first_sends_its_instructions_under_the_first_message_as_one_prompt() = runTest {
+        val actions = StartActions()
+        val vm = vm(StartFleet(), actions, backgroundScope)
+        vm.selectProject(3)
+        vm.onFirstMessageChange("  Add retries to the sync loop.  ")
+        vm.onPlanFirstChange(true)
+        runCurrent()
+        assertTrue(vm.state.value.planFirst)
+
+        vm.create()
+        runCurrent()
+
+        // The phone's clock says 1970-01-01 here: the plan file's date prefix.
+        assertEquals(listOf(41L to "Add retries to the sync loop.\n\n" + planFirstBrief("1970-01-01")), actions.messages)
+    }
+
+    @Test
+    fun plan_first_with_nothing_typed_still_sends_the_instructions() = runTest {
+        val actions = StartActions()
+        val vm = vm(StartFleet(), actions, backgroundScope)
+        vm.selectProject(3)
+        vm.onPlanFirstChange(true)
+        runCurrent()
+        vm.create()
+        runCurrent()
+
+        assertEquals(listOf(41L to planFirstBrief("1970-01-01")), actions.messages)
+    }
+
+    @Test
+    fun a_plan_first_message_the_hub_would_not_keep_waits_in_the_box_whole() = runTest {
+        val actions = StartActions().apply { failMessage = HubError.Tool("E_BUSY", "no") }
+        val drafts = DraftMemory()
+        val vm = vm(StartFleet(), actions, backgroundScope, drafts = drafts)
+        vm.selectProject(3)
+        vm.onFirstMessageChange("Add retries.")
+        vm.onPlanFirstChange(true)
+        runCurrent()
+        vm.create()
+        runCurrent()
+
+        assertEquals("Add retries.\n\n" + planFirstBrief("1970-01-01"), drafts.recall(41L), "unsent, with the instructions, for the person to send")
+    }
+
+    @Test
+    fun plan_first_goes_with_a_ticket_start_too() = runTest {
+        val actions = StartActions()
+        val work = FakeWorkActions().apply {
+            previewAnswer = StartPreview(key = "FLEET-151", plan = StartPlan(projectId = 3, hostAlias = "pine", branch = "fleet-151-orbit-redesign"))
+        }
+        val vm = NewSessionViewModel(
+            StartFleet(), actions, backgroundScope, canWrite = true, initialHost = "pine", onCreated = {},
+            ticketKey = "FLEET-151", workActions = work, now = { 1_000L }, utcOffset = { 0 },
+        )
+        runCurrent()
+        vm.onFirstMessageChange("Keep the public API as it is.")
+        vm.onPlanFirstChange(true)
+        runCurrent()
+        vm.create()
+        runCurrent()
+
+        assertEquals(listOf("start FLEET-151 pine -"), work.calls)
+        assertEquals(listOf(work.started.id to "Keep the public API as it is.\n\n" + planFirstBrief("1970-01-01")), actions.messages)
     }
 
     // ---- the Account row ----
