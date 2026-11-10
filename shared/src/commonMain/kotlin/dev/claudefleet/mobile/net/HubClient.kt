@@ -58,7 +58,11 @@ import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.QuickReply
 import dev.claudefleet.mobile.model.TidyReport
 import dev.claudefleet.mobile.model.Mission
+import dev.claudefleet.mobile.model.NoteDraft
+import dev.claudefleet.mobile.model.ReviewNote
+import dev.claudefleet.mobile.model.ReviewNotesSent
 import dev.claudefleet.mobile.model.ReviewRequest
+import dev.claudefleet.mobile.model.reviewNotesSendArgs
 import dev.claudefleet.mobile.model.FailingRoutine
 import dev.claudefleet.mobile.model.RoutineBudget
 import dev.claudefleet.mobile.model.SuggestedHost
@@ -1599,6 +1603,36 @@ class HubClient(
     /** Run a manual fleet agent's instance now (`agents { action: run, id, request?, run_scope? }`). */
     suspend fun runAgentRule(id: Long, form: AgentRunForm): AgentRunStarted =
         call("agents", agentRunArgs(id, form)) { json.decodeFromJsonElement(AgentRunStarted.serializer(), it) }
+
+    // ---- review notes on a session's diff (claude-fleet migration 223) ----
+
+    /** The notes sent on [sessionId], newest send first (`review_notes { action: list }`). */
+    suspend fun reviewNotes(sessionId: Long): List<ReviewNote> =
+        call("review_notes", buildJsonObject { put("session_id", sessionId); put("action", "list") }) {
+            json.decodeFromJsonElement(ListSerializer(ReviewNote.serializer()), it)
+        }
+
+    /**
+     * Type [drafts] into the session as one numbered message
+     * (`review_notes { action: send }`). [clientMsgId] makes a retry safe: a
+     * hub that has the send already types nothing a second time.
+     */
+    suspend fun sendReviewNotes(sessionId: Long, clientMsgId: String, drafts: List<NoteDraft>): ReviewNotesSent =
+        call("review_notes", reviewNotesSendArgs(sessionId, clientMsgId, drafts)) {
+            json.decodeFromJsonElement(ReviewNotesSent.serializer(), it)
+        }
+
+    /** Mark a sent note resolved, or reopen it (`review_notes { action: resolve }`). */
+    suspend fun resolveReviewNote(sessionId: Long, noteId: Long, resolved: Boolean): ReviewNote =
+        call(
+            "review_notes",
+            buildJsonObject {
+                put("session_id", sessionId)
+                put("action", "resolve")
+                put("note_id", noteId)
+                put("resolved", resolved)
+            },
+        ) { json.decodeFromJsonElement(ReviewNote.serializer(), it) }
 
     // ---- review requests (claude-fleet "Ask for review…", migration 225) ----
 

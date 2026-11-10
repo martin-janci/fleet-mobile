@@ -66,6 +66,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.ChangedFile
 import dev.claudefleet.mobile.model.branchLine
+import dev.claudefleet.mobile.model.NoteAnchor
+import dev.claudefleet.mobile.model.noteAnchor
+import dev.claudefleet.mobile.model.noteQuote
 import dev.claudefleet.mobile.model.lineCounts
 import dev.claudefleet.mobile.model.pushedLabel
 import dev.claudefleet.mobile.model.Commit
@@ -151,6 +154,8 @@ fun RepoBody(
     modifier: Modifier = Modifier,
     /** A diff may go side by side where it is wide enough (New bar, redesign 14.21); the worktree screen keeps one column. */
     split: Boolean = false,
+    /** Notes on the uncommitted diff's lines (review notes); null where the hub has none. */
+    notes: ReviewNotesUi? = null,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         if (state.tabs.size > 1 && state.top == null) {
@@ -192,7 +197,7 @@ fun RepoBody(
         ErrorBanner(state.error, onDismiss = handlers.onDismissError)
         state.notice?.let { Notice(it, handlers.onDismissNotice) }
         when (val top = state.top) {
-            is RepoView.Diff -> DiffPane(top.path, top.diff, handlers, openFile = { handlers.onOpenFile(top.path) }, split = split)
+            is RepoView.Diff -> DiffPane(top.path, top.diff, handlers, openFile = { handlers.onOpenFile(top.path) }, split = split, notes = notes)
             is RepoView.CommitDiff -> DiffPane(top.path, top.diff, handlers, openFile = null, split = split)
             is RepoView.CommitView -> CommitPane(top.hash, top.detail, state, handlers)
             is RepoView.File -> FilePane(top.path, top.content, state, handlers)
@@ -207,7 +212,7 @@ fun RepoBody(
 }
 
 @Composable
-private fun Notice(text: String, onDismiss: () -> Unit) {
+internal fun Notice(text: String, onDismiss: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer) {
         Row(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
@@ -511,13 +516,14 @@ private fun PathBar(path: String, subtitle: String? = null, actions: @Composable
 }
 
 @Composable
-private fun DiffPane(path: String, diff: FileDiff?, handlers: RepoHandlers, openFile: (() -> Unit)?, split: Boolean = false) {
+private fun DiffPane(path: String, diff: FileDiff?, handlers: RepoHandlers, openFile: (() -> Unit)?, split: Boolean = false, notes: ReviewNotesUi? = null) {
     if (split) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            if (twoPaneWide(maxWidth.value, maxHeight.value)) {
+            // Notes are written in one column: a side-by-side diff has two numbers per row.
+            if (twoPaneWide(maxWidth.value, maxHeight.value) && notes == null) {
                 Column(modifier = Modifier.fillMaxSize()) { SplitDiffPane(path, diff, handlers, openFile) }
             } else {
-                Column(modifier = Modifier.fillMaxSize()) { DiffPane(path, diff, handlers, openFile) }
+                Column(modifier = Modifier.fillMaxSize()) { DiffPane(path, diff, handlers, openFile, notes = notes) }
             }
         }
         return
@@ -545,7 +551,19 @@ private fun DiffPane(path: String, diff: FileDiff?, handlers: RepoHandlers, open
                     onLongPress = handlers.onAsk?.let { ask ->
                         { line: CodeLine -> ask(askAboutLine(path, line)) }
                     },
+                    // Tap a line to write a note on it (review notes).
+                    onTap = notes?.let { n ->
+                        { line: CodeLine ->
+                            val at = lineAnchor(path, line)
+                            if (at != null) n.onOpenLine(at, noteQuote(line.text))
+                        }
+                    },
+                    badge = notes?.let { n -> { line: CodeLine -> noteBadge(lineAnchor(path, line), n.state) } },
                 )
+            }
+            if (notes != null) {
+                NotesSendBar(notes)
+                ReviewNoteSheet(notes)
             }
             if (hunks.size > 1) {
                 Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -912,6 +930,12 @@ internal fun diffLines(diff: String): List<CodeLine> {
     }
 }
 
+/** The note anchor of a diff line, or null for a header or metadata. */
+internal fun lineAnchor(path: String, line: CodeLine): NoteAnchor? = when (line.kind) {
+    LineKind.Added, LineKind.Plain, LineKind.Removed -> noteAnchor(path, line.old, line.new, removed = line.kind == LineKind.Removed)
+    else -> null
+}
+
 /** Where each hunk starts in [lines]: the indices of its `@@` headers. */
 internal fun hunkStarts(lines: List<CodeLine>): List<Int> = lines.indices.filter { lines[it].kind == LineKind.Hunk }
 
@@ -927,6 +951,10 @@ private fun CodeLines(
     onLongPress: ((CodeLine) -> Unit)? = null,
     /** What a file's Find marks, by line index; none outside Find. */
     marks: Map<Int, List<LineMark>> = emptyMap(),
+    /** A tap on a line: a review note on it. */
+    onTap: ((CodeLine) -> Unit)? = null,
+    /** What the gutter shows beside a line (a note's mark), if anything. */
+    badge: ((CodeLine) -> String?)? = null,
 ) {
     val markColor = MaterialTheme.colorScheme.tertiaryContainer
     val currentColor = MaterialTheme.colorScheme.tertiary
@@ -950,14 +978,29 @@ private fun CodeLines(
                         color = bg,
                         contentColor = fg,
                         modifier = Modifier.widthIn(min = width).then(
-                            if (onLongPress != null && line.kind != LineKind.Meta && line.kind != LineKind.Hunk) {
-                                Modifier.combinedClickable(onClick = {}, onLongClick = { onLongPress(line) }, onLongClickLabel = "Ask about this line")
+                            if ((onLongPress != null || onTap != null) && line.kind != LineKind.Meta && line.kind != LineKind.Hunk) {
+                                Modifier.combinedClickable(
+                                    onClick = { onTap?.invoke(line) },
+                                    onClickLabel = if (onTap != null) "Write a note on this line" else null,
+                                    onLongClick = onLongPress?.let { { it(line) } },
+                                    onLongClickLabel = if (onLongPress != null) "Ask about this line" else null,
+                                )
                             } else {
                                 Modifier
                             },
                         ),
                     ) {
                         Row {
+                            if (badge != null) {
+                                Text(
+                                    badge(line).orEmpty().padEnd(2),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(start = 2.dp, top = 1.dp, bottom = 1.dp),
+                                )
+                            }
                             if (numbers) {
                                 Text(
                                     (line.new ?: line.old)?.toString().orEmpty().padStart(gutter),
