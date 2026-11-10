@@ -299,6 +299,11 @@ class ToolsTheAppMayCallTest {
         // only, the person's own asks. The phone never sends `ask`; a hub
         // without the tool refuses it and the Inbox shows no Review rows.
         "review_request",
+        // Notes on a session's diff lines (claude-fleet review notes, migration
+        // 223): `review_notes` list / send / resolve. The hub refuses a send
+        // or resolve to a host token, an answer-only device and a viewer; the
+        // phone only calls it where `tools/list` names it (`HubCapabilities.reviewNotes`).
+        "review_notes",
     )
 
     @Test

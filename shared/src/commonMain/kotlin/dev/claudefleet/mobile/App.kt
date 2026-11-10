@@ -99,7 +99,9 @@ import dev.claudefleet.mobile.data.SearchActions
 import dev.claudefleet.mobile.data.HubMissionActions
 import dev.claudefleet.mobile.data.BuiltInAgentActions
 import dev.claudefleet.mobile.data.HubBuiltInAgentActions
+import dev.claudefleet.mobile.data.HubReviewNoteActions
 import dev.claudefleet.mobile.data.HubReviewRequestActions
+import dev.claudefleet.mobile.data.ReviewNoteActions
 import dev.claudefleet.mobile.data.ReviewRequestActions
 import dev.claudefleet.mobile.data.MissionActions
 import dev.claudefleet.mobile.data.HubRoutineActions
@@ -375,6 +377,8 @@ import dev.claudefleet.mobile.ui.OrbitMissionsHandlers
 import dev.claudefleet.mobile.ui.OrbitMissionsScreen
 import dev.claudefleet.mobile.ui.MissionsViewModel
 import dev.claudefleet.mobile.ui.AgentActionsViewModel
+import dev.claudefleet.mobile.ui.ReviewNotesUi
+import dev.claudefleet.mobile.ui.ReviewNotesViewModel
 import dev.claudefleet.mobile.ui.ReviewRequestsViewModel
 import dev.claudefleet.mobile.ui.OrbitTrackersHandlers
 import dev.claudefleet.mobile.ui.OrbitTrackersScreen
@@ -699,6 +703,7 @@ class AppContainer(
 
     /** Reviews colleagues asked of this person ("Ask for review…"), through the same `withClient`. */
     val reviewRequestActions: ReviewRequestActions = HubReviewRequestActions(session)
+    val reviewNoteActions: ReviewNoteActions = HubReviewNoteActions(session)
 
     /** Routines and Pause all (redesign 8.9), through the same `withClient`. */
     val routineActions: RoutineActions = HubRoutineActions(session)
@@ -3327,6 +3332,15 @@ private fun SessionRoute(
         null
     }
     val repoFiles = repoVm?.state?.collectAsState()?.value
+    // Notes on the diff's lines (claude-fleet review notes), where the hub serves them.
+    val notesVm = if (repoVm != null && caps.reviewNotes) {
+        remember(sessionId, scope) { ReviewNotesViewModel(sessionId, container.reviewNoteActions, scope) }
+    } else {
+        null
+    }
+    val notesState = notesVm?.state?.collectAsState()?.value
+    val openDiffPath = (repoFiles?.top as? RepoView.Diff)?.path
+    LaunchedEffect(notesVm, openDiffPath) { if (openDiffPath != null) notesVm?.refresh() }
     fun selectTab(next: SessionTab) {
         val was = sessionTab
         if (next == was) return
@@ -3570,6 +3584,23 @@ private fun SessionRoute(
                                 onClose = { repoVm.back() },
                             ),
                             split = true,
+                            notes = if (notesVm != null && notesState != null) {
+                                ReviewNotesUi(
+                                    state = notesState,
+                                    agent = agentName(state.session).let { if (it == DEFAULT_AGENT_NAME) "Claude" else it },
+                                    canSend = !state.readOnly && state.connected,
+                                    onOpenLine = notesVm::openLine,
+                                    onSave = notesVm::saveDraft,
+                                    onClose = notesVm::close,
+                                    onDelete = notesVm::deleteDraft,
+                                    onSend = { notesVm.send() },
+                                    onResolve = { notesVm.resolve(it) },
+                                    onDismissError = notesVm::dismissError,
+                                    onDismissNotice = notesVm::dismissNotice,
+                                )
+                            } else {
+                                null
+                            },
                         )
                     }
                 },

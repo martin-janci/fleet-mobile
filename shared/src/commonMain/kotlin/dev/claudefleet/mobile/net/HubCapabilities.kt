@@ -141,6 +141,13 @@ data class HubCapabilities(
     val wizardState: Boolean get() = WIZARD_STATE in tools
 
     /**
+     * Notes on lines of a session's diff, sent to its agent (`review_notes`,
+     * claude-fleet migration 223). Absent on an older hub: the diff then has
+     * no note gutter at all.
+     */
+    val reviewNotes: Boolean get() = REVIEW_NOTES in tools
+
+    /**
      * Jev may propose a host (claude-fleet N5, `propose_host_placement`):
      * the New session wizard's Where step, and a host choice on a form in
      * Control's chat. Listed to a phone only once the hub opens it to client
@@ -399,6 +406,7 @@ data class HubCapabilities(
     companion object {
         const val WORK = "work"
         const val WORK_LINK = "work_link"
+        const val REVIEW_NOTES = "review_notes"
         const val ENSURE_OPERATOR = "ensure_operator"
         const val OPERATOR_STATUS = "operator_status"
         const val MCP_CONFIRMS = "mcp_confirms"
