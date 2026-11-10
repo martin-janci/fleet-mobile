@@ -22,6 +22,7 @@ import dev.claudefleet.mobile.model.planFirstBrief
 import dev.claudefleet.mobile.model.planSaid
 import dev.claudefleet.mobile.model.withPlanFirst
 import dev.claudefleet.mobile.store.FakePrefs
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -94,6 +95,20 @@ class PlanFirstTest {
     }
 
     @Test
+    fun only_what_the_agent_said_counts_not_what_a_command_printed() {
+        val searched = ConvTurn(
+            prompt = "x",
+            at = "t1",
+            items = listOf(ConvItem.Text("Looking at the last plan."), ConvItem.Tool("grep -r \"Plan ready\" docs/plans/a.md")),
+        )
+        assertNull(planSaid(listOf(searched)), "a search for the words is not the agent saying so")
+        val wrote = searched.copy(
+            items = listOf(ConvItem.Text("Wrote it."), ConvItem.Tool("Write docs/plans/a.md"), ConvItem.Text("Plan ready: docs/plans/a.md")),
+        )
+        assertEquals(PlanSaid("Wrote it.\nPlan ready: docs/plans/a.md", "t1"), planSaid(listOf(wrote)), "what it said around a tool call, one line each")
+    }
+
+    @Test
     fun the_plan_is_the_file_the_reply_names_among_the_changes() {
         val reply = "Plan ready: $plan"
         assertNull(planFile(listOf(file("src/a.kt", "modified")), reply))
@@ -137,6 +152,7 @@ class PlanFirstTest {
         assertTrue(next.isSettled(7, PlanReady(plan, "t1")), "across a killed process")
         assertFalse(next.isSettled(7, PlanReady(plan, "t2")), "the same file, said again after another prompt")
         assertFalse(next.isSettled(8, PlanReady(plan, "t1")), "another session")
+        assertFalse(next.isSettled(7, PlanReady("docs/plans/other.md", "t1")), "another plan, announced before any other prompt")
     }
 
     @Test
@@ -157,13 +173,28 @@ class PlanFirstTest {
         assertEquals(PlanSettled.MAX_SESSIONS * 2, prefs.getStringList(PlanSettled.KEY).size)
     }
 
+    @Test
+    fun the_hub_an_answer_was_given_on_is_remembered_across_a_killed_process() {
+        val prefs = FakePrefs()
+        PlanSettled(prefs).apply {
+            forHub("https://a.example")
+            settle(7, PlanReady(plan, "t1"))
+        }
+        assertTrue(PlanSettled(prefs).apply { forHub("https://a.example") }.isSettled(7, PlanReady(plan, "t1")), "the same hub keeps it")
+        assertFalse(PlanSettled(prefs).apply { forHub("https://b.example") }.isSettled(7, PlanReady(plan, "t1")), "another hub's session 7 is not this one")
+    }
+
     // ---- whether a card is due ----
 
     private class Changes(var files: List<ChangedFile>) : RepoActions {
         var reads = 0
         var fail: Throwable? = null
+
+        /** Set: a read waits here until it is completed. */
+        var slow: CompletableDeferred<Unit>? = null
         override suspend fun changes(sessionId: Long): List<ChangedFile> {
             reads++
+            slow?.await()
             fail?.let { throw it }
             return files
         }
@@ -211,6 +242,22 @@ class PlanFirstTest {
 
         // "Looks good, go ahead", typed by hand or on the desktop: a new turn.
         vm.heard(null, working = true)
+        assertNull(vm.plan.value)
+    }
+
+    @Test
+    fun a_slow_read_is_dropped_once_the_conversation_has_moved_on() = runTest {
+        val repo = Changes(listOf(file(plan)))
+        val slow = CompletableDeferred<Unit>().also { repo.slow = it }
+        val vm = PlanReadyViewModel(7, repo, PlanSettled(), backgroundScope)
+        vm.heard(said(), working = false)
+        runCurrent()
+        assertEquals(1, repo.reads)
+
+        // The next prompt went out while the changes were still being read.
+        vm.heard(null, working = true)
+        slow.complete(Unit)
+        runCurrent()
         assertNull(vm.plan.value)
     }
 
