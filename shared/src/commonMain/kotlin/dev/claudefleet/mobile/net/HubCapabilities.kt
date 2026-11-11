@@ -69,6 +69,13 @@ data class HubCapabilities(
     val handoffs: Boolean get() = CONTROL_HANDOFFS in tools
 
     /**
+     * Control's journal (`control_journal`): a mission steered from the phone
+     * is followed through its `follow` action (review w04-11). The hub lets
+     * only Control and the owner's device use it.
+     */
+    val controlJournal: Boolean get() = CONTROL_JOURNAL in tools
+
+    /**
      * The hub keeps the composer's chip row (`quick_replies`). Absent on a hub
      * older than that tool — the app then draws its cached chips and never
      * tries to sync them — and absent for a `readonly` token, which the hub
@@ -412,6 +419,7 @@ data class HubCapabilities(
         const val MCP_CONFIRMS = "mcp_confirms"
         const val ANSWER_MCP_CONFIRM = "answer_mcp_confirm"
         const val CONTROL_HANDOFFS = "control_handoffs"
+        const val CONTROL_JOURNAL = "control_journal"
         const val PROPOSE_HOST_PLACEMENT = "propose_host_placement"
         const val QUICK_REPLIES = "quick_replies"
         const val SESSION_TOOL_DETAIL = "session_tool_detail"

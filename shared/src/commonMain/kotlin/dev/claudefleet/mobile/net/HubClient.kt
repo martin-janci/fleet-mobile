@@ -507,13 +507,19 @@ class HubClient(
             },
         ) { json.decodeFromJsonElement(ToolDetail.serializer(), it) }
 
-    /** Deliver [text] to a session's REPL and submit it. */
-    suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult =
+    /**
+     * Deliver [text] to a session's REPL and submit it. [clientMsgId] makes a
+     * retry after a lost answer safe: the hub replays a repeated id's first
+     * result for ten minutes instead of typing again (`E_IN_FLIGHT` while the
+     * first still runs). A hub that does not know the argument ignores it.
+     */
+    suspend fun sendPrompt(sessionId: Long, text: String, clientMsgId: String? = null): SendPromptResult =
         call(
             "send_prompt",
             buildJsonObject {
                 put("session_id", sessionId)
                 put("prompt", text)
+                if (clientMsgId != null) put("client_msg_id", clientMsgId)
             },
         ) { json.decodeFromJsonElement(SendPromptResult.serializer(), it) }
 
@@ -1379,6 +1385,23 @@ class HubClient(
         call("control_handoffs", buildJsonObject { put("limit", limit) }) {
             json.decodeFromJsonElement(ListSerializer(ControlHandoff.serializer()), it)
         }
+
+    /**
+     * Control follows mission [missionId] from now on (`control_journal {
+     * action: follow }`): a `steer` receipt, so Control's feed tells it what
+     * the mission does next. [text] is the steer that asked.
+     */
+    suspend fun followMission(missionId: Long, text: String) {
+        call(
+            "control_journal",
+            buildJsonObject {
+                put("action", "follow")
+                put("thread", "mission")
+                put("id", missionId)
+                put("text", text)
+            },
+        ) { }
+    }
 
     // ---- the work graph: `work` reads, `work_link` decides ----
     //

@@ -55,6 +55,12 @@ data class BulkUiState(
     val canArchive: Boolean = false,
     /** Connected to the hub: offline, every action would fail once per session (review w22-8). */
     val online: Boolean = true,
+    /**
+     * The picked sessions as the fleet lists them, in the order picked —
+     * whether or not the list on screen shows them now: a selection survives
+     * a filter (r07 F12), and Kill acts on every pick (review phone-flows-1).
+     */
+    val picked: List<SessionRow> = emptyList(),
 ) {
     val active: Boolean get() = selecting || selected.isNotEmpty()
 
@@ -102,6 +108,7 @@ class BulkViewModel(
             action = l.action,
             canArchive = canWrite && archiveOne != null && caps.archiveSession,
             online = status is ConnectionStatus.Connected,
+            picked = live.mapNotNull { id -> rows.firstOrNull { it.id == id } },
         )
     }.stateIn(scope, SharingStarted.Eagerly, BulkUiState(enabled = canWrite))
 
@@ -136,8 +143,14 @@ class BulkViewModel(
     /** Send [text] to every picked session. */
     fun send(text: String): Job = run(BulkAction.Send(text), local.value.selected, merge = false)
 
-    /** Kill every picked session the hub would let go; skip and name the rest. */
-    fun kill(): Job = run(BulkAction.Kill, local.value.selected, merge = false)
+    /**
+     * Kill every picked session the hub would let go; skip and name the rest.
+     * [ids] is what the confirmation named, so Kill acts on exactly the
+     * sessions the person saw listed (review phone-flows-1); a pick dropped
+     * meanwhile is not killed.
+     */
+    fun kill(ids: Set<Long> = local.value.selected): Job =
+        run(BulkAction.Kill, ids.filterTo(LinkedHashSet()) { it in local.value.selected }, merge = false)
 
     /** Archive every picked session; the controller is skipped. */
     fun archive(): Job = run(BulkAction.Archive, local.value.selected, merge = false)

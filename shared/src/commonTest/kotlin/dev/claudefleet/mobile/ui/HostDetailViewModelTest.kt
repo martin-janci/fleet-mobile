@@ -13,6 +13,7 @@ import dev.claudefleet.mobile.model.RestorePlanEntry
 import dev.claudefleet.mobile.model.RestoreReport
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.net.HubCapabilities
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runCurrent
@@ -38,6 +39,9 @@ private class HostFleet(tools: Set<String>) : FleetState {
 private class Hosts : HostActions {
     val calls = mutableListOf<String>()
     var stillLost = true
+    /** When set, a restore waits for it, and then fails with [restoreFails] when that is set. */
+    var restoreGate: CompletableDeferred<Unit>? = null
+    var restoreFails: Throwable? = null
     override suspend fun probe(alias: String): HostRow {
         calls += "probe"
         return HostRow(alias = alias, reachable = true)
@@ -53,7 +57,9 @@ private class Hosts : HostActions {
         )
     }
     override suspend fun restore(alias: String): RestoreReport {
-        calls += "restore"
+        calls += "restore:$alias"
+        restoreGate?.await()
+        restoreFails?.let { throw it }
         stillLost = false
         return RestoreReport(dryRun = false, results = listOf(RestoreOutcome(sessionId = 5, tmuxName = "lost-one", ok = true)))
     }
@@ -120,8 +126,97 @@ class HostDetailViewModelTest {
         vm.restore().join()
         runCurrent()
 
-        assertEquals(listOf("plan", "discover", "restore", "plan", "discover"), hosts.calls)
+        assertEquals(listOf("plan", "discover", "restore:pine", "plan", "discover"), hosts.calls)
         assertEquals(0, vm.state.value.restorable)
+        assertTrue(vm.state.value.restored!!.results.single().ok)
+    }
+
+    /**
+     * Review phone-flows-6: a restore that ends after another host's sheet
+     * was opened reported on that other host — its "Restored 1 of 1.", its
+     * error banner, and a fresh look at the wrong host. The outcome is kept
+     * by host: the other sheet stays clean, and pine's own sheet shows it.
+     */
+    @Test
+    fun a_restore_that_ends_while_another_hosts_sheet_is_open_reports_on_its_own_host() = runTest {
+        val fleet = HostFleet(ALL_HOST)
+        fleet.hosts.value = listOf(HostRow(alias = "pine", reachable = true), HostRow(alias = "fir", reachable = true))
+        val hosts = Hosts()
+        val gate = CompletableDeferred<Unit>()
+        hosts.restoreGate = gate
+        val vm = HostDetailViewModel(fleet, hosts, backgroundScope, canWrite = true)
+        vm.open("pine").join()
+        runCurrent()
+
+        val restoring = vm.restore()
+        runCurrent()
+        assertTrue(vm.state.value.restoring)
+        vm.open("fir").join()
+        runCurrent()
+        assertFalse(vm.state.value.restoring, "fir has no restore under way")
+        hosts.calls.clear()
+
+        gate.complete(Unit)
+        restoring.join()
+        runCurrent()
+
+        assertNull(vm.state.value.restored, "pine's outcome is not drawn on fir's sheet")
+        assertFalse(vm.state.value.restoring)
+        assertEquals(emptyList(), hosts.calls, "no second look at the open host for pine's restore")
+
+        vm.open("pine").join()
+        runCurrent()
+        assertTrue(vm.state.value.restored!!.results.single().ok, "pine's own sheet keeps its outcome")
+    }
+
+    @Test
+    fun a_restore_that_fails_after_another_hosts_sheet_opened_shows_no_error_there() = runTest {
+        val fleet = HostFleet(ALL_HOST)
+        fleet.hosts.value = listOf(HostRow(alias = "pine", reachable = true), HostRow(alias = "fir", reachable = true))
+        val hosts = Hosts()
+        val gate = CompletableDeferred<Unit>()
+        hosts.restoreGate = gate
+        hosts.restoreFails = IllegalStateException("ssh: connection refused")
+        val vm = HostDetailViewModel(fleet, hosts, backgroundScope, canWrite = true)
+        vm.open("pine").join()
+        runCurrent()
+
+        val restoring = vm.restore()
+        runCurrent()
+        vm.open("fir").join()
+        runCurrent()
+        gate.complete(Unit)
+        restoring.join()
+        runCurrent()
+
+        assertNull(vm.state.value.error, "pine's failure is not fir's error")
+        assertNull(vm.state.value.restored)
+    }
+
+    @Test
+    fun a_sheet_reopened_during_its_restore_shows_it_running() = runTest {
+        val fleet = HostFleet(ALL_HOST)
+        fleet.hosts.value = listOf(HostRow(alias = "pine", reachable = true), HostRow(alias = "fir", reachable = true))
+        val hosts = Hosts()
+        val gate = CompletableDeferred<Unit>()
+        hosts.restoreGate = gate
+        val vm = HostDetailViewModel(fleet, hosts, backgroundScope, canWrite = true)
+        vm.open("pine").join()
+        runCurrent()
+        val restoring = vm.restore()
+        runCurrent()
+        vm.close()
+        vm.open("pine").join()
+        runCurrent()
+
+        assertTrue(vm.state.value.restoring)
+        vm.restore().join()
+        assertEquals(1, hosts.calls.count { it == "restore:pine" }, "a second tap does not restore twice")
+
+        gate.complete(Unit)
+        restoring.join()
+        runCurrent()
+        assertFalse(vm.state.value.restoring)
         assertTrue(vm.state.value.restored!!.results.single().ok)
     }
 

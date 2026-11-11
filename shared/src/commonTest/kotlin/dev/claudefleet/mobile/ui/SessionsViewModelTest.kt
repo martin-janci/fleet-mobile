@@ -411,6 +411,23 @@ class SessionsViewModelTest {
         )
         assertEquals(listOf("Morning PR sweep", "Routine 7"), state.routineGroups.map { it.name })
         assertEquals(4, state.shown)
+        // Review phone-flows-2: the New tab draws (and searches, and counts
+        // hosts over) every row it counts — the runs too.
+        assertEquals(state.shown, state.shownRows().size)
+        assertEquals(listOf(1L, 3L, 2L, 4L), state.shownRows().map { it.id })
+    }
+
+    /** Review phone-flows-2: a search for a routine run's name finds it on the New tab. */
+    @Test
+    fun a_search_finds_a_routine_run() = runTest {
+        val mine = session(1)
+        val run = session(2).copy(origin = "routine", originRef = "3", friendlyName = "Nightly deps bump", startedAt = 100)
+        val fleet = FakeFleet(rows = listOf(mine, run))
+        val vm = SessionsViewModel(fleet, backgroundScope)
+        runCurrent()
+        vm.setQuery("nightly")
+        runCurrent()
+        assertEquals(listOf(2L), vm.state.value.shownRows().map { it.id })
     }
 
     /** As the desktop's `isRoutineSession`: an external row is never a run, and only digits name a routine. */

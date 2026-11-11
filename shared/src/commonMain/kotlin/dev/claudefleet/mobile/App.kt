@@ -1113,7 +1113,14 @@ private fun ControlTab(
     val autonomyOn = settingsCaps.fleetSettings && settingsCaps.setSetting && credentials.canWrite
     val autonomy = remember(container, scope) { AutonomyViewModel(container.fleetSettingsActions, scope) }
     val autonomyState by autonomy.state.collectAsState()
-    if (autonomyOn) LaunchedEffect(autonomy) { autonomy.load() }
+    // Read again each time the app comes back: the desktop may have moved
+    // the dial meanwhile (review phone-flows-3).
+    if (autonomyOn) {
+        LifecycleResumeEffect(autonomy) {
+            autonomy.load()
+            onPauseOrDispose { }
+        }
+    }
     // The escalation cards: the rows Needs you reads (shared-in sessions are their owners' to answer).
     val laterKeys by container.escalationLater.later.collectAsState()
     // A host that answers again ends its Later at FleetRoute, whichever tab is on screen (review w21-1, w24).
@@ -1695,7 +1702,7 @@ private fun FleetRoute(
                         onClearSelection = bulk::clear,
                         onStartSelect = bulk::start,
                         onBulkSend = { bulk.send(it) },
-                        onBulkKill = { bulk.kill() },
+                        onBulkKill = { ids -> bulk.kill(ids) },
                         onDismissBulkOutcome = bulk::dismissOutcome,
                         onSearchHost = { nav.showSessionsFor(it) },
                         onSearchProject = { nav.newSessionIn(it) },
@@ -2585,6 +2592,7 @@ private fun FleetRoute(
                                 onSend = { text -> steer.send(m, text); Unit },
                                 onDismissError = steer::dismissError,
                                 delivered = steerState.delivered[m.id] ?: 0,
+                                busy = steer.busy(steerRows),
                             )
                         }.takeIf { layout == PhoneLayout.New },
                     ),

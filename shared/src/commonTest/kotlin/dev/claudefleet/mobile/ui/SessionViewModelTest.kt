@@ -230,6 +230,14 @@ private class FakeActions : SessionActions {
         return SendPromptResult(delivered = true, sessionId = sessionId, turnSeqBefore = 3)
     }
 
+    /** Every `client_msg_id` a send carried, in order. */
+    val sentIds = mutableListOf<String>()
+
+    override suspend fun sendPrompt(sessionId: Long, text: String, clientMsgId: String): SendPromptResult {
+        sentIds += clientMsgId
+        return sendPrompt(sessionId, text)
+    }
+
     /** Every key the card pressed, in order. */
     val sentKeys = mutableListOf<String>()
 
@@ -4119,6 +4127,64 @@ class SessionViewModelTest {
         assertNull(drafts.recallUnsent(ID), "sent, so forgotten")
     }
 
+    /**
+     * Review phone-systemic-2: a send that timed out on the hub (the paste may
+     * have landed) read "Not sent: the hub refused that", and Retry typed it a
+     * second time. It says it may have gone through, and Retry goes out under
+     * the first send's `client_msg_id`, which the hub replays when the first
+     * one landed.
+     */
+    @Test
+    fun a_send_that_may_have_run_says_so_and_retry_reuses_its_id() = runTest {
+        val actions = FakeActions()
+        actions.sendFails = HubError.Tool("E_SSH_TIMEOUT", "ssh timed out after 10s")
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, keepNotSent = true)
+        vm.onDraftChange("open the PR and deploy")
+        vm.send().join()
+        runCurrent()
+
+        val kept = vm.state.value.notSent!!
+        assertTrue(kept.mayHaveRun)
+        assertEquals("May have gone through", notSentHeadline(kept))
+        assertEquals(actions.sentIds.single(), kept.clientMsgId)
+
+        actions.sendFails = null
+        vm.retryNotSent().join()
+        runCurrent()
+
+        assertEquals(2, actions.sentIds.size)
+        assertEquals(actions.sentIds[0], actions.sentIds[1], "the retry is the same send to the hub")
+        assertNull(vm.state.value.notSent)
+    }
+
+    @Test
+    fun a_send_that_never_left_the_phone_is_not_sent() = runTest {
+        val actions = FakeActions()
+        actions.sendFails = HubError.Transport(ConnectException())
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, keepNotSent = true)
+        vm.onDraftChange("first")
+        vm.send().join()
+        runCurrent()
+
+        val kept = vm.state.value.notSent!!
+        assertFalse(kept.mayHaveRun)
+        assertEquals("Not sent: cannot reach the hub", notSentHeadline(kept))
+    }
+
+    @Test
+    fun each_new_send_has_its_own_id() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, keepNotSent = true)
+        vm.onDraftChange("first")
+        vm.send().join()
+        runCurrent()
+        vm.onDraftChange("first")
+        vm.send().join()
+        runCurrent()
+
+        assertEquals(2, actions.sentIds.toSet().size, "the same words sent twice on purpose are two sends")
+    }
+
     @Test
     fun retry_sends_the_kept_words_again_and_leaves_the_box_alone() = runTest {
         val actions = FakeActions()
@@ -4468,6 +4534,28 @@ class SessionViewModelTest {
         assertEquals(listOf(1L), actions.cancelled)
         assertTrue(vm.state.value.queued.isEmpty())
         assertEquals("run the tests again", vm.state.value.draft, "taken back into the empty box, not lost")
+        assertEquals("Taken back. It is in the box to edit.", vm.state.value.sendLaterNotice)
+    }
+
+    /**
+     * Review pm-work-ux-4: taking a prompt back while the box held a draft
+     * kept the draft and dropped the prompt's words, which only a one-line
+     * chip had shown. Both stay, the draft first.
+     */
+    @Test
+    fun taking_a_prompt_back_into_a_box_with_a_draft_keeps_both() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(tools = setOf("queue_prompt", "queued_prompts")), actions, backgroundScope)
+        runCurrent()
+        vm.sendLater("open the PR against release/2.4 and deploy it").join()
+        runCurrent()
+        vm.onDraftChange("and then tell me  ")
+
+        vm.cancelQueued(1).join()
+        runCurrent()
+
+        assertEquals(listOf(1L), actions.cancelled)
+        assertEquals("and then tell me\n\nopen the PR against release/2.4 and deploy it", vm.state.value.draft)
         assertEquals("Taken back. It is in the box to edit.", vm.state.value.sendLaterNotice)
     }
 
@@ -4900,3 +4988,6 @@ class SessionViewModelTest {
         assertEquals(FORKED, opened)
     }
 }
+
+/** Named as the JVM's own, so [HubError.Transport.kind] reads as a connect failure on every target. */
+private class ConnectException : Exception("connection refused")

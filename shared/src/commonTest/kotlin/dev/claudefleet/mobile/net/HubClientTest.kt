@@ -544,6 +544,20 @@ class HubClientTest {
         val args = params["arguments"]!!.jsonObject
         assertEquals("12", args["session_id"]!!.jsonPrimitive.content)
         assertEquals("carry on", args["prompt"]!!.jsonPrimitive.content)
+        assertNull(args["client_msg_id"], "no id, no parameter")
+    }
+
+    /** Review phone-systemic-2: the send's id, which the hub replays a repeat of instead of typing it again. */
+    @Test
+    fun send_prompt_carries_its_client_msg_id() = runTest {
+        val (hub, calls) = client {
+            sse(okResult("""{"delivered":true,"session_id":12,"turn_seq_before":7}""")) to HttpStatusCode.OK
+        }
+
+        hub.sendPrompt(sessionId = 12, text = "carry on", clientMsgId = "sp-abc-0123456789")
+
+        val args = Json.parseToJsonElement(calls.bodyText(0)).jsonObject["params"]!!.jsonObject["arguments"]!!.jsonObject
+        assertEquals("sp-abc-0123456789", args["client_msg_id"]!!.jsonPrimitive.content)
     }
 
     @Test

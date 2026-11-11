@@ -52,8 +52,9 @@ data class AutonomyUiState(
 
 /**
  * The autonomy chip's state: read the four settings, write a position's
- * changes in order. A failed write stops the rest and says so; the next
- * read shows what landed.
+ * settings in order. Each write's answer is the hub's whole effective map,
+ * and the chip shows that, never its own guess: a write that failed half way
+ * reads as Custom. A failed write stops the rest and says so.
  */
 class AutonomyViewModel(private val actions: FleetSettingsActions, private val scope: CoroutineScope) {
     private val local = MutableStateFlow(AutonomyUiState())
@@ -75,9 +76,9 @@ class AutonomyViewModel(private val actions: FleetSettingsActions, private val s
         local.update { it.copy(busy = true, error = null) }
         return scope.launch {
             try {
-                for ((key, value) in autonomyWrites(target, local.value.values)) {
-                    actions.set(key, value)
-                    local.update { s -> s.copy(values = s.values + (key to value)) }
+                for ((key, value) in autonomyWrites(target)) {
+                    val effective = actions.set(key, value)
+                    local.update { s -> s.copy(values = s.values + (key to value) + effective.filterKeys { it in AUTONOMY_KEYS }) }
                 }
             } catch (e: CancellationException) {
                 throw e

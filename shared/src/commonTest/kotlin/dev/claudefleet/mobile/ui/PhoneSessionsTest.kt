@@ -181,6 +181,18 @@ class PhoneSessionsTest {
         assertEquals(listOf(1L), state.pickableRows().map { it.id })
     }
 
+    /** Review phone-flows-2: Select all picks a routine's runs only while that routine is unfolded. */
+    @Test
+    fun select_all_picks_the_runs_of_an_unfolded_routine_only() {
+        val open = HostGroup("mac", true, listOf(ProjectGroup(1, "p", listOf(SessionRow(id = 1)))))
+        val nightly = RoutineGroup("routine:3", 3, "Nightly", listOf(SessionRow(id = 5, origin = "routine")))
+        val weekly = RoutineGroup("routine:4", 4, "Weekly", listOf(SessionRow(id = 6, origin = "routine")))
+        val state = SessionsUiState(groups = listOf(open), routineGroups = listOf(nightly, weekly))
+        assertEquals(listOf(1L, 5L, 6L), state.shownRows().map { it.id })
+        assertEquals(listOf(1L), state.pickableRows().map { it.id })
+        assertEquals(listOf(1L, 6L), state.pickableRows(openRoutines = setOf("routine:4")).map { it.id })
+    }
+
     /** r09 B6: "All idle" picks the sessions whose agent waits at its prompt. */
     @Test
     fun all_idle_picks_the_idle_rows() {

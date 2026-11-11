@@ -204,17 +204,23 @@ internal fun stateBands(rows: List<SessionRow>): List<Pair<StatusWord?, List<Ses
     return BAND_ORDER.mapNotNull { w -> byWord[w]?.let { w to it } }
 }
 
-/** Every row the list holds, in the order it draws them. */
+/**
+ * Every row the list holds, in the order it draws them: the routine runs
+ * last, in their Routines section (review phone-flows-2: they were counted
+ * and never drawn, and search did not find them).
+ */
 internal fun SessionsUiState.shownRows(): List<SessionRow> =
-    urgent + groups.flatMap { h -> h.projects.flatMap { it.sessions } }
+    urgent + groups.flatMap { h -> h.projects.flatMap { it.sessions } } + routineGroups.flatMap { it.sessions }
 
 /**
  * The rows Select all and All idle may pick: what is on screen, so not the
  * sessions inside a collapsed group, which Send and Archive would otherwise
- * act on unseen (review w22-7).
+ * act on unseen (review w22-7) — and of the routines, only the runs of the
+ * ones unfolded ([openRoutines]).
  */
-internal fun SessionsUiState.pickableRows(): List<SessionRow> =
-    urgent + groups.filterNot { it.collapsed }.flatMap { h -> h.projects.flatMap { it.sessions } }
+internal fun SessionsUiState.pickableRows(openRoutines: Set<String> = emptySet()): List<SessionRow> =
+    urgent + groups.filterNot { it.collapsed }.flatMap { h -> h.projects.flatMap { it.sessions } } +
+        routineGroups.filter { it.key in openRoutines }.flatMap { it.sessions }
 
 /** Where a search looks (MobileSessionsTools): every kind of hit, or one. */
 /** The search's chips. TEXT is the hub's full-text index: tasks, conversations, pull requests, the journal. */
@@ -346,14 +352,16 @@ fun SessionsTab(
     var scope by remember { mutableStateOf(SearchScope.ALL) }
     var sending by remember { mutableStateOf(false) }
     var killing by remember { mutableStateOf(false) }
+    // The routines unfolded, as on Classic: a routine's runs sit folded to one line.
+    var openRoutines by remember { mutableStateOf(emptySet<String>()) }
 
     Column(modifier = modifier.fillMaxSize()) {
         when {
             bulk.active -> SelectionHeader(
                 bulk,
                 onClear = handlers.onClearSelection,
-                onSelectAll = { bulkHandlers.onSelectAll(state.pickableRows().map { it.id }) },
-                onSelectIdle = idleIds(state.pickableRows()).takeIf { it.isNotEmpty() }?.let { ids -> { bulkHandlers.onSelectAll(ids) } },
+                onSelectAll = { bulkHandlers.onSelectAll(state.pickableRows(openRoutines).map { it.id }) },
+                onSelectIdle = idleIds(state.pickableRows(openRoutines)).takeIf { it.isNotEmpty() }?.let { ids -> { bulkHandlers.onSelectAll(ids) } },
             )
             state.searchOpen -> SearchHeader(
                 query = state.filters.query,
@@ -454,6 +462,36 @@ fun SessionsTab(
                                 }
                             }
                         }
+                        // A routine starts a session per run: they sit here, a
+                        // line per routine, out of the tree (claude-fleet's
+                        // Routines section; Classic draws the same).
+                        if (state.routineGroups.isNotEmpty()) {
+                            item(key = "routines-heading") { RoutinesHeading(state.routineGroups.sumOf { it.sessions.size }) }
+                            for (group in state.routineGroups) {
+                                val open = group.key in openRoutines
+                                item(key = "routine-${group.key}") {
+                                    RoutineGroupHeader(group, open) {
+                                        openRoutines = if (open) openRoutines - group.key else openRoutines + group.key
+                                    }
+                                }
+                                if (open) {
+                                    items(group.sessions, key = { "routine-run-${it.id}" }) { row ->
+                                        PhoneSessionRow(
+                                            row = row,
+                                            nowSeconds = state.nowSeconds,
+                                            live = live,
+                                            showHost = true,
+                                            accountName = row.accountUuid?.let(state.accountNames::get),
+                                            limit = state.limitOf(row),
+                                            onClick = { tap(row.id) },
+                                            selecting = bulk.active,
+                                            selected = row.id in bulk.selected,
+                                            onLongClick = select?.let { { it(row.id) } },
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         if (state.archivedRow && !state.isEmpty) {
                             item(key = "archived") {
                                 ArchivedRow(
@@ -496,13 +534,14 @@ fun SessionsTab(
         SendSheet(count = bulk.selected.size, onDismiss = { sending = false }, onSend = { handlers.onBulkSend(it); sending = false })
     }
     if (killing) {
-        val byId = rows.associateBy { it.id }
-        val picked = bulk.selected.mapNotNull(byId::get)
+        // Every pick, on screen or not: Kill acts on all of them, so the sheet
+        // names all of them, and Kill N kills exactly those (review phone-flows-1).
+        val picks = killPicks(bulk.picked, rows.mapTo(HashSet()) { it.id })
         KillSheet(
-            killable = picked.filter { killRefusal(it) == null }.map { it.displayName },
-            skipped = bulk.selected.size - bulk.killable,
+            killable = picks.names,
+            skipped = picks.skipped,
             onDismiss = { killing = false },
-            onKill = { handlers.onBulkKill(); killing = false },
+            onKill = { handlers.onBulkKill(picks.ids); killing = false },
         )
     }
     bulk.outcome?.let { outcome ->
@@ -958,6 +997,23 @@ private fun KillSheet(killable: List<String>, skipped: Int, onDismiss: () -> Uni
             for (name in killable) Text(name, color = Fleet.colors.fg, fontSize = 15.sp, modifier = Modifier.padding(vertical = 4.dp))
         }
     }
+}
+
+/** What the Kill sheet names and kills: [ids] and their [names], and how many picks it skips. */
+internal data class KillPicks(val ids: Set<Long>, val names: List<String>, val skipped: Int)
+
+/**
+ * The Kill sheet's picks: every one of [picked] (the selection as the fleet
+ * lists it) the hub would kill, named — a pick the list on screen ([onScreen])
+ * does not show now says so, since it is killed too.
+ */
+internal fun killPicks(picked: List<SessionRow>, onScreen: Set<Long>): KillPicks {
+    val killable = picked.filter { killRefusal(it) == null }
+    return KillPicks(
+        ids = killable.mapTo(LinkedHashSet()) { it.id },
+        names = killable.map { if (it.id in onScreen) it.displayName else "${it.displayName} · not in this view" },
+        skipped = picked.size - killable.size,
+    )
 }
 
 /**

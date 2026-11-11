@@ -670,7 +670,10 @@ class SessionViewModel(
         Local(
             draft = drafts.recall(sessionId),
             // A prompt the hub refused before the person left is still here to Retry or Edit (review w22-4).
-            notSent = drafts.recallUnsent(sessionId)?.let { NotSent(it, Friendly("Not sent", "The hub did not take this prompt. Retry it, or edit it.", isError = false)) },
+            // Only the words are kept across leaving the session, not why the
+            // send failed: it may have gone through (review phone-systemic-2),
+            // so the card asks for a look before Retry.
+            notSent = drafts.recallUnsent(sessionId)?.let { NotSent(it, Friendly("Not sent", "The hub may not have taken this prompt. Check the conversation, then retry it or edit it.", isError = false)) },
         ),
     )
     private val tokenReadOnly = !canSendPrompts
@@ -1207,7 +1210,8 @@ class SessionViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(answering = false, error = friendly(t)) }
+            // An answer is a write: one whose outcome is unknown says so (review phone-systemic-2).
+            local.update { it.copy(answering = false, error = friendlyWrite(t)) }
         }
     }
 
@@ -1485,7 +1489,12 @@ class SessionViewModel(
      * this is a history of what was composed, not of every prompt this screen
      * ever sent.
      */
-    private suspend fun deliver(text: String, clearDraft: Boolean, keep: Boolean = keepNotSent && clearDraft) {
+    private suspend fun deliver(
+        text: String,
+        clearDraft: Boolean,
+        keep: Boolean = keepNotSent && clearDraft,
+        clientMsgId: String = newPromptSendId(clock()),
+    ) {
         // Out of the box at once and shown as pending: the box is free and the
         // prompt is visibly on its way, rather than both frozen until the hub
         // answers. A failure puts it back.
@@ -1499,7 +1508,7 @@ class SessionViewModel(
             )
         }
         try {
-            actions.sendPrompt(sessionId, text)
+            actions.sendPrompt(sessionId, text, clientMsgId)
             quickReplies.remember(text)
             // Any accepted prompt starts a new turn, so the suggestion on offer
             // is spent — unless the row has already moved on to another one.
@@ -1511,10 +1520,23 @@ class SessionViewModel(
             local.update { it.copy(sending = false, pending = null, draft = if (clearDraft && it.draft.isEmpty()) text else it.draft) }
             throw e
         } catch (t: Throwable) {
-            val failure = friendly(t)
+            // A send whose outcome is unknown says so, not "not sent"
+            // (review phone-systemic-2): Retry then goes out under the same
+            // `client_msg_id`, which the hub replays if the first one landed.
+            val unknown = mayHaveRun(t)
+            val failure = friendlyWrite(t)
             if (keep) {
                 // The New bar: kept in the conversation, marked, with Retry and Edit.
-                local.update { it.copy(sending = false, pending = null, notSent = NotSent(text, failure)) }
+                local.update { it.copy(sending = false, pending = null, notSent = NotSent(text, failure, clientMsgId, unknown)) }
+                // Read the conversation again, so whether it landed is there to see.
+                if (unknown) {
+                    try {
+                        requestRead(first = false)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Throwable) {
+                    }
+                }
                 return
             }
             local.update {
@@ -1540,7 +1562,7 @@ class SessionViewModel(
         val unsent = current.notSent ?: return@launch
         if (!canWriteNow(current) || row() == null || blockedNow()) return@launch
         local.update { it.copy(notSent = null) }
-        deliver(unsent.text, clearDraft = false, keep = true)
+        deliver(unsent.text, clearDraft = false, keep = true, clientMsgId = unsent.clientMsgId ?: newPromptSendId(clock()))
     }
 
     /** Put the prompt the hub did not take back into the box, after what is typed, to edit it; nothing is sent. */
@@ -1687,17 +1709,19 @@ class SessionViewModel(
     /** Take a waiting prompt back before the session gets it. */
     fun cancelQueued(id: Long): Job = scope.launch {
         if (!fleet.capabilities.value.sendLater || readOnly || !connected()) return@launch
-        // Taking a prompt back keeps its words: into an empty box, to edit
-        // and send again, rather than gone (UX antipatterns 2026-11-03).
-        val body = local.value.queued.firstOrNull { it.id == id }?.body
+        // Taking a prompt back keeps its words: into the box, to edit and
+        // send again, rather than gone (UX antipatterns 2026-11-03). A box
+        // that already holds a draft keeps it, with the prompt after it
+        // (review pm-work-ux-4): the chip showed one line of it, and nothing
+        // else held the rest.
+        val body = local.value.queued.firstOrNull { it.id == id }?.body?.takeIf { it.isNotBlank() }
         try {
             val left = actions.queuedPrompts(sessionId, cancel = id)
             local.update {
-                val refill = body != null && it.draft.isBlank()
                 it.copy(
                     queued = left.filter { q -> q.waiting },
-                    draft = if (refill) body.orEmpty() else it.draft,
-                    sendLaterNotice = if (refill) "Taken back. It is in the box to edit." else "Taken back.",
+                    draft = if (body != null) appendToDraft(it.draft, body) else it.draft,
+                    sendLaterNotice = if (body != null) "Taken back. It is in the box to edit." else "Taken back.",
                 )
             }
         } catch (e: CancellationException) {

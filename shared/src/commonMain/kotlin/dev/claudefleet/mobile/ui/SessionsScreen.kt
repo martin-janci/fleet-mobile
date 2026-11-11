@@ -166,7 +166,8 @@ data class SessionsHandlers(
     /** *Select* in the header's overflow: select mode with nothing picked yet. */
     val onStartSelect: () -> Unit = {},
     val onBulkSend: (String) -> Unit = {},
-    val onBulkKill: () -> Unit = {},
+    /** Kill the picked sessions the confirmation named, by id. */
+    val onBulkKill: (Set<Long>) -> Unit = {},
     val onDismissBulkOutcome: () -> Unit = {},
     /** Search hits beyond sessions: a host's sessions, a new session in a project, a ticket lookup. */
     val onSearchHost: (String) -> Unit = {},
@@ -723,7 +724,7 @@ private fun PinnedHeading(count: Int) {
 
 /** Over the routine groups: how many runs they hold. */
 @Composable
-private fun RoutinesHeading(runs: Int) {
+internal fun RoutinesHeading(runs: Int) {
     Text(
         text = "Routines · ${routineRunsWord(runs)}",
         style = MaterialTheme.typography.labelLarge,
@@ -734,7 +735,7 @@ private fun RoutinesHeading(runs: Int) {
 
 /** One routine's runs, folded to a line: its name, how many, how many need you. */
 @Composable
-private fun RoutineGroupHeader(group: RoutineGroup, open: Boolean, onClick: () -> Unit) {
+internal fun RoutineGroupHeader(group: RoutineGroup, open: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1125,7 +1126,7 @@ private fun SelectionBar(bulk: BulkUiState, handlers: SessionsHandlers) {
                         if (skipped > 0) " $skipped picked cannot be killed from here and are skipped." else "",
                 )
             },
-            confirmButton = { DangerTextButton(onClick = { handlers.onBulkKill(); killing = false }) { Text("Kill") } },
+            confirmButton = { DangerTextButton(onClick = { handlers.onBulkKill(bulk.selected); killing = false }) { Text("Kill") } },
             dismissButton = { TextButton(onClick = { killing = false }) { Text("Cancel") } },
         )
     }

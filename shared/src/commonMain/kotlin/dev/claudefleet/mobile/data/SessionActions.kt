@@ -67,6 +67,12 @@ interface SessionActions {
     suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult
 
     /**
+     * [sendPrompt] under a caller-chosen `client_msg_id`: sent again with the
+     * same id, the hub replays the first answer instead of typing twice.
+     */
+    suspend fun sendPrompt(sessionId: Long, text: String, clientMsgId: String): SendPromptResult = sendPrompt(sessionId, text)
+
+    /**
      * Press one key (`"Enter"` | `"Escape"` | `"C-c"`, or a digit `"1"`–`"9"`
      * that picks a dialog's option) instead of typing text.
      */
@@ -119,6 +125,9 @@ interface SessionActions {
 
     /** The prompts the hub keeps for this session; [cancel] takes one back first (`queued_prompts`). */
     suspend fun queuedPrompts(sessionId: Long, cancel: Long? = null): List<QueuedPrompt> = emptyList()
+
+    /** Control follows mission [missionId] from now on (`control_journal { action: follow }`). */
+    suspend fun followMission(missionId: Long, text: String): Unit = throw UnsupportedOperationException("control_journal")
 
     /**
      * Tune prompt (`session_prompt_tune`): a model's rewrite of [draft], a
@@ -212,6 +221,9 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
     override suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult =
         session.withClient { it.sendPrompt(sessionId, text) }
 
+    override suspend fun sendPrompt(sessionId: Long, text: String, clientMsgId: String): SendPromptResult =
+        session.withClient { it.sendPrompt(sessionId, text, clientMsgId) }
+
     override suspend fun sendKeys(sessionId: Long, key: String): SendPromptResult =
         session.withClient { it.sendKeys(sessionId, key) }
 
@@ -246,6 +258,9 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
 
     override suspend fun queuedPrompts(sessionId: Long, cancel: Long?): List<QueuedPrompt> =
         session.withClient { it.queuedPrompts(sessionId, cancel) }
+
+    override suspend fun followMission(missionId: Long, text: String) =
+        session.withClient { it.followMission(missionId, text) }
 
     override suspend fun tunePrompt(sessionId: Long, draft: String, ask: String, history: List<String>): TuneAnswer =
         session.withClient { it.tunePrompt(sessionId, draft, ask, history) }
