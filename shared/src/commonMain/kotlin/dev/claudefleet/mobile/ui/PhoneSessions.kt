@@ -999,18 +999,23 @@ private fun KillSheet(killable: List<String>, skipped: Int, onDismiss: () -> Uni
     }
 }
 
-/** What the Kill sheet names and kills: [ids] and their [names], and how many picks it skips. */
+/**
+ * What the Kill sheet acts on: [ids] is every pick it listed, killable or
+ * not, so the outcome names each skipped one with its reason; [names] are
+ * the ones it kills, and [skipped] how many it does not.
+ */
 internal data class KillPicks(val ids: Set<Long>, val names: List<String>, val skipped: Int)
 
 /**
  * The Kill sheet's picks: every one of [picked] (the selection as the fleet
  * lists it) the hub would kill, named — a pick the list on screen ([onScreen])
- * does not show now says so, since it is killed too.
+ * does not show now says so, since it is killed too. The refused picks go to
+ * [BulkViewModel.kill] as well, which skips and names them (review of #300).
  */
 internal fun killPicks(picked: List<SessionRow>, onScreen: Set<Long>): KillPicks {
     val killable = picked.filter { killRefusal(it) == null }
     return KillPicks(
-        ids = killable.mapTo(LinkedHashSet()) { it.id },
+        ids = picked.mapTo(LinkedHashSet()) { it.id },
         names = killable.map { if (it.id in onScreen) it.displayName else "${it.displayName} · not in this view" },
         skipped = picked.size - killable.size,
     )

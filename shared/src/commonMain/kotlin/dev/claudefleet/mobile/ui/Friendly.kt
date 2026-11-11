@@ -30,27 +30,13 @@ fun friendly(t: Throwable): Friendly = friendlyWords(t).also {
 private val MAY_HAVE_RUN_CODES = setOf("E_SSH_TIMEOUT", "E_TIMEOUT", "E_AGENT_PROTOCOL", "E_IN_FLIGHT")
 
 /**
- * The transport failures that happen before a request leaves the phone: no
- * name, no route, no connection. Any other one may have come after the hub
- * had the request (a read timeout, a reset mid-answer, an answer it could not
- * parse).
- */
-private val NEVER_SENT_KINDS = setOf(
-    "ConnectException",
-    "ConnectTimeoutException",
-    "UnknownHostException",
-    "UnresolvedAddressException",
-    "NoRouteToHostException",
-)
-
-/**
  * Whether a write that failed with [t] may have gone through anyway (review
  * phone-systemic-2, the desktop's `MAY_HAVE_RUN`, w16-8). For writes only: a
  * read has nothing to go through, and Retry is its next step.
  */
 fun mayHaveRun(t: Throwable): Boolean = when (t) {
     is HubError.Tool -> t.code in MAY_HAVE_RUN_CODES
-    is HubError.Transport -> t.kind !in NEVER_SENT_KINDS
+    is HubError.Transport -> !t.neverSent
     else -> false
 }
 

@@ -211,7 +211,7 @@ class BulkViewModelTest {
 
         // Session 1 left the filtered list (it turned working): only 2 and 3 are on screen.
         val picks = killPicks(vm.state.value.picked, onScreen = setOf(2L, 3L))
-        assertEquals(setOf(1L, 2L), picks.ids)
+        assertEquals(setOf(1L, 2L, 3L), picks.ids, "the refused pick goes too, to be named")
         assertEquals(listOf("one · not in this view", "two"), picks.names)
         assertEquals(1, picks.skipped, "the controller")
 
@@ -219,6 +219,27 @@ class BulkViewModelTest {
         runCurrent()
         assertEquals(listOf(1L, 2L), calls.killed)
         assertEquals(setOf(3L), vm.state.value.selected, "the skipped pick stays picked")
+    }
+
+    /**
+     * Review of #300: the Kill sheet sent only its killable picks, so the
+     * outcome said nothing about the ones it skipped. It names them again,
+     * with the reason, as Classic's selection bar does.
+     */
+    @Test
+    fun the_kill_sheet_outcome_names_the_skipped_picks() = runTest {
+        val calls = BulkCalls()
+        val vm = BulkViewModel(BulkFleet(ROWS), calls, backgroundScope, canWrite = true)
+        listOf(1L, 2L, 3L).forEach(vm::toggle)
+        runCurrent()
+
+        vm.kill(killPicks(vm.state.value.picked, onScreen = setOf(1L, 2L, 3L)).ids).join()
+        runCurrent()
+        assertEquals(listOf(1L, 2L), calls.killed)
+        val skipped = vm.state.value.outcome!!.filter { !it.ok }
+        assertEquals(listOf(3L), skipped.map { it.sessionId })
+        assertTrue(skipped.single().reason != null, "the skipped pick says why")
+        assertFalse(skipped.single().retryable)
     }
 
     @Test
