@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -24,24 +25,28 @@ import dev.claudefleet.mobile.notify.MISSION_WAITING_REASON
 import dev.claudefleet.mobile.notify.MissionWaitAlert
 import dev.claudefleet.mobile.notify.ROUTINE_FAILED_REASON
 import dev.claudefleet.mobile.notify.RoutineFailedAlert
+import dev.claudefleet.mobile.notify.MissionWaitWatch
+import dev.claudefleet.mobile.notify.RoutineFailedWatch
+import dev.claudefleet.mobile.notify.keepSeenForHub
 import dev.claudefleet.mobile.notify.missionWaitActions
-import dev.claudefleet.mobile.notify.missionWaitAlerts
-import dev.claudefleet.mobile.notify.missionWaitsResolved
-import dev.claudefleet.mobile.notify.routineFailedAlerts
 import dev.claudefleet.mobile.notify.needsYouContent
 import dev.claudefleet.mobile.notify.decodeSeen
 import dev.claudefleet.mobile.notify.encodeSeen
 import dev.claudefleet.mobile.notify.needsYouEvents
 import dev.claudefleet.mobile.notify.notifyAllows
-import dev.claudefleet.mobile.store.AndroidPrefs
-import dev.claudefleet.mobile.store.AndroidSecrets
+import dev.claudefleet.mobile.store.Credentials
+import io.ktor.client.HttpClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -54,8 +59,9 @@ import kotlinx.coroutines.launch
  * A foreground service, so the system keeps it — with its own quiet ongoing
  * notification, which is the honest price of a socket that stays open — of
  * type `specialUse`: none of the named types is "watch a server for a
- * person". It reads the same stored credential the app does through its own
- * [AppContainer], so a revoked token (401) unpairs here as it would there,
+ * person". It follows the app's own credential, through the process's
+ * [AppContainer]: a re-pair restarts the watch with the new token, another
+ * hub starts it afresh, a revoked token (401) unpairs here as it would there,
  * and it stops itself when there is no credential to watch with.
  */
 class NeedsYouService : Service() {
@@ -99,26 +105,59 @@ class NeedsYouService : Service() {
         super.onDestroy()
     }
 
+    /**
+     * Follow the stored credential for as long as the service runs. The
+     * process's own [AppContainer] and its session, not a copy read once: a
+     * pair, a Forget or a 401 anywhere in the app is seen here at once. The
+     * watch for one credential ends when it changes (its stream, polls and
+     * all), and the service stops when there is none.
+     */
     private suspend fun watch() {
-        val http = hubHttpClient()
-        val container = AppContainer(
-            secrets = AndroidSecrets(applicationContext),
-            prefs = AndroidPrefs(getSharedPreferences("quick_replies", MODE_PRIVATE)),
-            http = http,
-            appVersion = BuildConfig.VERSION_NAME,
-        )
-        val credentials = (container.session.restore() as? AuthState.Paired)?.credentials
-        if (credentials == null) {
-            stopSelf()
-            return
+        val container = (application as FleetApplication).container
+        val session = container.session
+        // Started at boot, or by the system after the process died: nothing
+        // has read the store yet.
+        if (session.state.value == AuthState.Unknown) {
+            try {
+                session.restore()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                stopSelf()
+                return
+            }
         }
-        val fleet = container.repository(credentials, scope)
-        fleet.start()
-        scope.launch { watchRoutines(HubClient(http, credentials.hub, credentials.token), container) }
-        scope.launch { watchMissions(HubClient(http, credentials.hub, credentials.token), container) }
+        val http = hubHttpClient()
+        session.state
+            .map { (it as? AuthState.Paired)?.credentials }
+            .distinctUntilChanged()
+            .collectLatest { credentials ->
+                if (credentials == null) {
+                    // Forgotten or revoked: this phone no longer sees that
+                    // fleet, and its notifications would open another's ids.
+                    withdrawAll()
+                    stopSelf()
+                } else {
+                    watchHub(container, http, credentials)
+                }
+            }
+    }
+
+    /** One credential's watch: the stream and the two polls, ended together when it changes. */
+    private suspend fun watchHub(container: AppContainer, http: HttpClient, credentials: Credentials) = coroutineScope {
         // What the last run saw, so a session that began waiting while the
         // service was down is still news when it comes back.
         val memory = getSharedPreferences("notifications", MODE_PRIVATE)
+        // Another hub's ids are other sessions, runs and missions: what the
+        // old one's looks saw, and its notifications, go.
+        if (container.prefs.keepSeenForHub(credentials.hub)) {
+            memory.edit().remove(SEEN).apply()
+            withdrawAll()
+        }
+        val fleet = container.repository(credentials, this)
+        fleet.start()
+        launch { watchRoutines(HubClient(http, credentials.hub, credentials.token), container) }
+        launch { watchMissions(HubClient(http, credentials.hub, credentials.token), container) }
         val remembered = memory.getStringSet(SEEN, null)?.let { decodeSeen(it.toList()) }
         needsYouEvents(fleet, remembered) { seen -> memory.edit().putStringSet(SEEN, encodeSeen(seen).toSet()).apply() }
             .collect { event ->
@@ -135,6 +174,17 @@ class NeedsYouService : Service() {
 
     /** The sessions with a notification up, for the group's summary. */
     private val shown = linkedMapOf<Long, String>()
+
+    /**
+     * Every alert this app has up — sessions, the summary, routines,
+     * missions, whichever instance posted them — but not the ongoing notice
+     * or another channel's (the update's).
+     */
+    private fun withdrawAll() {
+        shown.clear()
+        val m = manager(this)
+        m.activeNotifications.filter { it.notification.channelId == ALERTS }.forEach { m.cancel(it.id) }
+    }
 
     /**
      * Put one alert away. By id, whether or not this instance posted it:
@@ -250,13 +300,14 @@ class NeedsYouService : Service() {
     /**
      * The matrix's Routine failed row (review r19, R19-5): the hub's event
      * stream carries sessions, not routine runs, so ask `routines { failing }`
-     * every [ROUTINE_POLL_MS]. The first answer is the baseline: a failure
-     * from before the watcher started is on the Inbox already, not news. A hub
-     * that answers with an error (an older hub, a token without routines) is
-     * asked again less often.
+     * every [ROUTINE_POLL_MS]. What it saw is kept on the phone
+     * ([RoutineFailedWatch]), so a run that failed while the service was down
+     * is news when it comes back; only the first look ever is the baseline. A
+     * hub that answers with an error (an older hub, a token without routines)
+     * is asked again less often.
      */
     private suspend fun watchRoutines(client: HubClient, container: AppContainer) {
-        var seen: Set<Long>? = null
+        val watch = RoutineFailedWatch(container.prefs)
         while (true) {
             val failing = try {
                 client.failingRoutines()
@@ -266,8 +317,7 @@ class NeedsYouService : Service() {
                 null
             }
             if (failing != null) {
-                val (alerts, now) = routineFailedAlerts(seen, failing)
-                seen = now
+                val alerts = watch.look(failing)
                 if (!AppVisibility.foreground && container.prefs.notifyAllows(ROUTINE_FAILED_REASON)) alerts.forEach(::postRoutine)
             }
             delay(if (failing != null) ROUTINE_POLL_MS else ROUTINE_RETRY_MS)
@@ -277,12 +327,12 @@ class NeedsYouService : Service() {
     /**
      * A mission that waits on a person (gap plan G5.7): the event stream
      * carries sessions, not missions, so ask `work { missions }` every
-     * [ROUTINE_POLL_MS], as for routines. The first answer is the baseline; a
-     * hub that answers with an error (no missions, a token without work) is
-     * asked again less often.
+     * [ROUTINE_POLL_MS], as for routines, and kept on the phone as they are
+     * ([MissionWaitWatch]); a hub that answers with an error (no missions, a
+     * token without work) is asked again less often.
      */
     private suspend fun watchMissions(client: HubClient, container: AppContainer) {
-        var seen: Map<Long, String>? = null
+        val watch = MissionWaitWatch(container.prefs)
         while (true) {
             val missions = try {
                 client.workMissions()
@@ -292,10 +342,10 @@ class NeedsYouService : Service() {
                 null
             }
             if (missions != null) {
-                val (alerts, now) = missionWaitAlerts(seen, missions)
-                // A wait that ended takes its notification down (review w21-3).
-                for (id in missionWaitsResolved(seen, now)) manager(this).cancel(MISSION_BASE + (id % 100_000).toInt())
-                seen = now
+                val (alerts, resolved) = watch.look(missions)
+                // A wait that ended takes its notification down (review w21-3),
+                // whichever instance of the service posted it.
+                for (id in resolved) manager(this).cancel(MISSION_BASE + (id % 100_000).toInt())
                 if (!AppVisibility.foreground && container.prefs.notifyAllows(MISSION_WAITING_REASON)) alerts.forEach(::postMission)
             }
             delay(if (missions != null) ROUTINE_POLL_MS else ROUTINE_RETRY_MS)
@@ -444,5 +494,26 @@ class AndroidBackgroundNotifier(private val context: Context) : BackgroundNotifi
         /** The stored choice, for the service to check before it watches. */
         fun isEnabled(context: Context): Boolean =
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY, false)
+    }
+}
+
+/**
+ * After the phone starts: Android starts nothing of this app's by itself, so
+ * "Notify me" stayed silent until the app was next opened. A `specialUse`
+ * foreground service may be started from BOOT_COMPLETED (Android 15 bars
+ * only dataSync, camera, mediaPlayback, phoneCall, mediaProjection and
+ * microphone), and the broadcast comes after the first unlock, when the
+ * stored credential can be read. The service checks the credential itself.
+ */
+class BootReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        if (!AndroidBackgroundNotifier.isEnabled(context)) return
+        try {
+            (context.applicationContext as FleetApplication).notifier.apply()
+        } catch (e: RuntimeException) {
+            // The system refused to start the service from here; the next
+            // launch starts it.
+        }
     }
 }

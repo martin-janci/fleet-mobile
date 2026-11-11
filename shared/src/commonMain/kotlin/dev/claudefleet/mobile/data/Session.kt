@@ -194,8 +194,14 @@ class AppSession(
      * [withClient]'s own 401 handling and [FleetRepository]'s `onRevoked`
      * (wired up in `AppContainer`) are the only two 401 paths in the app, and
      * both go through here rather than through [forget].
+     *
+     * [refused] is the credential that got the 401, when the caller knows it
+     * (the repository does): a credential this device no longer holds — it
+     * re-paired, or forgot, since that stream opened — is not the one to
+     * clear, and clearing would delete the new pairing from the store.
      */
-    suspend fun revoke() {
+    suspend fun revoke(refused: Credentials? = null) {
+        if (refused != null && credentials()?.token != refused.token) return
         val hub = (_state.value as? AuthState.Paired)?.credentials?.hub
         secrets.clear()
         _lastHub = hub

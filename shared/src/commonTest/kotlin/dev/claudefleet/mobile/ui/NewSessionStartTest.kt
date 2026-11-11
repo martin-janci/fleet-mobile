@@ -15,6 +15,12 @@ import dev.claudefleet.mobile.model.suggestedHostOf
 import dev.claudefleet.mobile.net.json
 import kotlinx.serialization.json.JsonNull
 import dev.claudefleet.mobile.model.HostLogin
+import dev.claudefleet.mobile.model.AccountBlocks
+import dev.claudefleet.mobile.model.AccountRow
+import dev.claudefleet.mobile.model.blocks
+import dev.claudefleet.mobile.model.OrgDirectory
+import dev.claudefleet.mobile.model.OrgInfo
+import dev.claudefleet.mobile.model.OrgRule
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.NewBgSessionResult
 import dev.claudefleet.mobile.model.ProjectRow
@@ -66,6 +72,8 @@ private class StartFleet(caps: HubCapabilities = MAIN_HUB) : FleetState {
     override val sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16)
     override val capabilities = MutableStateFlow(caps)
     override val accountNames = MutableStateFlow(mapOf("acc-1" to "m.janci@32bit.sk", "acc-2" to "team@32bit.sk"))
+    override val accountBlocks = MutableStateFlow<Map<String, AccountBlocks>>(emptyMap())
+    override val orgs = MutableStateFlow(OrgDirectory.EMPTY)
     override val startProgress = MutableSharedFlow<StartProgress>(extraBufferCapacity = 16)
     override suspend fun refresh() {}
 }
@@ -443,6 +451,79 @@ class NewSessionStartTest {
         vm.create()
         runCurrent()
         assertTrue(actions.requests.last().overLimitOk)
+    }
+
+    /**
+     * The project's forbidden accounts (claude-fleet migration 217): the
+     * freest login is on one, so the default is the next allowed login, the
+     * forbidden one is listed as "not for this project" and cannot be picked.
+     */
+    @Test
+    fun the_default_is_never_a_login_the_project_forbids() = runTest {
+        val actions = StartActions()
+        actions.headroomAnswer = Headroom(
+            pauseAtPct = 90.0,
+            chosen = HostLogin(profile = null, accountUuid = "acc-1", usedPct = 10.0),
+            logins = listOf(
+                HostLogin(profile = null, accountUuid = "acc-1", usedPct = 10.0),
+                HostLogin(profile = "team", accountUuid = "acc-2", usedPct = 60.0),
+            ),
+        )
+        val fleet = StartFleet().apply { accountBlocks.value = listOf(AccountRow("acc-1", forbiddenProjectIds = listOf(3))).associate { it.uuid to it.blocks() } }
+        val vm = vm(fleet, actions, backgroundScope)
+        vm.selectProject(3)
+        runCurrent()
+        assertEquals("team", assertNotNull(vm.state.value.account).profile)
+        val own = assertNotNull(vm.state.value.logins.firstOrNull { it.profile == null })
+        assertTrue(own.forbidden)
+        assertEquals("m.janci@32bit.sk · not for this project", accountLine(own))
+        vm.pickLogin(null)
+        runCurrent()
+        assertEquals("team", assertNotNull(vm.state.value.account).profile, "a forbidden login is not pickable")
+        assertTrue(vm.state.value.canCreate)
+        vm.create()
+        runCurrent()
+        assertEquals("team", actions.requests.last().profile)
+    }
+
+    /** The same through the project's org (migration 218), read from the org rules the hub sends. */
+    @Test
+    fun an_account_kept_off_the_projects_org_is_never_the_default() = runTest {
+        val actions = StartActions()
+        actions.headroomAnswer = Headroom(
+            pauseAtPct = 90.0,
+            chosen = HostLogin(profile = null, accountUuid = "acc-1", usedPct = 10.0),
+            logins = listOf(
+                HostLogin(profile = null, accountUuid = "acc-1", usedPct = 10.0),
+                HostLogin(profile = "team", accountUuid = "acc-2", usedPct = 60.0),
+            ),
+        )
+        val fleet = StartFleet().apply {
+            accountBlocks.value = listOf(AccountRow("acc-1", forbiddenOrgIds = listOf(9))).associate { it.uuid to it.blocks() }
+            orgs.value = OrgDirectory(orgs = mapOf(9L to OrgInfo(9, "Acme")), rules = listOf(OrgRule(id = 1, orgId = 9, owner = "me")))
+        }
+        val vm = vm(fleet, actions, backgroundScope)
+        vm.selectProject(3)
+        runCurrent()
+        assertEquals("team", assertNotNull(vm.state.value.account).profile)
+    }
+
+    /** Every login on the host is on a forbidden account: nothing the hub would take, so Create waits. */
+    @Test
+    fun a_host_with_only_forbidden_logins_cannot_start_the_project() = runTest {
+        val actions = StartActions()
+        val fleet = StartFleet().apply {
+            accountBlocks.value = listOf(AccountRow("acc-1", forbiddenProjectIds = listOf(3)), AccountRow("acc-2", forbiddenProjectIds = listOf(3))).associate { it.uuid to it.blocks() }
+        }
+        val vm = vm(fleet, actions, backgroundScope)
+        vm.selectProject(3)
+        runCurrent()
+        assertTrue(assertNotNull(vm.state.value.account).forbidden)
+        assertFalse(vm.state.value.canCreate)
+        assertEquals("No login on pine is on an account allowed for this project: pick another host.", vm.state.value.missing)
+        vm.create()
+        runCurrent()
+        assertTrue(actions.requests.isEmpty())
     }
 
     @Test

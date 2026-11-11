@@ -44,6 +44,7 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LifecycleStartEffect
 import dev.claudefleet.mobile.data.SsoSignIn
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.data.forbiddenAccountsIn
 import dev.claudefleet.mobile.data.AgentActions
 import dev.claudefleet.mobile.data.ControlActions
 import dev.claudefleet.mobile.data.AppSession
@@ -795,8 +796,11 @@ class AppContainer(
             // be routed back to the same rule by hand. Without this the app sat
             // on a revoked token behind a banner, while the identical 401
             // through `HubSessionActions` returned it to Pair. `revoke()`, not
-            // `forget()`, so the Pair screen can say why.
-            onRevoked = { session.revoke() },
+            // `forget()`, so the Pair screen can say why. Only while this is
+            // still the stored credential: a stream of an older pairing (the
+            // background watcher's, a moment behind a re-pair) must not
+            // delete the new one.
+            onRevoked = { session.revoke(refused = credentials) },
         )
     }
 }
@@ -1114,7 +1118,14 @@ private fun ControlTab(
     val autonomyOn = settingsCaps.fleetSettings && settingsCaps.setSetting && credentials.canWrite
     val autonomy = remember(container, scope) { AutonomyViewModel(container.fleetSettingsActions, scope) }
     val autonomyState by autonomy.state.collectAsState()
-    if (autonomyOn) LaunchedEffect(autonomy) { autonomy.load() }
+    // Read again each time the app comes back: the desktop may have moved
+    // the dial meanwhile (review phone-flows-3).
+    if (autonomyOn) {
+        LifecycleResumeEffect(autonomy) {
+            autonomy.load()
+            onPauseOrDispose { }
+        }
+    }
     // The escalation cards: the rows Needs you reads (shared-in sessions are their owners' to answer).
     val laterKeys by container.escalationLater.later.collectAsState()
     // A host that answers again ends its Later at FleetRoute, whichever tab is on screen (review w21-1, w24).
@@ -1354,6 +1365,7 @@ private fun FleetRoute(
             credentials.canWrite,
             accountName = { uuid -> repository.accountNames.value[uuid] },
             signedOut = { alias, profile -> repository.hosts.value.firstOrNull { it.alias == alias }?.isSignedOut(profile) == true },
+            forbidden = { projectId, orgId -> repository.forbiddenAccountsIn(projectId, orgId) },
         )
     }
     val trackers = remember(repository, scope) { TrackersViewModel(repository, container.trackerActions, scope, credentials.canWrite) }
@@ -1705,7 +1717,7 @@ private fun FleetRoute(
                         onClearSelection = bulk::clear,
                         onStartSelect = bulk::start,
                         onBulkSend = { bulk.send(it) },
-                        onBulkKill = { bulk.kill() },
+                        onBulkKill = { ids -> bulk.kill(ids) },
                         onDismissBulkOutcome = bulk::dismissOutcome,
                         onSearchHost = { nav.showSessionsFor(it) },
                         onSearchProject = { nav.newSessionIn(it) },
@@ -2595,6 +2607,7 @@ private fun FleetRoute(
                                 onSend = { text -> steer.send(m, text); Unit },
                                 onDismissError = steer::dismissError,
                                 delivered = steerState.delivered[m.id] ?: 0,
+                                busy = steer.busy(steerRows),
                             )
                         }.takeIf { layout == PhoneLayout.New },
                     ),

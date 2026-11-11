@@ -30,6 +30,8 @@ import dev.claudefleet.mobile.model.ConfirmRequest
 import dev.claudefleet.mobile.model.ControlHandoff
 import dev.claudefleet.mobile.model.Mission
 import dev.claudefleet.mobile.model.OperatorStatus
+import dev.claudefleet.mobile.model.QueuePromptResult
+import dev.claudefleet.mobile.model.SendLaterTiming
 
 private class RoomFleet(rows: List<SessionRow>) : FleetState {
     override val sessions = MutableStateFlow(rows)
@@ -56,7 +58,19 @@ private class RoomControl(var status: OperatorStatus) : ControlActions, AgentAct
 
 private class SteerCalls : SessionActions {
     val sent = mutableListOf<Pair<Long, String>>()
+    val queued = mutableListOf<Pair<Long, String>>()
+    val followed = mutableListOf<Pair<Long, String>>()
     var failing = false
+    var followFails = false
+    override suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming): QueuePromptResult {
+        if (failing) throw HubError.Tool("E_INVALID_STATE", "busy")
+        queued += sessionId to prompt
+        return QueuePromptResult(sessionId = sessionId, queuedId = 1)
+    }
+    override suspend fun followMission(missionId: Long, text: String) {
+        if (followFails) throw HubError.Tool("E_FORBIDDEN", "control_journal is Control's and its owner's")
+        followed += missionId to text
+    }
     override suspend fun sendPrompt(sessionId: Long, text: String): SendPromptResult {
         if (failing) throw HubError.Tool("E_INVALID_STATE", "busy")
         sent += sessionId to text
@@ -130,6 +144,59 @@ class ControlRoomTest {
         assertTrue(steerBlocked(SessionRow(id = 5, lostAt = 1), connected = true, canWrite = true)!!.contains("was lost"))
         assertTrue(steerBlocked(SessionRow(id = 5), connected = false, canWrite = true)!!.startsWith("Not connected"))
         assertFalse(steerBlocked(SessionRow(id = 5), connected = true, canWrite = true) != null)
+    }
+
+    /**
+     * Review w04-11 on the phone: a steer leaves a `follow` receipt, so
+     * Control's feed tells it what the mission does next; and (w04-12) it
+     * goes into Control's queue on the hub, behind what already waits there,
+     * rather than typed into Control's turn.
+     */
+    @Test
+    fun a_steer_queues_behind_control_and_control_follows_the_mission() = runTest {
+        val fleet = RoomFleet(listOf(SessionRow(id = 5, tmuxName = "control", claudeStatus = "working")))
+        fleet.capabilities.value = HubCapabilities(
+            tools = setOf(HubCapabilities.QUEUE_PROMPT, HubCapabilities.QUEUED_PROMPTS, HubCapabilities.CONTROL_JOURNAL),
+        )
+        val calls = SteerCalls()
+        val steer = MissionSteer(fleet, calls, backgroundScope, canWrite = true) { 5L }
+        val m = Mission(id = 9, name = "Ship it")
+
+        assertNull(steer.busy(fleet.sessions.value), "the hub keeps it until Control's turn ends")
+        steer.send(m, "  pause it when wave 2 finishes ")!!.join()
+
+        assertEquals(listOf(5L to "About mission #9 \"Ship it\":\n\npause it when wave 2 finishes"), calls.queued)
+        assertTrue(calls.sent.isEmpty(), "never typed straight into Control's turn")
+        assertEquals(listOf(9L to "pause it when wave 2 finishes"), calls.followed)
+        assertEquals(1, steer.state.value.delivered[9L])
+
+        // The follow is best effort: refused, the steer still counts and says nothing.
+        calls.followFails = true
+        steer.send(m, "and tell me")!!.join()
+        assertNull(steer.state.value.error)
+        assertEquals(2, steer.state.value.delivered[9L])
+    }
+
+    @Test
+    fun on_a_hub_that_keeps_no_prompts_send_waits_while_control_is_mid_turn() = runTest {
+        val fleet = RoomFleet(listOf(SessionRow(id = 5, tmuxName = "control", claudeStatus = "working")))
+        val calls = SteerCalls()
+        val steer = MissionSteer(fleet, calls, backgroundScope, canWrite = true) { 5L }
+        val m = Mission(id = 9, name = "Ship it")
+
+        assertEquals(
+            "Control is mid-turn. Send opens when it finishes, so this is not typed into its turn.",
+            steer.busy(fleet.sessions.value),
+        )
+        assertNull(steer.send(m, "pause it"))
+        assertTrue(calls.sent.isEmpty())
+        assertTrue(calls.followed.isEmpty(), "no follow on a hub that does not list control_journal")
+
+        fleet.sessions.value = listOf(SessionRow(id = 5, tmuxName = "control", claudeStatus = "idle"))
+        assertNull(steer.busy(fleet.sessions.value))
+        steer.send(m, "pause it")!!.join()
+        assertEquals(1, calls.sent.size)
+        assertTrue(calls.followed.isEmpty())
     }
 
     /** Review w21-15: past the 20 receipts kept, a steer that went through still counts, so the box clears. */

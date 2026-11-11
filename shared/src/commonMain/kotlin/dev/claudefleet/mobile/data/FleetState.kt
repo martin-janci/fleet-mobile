@@ -10,6 +10,8 @@ import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.StartProgress
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.TrackerRow
+import dev.claudefleet.mobile.model.forbiddenAccounts
+import dev.claudefleet.mobile.model.orgOfProject
 import dev.claudefleet.mobile.net.HubCapabilities
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -230,6 +232,20 @@ interface FleetState {
 
     /** Tickets a read just answered, merged into [tickets]. */
     fun rememberTickets(tickets: List<Ticket>) {}
+}
+
+/**
+ * The accounts project [projectId] forbids, itself or through its org, from
+ * the [FleetState.accountBlocks] this fleet already holds: the desktop's
+ * `forbiddenOf` (account_limits.ts). The org is [orgId] when the caller knows
+ * it (a session row's own), else the project's as [orgOfProject] reads it
+ * from the org rules; where neither can tell, only the project's own blocks
+ * count, and the hub still refuses.
+ */
+fun FleetState.forbiddenAccountsIn(projectId: Long?, orgId: Long? = null): Set<String> {
+    if (projectId == null) return emptySet()
+    val org = orgId ?: projects.value.firstOrNull { it.id == projectId }?.let { orgs.value.orgOfProject(it) }
+    return forbiddenAccounts(accountBlocks.value, projectId, org)
 }
 
 /** The defaults [FleetState] hands a fake: a hub without the work graph. */

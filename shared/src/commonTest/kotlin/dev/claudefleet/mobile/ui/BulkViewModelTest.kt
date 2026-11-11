@@ -196,6 +196,66 @@ class BulkViewModelTest {
         assertTrue(skipped.all { it.reason != null })
     }
 
+    /**
+     * Review phone-flows-1: the Kill sheet named only the picks the filtered
+     * list still showed, and Kill killed every pick. The sheet now names
+     * every pick the fleet lists ([BulkUiState.picked], on screen or not)
+     * and Kill kills exactly the ids it named.
+     */
+    @Test
+    fun the_kill_sheet_names_every_pick_and_kill_kills_exactly_those() = runTest {
+        val calls = BulkCalls()
+        val vm = BulkViewModel(BulkFleet(ROWS), calls, backgroundScope, canWrite = true)
+        listOf(1L, 2L, 3L).forEach(vm::toggle)
+        runCurrent()
+
+        // Session 1 left the filtered list (it turned working): only 2 and 3 are on screen.
+        val picks = killPicks(vm.state.value.picked, onScreen = setOf(2L, 3L))
+        assertEquals(setOf(1L, 2L, 3L), picks.ids, "the refused pick goes too, to be named")
+        assertEquals(listOf("one · not in this view", "two"), picks.names)
+        assertEquals(1, picks.skipped, "the controller")
+
+        vm.kill(picks.ids).join()
+        runCurrent()
+        assertEquals(listOf(1L, 2L), calls.killed)
+        assertEquals(setOf(3L), vm.state.value.selected, "the skipped pick stays picked")
+    }
+
+    /**
+     * Review of #300: the Kill sheet sent only its killable picks, so the
+     * outcome said nothing about the ones it skipped. It names them again,
+     * with the reason, as Classic's selection bar does.
+     */
+    @Test
+    fun the_kill_sheet_outcome_names_the_skipped_picks() = runTest {
+        val calls = BulkCalls()
+        val vm = BulkViewModel(BulkFleet(ROWS), calls, backgroundScope, canWrite = true)
+        listOf(1L, 2L, 3L).forEach(vm::toggle)
+        runCurrent()
+
+        vm.kill(killPicks(vm.state.value.picked, onScreen = setOf(1L, 2L, 3L)).ids).join()
+        runCurrent()
+        assertEquals(listOf(1L, 2L), calls.killed)
+        val skipped = vm.state.value.outcome!!.filter { !it.ok }
+        assertEquals(listOf(3L), skipped.map { it.sessionId })
+        assertTrue(skipped.single().reason != null, "the skipped pick says why")
+        assertFalse(skipped.single().retryable)
+    }
+
+    @Test
+    fun kill_acts_on_no_id_the_selection_has_dropped() = runTest {
+        val calls = BulkCalls()
+        val vm = BulkViewModel(BulkFleet(ROWS), calls, backgroundScope, canWrite = true)
+        listOf(1L, 2L).forEach(vm::toggle)
+        runCurrent()
+        val named = killPicks(vm.state.value.picked, onScreen = setOf(1L, 2L)).ids
+        vm.toggle(2L)
+
+        vm.kill(named).join()
+        runCurrent()
+        assertEquals(listOf(1L), calls.killed)
+    }
+
     @Test
     fun a_readonly_pairing_picks_nothing() = runTest {
         val calls = BulkCalls()

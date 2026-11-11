@@ -40,8 +40,25 @@ import dev.claudefleet.mobile.ui.theme.OrbitTokens
  * OK. The Classic bar keeps its banner, its dialog and its draft-back rule.
  */
 
-/** A prompt the hub did not take: the words, kept, and why. */
-data class NotSent(val text: String, val why: Friendly)
+/**
+ * A prompt the hub did not take: the words, kept, and why. [clientMsgId] is
+ * the send's `client_msg_id`, which Retry sends again, so a first send whose
+ * answer was lost on the way back is replayed by the hub, never typed twice.
+ * [mayHaveRun]: the send went out and its outcome is unknown ([mayHaveRun]
+ * of the failure), so the card must not say it was not sent.
+ */
+data class NotSent(val text: String, val why: Friendly, val clientMsgId: String? = null, val mayHaveRun: Boolean = false)
+
+/**
+ * An id for one prompt's send (`send_prompt { client_msg_id }`): kept with a
+ * [NotSent] until the send is answered, so Retry after a lost answer types
+ * nothing twice.
+ */
+fun newPromptSendId(nowSeconds: Long, random: kotlin.random.Random = kotlin.random.Random.Default): String {
+    val alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+    val tail = buildString { repeat(10) { append(alphabet[random.nextInt(alphabet.length)]) } }
+    return "sp-${nowSeconds.coerceAtLeast(0).toString(36)}-$tail"
+}
 
 /** What a failed session's card says and offers; see [failedSession]. */
 data class FailedSession(
@@ -88,7 +105,8 @@ internal val FAILED_QUICK_REPLIES = listOf("Retry", "Show the error")
 fun sendLabel(working: Boolean): String = if (working) "Queue" else "Send"
 
 /** The "Not sent" line's headline: the hub's own short reason after the words. */
-fun notSentHeadline(n: NotSent): String = "Not sent: " + n.why.title.replaceFirstChar { it.lowercase() }
+fun notSentHeadline(n: NotSent): String =
+    if (n.mayHaveRun) n.why.title else "Not sent: " + n.why.title.replaceFirstChar { it.lowercase() }
 
 /** What the repair did, as ticked lines; a report that did nothing says so. */
 fun repairDone(report: RepairReport): List<String> =

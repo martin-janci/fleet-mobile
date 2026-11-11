@@ -89,8 +89,6 @@ class HostDetailViewModel(
         val checking: Boolean = false,
         val check: HostCheck? = null,
         val plan: RestoreReport? = null,
-        val restoring: Boolean = false,
-        val restored: RestoreReport? = null,
         val candidates: List<LostCandidate>? = null,
         val discoverNote: String? = null,
         /** The scan was held back for a host that does not answer: it runs when the host does. */
@@ -113,6 +111,14 @@ class HostDetailViewModel(
         val notes: Map<String, String> = emptyMap(),
         /** Armed hosts whose restore is under way: no longer [armed], not yet done. */
         val running: Set<String> = emptySet(),
+        /**
+         * Hosts whose Restore (the sheet's button) is under way, and each
+         * host's last outcome: kept by host, so a restore that ends while
+         * another host's sheet is open reports on its own host, and a sheet
+         * reopened meanwhile shows Restoring… (review phone-flows-6).
+         */
+        val restoring: Set<String> = emptySet(),
+        val restored: Map<String, RestoreReport> = emptyMap(),
     )
 
     private val back = MutableStateFlow(Back())
@@ -152,8 +158,8 @@ class HostDetailViewModel(
             checking = l.checking,
             check = l.check,
             plan = l.plan,
-            restoring = l.restoring,
-            restored = l.restored,
+            restoring = l.alias != null && l.alias in b.restoring,
+            restored = l.alias?.let(b.restored::get),
             candidates = l.candidates,
             discoverNote = l.discoverNote,
             resuming = l.resuming,
@@ -181,8 +187,8 @@ class HostDetailViewModel(
         val alias = local.value.alias ?: return@launch
         if (!fleet.capabilities.value.probeHost || local.value.probing) return@launch
         local.update { it.copy(probing = true, error = null) }
-        guarded { actions.probe(alias) }
-        local.update { it.copy(probing = false) }
+        guarded(alias) { actions.probe(alias) }
+        local.update { if (it.alias == alias) it.copy(probing = false) else it }
     }
 
     /** The health checklist, over the hub's SSH: a read, asked for with a tap. */
@@ -190,7 +196,7 @@ class HostDetailViewModel(
         val alias = local.value.alias ?: return@launch
         if (!fleet.capabilities.value.checkHost || local.value.checking) return@launch
         local.update { it.copy(checking = true, error = null) }
-        val c = guarded { actions.check(alias) }
+        val c = guarded(alias) { actions.check(alias) }
         local.update { if (it.alias == alias) it.copy(checking = false, check = c ?: it.check) else it }
     }
 
@@ -199,7 +205,7 @@ class HostDetailViewModel(
         val alias = local.value.alias ?: return@launch
         val caps = fleet.capabilities.value
         if (canWrite && caps.restoreSessions) {
-            guarded { actions.restorePlan(alias) }?.let { plan -> local.update { if (it.alias == alias) it.copy(plan = plan) else it } }
+            guarded(alias) { actions.restorePlan(alias) }?.let { plan -> local.update { if (it.alias == alias) it.copy(plan = plan) else it } }
         }
         if (caps.discoverLost) {
             // The scan goes over SSH: on a host that does not answer it can
@@ -218,7 +224,7 @@ class HostDetailViewModel(
     /** The scan for untracked conversations on [alias], over the hub's SSH. */
     private suspend fun discover(alias: String) {
         local.update { if (it.alias == alias) it.copy(discoverNote = null, scanWaits = false) else it }
-        val found = guarded { actions.discover(alias) }
+        val found = guarded(alias) { actions.discover(alias) }
         local.update {
             when {
                 it.alias != alias -> it
@@ -231,11 +237,21 @@ class HostDetailViewModel(
     /** Restore what the plan would; then look again, for what is still lost. */
     fun restore(): Job = scope.launch {
         val alias = local.value.alias ?: return@launch
-        if (!state.value.canRestore || local.value.restoring) return@launch
-        local.update { it.copy(restoring = true, error = null) }
-        val done = guarded { actions.restore(alias) }
-        local.update { it.copy(restoring = false, restored = done ?: it.restored) }
-        if (done != null) checkLost().join()
+        if (!state.value.canRestore || alias in back.value.restoring) return@launch
+        back.update { it.copy(restoring = it.restoring + alias) }
+        local.update { it.copy(error = null) }
+        val done = try {
+            guarded(alias) { actions.restore(alias) }
+        } catch (e: CancellationException) {
+            back.update { it.copy(restoring = it.restoring - alias) }
+            throw e
+        }
+        back.update { b ->
+            b.copy(restoring = b.restoring - alias, restored = if (done != null) b.restored + (alias to done) else b.restored)
+        }
+        // Look again only on the host the restore was for: another host's
+        // sheet may be open by now.
+        if (done != null && local.value.alias == alias) checkLost().join()
     }
 
     /**
@@ -281,17 +297,18 @@ class HostDetailViewModel(
         val alias = local.value.alias ?: return@launch
         if (!canWrite || local.value.resuming != null) return@launch
         local.update { it.copy(resuming = candidate.claudeSessionId, error = null) }
-        val row = guarded { actions.resume(alias, candidate) }
+        val row = guarded(alias) { actions.resume(alias, candidate) }
         local.update { it.copy(resuming = null) }
         if (row != null) onStarted(row.id)
     }
 
-    private suspend fun <T> guarded(block: suspend () -> T): T? = try {
+    /** [block]'s value, or null with its error shown on [alias]'s sheet — only while that sheet is the one open. */
+    private suspend fun <T> guarded(alias: String, block: suspend () -> T): T? = try {
         block()
     } catch (e: CancellationException) {
         throw e
     } catch (t: Throwable) {
-        local.update { it.copy(error = friendly(t)) }
+        local.update { if (it.alias == alias) it.copy(error = friendly(t)) else it }
         null
     }
 }

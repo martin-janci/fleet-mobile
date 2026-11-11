@@ -21,6 +21,39 @@ fun friendly(t: Throwable): Friendly = friendlyWords(t).also {
     FleetLog.ring.add(if (it.isError) LogLevel.Warn else LogLevel.Info, "ui", "${it.title}: ${it.details ?: it.body}")
 }
 
+/**
+ * The codes that mean a write went out and its outcome is unknown — the hub's
+ * `codes::may_have_run` (`E_SSH_TIMEOUT`, `E_TIMEOUT`, `E_AGENT_PROTOCOL`: the
+ * paste may have landed) and `E_IN_FLIGHT`, the hub still running an earlier
+ * send under the same `client_msg_id`.
+ */
+private val MAY_HAVE_RUN_CODES = setOf("E_SSH_TIMEOUT", "E_TIMEOUT", "E_AGENT_PROTOCOL", "E_IN_FLIGHT")
+
+/**
+ * Whether a write that failed with [t] may have gone through anyway (review
+ * phone-systemic-2, the desktop's `MAY_HAVE_RUN`, w16-8). For writes only: a
+ * read has nothing to go through, and Retry is its next step.
+ */
+fun mayHaveRun(t: Throwable): Boolean = when (t) {
+    is HubError.Tool -> t.code in MAY_HAVE_RUN_CODES
+    is HubError.Transport -> !t.neverSent
+    else -> false
+}
+
+/**
+ * [friendly] for a write: one that [mayHaveRun] says so, rather than
+ * "refused" or "cannot reach the hub", so the person checks before sending it
+ * a second time. The hub's own words stay under Details.
+ */
+fun friendlyWrite(t: Throwable): Friendly {
+    val words = friendly(t)
+    return if (mayHaveRun(t)) {
+        words.copy(title = "May have gone through", body = "It may have reached the session anyway. Check the conversation before you send it again.")
+    } else {
+        words
+    }
+}
+
 private fun friendlyWords(t: Throwable): Friendly {
     val raw = explain(t)
     return when (t) {

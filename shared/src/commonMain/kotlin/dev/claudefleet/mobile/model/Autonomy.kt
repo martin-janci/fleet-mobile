@@ -68,10 +68,16 @@ fun autonomyOf(values: Map<String, String>): Autonomy? {
 /** The chip's word: the position's label, or "Custom". */
 fun autonomyWord(a: Autonomy?): String = a?.label ?: "Custom"
 
-/** The writes a position makes, in order; a value already set is skipped. */
-fun autonomyWrites(target: Autonomy, values: Map<String, String>): List<Pair<String, String>> = buildList {
+/**
+ * The writes a position makes, in order — every one of them, whatever the
+ * phone last read: a copy read minutes ago may be stale (the desktop moved
+ * the dial since), and skipping a key it thinks is set left the hub on a mix
+ * that acts as Ask first while the chip named the pick (review
+ * phone-flows-3).
+ */
+fun autonomyWrites(target: Autonomy): List<Pair<String, String>> = buildList {
     add(KEY_MAX_LEVEL to target.maxLevel.toString())
     add(KEY_AUTO_CONTINUE to target.autoContinue.toString())
     if (target.autoContinue) add(KEY_AUTO_CONTINUE_MINUTES to target.minutes.toString())
     add(KEY_REACT_TO_EVENTS to target.reactToEvents.toString())
-}.filter { (k, v) -> values[k] != v }
+}

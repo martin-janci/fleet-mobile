@@ -21,6 +21,9 @@ import dev.claudefleet.mobile.model.QueuePromptResult
 import dev.claudefleet.mobile.model.SendLaterTiming
 import dev.claudefleet.mobile.model.TuneAnswer
 import dev.claudefleet.mobile.model.HostLogin
+import dev.claudefleet.mobile.model.AccountBlocks
+import dev.claudefleet.mobile.model.AccountRow
+import dev.claudefleet.mobile.model.blocks
 import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.ConvItem
@@ -112,6 +115,7 @@ private class FakeFleetState(
     override val sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val access = MutableStateFlow(MyAccess.UNKNOWN)
     override val repairProgress = MutableSharedFlow<StartProgress>(extraBufferCapacity = 16)
+    override val accountBlocks = MutableStateFlow<Map<String, AccountBlocks>>(emptyMap())
     override suspend fun refresh() = Unit
 }
 
@@ -230,6 +234,14 @@ private class FakeActions : SessionActions {
         return SendPromptResult(delivered = true, sessionId = sessionId, turnSeqBefore = 3)
     }
 
+    /** Every `client_msg_id` a send carried, in order. */
+    val sentIds = mutableListOf<String>()
+
+    override suspend fun sendPrompt(sessionId: Long, text: String, clientMsgId: String): SendPromptResult {
+        sentIds += clientMsgId
+        return sendPrompt(sessionId, text)
+    }
+
     /** Every key the card pressed, in order. */
     val sentKeys = mutableListOf<String>()
 
@@ -323,6 +335,7 @@ private class FakeActions : SessionActions {
     val touched = mutableListOf<Long>()
     var headroom = Headroom()
     val headroomAsked = mutableListOf<Pair<String, String?>>()
+    val headroomProjects = mutableListOf<Long?>()
     val restartedUnder = mutableListOf<String>()
     val restartedOverLimit = mutableListOf<String>()
 
@@ -372,8 +385,12 @@ private class FakeActions : SessionActions {
         touched += sessionId
     }
 
-    override suspend fun accountHeadroom(hostAlias: String, profile: String?): Headroom {
+    override suspend fun accountHeadroom(hostAlias: String, profile: String?): Headroom =
+        accountHeadroomIn(hostAlias, profile, null)
+
+    override suspend fun accountHeadroomIn(hostAlias: String, profile: String?, projectId: Long?): Headroom {
         headroomAsked += hostAlias to profile
+        headroomProjects += projectId
         return headroom
     }
 
@@ -4122,6 +4139,64 @@ class SessionViewModelTest {
         assertNull(drafts.recallUnsent(ID), "sent, so forgotten")
     }
 
+    /**
+     * Review phone-systemic-2: a send that timed out on the hub (the paste may
+     * have landed) read "Not sent: the hub refused that", and Retry typed it a
+     * second time. It says it may have gone through, and Retry goes out under
+     * the first send's `client_msg_id`, which the hub replays when the first
+     * one landed.
+     */
+    @Test
+    fun a_send_that_may_have_run_says_so_and_retry_reuses_its_id() = runTest {
+        val actions = FakeActions()
+        actions.sendFails = HubError.Tool("E_SSH_TIMEOUT", "ssh timed out after 10s")
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, keepNotSent = true)
+        vm.onDraftChange("open the PR and deploy")
+        vm.send().join()
+        runCurrent()
+
+        val kept = vm.state.value.notSent!!
+        assertTrue(kept.mayHaveRun)
+        assertEquals("May have gone through", notSentHeadline(kept))
+        assertEquals(actions.sentIds.single(), kept.clientMsgId)
+
+        actions.sendFails = null
+        vm.retryNotSent().join()
+        runCurrent()
+
+        assertEquals(2, actions.sentIds.size)
+        assertEquals(actions.sentIds[0], actions.sentIds[1], "the retry is the same send to the hub")
+        assertNull(vm.state.value.notSent)
+    }
+
+    @Test
+    fun a_send_that_never_left_the_phone_is_not_sent() = runTest {
+        val actions = FakeActions()
+        actions.sendFails = HubError.Transport(ConnectException())
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, keepNotSent = true)
+        vm.onDraftChange("first")
+        vm.send().join()
+        runCurrent()
+
+        val kept = vm.state.value.notSent!!
+        assertFalse(kept.mayHaveRun)
+        assertEquals("Not sent: cannot reach the hub", notSentHeadline(kept))
+    }
+
+    @Test
+    fun each_new_send_has_its_own_id() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, keepNotSent = true)
+        vm.onDraftChange("first")
+        vm.send().join()
+        runCurrent()
+        vm.onDraftChange("first")
+        vm.send().join()
+        runCurrent()
+
+        assertEquals(2, actions.sentIds.toSet().size, "the same words sent twice on purpose are two sends")
+    }
+
     @Test
     fun retry_sends_the_kept_words_again_and_leaves_the_box_alone() = runTest {
         val actions = FakeActions()
@@ -4474,6 +4549,28 @@ class SessionViewModelTest {
         assertEquals("Taken back. It is in the box to edit.", vm.state.value.sendLaterNotice)
     }
 
+    /**
+     * Review pm-work-ux-4: taking a prompt back while the box held a draft
+     * kept the draft and dropped the prompt's words, which only a one-line
+     * chip had shown. Both stay, the draft first.
+     */
+    @Test
+    fun taking_a_prompt_back_into_a_box_with_a_draft_keeps_both() = runTest {
+        val actions = FakeActions()
+        val vm = SessionViewModel(ID, FakeFleetState(tools = setOf("queue_prompt", "queued_prompts")), actions, backgroundScope)
+        runCurrent()
+        vm.sendLater("open the PR against release/2.4 and deploy it").join()
+        runCurrent()
+        vm.onDraftChange("and then tell me  ")
+
+        vm.cancelQueued(1).join()
+        runCurrent()
+
+        assertEquals(listOf(1L), actions.cancelled)
+        assertEquals("and then tell me\n\nopen the PR against release/2.4 and deploy it", vm.state.value.draft)
+        assertEquals("Taken back. It is in the box to edit.", vm.state.value.sendLaterNotice)
+    }
+
     @Test
     fun taking_back_keeps_the_persons_words_only_and_never_drops_whats_typed() = runTest {
         // Review phone_misc 1: the hub's marker line landed in the box, a
@@ -4759,6 +4856,27 @@ class SessionViewModelTest {
         assertEquals(HostLogin(null, "acc-b", 40.0), vm.state.value.switchTarget, "not its own signed-out login, though it has more room")
     }
 
+    /**
+     * The project's forbidden accounts (claude-fleet migration 217): the
+     * limit card never proposes a login on one, though it has the most room.
+     */
+    @Test
+    fun switch_account_never_proposes_a_login_the_project_forbids() = runTest {
+        val actions = FakeActions().apply {
+            headroom = Headroom(
+                pauseAtPct = 95.0,
+                logins = listOf(HostLogin("work", "acc-a", 100.0), HostLogin("spare", "acc-b", 10.0), HostLogin("team", "acc-c", 60.0)),
+            )
+        }
+        val fleet = switchFleet().apply { accountBlocks.value = listOf(AccountRow("acc-b", forbiddenProjectIds = listOf(1))).associate { it.uuid to it.blocks() } }
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+        vm.proposeSwitch().join()
+        runCurrent()
+        assertEquals(HostLogin("team", "acc-c", 60.0), vm.state.value.switchTarget)
+        assertEquals(listOf<Long?>(1), actions.headroomProjects, "the hub is told the project too")
+    }
+
     @Test
     fun switch_account_is_not_offered_where_the_hub_cannot_restart_under_a_profile() = runTest {
         val actions = FakeActions()
@@ -4907,6 +5025,37 @@ class SessionViewModelTest {
         assertTrue(actions.restartedUnder.isEmpty())
     }
 
+    /** Details › Switch account… lists a login the project forbids as "not for this project" and never picks it. */
+    @Test
+    fun switch_account_from_details_shows_a_forbidden_login_and_never_picks_it() = runTest {
+        val actions = FakeActions().apply {
+            headroom = Headroom(
+                pauseAtPct = 95.0,
+                logins = listOf(HostLogin("work", "acc-a", 99.0), HostLogin("spare", "acc-b", 10.0), HostLogin("team", "acc-c", 60.0)),
+            )
+        }
+        val fleet = FakeFleetState(listOf(running)).apply {
+            capabilities.value = HubCapabilities(tools = switchTools, params = mapOf("restart_session" to setOf("session_id", "profile")))
+            accountBlocks.value = listOf(AccountRow("acc-b", forbiddenProjectIds = listOf(1))).associate { it.uuid to it.blocks() }
+        }
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+        vm.openAccountSwitch().join()
+        runCurrent()
+        val open = assertNotNull(vm.state.value.accountSwitch)
+        assertEquals(listOf("spare", "team"), open.logins.map { it.profile }, "listed, as the desktop lists it")
+        assertEquals(setOf("acc-b"), open.forbidden)
+        assertEquals(HostLogin("team", "acc-c", 60.0), open.picked, "over the line: the roomiest allowed login")
+        assertEquals(NOT_FOR_THIS_PROJECT, switchLoginSub(open.logins[0], "acc-a", 95.0, signedOut = false, forbidden = true))
+
+        vm.pickAccountSwitch(HostLogin("spare", "acc-b", 10.0))
+        runCurrent()
+        assertEquals(HostLogin("team", "acc-c", 60.0), vm.state.value.accountSwitch?.picked, "a forbidden login is not pickable")
+        vm.confirmAccountSwitch().join()
+        runCurrent()
+        assertEquals(listOf("team"), actions.restartedUnder)
+    }
+
     @Test
     fun switch_account_from_details_with_no_other_login_says_so() = runTest {
         val actions = FakeActions().apply { headroom = Headroom(logins = listOf(HostLogin("work", "acc-a", 10.0))) }
@@ -4944,3 +5093,6 @@ class SessionViewModelTest {
         assertEquals(FORKED, opened)
     }
 }
+
+/** Named as the JVM's own, so [HubError.Transport.kind] reads as a connect failure on every target. */
+private class ConnectException : Exception("connection refused")

@@ -221,7 +221,7 @@ fun SteerComposer(missionName: String, steer: MissionSteerUi, nowSeconds: Long, 
                 TextButton(onClick = steer.onDismissError) { Text("Dismiss") }
             }
         }
-        steer.blocked?.let { Text(it, color = o.fgMuted, fontSize = 13.sp) }
+        (steer.blocked ?: steer.busy)?.let { Text(it, color = o.fgMuted, fontSize = 13.sp) }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
                 value = text,
@@ -233,7 +233,7 @@ fun SteerComposer(missionName: String, steer: MissionSteerUi, nowSeconds: Long, 
             )
             Button(
                 onClick = { steer.onSend(text) },
-                enabled = steer.blocked == null && !steer.sending && text.isNotBlank(),
+                enabled = steer.blocked == null && steer.busy == null && !steer.sending && text.isNotBlank(),
             ) { Text(if (steer.sending) "Sending…" else "Send") }
         }
     }

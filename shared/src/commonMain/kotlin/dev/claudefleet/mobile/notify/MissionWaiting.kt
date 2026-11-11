@@ -92,7 +92,7 @@ fun missionWaitsResolved(seen: Map<Long, String>?, now: Map<Long, String>): List
     seen.orEmpty().filter { (id, key) -> key.isNotEmpty() && now[id].isNullOrEmpty() }.keys.toList()
 
 /** The waits the background check last saw, in [Prefs]; null before the first look. */
-private const val MISSION_WAIT_SEEN: String = "mission_wait_seen"
+internal const val MISSION_WAIT_SEEN: String = "mission_wait_seen"
 private const val MISSION_SEEN_HEADER = "v1"
 
 fun Prefs.readMissionSeen(): Map<Long, String>? =
@@ -103,4 +103,26 @@ fun Prefs.readMissionSeen(): Map<Long, String>? =
 
 fun Prefs.writeMissionSeen(seen: Map<Long, String>) {
     putStringList(MISSION_WAIT_SEEN, listOf(MISSION_SEEN_HEADER) + seen.map { (id, key) -> "$id=$key" })
+}
+
+/**
+ * The always-on watcher's look at the missions (Android's `NeedsYouService`),
+ * remembering in [prefs] as iOS's background check does: a wait that began
+ * while the watcher was down is news when it comes back, and one that ended
+ * meanwhile is still taken down (a notification's id is the mission's, so
+ * this also clears what a previous process posted). Before the first look
+ * ever there is nothing stored, so that look stays the baseline. Written only
+ * when the waits move, not every poll.
+ */
+class MissionWaitWatch(private val prefs: Prefs) {
+    private var seen: Map<Long, String>? = prefs.readMissionSeen()
+
+    /** One look at [missions]: the waits to post, and the missions whose notification comes down. */
+    fun look(missions: List<Mission>): Pair<List<MissionWaitAlert>, List<Long>> {
+        val (alerts, now) = missionWaitAlerts(seen, missions)
+        val resolved = missionWaitsResolved(seen, now)
+        if (now != seen) prefs.writeMissionSeen(now)
+        seen = now
+        return alerts to resolved
+    }
 }

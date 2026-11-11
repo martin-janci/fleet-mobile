@@ -13,6 +13,8 @@ import dev.claudefleet.mobile.model.forbiddenAccounts
 import dev.claudefleet.mobile.model.HostLogin
 import dev.claudefleet.mobile.model.loginLabel
 import dev.claudefleet.mobile.model.freestLogin
+import dev.claudefleet.mobile.model.AccountBlocks
+import dev.claudefleet.mobile.model.orgOfProject
 import dev.claudefleet.mobile.model.leftText
 import dev.claudefleet.mobile.model.NO_START_STEPS
 import dev.claudefleet.mobile.model.StartStepState
@@ -197,6 +199,8 @@ data class AccountChoice(
     val over: Boolean,
     /** Fleet knows this login is signed out: a session started on it opens `/login`. */
     val signedOut: Boolean = false,
+    /** Its account is kept off the chosen project: the hub refuses the start (`E_ACCOUNT_FORBIDDEN`). */
+    val forbidden: Boolean = false,
 )
 
 /** The confirm sheet: what will start, how many, and in which organisation. */
@@ -335,6 +339,8 @@ class NewSessionViewModel(
         val caps: HubCapabilities,
         val tickets: List<Ticket>,
         val orgs: OrgDirectory,
+        /** What each account is kept off ([FleetState.accountBlocks]), for the accounts the chosen project forbids. */
+        val accountBlocks: Map<String, AccountBlocks> = emptyMap(),
     )
 
     private val local = MutableStateFlow(Local())
@@ -345,7 +351,7 @@ class NewSessionViewModel(
             fleet.projects,
             fleet.status,
             local,
-            combine(fleet.capabilities, fleet.tickets, fleet.orgs, ::WorkView),
+            combine(fleet.capabilities, fleet.tickets, fleet.orgs, fleet.accountBlocks, ::WorkView),
         ) { (hosts, sessions), projects, status, l, work ->
             assemble(hosts, projects, status, l, work, sessions)
         }.stateIn(scope, SharingStarted.Eagerly, current())
@@ -469,6 +475,8 @@ class NewSessionViewModel(
     fun pickLogin(profile: String?) {
         val logins = local.value.headroom?.logins.orEmpty()
         if (logins.none { it.profile == profile }) return
+        // A login the project forbids is listed, not pickable.
+        if (state.value.logins.any { it.profile == profile && it.forbidden }) return
         local.update { it.copy(loginPicked = true, pickedProfile = profile) }
     }
 
@@ -767,7 +775,7 @@ class NewSessionViewModel(
             fleet.projects.value,
             fleet.status.value,
             local.value,
-            WorkView(fleet.capabilities.value, fleet.tickets.value, fleet.orgs.value),
+            WorkView(fleet.capabilities.value, fleet.tickets.value, fleet.orgs.value, fleet.accountBlocks.value),
             fleet.sessions.value,
         )
 
@@ -847,25 +855,32 @@ class NewSessionViewModel(
         val names = fleet.accountNames.value
         val headroom = l.headroom?.takeIf { l.headroomHost == host && host != null && ticketKey == null }
         val pauseAt = headroom?.pauseAtPct ?: 100.0
-        val logins = headroom?.logins.orEmpty().map { accountChoice(it, pauseAt, names) }
+        // The accounts the chosen project forbids, itself or through its org
+        // (the desktop's `forbiddenHere`): shown, never the default, never sent.
+        val forbidden = chosen?.let { forbiddenAccounts(work.accountBlocks, it.id, work.orgs.orgOfProject(it)) }.orEmpty()
+        val logins = headroom?.logins.orEmpty().map { accountChoice(it, pauseAt, names, it.accountUuid in forbidden) }
         // Unpicked, the row shows the login the start will use: the signed-in
         // one with the most room, as the desktop's New session defaults
-        // (`freestLogin`), else the hub's own choice (review M1/F4).
-        // Never a default on an account the project forbids: the hub refuses
-        // that start (`E_ACCOUNT_FORBIDDEN`), and every default start failed.
-        val forbidden = forbiddenAccounts(fleet.accountBlocks.value, l.projectId)
+        // (`freestLogin`), else the hub's own choice (review M1/F4) — on an
+        // account the project allows while there is one.
         val account = headroom?.let { h ->
-            if (l.loginPicked) logins.firstOrNull { it.profile == l.pickedProfile }
-            else (freestLogin(h.logins.filter { it.accountUuid !in forbidden }) ?: h.chosen)?.let { accountChoice(it, h.pauseAtPct, names) }
+            if (l.loginPicked) {
+                logins.firstOrNull { it.profile == l.pickedProfile }
+            } else {
+                val allowed = h.logins.filter { it.accountUuid !in forbidden }
+                (freestLogin(allowed) ?: h.chosen?.takeIf { it.accountUuid !in forbidden } ?: allowed.firstOrNull() ?: h.chosen)
+                    ?.let { accountChoice(it, h.pauseAtPct, names, it.accountUuid in forbidden) }
+            }
         }
-        // A default the hub would refuse (past the pause line, or forbidden for
-        // the project) or that opens `/login` (signed out) waits for a pick.
-        val defaultForbidden = !l.loginPicked && headroom != null &&
-            (freestLogin(headroom.logins.filter { it.accountUuid !in forbidden }) == null) &&
-            headroom.chosen?.accountUuid?.let { it in forbidden } == true
-        val accountBlock = account?.takeIf { !l.loginPicked && (it.over || it.signedOut || defaultForbidden) }?.let {
+        // A default the hub would refuse (past the pause line) or that opens
+        // `/login` (signed out) waits for the person to pick a login. One the
+        // project forbids is refused picked or not.
+        val accountBlock = account?.let {
             when {
-                defaultForbidden -> "Pick a login: ${it.label} is not allowed in this project."
+                it.forbidden && logins.all { c -> c.forbidden } ->
+                    "No login on $host is on an account allowed for this project: pick another host."
+                it.forbidden -> "Pick a login: ${it.label} is not for this project."
+                l.loginPicked || !(it.over || it.signedOut) -> null
                 it.signedOut -> "Pick a login: ${it.label} is signed out on $host."
                 else -> "Pick a login: ${it.label} is past the pause line."
             }
@@ -994,7 +1009,7 @@ private fun branchProblem(name: String, empty: String): String = when {
 }
 
 /** One login as the Account row says it: who, and the room left under the tighter window. */
-internal fun accountChoice(l: HostLogin, pauseAtPct: Double, names: Map<String, String>): AccountChoice {
+internal fun accountChoice(l: HostLogin, pauseAtPct: Double, names: Map<String, String>, forbidden: Boolean = false): AccountChoice {
     val used = l.usedPct
     return AccountChoice(
         profile = l.profile,
@@ -1002,6 +1017,7 @@ internal fun accountChoice(l: HostLogin, pauseAtPct: Double, names: Map<String, 
         room = used?.let { leftText(it) } ?: "no reading",
         over = used != null && used >= pauseAtPct,
         signedOut = l.signedOut,
+        forbidden = forbidden,
     )
 }
 

@@ -36,7 +36,7 @@ fun routineFailedAlerts(seen: Set<Long>?, failing: List<FailingRoutine>): Pair<L
 }
 
 /** The failed runs the background check last saw, in [Prefs]; null before the first look. */
-private const val ROUTINE_FAILED_SEEN: String = "routine_failed_seen"
+internal const val ROUTINE_FAILED_SEEN: String = "routine_failed_seen"
 private const val ROUTINE_SEEN_HEADER = "v1"
 
 fun Prefs.readRoutineSeen(): Set<Long>? =
@@ -44,4 +44,24 @@ fun Prefs.readRoutineSeen(): Set<Long>? =
 
 fun Prefs.writeRoutineSeen(seen: Set<Long>) {
     putStringList(ROUTINE_FAILED_SEEN, listOf(ROUTINE_SEEN_HEADER) + seen.map { it.toString() })
+}
+
+/**
+ * The always-on watcher's look at `routines { failing }` (Android's
+ * `NeedsYouService`), remembering in [prefs] as iOS's background check does:
+ * a run that failed while the watcher was down (the process killed and
+ * restarted, an update, a reboot) is news when it comes back, not its
+ * baseline. Before the first look ever there is nothing stored, so that look
+ * stays the baseline. Written only when the set moves, not every poll.
+ */
+class RoutineFailedWatch(private val prefs: Prefs) {
+    private var seen: Set<Long>? = prefs.readRoutineSeen()
+
+    /** The alerts one look at [failing] makes. */
+    fun look(failing: List<FailingRoutine>): List<RoutineFailedAlert> {
+        val (alerts, now) = routineFailedAlerts(seen, failing)
+        if (now != seen) prefs.writeRoutineSeen(now)
+        seen = now
+        return alerts
+    }
 }

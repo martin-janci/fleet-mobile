@@ -30,8 +30,8 @@ private class FakeInbox(
         refuse?.let { throw it }
     }
 
-    override suspend fun headroom(hostAlias: String, profile: String?): Headroom {
-        calls += "headroom $hostAlias ${profile.orEmpty()}"
+    override suspend fun headroom(hostAlias: String, profile: String?, projectId: Long?): Headroom {
+        calls += "headroom $hostAlias ${profile.orEmpty()}" + (projectId?.let { " project $it" } ?: "")
         return headroom
     }
 
@@ -96,6 +96,36 @@ class InboxViewModelTest {
         val vm = InboxViewModel(hub, this, canWrite = true, signedOut = { host, profile -> host == "mac" && profile == "work" })
         vm.proposeSwitch(paused(), switchAvailable = true); runCurrent()
         assertEquals(fresh, vm.state.value.switchTargets[2L])
+    }
+
+    /**
+     * The project's forbidden accounts (claude-fleet migration 217): Switch
+     * never proposes a login on one, though it has the most room, and the
+     * headroom read names the project so the hub's own suggestion skips them too.
+     */
+    @Test
+    fun switch_account_never_proposes_a_login_the_project_forbids() = runTest {
+        val spare = HostLogin(profile = "spare", accountUuid = "acct-b", usedPct = 10.0)
+        val team = HostLogin(profile = "team", accountUuid = "acct-c", usedPct = 60.0)
+        val hub = FakeInbox(headroom = Headroom(pauseAtPct = 95.0, logins = listOf(HostLogin(accountUuid = "acct-a", usedPct = 100.0), spare, team)))
+        val vm = InboxViewModel(hub, this, canWrite = true, forbidden = { p, _ -> if (p == 7L) setOf("acct-b") else emptySet() })
+        vm.proposeSwitch(paused().copy(projectId = 7), switchAvailable = true); runCurrent()
+        assertEquals(team, vm.state.value.switchTargets[2L])
+        assertEquals("headroom mac  project 7", hub.calls.single())
+
+        // A signed-out row: the same rule.
+        val row = paused().copy(projectId = 7, claudeProfile = "work", attention = Attention("no_credentials", since = 20, state = "blocked"))
+        vm.proposeSwitch(row, switchAvailable = true); runCurrent()
+        assertEquals(team, vm.state.value.switchTargets[2L])
+
+        // Only spare has room: nowhere to go, rather than a refused restart.
+        val only = InboxViewModel(
+            FakeInbox(headroom = Headroom(pauseAtPct = 95.0, logins = listOf(HostLogin(accountUuid = "acct-a", usedPct = 100.0), spare))),
+            this, canWrite = true, forbidden = { _, _ -> setOf("acct-b") },
+        )
+        only.proposeSwitch(paused().copy(projectId = 7), switchAvailable = true); runCurrent()
+        assertNull(only.state.value.switchTargets[2L])
+        assertEquals("No other login on mac has room left.", only.state.value.notices[2L])
     }
 
     /** Review w23-4: a signed-out row offers Switch account, to a login that is signed in. */

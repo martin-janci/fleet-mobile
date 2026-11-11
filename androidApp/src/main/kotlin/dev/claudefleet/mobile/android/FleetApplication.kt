@@ -3,10 +3,18 @@ package dev.claudefleet.mobile.android
 import android.app.Application
 import android.os.Build
 import dev.claudefleet.mobile.AppContainer
+import dev.claudefleet.mobile.data.AuthState
 import dev.claudefleet.mobile.log.FleetLog
 import dev.claudefleet.mobile.net.ClientPlatform
 import dev.claudefleet.mobile.store.AndroidPrefs
 import dev.claudefleet.mobile.store.AndroidSecrets
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 /**
  * The process, which owns the one [AppContainer] — as iOS's
@@ -69,7 +77,30 @@ class FleetApplication : Application() {
             // release on it and says why.
             installer = AndroidAppInstaller(this, bearerFor = { url -> container.session.bearerFor(url) }),
             clientPlatform = ClientPlatform("android", androidArch(), BuildConfig.GIT_SHA),
-        )
+        ).also(::notifyAfterEveryPair)
+    }
+
+    /**
+     * A credential arriving (a pair, a re-pair after a revoke or a Forget)
+     * starts "Notify me" again while the person has it on: the service stops
+     * itself when there is no credential, and nothing else would start it
+     * before the next launch. A start the system refuses from the background
+     * waits for that launch.
+     */
+    private fun notifyAfterEveryPair(container: AppContainer) {
+        CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+            container.session.state
+                .map { (it as? AuthState.Paired)?.credentials }
+                .distinctUntilChanged()
+                .filterNotNull()
+                .collect {
+                    try {
+                        notifier.apply()
+                    } catch (e: RuntimeException) {
+                        // Refused from the background; the next launch starts it.
+                    }
+                }
+        }
     }
 }
 

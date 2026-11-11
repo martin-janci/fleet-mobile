@@ -37,6 +37,21 @@ fun steerBlocked(operator: SessionRow?, connected: Boolean, canWrite: Boolean): 
     else -> null
 }
 
+/**
+ * Why Send waits now, or null (review w04-12): a steer is a prompt in
+ * Control's REPL, so it must not be typed into Control's turn. A hub that
+ * keeps prompts ([hubQueues], `queue_prompt`) takes it into Control's queue,
+ * behind the lines already waiting there, so nothing waits; an older hub
+ * would type it at once, so Send waits while Control is mid-turn. The
+ * desktop's `steerBusy` words.
+ */
+fun steerBusy(operator: SessionRow?, hubQueues: Boolean): String? =
+    if (!hubQueues && operator?.claudeStatus == "working") {
+        "Control is mid-turn. Send opens when it finishes, so this is not typed into its turn."
+    } else {
+        null
+    }
+
 /** One steer sent: the room's receipt line. */
 data class SteerReceipt(val missionId: Long, val text: String, val at: Long)
 
@@ -64,6 +79,8 @@ data class MissionSteerUi(
     val onDismissError: () -> Unit,
     /** How many of this mission's steers Control took ([SteerState.delivered]); the composer clears when it grows. */
     val delivered: Int = 0,
+    /** Why Send waits for now ([steerBusy]); the box stays open. */
+    val busy: String? = null,
 )
 
 /**
@@ -86,14 +103,38 @@ class MissionSteer(
     fun blocked(rows: List<SessionRow>, status: ConnectionStatus): String? =
         steerBlocked(operator(rows), status is ConnectionStatus.Connected, canWrite)
 
+    /** [steerBusy] for Control's row in [rows]. */
+    fun busy(rows: List<SessionRow>): String? = steerBusy(operator(rows), fleet.capabilities.value.sendLater)
+
     fun send(m: Mission, text: String): Job? {
         if (text.isBlank() || local.value.sending != null) return null
         if (blocked(fleet.sessions.value, fleet.status.value) != null) return null
+        if (busy(fleet.sessions.value) != null) return null
         val op = operator(fleet.sessions.value) ?: return null
+        val caps = fleet.capabilities.value
         local.update { it.copy(sending = m.id, error = null) }
         return scope.launch {
             try {
-                actions.sendPrompt(op.id, steerBody(m, text))
+                // Into Control's queue where the hub keeps one, as Control's
+                // own composer sends: typed now when Control is idle, else
+                // after its turn and behind what already waits (review w04-12).
+                if (caps.sendLater) {
+                    actions.queuePrompt(op.id, steerBody(m, text))
+                } else {
+                    actions.sendPrompt(op.id, steerBody(m, text))
+                }
+                // Control follows the mission from now on (review w04-11), so
+                // its feed says what the mission does next. Best effort: the
+                // steer went already, and an older hub or a device that is
+                // not the owner's is refused.
+                if (caps.controlJournal) {
+                    try {
+                        actions.followMission(m.id, text.trim())
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Throwable) {
+                    }
+                }
                 local.update {
                     it.copy(
                         sending = null,

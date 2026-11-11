@@ -80,4 +80,41 @@ class MissionWaitingTest {
         assertEquals(listOf("Review grant"), missionCategories().getValue(missionCategory("sign_grant")).map { it.label })
         assertEquals(listOf("Answer"), missionCategories().getValue(missionCategory("question")).map { it.label })
     }
+
+    /**
+     * Android's always-on watcher remembers across a restart of its process:
+     * a wait that began while it was down is news, and one that ended
+     * meanwhile is taken down, though another process posted it.
+     */
+    @Test
+    fun a_restarted_watcher_posts_the_new_wait_and_withdraws_the_ended_one() {
+        val prefs = FakePrefs()
+        val (first, none) = MissionWaitWatch(prefs).look(listOf(waiting(1)))
+        assertEquals(emptyList(), first, "the first look ever is the baseline")
+        assertEquals(emptyList(), none)
+        // The process is killed and comes back: a new watcher over the same store.
+        val ended = Mission(id = 1, name = "Ship 1.4", state = "active")
+        val (alerts, resolved) = MissionWaitWatch(prefs).look(listOf(ended, waiting(2)))
+        assertEquals(listOf(2L), alerts.map { it.missionId })
+        assertEquals(listOf(1L), resolved)
+        val (again, gone) = MissionWaitWatch(prefs).look(listOf(ended, waiting(2)))
+        assertEquals(emptyList(), again, "said once")
+        assertEquals(emptyList(), gone)
+    }
+
+    /** Written when the waits move, not at every minute's poll. */
+    @Test
+    fun the_watcher_writes_only_when_the_waits_change() {
+        val prefs = CountingPrefs()
+        val watch = MissionWaitWatch(prefs)
+        watch.look(emptyList())
+        assertEquals(1, prefs.writes, "the first look is recorded, even an empty one")
+        watch.look(emptyList())
+        assertEquals(1, prefs.writes)
+        watch.look(listOf(waiting(1)))
+        assertEquals(2, prefs.writes)
+        watch.look(listOf(waiting(1)))
+        assertEquals(2, prefs.writes)
+    }
 }
+

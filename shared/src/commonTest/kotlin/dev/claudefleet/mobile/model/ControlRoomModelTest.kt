@@ -101,13 +101,18 @@ class ControlRoomModelTest {
     }
 
     @Test
-    fun the_dial_reads_its_four_settings_and_writes_only_what_differs() {
+    fun the_dial_reads_its_four_settings_and_writes_every_one_of_a_position() {
         val brief = mapOf(KEY_MAX_LEVEL to "2", KEY_AUTO_CONTINUE to "true", KEY_AUTO_CONTINUE_MINUTES to "10", KEY_REACT_TO_EVENTS to "true")
         assertEquals(Autonomy.BRIEF, autonomyOf(brief))
         assertEquals(Autonomy.ASK, autonomyOf(brief + (KEY_MAX_LEVEL to "1") + (KEY_AUTO_CONTINUE to "false") + (KEY_AUTO_CONTINUE_MINUTES to "7")))
         assertNull(autonomyOf(brief + (KEY_AUTO_CONTINUE_MINUTES to "7")))
         assertEquals("Custom", autonomyWord(null))
-        assertEquals(listOf(KEY_MAX_LEVEL to "3", KEY_AUTO_CONTINUE_MINUTES to "2"), autonomyWrites(Autonomy.AUTOPILOT, brief))
-        assertEquals(listOf(KEY_MAX_LEVEL to "1", KEY_AUTO_CONTINUE to "false"), autonomyWrites(Autonomy.ASK, brief))
+        // Every key, even one the phone's copy already shows: that copy may be
+        // stale (review phone-flows-3).
+        assertEquals(
+            listOf(KEY_MAX_LEVEL to "3", KEY_AUTO_CONTINUE to "true", KEY_AUTO_CONTINUE_MINUTES to "2", KEY_REACT_TO_EVENTS to "true"),
+            autonomyWrites(Autonomy.AUTOPILOT),
+        )
+        assertEquals(listOf(KEY_MAX_LEVEL to "1", KEY_AUTO_CONTINUE to "false", KEY_REACT_TO_EVENTS to "true"), autonomyWrites(Autonomy.ASK))
     }
 }

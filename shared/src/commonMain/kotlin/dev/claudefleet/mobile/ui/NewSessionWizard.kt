@@ -378,7 +378,8 @@ internal fun worktreeLine(s: NewSessionUiState, worktreeName: String?): String =
 
 /** The Account row: "m.janci@32bit.sk · 75% left", and the pause line when it is past it. */
 internal fun accountLine(a: AccountChoice): String =
-    "${a.label} · ${a.room}" + (if (a.over) " · past the pause line" else "") + (if (a.signedOut) " · signed out" else "")
+    if (a.forbidden) "${a.label} · $NOT_FOR_THIS_PROJECT"
+    else "${a.label} · ${a.room}" + (if (a.over) " · past the pause line" else "") + (if (a.signedOut) " · signed out" else "")
 
 /** "Drafted from FLEET-151": where the branch in the field came from. */
 internal fun draftedFrom(s: NewSessionUiState): String? =
@@ -689,8 +690,11 @@ private fun ReviewStep(
                                 pickingLogin = false
                                 extras.onPickLogin(l.profile)
                             },
-                            sub = l.room + (if (l.over) " · past the pause line: it starts anyway, as you chose it" else "") +
+                            sub = if (l.forbidden) NOT_FOR_THIS_PROJECT else l.room +
+                                (if (l.over) " · past the pause line: it starts anyway, as you chose it" else "") +
                                 (if (l.signedOut) " · signed out: the session opens on /login" else ""),
+                            // The hub refuses a start under it (E_ACCOUNT_FORBIDDEN), as the desktop's picker shows.
+                            enabled = !l.forbidden,
                         )
                     }
                 }
@@ -727,7 +731,7 @@ private fun ReviewStep(
                     ReviewRow(
                         "Account",
                         accountLine(account),
-                        onChange = if (s.logins.size > 1 || account.over || account.signedOut) ({ pickingLogin = true }) else null,
+                        onChange = if (s.logins.size > 1 || account.over || account.signedOut || account.forbidden) ({ pickingLogin = true }) else null,
                         enabled = editable,
                         divider = s.ticketKey != null,
                     )

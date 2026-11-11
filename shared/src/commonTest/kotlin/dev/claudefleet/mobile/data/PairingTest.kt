@@ -606,6 +606,33 @@ class AppSessionTest {
 
         assertNull(app.unpairReason.value)
     }
+
+    /**
+     * A 401 for an older pairing's token (the background watcher's stream, a
+     * moment behind a re-pair, or the old token revoked later as Forget
+     * advises) must not delete the pairing the phone holds now.
+     */
+    @Test
+    fun a_401_for_a_credential_no_longer_held_clears_nothing() = runTest {
+        val old = Credentials(BASE, "tok-old-value", "phone", "full")
+        val held = Credentials(BASE, "tok-new-value", "phone", "full")
+        val secrets = FakeSecrets(held)
+        val (app, _, _) = session(secrets) { "" to HttpStatusCode.OK }
+        app.restore()
+
+        app.revoke(refused = old)
+
+        assertEquals(held, secrets.read())
+        assertEquals(AuthState.Paired(held), app.state.value)
+        assertNull(app.unpairReason.value)
+        assertEquals(0, secrets.clears)
+
+        app.revoke(refused = held)
+
+        assertNull(secrets.read())
+        assertEquals(AuthState.Unpaired, app.state.value)
+        assertEquals(REVOKED_CREDENTIAL_REASON, app.unpairReason.value)
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -130,6 +130,32 @@ data class OrgDirectory(
 }
 
 /**
+ * The org [project] belongs to, as the hub reads it for an account kept off
+ * an org (claude-fleet `Store::project_org`; the desktop's `projectOrgId`,
+ * src/lib/orgs.ts): the most specific rule not bound to a host that matches
+ * the project's owner and repository, ties to the lower id. Null when none
+ * does, and null when the answer is not knowable here: a path rule could
+ * outrank it, and [ProjectRow] has no base path (`list_projects` does not
+ * send one). Null forbids nothing extra; the hub still refuses.
+ */
+fun OrgDirectory.orgOfProject(project: ProjectRow): Long? {
+    fun matches(r: OrgRule): Boolean {
+        if (r.hostAlias != null) return false
+        if (r.owner != null && (project.owner == "local" || !r.owner.equals(project.owner, ignoreCase = true))) return false
+        if (r.repo != null && !r.repo.equals(project.repo, ignoreCase = true)) return false
+        return true
+    }
+    val candidates = rules.filter(::matches)
+    if (candidates.any { it.pathPrefix != null }) return null
+    fun rank(r: OrgRule): Int = when {
+        r.repo != null -> 2000
+        r.owner != null -> 1000
+        else -> 0
+    }
+    return candidates.sortedWith(compareByDescending<OrgRule>(::rank).thenBy { it.id }).firstOrNull()?.orgId
+}
+
+/**
  * The org a session belongs to: the hub's own `org_id` on the row, else its
  * work's. The second stands in for a hub older than claude-fleet's M8.6,
  * whose phone view leaves `org_id` out — its work links still carry one.

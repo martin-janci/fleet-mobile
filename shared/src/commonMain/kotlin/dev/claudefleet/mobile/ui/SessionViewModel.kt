@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import dev.claudefleet.mobile.data.ALL_SESSIONS_CHANGED
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.data.forbiddenAccountsIn
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.QuickReplyActions
 import dev.claudefleet.mobile.data.SessionActions
@@ -16,7 +17,6 @@ import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.loginLabel
 import dev.claudefleet.mobile.model.forAccount
 import dev.claudefleet.mobile.model.signedInElsewhere
-import dev.claudefleet.mobile.model.forbiddenAccounts
 import dev.claudefleet.mobile.model.isSignedOut
 import dev.claudefleet.mobile.model.QueuedPrompt
 import dev.claudefleet.mobile.model.takenBackText
@@ -673,7 +673,10 @@ class SessionViewModel(
         Local(
             draft = drafts.recall(sessionId),
             // A prompt the hub refused before the person left is still here to Retry or Edit (review w22-4).
-            notSent = drafts.recallUnsent(sessionId)?.let { NotSent(it, Friendly("Not sent", "The hub did not take this prompt. Retry it, or edit it.", isError = false)) },
+            // Only the words are kept across leaving the session, not why the
+            // send failed: it may have gone through (review phone-systemic-2),
+            // so the card asks for a look before Retry.
+            notSent = drafts.recallUnsent(sessionId)?.let { NotSent(it, Friendly("Not sent", "The hub may not have taken this prompt. Check the conversation, then retry it or edit it.", isError = false)) },
         ),
     )
     private val tokenReadOnly = !canSendPrompts
@@ -1212,7 +1215,8 @@ class SessionViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(answering = false, error = friendly(t)) }
+            // An answer is a write: one whose outcome is unknown says so (review phone-systemic-2).
+            local.update { it.copy(answering = false, error = friendlyWrite(t)) }
         }
     }
 
@@ -1490,7 +1494,12 @@ class SessionViewModel(
      * this is a history of what was composed, not of every prompt this screen
      * ever sent.
      */
-    private suspend fun deliver(text: String, clearDraft: Boolean, keep: Boolean = keepNotSent && clearDraft) {
+    private suspend fun deliver(
+        text: String,
+        clearDraft: Boolean,
+        keep: Boolean = keepNotSent && clearDraft,
+        clientMsgId: String = newPromptSendId(clock()),
+    ) {
         // Out of the box at once and shown as pending: the box is free and the
         // prompt is visibly on its way, rather than both frozen until the hub
         // answers. A failure puts it back.
@@ -1504,7 +1513,7 @@ class SessionViewModel(
             )
         }
         try {
-            actions.sendPrompt(sessionId, text)
+            actions.sendPrompt(sessionId, text, clientMsgId)
             quickReplies.remember(text)
             // Any accepted prompt starts a new turn, so the suggestion on offer
             // is spent — unless the row has already moved on to another one.
@@ -1516,10 +1525,23 @@ class SessionViewModel(
             local.update { it.copy(sending = false, pending = null, draft = if (clearDraft && it.draft.isEmpty()) text else it.draft) }
             throw e
         } catch (t: Throwable) {
-            val failure = friendly(t)
+            // A send whose outcome is unknown says so, not "not sent"
+            // (review phone-systemic-2): Retry then goes out under the same
+            // `client_msg_id`, which the hub replays if the first one landed.
+            val unknown = mayHaveRun(t)
+            val failure = friendlyWrite(t)
             if (keep) {
                 // The New bar: kept in the conversation, marked, with Retry and Edit.
-                local.update { it.copy(sending = false, pending = null, notSent = NotSent(text, failure)) }
+                local.update { it.copy(sending = false, pending = null, notSent = NotSent(text, failure, clientMsgId, unknown)) }
+                // Read the conversation again, so whether it landed is there to see.
+                if (unknown) {
+                    try {
+                        requestRead(first = false)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Throwable) {
+                    }
+                }
                 return
             }
             local.update {
@@ -1545,7 +1567,7 @@ class SessionViewModel(
         val unsent = current.notSent ?: return@launch
         if (!canWriteNow(current) || row() == null || blockedNow()) return@launch
         local.update { it.copy(notSent = null) }
-        deliver(unsent.text, clearDraft = false, keep = true)
+        deliver(unsent.text, clearDraft = false, keep = true, clientMsgId = unsent.clientMsgId ?: newPromptSendId(clock()))
     }
 
     /** Put the prompt the hub did not take back into the box, after what is typed, to edit it; nothing is sent. */
@@ -1847,14 +1869,15 @@ class SessionViewModel(
         try {
             // Never a login the hub knows is signed out (review w23-3).
             val host = fleet.hosts.value.firstOrNull { it.alias == r.hostAlias }
-            // Nor one on an account the session's project forbids: the hub refuses that switch.
-            val forbidden = forbiddenAccounts(fleet.accountBlocks.value, r.projectId, r.orgId)
-            val out = { l: HostLogin -> host?.isSignedOut(l.profile) == true || l.accountUuid in forbidden }
+            val out = { l: HostLogin -> host?.isSignedOut(l.profile) == true }
             val h = actions.accountHeadroomIn(r.hostAlias, r.claudeProfile, r.projectId)
+            // Never a login on an account the session's project forbids: the
+            // hub refuses that restart (E_ACCOUNT_FORBIDDEN).
+            val off = fleet.forbiddenAccountsIn(r.projectId, r.orgId)
             // A signed-out session needs any signed-in login with room, as the
             // Inbox offers it (review M9); a paused one, another account.
             val signedOutRow = r.attention?.reason == "no_credentials"
-            val target = if (signedOutRow) h.signedInElsewhere(r.claudeProfile, out) else h.forAccount(r.accountUuid, out).suggestion
+            val target = if (signedOutRow) h.signedInElsewhere(r.claudeProfile, out, off) else h.forAccount(r.accountUuid, out, off).suggestion
             local.update {
                 if (target != null) it.copy(switchTarget = target)
                 else if (signedOutRow) it.copy(limitNotice = "No other login on ${r.hostAlias} is signed in with room left.")
@@ -1915,10 +1938,10 @@ class SessionViewModel(
         local.update { it.copy(accountSwitch = AccountSwitch(loading = true), error = null, limitNotice = null) }
         try {
             val signedOut = fleet.hosts.value.firstOrNull { it.alias == r.hostAlias }?.signedOutLogins.orEmpty().map { it.profile }
-            // The pre-picked login is never one on an account the project forbids.
-            val forbidden = forbiddenAccounts(fleet.accountBlocks.value, r.projectId, r.orgId)
+            // Listed, but not pickable: the hub refuses a switch onto one (E_ACCOUNT_FORBIDDEN).
+            val off = fleet.forbiddenAccountsIn(r.projectId, r.orgId)
             val h = actions.accountHeadroomIn(r.hostAlias, r.claudeProfile, r.projectId)
-                .forAccount(r.accountUuid) { l -> l.profile in signedOut || l.accountUuid in forbidden }
+                .forAccount(r.accountUuid, { l -> l.profile in signedOut }, off)
             val choices = otherLogins(h, r.claudeProfile)
             local.update { l ->
                 val open = l.accountSwitch ?: return@update l
@@ -1928,7 +1951,8 @@ class SessionViewModel(
                         logins = choices,
                         pauseAtPct = h.pauseAtPct,
                         signedOut = signedOut,
-                        picked = open.picked ?: h.suggestion?.takeIf { it in choices },
+                        forbidden = off,
+                        picked = open.picked?.takeIf { it.accountUuid !in off } ?: h.suggestion?.takeIf { it in choices },
                         notice = if (choices.isEmpty()) "${r.hostAlias} has no other login to switch to." else null,
                     ),
                 )
@@ -1941,7 +1965,11 @@ class SessionViewModel(
     }
 
     fun pickAccountSwitch(login: HostLogin) {
-        local.update { l -> l.copy(accountSwitch = l.accountSwitch?.copy(picked = login)) }
+        local.update { l ->
+            // A login the project forbids is shown, never picked.
+            if (l.accountSwitch?.forbidden?.contains(login.accountUuid) == true) l
+            else l.copy(accountSwitch = l.accountSwitch?.copy(picked = login))
+        }
     }
 
     fun closeAccountSwitch() {

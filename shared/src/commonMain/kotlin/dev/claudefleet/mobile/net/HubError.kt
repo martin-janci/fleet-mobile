@@ -147,6 +147,9 @@ sealed class HubError(message: String, cause: Throwable? = null) : Exception(mes
         /** The failure's type, which is all of it that is safe to repeat. */
         val kind: String = kindOf(cause)
 
+        /** Whether the failure came before the request left the phone ([failedBeforeSending]). */
+        val neverSent: Boolean = failedBeforeSending(cause)
+
         override fun toString(): String = "HubError.Transport(kind=$kind)"
     }
 }

@@ -33,6 +33,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration
@@ -235,6 +236,30 @@ class NeedsYouCheckTest {
         assertNull(prefs.readSeen())
         prefs.writeSeen(emptyMap())
         assertEquals(emptyMap(), prefs.readSeen(), "an empty fleet is a look, not the absence of one")
+    }
+
+    /**
+     * Another hub's ids name other sessions, runs and missions: pairing
+     * another hub forgets what the old one's looks saw, so its news is not
+     * taken for old. The same hub again (a re-pair) keeps it.
+     */
+    @Test
+    fun the_seen_sets_belong_to_one_hub() {
+        val prefs = FakePrefs().apply {
+            writeSeen(mapOf(1L to "waiting"))
+            writeRoutineSeen(setOf(5L))
+            writeMissionSeen(mapOf(2L to "question:5"))
+        }
+        assertFalse(prefs.keepSeenForHub("https://a.example"), "kept from before the hub was recorded: taken as this hub's")
+        assertEquals(setOf(5L), prefs.readRoutineSeen())
+        assertFalse(prefs.keepSeenForHub("https://a.example"))
+        assertEquals(mapOf(1L to "waiting"), prefs.readSeen())
+
+        assertTrue(prefs.keepSeenForHub("https://b.example"))
+        assertNull(prefs.readSeen())
+        assertNull(prefs.readRoutineSeen(), "no look yet: the new hub's first look is its baseline")
+        assertNull(prefs.readMissionSeen())
+        assertFalse(prefs.keepSeenForHub("https://b.example"))
     }
 
     @Test

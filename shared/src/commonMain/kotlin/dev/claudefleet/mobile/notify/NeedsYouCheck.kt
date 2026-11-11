@@ -41,6 +41,29 @@ fun Prefs.writeSeen(seen: Map<Long, String?>) {
     putStringList(NEEDS_YOU_SEEN, listOf(SEEN_HEADER) + encodeSeen(seen))
 }
 
+/** The hub the seen sets in [Prefs] belong to. */
+private const val SEEN_HUB: String = "needs_you_seen_hub"
+
+/**
+ * Keep the seen sets in [Prefs] (sessions, failed runs, mission waits) only
+ * for [hub]: another hub's ids name other sessions, runs and missions, so a
+ * set carried over from it would silence their news. With no hub recorded
+ * yet (kept since before this was), the sets are taken as [hub]'s. True when
+ * they belonged to another hub and were cleared, so that a platform keeping
+ * a copy of its own (Android's service) clears that too. A cleared set reads
+ * as no look yet: the next look is the new hub's baseline.
+ */
+fun Prefs.keepSeenForHub(hub: String): Boolean {
+    val was = getStringList(SEEN_HUB).firstOrNull()
+    if (was == hub) return false
+    putStringList(SEEN_HUB, listOf(hub))
+    if (was == null) return false
+    putStringList(NEEDS_YOU_SEEN, emptyList())
+    putStringList(ROUTINE_FAILED_SEEN, emptyList())
+    putStringList(MISSION_WAIT_SEEN, emptyList())
+    return true
+}
+
 /**
  * One look at the fleet, for a platform that cannot keep watching it: iOS,
  * woken by `BGAppRefreshTask` for about thirty seconds at a time of the

@@ -6,8 +6,10 @@ import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.RepairReport
 import dev.claudefleet.mobile.model.RestorePlanEntry
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.net.HubError
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -76,6 +78,37 @@ class RecoveryTest {
         assertEquals("Not sent: mercury did not answer", notSentHeadline(n))
     }
 
+    /** Review phone-systemic-2: the hub's `may_have_run` codes, and a transport failure after the request left. */
+    @Test
+    fun a_write_whose_outcome_is_unknown_may_have_gone_through() {
+        for (code in listOf("E_SSH_TIMEOUT", "E_TIMEOUT", "E_AGENT_PROTOCOL", "E_IN_FLIGHT")) {
+            assertTrue(mayHaveRun(HubError.Tool(code, "x")), code)
+            assertEquals("May have gone through", friendlyWrite(HubError.Tool(code, "x")).title)
+        }
+        assertFalse(mayHaveRun(HubError.Tool("E_BUSY", "mid-turn")))
+        assertEquals("The hub refused that", friendlyWrite(HubError.Tool("E_BUSY", "mid-turn")).title)
+        // The answer was lost on the way back: the hub may have it.
+        assertTrue(mayHaveRun(HubError.Transport(SocketTimeoutException())))
+        // Never left the phone.
+        assertFalse(mayHaveRun(HubError.Transport(UnknownHostException())))
+        assertEquals("Cannot reach the hub", friendlyWrite(HubError.Transport(UnknownHostException())).title)
+        assertFalse(mayHaveRun(IllegalStateException("local")))
+        // A read keeps its plain words: friendly() is unchanged.
+        assertEquals("The hub refused that", friendly(HubError.Tool("E_SSH_TIMEOUT", "x")).title)
+
+        val kept = NotSent("deploy", friendlyWrite(HubError.Tool("E_TIMEOUT", "x")), "sp-1", mayHaveRun = true)
+        assertEquals("May have gone through", notSentHeadline(kept))
+    }
+
+    @Test
+    fun a_prompt_send_id_is_fresh_each_time() {
+        val r = kotlin.random.Random(7)
+        val a = newPromptSendId(1_000, r)
+        val b = newPromptSendId(1_000, r)
+        assertTrue(a.startsWith("sp-"))
+        assertTrue(a != b)
+    }
+
     @Test
     fun a_repair_lists_what_it_did_and_what_is_left() {
         val report = RepairReport(
@@ -117,3 +150,7 @@ class RecoveryTest {
         assertEquals("Recreate fresh", planVerdict(RestorePlanEntry(sessionId = 4, action = "recreate_fresh")))
     }
 }
+
+/** Named as the JVM's own, so [HubError.Transport.kind] reads the same on every target. */
+private class SocketTimeoutException : Exception("read timed out")
+private class UnknownHostException : Exception("no such host")
