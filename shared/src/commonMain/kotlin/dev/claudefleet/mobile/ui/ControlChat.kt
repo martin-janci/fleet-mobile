@@ -7,6 +7,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -456,10 +457,11 @@ const val CONTROL_FORM_CLOSE_TAG = "control.form.close."
 
 /** The header of the Control tab: "Control · N need you", and its views below. */
 @Composable
-fun ControlHeader(subtitle: String?, views: @Composable () -> Unit) {
+fun ControlHeader(subtitle: String?, views: @Composable () -> Unit, actions: @Composable RowScope.() -> Unit = {}) {
     ScreenHeader(
         title = "Control",
         subtitle = subtitle,
+        actions = actions,
         modifier = Modifier.semantics { heading() },
         below = { views() },
     )
@@ -733,9 +735,15 @@ fun handoffWorkState(state: String?): String = when (state) {
     else -> "idle"
 }
 
-/** The newest [ControlViewModel.CHIPS_SHOWN] receipts as chips, oldest first (the order a transcript reads). */
+/**
+ * The newest [ControlViewModel.CHIPS_SHOWN] receipts as chips, oldest first (the order a transcript reads).
+ * Several handoffs to one session are one chip, the newest: its state is the session's, so two
+ * read the same twice (Martin, 2026-11-11).
+ */
 fun handoffChips(handoffs: List<ControlHandoff>, rows: List<SessionRow>): List<HandoffChip> =
-    handoffs.take(ControlViewModel.CHIPS_SHOWN).reversed().map { h -> handoffChip(h, rows) }
+    handoffs
+        .distinctBy { h -> if (h.kind == "session" && h.sessionId != null) "s${h.sessionId}" else "h${h.id}" }
+        .take(ControlViewModel.CHIPS_SHOWN).reversed().map { h -> handoffChip(h, rows) }
 
 fun handoffChip(h: ControlHandoff, rows: List<SessionRow>): HandoffChip = when (h.kind) {
     "session" -> {

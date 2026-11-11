@@ -98,12 +98,18 @@ class AutonomyViewModel(private val actions: FleetSettingsActions, private val s
 /** "Autonomy · Within your brief": a tap opens the three positions. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AutonomyChip(state: AutonomyUiState, onSet: (Autonomy) -> Unit, onDismissError: () -> Unit) {
+fun AutonomyChip(
+    state: AutonomyUiState,
+    onSet: (Autonomy) -> Unit,
+    onDismissError: () -> Unit,
+    /** In Control's header: the position alone ("Autopilot ▾"), the sheet says what it is. */
+    short: Boolean = false,
+) {
     if (!state.loaded) return
     val o = Fleet.colors
     var open by remember { mutableStateOf(false) }
     OrbitChip(
-        "Autonomy · ${autonomyWord(state.current)}",
+        if (short) "${autonomyWord(state.current)} ▾" else "Autonomy · ${autonomyWord(state.current)}",
         modifier = Modifier
             .padding(horizontal = 12.dp, vertical = 2.dp)
             .clickable(onClickLabel = "Change Control's autonomy") { open = true }

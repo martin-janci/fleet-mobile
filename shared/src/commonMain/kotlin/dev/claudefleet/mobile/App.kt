@@ -154,7 +154,6 @@ import dev.claudefleet.mobile.ui.MissionsUiState
 import dev.claudefleet.mobile.ui.ControlViews
 import dev.claudefleet.mobile.ui.ControlWaiting
 import dev.claudefleet.mobile.ui.controlForms
-import dev.claudefleet.mobile.ui.HandoffChips
 import dev.claudefleet.mobile.ui.TodayLink
 import dev.claudefleet.mobile.ui.asksAboutToday
 import dev.claudefleet.mobile.ui.FilesHandlers
@@ -274,10 +273,10 @@ import dev.claudefleet.mobile.model.graphFromTree
 import dev.claudefleet.mobile.ui.AutonomyChip
 import dev.claudefleet.mobile.ui.AutonomyViewModel
 import dev.claudefleet.mobile.ui.ControlThreadsSheet
-import dev.claudefleet.mobile.ui.ControlThreadsStrip
 import dev.claudefleet.mobile.ui.MissionSteer
 import dev.claudefleet.mobile.ui.MissionSteerUi
-import dev.claudefleet.mobile.ui.TaskGraphCard
+import dev.claudefleet.mobile.ui.ControlActivity
+import dev.claudefleet.mobile.ui.ControlActivityBar
 import dev.claudefleet.mobile.ui.sharedRows
 import dev.claudefleet.mobile.ui.loadPhoneLayout
 import dev.claudefleet.mobile.ui.savePhoneLayout
@@ -1137,6 +1136,8 @@ private fun ControlTab(
             loginEscalations(controlHosts, later) { utcOffsetSeconds(it) }
     }
     var threadsOpen by remember { mutableStateOf(false) }
+    // Control's activity row (needs you, handed off, threads): which count's sheet is open.
+    var activityOpen by remember { mutableStateOf<ControlActivity?>(null) }
     if (threadsOpen) {
         ControlThreadsSheet(
             threads = threads,
@@ -1164,27 +1165,33 @@ private fun ControlTab(
                 autofixCanApply = autofixCanApply,
                 control = ControlChrome(
                     header = {
-                        ControlHeader(subtitle, views)
+                        ControlHeader(subtitle, views, actions = {
+                            // The dial is a setting, not news: it sits in the header (2026-11-11).
+                            if (autonomyOn) AutonomyChip(autonomyState, onSet = { autonomy.set(it); Unit }, onDismissError = autonomy::dismissError, short = true)
+                        })
                         ErrorBanner(controlState.error, onDismiss = control::dismissError)
-                        // The threads Control handed out (claude-fleet #914), one strip; the list is a sheet.
-                        ControlThreadsStrip(threads) { threadsOpen = true }
+                        // What needs the person, what Control handed out (with its newest plan, claude-fleet #914)
+                        // and its threads, as one row of counts; each opens its list in a sheet, so the
+                        // conversation keeps the screen (Martin, 2026-11-11: "cannot see chat").
+                        ControlActivityBar(
+                            escalations = escalationCards,
+                            handoffs = controlState.handoffs,
+                            watching = controlState.watchingCi,
+                            plan = treeGraph,
+                            threads = threads,
+                            open = activityOpen,
+                            onToggle = { s -> if (s == ControlActivity.Threads) threadsOpen = true else activityOpen = s },
+                            onOpenSession = nav::open,
+                            onLater = container.escalationLater::putOff,
+                            onInbox = { nav.select(Tab.Inbox) },
+                        )
                     },
                     aboveComposer = {
-                        // The newest proposed tree, as a task graph (claude-fleet #914).
-                        treeGraph?.let { TaskGraphCard(it, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) }
-                        if (autonomyOn) AutonomyChip(autonomyState, onSet = { autonomy.set(it); Unit }, onDismissError = autonomy::dismissError)
-                        HandoffChips(controlState.handoffs, onOpenSession = nav::open, watching = controlState.watchingCi)
+                        // Only what the chat waits on, or answers the line just sent, stays above the composer.
                         // Asked about the day ("what did I ship today?"): the answer offers Today.
                         val asked = controlRows.firstOrNull { it.id == sessionId }?.lastPrompt
                         if (controlToday.available && asksAboutToday(asked)) TodayLink { today.open() }
                         otherForms()
-                        // What needs the person across the fleet, worst first, with Later (Control review F19).
-                        EscalationCards(
-                            all = escalationCards,
-                            onOpen = nav::open,
-                            onLater = container.escalationLater::putOff,
-                            onMore = { nav.select(Tab.Inbox) },
-                        )
                         ConfirmCards(controlState, onAnswer = { nonce, ok -> control.answer(nonce, ok) }, onHide = control::hide)
                     },
                     formContext = FormContext(

@@ -419,6 +419,30 @@ class ControlChatTest {
     }
 
     @Test
+    fun two_handoffs_to_one_session_are_one_chip_the_newest() {
+        val row = SessionRow(id = 9, friendlyName = "STA3-3", claudeStatus = "idle")
+        val hs = listOf(
+            ControlHandoff(id = 4, kind = "session", sessionId = 9),
+            ControlHandoff(id = 3, kind = "session", sessionId = 9),
+            ControlHandoff(id = 2, kind = "task", item = HandoffItem(2, "t2", "todo")),
+            ControlHandoff(id = 1, kind = "session", sessionId = 7),
+        )
+        // The repeat does not take a slot: the three are still three different things.
+        assertEquals(listOf(1L, 2L, 4L), handoffChips(hs, listOf(row)).map { it.id })
+    }
+
+    @Test
+    fun the_activity_row_counts_only_what_there_is() {
+        assertEquals(emptyList(), activityCounts(0, emptyList(), plan = false, threads = emptyList()))
+        val chips = listOf(HandoffChip(1, "Sent to api", "working", 3), HandoffChip(2, "Sent to web", "waiting", 4))
+        val counts = activityCounts(56, chips, plan = false, threads = emptyList())
+        assertEquals(listOf("56 need you", "↗ 2 handed off"), counts.map { it.label })
+        assertTrue(counts.all { it.attention })
+        assertFalse(activityCounts(0, chips.take(1), plan = false, threads = emptyList()).single().attention)
+        assertEquals("↗ Plan", activityCounts(0, emptyList(), plan = true, threads = emptyList()).single().label)
+    }
+
+    @Test
     fun each_blocked_state_says_what_to_do() {
         assertTrue("Wake" in controlBlockedLine(null, null))
         assertTrue("Settings › Devices" in controlBlockedLine("token_revoked", null))
