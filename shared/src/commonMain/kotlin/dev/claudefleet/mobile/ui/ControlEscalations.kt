@@ -85,8 +85,8 @@ const val ESCALATION_LATER_TAG = "control.escalation.later."
 const val ESCALATIONS_MORE_TAG = "control.escalations.more"
 
 /** "2 more in Inbox" (the tab it opens; review w21-13), or null when every card is drawn. */
-internal fun escalationsMoreLine(total: Int): String? {
-    val more = total - ESCALATIONS_SHOWN
+internal fun escalationsMoreLine(total: Int, shown: Int = ESCALATIONS_SHOWN): String? {
+    val more = total - shown
     return if (more > 0) "$more more in Inbox" else null
 }
 
@@ -103,12 +103,14 @@ fun EscalationCards(
     onOpen: (Long) -> Unit,
     onLater: (String) -> Unit,
     onMore: () -> Unit,
+    /** How many cards to draw before the count ([ESCALATIONS_SHOWN] where they sit above a composer). */
+    shown: Int = ESCALATIONS_SHOWN,
 ) {
     if (all.isEmpty()) return
     val o = Fleet.colors
     val clipboard = LocalClipboardManager.current
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        for (e in all.take(ESCALATIONS_SHOWN)) {
+        for (e in all.take(shown)) {
             Surface(
                 color = o.statusWaiting.copy(alpha = 0.08f),
                 border = BorderStroke(1.dp, o.statusWaiting),
@@ -150,7 +152,7 @@ fun EscalationCards(
                 }
             }
         }
-        escalationsMoreLine(all.size)?.let { line ->
+        escalationsMoreLine(all.size, shown)?.let { line ->
             TextButton(onClick = onMore, modifier = Modifier.testTag(ESCALATIONS_MORE_TAG)) {
                 Text(line, style = Fleet.type.textSm, color = o.accent)
             }
