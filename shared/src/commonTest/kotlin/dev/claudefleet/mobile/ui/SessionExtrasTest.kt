@@ -313,6 +313,12 @@ class SessionExtrasTest {
         assertEquals(null, orbitMenuNote(busy = false, connected = true))
         assertTrue(orbitMenuNote(busy = false, connected = false)!!.startsWith("Not connected"))
         assertTrue(orbitMenuNote(busy = true, connected = true)!!.startsWith("Waiting"))
+        // Review phone_misc 11: one name on every surface.
+        assertEquals("Clean up in progress", cleanUpChip("requested"))
+        assertEquals("Clean up", TidyChoice.SafeKill.label)
+        // Review phone_misc 6: a send or an answer out also holds every item back.
+        assertTrue(orbitMenuNote(busy = false, connected = true, sending = true)!!.startsWith("A message is on its way"))
+        assertTrue(orbitMenuNote(busy = false, connected = true, answering = true)!!.startsWith("Your answer is on its way"))
         assertTrue(orbitMenuItems(OrbitMenuFacts(manage = true, pinned = true)).none { it.id == OrbitItem.Retire })
     }
 

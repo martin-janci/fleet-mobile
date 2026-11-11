@@ -646,11 +646,12 @@ fun updateWarnings(u: UpdatesHealth?): List<StorageWarning> {
             "update_rolled_back" -> "Update rolled back: ${updateWho(a)}"
             "update_required" -> "Update required: ${updateWho(a)}"
             "channel_stale" -> "Release channel stale"
-            "rollout_paused" -> "Rollout paused: ${a.component ?: a.target}"
+            // The hub sends "" (not null) for a field that does not apply.
+            "rollout_paused" -> "Rollout paused: ${a.component?.takeIf { it.isNotBlank() } ?: a.target}"
             else -> "Update: ${a.reason.replace('_', ' ')}: ${updateWho(a)}"
         }
         val line = listOfNotNull(
-            a.version?.let { "${a.target} runs $it" } ?: a.target,
+            a.version?.takeIf { it.isNotBlank() }?.let { "${a.target} runs $it" } ?: a.target,
             a.detail?.takeIf { it.isNotBlank() },
             "See Settings, Updates on the desktop",
         ).joinToString(" · ")

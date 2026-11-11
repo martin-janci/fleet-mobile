@@ -238,7 +238,7 @@ private fun MissionBody(detail: MissionDetail, state: MissionsUiState, handlers:
             }
         }
         items(plan.steps, key = { "step:${it.key()}" }) { s ->
-            StepRow(s, s.itemId?.let { titles[it] }, state.canStart && detail.mayChange && state.busy == null, handlers)
+            StepRow(s, s.itemId?.let { titles[it] }, state.canStart && detail.mayChange && state.busy == null, handlers, showGo = state.canStart && detail.mayChange)
         }
         if (state.canStart && detail.mayChange && plan.steps.count { it.kind != "ask" } > 1) {
             item(key = "start-all") {

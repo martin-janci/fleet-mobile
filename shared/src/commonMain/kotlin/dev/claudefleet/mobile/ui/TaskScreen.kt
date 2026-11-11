@@ -1,13 +1,12 @@
 package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.epochSeconds
-import dev.claudefleet.mobile.utcOffsetSeconds
 import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.model.dueLine
-import dev.claudefleet.mobile.model.dueLabel
+import dev.claudefleet.mobile.model.prLabel
 import dev.claudefleet.mobile.model.subtaskLine
 import dev.claudefleet.mobile.model.subtaskMark
-import dev.claudefleet.mobile.model.localEpochDay
+import dev.claudefleet.mobile.model.todayEpochDay
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -146,7 +145,7 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
             },
         )
         ConnectionBanner(status)
-        ErrorBanner(state.error, onDismiss = handlers.onDismissError)
+        ErrorBanner(state.error ?: state.loadError, onDismiss = handlers.onDismissError)
         if (state.error != null && state.conflict) ReloadRow(handlers.onRefresh)
         InlineLoading(waiting = state.loading || state.busy)
 
@@ -179,7 +178,7 @@ fun TaskScreen(state: TaskUiState, status: ConnectionStatus, handlers: TaskHandl
                         Text("Its tracker is failing to sync — sessions below are what fleet last knew.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     }
                     if (task.assignees.isNotEmpty()) Text("Assigned: ${task.assignees.joinToString()}", style = MaterialTheme.typography.bodySmall)
-                    dueLine(task.dueAt, localEpochDay(epochSeconds(), utcOffsetSeconds(epochSeconds())), task.statusCategory == StatusCategory.Done)?.let {
+                    dueLine(task.dueAt, todayEpochDay(), task.statusCategory == StatusCategory.Done)?.let {
                         Text(it.text, style = MaterialTheme.typography.bodySmall, color = if (it.overdue) MaterialTheme.colorScheme.error else Color.Unspecified)
                     }
                     listOfNotNull(
@@ -298,10 +297,6 @@ private fun SessionLinkRow(link: WorkTaskLink, handlers: TaskHandlers, state: Ta
         },
     )
 }
-
-/** A pull request's URL as the few characters a row has room for: "PR #9", or "PR" when it has no number. */
-internal fun prLabel(url: String): String =
-    Regex("""/(?:pull|merge_requests)/(\d+)""").find(url)?.groupValues?.get(1)?.let { "PR #$it" } ?: "PR"
 
 /** A session under a task, in a line: its state, why it is here, and what it is doing. */
 internal fun sessionLinkLine(link: WorkTaskLink): String = buildList {
@@ -491,6 +486,7 @@ internal fun TaskEditSheetFor(state: TaskUiState, handlers: TaskHandlers) {
     TaskEditSheet(
         before = state.editFields,
         notesLocked = state.notesLocked,
+        sizes = state.editSizes,
         busy = state.busy,
         connected = state.connected,
         error = state.error,
@@ -552,10 +548,9 @@ internal fun TaskHierarchy(state: TaskUiState, handlers: TaskHandlers, modifier:
         }
         state.subtaskRollup?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         if (children.isNotEmpty()) {
-            val today = remember { epochSeconds().let { localEpochDay(it, utcOffsetSeconds(it)) } }
+            val today = remember { todayEpochDay() }
             for (c in children) {
-                val line = subtaskLine(c, today)
-                val overdue = c.status != "done" && dueLabel(c.dueAt, today)?.overdue == true
+                val (line, overdue) = subtaskLine(c, today)
                 Row(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable { handlers.onOpenChild(c.taskId) }.padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,

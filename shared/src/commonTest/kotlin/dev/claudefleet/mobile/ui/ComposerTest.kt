@@ -59,6 +59,12 @@ class ComposerTest {
         assertTrue(pickerOptionsFor(AGENT_CODEX, "effort").none { it.value == "auto" })
         assertEquals(MODEL_OPTIONS, pickerOptionsFor("claude", "model"))
         assertEquals(EFFORT_OPTIONS, pickerOptionsFor(null, "effort"))
+        // Worktree/Hermes 8: Hermes has its own models and no /effort.
+        assertEquals(HERMES_MODEL_OPTIONS, pickerOptionsFor(AGENT_HERMES, "model"))
+        assertTrue(pickerOptionsFor(AGENT_HERMES, "effort").isEmpty())
+        assertTrue(!hasEffortPicker(AGENT_HERMES) && hasEffortPicker("claude") && hasEffortPicker(AGENT_CODEX))
+        assertTrue(orbitMenuItems(OrbitMenuFacts(steer = true, effort = false)).none { it.id == OrbitItem.Effort })
+        assertTrue(orbitMenuItems(OrbitMenuFacts(steer = true)).any { it.id == OrbitItem.Effort })
         assertTrue(switchesByRelaunch(AGENT_CODEX))
         assertTrue(!switchesByRelaunch("claude") && !switchesByRelaunch(null))
     }

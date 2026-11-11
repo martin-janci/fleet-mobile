@@ -9,7 +9,10 @@ import dev.claudefleet.mobile.model.OrgSource
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.WorkSummary
 import dev.claudefleet.mobile.model.WorkTaskLink
+import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
+import dev.claudefleet.mobile.net.isUnknownAction
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -46,6 +49,22 @@ internal fun friendlyWorkWrite(t: Throwable): Friendly =
     }
 
 internal fun ConnectionStatus.isConnected(): Boolean = this is ConnectionStatus.Connected
+
+/**
+ * A `work` read whose failure means "nothing to show": its answer, or null
+ * (and [onFail]) when it fails. An action the hub turns out not to have is
+ * forgotten for this connection, so it is not asked again. Cancellation goes
+ * on up.
+ */
+internal suspend fun <T> FleetState.readOrNull(action: String, onFail: () -> Unit = {}, read: suspend () -> T): T? = try {
+    read()
+} catch (e: CancellationException) {
+    throw e
+} catch (t: Throwable) {
+    if (t is HubError.Tool && t.isUnknownAction()) actionMissing(HubCapabilities.WORK, action)
+    onFail()
+    null
+}
 
 /**
  * What a Work-view write says when it is tapped while the hub is not

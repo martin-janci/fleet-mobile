@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.data.ReviewRequestActions
 import dev.claudefleet.mobile.model.ReviewRequest
+import dev.claudefleet.mobile.net.HubCapabilities
 import dev.claudefleet.mobile.net.HubError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -22,17 +23,23 @@ data class ReviewRequestsUiState(
 
 /*
  * Reviews a colleague asked of this person (claude-fleet "Ask for review…",
- * migration 225). A hub without `review_request` answers an unknown tool:
- * the list stays empty and nothing is drawn.
+ * migration 225). Asked only of a hub that serves `review_request` to this
+ * device ([capabilities]); one that refuses anyway leaves the list empty.
  */
 class ReviewRequestsViewModel(
     private val actions: ReviewRequestActions,
     private val scope: CoroutineScope,
+    /** The hub's tools; null asks regardless (tests, and the older wiring). */
+    private val capabilities: StateFlow<HubCapabilities>? = null,
 ) {
     private val _state = MutableStateFlow(ReviewRequestsUiState())
     val state: StateFlow<ReviewRequestsUiState> = _state.asStateFlow()
 
     fun refresh(): Job = scope.launch {
+        if (capabilities?.value?.has(TOOL, "list") == false) {
+            _state.update { it.copy(asks = emptyList()) }
+            return@launch
+        }
         try {
             val asks = actions.list()
             _state.update { it.copy(asks = asks) }
@@ -56,8 +63,13 @@ class ReviewRequestsViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                _state.update { it.copy(busy = it.busy - r.id, notices = it.notices + (r.id to (e.message ?: "Could not mark it done"))) }
+                // The person's words, not the hub's raw error.
+                _state.update { it.copy(busy = it.busy - r.id, notices = it.notices + (r.id to friendly(e).body)) }
             }
         }
+    }
+
+    private companion object {
+        const val TOOL = "review_request"
     }
 }

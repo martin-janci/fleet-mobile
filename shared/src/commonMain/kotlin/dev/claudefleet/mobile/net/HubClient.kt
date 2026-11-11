@@ -636,14 +636,17 @@ class HubClient(
     /**
      * Which login on [hostAlias] has room left (`check_account_headroom`, hub
      * contract 14): [profile] is the session's own, null for the host's login.
-     * From the usage the hub already keeps; never a fresh fetch.
+     * From the usage the hub already keeps; never a fresh fetch. With
+     * [projectId] the hub never suggests an account forbidden for that
+     * project (claude-fleet migration 217); an older hub ignores the key.
      */
-    suspend fun checkAccountHeadroom(hostAlias: String, profile: String?): Headroom =
+    suspend fun checkAccountHeadroom(hostAlias: String, profile: String?, projectId: Long? = null): Headroom =
         call(
             "check_account_headroom",
             buildJsonObject {
                 put("host_alias", hostAlias)
                 profile?.let { put("profile", it) }
+                projectId?.let { put("project_id", it) }
             },
         ) { json.decodeFromJsonElement(Headroom.serializer(), it) }
 
@@ -753,30 +756,18 @@ class HubClient(
         ) { json.decodeFromJsonElement(AccountRow.serializer(), it) }
 
     /**
-     * Forbid account [uuid] for [projectIds] (`set_account_projects`): the
-     * whole list, replaced; empty allows every project again. Returns the
-     * account as the hub now has it.
+     * Forbid account [uuid] for [projectIds] and for every project of
+     * [orgIds] (`set_account_projects`), in one call the hub applies as one:
+     * each list given is the whole list, replaced (empty clears it); a null
+     * list stays as it is. Returns the account as the hub now has it.
      */
-    suspend fun setAccountProjects(uuid: String, projectIds: List<Long>): AccountRow =
+    suspend fun setAccountBlocks(uuid: String, projectIds: List<Long>?, orgIds: List<Long>?): AccountRow =
         call(
             "set_account_projects",
             buildJsonObject {
                 put("uuid", uuid)
-                put("forbidden_project_ids", buildJsonArray { projectIds.distinct().forEach { add(JsonPrimitive(it)) } })
-            },
-        ) { json.decodeFromJsonElement(AccountRow.serializer(), it) }
-
-    /**
-     * Forbid account [uuid] for every project of [orgIds] (`set_account_projects`
-     * with only the org list): the whole list, replaced, empty clears; the
-     * project list stays as it is. Returns the account as the hub now has it.
-     */
-    suspend fun setAccountOrgs(uuid: String, orgIds: List<Long>): AccountRow =
-        call(
-            "set_account_projects",
-            buildJsonObject {
-                put("uuid", uuid)
-                put("forbidden_org_ids", buildJsonArray { orgIds.distinct().forEach { add(JsonPrimitive(it)) } })
+                projectIds?.let { ids -> put("forbidden_project_ids", buildJsonArray { ids.distinct().forEach { add(JsonPrimitive(it)) } }) }
+                orgIds?.let { ids -> put("forbidden_org_ids", buildJsonArray { ids.distinct().forEach { add(JsonPrimitive(it)) } }) }
             },
         ) { json.decodeFromJsonElement(AccountRow.serializer(), it) }
 
@@ -2109,7 +2100,7 @@ class HubClient(
             "work",
             buildJsonObject {
                 put("action", "tree")
-                val f = filters.normalized()
+                val f = filters.forWire()
                 if (f != WorkTreeFilters()) put("filters", json.encodeToJsonElement(WorkTreeFilters.serializer(), f))
                 cursor?.let { put("cursor", it) }
                 limit?.let { put("limit", it) }

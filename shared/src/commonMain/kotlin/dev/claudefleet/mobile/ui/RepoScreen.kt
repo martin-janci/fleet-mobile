@@ -69,6 +69,8 @@ import dev.claudefleet.mobile.model.branchLine
 import dev.claudefleet.mobile.model.NoteAnchor
 import dev.claudefleet.mobile.model.noteAnchor
 import dev.claudefleet.mobile.model.noteQuote
+import dev.claudefleet.mobile.model.ReviewNote
+import dev.claudefleet.mobile.model.anchor
 import dev.claudefleet.mobile.model.lineCounts
 import dev.claudefleet.mobile.model.pushedLabel
 import dev.claudefleet.mobile.model.Commit
@@ -83,6 +85,7 @@ import dev.claudefleet.mobile.model.ticketRefs
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.MarkdownText
 import dev.claudefleet.mobile.ui.components.ScreenHeader
+import dev.claudefleet.mobile.ui.components.rememberCopied
 import dev.claudefleet.mobile.ui.theme.diffColors
 import dev.claudefleet.mobile.ui.theme.FleetIcons
 import kotlinx.coroutines.launch
@@ -544,6 +547,11 @@ private fun DiffPane(path: String, diff: FileDiff?, handlers: RepoHandlers, open
         diff.binary -> Quiet("A binary file — no diff to show.")
         diff.diff.isBlank() -> Quiet("No difference.")
         else -> Column(modifier = Modifier.fillMaxSize()) {
+            if (notes != null) {
+                val sent = notes.state.sent
+                val elsewhere = remember(lines, sent) { notesElsewhere(path, lines, sent) }
+                NotesElsewhere(elsewhere, notes)
+            }
             Column(modifier = Modifier.weight(1f)) {
                 CodeLines(
                     lines,
@@ -560,7 +568,7 @@ private fun DiffPane(path: String, diff: FileDiff?, handlers: RepoHandlers, open
                             if (at != null) n.onOpenLine(at, noteQuote(line.text))
                         }
                     },
-                    badge = notes?.let { n -> { line: CodeLine -> noteBadge(lineAnchor(path, line), n.state) } },
+                    badge = notes?.let { n -> { line: CodeLine -> noteBadge(lineAnchor(path, line), noteQuote(line.text), n.state) } },
                 )
             }
             if (notes != null) {
@@ -742,8 +750,8 @@ private fun CommitPane(hash: String, detail: CommitDetail?, state: RepoUiState, 
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f),
                         )
-                        var copied by remember(detail.hash) { mutableStateOf(false) }
-                        TextButton(onClick = { clipboard.setText(AnnotatedString(detail.hash)); copied = true }) { Text(if (copied) "Copied" else "Copy hash") }
+                        val copied = rememberCopied(detail.hash)
+                        TextButton(onClick = { clipboard.setText(AnnotatedString(detail.hash)); copied.mark() }) { Text(if (copied.copied) "Copied" else "Copy hash") }
                     }
                     if (detail.body.isNotBlank()) {
                         Text(withTicketLinks(detail.body.trim(), state), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
@@ -913,11 +921,20 @@ private val HUNK_HEADER = Regex("""^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@""")
 internal fun diffLines(diff: String): List<CodeLine> {
     var old = 0
     var new = 0
+    // `---`/`+++` are a file's headers only before its first `@@`: inside a
+    // hunk they are a removed `-- ` (an SQL comment) or an added `++x` line,
+    // which must count, or every later number in the hunk is one off.
+    var inHunk = false
     return diff.trimEnd('\n').split('\n').map { line ->
         when {
-            line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff ") || line.startsWith("index ") ->
+            line.startsWith("diff ") -> {
+                inHunk = false
+                CodeLine(line, LineKind.Meta)
+            }
+            !inHunk && (line.startsWith("+++") || line.startsWith("---") || line.startsWith("index ")) ->
                 CodeLine(line, LineKind.Meta)
             line.startsWith("@@") -> {
+                inHunk = true
                 HUNK_HEADER.find(line)?.let {
                     old = it.groupValues[1].toInt()
                     new = it.groupValues[2].toInt()
@@ -936,6 +953,18 @@ internal fun diffLines(diff: String): List<CodeLine> {
 internal fun lineAnchor(path: String, line: CodeLine): NoteAnchor? = when (line.kind) {
     LineKind.Added, LineKind.Plain, LineKind.Removed -> noteAnchor(path, line.old, line.new, removed = line.kind == LineKind.Removed)
     else -> null
+}
+
+/**
+ * The sent notes no row of [path]'s diff shows: a note sits on a row only
+ * where that row's number and side are its anchor and its text is the line
+ * the note quoted (review notes 4). The rest — a line the agent changed since,
+ * a whole-file note, a note on another file — are listed above the diff.
+ */
+internal fun notesElsewhere(path: String, lines: List<CodeLine>, sent: List<ReviewNote>): List<ReviewNote> {
+    if (sent.isEmpty()) return emptyList()
+    val rows: Map<NoteAnchor, String> = lines.mapNotNull { l -> lineAnchor(path, l)?.let { it to noteQuote(l.text) } }.toMap()
+    return sent.filterNot { n -> n.anchor()?.let { a -> rows[a]?.let { quoteMatches(n, it) } } == true }
 }
 
 /** Where each hunk starts in [lines]: the indices of its `@@` headers. */

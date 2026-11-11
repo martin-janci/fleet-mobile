@@ -52,15 +52,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.claudefleet.mobile.epochSeconds
-import dev.claudefleet.mobile.utcOffsetSeconds
 import dev.claudefleet.mobile.model.IdOrWord
 import dev.claudefleet.mobile.model.WorkFacetId
 import dev.claudefleet.mobile.model.facetSentence
-import dev.claudefleet.mobile.model.priorityLabel
-import dev.claudefleet.mobile.model.StatusCategory
-import dev.claudefleet.mobile.model.dueChip
-import dev.claudefleet.mobile.model.localEpochDay
+import dev.claudefleet.mobile.model.fold
+import dev.claudefleet.mobile.model.todayEpochDay
 import dev.claudefleet.mobile.model.WorkRule
 import dev.claudefleet.mobile.model.WorkTask
 import dev.claudefleet.mobile.model.WorkTreeFilters
@@ -378,7 +374,7 @@ internal fun TaskCard(task: WorkTask, onClick: () -> Unit, onOpenSession: (() ->
     WorkRow(
         label = task.label,
         title = if (task.key != null) task.title else "",
-        details = taskCardLine(task, remember { epochSeconds().let { localEpochDay(it, utcOffsetSeconds(it)) } }),
+        details = taskCardLine(task, remember { todayEpochDay() }),
         onClick = onClick,
         status = task.statusCategory,
         unavailable = task.unavailable,
@@ -391,15 +387,12 @@ internal fun TaskCard(task: WorkTask, onClick: () -> Unit, onOpenSession: (() ->
 /**
  * The card's second line, in words — out here so it can be asserted. With
  * [todayEpochDay] (the local day), a due date shows as the desktop's row
- * says it: "Due Fri", or "Overdue Oct 30" once it has passed; a done task's
- * is history.
+ * says it: "Due Fri", or "Overdue · Oct 30" once it has passed; a done
+ * task's is history. Led by the same facts as the New layout's row
+ * ([taskFacts]).
  */
 internal fun taskCardLine(task: WorkTask, todayEpochDay: Long? = null): String = buildList {
-    // Urgent and high only, as on the desktop's row: the rest is the usual case.
-    if (task.priority == "urgent" || task.priority == "high") priorityLabel(task.priority)?.let { add(it) }
-    if (todayEpochDay != null && task.statusCategory != StatusCategory.Done) {
-        dueChip(task.dueAt, todayEpochDay, done = false)?.let { add(it.text) }
-    }
+    taskFacts(task, todayEpochDay).text.takeIf { it.isNotEmpty() }?.let { add(it) }
     task.statusName?.takeIf { it.isNotBlank() }?.let { add(it) }
     task.trackerName?.takeIf { it.isNotBlank() }?.let { add(it) }
     val c = task.counts
@@ -447,6 +440,13 @@ private fun EmptyWork(state: MyWorkUiState, handlers: MyWorkHandlers, modifier: 
         if (state.archivedRow) ArchivedRow(state.archivedHidden, state.showArchived, "tasks", handlers.onSetArchived)
     }
 }
+
+/** Two labels are one as the hub matches them: case and accents ignored ([fold]; the desktop's `fold(l) === fold(own)`). */
+internal fun sameLabel(a: String?, b: String): Boolean = a != null && fold(a) == fold(b)
+
+/** The Label chips: the page's labels, and a remembered one it does not list (so it can be seen and cleared). */
+internal fun labelFilterChoices(labels: List<String>, current: String?): List<String> =
+    labels + listOfNotNull(current?.takeIf { v -> labels.none { sameLabel(v, it) } })
 
 /** "No tasks match Org: Acme, Status: Done." — the desktop's empty state. */
 internal fun emptyWorkSentence(facets: String): String = "No tasks match $facets."
@@ -556,11 +556,15 @@ internal fun WorkFiltersSheet(
                     }
                 }
             }
-            FilterGroup("Priority") {
-                ChipFlow {
-                    ChoiceChip("Any", f.priority == null, { handlers.onSetPriority(null) })
-                    for (p in WorkTreeFilters.PRIORITIES) {
-                        ChoiceChip(WorkTreeFilters.priorityFilterLabel(p), f.priority == p, { handlers.onSetPriority(p) })
+            // Only where the hub acts on it: an older one drops the filter and
+            // would list everything under a chip saying otherwise.
+            if (state.priorityFilter) {
+                FilterGroup("Priority") {
+                    ChipFlow {
+                        ChoiceChip("Any", f.priority == null, { handlers.onSetPriority(null) })
+                        for (p in WorkTreeFilters.PRIORITIES) {
+                            ChoiceChip(WorkTreeFilters.priorityFilterLabel(p), f.priority == p, { handlers.onSetPriority(p) })
+                        }
                     }
                 }
             }
@@ -568,8 +572,7 @@ internal fun WorkFiltersSheet(
                 FilterGroup("Label") {
                     ChipFlow {
                         ChoiceChip("Any", f.label == null, { handlers.onClearFacet(WorkFacetId.LABEL) })
-                        val labels = planning.labels + listOfNotNull(f.label?.takeIf { v -> planning.labels.none { it.equals(v, ignoreCase = true) } })
-                        for (l in labels) ChoiceChip(l, f.label.equals(l, ignoreCase = true), { handlers.onSetLabel(l) })
+                        for (l in labelFilterChoices(planning.labels, f.label)) ChoiceChip(l, sameLabel(f.label, l), { handlers.onSetLabel(l) })
                     }
                 }
             }

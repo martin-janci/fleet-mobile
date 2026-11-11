@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.data
 
+import dev.claudefleet.mobile.model.AccountBlocks
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.MyAccess
@@ -124,6 +125,14 @@ interface FleetState {
     val accountNames: StateFlow<Map<String, String>> get() = NoWork.accountNames
 
     /**
+     * Account uuid → the projects and orgs it is forbidden for (claude-fleet
+     * migrations 217/218), from the same `list_accounts` read as
+     * [accountNames]: so the phone neither defaults to nor pre-picks a login
+     * the hub would refuse. Empty from an older hub.
+     */
+    val accountBlocks: StateFlow<Map<String, AccountBlocks>> get() = NoWork.accountBlocks
+
+    /**
      * Account uuid → its last usage reading, read when the hub lists
      * `account_usage` and again on each `account_usage:updated`; empty
      * otherwise. Says when a paused row's limit resets (step 4.10).
@@ -230,6 +239,7 @@ private object NoWork {
     val myWork: StateFlow<Set<Long>?> = MutableStateFlow<Set<Long>?>(null).asStateFlow()
     val orgs: StateFlow<OrgDirectory> = MutableStateFlow(OrgDirectory.EMPTY).asStateFlow()
     val accountNames: StateFlow<Map<String, String>> = MutableStateFlow<Map<String, String>>(emptyMap()).asStateFlow()
+    val accountBlocks: StateFlow<Map<String, AccountBlocks>> = MutableStateFlow<Map<String, AccountBlocks>>(emptyMap()).asStateFlow()
     val accountUsage: StateFlow<Map<String, AccountUsageSnapshot>> =
         MutableStateFlow<Map<String, AccountUsageSnapshot>>(emptyMap()).asStateFlow()
     val trackers: StateFlow<List<TrackerRow>> = MutableStateFlow<List<TrackerRow>>(emptyList()).asStateFlow()

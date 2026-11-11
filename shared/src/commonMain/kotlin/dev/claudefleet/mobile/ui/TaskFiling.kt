@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import dev.claudefleet.mobile.model.EpicFacet
+import dev.claudefleet.mobile.ui.components.ErrorBanner
 
 /** "Payments revamp (4)": an epic as the *Under epic…* list names it. */
 internal fun epicChoiceLabel(e: EpicFacet): String =
@@ -31,10 +32,10 @@ internal fun FileUnderEpicDialog(state: TaskUiState, handlers: TaskHandlers) {
         text = {
             Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                 // A refusal (too deep, say) is said here, over the screen's own banner.
-                state.error?.let { Text("${it.title}: ${it.body}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                ErrorBanner(state.error, onDismiss = handlers.onDismissError)
                 if (state.epicChoices.isEmpty()) {
                     Text(
-                        "No epic of fleet's own is listed. Open Work to load them, or mark a task an epic on the desktop.",
+                        "No epic of fleet's own to file it under. Mark a task an epic on the desktop first.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }

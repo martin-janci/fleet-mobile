@@ -4,6 +4,8 @@ import dev.claudefleet.mobile.model.ConvItem
 import dev.claudefleet.mobile.model.ConvTurn
 import dev.claudefleet.mobile.model.fold
 import dev.claudefleet.mobile.model.foldedContains
+import dev.claudefleet.mobile.model.otherAuthor
+import dev.claudefleet.mobile.model.promptParts
 
 /**
  * One turn as the conversation list draws it: the turn, and the key the
@@ -92,11 +94,16 @@ internal fun findTurns(rows: List<TurnRow>, query: String, scope: FindScope = Fi
     val q = fold(query.trim())
     if (q.isEmpty() && scope != FindScope.Errors) return emptyList()
     fun has(text: String?) = text.foldedContains(q)
+    // The prompt as its bubble shows it: the desktop's head lines (a context
+    // line, a dashboard's JSON) are chips, so a word only they hold is not a
+    // match there is nothing to highlight on.
+    fun shown(prompt: String?) = prompt?.let { promptParts(it).text }
     return rows.indices.filter { i ->
         val turn = rows[i].turn
         when (scope) {
-            FindScope.Everything -> has(turn.prompt) || turn.items.any { it is ConvItem.Text && has(it.text) }
-            FindScope.Mine -> has(turn.prompt)
+            FindScope.Everything -> has(shown(turn.prompt)) || turn.items.any { it is ConvItem.Text && has(it.text) }
+            // My messages: not a prompt drawn as a colleague's.
+            FindScope.Mine -> turn.otherAuthor() == null && has(shown(turn.prompt))
             FindScope.Tools -> turn.items.any { toolText(it).any(::has) }
             FindScope.Errors -> turn.items.any { failed(it) && (q.isEmpty() || toolText(it).any(::has)) }
         }

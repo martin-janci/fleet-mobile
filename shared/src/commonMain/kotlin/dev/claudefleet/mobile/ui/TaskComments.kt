@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,7 +63,9 @@ internal fun commentHeader(c: TaskComment, nowSeconds: Long): String =
 internal fun TaskCommentsBlock(state: TaskUiState, handlers: TaskHandlers, nowSeconds: Long, modifier: Modifier = Modifier) {
     val timeline = remember(state.comments, state.trackerComments) { commentTimeline(state.comments, state.trackerComments) }
     if (timeline.isEmpty() && !state.canComment && !state.trackerCommentsFailed) return
-    var toTracker by remember { mutableStateOf(false) }
+    // Saveable: this block is a lazy item, and scrolling it away must not
+    // untick the box while the draft (the view model's) is kept.
+    var toTracker by rememberSaveable { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<TaskComment?>(null) }
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {

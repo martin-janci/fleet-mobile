@@ -4,6 +4,7 @@ import dev.claudefleet.mobile.data.BuiltInAgentActions
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.AgentAction
+import dev.claudefleet.mobile.model.ActionAbout
 import dev.claudefleet.mobile.model.AgentJob
 import dev.claudefleet.mobile.model.AgentRule
 import dev.claudefleet.mobile.model.AgentRunForm
@@ -116,6 +117,33 @@ class AgentActionsTest {
         assertEquals(listOf("status", "decide 3 true", "decide 1 true"), agents.calls)
         assertEquals(listOf(2L), vm.state.value.pending.map { it.id })
         assertEquals("Approved 2: they run within a minute.", vm.state.value.notices[3L])
+    }
+
+    @Test
+    fun only_tool_calls_fold_and_a_partial_approve_all_is_said_under_what_is_left() = runTest {
+        // Agents review 3: two reviews on two PRs shared the hub's `2:post_review:`
+        // key and one "Approve all 2". 11: the notice went to a row no longer shown.
+        val reviews = listOf(action(5), action(4, REVIEW.replace("\"number\":4", "\"number\":5")))
+        val about = reviews.map { ActionAbout(id = it.id, what = "post review", group = "2:post_review:") }
+        assertEquals(listOf(1, 1), groupAgentActions(reviews, about).map { it.items.size })
+
+        val calls = listOf(
+            AgentAction(id = 9, kind = "mcp_call", payload = "{}"),
+            AgentAction(id = 8, kind = "mcp_call", payload = "{}"),
+        )
+        val group = groupAgentActions(calls, calls.map { ActionAbout(id = it.id, group = "4:jira.jira_update_issue") }).single()
+        val agents = object : BuiltInAgentActions by FakeAgents(pending = calls) {
+            override suspend fun decide(id: Long, approve: Boolean): AgentAction =
+                if (id == 9L) AgentAction(id = 9, kind = "mcp_call", state = "approved") else throw HubError.Tool("E_INVALID_STATE", "superseded")
+        }
+        val vm = AgentActionsViewModel(AgentsFleet(withAgents), agents, backgroundScope, canWrite = true)
+        runCurrent()
+        vm.refresh()?.join()
+        runCurrent()
+        vm.approveAll(group)?.join()
+        runCurrent()
+        assertEquals(listOf(8L), vm.state.value.pending.map { it.id })
+        assertTrue(vm.state.value.notices[8L].orEmpty().startsWith("Approved 1"), "said under the row still shown")
     }
 
     @Test

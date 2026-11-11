@@ -187,8 +187,10 @@ const val HUB_VERSION_DIGIT_KEYS: String = "0.2.36"
 
 /**
  * The first hub release that takes `filters.sort: priority` (claude-fleet
- * #1066). An older hub refuses an unknown sort, so the phone offers it only
- * from here on; a hub that names no version does not get it.
+ * #1066), and with it `filters.priority` and `filters.label` (#1082). An
+ * older hub refuses an unknown sort and drops the two filters without a
+ * word, so the phone offers and sends them only from here on
+ * (`WorkTreeFilters.forHub`); a hub that names no version does not get them.
  */
 const val HUB_VERSION_PRIORITY_SORT: String = "0.6.5"
 

@@ -45,13 +45,39 @@ class DueDateTest {
     fun the_task_screen_line_and_the_chip_flag_a_date_that_has_passed() {
         assertEquals(DueLabel("Due Fri · 2026-11-06", false), dueLine("2026-11-06", today, done = false))
         assertEquals(DueLabel("Overdue · was due 2026-10-30", true), dueLine("2026-10-30", today, done = false))
-        assertEquals(DueLabel("Due: 2026-10-30", false), dueLine("2026-10-30", today, done = true))
+        assertNull(dueLine("2026-10-30", today, done = true), "a done task shows no due date (the desktop's openDue)")
         assertEquals(DueLabel("Due: next week", false), dueLine("next week", today, done = false))
         assertNull(dueLine(" ", today, done = false))
+    }
 
-        assertEquals(DueLabel("Due Tomorrow", false), dueChip("2026-11-05", today, done = false))
-        assertEquals(DueLabel("Overdue Oct 30", true), dueChip("2026-10-30", today, done = false))
-        assertEquals(DueLabel("Due 2026-10-30", false), dueChip("2026-10-30", today, done = true))
-        assertNull(dueChip(null, today, done = false))
+    /** The desktop's `openDue`: "Due Fri" / "Overdue · Oct 30", nothing once done, nothing for a date that does not parse. */
+    @Test
+    fun open_due_is_the_desktops_chip() {
+        assertEquals(DueLabel("Due Tomorrow", false), openDue("2026-11-05", done = false, todayEpochDay = today))
+        assertEquals(DueLabel("Overdue · Oct 30", true), openDue("2026-10-30", done = false, todayEpochDay = today))
+        assertEquals(DueLabel("Due Nov 11", false), openDue(" 2026-11-11 ", done = false, todayEpochDay = today))
+        assertNull(openDue("2026-10-30", done = true, todayEpochDay = today))
+        assertNull(openDue("next week", done = false, todayEpochDay = today))
+        assertNull(openDue(null, done = false, todayEpochDay = today))
+    }
+
+    /** One builder for every row: a hot priority, then the open due date; overdue flags the line. */
+    @Test
+    fun row_facts_lead_with_a_hot_priority_and_the_open_due_date() {
+        assertEquals(FactLine("Urgent · Overdue · Oct 30", overdue = true), rowFacts("urgent", "2026-10-30", done = false, todayEpochDay = today))
+        assertEquals(FactLine("High · Due Fri"), rowFacts("high", "2026-11-06", done = false, todayEpochDay = today))
+        assertEquals(FactLine("Due Fri"), rowFacts("medium", "2026-11-06", done = false, todayEpochDay = today))
+        assertEquals(FactLine("High"), rowFacts("high", "2026-10-30", done = true, todayEpochDay = today))
+        assertEquals(FactLine("Urgent"), rowFacts("urgent", "2026-10-30", done = false, todayEpochDay = null))
+        assertEquals("High", hotPriorityLabel("high"))
+        assertNull(hotPriorityLabel("low"))
+        assertNull(hotPriorityLabel(null))
+    }
+
+    @Test
+    fun labels_past_four_are_counted() {
+        assertEquals(listOf("a", "b"), labelChips(listOf("a", "b")))
+        assertEquals(listOf("a", "b", "c", "d"), labelChips(listOf("a", "b", "c", "d")))
+        assertEquals(listOf("a", "b", "c", "d", "+2"), labelChips(listOf("a", "b", "c", "d", "e", "f")))
     }
 }

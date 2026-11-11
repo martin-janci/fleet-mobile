@@ -9,6 +9,7 @@ import dev.claudefleet.mobile.model.BackgroundOptions
 import dev.claudefleet.mobile.model.BG_AGENT_CLAUDE
 import dev.claudefleet.mobile.model.backgroundAgents
 import dev.claudefleet.mobile.model.Headroom
+import dev.claudefleet.mobile.model.forbiddenAccounts
 import dev.claudefleet.mobile.model.HostLogin
 import dev.claudefleet.mobile.model.loginLabel
 import dev.claudefleet.mobile.model.freestLogin
@@ -363,8 +364,10 @@ class NewSessionViewModel(
         // The Account row: the host's logins and their room, read again when
         // the host changes. Readonly, from usage the hub already keeps.
         scope.launch {
-            state.map { s -> s.host.takeIf { accountGate() } }.distinctUntilChanged().collect { host ->
-                if (host != null) readHeadroom(host)
+            // And when the project changes: the hub suggests no login on an
+            // account the project forbids, given the project.
+            state.map { s -> s.host.takeIf { accountGate() }?.let { it to s.projectId } }.distinctUntilChanged().collect { at ->
+                if (at != null) readHeadroom(at.first, at.second)
             }
         }
         // Jev's host for the project (claude-fleet N5): asked when a project
@@ -406,9 +409,9 @@ class NewSessionViewModel(
     private fun draftGate(): Boolean =
         ticketKey != null && canWrite && workActions != null && fleet.capabilities.value.has(WORK_LINK, PREVIEW_START)
 
-    private suspend fun readHeadroom(host: String) {
+    private suspend fun readHeadroom(host: String, projectId: Long?) {
         val answer = try {
-            actions.headroom(host)
+            actions.headroomIn(host, projectId)
         } catch (e: CancellationException) {
             throw e
         } catch (_: Throwable) {
@@ -848,15 +851,24 @@ class NewSessionViewModel(
         // Unpicked, the row shows the login the start will use: the signed-in
         // one with the most room, as the desktop's New session defaults
         // (`freestLogin`), else the hub's own choice (review M1/F4).
+        // Never a default on an account the project forbids: the hub refuses
+        // that start (`E_ACCOUNT_FORBIDDEN`), and every default start failed.
+        val forbidden = forbiddenAccounts(fleet.accountBlocks.value, l.projectId)
         val account = headroom?.let { h ->
             if (l.loginPicked) logins.firstOrNull { it.profile == l.pickedProfile }
-            else (freestLogin(h.logins) ?: h.chosen)?.let { accountChoice(it, h.pauseAtPct, names) }
+            else (freestLogin(h.logins.filter { it.accountUuid !in forbidden }) ?: h.chosen)?.let { accountChoice(it, h.pauseAtPct, names) }
         }
-        // A default the hub would refuse (past the pause line) or that opens
-        // `/login` (signed out) waits for the person to pick a login.
-        val accountBlock = account?.takeIf { !l.loginPicked && (it.over || it.signedOut) }?.let {
-            if (it.signedOut) "Pick a login: ${it.label} is signed out on $host."
-            else "Pick a login: ${it.label} is past the pause line."
+        // A default the hub would refuse (past the pause line, or forbidden for
+        // the project) or that opens `/login` (signed out) waits for a pick.
+        val defaultForbidden = !l.loginPicked && headroom != null &&
+            (freestLogin(headroom.logins.filter { it.accountUuid !in forbidden }) == null) &&
+            headroom.chosen?.accountUuid?.let { it in forbidden } == true
+        val accountBlock = account?.takeIf { !l.loginPicked && (it.over || it.signedOut || defaultForbidden) }?.let {
+            when {
+                defaultForbidden -> "Pick a login: ${it.label} is not allowed in this project."
+                it.signedOut -> "Pick a login: ${it.label} is signed out on $host."
+                else -> "Pick a login: ${it.label} is past the pause line."
+            }
         }
         val canCreate = canWrite && !l.creating && host != null && ready && accountBlock == null
         val branchInvalid = (l.newWorktree || fromBranch) && l.branch.isNotBlank() && !branchOk

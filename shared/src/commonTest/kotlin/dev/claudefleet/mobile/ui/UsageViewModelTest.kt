@@ -60,14 +60,14 @@ private class UsageCalls : UsageActions {
         return AccountRow(uuid = uuid, email = "a@b.c", nickname = nickname)
     }
     val forbids = mutableListOf<Pair<String, List<Long>>>()
-    override suspend fun setForbiddenProjects(uuid: String, projectIds: List<Long>): AccountRow {
-        forbids += uuid to projectIds
-        return AccountRow(uuid = uuid, email = "a@b.c", forbiddenProjectIds = projectIds)
-    }
     val orgForbids = mutableListOf<Pair<String, List<Long>>>()
-    override suspend fun setForbiddenOrgs(uuid: String, orgIds: List<Long>): AccountRow {
-        orgForbids += uuid to orgIds
-        return AccountRow(uuid = uuid, email = "a@b.c", forbiddenOrgIds = orgIds)
+    /** Every `set_account_projects` call: (uuid, projects, orgs). */
+    val blockCalls = mutableListOf<Triple<String, List<Long>?, List<Long>?>>()
+    override suspend fun setAccountBlocks(uuid: String, projectIds: List<Long>?, orgIds: List<Long>?): AccountRow {
+        blockCalls += Triple(uuid, projectIds, orgIds)
+        projectIds?.let { forbids += uuid to it }
+        orgIds?.let { orgForbids += uuid to it }
+        return AccountRow(uuid = uuid, email = "a@b.c", forbiddenProjectIds = projectIds.orEmpty(), forbiddenOrgIds = orgIds.orEmpty())
     }
     var orgList = listOf(OrgDetail(id = 7, name = "SalesTwins"), OrgDetail(id = 2, name = "acme"))
     override suspend fun orgs(): List<OrgDetail> = orgList
@@ -259,7 +259,7 @@ class UsageViewModelTest {
         assertFalse(vm.state.value.canRename)
         assertEquals(2, vm.state.value.projects.size)
 
-        vm.setForbiddenProjects("u1", listOf(3, 1, 3))
+        vm.setAccountBlocks("u1", listOf(3, 1, 3), null)
         runCurrent()
         assertEquals(listOf("u1" to listOf(1L, 3L)), calls.forbids)
         val row = vm.state.value.accounts.single()
@@ -279,7 +279,7 @@ class UsageViewModelTest {
         runCurrent()
         assertEquals(listOf("acme", "SalesTwins"), vm.state.value.orgs.map { it.name })
 
-        vm.setForbiddenOrgs("u1", listOf(7, 7))
+        vm.setAccountBlocks("u1", null, listOf(7, 7))
         runCurrent()
         assertEquals(listOf("u1" to listOf(7L)), calls.orgForbids)
         val row = vm.state.value.accounts.single()
@@ -294,7 +294,7 @@ class UsageViewModelTest {
         readonly.attach()
         runCurrent()
         assertTrue(readonly.state.value.orgs.isEmpty())
-        readonly.setForbiddenOrgs("u1", listOf(1))
+        readonly.setAccountBlocks("u1", null, listOf(1))
         runCurrent()
         assertEquals(1, calls.orgForbids.size)
     }
@@ -307,10 +307,36 @@ class UsageViewModelTest {
         runCurrent()
         assertFalse(unlisted.state.value.canSetProjects)
         assertFalse(readonly.state.value.canSetProjects)
-        unlisted.setForbiddenProjects("u1", listOf(1))
-        readonly.setForbiddenProjects("u1", listOf(1))
+        unlisted.setAccountBlocks("u1", listOf(1), null)
+        readonly.setAccountBlocks("u1", listOf(1), null)
         runCurrent()
         assertTrue(calls.forbids.isEmpty())
+    }
+
+    // Accounts review 12: one Save is one call carrying both lists, never two racing.
+    @Test
+    fun a_save_of_projects_and_orgs_is_one_call() = runTest {
+        val calls = UsageCalls()
+        val vm = UsageViewModel(UsageFleet(both + HubCapabilities.SET_ACCOUNT_PROJECTS), calls, backgroundScope)
+        vm.attach()
+        runCurrent()
+        vm.setAccountBlocks("u1", listOf(3, 1), listOf(7))
+        runCurrent()
+        assertEquals<Any?>(listOf(Triple("u1", listOf(1L, 3L), listOf(7L))), calls.blockCalls)
+        val row = vm.state.value.accounts.single()
+        assertEquals(listOf(1L, 3L) to listOf(7L), row.forbiddenProjectIds to row.forbiddenOrgIds)
+    }
+
+    // Accounts review 9: the phone neither defaults to nor pre-picks a login the project forbids.
+    @Test
+    fun the_accounts_a_project_forbids() {
+        val blocks = mapOf(
+            "acct-a" to dev.claudefleet.mobile.model.AccountBlocks(projects = setOf(3)),
+            "acct-b" to dev.claudefleet.mobile.model.AccountBlocks(orgs = setOf(7)),
+        )
+        assertEquals(setOf("acct-a"), dev.claudefleet.mobile.model.forbiddenAccounts(blocks, 3))
+        assertEquals(setOf("acct-a", "acct-b"), dev.claudefleet.mobile.model.forbiddenAccounts(blocks, 3, orgId = 7))
+        assertEquals(emptySet<String>(), dev.claudefleet.mobile.model.forbiddenAccounts(blocks, null), "no project, nothing forbidden")
     }
 
     @Test

@@ -45,7 +45,7 @@ fun sessionsByAccount(rows: List<SessionRow>): Map<String, AccountSessions> =
         .mapValues { (_, rs) ->
             AccountSessions(
                 live = rs.size,
-                paused = rs.count { it.attention?.reason == "account_limit" || it.attention?.reason == "no_credentials" },
+                paused = rs.count { it.pausedOnLogin },
             )
         }
 
@@ -192,29 +192,15 @@ class UsageViewModel(
     }
 
     /**
-     * Forbid [uuid] for exactly [projectIds] (empty allows every project
-     * again); the row takes the hub's answer.
+     * Forbid [uuid] for exactly [projectIds] and every project of exactly
+     * [orgIds], later ones too (empty clears a list, null keeps it): one
+     * call, which the hub applies as one, so a Save is never half-applied
+     * and two answers never race for the row. The row takes the hub's answer.
      */
-    fun setForbiddenProjects(uuid: String, projectIds: List<Long>): Job = scope.launch {
-        if (!state.value.canSetProjects) return@launch
+    fun setAccountBlocks(uuid: String, projectIds: List<Long>?, orgIds: List<Long>?): Job = scope.launch {
+        if (!state.value.canSetProjects || (projectIds == null && orgIds == null)) return@launch
         try {
-            val row = actions.setForbiddenProjects(uuid, projectIds.distinct().sorted())
-            local.update { l -> l.copy(accounts = l.accounts.map { if (it.uuid == row.uuid) row else it }) }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (t: Throwable) {
-            local.update { it.copy(error = friendly(t)) }
-        }
-    }
-
-    /**
-     * Forbid [uuid] for every project of exactly [orgIds], later ones too
-     * (empty clears); the row takes the hub's answer.
-     */
-    fun setForbiddenOrgs(uuid: String, orgIds: List<Long>): Job = scope.launch {
-        if (!state.value.canSetProjects) return@launch
-        try {
-            val row = actions.setForbiddenOrgs(uuid, orgIds.distinct().sorted())
+            val row = actions.setAccountBlocks(uuid, projectIds?.distinct()?.sorted(), orgIds?.distinct()?.sorted())
             local.update { l -> l.copy(accounts = l.accounts.map { if (it.uuid == row.uuid) row else it }) }
         } catch (e: CancellationException) {
             throw e

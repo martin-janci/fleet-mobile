@@ -41,6 +41,23 @@ class OrbitMissionsTest {
     }
 
     @Test
+    fun pause_all_names_every_active_mission_the_waiting_ones_too() {
+        // Review phone_misc 3: the hub pauses every active mission; the
+        // sheet named only the Working ones.
+        val g = missionGroups(
+            listOf(
+                mission(1, "active"),
+                mission(2, "active").copy(waitingOn = MissionWait("question", since = NOW - 60)),
+                mission(3, "paused"),
+            ),
+            NOW,
+        )
+        assertEquals(setOf(1L, 2L), g.pausable.map { it.id }.toSet())
+        val onlyWaiting = missionGroups(listOf(mission(2, "active").copy(waitingOn = MissionWait("question"))), NOW)
+        assertEquals(listOf(2L), onlyWaiting.pausable.map { it.id }, "Pause all is offered with only waiting missions active")
+    }
+
+    @Test
     fun a_row_says_the_step_it_is_on_with_its_word() {
         val running = mission(1, "active", done = 1, total = 5)
         assertEquals("step 2 of 5", missionLine(running))
