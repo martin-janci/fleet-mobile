@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -103,6 +105,7 @@ fun declineOption(card: BlockedCard): Answer.Option? =
  * Whether an answer may go out at all is still [SessionViewModel.answer]'s
  * call — the card only draws [SessionUiState.canAnswer].
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun QuestionCard(
     card: BlockedCard,
@@ -127,17 +130,21 @@ internal fun QuestionCard(
         border = BorderStroke(1.dp, line),
     ) {
         Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(card.headline, style = Fleet.type.textLg, modifier = Modifier.weight(1f))
-                relativeAgo(state.session?.lastActivityAt, state.nowSeconds)?.let {
-                    Text("asked $it", style = Fleet.type.textXs, color = Fleet.colors.fg2)
-                }
+            // The age sits under the headline, not beside it: beside it, at a
+            // large font, it squeezed the headline to a word per line and
+            // pushed the answers out of the card (claude-fleet HITL audit H-33).
+            Text(card.headline, style = Fleet.type.textLg)
+            relativeAgo(state.session?.lastActivityAt, state.nowSeconds)?.let {
+                Text("asked $it", style = Fleet.type.textXs, color = Fleet.colors.fg2)
             }
-            asking?.let { tool ->
+            // The command once: a headline that already says it ("Allow Bash:
+            // cargo fleet-test?") does not print it again below.
+            val command = asking?.let { it.target?.takeIf { t -> t.isNotBlank() } ?: it.summary }
+            if (command != null && !card.headline.contains(command.trim())) {
                 Spacer(Modifier.height(6.dp))
                 SelectionContainer {
                     Text(
-                        text = tool.target?.takeIf { it.isNotBlank() } ?: tool.summary,
+                        text = command,
                         style = Fleet.type.code,
                         color = Fleet.colors.fg2,
                         maxLines = 6,
@@ -182,12 +189,13 @@ internal fun QuestionCard(
             // the accent fall under 4.5:1 on it in the light theme, so its
             // text is fg or fg-2 and its text buttons are fg (review r11).
             val onTint = ButtonDefaults.textButtonColors(contentColor = Fleet.colors.fg)
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Wraps as whole buttons, never a word per line ("Show in /
+            // Claude / Code", H-33).
+            FlowRow(verticalArrangement = Arrangement.Center) {
                 if (!state.readOnly && onAnswerInWords != null && declineOption(card) != null) {
-                    TextButton(onClick = onAnswerInWords, enabled = state.canAnswer, colors = onTint) { Text("Answer in your own words…") }
+                    TextButton(onClick = onAnswerInWords, enabled = state.canAnswer, colors = onTint) { Text("Answer in your own words…", maxLines = 1) }
                 }
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = onShowAgent, colors = onTint) { Text("Show in $agent") }
+                TextButton(onClick = onShowAgent, colors = onTint) { Text("Show in $agent", maxLines = 1) }
             }
             if (stuck && !state.readOnly && onRestart != null) {
                 TextButton(onClick = onRestart, enabled = state.connected, colors = onTint) { Text("Restart") }

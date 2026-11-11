@@ -33,6 +33,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.OrbitTokens
@@ -135,6 +136,11 @@ fun BottomBar(
                         fontSize = 12.sp,
                         lineHeight = 14.sp,
                         fontWeight = if (current) FontWeight.SemiBold else FontWeight.Normal,
+                        // One line: at font scale 1.3 "Sessions" wrapped to
+                        // "Session / s" (claude-fleet HITL audit H-36).
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
