@@ -92,6 +92,68 @@ class AppLifecycleTest {
         assertTrue("START_NOT_STICKY" in start && "stopSelf()" in start)
     }
 
+    /**
+     * The watcher follows the app's own credential rather than a copy read
+     * once: a re-pair restarts it, a Forget or a revoke stops it, and its own
+     * 401 goes through the app's session, which clears only the credential
+     * that was refused.
+     */
+    @Test
+    fun the_service_follows_the_stored_credential() {
+        assertTrue("AppContainer(" !in service, "a second container reads the credential once and never again")
+        val watch = service.substringAfter("private suspend fun watch()", "").substringBefore("private suspend fun watchHub(")
+        assertTrue("(application as FleetApplication).container" in watch)
+        assertTrue(Regex("""session\.state\s*\.map \{[^}]*Paired[^}]*\}\s*\.distinctUntilChanged\(\)\s*\.collectLatest""").containsMatchIn(watch))
+        val none = watch.substringAfter("if (credentials == null) {", "").substringBefore("} else {")
+        assertTrue("withdrawAll()" in none && "stopSelf()" in none, "no credential: its alerts come down and the service stops")
+        assertTrue("watchHub(container, http, credentials)" in watch)
+        // The stream and both polls live in the credential's scope, so a change ends all three.
+        val hub = service.substringAfter("private suspend fun watchHub(", "").substringBefore("\n    }\n")
+        assertTrue("= coroutineScope {" in hub)
+        assertTrue("container.repository(credentials, this)" in hub)
+        assertTrue("scope.launch" !in hub, "a poll launched in the service's scope outlives its credential")
+        assertTrue("onRevoked = { session.revoke(refused = credentials) }" in app)
+        // A pair after a revoke or a Forget, which stopped the service, starts it again.
+        val pair = application.substringAfter("private fun notifyAfterEveryPair(", "").substringBefore("\n    }\n")
+        assertTrue(".also(::notifyAfterEveryPair)" in application)
+        assertTrue(Regex("""\.filterNotNull\(\)\s*\.collect \{\s*try \{\s*notifier\.apply\(\)""").containsMatchIn(pair))
+    }
+
+    /** Another hub's ids name other sessions: its seen sets and its alerts go when the hub changes. */
+    @Test
+    fun a_new_hub_starts_the_watch_with_nothing_seen() {
+        val hub = service.substringAfter("private suspend fun watchHub(", "").substringBefore("\n    }\n")
+        val forget = hub.substringAfter("if (container.prefs.keepSeenForHub(credentials.hub)) {", "").substringBefore("}")
+        assertTrue("memory.edit().remove(SEEN).apply()" in forget && "withdrawAll()" in forget)
+        assertTrue(hub.indexOf("keepSeenForHub") in 0 until hub.indexOf("memory.getStringSet(SEEN"), "cleared before it is read")
+        val all = service.substringAfter("private fun withdrawAll()", "").substringBefore("\n    }")
+        assertTrue("channelId == ALERTS" in all, "only the alerts' channel: not the ongoing notice, not the update's")
+    }
+
+    /** Failed runs and mission waits are remembered across a restart of the service, as the sessions are. */
+    @Test
+    fun the_routine_and_mission_polls_keep_what_they_saw() {
+        val routines = service.substringAfter("private suspend fun watchRoutines(", "").substringBefore("\n    }\n")
+        val missions = service.substringAfter("private suspend fun watchMissions(", "").substringBefore("\n    }\n")
+        assertTrue("RoutineFailedWatch(container.prefs)" in routines)
+        assertTrue("MissionWaitWatch(container.prefs)" in missions)
+        assertTrue("var seen" !in routines && "var seen" !in missions, "a seen set in memory is the baseline again after every restart")
+        assertTrue("for (id in resolved) manager(this).cancel(MISSION_BASE" in missions)
+    }
+
+    /** After a reboot, "Notify me" comes back without the app being opened. */
+    @Test
+    fun the_watch_starts_again_after_the_phone_restarts() {
+        val receiver = Regex("""<receiver\s+android:name="\.BootReceiver"[\s\S]*?</receiver>""").find(manifest)?.value
+            ?: fail("no BootReceiver in the manifest")
+        assertTrue("android.intent.action.BOOT_COMPLETED" in receiver)
+        assertTrue("""android:exported="false"""" in receiver)
+        val boot = service.substringAfter("class BootReceiver : BroadcastReceiver()", "")
+        assertTrue("intent.action != Intent.ACTION_BOOT_COMPLETED) return" in boot)
+        assertTrue("AndroidBackgroundNotifier.isEnabled(context)) return" in boot)
+        assertTrue(Regex("""try \{\s*\(context\.applicationContext as FleetApplication\)\.notifier\.apply\(\)\s*\} catch \(e: RuntimeException\)""").containsMatchIn(boot))
+    }
+
     /** The two polls stop when the app leaves the screen, and resume when it comes back. */
     @Test
     fun the_terminals_and_control_polls_are_bound_to_the_lifecycle() {

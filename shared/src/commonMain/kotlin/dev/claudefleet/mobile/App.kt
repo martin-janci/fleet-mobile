@@ -791,8 +791,11 @@ class AppContainer(
             // be routed back to the same rule by hand. Without this the app sat
             // on a revoked token behind a banner, while the identical 401
             // through `HubSessionActions` returned it to Pair. `revoke()`, not
-            // `forget()`, so the Pair screen can say why.
-            onRevoked = { session.revoke() },
+            // `forget()`, so the Pair screen can say why. Only while this is
+            // still the stored credential: a stream of an older pairing (the
+            // background watcher's, a moment behind a re-pair) must not
+            // delete the new one.
+            onRevoked = { session.revoke(refused = credentials) },
         )
     }
 }

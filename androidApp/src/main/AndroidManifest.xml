@@ -41,7 +41,8 @@
       on Android 12+, an app updating itself may install without a confirm
       (UPDATE_PACKAGES_WITHOUT_USER_ACTION): the automatic update does, while
       the app is off screen. RECEIVE_BOOT_COMPLETED keeps its periodic job
-      (`AppUpdateJob`, persisted) across a restart. See `AndroidAppInstaller`.
+      (`AppUpdateJob`, persisted) across a restart, and starts "Notify me"
+      again after one (`BootReceiver`). See `AndroidAppInstaller`.
     -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
@@ -202,6 +203,14 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+        <!-- After the phone starts: the watch service back on while "Notify me" is. A protected system broadcast. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
         <service

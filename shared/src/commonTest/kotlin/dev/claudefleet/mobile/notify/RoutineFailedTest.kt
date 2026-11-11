@@ -4,6 +4,7 @@ import dev.claudefleet.mobile.model.FailingRoutine
 import dev.claudefleet.mobile.model.Routine
 import dev.claudefleet.mobile.model.RoutineRun
 import dev.claudefleet.mobile.store.FakePrefs
+import dev.claudefleet.mobile.store.Prefs
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -59,5 +60,46 @@ class RoutineFailedTest {
         assertEquals(emptySet(), prefs.readRoutineSeen())
         prefs.writeRoutineSeen(setOf(5L, 6L))
         assertEquals(setOf(5L, 6L), prefs.readRoutineSeen())
+    }
+
+    /**
+     * Android's always-on watcher remembers across a restart of its process:
+     * a run that failed while it was down is news when it comes back, not
+     * its baseline.
+     */
+    @Test
+    fun a_restarted_watcher_posts_the_failure_that_came_while_it_was_down() {
+        val prefs = FakePrefs()
+        assertEquals(emptyList(), RoutineFailedWatch(prefs).look(listOf(failing(1))), "the first look ever is the baseline")
+        // The process is killed and comes back: a new watcher over the same store.
+        val again = RoutineFailedWatch(prefs).look(listOf(failing(1), failing(2)))
+        assertEquals(listOf(2L), again.map { it.runId })
+        assertEquals(emptyList(), RoutineFailedWatch(prefs).look(listOf(failing(1), failing(2))), "said once")
+    }
+
+    /** Written when the set moves, not at every minute's poll. */
+    @Test
+    fun the_watcher_writes_only_when_the_failing_runs_change() {
+        val prefs = CountingPrefs()
+        val watch = RoutineFailedWatch(prefs)
+        watch.look(emptyList())
+        assertEquals(1, prefs.writes, "the first look is recorded, even an empty one")
+        watch.look(emptyList())
+        assertEquals(1, prefs.writes)
+        watch.look(listOf(failing(3)))
+        assertEquals(2, prefs.writes)
+        watch.look(listOf(failing(3)))
+        assertEquals(2, prefs.writes)
+    }
+}
+
+/** A [FakePrefs] that counts its writes. */
+internal class CountingPrefs(private val inner: FakePrefs = FakePrefs()) : Prefs by inner {
+    var writes = 0
+        private set
+
+    override fun putStringList(key: String, value: List<String>) {
+        writes++
+        inner.putStringList(key, value)
     }
 }
