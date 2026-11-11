@@ -34,8 +34,8 @@ interface InboxActions {
     /** Retry the last turn: its prompt again, as a new one. */
     suspend fun retry(sessionId: Long, prompt: String)
 
-    /** Which login on [hostAlias] has room left (`check_account_headroom`). */
-    suspend fun headroom(hostAlias: String, profile: String?): Headroom
+    /** Which login on [hostAlias] has room left (`check_account_headroom`), for work in [projectId]. */
+    suspend fun headroom(hostAlias: String, profile: String?, projectId: Long? = null): Headroom
 
     /** Restart the session under [profile], resuming its conversation. */
     suspend fun restartUnder(sessionId: Long, profile: String)
@@ -47,7 +47,8 @@ class SessionInboxActions(private val actions: SessionActions) : InboxActions {
         actions.sendPrompt(sessionId, prompt)
     }
 
-    override suspend fun headroom(hostAlias: String, profile: String?): Headroom = actions.accountHeadroom(hostAlias, profile)
+    override suspend fun headroom(hostAlias: String, profile: String?, projectId: Long?): Headroom =
+        actions.accountHeadroom(hostAlias, profile, projectId)
 
     override suspend fun restartUnder(sessionId: Long, profile: String) = actions.restartUnder(sessionId, profile)
 }
@@ -154,6 +155,8 @@ class InboxViewModel(
     private val accountName: (String) -> String? = { null },
     /** A host's login is signed out (`signed_out_logins`), by host alias and profile; never offered as a switch target. */
     private val signedOut: (String, String?) -> Boolean = { _, _ -> false },
+    /** The accounts a project forbids ([dev.claudefleet.mobile.data.forbiddenAccounts]); never offered as a switch target. */
+    private val forbidden: (Long?) -> Set<String> = { emptySet() },
 ) {
     private val _state = MutableStateFlow(InboxUiState())
     val state: StateFlow<InboxUiState> = _state.asStateFlow()
@@ -172,11 +175,13 @@ class InboxViewModel(
         if (!inboxRowActions(row, canWrite, switchAvailable, null).switchAccount) return null
         return press(row.id) {
             val out = { l: HostLogin -> signedOut(row.hostAlias, l.profile) }
-            val h = actions.headroom(row.hostAlias, row.claudeProfile)
+            val h = actions.headroom(row.hostAlias, row.claudeProfile, row.projectId)
+            // Never a login the hub would refuse for the row's project (E_ACCOUNT_FORBIDDEN).
+            val off = forbidden(row.projectId)
             val target = if (row.attention?.reason == "no_credentials") {
-                h.signedInElsewhere(row.claudeProfile, out)
+                h.signedInElsewhere(row.claudeProfile, out, off)
             } else {
-                h.forAccount(row.accountUuid, out).suggestion
+                h.forAccount(row.accountUuid, out, off).suggestion
             }
             if (target == null) {
                 if (row.attention?.reason == "no_credentials") "No other login on ${row.hostAlias} is signed in with room left."

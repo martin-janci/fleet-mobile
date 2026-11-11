@@ -642,14 +642,17 @@ class HubClient(
     /**
      * Which login on [hostAlias] has room left (`check_account_headroom`, hub
      * contract 14): [profile] is the session's own, null for the host's login.
-     * From the usage the hub already keeps; never a fresh fetch.
+     * From the usage the hub already keeps; never a fresh fetch. With
+     * [projectId] the hub's `suggestion` is never a login on an account that
+     * project forbids (an older hub ignores the argument).
      */
-    suspend fun checkAccountHeadroom(hostAlias: String, profile: String?): Headroom =
+    suspend fun checkAccountHeadroom(hostAlias: String, profile: String?, projectId: Long? = null): Headroom =
         call(
             "check_account_headroom",
             buildJsonObject {
                 put("host_alias", hostAlias)
                 profile?.let { put("profile", it) }
+                projectId?.let { put("project_id", it) }
             },
         ) { json.decodeFromJsonElement(Headroom.serializer(), it) }
 

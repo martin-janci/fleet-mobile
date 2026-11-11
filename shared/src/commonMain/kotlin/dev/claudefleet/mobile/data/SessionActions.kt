@@ -111,8 +111,8 @@ interface SessionActions {
     suspend fun restartWith(sessionId: Long, model: String?, effort: String?): Unit =
         throw UnsupportedOperationException("restart_session { model, effort }")
 
-    /** Which login on [hostAlias] has room left (`check_account_headroom`). */
-    suspend fun accountHeadroom(hostAlias: String, profile: String?): Headroom =
+    /** Which login on [hostAlias] has room left (`check_account_headroom`), for work in [projectId]. */
+    suspend fun accountHeadroom(hostAlias: String, profile: String?, projectId: Long? = null): Headroom =
         throw UnsupportedOperationException("check_account_headroom")
 
     /**
@@ -250,8 +250,8 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
         session.withClient { it.restartWith(sessionId, model, effort) }
     }
 
-    override suspend fun accountHeadroom(hostAlias: String, profile: String?): Headroom =
-        session.withClient { it.checkAccountHeadroom(hostAlias, profile) }
+    override suspend fun accountHeadroom(hostAlias: String, profile: String?, projectId: Long?): Headroom =
+        session.withClient { it.checkAccountHeadroom(hostAlias, profile, projectId) }
 
     override suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming): QueuePromptResult =
         session.withClient { it.queuePrompt(sessionId, prompt, timing) }

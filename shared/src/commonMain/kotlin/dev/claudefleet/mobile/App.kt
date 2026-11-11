@@ -44,6 +44,7 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LifecycleStartEffect
 import dev.claudefleet.mobile.data.SsoSignIn
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.data.forbiddenAccounts
 import dev.claudefleet.mobile.data.AgentActions
 import dev.claudefleet.mobile.data.ControlActions
 import dev.claudefleet.mobile.data.AppSession
@@ -1353,6 +1354,7 @@ private fun FleetRoute(
             credentials.canWrite,
             accountName = { uuid -> repository.accountNames.value[uuid] },
             signedOut = { alias, profile -> repository.hosts.value.firstOrNull { it.alias == alias }?.isSignedOut(profile) == true },
+            forbidden = { projectId -> repository.forbiddenAccounts(projectId) },
         )
     }
     val trackers = remember(repository, scope) { TrackersViewModel(repository, container.trackerActions, scope, credentials.canWrite) }

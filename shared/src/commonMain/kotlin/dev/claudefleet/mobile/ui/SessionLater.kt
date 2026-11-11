@@ -391,21 +391,28 @@ data class AccountSwitch(
     val pauseAtPct: Double = 100.0,
     /** The profiles on the host fleet knows are signed out (null = the host's own login). */
     val signedOut: List<String?> = emptyList(),
+    /** The accounts the session's project forbids: their logins are listed, not pickable. */
+    val forbidden: Set<String> = emptySet(),
 )
 
 /**
  * A login's line in Switch account (review w23-5): how much it has used,
  * and what makes it a dead end — the session's own account, which shares
  * its limit; a login at the pause line; one that is signed out. Each stays
- * pickable: the person still decides.
+ * pickable: the person still decides. One on an account the session's
+ * project forbids ([forbidden]) is not: the hub refuses it, so it says
+ * "not for this project" in place of its room, as the desktop's picker does.
  */
-fun switchLoginSub(l: HostLogin, sessionAccount: String?, pauseAtPct: Double, signedOut: Boolean): String =
-    listOfNotNull(
+fun switchLoginSub(l: HostLogin, sessionAccount: String?, pauseAtPct: Double, signedOut: Boolean, forbidden: Boolean = false): String =
+    if (forbidden) NOT_FOR_THIS_PROJECT else listOfNotNull(
         roomText(l),
         "same account, shares its limit".takeIf { sessionAccount != null && l.accountUuid == sessionAccount },
         "past the pause line".takeIf { (l.usedPct ?: 0.0) >= pauseAtPct },
         "signed out".takeIf { signedOut },
     ).joinToString(" · ")
+
+/** What a login on an account the project forbids says in a picker: the desktop's words. */
+const val NOT_FOR_THIS_PROJECT = "not for this project"
 
 /** Every login on the host but the one the session runs under ([currentProfile], null = the host's own). */
 fun otherLogins(h: Headroom, currentProfile: String?): List<HostLogin> =
@@ -439,11 +446,13 @@ internal fun SwitchAccountSheet(
         if (switch.loading) Text("Reading the logins on ${session?.hostAlias ?: "the host"}…", style = Fleet.type.textSm, color = o.fgMuted)
         switch.notice?.let { Text(it, style = Fleet.type.textSm, color = o.fg) }
         for (l in switch.logins) {
+            val forbidden = l.accountUuid in switch.forbidden
             SheetOption(
                 title = loginLabel(l, accountName),
-                sub = switchLoginSub(l, session?.accountUuid, switch.pauseAtPct, l.profile in switch.signedOut),
+                sub = switchLoginSub(l, session?.accountUuid, switch.pauseAtPct, l.profile in switch.signedOut, forbidden),
                 selected = l == switch.picked,
                 onSelect = { onPick(l) },
+                enabled = !forbidden,
             )
         }
     }

@@ -4,6 +4,7 @@ import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.log.FleetLog
 import dev.claudefleet.mobile.ui.ProjectFileNames
 import dev.claudefleet.mobile.ui.explain
+import dev.claudefleet.mobile.model.AccountRow
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.MyAccess
@@ -182,6 +183,9 @@ class FleetRepository(
 
     private val _accountNames = MutableStateFlow<Map<String, String>>(emptyMap())
     override val accountNames: StateFlow<Map<String, String>> = _accountNames.asStateFlow()
+
+    private val _accounts = MutableStateFlow<List<AccountRow>>(emptyList())
+    override val accounts: StateFlow<List<AccountRow>> = _accounts.asStateFlow()
 
     private val _accountUsage = MutableStateFlow<Map<String, AccountUsageSnapshot>>(emptyMap())
     override val accountUsage: StateFlow<Map<String, AccountUsageSnapshot>> = _accountUsage.asStateFlow()
@@ -488,6 +492,7 @@ class FleetRepository(
                                 _myWork.value = null
                                 _orgs.value = OrgDirectory.EMPTY
                                 _accountNames.value = emptyMap()
+                                _accounts.value = emptyList()
                                 _accountUsage.value = emptyMap()
                                 _trackers.value = emptyList()
                                 grantsRead?.cancel()
@@ -768,9 +773,13 @@ class FleetRepository(
      * every row's account chip.
      */
     private suspend fun readAccountNames(caps: HubCapabilities): Map<String, String> {
-        if (!caps.accounts) return emptyMap()
+        if (!caps.accounts) {
+            _accounts.value = emptyList()
+            return emptyMap()
+        }
         return try {
-            client.listAccounts().associate { it.uuid to it.label }
+            // The rows too, for the projects each is kept off ([accounts]).
+            client.listAccounts().also { _accounts.value = it }.associate { it.uuid to it.label }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Throwable) {

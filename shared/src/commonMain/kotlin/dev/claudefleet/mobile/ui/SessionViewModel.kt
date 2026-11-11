@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import dev.claudefleet.mobile.data.ALL_SESSIONS_CHANGED
 import dev.claudefleet.mobile.data.ConnectionStatus
+import dev.claudefleet.mobile.data.forbiddenAccounts
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.QuickReplyActions
 import dev.claudefleet.mobile.data.SessionActions
@@ -1842,11 +1843,14 @@ class SessionViewModel(
             // Never a login the hub knows is signed out (review w23-3).
             val host = fleet.hosts.value.firstOrNull { it.alias == r.hostAlias }
             val out = { l: HostLogin -> host?.isSignedOut(l.profile) == true }
-            val h = actions.accountHeadroom(r.hostAlias, r.claudeProfile)
+            val h = actions.accountHeadroom(r.hostAlias, r.claudeProfile, r.projectId)
+            // Never a login on an account the session's project forbids: the
+            // hub refuses that restart (E_ACCOUNT_FORBIDDEN).
+            val off = fleet.forbiddenAccounts(r.projectId)
             // A signed-out session needs any signed-in login with room, as the
             // Inbox offers it (review M9); a paused one, another account.
             val signedOutRow = r.attention?.reason == "no_credentials"
-            val target = if (signedOutRow) h.signedInElsewhere(r.claudeProfile, out) else h.forAccount(r.accountUuid, out).suggestion
+            val target = if (signedOutRow) h.signedInElsewhere(r.claudeProfile, out, off) else h.forAccount(r.accountUuid, out, off).suggestion
             local.update {
                 if (target != null) it.copy(switchTarget = target)
                 else if (signedOutRow) it.copy(limitNotice = "No other login on ${r.hostAlias} is signed in with room left.")
@@ -1907,7 +1911,10 @@ class SessionViewModel(
         local.update { it.copy(accountSwitch = AccountSwitch(loading = true), error = null, limitNotice = null) }
         try {
             val signedOut = fleet.hosts.value.firstOrNull { it.alias == r.hostAlias }?.signedOutLogins.orEmpty().map { it.profile }
-            val h = actions.accountHeadroom(r.hostAlias, r.claudeProfile).forAccount(r.accountUuid) { l -> l.profile in signedOut }
+            // Listed, but not pickable: the hub refuses a switch onto one (E_ACCOUNT_FORBIDDEN).
+            val off = fleet.forbiddenAccounts(r.projectId)
+            val h = actions.accountHeadroom(r.hostAlias, r.claudeProfile, r.projectId)
+                .forAccount(r.accountUuid, { l -> l.profile in signedOut }, off)
             val choices = otherLogins(h, r.claudeProfile)
             local.update { l ->
                 val open = l.accountSwitch ?: return@update l
@@ -1917,7 +1924,8 @@ class SessionViewModel(
                         logins = choices,
                         pauseAtPct = h.pauseAtPct,
                         signedOut = signedOut,
-                        picked = open.picked ?: h.suggestion?.takeIf { it in choices },
+                        forbidden = off,
+                        picked = open.picked?.takeIf { it.accountUuid !in off } ?: h.suggestion?.takeIf { it in choices },
                         notice = if (choices.isEmpty()) "${r.hostAlias} has no other login to switch to." else null,
                     ),
                 )
@@ -1930,7 +1938,11 @@ class SessionViewModel(
     }
 
     fun pickAccountSwitch(login: HostLogin) {
-        local.update { l -> l.copy(accountSwitch = l.accountSwitch?.copy(picked = login)) }
+        local.update { l ->
+            // A login the project forbids is shown, never picked.
+            if (l.accountSwitch?.forbidden?.contains(login.accountUuid) == true) l
+            else l.copy(accountSwitch = l.accountSwitch?.copy(picked = login))
+        }
     }
 
     fun closeAccountSwitch() {

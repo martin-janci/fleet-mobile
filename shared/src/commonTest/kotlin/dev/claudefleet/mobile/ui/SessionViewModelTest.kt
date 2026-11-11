@@ -21,6 +21,7 @@ import dev.claudefleet.mobile.model.QueuePromptResult
 import dev.claudefleet.mobile.model.SendLaterTiming
 import dev.claudefleet.mobile.model.TuneAnswer
 import dev.claudefleet.mobile.model.HostLogin
+import dev.claudefleet.mobile.model.AccountRow
 import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.ConvItem
@@ -112,6 +113,7 @@ private class FakeFleetState(
     override val sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val access = MutableStateFlow(MyAccess.UNKNOWN)
     override val repairProgress = MutableSharedFlow<StartProgress>(extraBufferCapacity = 16)
+    override val accounts = MutableStateFlow<List<AccountRow>>(emptyList())
     override suspend fun refresh() = Unit
 }
 
@@ -331,6 +333,7 @@ private class FakeActions : SessionActions {
     val touched = mutableListOf<Long>()
     var headroom = Headroom()
     val headroomAsked = mutableListOf<Pair<String, String?>>()
+    val headroomProjects = mutableListOf<Long?>()
     val restartedUnder = mutableListOf<String>()
     val restartedOverLimit = mutableListOf<String>()
 
@@ -380,8 +383,9 @@ private class FakeActions : SessionActions {
         touched += sessionId
     }
 
-    override suspend fun accountHeadroom(hostAlias: String, profile: String?): Headroom {
+    override suspend fun accountHeadroom(hostAlias: String, profile: String?, projectId: Long?): Headroom {
         headroomAsked += hostAlias to profile
+        headroomProjects += projectId
         return headroom
     }
 
@@ -4803,6 +4807,27 @@ class SessionViewModelTest {
         assertEquals(HostLogin(null, "acc-b", 40.0), vm.state.value.switchTarget, "not its own signed-out login, though it has more room")
     }
 
+    /**
+     * The project's forbidden accounts (claude-fleet migration 217): the
+     * limit card never proposes a login on one, though it has the most room.
+     */
+    @Test
+    fun switch_account_never_proposes_a_login_the_project_forbids() = runTest {
+        val actions = FakeActions().apply {
+            headroom = Headroom(
+                pauseAtPct = 95.0,
+                logins = listOf(HostLogin("work", "acc-a", 100.0), HostLogin("spare", "acc-b", 10.0), HostLogin("team", "acc-c", 60.0)),
+            )
+        }
+        val fleet = switchFleet().apply { accounts.value = listOf(AccountRow("acc-b", forbiddenProjectIds = listOf(1))) }
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+        vm.proposeSwitch().join()
+        runCurrent()
+        assertEquals(HostLogin("team", "acc-c", 60.0), vm.state.value.switchTarget)
+        assertEquals(listOf<Long?>(1), actions.headroomProjects, "the hub is told the project too")
+    }
+
     @Test
     fun switch_account_is_not_offered_where_the_hub_cannot_restart_under_a_profile() = runTest {
         val actions = FakeActions()
@@ -4949,6 +4974,37 @@ class SessionViewModelTest {
         runCurrent()
         assertNull(vm.state.value.accountSwitch)
         assertTrue(actions.restartedUnder.isEmpty())
+    }
+
+    /** Details › Switch account… lists a login the project forbids as "not for this project" and never picks it. */
+    @Test
+    fun switch_account_from_details_shows_a_forbidden_login_and_never_picks_it() = runTest {
+        val actions = FakeActions().apply {
+            headroom = Headroom(
+                pauseAtPct = 95.0,
+                logins = listOf(HostLogin("work", "acc-a", 99.0), HostLogin("spare", "acc-b", 10.0), HostLogin("team", "acc-c", 60.0)),
+            )
+        }
+        val fleet = FakeFleetState(listOf(running)).apply {
+            capabilities.value = HubCapabilities(tools = switchTools, params = mapOf("restart_session" to setOf("session_id", "profile")))
+            accounts.value = listOf(AccountRow("acc-b", forbiddenProjectIds = listOf(1)))
+        }
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+        vm.openAccountSwitch().join()
+        runCurrent()
+        val open = assertNotNull(vm.state.value.accountSwitch)
+        assertEquals(listOf("spare", "team"), open.logins.map { it.profile }, "listed, as the desktop lists it")
+        assertEquals(setOf("acc-b"), open.forbidden)
+        assertEquals(HostLogin("team", "acc-c", 60.0), open.picked, "over the line: the roomiest allowed login")
+        assertEquals(NOT_FOR_THIS_PROJECT, switchLoginSub(open.logins[0], "acc-a", 95.0, signedOut = false, forbidden = true))
+
+        vm.pickAccountSwitch(HostLogin("spare", "acc-b", 10.0))
+        runCurrent()
+        assertEquals(HostLogin("team", "acc-c", 60.0), vm.state.value.accountSwitch?.picked, "a forbidden login is not pickable")
+        vm.confirmAccountSwitch().join()
+        runCurrent()
+        assertEquals(listOf("team"), actions.restartedUnder)
     }
 
     @Test

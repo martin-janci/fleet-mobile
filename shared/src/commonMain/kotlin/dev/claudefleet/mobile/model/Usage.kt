@@ -207,10 +207,18 @@ data class Headroom(
  * (a profile can be logged into another account since the start), so when
  * the row names an account the host has a login for, `over` and the
  * suggestion are read for that account: the login under the line with the
- * least used, on another account.
+ * least used, on another account, and never on one of [forbidden] (the
+ * accounts the session's project forbids, [accountsForbiddenFor]).
  */
-fun Headroom.forAccount(accountUuid: String?, signedOut: (HostLogin) -> Boolean = { false }): Headroom {
-    val chosen = accountUuid?.let { a -> logins.firstOrNull { it.accountUuid == a } } ?: return this
+fun Headroom.forAccount(
+    accountUuid: String?,
+    signedOut: (HostLogin) -> Boolean = { false },
+    forbidden: Set<String> = emptySet(),
+): Headroom {
+    val chosen = accountUuid?.let { a -> logins.firstOrNull { it.accountUuid == a } }
+        // The hub's own suggestion, never on an account the project forbids
+        // (the desktop's `headroomForAccount`).
+        ?: return if (suggestion != null && suggestion.accountUuid in forbidden) copy(suggestion = null) else this
     val used = chosen.usedPct
     val over = used != null && used >= pauseAtPct
     var suggestion: HostLogin? = null
@@ -220,6 +228,9 @@ fun Headroom.forAccount(accountUuid: String?, signedOut: (HostLogin) -> Boolean 
             // A signed-out login would restart the session into `/login`
             // (the hub's own filter, account_limits.rs; review w23-3).
             if (l.accountUuid == chosen.accountUuid || pct >= pauseAtPct || signedOut(l)) continue
+            // Nor a login on an account the session's project forbids: the
+            // hub refuses that switch (`E_ACCOUNT_FORBIDDEN`).
+            if (l.accountUuid in forbidden) continue
             if (suggestion == null || pct < (suggestion.usedPct ?: Double.MAX_VALUE)) suggestion = l
         }
     }
@@ -232,8 +243,14 @@ fun Headroom.forAccount(accountUuid: String?, signedOut: (HostLogin) -> Boolean 
  * [exceptProfile] (the session's own, which is the one signed out), and
  * under the pause line. Logins with a reading come first; null when none.
  */
-fun Headroom.signedInElsewhere(exceptProfile: String?, signedOut: (HostLogin) -> Boolean): HostLogin? =
-    logins.filter { l -> l.profile != exceptProfile && !signedOut(l) && (l.usedPct ?: 0.0) < pauseAtPct }
+fun Headroom.signedInElsewhere(
+    exceptProfile: String?,
+    signedOut: (HostLogin) -> Boolean,
+    forbidden: Set<String> = emptySet(),
+): HostLogin? =
+    logins.filter { l ->
+        l.profile != exceptProfile && !signedOut(l) && (l.usedPct ?: 0.0) < pauseAtPct && l.accountUuid !in forbidden
+    }
         .minByOrNull { it.usedPct ?: Double.MAX_VALUE }
 
 /** "work (m.janci@…)" or the account alone: how a login reads in the switch question. */
@@ -250,8 +267,25 @@ fun leftText(usedPct: Double): String = "${(100 - kotlin.math.round(usedPct).toI
 
 /**
  * The signed-in login with a reading and the most room: the default the
- * desktop's New session picks (`freestLogin`, account_limits.ts). Null when
- * no login has a reading.
+ * desktop's New session picks (`freestLogin`, account_limits.ts, over its
+ * `allowedLogins`). Never one on an account in [forbidden]. Null when no
+ * such login has a reading.
  */
-fun freestLogin(logins: List<HostLogin>): HostLogin? =
-    logins.filter { !it.signedOut }.mapNotNull { l -> l.usedPct?.let { l to it } }.minByOrNull { it.second }?.first
+fun freestLogin(logins: List<HostLogin>, forbidden: Set<String> = emptySet()): HostLogin? =
+    logins.filter { !it.signedOut && it.accountUuid !in forbidden }
+        .mapNotNull { l -> l.usedPct?.let { l to it } }.minByOrNull { it.second }?.first
+
+/**
+ * The accounts project [projectId] forbids (claude-fleet migrations 217/218,
+ * docs/accounts.md "Keep an account off a project"), itself or through its
+ * org [orgId]: the desktop's `accountsForbiddenFor` (src/lib/accounts.ts).
+ * No start, resume or switch in the project may use a login on one; the hub
+ * refuses it with `E_ACCOUNT_FORBIDDEN`. Empty without a project.
+ */
+fun accountsForbiddenFor(projectId: Long?, accounts: List<AccountRow>, orgId: Long? = null): Set<String> {
+    if (projectId == null) return emptySet()
+    return accounts
+        .filter { a -> projectId in a.forbiddenProjectIds || (orgId != null && orgId in a.forbiddenOrgIds) }
+        .map { it.uuid }
+        .toSet()
+}
