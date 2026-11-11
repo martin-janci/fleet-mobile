@@ -82,8 +82,17 @@ class PhoneSessionsTest {
         assertEquals("offline", staleLine("offline", null))
         val asked = row(status = "blocked", pending = PendingInput(kind = "permission", question = "Allow cargo fleet-test?"))
         assertEquals("Allow cargo fleet-test?", waitsOn(asked))
-        assertEquals("Needs you", waitsOn(row(status = "blocked")))
+        // claude-fleet HITL audit H-11: never "Waiting for you: Needs you".
+        assertEquals("an answer in the terminal", waitsOn(row(status = "blocked")))
         assertEquals("", waitsOn(row(status = "idle")))
+    }
+
+    @Test
+    fun a_row_that_needs_you_says_why_in_words() {
+        assertEquals("stuck on the trust prompt", reasonWords(row(status = "idle").copy(stuckKind = "trust_prompt")))
+        assertEquals("ran out of memory", reasonWords(row(status = "idle").copy(stuckKind = "oom")))
+        assertEquals("the turn stopped with an error", reasonWords(row(status = "failed")))
+        assertNull(reasonWords(row(status = "working")))
     }
 
     @Test

@@ -110,7 +110,9 @@ internal fun sharedLine(s: SharedRow): String =
  * failed, else Needs you.
  */
 internal fun inboxWord(row: SessionRow): StatusWord =
-    when (StatusWord.of(StatusTone.of(row))) {
+    // A lost or ghost row is Paused, never "Waiting for you" (HITL audit H-17).
+    if (row.attentionReason == "lifecycle") StatusWord.PAUSED
+    else when (StatusWord.of(StatusTone.of(row))) {
         StatusWord.PAUSED -> StatusWord.PAUSED
         StatusWord.FAILED -> StatusWord.FAILED
         else -> StatusWord.NEEDS_YOU

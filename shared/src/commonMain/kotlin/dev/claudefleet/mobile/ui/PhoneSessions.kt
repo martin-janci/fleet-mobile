@@ -105,7 +105,11 @@ internal fun phoneWord(row: SessionRow): StatusWord? = when {
  * "show stale data with its age and *Was working*, with no spinner"). A stale
  * Needs you row says "Was waiting for you": the hub may have moved on (r13 P17).
  */
-internal fun phoneLead(word: StatusWord?, live: Boolean): String? = when {
+internal fun phoneLead(word: StatusWord?, live: Boolean, row: SessionRow? = null): String? = when {
+    // A row blocked on something outside it (a down host, a login, a full
+    // context, a silent turn) is not waiting for an answer: "Needs you", as
+    // the desktop words it (claude-fleet HITL audit H-11).
+    word == StatusWord.NEEDS_YOU && row?.attentionReason in NOT_AN_ANSWER -> "Needs you"
     word == StatusWord.NEEDS_YOU && !live -> "Was waiting for you"
     word == StatusWord.NEEDS_YOU -> "Waiting for you"
     word == StatusWord.WORKING && !live -> "Was working"
@@ -127,9 +131,41 @@ internal fun waitsOn(
 ): String =
     row.pendingInput?.question?.trim()?.takeIf { it.isNotEmpty() }?.takeIf { row.needsAttention }
         ?: blockedLine(row, accountName, limit, nowSeconds)
+        ?: reasonWords(row)
         ?: row.supportingLine
         ?: row.attentionReason?.let(::reasonLabel)
         ?: ""
+
+/** Reasons that need a person but not an answer typed to the session. */
+private val NOT_AN_ANSWER = setOf("host_down", "no_credentials", "context_full", "stale_working")
+
+/**
+ * Why a row needs a person, in words, when no question or blocked line says
+ * it: the desktop's `row_reason.ts`, so the phone never reads "Waiting for
+ * you: Needs you" or "Failed: Failed · stuck" (claude-fleet HITL audit H-11).
+ */
+internal fun reasonWords(row: SessionRow): String? {
+    if (!row.needsAttention) return null
+    return when (row.attentionReason) {
+        "waiting" -> row.pendingForm?.let { f -> if (f.title.isBlank()) "a form" else "a form, “${f.title}”" }
+            ?: "an answer in the terminal"
+        "stuck" -> when (row.stuckKind) {
+            "auth_menu" -> "stuck on the sign-in menu"
+            "reconnect" -> "stuck reconnecting"
+            "trust_prompt" -> "stuck on the trust prompt"
+            "oom" -> "ran out of memory"
+            "press_enter" -> "waiting for Enter in the terminal"
+            else -> "stuck"
+        }
+        "context_full" -> row.contextPct?.let { "context ${it.toInt()}% full, compact or clear it" } ?: "context nearly full"
+        "stale_working" -> "no sign of work for a while, check the terminal"
+        "ci_failing" -> row.prUrl?.substringAfterLast("/pull/", "")?.takeIf { n -> n.isNotEmpty() && n.all { it.isDigit() } }
+            ?.let { "checks failing on PR #$it" } ?: "checks failing"
+        "failed", "stop_failed" ->
+            if (row.safeKillState == "failed") "clean up could not commit or push its work" else "the turn stopped with an error"
+        else -> null
+    }
+}
 
 /**
  * A Blocked row's line (redesign step 4.10), as the desktop words it:
@@ -257,7 +293,7 @@ fun PhoneSessionRow(
         line = waitsOn(row, accountName, limit, nowSeconds),
         modifier = modifier,
         word = word,
-        lead = phoneLead(word, live),
+        lead = phoneLead(word, live, row),
         age = relativeTime(since, nowSeconds),
         selected = selected,
         divider = divider,
