@@ -78,6 +78,7 @@ import dev.claudefleet.mobile.model.CommitDetail
 import dev.claudefleet.mobile.model.FileContent
 import dev.claudefleet.mobile.model.FileDiff
 import dev.claudefleet.mobile.model.SessionRow
+import dev.claudefleet.mobile.model.gitStatusLetter
 import dev.claudefleet.mobile.model.githubCommitUrl
 import dev.claudefleet.mobile.model.ticketRefUrl
 import dev.claudefleet.mobile.model.ticketRefs
@@ -347,7 +348,8 @@ internal fun nameAndFolder(path: String): Pair<String, String> {
 /** git's status letter, coloured: added green, deleted red, everything else the accent. */
 @Composable
 private fun StatusLetter(status: String) {
-    val letter = status.trim().take(1).ifEmpty { "?" }
+    // The hub sends the word ("modified"); the row shows git's letter for it.
+    val letter = gitStatusLetter(status)
     val diff = diffColors()
     val color = when (letter) {
         "A", "?" -> diff.addedFg

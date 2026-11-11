@@ -9,6 +9,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.text.selection.SelectionContainer
 import dev.claudefleet.mobile.model.sharedSentence
+import dev.claudefleet.mobile.model.planChangesDraft
 import dev.claudefleet.mobile.model.relativeAgo
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import androidx.compose.ui.semantics.Role
@@ -367,6 +368,8 @@ fun SessionScreen(
     /** The test phones this session holds or waits for ([SessionDeviceStrip]); the default draws none. */
     devices: SessionDevicesUiState = SessionDevicesUiState(),
     devicesHandlers: SessionDevicesHandlers = SessionDevicesHandlers(),
+    /** The "Plan ready" card ([PlanReadyCard]), New bar only; null draws none. */
+    plan: PlanReadyHost? = null,
 ) {
     // On the New bar the result sits in the conversation instead (RepairResultCard).
     if (tabs == null) state.repair?.let { RepairReportDialog(it, onDismissRepair) }
@@ -1039,6 +1042,22 @@ fun SessionScreen(
                             stopReading()
                             focusPrompt = true
                         },
+                        modifier = Modifier.heightIn(max = cardMax),
+                    )
+                }
+                // Plan first (claude-fleet docs/plan-first.md): the agent said
+                // "Plan ready" and waits for a yes. A question comes first.
+                plan?.takeIf { state.card == null && state.viewing == null }?.let { host ->
+                    PlanReadyCard(
+                        host = host,
+                        agent = tabs.agent,
+                        // Into the box, never sent: the person says what to change.
+                        onAskChanges = {
+                            onDraftChange(planChangesDraft(state.draft, host.plan.path))
+                            immersive = false
+                            stopReading()
+                            focusPrompt = true
+                        }.takeIf { !state.readOnly && state.session != null },
                         modifier = Modifier.heightIn(max = cardMax),
                     )
                 }

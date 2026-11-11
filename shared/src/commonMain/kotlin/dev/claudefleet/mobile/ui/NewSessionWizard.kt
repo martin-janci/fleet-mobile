@@ -43,6 +43,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -383,10 +384,23 @@ internal fun accountLine(a: AccountChoice): String =
 internal fun draftedFrom(s: NewSessionUiState): String? =
     s.branchDraft?.takeIf { !s.ticketBranchEdited && s.ticketKey != null }?.let { "Drafted from ${s.ticketKey}" }
 
+/** The Plan first switch on the Review step. */
+const val PLAN_FIRST_TAG = "newSession.planFirst"
+
+/** Under the first message: when it goes, and what goes with it when Plan first is on. */
+internal fun firstMessageHint(planFirst: Boolean): String =
+    if (planFirst) {
+        "Sent once Claude is ready, with the Plan first instructions under it."
+    } else {
+        "Sent once Claude is ready. Left empty, the session waits for you."
+    }
+
 /** The taps the gap plan's G5.6 adds to the wizard; each defaults to nothing for a caller that does not offer it. */
 data class NewSessionExtras(
     val onStartFrom: (StartFrom) -> Unit = {},
     val onFirstMessage: (String) -> Unit = {},
+    /** The Plan first switch under the first message. */
+    val onPlanFirst: (Boolean) -> Unit = {},
     val onPickLogin: (String?) -> Unit = {},
     val onTicketBranch: (String) -> Unit = {},
     val onClearDraft: () -> Unit = {},
@@ -742,13 +756,34 @@ private fun ReviewStep(
                 value = s.firstMessage,
                 onValueChange = extras.onFirstMessage,
                 label = { Text("First message (optional)") },
-                supportingText = { Text("Sent once Claude is ready. Left empty, the session waits for you.") },
+                supportingText = { Text(firstMessageHint(s.planFirst)) },
                 minLines = 2,
                 maxLines = 6,
                 enabled = editable,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
             )
+        }
+        // Plan first (claude-fleet docs/plan-first.md): the instructions to
+        // write a plan file and wait go out under the first message.
+        if (s.firstMessageAvailable) item(key = "plan-first") {
+            Row(
+                modifier = Modifier.fillMaxWidth()
+                    .defaultMinSize(minHeight = OrbitTokens.spacing("touch-min").dp)
+                    .toggleable(value = s.planFirst, enabled = editable, role = Role.Checkbox, onValueChange = extras.onPlanFirst)
+                    .testTag(PLAN_FIRST_TAG),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(checked = s.planFirst, onCheckedChange = null, enabled = editable)
+                Column {
+                    Text("Plan first", color = Fleet.colors.fg, style = Fleet.type.textMd)
+                    Text(
+                        "It writes a plan to docs/plans/ and waits for your yes before changing code.",
+                        color = Fleet.colors.fgMuted,
+                        style = Fleet.type.textSm,
+                    )
+                }
+            }
         }
         // Multi-start (M13.4d): once a first project is picked, the others it
         // may also start in. Ticks only; the confirm sheet sends.

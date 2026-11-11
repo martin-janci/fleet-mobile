@@ -18,6 +18,8 @@ import dev.claudefleet.mobile.model.NO_START_STEPS
 import dev.claudefleet.mobile.model.StartStepState
 import dev.claudefleet.mobile.model.folding
 import dev.claudefleet.mobile.model.newStartToken
+import dev.claudefleet.mobile.model.planDate
+import dev.claudefleet.mobile.model.withPlanFirst
 import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.MultiStart
@@ -34,6 +36,7 @@ import dev.claudefleet.mobile.net.HubError
 import dev.claudefleet.mobile.net.existingSessionId
 import dev.claudefleet.mobile.net.isUnknownAction
 import dev.claudefleet.mobile.ui.theme.StatusTone
+import dev.claudefleet.mobile.utcOffsetSeconds
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -136,6 +139,12 @@ data class NewSessionUiState(
     val firstMessage: String = "",
     /** The hub keeps a first message for the new session (`queue_prompt`): the field is offered. */
     val firstMessageAvailable: Boolean = false,
+    /**
+     * Plan first (claude-fleet `docs/plan-first.md`): the first message goes
+     * out with the instructions to write a plan file and wait under it.
+     * Offered where the first message is.
+     */
+    val planFirst: Boolean = false,
     /**
      * The Review step's Account row: the login the session starts under and
      * its room, from `check_account_headroom`. Null while there is nothing
@@ -272,6 +281,8 @@ class NewSessionViewModel(
     private val drafts: DraftMemory? = null,
     /** This device's clock, for the start token. */
     private val now: () -> Long = { epochSeconds() },
+    /** This device's offset from UTC at a time, for the plan file's date. */
+    private val utcOffset: (Long) -> Int = { utcOffsetSeconds(it) },
 ) {
     private data class Local(
         val pickedHost: String? = null,
@@ -299,6 +310,7 @@ class NewSessionViewModel(
         val result: MultiStartResult? = null,
         val startFrom: StartFrom = StartFrom.Project,
         val firstMessage: String = "",
+        val planFirst: Boolean = false,
         /** `check_account_headroom` for [headroomHost]; null until it answered. */
         val headroom: Headroom? = null,
         val headroomHost: String? = null,
@@ -434,6 +446,23 @@ class NewSessionViewModel(
 
     fun onFirstMessageChange(text: String) {
         local.update { it.copy(firstMessage = text) }
+    }
+
+    fun onPlanFirstChange(on: Boolean) {
+        local.update { it.copy(planFirst = on) }
+    }
+
+    /**
+     * What the new session is sent first: what was typed, with the Plan
+     * first instructions under it when that is on (then they go alone when
+     * nothing was typed). Null sends nothing.
+     */
+    private fun firstPrompt(s: NewSessionUiState): String? {
+        if (!s.firstMessageAvailable) return null
+        val typed = s.firstMessage.trim()
+        if (!s.planFirst) return typed.takeIf { it.isNotEmpty() }
+        val at = now()
+        return withPlanFirst(typed, planDate(at, utcOffset(at)))
     }
 
     /** Pick the login to start under; [profile] null is the host's own. One the host does not have is ignored. */
@@ -608,7 +637,7 @@ class NewSessionViewModel(
         // The real steps, when the hub reports them: a fresh token per start.
         val token = if (fleet.capabilities.value.accepts(HubCapabilities.NEW_SESSION, START_TOKEN)) newStartToken(now()) else null
         val request = base.copy(startToken = token)
-        val message = s.firstMessage.trim().takeIf { s.firstMessageAvailable && it.isNotEmpty() }
+        val message = firstPrompt(s)
         local.update { it.copy(creating = true, error = null, startToken = token, startSteps = token?.let { NO_START_STEPS }) }
         return callScope.launch {
             try {
@@ -694,7 +723,7 @@ class NewSessionViewModel(
         // The person's own branch, only when they edited the draft: the
         // draft itself is what the hub would name anyway, never sent as theirs.
         val worktree = s.ticketBranch.trim().takeIf { s.ticketBranchEditable && s.ticketBranchEdited && it.isNotEmpty() }
-        val message = s.firstMessage.trim().takeIf { s.firstMessageAvailable && it.isNotEmpty() }
+        val message = firstPrompt(s)
         local.update { it.copy(creating = true, error = null, startToken = null, startSteps = null) }
         return callScope.launch {
             try {
@@ -901,6 +930,7 @@ class NewSessionViewModel(
             firstMessage = l.firstMessage,
             // One session gets the message: never on a multi-start.
             firstMessageAvailable = canWrite && HubCapabilities.QUEUE_PROMPT in caps.tools && ticked.isEmpty(),
+            planFirst = l.planFirst,
             account = account,
             logins = logins,
             branchDraft = draftHere,
