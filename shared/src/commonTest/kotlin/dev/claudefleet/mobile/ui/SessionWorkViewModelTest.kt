@@ -344,6 +344,7 @@ internal class FakeWorkActions : WorkActions {
 
     override suspend fun trackerComments(key: String): dev.claudefleet.mobile.model.TrackerComments {
         trackerCommentKeys += key
+        trackerCommentsGate()
         failTrackerComments?.let { throw it }
         return trackerCommentsAnswer
     }
@@ -403,9 +404,16 @@ internal class FakeWorkActions : WorkActions {
         return dev.claudefleet.mobile.model.WorkItem(id = itemId)
     }
 
+    /** Runs inside every task read before it answers, with the read's number (1, 2, …): a test holds one open with it. */
+    var taskGate: suspend (Int) -> Unit = {}
+
+    /** Runs inside every tracker-comments read before it answers. */
+    var trackerCommentsGate: suspend () -> Unit = {}
+
     override suspend fun task(taskId: String): TaskDetail {
         taskCalls += 1
         taskIds += taskId
+        taskGate(taskCalls)
         failTask?.let { throw it }
         return taskAnswers[taskId] ?: taskAnswer ?: throw HubError.Tool("E_NOTFOUND", "no such task")
     }

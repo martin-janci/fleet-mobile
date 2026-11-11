@@ -156,8 +156,10 @@ internal fun QuestionCard(
             val answers = questionAnswers(card, state.session?.stuckKind).filter { state.mayAnswerWith(it.answer) }
             // A tap in the first moments after the card appears or changes was
             // aimed at what was there before: ignored (plan v2 §3).
-            var armed by remember(card) { mutableStateOf(false) }
-            LaunchedEffect(card) {
+            // Keyed on the question, not its ticks: ticking a box is not a new card.
+            val question = card.questionKey()
+            var armed by remember(question) { mutableStateOf(false) }
+            LaunchedEffect(question) {
                 delay(ANSWER_ARM_MS)
                 armed = true
             }

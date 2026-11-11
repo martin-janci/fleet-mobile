@@ -200,8 +200,13 @@ class AgentActionsViewModel(
                 else -> "Rejected $done."
             }
             val notice = if (done > 0 && failure != null) "$said Some failed: $failure" else said
-            // The notice stays under what is left of the group, or its first item.
-            local.update { it.copy(busy = it.busy - ids.toSet(), notices = it.notices + (ids.first() to notice)) }
+            // The notice stays under what is left of the group: the first item
+            // still pending, else (all went) the first, which no row shows.
+            local.update { l ->
+                val left = l.pending.map { it.id }.toSet()
+                val at = ids.firstOrNull { it in left } ?: ids.first()
+                l.copy(busy = l.busy - ids.toSet(), notices = l.notices + (at to notice))
+            }
         }
     }
 

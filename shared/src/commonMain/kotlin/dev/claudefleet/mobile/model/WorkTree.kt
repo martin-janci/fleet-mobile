@@ -111,6 +111,13 @@ data class WorkTreeFilters(
     val label: String? = null,
     /** The order inside each section, one of [SORTS]; absent is `activity`. */
     val sort: String? = null,
+    /**
+     * How the tree is cut into sections for one read (`epic`: one section per
+     * epic, each there even with nothing under it — what *Under epic…*
+     * reads). Never a person's filter: [normalized] drops it, so it is never
+     * remembered or saved in a view; [forWire] keeps it for the read itself.
+     */
+    @SerialName("group_by") val groupBy: String? = null,
 ) {
     /**
      * "Any" spelled as absent, a blank query dropped, a `false` toggle
@@ -138,12 +145,22 @@ data class WorkTreeFilters(
     )
 
     /**
-     * How many filters a person set. The group (navigation), the search and
-     * *Show archived* (it widens the tree) are not counted.
+     * What a read sends: [normalized], plus a [groupBy] this build knows.
+     * The one place `group_by` survives — it belongs to a read, never to
+     * the filters a person keeps.
      */
-    val count: Int get() = with(normalized()) {
-        listOfNotNull(org, tracker, status, mine, has, review, iteration, epic, itemType, priority, label).size
-    }
+    fun forWire(): WorkTreeFilters = normalized().copy(groupBy = groupBy?.takeIf { it in GROUP_BYS })
+
+    /**
+     * The filters a hub at [hubVersion] acts on. Before
+     * [HUB_VERSION_PRIORITY_SORT][dev.claudefleet.mobile.net.HUB_VERSION_PRIORITY_SORT]
+     * a hub drops `priority` and `label` without a word (the list would show
+     * everything under a chip saying otherwise) and refuses `sort: priority`
+     * outright (the tab would never load). Used for what is shown and what is
+     * sent; the remembered filters keep them for a hub that takes them.
+     */
+    fun forHub(hubVersion: String?): WorkTreeFilters =
+        if (takesPriority(hubVersion)) this else copy(priority = null, label = null, sort = sort?.takeIf { it != "priority" })
 
     /**
      * What the *Filters (n)* button counts: the filters held in the sheet —
@@ -178,8 +195,14 @@ data class WorkTreeFilters(
         val SORTS = listOf("activity", "updated", "key", "title", "due", "priority")
 
         /** The sorts a hub at [hubVersion] takes. */
-        fun sortsFor(hubVersion: String?): List<String> =
-            if (dev.claudefleet.mobile.net.semverAtLeast(hubVersion, dev.claudefleet.mobile.net.HUB_VERSION_PRIORITY_SORT)) SORTS else SORTS - "priority"
+        fun sortsFor(hubVersion: String?): List<String> = if (takesPriority(hubVersion)) SORTS else SORTS - "priority"
+
+        /** A hub at [hubVersion] acts on `filters.priority`, `filters.label` and `sort: priority`. */
+        fun takesPriority(hubVersion: String?): Boolean =
+            dev.claudefleet.mobile.net.semverAtLeast(hubVersion, dev.claudefleet.mobile.net.HUB_VERSION_PRIORITY_SORT)
+
+        /** The `group_by` values a read may send (the desktop's epic read). */
+        val GROUP_BYS = listOf("epic")
 
         /** The desktop's `WORK_SORT_LABELS`. */
         fun sortLabel(sort: String): String = when (sort) {
@@ -507,6 +530,27 @@ fun priorityLabel(p: String?): String? = when (p) {
     else -> null
 }
 
+/** Urgent and high only, as the desktop's row says them (`hot`): the rest is the usual case. */
+fun hotPriorityLabel(p: String?): String? = if (p == "urgent" || p == "high") priorityLabel(p) else null
+
+/** A line of words, and whether a date in it has passed (the line's red). */
+data class FactLine(val text: String, val overdue: Boolean = false)
+
+/**
+ * What every task row leads with, on both layouts and in the subtask list:
+ * a hot priority ([hotPriorityLabel]), then the due date as the desktop's
+ * chip says it ([openDue]: none once the task is done). [todayEpochDay]
+ * null leaves the date out.
+ */
+fun rowFacts(priority: String?, dueAt: String?, done: Boolean, todayEpochDay: Long?): FactLine {
+    val due = todayEpochDay?.let { openDue(dueAt, done, it) }
+    return FactLine(listOfNotNull(hotPriorityLabel(priority), due?.text).joinToString(" · "), due?.overdue == true)
+}
+
+/** The first [shown] labels, then "+N" for the rest — the most a chip row has room for. */
+fun labelChips(labels: List<String>, shown: Int = 4): List<String> =
+    if (labels.size <= shown) labels else labels.take(shown) + "+${labels.size - shown}"
+
 /** An estimate as the task page says it: "3 pts", "1 pt", "4 h", "2.5 pts"; null for none (the desktop's `estimateLabel`). */
 fun estimateLabel(estimate: Double?, unit: String?): String? {
     if (estimate == null || !estimate.isFinite() || estimate <= 0.0) return null
@@ -582,6 +626,17 @@ data class WorkTreeFacets(
 
 @Serializable
 data class IterationFacet(val name: String = "", val active: Boolean = false, val count: Int = 0)
+
+/**
+ * Every epic of fleet's own a tree read with `group_by: epic` names (the
+ * desktop's `workEpics`): one section per epic, so each is there even with
+ * nothing filed under it yet. As `item:<id>`, by title.
+ */
+fun epicChoicesFrom(page: WorkTreePage): List<EpicFacet> =
+    page.groups.mapNotNull { g ->
+        val id = g.group.id.removePrefix("epic:").takeIf { it != g.group.id }?.toLongOrNull() ?: return@mapNotNull null
+        EpicFacet(taskId = "item:$id", title = g.group.label.ifBlank { "item:$id" })
+    }.distinctBy { it.taskId }.sortedBy { it.title.lowercase() }
 
 @Serializable
 data class EpicFacet(
@@ -681,14 +736,18 @@ fun subtaskMark(status: String?): String = when (status) {
 
 /**
  * The words after a subtask's title: its key, an urgent or high priority, its
- * due date (none once it is done), and how many sessions work on it.
+ * due date (none once it is done), and how many sessions work on it; overdue
+ * when that date has passed.
  */
-fun subtaskLine(s: SubtaskView, todayEpochDay: Long): String = buildList {
-    s.key?.takeIf { it.isNotBlank() }?.let { add(it) }
-    if (s.priority == "urgent" || s.priority == "high") priorityLabel(s.priority)?.let { add(it) }
-    if (s.status != "done") dueChip(s.dueAt, todayEpochDay, done = false)?.let { add(it.text) }
-    if (s.liveSessions > 0) add(if (s.liveSessions == 1) "1 live" else "${s.liveSessions} live")
-}.joinToString(" · ")
+fun subtaskLine(s: SubtaskView, todayEpochDay: Long): FactLine {
+    val facts = rowFacts(s.priority, s.dueAt, s.status == "done", todayEpochDay)
+    val text = buildList {
+        s.key?.takeIf { it.isNotBlank() }?.let { add(it) }
+        facts.text.takeIf { it.isNotEmpty() }?.let { add(it) }
+        if (s.liveSessions > 0) add(if (s.liveSessions == 1) "1 live" else "${s.liveSessions} live")
+    }.joinToString(" · ")
+    return FactLine(text, facts.overdue)
+}
 
 /** A comment on a task in fleet (`store::CommentRow`): plain text, never markup. */
 @Serializable

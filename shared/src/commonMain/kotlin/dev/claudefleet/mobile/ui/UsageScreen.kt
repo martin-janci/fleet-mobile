@@ -62,10 +62,12 @@ data class UsageHandlers(
     val onDismissError: () -> Unit = {},
     /** Name an account (uuid, name; blank clears). Offered where [UsageUiState.canRename]. */
     val onRename: (String, String) -> Unit = { _, _ -> },
-    /** Forbid an account for exactly these projects. Offered where [UsageUiState.canSetProjects]. */
-    val onSetProjects: (String, List<Long>) -> Unit = { _, _ -> },
-    /** Forbid an account for every project of exactly these orgs. Offered where [UsageUiState.canSetProjects]. */
-    val onSetOrgs: (String, List<Long>) -> Unit = { _, _ -> },
+    /**
+     * Forbid an account for exactly these projects and every project of
+     * exactly these orgs (null keeps a list), in one call. Offered where
+     * [UsageUiState.canSetProjects].
+     */
+    val onSetBlocks: (String, List<Long>?, List<Long>?) -> Unit = { _, _, _ -> },
     /** Turn automatic switching on or off for my sessions. */
     val onAutoSwitch: (Boolean) -> Unit = {},
     /** …and whether a switched session is told to carry on. */
@@ -109,9 +111,9 @@ internal fun AccountNameDialog(
     canRename: Boolean = true,
     canSetProjects: Boolean = false,
     projects: List<ProjectRow> = emptyList(),
-    onSaveProjects: (List<Long>) -> Unit = {},
     orgs: List<OrgDetail> = emptyList(),
-    onSaveOrgs: (List<Long>) -> Unit = {},
+    /** The project and org lists to save, a null one unchanged; called once, with both. */
+    onSaveBlocks: (List<Long>?, List<Long>?) -> Unit = { _, _ -> },
 ) {
     var name by remember(account.uuid) { mutableStateOf(account.nickname.orEmpty()) }
     var forbidden by remember(account.uuid) { mutableStateOf(account.forbiddenProjectIds.toSet()) }
@@ -197,8 +199,13 @@ internal fun AccountNameDialog(
         confirmButton = {
             TextButton(onClick = {
                 if (canRename && name.trim() != account.nickname.orEmpty().trim()) onSave(name)
-                if (canSetProjects && forbidden != account.forbiddenProjectIds.toSet()) onSaveProjects(forbidden.sorted())
-                if (canSetProjects && forbiddenOrgs != account.forbiddenOrgIds.toSet()) onSaveOrgs(forbiddenOrgs.sorted())
+                if (canSetProjects) {
+                    val projectsChanged = forbidden != account.forbiddenProjectIds.toSet()
+                    val orgsChanged = forbiddenOrgs != account.forbiddenOrgIds.toSet()
+                    if (projectsChanged || orgsChanged) {
+                        onSaveBlocks(forbidden.sorted().takeIf { projectsChanged }, forbiddenOrgs.sorted().takeIf { orgsChanged })
+                    }
+                }
                 onDismiss()
             }) { Text("Save") }
         },
@@ -216,9 +223,8 @@ internal fun AccountDialogFor(account: AccountRow, state: UsageUiState, handlers
         canRename = state.canRename,
         canSetProjects = state.canSetProjects,
         projects = state.projects,
-        onSaveProjects = { handlers.onSetProjects(account.uuid, it) },
         orgs = state.orgs,
-        onSaveOrgs = { handlers.onSetOrgs(account.uuid, it) },
+        onSaveBlocks = { projects, orgs -> handlers.onSetBlocks(account.uuid, projects, orgs) },
     )
 }
 

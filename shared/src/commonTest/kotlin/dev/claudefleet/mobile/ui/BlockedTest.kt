@@ -159,6 +159,22 @@ class BlockedTest {
     }
 
     @Test
+    fun the_hubs_persists_flag_marks_the_folder_wide_answer_whatever_its_label() {
+        // A newer hub says it outright (`persists`), e.g. "switch to auto mode",
+        // which no label rule catches; an older hub still goes by the label.
+        val wire = dev.claudefleet.mobile.net.json.decodeFromString(
+            PendingOption.serializer(),
+            """{"n":3,"label":"Yes, and switch to auto mode","persists":true}""",
+        )
+        assertTrue(wire.persists)
+        assertTrue(!dev.claudefleet.mobile.net.json.decodeFromString(PendingOption.serializer(), """{"n":1,"label":"Yes"}""").persists)
+        val p = PendingInput("permission", "Do you want to proceed?", listOf(PendingOption(1, "Yes", true), wire, PendingOption(4, "No")))
+        val card = blockedCard(row(pending = p), HUB_VERSION_DIGIT_KEYS)!!
+        assertEquals(listOf(1, 4), card.answers.filterIsInstance<Answer.Option>().map { it.n })
+        assertEquals(FOLDER_RULE_ON_DESKTOP, card.explain)
+    }
+
+    @Test
     fun only_a_rule_that_outlives_the_session_counts_as_folder_wide() {
         assertTrue(isFolderRule("Yes, and don't ask again"))
         assertTrue(isFolderRule("Yes, and don’t ask again for: ls * in /tmp"))

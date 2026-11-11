@@ -32,7 +32,7 @@ fun TicketCardBody(card: TicketCard, modifier: Modifier = Modifier, lineLimit: I
     if (!card.hasBody) return
     val clipboard = LocalClipboardManager.current
     // Keyed on the card, so a copied mark never carries over to another ticket.
-    var copied by remember(card) { mutableStateOf(false) }
+    val copied = rememberCopied(card)
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         if (card.acceptance.isNotEmpty()) {
             Text("Acceptance criteria", style = MaterialTheme.typography.labelMedium)
@@ -47,10 +47,10 @@ fun TicketCardBody(card: TicketCard, modifier: Modifier = Modifier, lineLimit: I
         TextButton(
             onClick = {
                 clipboard.setText(AnnotatedString(card.copyText))
-                copied = true
+                copied.mark()
             },
             modifier = Modifier.testTag(TICKET_CARD_COPY_TAG),
-        ) { Text(if (copied) "Copied" else "Copy") }
+        ) { Text(if (copied.copied) "Copied" else "Copy") }
     }
 }
 

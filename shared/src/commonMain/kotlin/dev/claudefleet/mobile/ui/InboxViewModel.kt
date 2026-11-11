@@ -48,7 +48,7 @@ class SessionInboxActions(private val actions: SessionActions) : InboxActions {
     }
 
     override suspend fun headroom(hostAlias: String, profile: String?, projectId: Long?): Headroom =
-        actions.accountHeadroom(hostAlias, profile, projectId)
+        actions.accountHeadroomIn(hostAlias, profile, projectId)
 
     override suspend fun restartUnder(sessionId: Long, profile: String) = actions.restartUnder(sessionId, profile)
 }
@@ -155,8 +155,12 @@ class InboxViewModel(
     private val accountName: (String) -> String? = { null },
     /** A host's login is signed out (`signed_out_logins`), by host alias and profile; never offered as a switch target. */
     private val signedOut: (String, String?) -> Boolean = { _, _ -> false },
-    /** The accounts a project forbids ([dev.claudefleet.mobile.data.forbiddenAccounts]); never offered as a switch target. */
-    private val forbidden: (Long?) -> Set<String> = { emptySet() },
+    /**
+     * The accounts a project (by id, and the row's org when it has one)
+     * forbids ([dev.claudefleet.mobile.data.forbiddenAccountsIn]); never
+     * offered as a switch target.
+     */
+    private val forbidden: (projectId: Long?, orgId: Long?) -> Set<String> = { _, _ -> emptySet() },
 ) {
     private val _state = MutableStateFlow(InboxUiState())
     val state: StateFlow<InboxUiState> = _state.asStateFlow()
@@ -177,7 +181,7 @@ class InboxViewModel(
             val out = { l: HostLogin -> signedOut(row.hostAlias, l.profile) }
             val h = actions.headroom(row.hostAlias, row.claudeProfile, row.projectId)
             // Never a login the hub would refuse for the row's project (E_ACCOUNT_FORBIDDEN).
-            val off = forbidden(row.projectId)
+            val off = forbidden(row.projectId, row.orgId)
             val target = if (row.attention?.reason == "no_credentials") {
                 h.signedInElsewhere(row.claudeProfile, out, off)
             } else {

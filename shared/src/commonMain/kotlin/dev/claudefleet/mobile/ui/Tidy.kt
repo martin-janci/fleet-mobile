@@ -9,7 +9,8 @@ import dev.claudefleet.mobile.model.TidyCandidate
  * turned into, what is suggested, and what is ticked to begin with.
  */
 enum class TidyChoice(val wire: String, val label: String) {
-    SafeKill("safe_kill", "Safe kill"),
+    // One name on every surface: the desktop's tidy.ts says "Clean up".
+    SafeKill("safe_kill", "Clean up"),
     Kill("kill", "Kill"),
     Archive("archive", "Archive only"),
     Snooze("snooze", "Snooze 7 d"),

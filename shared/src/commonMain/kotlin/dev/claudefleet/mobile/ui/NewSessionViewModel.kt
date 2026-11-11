@@ -9,11 +9,11 @@ import dev.claudefleet.mobile.model.BackgroundOptions
 import dev.claudefleet.mobile.model.BG_AGENT_CLAUDE
 import dev.claudefleet.mobile.model.backgroundAgents
 import dev.claudefleet.mobile.model.Headroom
+import dev.claudefleet.mobile.model.forbiddenAccounts
 import dev.claudefleet.mobile.model.HostLogin
 import dev.claudefleet.mobile.model.loginLabel
 import dev.claudefleet.mobile.model.freestLogin
-import dev.claudefleet.mobile.model.AccountRow
-import dev.claudefleet.mobile.model.accountsForbiddenFor
+import dev.claudefleet.mobile.model.AccountBlocks
 import dev.claudefleet.mobile.model.orgOfProject
 import dev.claudefleet.mobile.model.leftText
 import dev.claudefleet.mobile.model.NO_START_STEPS
@@ -339,8 +339,8 @@ class NewSessionViewModel(
         val caps: HubCapabilities,
         val tickets: List<Ticket>,
         val orgs: OrgDirectory,
-        /** `list_accounts`, for the accounts the chosen project forbids. */
-        val accounts: List<AccountRow> = emptyList(),
+        /** What each account is kept off ([FleetState.accountBlocks]), for the accounts the chosen project forbids. */
+        val accountBlocks: Map<String, AccountBlocks> = emptyMap(),
     )
 
     private val local = MutableStateFlow(Local())
@@ -351,7 +351,7 @@ class NewSessionViewModel(
             fleet.projects,
             fleet.status,
             local,
-            combine(fleet.capabilities, fleet.tickets, fleet.orgs, fleet.accounts, ::WorkView),
+            combine(fleet.capabilities, fleet.tickets, fleet.orgs, fleet.accountBlocks, ::WorkView),
         ) { (hosts, sessions), projects, status, l, work ->
             assemble(hosts, projects, status, l, work, sessions)
         }.stateIn(scope, SharingStarted.Eagerly, current())
@@ -370,8 +370,10 @@ class NewSessionViewModel(
         // The Account row: the host's logins and their room, read again when
         // the host changes. Readonly, from usage the hub already keeps.
         scope.launch {
-            state.map { s -> s.host.takeIf { accountGate() } }.distinctUntilChanged().collect { host ->
-                if (host != null) readHeadroom(host)
+            // And when the project changes: the hub suggests no login on an
+            // account the project forbids, given the project.
+            state.map { s -> s.host.takeIf { accountGate() }?.let { it to s.projectId } }.distinctUntilChanged().collect { at ->
+                if (at != null) readHeadroom(at.first, at.second)
             }
         }
         // Jev's host for the project (claude-fleet N5): asked when a project
@@ -413,9 +415,9 @@ class NewSessionViewModel(
     private fun draftGate(): Boolean =
         ticketKey != null && canWrite && workActions != null && fleet.capabilities.value.has(WORK_LINK, PREVIEW_START)
 
-    private suspend fun readHeadroom(host: String) {
+    private suspend fun readHeadroom(host: String, projectId: Long?) {
         val answer = try {
-            actions.headroom(host)
+            actions.headroomIn(host, projectId)
         } catch (e: CancellationException) {
             throw e
         } catch (_: Throwable) {
@@ -773,7 +775,7 @@ class NewSessionViewModel(
             fleet.projects.value,
             fleet.status.value,
             local.value,
-            WorkView(fleet.capabilities.value, fleet.tickets.value, fleet.orgs.value, fleet.accounts.value),
+            WorkView(fleet.capabilities.value, fleet.tickets.value, fleet.orgs.value, fleet.accountBlocks.value),
             fleet.sessions.value,
         )
 
@@ -855,7 +857,7 @@ class NewSessionViewModel(
         val pauseAt = headroom?.pauseAtPct ?: 100.0
         // The accounts the chosen project forbids, itself or through its org
         // (the desktop's `forbiddenHere`): shown, never the default, never sent.
-        val forbidden = chosen?.let { accountsForbiddenFor(it.id, work.accounts, work.orgs.orgOfProject(it)) }.orEmpty()
+        val forbidden = chosen?.let { forbiddenAccounts(work.accountBlocks, it.id, work.orgs.orgOfProject(it)) }.orEmpty()
         val logins = headroom?.logins.orEmpty().map { accountChoice(it, pauseAt, names, it.accountUuid in forbidden) }
         // Unpicked, the row shows the login the start will use: the signed-in
         // one with the most room, as the desktop's New session defaults

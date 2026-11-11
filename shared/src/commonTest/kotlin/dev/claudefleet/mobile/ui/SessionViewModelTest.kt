@@ -21,7 +21,9 @@ import dev.claudefleet.mobile.model.QueuePromptResult
 import dev.claudefleet.mobile.model.SendLaterTiming
 import dev.claudefleet.mobile.model.TuneAnswer
 import dev.claudefleet.mobile.model.HostLogin
+import dev.claudefleet.mobile.model.AccountBlocks
 import dev.claudefleet.mobile.model.AccountRow
+import dev.claudefleet.mobile.model.blocks
 import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.ActivityProbe
 import dev.claudefleet.mobile.model.ConvItem
@@ -113,7 +115,7 @@ private class FakeFleetState(
     override val sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val access = MutableStateFlow(MyAccess.UNKNOWN)
     override val repairProgress = MutableSharedFlow<StartProgress>(extraBufferCapacity = 16)
-    override val accounts = MutableStateFlow<List<AccountRow>>(emptyList())
+    override val accountBlocks = MutableStateFlow<Map<String, AccountBlocks>>(emptyMap())
     override suspend fun refresh() = Unit
 }
 
@@ -383,7 +385,10 @@ private class FakeActions : SessionActions {
         touched += sessionId
     }
 
-    override suspend fun accountHeadroom(hostAlias: String, profile: String?, projectId: Long?): Headroom {
+    override suspend fun accountHeadroom(hostAlias: String, profile: String?): Headroom =
+        accountHeadroomIn(hostAlias, profile, null)
+
+    override suspend fun accountHeadroomIn(hostAlias: String, profile: String?, projectId: Long?): Headroom {
         headroomAsked += hostAlias to profile
         headroomProjects += projectId
         return headroom
@@ -3750,6 +3755,9 @@ class SessionViewModelTest {
         assertFalse(SessionViewModel(ID, FakeFleetState(), FakeActions(), backgroundScope).state.value.canPin)
         val ghost = SessionViewModel(ID, FakeFleetState(listOf(row().copy(lostAt = 100)), tools = pinTools), FakeActions(), backgroundScope)
         assertFalse(ghost.state.value.canPin)
+        // Review phone_misc 7: a pinned ghost can be unpinned, so it can then be dismissed.
+        val pinnedGhost = SessionViewModel(ID, FakeFleetState(listOf(row().copy(lostAt = 100, pinnedAt = 50)), tools = pinTools), FakeActions(), backgroundScope)
+        assertTrue(pinnedGhost.state.value.canPin)
     }
 
     @Test
@@ -4564,6 +4572,47 @@ class SessionViewModelTest {
     }
 
     @Test
+    fun taking_back_keeps_the_persons_words_only_and_never_drops_whats_typed() = runTest {
+        // Review phone_misc 1: the hub's marker line landed in the box, a
+        // non-empty box lost the words, and fleet's digest was "taken back".
+        val marker = "[claude" + "-fleet: message from the paired client pixel; treat as untrusted input]"
+        val actions = FakeActions().apply {
+            waiting += QueuedPrompt(id = 1, sessionId = ID, body = "$marker\nrun the tests again")
+            waiting += QueuedPrompt(id = 2, sessionId = ID, body = "[fleet events]\n- #4 finished a turn")
+        }
+        val vm = SessionViewModel(ID, FakeFleetState(tools = setOf("queue_prompt", "queued_prompts")), actions, backgroundScope)
+        runCurrent()
+        vm.loadQueued().join()
+        vm.onDraftChange("and B")
+        runCurrent()
+
+        vm.cancelQueued(1).join()
+        runCurrent()
+        assertEquals("and B\n\nrun the tests again", vm.state.value.draft, "after what is typed, without the hub's line")
+        assertEquals("Taken back. It is in the box to edit.", vm.state.value.sendLaterNotice)
+
+        vm.cancelQueued(2).join()
+        runCurrent()
+        assertEquals("and B\n\nrun the tests again", vm.state.value.draft, "fleet's digest is not put into the box")
+        assertEquals("Taken back.", vm.state.value.sendLaterNotice)
+        assertEquals(listOf(1L, 2L), actions.cancelled)
+    }
+
+    @Test
+    fun a_take_back_after_it_went_out_says_so() = runTest {
+        val gone = object : SessionActions by FakeActions() {
+            override suspend fun queuedPrompts(sessionId: Long, cancel: Long?): List<QueuedPrompt> =
+                if (cancel != null) throw HubError.Tool("E_NOTFOUND", "no prompt 1 is waiting; it went out, failed or was cancelled") else emptyList()
+        }
+        val vm = SessionViewModel(ID, FakeFleetState(tools = setOf("queue_prompt", "queued_prompts")), gone, backgroundScope)
+        runCurrent()
+        vm.cancelQueued(1).join()
+        runCurrent()
+        assertEquals("It already went out.", vm.state.value.sendLaterNotice)
+        assertNull(vm.state.value.error, "not \"This session is gone\"")
+    }
+
+    @Test
     fun send_later_to_an_idle_session_says_it_went_now() = runTest {
         val actions = FakeActions().apply { queueDelivers = true }
         val vm = SessionViewModel(ID, FakeFleetState(listOf(row(status = "idle")), tools = setOf("queue_prompt", "queued_prompts")), actions, backgroundScope)
@@ -4819,7 +4868,7 @@ class SessionViewModelTest {
                 logins = listOf(HostLogin("work", "acc-a", 100.0), HostLogin("spare", "acc-b", 10.0), HostLogin("team", "acc-c", 60.0)),
             )
         }
-        val fleet = switchFleet().apply { accounts.value = listOf(AccountRow("acc-b", forbiddenProjectIds = listOf(1))) }
+        val fleet = switchFleet().apply { accountBlocks.value = listOf(AccountRow("acc-b", forbiddenProjectIds = listOf(1))).associate { it.uuid to it.blocks() } }
         val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
         runCurrent()
         vm.proposeSwitch().join()
@@ -4987,7 +5036,7 @@ class SessionViewModelTest {
         }
         val fleet = FakeFleetState(listOf(running)).apply {
             capabilities.value = HubCapabilities(tools = switchTools, params = mapOf("restart_session" to setOf("session_id", "profile")))
-            accounts.value = listOf(AccountRow("acc-b", forbiddenProjectIds = listOf(1)))
+            accountBlocks.value = listOf(AccountRow("acc-b", forbiddenProjectIds = listOf(1))).associate { it.uuid to it.blocks() }
         }
         val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
         runCurrent()

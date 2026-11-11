@@ -7,8 +7,9 @@ import kotlin.test.assertNull
 /**
  * The accounts a project forbids (claude-fleet migrations 217/218): the
  * phone's login choices skip them, as the desktop's do (`accountsForbiddenFor`,
- * `headroomForAccount`, `allowedLogins`), so it never proposes a login the hub
- * refuses with `E_ACCOUNT_FORBIDDEN`.
+ * here [forbiddenAccounts] over [AccountBlocks]; `headroomForAccount`,
+ * `allowedLogins`), so it never proposes a login the hub refuses with
+ * `E_ACCOUNT_FORBIDDEN`.
  */
 class ForbiddenAccountsTest {
     private val own = HostLogin(profile = null, accountUuid = "personal", usedPct = 10.0)
@@ -22,11 +23,11 @@ class ForbiddenAccountsTest {
             AccountRow("a", forbiddenProjectIds = listOf(3)),
             AccountRow("b", forbiddenOrgIds = listOf(9)),
             AccountRow("c", forbiddenProjectIds = listOf(4), forbiddenOrgIds = listOf(8)),
-        )
-        assertEquals(setOf("a"), accountsForbiddenFor(3, accounts))
-        assertEquals(setOf("a", "b"), accountsForbiddenFor(3, accounts, orgId = 9))
-        assertEquals(setOf("c"), accountsForbiddenFor(4, accounts, orgId = 7))
-        assertEquals(emptySet(), accountsForbiddenFor(null, accounts, orgId = 9), "no project, nothing forbidden")
+        ).associate { it.uuid to it.blocks() }
+        assertEquals(setOf("a"), forbiddenAccounts(accounts, 3))
+        assertEquals(setOf("a", "b"), forbiddenAccounts(accounts, 3, orgId = 9))
+        assertEquals(setOf("c"), forbiddenAccounts(accounts, 4, orgId = 7))
+        assertEquals(emptySet(), forbiddenAccounts(accounts, null, orgId = 9), "no project, nothing forbidden")
     }
 
     @Test

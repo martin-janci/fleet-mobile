@@ -88,18 +88,55 @@ class TaskEditingTest {
         assertTrue(taskEditOf("Fix login", "", "", "", none, notesLocked = false, unit = "hours").isEmpty)
     }
 
+    /** Each field's own error, said under that field: a label's never lands on the Estimate field. */
     @Test
     fun labels_and_estimates_past_the_hubs_limits_are_named_before_saving() {
-        assertNull(taskSizeError("ui, auth", "3.5"))
-        assertNull(taskSizeError("", ""))
-        assertEquals("At most 20 labels.", taskSizeError((1..21).joinToString(",") { "l$it" }, ""))
-        assertEquals("A label is at most 40 characters.", taskSizeError("x".repeat(41), ""))
+        assertNull(taskLabelsError("ui, auth"))
+        assertNull(taskLabelsError(""))
+        assertEquals("At most 20 labels.", taskLabelsError((1..21).joinToString(",") { "l$it" }))
+        assertEquals("A label is at most 40 characters.", taskLabelsError("x".repeat(41)))
         // 40 emoji are 40 characters to the hub (80 UTF-16 units).
-        assertNull(taskSizeError("\uD83D\uDE80".repeat(40), ""))
-        assertEquals("A label is at most 40 characters.", taskSizeError("\uD83D\uDE80".repeat(41), ""))
-        assertEquals("A label has no control characters.", taskSizeError("tab\there", ""))
-        assertEquals("An estimate is a number from 0 to 1000.", taskSizeError("", "lots"))
-        assertEquals("An estimate is a number from 0 to 1000.", taskSizeError("", "1001"))
-        assertEquals("An estimate is a number from 0 to 1000.", taskSizeError("", "-1"))
+        assertNull(taskLabelsError("\uD83D\uDE80".repeat(40)))
+        assertEquals("A label is at most 40 characters.", taskLabelsError("\uD83D\uDE80".repeat(41)))
+        assertEquals("A label has no control characters.", taskLabelsError("tab\there"))
+        assertNull(taskEstimateError("3.5"))
+        assertNull(taskEstimateError(""))
+        assertEquals("An estimate is a number from 0 to 1000.", taskEstimateError("lots"))
+        assertEquals("An estimate is a number from 0 to 1000.", taskEstimateError("1001"))
+        assertEquals("An estimate is a number from 0 to 1000.", taskEstimateError("-1"))
+    }
+
+    /** A keypad that offers a decimal comma: "2,5" is two and a half. */
+    @Test
+    fun a_decimal_comma_is_a_point() {
+        assertEquals(2.5, parseEstimate("2,5"))
+        assertNull(taskEstimateError("2,5"))
+        val before = TaskEditFields(title = "Fix login")
+        assertEquals(
+            TaskEdit(estimate = 2.5, estimateUnit = "points"),
+            taskEditOf("Fix login", "", "", "", before, notesLocked = false, estimate = "2,5"),
+        )
+    }
+
+    /** A hub whose `edit` does not take them is never sent priority, labels or estimate: it would drop them and call it saved. */
+    @Test
+    fun without_sizes_only_the_older_fields_are_sent() {
+        val before = TaskEditFields(title = "Fix login", priority = "high")
+        val edit = taskEditOf(
+            "Fix the login", "", "", "", before, notesLocked = false,
+            priority = "urgent", labels = "api", estimate = "3", unit = "hours", sizes = false,
+        )
+        assertEquals(TaskEdit(title = "Fix the login"), edit)
+        assertTrue(taskEditOf("Fix login", "", "", "", before, notesLocked = false, priority = "urgent", sizes = false).isEmpty)
+        assertEquals(TaskEdit(title = "x"), TaskEdit(title = "x", priority = "low", labels = listOf("a"), estimate = 1.0, estimateUnit = "points").withoutSizes())
+    }
+
+    /** The date rule is the calendar's (leap years included), from 1970 on. */
+    @Test
+    fun a_due_date_before_1970_does_not_exist_here() {
+        assertEquals("That day does not exist.", dueDateError("1969-12-31"))
+        assertNull(dueDateError("1970-01-01"))
+        assertNull(dueDateError("2000-02-29"))
+        assertEquals("That day does not exist.", dueDateError("1900-02-29"))
     }
 }

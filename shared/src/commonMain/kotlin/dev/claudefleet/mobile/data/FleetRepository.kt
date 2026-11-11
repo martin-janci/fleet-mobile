@@ -4,8 +4,9 @@ import dev.claudefleet.mobile.epochSeconds
 import dev.claudefleet.mobile.log.FleetLog
 import dev.claudefleet.mobile.ui.ProjectFileNames
 import dev.claudefleet.mobile.ui.explain
-import dev.claudefleet.mobile.model.AccountRow
+import dev.claudefleet.mobile.model.AccountBlocks
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
+import dev.claudefleet.mobile.model.blocks
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.MyAccess
 import dev.claudefleet.mobile.model.OrgDirectory
@@ -184,8 +185,8 @@ class FleetRepository(
     private val _accountNames = MutableStateFlow<Map<String, String>>(emptyMap())
     override val accountNames: StateFlow<Map<String, String>> = _accountNames.asStateFlow()
 
-    private val _accounts = MutableStateFlow<List<AccountRow>>(emptyList())
-    override val accounts: StateFlow<List<AccountRow>> = _accounts.asStateFlow()
+    private val _accountBlocks = MutableStateFlow<Map<String, AccountBlocks>>(emptyMap())
+    override val accountBlocks: StateFlow<Map<String, AccountBlocks>> = _accountBlocks.asStateFlow()
 
     private val _accountUsage = MutableStateFlow<Map<String, AccountUsageSnapshot>>(emptyMap())
     override val accountUsage: StateFlow<Map<String, AccountUsageSnapshot>> = _accountUsage.asStateFlow()
@@ -492,7 +493,7 @@ class FleetRepository(
                                 _myWork.value = null
                                 _orgs.value = OrgDirectory.EMPTY
                                 _accountNames.value = emptyMap()
-                                _accounts.value = emptyList()
+                                _accountBlocks.value = emptyMap()
                                 _accountUsage.value = emptyMap()
                                 _trackers.value = emptyList()
                                 grantsRead?.cancel()
@@ -774,12 +775,14 @@ class FleetRepository(
      */
     private suspend fun readAccountNames(caps: HubCapabilities): Map<String, String> {
         if (!caps.accounts) {
-            _accounts.value = emptyList()
+            _accountBlocks.value = emptyMap()
             return emptyMap()
         }
         return try {
-            // The rows too, for the projects each is kept off ([accounts]).
-            client.listAccounts().also { _accounts.value = it }.associate { it.uuid to it.label }
+            val rows = client.listAccounts()
+            // The same read says what each account is kept off ([accountBlocks]).
+            _accountBlocks.value = rows.associate { it.uuid to it.blocks() }.filterValues { !it.isEmpty }
+            rows.associate { it.uuid to it.label }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Throwable) {

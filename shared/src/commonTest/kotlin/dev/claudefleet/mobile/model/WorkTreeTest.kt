@@ -128,10 +128,51 @@ class WorkTreeTest {
     }
 
     @Test
-    fun the_filter_count_leaves_out_search_and_group() {
-        assertEquals(0, WorkTreeFilters(query = "login", group = "none").count)
-        assertEquals(2, WorkTreeFilters(mine = true, status = "open").count)
+    fun any_spelled_as_a_value_is_empty() {
         assertTrue(WorkTreeFilters(status = "any", mine = false).isEmpty)
+    }
+
+    /**
+     * Below 0.6.5 a hub drops `priority` and `label` without a word and
+     * refuses `sort: priority`: neither shown nor sent to it. From there on,
+     * kept as they are.
+     */
+    @Test
+    fun a_hub_before_the_priority_release_gets_no_priority_label_or_priority_sort() {
+        val f = WorkTreeFilters(status = "open", priority = "urgent", label = "api", sort = "priority")
+        assertEquals(WorkTreeFilters(status = "open"), f.forHub("0.6.4"))
+        assertEquals(WorkTreeFilters(status = "open"), f.forHub(null), "a hub that names no version gets none")
+        assertEquals(WorkTreeFilters(sort = "due"), f.copy(priority = null, label = null, status = null, sort = "due").forHub("0.6.4"), "another sort stays")
+        assertEquals(f, f.forHub("0.6.5"))
+        assertEquals(f, f.forHub("v0.7.0"))
+    }
+
+    /** `group_by` belongs to one read: never kept by [WorkTreeFilters.normalized] (so never remembered or saved), sent by [WorkTreeFilters.forWire]. */
+    @Test
+    fun group_by_is_sent_but_never_kept() {
+        val f = WorkTreeFilters(archived = true, groupBy = "epic")
+        assertNull(f.normalized().groupBy)
+        assertEquals(WorkTreeFilters(archived = true), f.normalized())
+        assertEquals("epic", f.forWire().groupBy)
+        assertNull(f.copy(groupBy = "someday").forWire().groupBy, "a value this build does not know is not sent")
+        val wire = json.encodeToJsonElement(WorkTreeFilters.serializer(), f.forWire()).jsonObject
+        assertEquals("epic", wire["group_by"]!!.jsonPrimitive.content)
+    }
+
+    /** The desktop's `workEpics`: every `epic:<id>` section, by title, as `item:<id>` — an epic with nothing under it too. */
+    @Test
+    fun epics_are_read_from_an_epic_grouped_page() {
+        val page = WorkTreePage(
+            groups = listOf(
+                TreeGroup(1, null, GroupRef("epic:40", "Payments"), 0),
+                TreeGroup(2, null, GroupRef("epic:7", "Auth revamp"), 3),
+                TreeGroup(1, null, GroupRef("none", "No epic"), 9),
+                TreeGroup(2, null, GroupRef("epic:40", "Payments"), 1),
+                TreeGroup(null, null, GroupRef("epic:x", "Broken"), 1),
+            ),
+        )
+        assertEquals(listOf("item:7", "item:40"), epicChoicesFrom(page).map { it.taskId })
+        assertEquals(listOf("Auth revamp", "Payments"), epicChoicesFrom(page).map { it.title })
     }
 
     /**
@@ -151,8 +192,7 @@ class WorkTreeTest {
             archived = true,
         )
         assertEquals(4, all.sheetCount)
-        assertEquals(6, all.count)
-        assertEquals(0, WorkTreeFilters(archived = true).count)
+        assertEquals(0, WorkTreeFilters(archived = true).sheetCount)
         assertTrue(WorkTreeFilters(archived = true).isEmpty, "showing archived tasks narrows nothing")
         assertFalse(WorkTreeFilters(query = "x").isEmpty)
     }

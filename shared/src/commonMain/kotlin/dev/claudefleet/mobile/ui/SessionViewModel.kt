@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import dev.claudefleet.mobile.data.ALL_SESSIONS_CHANGED
 import dev.claudefleet.mobile.data.ConnectionStatus
-import dev.claudefleet.mobile.data.forbiddenAccounts
+import dev.claudefleet.mobile.data.forbiddenAccountsIn
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.QuickReplyActions
 import dev.claudefleet.mobile.data.SessionActions
@@ -19,6 +19,7 @@ import dev.claudefleet.mobile.model.forAccount
 import dev.claudefleet.mobile.model.signedInElsewhere
 import dev.claudefleet.mobile.model.isSignedOut
 import dev.claudefleet.mobile.model.QueuedPrompt
+import dev.claudefleet.mobile.model.takenBackText
 import dev.claudefleet.mobile.model.HostLogin
 import dev.claudefleet.mobile.model.SendLaterTiming
 import dev.claudefleet.mobile.model.ActivityProbe
@@ -378,12 +379,13 @@ data class SessionUiState(
         get() = canManage && ghost && dismissGhostAvailable && session?.isPinned != true
 
     /**
-     * ⋮ Pin / Unpin (the desktop's pin, migration 189): kept above the
-     * groups, and the hub refuses Clean up and Kill until it is unpinned.
-     * Not on a ghost, which has nothing left to keep.
+     * ⋮ Pin / Unpin (the desktop's pin, migration 189): the hub refuses
+     * Clean up and Kill until it is unpinned. Pin is not offered on a ghost,
+     * which has nothing left to keep; Unpin is, since the hub neither
+     * dismisses nor reaps a pinned ghost until it is unpinned.
      */
     val canPin: Boolean
-        get() = canManage && pinAvailable && !ghost
+        get() = canManage && pinAvailable && (!ghost || session?.isPinned == true)
     /**
      * Whether the ⋮ menu is offered at all: a readonly credential may not
      * call any of these tools, a session that has left the fleet has nothing
@@ -1119,7 +1121,9 @@ class SessionViewModel(
     fun answer(a: Answer): Job = scope.launch {
         if (!canAnswerNow(local.value, keys = a.isKey)) return@launch
         // Never from the phone, whatever drew it (plan v2 R4): see [isFolderRule].
-        if (a is Answer.Option && isFolderRule(a.label) && row()?.pendingInput?.multi != true) return@launch
+        if (a is Answer.Option && row()?.pendingInput?.multi != true &&
+            (a.isFolderWide || row()?.pendingInput?.options?.any { it.n == a.n && it.persists } == true)
+        ) return@launch
         local.update { it.copy(answering = true, stillWaiting = false, error = null) }
         try {
             // Every KEY is pressed only after re-reading the pane. The hub
@@ -1698,8 +1702,12 @@ class SessionViewModel(
     /** Read what the hub keeps for this session, for the Send later sheet. Silent on failure. */
     fun loadQueued(): Job = scope.launch {
         if (!fleet.capabilities.value.sendLater || readOnly) return@launch
+        // A list read sent before a take-back and answered after it would put
+        // the chip back: only the newest read, and none across a take-back, lands.
+        val gen = ++queuedGeneration
         try {
             val queued = actions.queuedPrompts(sessionId)
+            if (gen != queuedGeneration) return@launch
             local.update { it.copy(queued = queued.filter { q -> q.waiting }) }
         } catch (e: CancellationException) {
             throw e
@@ -1707,28 +1715,47 @@ class SessionViewModel(
         }
     }
 
+    /** Bumped by every queued list read and every take-back; see [loadQueued]. */
+    private var queuedGeneration = 0L
+
+    /** Take-backs in flight, so a double tap cancels once. */
+    private val takingBack = mutableSetOf<Long>()
+
     /** Take a waiting prompt back before the session gets it. */
     fun cancelQueued(id: Long): Job = scope.launch {
         if (!fleet.capabilities.value.sendLater || readOnly || !connected()) return@launch
-        // Taking a prompt back keeps its words: into the box, to edit and
-        // send again, rather than gone (UX antipatterns 2026-11-03). A box
-        // that already holds a draft keeps it, with the prompt after it
-        // (review pm-work-ux-4): the chip showed one line of it, and nothing
-        // else held the rest.
-        val body = local.value.queued.firstOrNull { it.id == id }?.body?.takeIf { it.isNotBlank() }
+        if (!takingBack.add(id)) return@launch
+        // Taking a prompt back keeps its words, after whatever is typed, to
+        // edit and send again, rather than gone (UX antipatterns 2026-11-03).
+        // The hub stores a paired phone's text under its untrusted-input line,
+        // which is the hub's, not the person's; fleet's own digests are not
+        // theirs to take back into the box at all.
+        val text = takenBackText(local.value.queued.firstOrNull { it.id == id }?.body)
         try {
+            queuedGeneration++
             val left = actions.queuedPrompts(sessionId, cancel = id)
+            queuedGeneration++
             local.update {
                 it.copy(
                     queued = left.filter { q -> q.waiting },
-                    draft = if (body != null) appendToDraft(it.draft, body) else it.draft,
-                    sendLaterNotice = if (body != null) "Taken back. It is in the box to edit." else "Taken back.",
+                    draft = text?.let { t -> appendToDraft(it.draft, t) } ?: it.draft,
+                    sendLaterNotice = if (text != null) "Taken back. It is in the box to edit." else "Taken back.",
                 )
             }
         } catch (e: CancellationException) {
             throw e
+        } catch (e: HubError.Tool) {
+            if (e.code == "E_NOTFOUND") {
+                // It went out (or was taken back already) before this tap.
+                local.update { it.copy(sendLaterNotice = "It already went out.") }
+                loadQueued()
+            } else {
+                local.update { it.copy(error = friendly(e)) }
+            }
         } catch (t: Throwable) {
             local.update { it.copy(error = friendly(t)) }
+        } finally {
+            takingBack.remove(id)
         }
     }
 
@@ -1843,10 +1870,10 @@ class SessionViewModel(
             // Never a login the hub knows is signed out (review w23-3).
             val host = fleet.hosts.value.firstOrNull { it.alias == r.hostAlias }
             val out = { l: HostLogin -> host?.isSignedOut(l.profile) == true }
-            val h = actions.accountHeadroom(r.hostAlias, r.claudeProfile, r.projectId)
+            val h = actions.accountHeadroomIn(r.hostAlias, r.claudeProfile, r.projectId)
             // Never a login on an account the session's project forbids: the
             // hub refuses that restart (E_ACCOUNT_FORBIDDEN).
-            val off = fleet.forbiddenAccounts(r.projectId)
+            val off = fleet.forbiddenAccountsIn(r.projectId, r.orgId)
             // A signed-out session needs any signed-in login with room, as the
             // Inbox offers it (review M9); a paused one, another account.
             val signedOutRow = r.attention?.reason == "no_credentials"
@@ -1912,8 +1939,8 @@ class SessionViewModel(
         try {
             val signedOut = fleet.hosts.value.firstOrNull { it.alias == r.hostAlias }?.signedOutLogins.orEmpty().map { it.profile }
             // Listed, but not pickable: the hub refuses a switch onto one (E_ACCOUNT_FORBIDDEN).
-            val off = fleet.forbiddenAccounts(r.projectId)
-            val h = actions.accountHeadroom(r.hostAlias, r.claudeProfile, r.projectId)
+            val off = fleet.forbiddenAccountsIn(r.projectId, r.orgId)
+            val h = actions.accountHeadroomIn(r.hostAlias, r.claudeProfile, r.projectId)
                 .forAccount(r.accountUuid, { l -> l.profile in signedOut }, off)
             val choices = otherLogins(h, r.claudeProfile)
             local.update { l ->

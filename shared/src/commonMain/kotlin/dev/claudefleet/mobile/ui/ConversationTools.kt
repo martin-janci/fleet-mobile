@@ -59,6 +59,7 @@ import dev.claudefleet.mobile.ui.components.Base64Image
 import dev.claudefleet.mobile.model.EditDetail
 import dev.claudefleet.mobile.model.ToolDetail
 import dev.claudefleet.mobile.ui.components.MarkdownText
+import dev.claudefleet.mobile.ui.components.rememberCopied
 import dev.claudefleet.mobile.ui.theme.DiffColors
 import dev.claudefleet.mobile.ui.theme.diffColors
 import dev.claudefleet.mobile.ui.theme.FleetIcons
@@ -812,17 +813,15 @@ private fun Muted(text: String) {
 @Composable
 private fun CopyOutput(text: String, tint: Color) {
     val clipboard = LocalClipboardManager.current
-    val scope = rememberCoroutineScope()
-    var copied by remember(text) { mutableStateOf(false) }
+    val copied = rememberCopied(text)
     Text(
-        if (copied) "Copied" else "Copy output",
+        if (copied.copied) "Copied" else "Copy output",
         style = MaterialTheme.typography.labelMedium,
         color = tint,
         modifier = Modifier
             .clickable(role = Role.Button) {
                 clipboard.setText(AnnotatedString(text))
-                copied = true
-                scope.launch { delay(1500); copied = false }
+                copied.mark()
             }
             .padding(vertical = 8.dp),
     )

@@ -42,10 +42,19 @@ data class OrbitMenuItem(
 
 /**
  * Why every item that writes is grey, said at the top of the menu: the hub
- * is away, or the last action has not finished. Null while they work.
+ * is away, a message or an answer is still on its way, or the last action
+ * has not finished — the same three the view model's `idle` checks before it
+ * runs any of them. Null while they work.
  */
-internal fun orbitMenuNote(busy: Boolean, connected: Boolean): String? = when {
+internal fun orbitMenuNote(
+    busy: Boolean,
+    connected: Boolean,
+    sending: Boolean = false,
+    answering: Boolean = false,
+): String? = when {
     !connected -> "Not connected to the hub: the grey items work once it answers."
+    sending -> "A message is on its way: the grey items work once it arrives."
+    answering -> "Your answer is on its way: the grey items work once the session takes it."
     busy -> "Waiting for the last action to finish: the grey items work then."
     else -> null
 }
@@ -65,6 +74,8 @@ data class OrbitMenuFacts(
     val dismissGhost: Boolean = false,
     val restart: Boolean = false,
     val steer: Boolean = false,
+    /** The agent has an effort setting (not Hermes): Effort… beside Model…. */
+    val effort: Boolean = true,
     val review: Boolean = false,
     val archive: Boolean = false,
     val kill: Boolean = false,
@@ -89,7 +100,7 @@ fun orbitMenuItems(f: OrbitMenuFacts): List<OrbitMenuItem> = buildList {
     if (f.manage) add(OrbitMenuItem(OrbitItem.Tags, "Tags…", "labels to filter by", 0))
     if (f.steer) {
         add(OrbitMenuItem(OrbitItem.Model, "Model…", "switches with /model", 1))
-        add(OrbitMenuItem(OrbitItem.Effort, "Effort…", "sets /effort", 1))
+        if (f.effort) add(OrbitMenuItem(OrbitItem.Effort, "Effort…", "sets /effort", 1))
     }
     if (f.review) add(OrbitMenuItem(OrbitItem.Review, "Review…", "a new session reviews this worktree", 1))
     if (f.sendLater) add(OrbitMenuItem(OrbitItem.SendLater, "Send later…", "goes in when the session is next idle", 1))
@@ -102,7 +113,7 @@ fun orbitMenuItems(f: OrbitMenuFacts): List<OrbitMenuItem> = buildList {
     if (f.pin) {
         add(
             if (f.pinned) OrbitMenuItem(OrbitItem.Pin, "Unpin", "Clean up and Kill work again", 2)
-            else OrbitMenuItem(OrbitItem.Pin, "Pin", "kept on top; nothing removes it until unpinned", 2),
+            else OrbitMenuItem(OrbitItem.Pin, "Pin", "Clean up and Kill are refused until unpinned", 2),
         )
     }
     f.tmuxName?.takeIf { it.isNotBlank() }?.let {

@@ -22,6 +22,8 @@ import dev.claudefleet.mobile.model.COMMENT_MAX
 import dev.claudefleet.mobile.model.PromoteTarget
 import dev.claudefleet.mobile.model.PromotionView
 import dev.claudefleet.mobile.model.WorkTaskLink
+import dev.claudefleet.mobile.model.WorkTreeFilters
+import dev.claudefleet.mobile.model.epicChoicesFrom
 import dev.claudefleet.mobile.model.subtaskRollup
 import dev.claudefleet.mobile.model.takesSubtask
 import dev.claudefleet.mobile.net.HubCapabilities
@@ -89,8 +91,14 @@ data class TaskUiState(
     /** The placement's note, kept by a placement unless the person edits it. */
     val placementNote: String = "",
     val busy: Boolean = false,
+    /** Why the last write was refused: said in its sheet (or the screen), until dismissed or the next write. */
     val error: Friendly? = null,
     val conflict: Boolean = false,
+    /**
+     * Why the last read of the task failed. Apart from [error], so a re-read
+     * (any work change fleet-wide) never wipes the refusal a sheet is showing.
+     */
+    val loadError: Friendly? = null,
     /** The hub does not know this task, or it is not visible to this token. */
     val gone: Boolean = false,
     val stale: String? = null,
@@ -116,6 +124,12 @@ data class TaskUiState(
      * token, a hub that serves `work_link edit`, a connection.
      */
     val canEdit: Boolean = false,
+    /**
+     * The Edit sheet offers priority, labels and estimate: the hub's
+     * `work_link` names them (`accepts(WORK_LINK, "priority")`). An older hub
+     * would drop them and call the edit saved.
+     */
+    val editSizes: Boolean = false,
     /** The status chips set it: the same, for `work_link set_status`. */
     val canSetStatus: Boolean = false,
     /** The tracker the status chips move the ticket at; null for fleet's own task. */
@@ -131,8 +145,7 @@ data class TaskUiState(
      * is ticked, for "1 of 3 done". Empty when it names none.
      */
     val criteria: List<Criterion> = emptyList(),
-    /** The epic or task this one is filed under (`item:<id>`), and its label once read. */
-    val parentTaskId: String? = null,
+    /** The label of the epic or task this one is filed under ([parentTaskId]), once read. */
     val parentLabel: String? = null,
     /** "2 of 5 subtasks done", or null with none. */
     val subtaskRollup: String? = null,
@@ -154,17 +167,11 @@ data class TaskUiState(
      * `work_link promote`, a connection.
      */
     val canPromote: Boolean = false,
-    val promoteTargets: List<PromoteTarget> = emptyList(),
     val promoteOpen: Boolean = false,
     /** No tracker takes it yet: what would bring Promote (shown with the button off). */
     val promoteHint: String? = null,
     /** "Creating the ticket in Acme Jira…", or why it was not created. */
     val promotionLine: String? = null,
-    val promotionFailed: Boolean = false,
-    /** Fleet's comments on the task, oldest first. */
-    val comments: List<TaskComment> = emptyList(),
-    /** The ticket's tracker by name, when a comment can be posted there too ([canPostToTracker]). */
-    val commentsTracker: String? = null,
     /** **Comment**: a task fleet has an item for, a full token, `work_link comment`, a connection. */
     val canComment: Boolean = false,
     /** *Also post to <tracker>* is offered beside Comment. */
@@ -192,6 +199,20 @@ data class TaskUiState(
     val fileOpen: Boolean = false,
 ) {
     val task get() = detail?.task
+
+    /** The epic or task this one is filed under (`item:<id>`). */
+    val parentTaskId: String? get() = detail?.task?.parentTaskId
+
+    /** The trackers Promote may create the ticket in. */
+    val promoteTargets: List<PromoteTarget> get() = detail?.promoteTargets.orEmpty()
+
+    val promotionFailed: Boolean get() = detail?.promotion?.state == "failed"
+
+    /** Fleet's comments on the task, oldest first. */
+    val comments: List<TaskComment> get() = detail?.comments.orEmpty()
+
+    /** The ticket's tracker by name, when a comment can be posted there too ([canPostToTracker]). */
+    val commentsTracker: String? get() = detail?.commentsTracker
 }
 
 /**
@@ -251,6 +272,7 @@ class TaskViewModel(
         val busy: Boolean = false,
         val error: Friendly? = null,
         val conflict: Boolean = false,
+        val loadError: Friendly? = null,
         val gone: Boolean = false,
         val summarizing: Long? = null,
         val summary: PastWorkSummary? = null,
@@ -266,12 +288,17 @@ class TaskViewModel(
         val trackerCommentsFor: String? = null,
         val fileOpen: Boolean = false,
         val result: TaskResult? = null,
+        /** Every epic of fleet's own, read when *Under epic…* opens; null until then (or from a hub that cannot say). */
+        val epics: List<EpicFacet>? = null,
     )
 
     private val local = MutableStateFlow(Local())
 
     /** The re-read while an AI check runs on the hub. */
     private var checkPoll: Job? = null
+
+    /** Bumped by every [load]: an answer from an earlier one, landing after a later one, is dropped. */
+    private var loadSeq = 0L
 
     val state: StateFlow<TaskUiState> =
         combine(fleet.capabilities, fleet.status, fleet.orgs, local) { caps, status, orgs, l -> assemble(caps, status, orgs, l) }
@@ -291,39 +318,43 @@ class TaskViewModel(
         }
     }
 
+    /** **Refresh**, or *Reload* after a conflict: read again, the tracker's comments too; the conflict is answered by the re-read. */
     fun refresh(): Job = scope.launch {
-        local.update { it.copy(trackerCommentsFor = null) }
+        local.update { l -> l.copy(trackerCommentsFor = null, error = l.error.takeIf { !l.conflict }, conflict = false) }
         load()
     }
 
+    /**
+     * Read the task, then what hangs off it. Latest wins: entered from a
+     * reconnect, a work change, a write's re-read and the check poll, so an
+     * earlier read's answer that lands after a later one is dropped rather
+     * than shown over it. A write's refusal ([Local.error]) is not touched.
+     */
     private suspend fun load() {
         if (!fleet.capabilities.value.has(WORK, TASK)) return
+        val seq = ++loadSeq
         local.update { it.copy(loading = true) }
         try {
             val detail = actions.task(taskId)
-            local.update { it.copy(loading = false, detail = detail, asOf = clock(), gone = false, error = null, conflict = false) }
+            if (seq != loadSeq) return
+            local.update { it.copy(loading = false, detail = detail, asOf = clock(), gone = false, loadError = null) }
             pollWhileChecking(detail.check)
             // The parent's name, for "Under …": a second read, and a parent
             // this token may not see (or one that is gone) just stays unnamed.
-            val parent = detail.task.parentTaskId
-            val label = parent?.let {
-                try {
-                    actions.task(it).task.label
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Throwable) {
-                    null
-                }
-            }
+            val label = detail.task.parentTaskId?.let { orNullUnlessCancelled { actions.task(it).task.label } }
+            if (seq != loadSeq) return
             local.update { it.copy(parentLabel = label) }
-            loadTrackerComments(detail)
-            loadResult(detail)
+            // Fleet's own read first: the Result card (and its Make a task)
+            // never waits on a live call to the tracker.
+            loadResult(detail, seq)
+            loadTrackerComments(detail, seq)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
+            if (seq != loadSeq) return
             if (t is HubError.Tool && t.isUnknownAction()) fleet.actionMissing(WORK, TASK)
             val gone = t is HubError.Tool && t.code == "E_NOTFOUND"
-            local.update { it.copy(loading = false, gone = gone, error = if (gone) null else friendlyWork(t)) }
+            local.update { it.copy(loading = false, gone = gone, loadError = if (gone) null else friendlyWork(t)) }
         }
     }
 
@@ -332,18 +363,16 @@ class TaskViewModel(
      * the tracker, so once per key while this screen lives (Refresh reads
      * again), never on every `work:changed`. A failure is one quiet line.
      */
-    private suspend fun loadTrackerComments(detail: TaskDetail) {
+    private suspend fun loadTrackerComments(detail: TaskDetail, seq: Long) {
         val key = detail.task.key?.takeIf { it.isNotBlank() } ?: return
         if (detail.commentsTracker == null || !fleet.capabilities.value.has(WORK, TRACKER_COMMENTS)) return
         if (local.value.trackerCommentsFor == key) return
         local.update { it.copy(trackerCommentsFor = key) }
-        val read = try {
-            actions.trackerComments(key).comments
-        } catch (e: CancellationException) {
-            throw e
-        } catch (t: Throwable) {
-            if (t is HubError.Tool && t.isUnknownAction()) fleet.actionMissing(WORK, TRACKER_COMMENTS)
-            null
+        val read = fleet.readOrNull(TRACKER_COMMENTS) { actions.trackerComments(key).comments }
+        if (seq != loadSeq) {
+            // A later load took over: it reads them again rather than trust this one.
+            local.update { if (it.trackerCommentsFor == key) it.copy(trackerCommentsFor = null) else it }
+            return
         }
         local.update { it.copy(trackerComments = read.orEmpty(), trackerCommentsFailed = read == null) }
     }
@@ -353,17 +382,12 @@ class TaskViewModel(
      * finishes changes it). A hub without the action, or a failed read,
      * leaves the last one shown.
      */
-    private suspend fun loadResult(detail: TaskDetail) {
+    private suspend fun loadResult(detail: TaskDetail, seq: Long) {
         val itemId = detail.task.itemId ?: return
         if (!fleet.capabilities.value.has(WORK, RESULT)) return
-        val read = try {
-            actions.result(itemId)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (t: Throwable) {
-            if (t is HubError.Tool && t.isUnknownAction()) fleet.actionMissing(WORK, RESULT)
-            return
-        }
+        var failed = false
+        val read = fleet.readOrNull(RESULT, onFail = { failed = true }) { actions.result(itemId) }
+        if (failed || seq != loadSeq) return
         local.update { it.copy(result = read) }
     }
 
@@ -544,8 +568,9 @@ class TaskViewModel(
         }
     }
 
+    /** The banner's ✕: a write's refusal first, then a failed read's. */
     fun dismissError() {
-        local.update { it.copy(error = null, conflict = false) }
+        local.update { if (it.error != null) it.copy(error = null, conflict = false) else it.copy(loadError = null) }
     }
 
     fun openEdit() {
@@ -560,8 +585,10 @@ class TaskViewModel(
      * **Save** in the Edit sheet: only the fields that changed. The sheet
      * stays open on a refusal, with the hub's reason in it.
      */
-    fun saveEdit(edit: TaskEdit): Job? {
+    fun saveEdit(typed: TaskEdit): Job? {
         val itemId = state.value.task?.itemId ?: return null
+        // Never sent to a hub that would drop them and call the edit saved.
+        val edit = if (state.value.editSizes) typed else typed.withoutSizes()
         if (edit.isEmpty) return null.also { closeEdit() }
         return itemWrite(EDIT) {
             actions.editItem(
@@ -652,8 +679,22 @@ class TaskViewModel(
         }
     }
 
+    /**
+     * **Under epic…**: opens on the epics already known, and reads every
+     * epic of fleet's own the way the desktop does — one tree read grouped by
+     * epic, archived included, one task — so an epic with nothing under it
+     * yet is offered too. A failed read (or a hub that does not group by
+     * epic) leaves the ones the Work tree named.
+     */
     fun openFile() {
-        if (state.value.canFile) local.update { it.copy(fileOpen = true, error = null, conflict = false) }
+        if (!state.value.canFile) return
+        local.update { it.copy(fileOpen = true, error = null, conflict = false) }
+        if (!fleet.capabilities.value.has(WORK, TREE)) return
+        scope.launch {
+            val page = fleet.readOrNull(TREE) { actions.tree(WorkTreeFilters(archived = true, groupBy = "epic"), limit = 1) } ?: return@launch
+            val epics = epicChoicesFrom(page)
+            if (epics.isNotEmpty()) local.update { it.copy(epics = epics) }
+        }
     }
 
     fun closeFile() {
@@ -801,6 +842,7 @@ class TaskViewModel(
             busy = l.busy,
             error = l.error,
             conflict = l.conflict,
+            loadError = l.loadError,
             gone = l.gone,
             stale = if (!connected && detail != null) l.asOf?.let { staleLine(it, utcOffset(it)) } else null,
             canSummarize = key != null && allowed(caps, status, SUMMARIZE),
@@ -811,11 +853,11 @@ class TaskViewModel(
             orgName = task?.orgId?.let { orgs.name(it) },
             orgColor = task?.orgId?.let { orgs.orgs[it]?.color },
             canEdit = task?.editable == true && allowed(caps, status, EDIT),
+            editSizes = caps.accepts(WORK_LINK, PRIORITY),
             canSetStatus = (task?.editable == true || task?.movesAtTracker == true) && allowed(caps, status, SET_STATUS),
             statusAtTracker = task?.takeIf { it.movesAtTracker }?.let { it.trackerName?.ifBlank { null } ?: "its tracker" },
             editOpen = l.editOpen,
             notesLocked = task?.origin == "agent",
-            parentTaskId = task?.parentTaskId,
             parentLabel = l.parentLabel,
             subtaskRollup = task?.let(::subtaskRollup),
             canAddSubtask = task != null && takesSubtask(task) && allowed(caps, status, CREATE),
@@ -836,21 +878,18 @@ class TaskViewModel(
             canAcceptCheck = detail?.check?.acceptable == true && allowed(caps, status, VERIFY),
             canSetupCheck = detail?.check?.setup != null && allowed(caps, status, CHECK_SETUP),
             canPromote = task?.itemId != null && promoteTargets.isNotEmpty() && !promoting && allowed(caps, status, PROMOTE),
-            promoteTargets = promoteTargets,
             promoteOpen = l.promoteOpen,
             promoteHint = detail?.promoteHint?.takeIf {
                 task?.itemId != null && promoteTargets.isEmpty() && !promoting && canWrite && caps.has(WORK_LINK, PROMOTE)
             },
             promotionLine = promotion?.let(::promotionLine),
-            promotionFailed = promotion?.state == "failed",
-            comments = detail?.comments.orEmpty(),
-            commentsTracker = detail?.commentsTracker,
             canComment = task?.itemId != null && allowed(caps, status, COMMENT),
             canPostToTracker = detail?.commentsTracker != null && detail.canPostToTracker && allowed(caps, status, COMMENT),
             canDeleteComment = allowed(caps, status, COMMENT_DELETE),
             commentDraft = l.commentDraft,
             canFile = task?.editable == true && !task.epic && allowed(caps, status, SET_PARENT),
-            epicChoices = knownEpics().filter { it.taskId.startsWith("item:") && it.taskId != task?.taskId && it.taskId != task?.parentTaskId },
+            epicChoices = (l.epics ?: knownEpics())
+                .filter { it.taskId.startsWith("item:") && it.taskId != task?.taskId && it.taskId != task?.parentTaskId },
             fileOpen = l.fileOpen,
             trackerComments = l.trackerComments.takeIf { detail?.commentsTracker != null }.orEmpty(),
             trackerCommentsFailed = l.trackerCommentsFailed && detail?.commentsTracker != null,
@@ -880,6 +919,10 @@ class TaskViewModel(
             detail.task.placementVersion.takeIf { it != 0L } ?: detail.placement?.version ?: 0L
 
         const val TASK = "task"
+        const val TREE = "tree"
+
+        /** A `work_link` argument only a hub whose `edit` takes priority, labels and estimate names. */
+        const val PRIORITY = "priority"
         const val PLACE = "place"
         const val RESUME = "resume"
         const val START = "start"

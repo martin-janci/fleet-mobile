@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.loginLabel
 import dev.claudefleet.mobile.model.relativeWithin
 import dev.claudefleet.mobile.model.roomText
+import dev.claudefleet.mobile.model.withoutUntrustedMarker
 import dev.claudefleet.mobile.ui.kit.BottomSheet
 import dev.claudefleet.mobile.ui.kit.SheetAction
 import dev.claudefleet.mobile.ui.theme.Fleet
@@ -366,7 +367,7 @@ internal fun SendLaterSheet(
             for (q in state.queued) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(q.body, style = Fleet.type.textSm, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(withoutUntrustedMarker(q.body).trim(), style = Fleet.type.textSm, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(queuedWhen(q, at, utcOffset), style = Fleet.type.textXs, color = o.fgMuted)
                     }
                     TextButton(onClick = { host.onCancelQueued(q.id) }, enabled = state.connected) { Text("Take back") }

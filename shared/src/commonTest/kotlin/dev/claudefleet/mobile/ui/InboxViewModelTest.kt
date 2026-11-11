@@ -108,7 +108,7 @@ class InboxViewModelTest {
         val spare = HostLogin(profile = "spare", accountUuid = "acct-b", usedPct = 10.0)
         val team = HostLogin(profile = "team", accountUuid = "acct-c", usedPct = 60.0)
         val hub = FakeInbox(headroom = Headroom(pauseAtPct = 95.0, logins = listOf(HostLogin(accountUuid = "acct-a", usedPct = 100.0), spare, team)))
-        val vm = InboxViewModel(hub, this, canWrite = true, forbidden = { if (it == 7L) setOf("acct-b") else emptySet() })
+        val vm = InboxViewModel(hub, this, canWrite = true, forbidden = { p, _ -> if (p == 7L) setOf("acct-b") else emptySet() })
         vm.proposeSwitch(paused().copy(projectId = 7), switchAvailable = true); runCurrent()
         assertEquals(team, vm.state.value.switchTargets[2L])
         assertEquals("headroom mac  project 7", hub.calls.single())
@@ -121,7 +121,7 @@ class InboxViewModelTest {
         // Only spare has room: nowhere to go, rather than a refused restart.
         val only = InboxViewModel(
             FakeInbox(headroom = Headroom(pauseAtPct = 95.0, logins = listOf(HostLogin(accountUuid = "acct-a", usedPct = 100.0), spare))),
-            this, canWrite = true, forbidden = { setOf("acct-b") },
+            this, canWrite = true, forbidden = { _, _ -> setOf("acct-b") },
         )
         only.proposeSwitch(paused().copy(projectId = 7), switchAvailable = true); runCurrent()
         assertNull(only.state.value.switchTargets[2L])

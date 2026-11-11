@@ -672,7 +672,7 @@ class AutomationTest {
               {"reason":"update_rolled_back","target":"hub:self","component":"hub"},
               {"reason":"rollback_failed","target":"hub:self"},
               {"reason":"update_required","target":"client:3","component":"android","version":"0.6.1"},
-              {"reason":"channel_stale","target":"channel:stable"},
+              {"reason":"channel_stale","target":"channel:stable","component":"","version":""},
               {"reason":"something_new","target":"agent:mercury"}]}}""",
         )
         val w = updateWarnings(health.updates)
@@ -687,6 +687,12 @@ class AutomationTest {
             w.map { it.title },
         )
         assertEquals("hub:self runs 0.6.4 · health check failed · See Settings, Updates on the desktop", w.first().line)
+        // Review phone_misc 8: the hub's empty version is no version.
+        assertEquals("channel:stable · See Settings, Updates on the desktop", w[3].line)
+        assertEquals(
+            "Rollout paused: channel:beta",
+            updateWarnings(UpdatesHealth(attention = listOf(UpdateAttention("rollout_paused", "channel:beta", component = "")))).single().title,
+        )
         assertEquals(emptyList(), updateWarnings(null))
         assertEquals(emptyList(), updateWarnings(UpdatesHealth(channel = "fresh")))
         assertEquals("Rollback failed: agent on pine", updateWarnings(UpdatesHealth(attention = listOf(UpdateAttention("rollback_failed", "agent:pine")))).single().title)

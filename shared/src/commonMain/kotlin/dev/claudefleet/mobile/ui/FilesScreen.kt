@@ -81,7 +81,7 @@ fun FilesScreen(
         ConnectionBanner(status)
         // A failed list read offers Try again (14.12); a failed action does not,
         // since re-listing would not redo it.
-        ErrorBanner(state.error, onDismiss = handlers.onDismissError, onRetry = handlers.onRefresh.takeIf { state.listFailed && state.error != null })
+        ErrorBanner(state.error, onDismiss = handlers.onDismissError, onRetry = handlers.onRefresh.takeIf { state.retryable && !state.refreshing })
         state.notice?.let { notice ->
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),

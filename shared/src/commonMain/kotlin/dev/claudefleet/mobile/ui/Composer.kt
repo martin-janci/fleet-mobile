@@ -185,6 +185,8 @@ val HERMES_MODEL_OPTIONS: List<PickerOption> = listOf(
 /** The model or effort ([command]) picker's entries for a session of [agent]. */
 fun pickerOptionsFor(agent: String?, command: String): List<PickerOption> = when {
     agent == AGENT_HERMES && command == "model" -> HERMES_MODEL_OPTIONS
+    // Hermes has no `/effort`: nothing to pick, and Claude's levels would be typed as a command it lacks.
+    agent == AGENT_HERMES -> emptyList()
     agent == AGENT_CODEX && command == "model" -> CODEX_MODEL_OPTIONS
     agent == AGENT_CODEX -> CODEX_EFFORT_OPTIONS
     command == "model" -> MODEL_OPTIONS
@@ -197,6 +199,9 @@ fun pickerOptionsFor(agent: String?, command: String): List<PickerOption> = when
  * conversation with the pick (`restart_session { model, effort }`).
  */
 fun switchesByRelaunch(agent: String?): Boolean = agent == AGENT_CODEX
+
+/** Whether [agent] has an effort setting to pick at all: Hermes has none (fleet's Hermes adapter). */
+fun hasEffortPicker(agent: String?): Boolean = pickerOptionsFor(agent, "effort").isNotEmpty()
 
 /** The line a picker sends — `/model opus` — or null for a blank or multi-word value. */
 fun pickerCommand(command: String, value: String): String? {

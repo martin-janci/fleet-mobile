@@ -46,6 +46,7 @@ import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.WorkTaskLink
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.WorkStatusDot
+import dev.claudefleet.mobile.ui.components.rememberCopied
 import dev.claudefleet.mobile.ui.kit.InlineLoading
 
 /** Everything a session's *Tasks* section reports. */
@@ -300,8 +301,8 @@ internal fun CrossOrgPanel(choice: CrossOrgChoice, state: SessionTasksUiState, h
             )
             Text(command, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
             // The label answers the tap: the clipboard alone says nothing on iOS.
-            var copied by remember(command) { mutableStateOf(false) }
-            OutlinedButton(onClick = { clipboard.setText(AnnotatedString(command)); copied = true }) { Text(if (copied) "Copied" else "Copy command") }
+            val copied = rememberCopied(command)
+            OutlinedButton(onClick = { clipboard.setText(AnnotatedString(command)); copied.mark() }) { Text(if (copied.copied) "Copied" else "Copy command") }
         }
         Text(
             "Or on the desktop: Settings → Work → Organisations. Once the session is in $task, add the task again.",

@@ -31,18 +31,53 @@ data class ReviewNotesUiState(
     /** A resolve on the wire, by note. */
     val resolving: Set<Long> = emptySet(),
     val error: Friendly? = null,
+    /** A failed Resolve, said where Resolve was pressed (the line's sheet, or the list above the diff). */
+    val resolveError: Friendly? = null,
     /** What the last send did: typed now, or queued behind the agent's turn. */
     val notice: String? = null,
 ) {
-    /** Sent notes by the line they sit on. */
+    /** Sent notes by the line number they were written on; [sentOn] also checks the line still says what they quote. */
     val sentByAnchor: Map<NoteAnchor, List<ReviewNote>> get() =
         sent.mapNotNull { n -> n.anchor()?.let { it to n } }.groupBy({ it.first }, { it.second })
+
+    /**
+     * The sent notes that sit on the row at [anchor] whose text is [rowQuote]:
+     * only where the row still says what the note quotes (review notes 4). After
+     * the agent changed the file, line 12 is another line; its notes are listed
+     * above the diff instead ([notesElsewhere]).
+     */
+    fun sentOn(anchor: NoteAnchor, rowQuote: String): List<ReviewNote> =
+        sentByAnchor[anchor].orEmpty().filter { quoteMatches(it, rowQuote) }
 }
+
+/**
+ * A send's refusal in plain words. `E_IN_FLIGHT` and `E_CONFLICT` are the
+ * hub's (it is gaining them); the drafts stay either way.
+ */
+internal fun sendRefusal(e: HubError.Tool): Friendly = when (e.code) {
+    "E_IN_FLIGHT" -> Friendly(
+        "Still being typed",
+        "The hub is typing these notes into the session now. Your drafts stay; send again in a moment to check.",
+        isError = false,
+        details = explain(e),
+    )
+    "E_CONFLICT" -> Friendly(
+        "Notes changed since the last try",
+        "The hub had an earlier send of different notes. Your drafts stay; send again to send them as they are now.",
+        isError = true,
+        details = explain(e),
+    )
+    else -> friendly(e)
+}
+
+/** A sent note belongs on a row whose text is the line it quoted. */
+internal fun quoteMatches(n: ReviewNote, rowQuote: String): Boolean = n.quote.orEmpty().trimEnd() == rowQuote.trimEnd()
 
 /**
  * Review notes on a session's diff (claude-fleet migration 223, `review_notes`):
  * tap a line to draft a note, Send types every draft into the session as one
- * numbered message. Drafts live in this view model, on this phone, until sent.
+ * numbered message. Drafts stay on this phone until sent, in [memory] (per hub
+ * and session, across visits and a killed process), with the pending send's id.
  *
  * [canSend] is the token's write right; a viewer's share still drafts, and the
  * hub's refusal of the send is shown as the error.
@@ -52,12 +87,16 @@ class ReviewNotesViewModel(
     private val actions: ReviewNoteActions,
     private val scope: CoroutineScope,
     private val now: () -> Long = { epochSeconds() },
+    private val memory: NoteDraftMemory = NoteDraftMemory(),
 ) {
-    private val _state = MutableStateFlow(ReviewNotesUiState())
+    private val _state = MutableStateFlow(ReviewNotesUiState(drafts = memory.drafts(sessionId)))
     val state: StateFlow<ReviewNotesUiState> = _state.asStateFlow()
 
-    /** The id of a send that got no answer: a retry reuses it, so the hub types nothing twice. */
-    private var pendingSendId: String? = null
+    /** Change the drafts on screen and in [memory] together. */
+    private fun updateDrafts(change: (ReviewNotesUiState) -> ReviewNotesUiState) {
+        _state.update(change)
+        memory.keepDrafts(sessionId, _state.value.drafts)
+    }
 
     fun refresh(): Job = scope.launch {
         try {
@@ -85,7 +124,7 @@ class ReviewNotesViewModel(
         val s = _state.value
         val anchor = s.open ?: return
         val text = body.take(REVIEW_NOTE_BODY_MAX)
-        _state.update {
+        updateDrafts {
             val drafts = if (text.isBlank()) {
                 it.drafts - anchor
             } else {
@@ -96,7 +135,7 @@ class ReviewNotesViewModel(
     }
 
     fun deleteDraft(anchor: NoteAnchor) {
-        _state.update { it.copy(drafts = it.drafts - anchor, open = if (it.open == anchor) null else it.open) }
+        updateDrafts { it.copy(drafts = it.drafts - anchor, open = if (it.open == anchor) null else it.open) }
     }
 
     fun send(): Job? {
@@ -106,18 +145,29 @@ class ReviewNotesViewModel(
             _state.update { it.copy(error = Friendly("Too many notes", "At most $REVIEW_NOTES_MAX notes go in one message; delete some first.", isError = true)) }
             return null
         }
-        val id = pendingSendId ?: newNotesSendId(now()).also { pendingSendId = it }
+        // One send per session at a time, across visits: a second visit's
+        // Send while the first is out would type the notes twice.
+        if (!memory.startSend(sessionId)) {
+            _state.update { it.copy(error = Friendly("Still sending", "These notes are already on their way; the drafts stay until the hub answers.", isError = false)) }
+            return null
+        }
         val drafts = s.drafts.values.toList()
+        val fingerprint = notesFingerprint(drafts)
+        // The id of a send that got no answer is reused only for the same
+        // notes: the hub answers it `repeat` and types nothing twice. Kept in
+        // [memory] before the call, so a visit after a lost answer reuses it.
+        val id = memory.pending(sessionId)?.takeIf { it.fingerprint == fingerprint }?.id ?: newNotesSendId(now())
+        memory.keepPending(sessionId, PendingNotesSend(id, fingerprint))
         _state.update { it.copy(sending = true, error = null, notice = null) }
         return scope.launch {
             try {
                 val out = actions.send(sessionId, id, drafts)
-                pendingSendId = null
-                _state.update { st ->
-                    // Drafts written while the send was out stay.
+                memory.keepPending(sessionId, null)
+                updateDrafts { st ->
+                    // Only the drafts this send carried go, `repeat` or not:
+                    // one written or edited while it was out stays.
                     val left = st.drafts.filterKeys { k -> drafts.none { it.anchor == k && st.drafts[k] == it } }
                     st.copy(
-                        sending = false,
                         drafts = left,
                         sent = (out.notes + st.sent.filterNot { o -> out.notes.any { it.id == o.id } }),
                         notice = if (out.delivered || out.repeat) null else "Queued: it goes in when the agent's turn ends.",
@@ -126,19 +176,27 @@ class ReviewNotesViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: HubError.Tool) {
-                // A refusal is an answer: the next try is a new send.
-                pendingSendId = null
-                _state.update { it.copy(sending = false, error = friendly(e)) }
+                when (e.code) {
+                    // The hub is still typing this very send: the id stays, so
+                    // Send again later is answered as the same send.
+                    "E_IN_FLIGHT" -> Unit
+                    // A refusal is an answer: the next try is a new send.
+                    else -> memory.keepPending(sessionId, null)
+                }
+                _state.update { it.copy(error = sendRefusal(e)) }
             } catch (e: Throwable) {
                 // No answer: keep the id, so Send again cannot type them twice.
-                _state.update { it.copy(sending = false, error = friendly(e)) }
+                _state.update { it.copy(error = friendly(e)) }
+            } finally {
+                memory.endSend(sessionId)
+                _state.update { it.copy(sending = false) }
             }
         }
     }
 
     fun resolve(note: ReviewNote, resolved: Boolean = !note.resolved): Job? {
         if (note.id in _state.value.resolving) return null
-        _state.update { it.copy(resolving = it.resolving + note.id, error = null) }
+        _state.update { it.copy(resolving = it.resolving + note.id, resolveError = null) }
         return scope.launch {
             try {
                 val out = actions.resolve(sessionId, note.id, resolved)
@@ -146,10 +204,13 @@ class ReviewNotesViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                _state.update { it.copy(resolving = it.resolving - note.id, error = friendly(e)) }
+                // Said where Resolve was pressed: the sheet covers the diff's banner.
+                _state.update { it.copy(resolving = it.resolving - note.id, resolveError = friendly(e)) }
             }
         }
     }
+
+    fun dismissResolveError() = _state.update { it.copy(resolveError = null) }
 
     fun dismissError() = _state.update { it.copy(error = null) }
 

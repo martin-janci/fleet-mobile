@@ -208,7 +208,7 @@ data class Headroom(
  * the row names an account the host has a login for, `over` and the
  * suggestion are read for that account: the login under the line with the
  * least used, on another account, and never on one of [forbidden] (the
- * accounts the session's project forbids, [accountsForbiddenFor]).
+ * accounts the session's project forbids, [forbiddenAccounts]).
  */
 fun Headroom.forAccount(
     accountUuid: String?,
@@ -253,6 +253,25 @@ fun Headroom.signedInElsewhere(
     }
         .minByOrNull { it.usedPct ?: Double.MAX_VALUE }
 
+/** What an account is forbidden for (`AccountRow.forbiddenProjectIds` / `forbiddenOrgIds`). */
+data class AccountBlocks(val projects: Set<Long> = emptySet(), val orgs: Set<Long> = emptySet()) {
+    val isEmpty: Boolean get() = projects.isEmpty() && orgs.isEmpty()
+}
+
+fun AccountRow.blocks(): AccountBlocks = AccountBlocks(forbiddenProjectIds.toSet(), forbiddenOrgIds.toSet())
+
+/**
+ * The accounts work in [projectId] (filed under [orgId], when the phone
+ * knows it) may not run on, as far as the phone can tell: the hub refuses
+ * a start or switch onto one (`E_ACCOUNT_FORBIDDEN`), so it is never the
+ * default nor the pre-picked login. The hub resolves a project's org itself;
+ * without [orgId] only the project's own blocks count here.
+ */
+fun forbiddenAccounts(blocks: Map<String, AccountBlocks>, projectId: Long?, orgId: Long? = null): Set<String> {
+    if (projectId == null) return emptySet()
+    return blocks.filterValues { b -> projectId in b.projects || (orgId != null && orgId in b.orgs) }.keys
+}
+
 /** "work (m.janci@…)" or the account alone: how a login reads in the switch question. */
 fun loginLabel(l: HostLogin, accountName: (String) -> String?): String {
     val who = accountName(l.accountUuid) ?: l.accountUuid.take(8)
@@ -274,18 +293,3 @@ fun leftText(usedPct: Double): String = "${(100 - kotlin.math.round(usedPct).toI
 fun freestLogin(logins: List<HostLogin>, forbidden: Set<String> = emptySet()): HostLogin? =
     logins.filter { !it.signedOut && it.accountUuid !in forbidden }
         .mapNotNull { l -> l.usedPct?.let { l to it } }.minByOrNull { it.second }?.first
-
-/**
- * The accounts project [projectId] forbids (claude-fleet migrations 217/218,
- * docs/accounts.md "Keep an account off a project"), itself or through its
- * org [orgId]: the desktop's `accountsForbiddenFor` (src/lib/accounts.ts).
- * No start, resume or switch in the project may use a login on one; the hub
- * refuses it with `E_ACCOUNT_FORBIDDEN`. Empty without a project.
- */
-fun accountsForbiddenFor(projectId: Long?, accounts: List<AccountRow>, orgId: Long? = null): Set<String> {
-    if (projectId == null) return emptySet()
-    return accounts
-        .filter { a -> projectId in a.forbiddenProjectIds || (orgId != null && orgId in a.forbiddenOrgIds) }
-        .map { it.uuid }
-        .toSet()
-}

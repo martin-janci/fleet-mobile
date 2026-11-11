@@ -10,11 +10,11 @@ interface UsageActions {
     suspend fun report(sinceSecs: Long?): UsageReport
     suspend fun accounts(): List<AccountRow>
     suspend fun setNickname(uuid: String, nickname: String?): AccountRow
-    /** Replace the projects [uuid] is forbidden for (`set_account_projects`). */
-    suspend fun setForbiddenProjects(uuid: String, projectIds: List<Long>): AccountRow =
-        error("set_account_projects is not offered")
-    /** Replace the orgs [uuid] is forbidden for (`set_account_projects`, the org list only). */
-    suspend fun setForbiddenOrgs(uuid: String, orgIds: List<Long>): AccountRow =
+    /**
+     * Replace the projects and orgs [uuid] is forbidden for in one
+     * `set_account_projects` call; a null list stays as it is.
+     */
+    suspend fun setAccountBlocks(uuid: String, projectIds: List<Long>?, orgIds: List<Long>?): AccountRow =
         error("set_account_projects is not offered")
     /** The fleet's orgs, for an account's "Not for these orgs" list. */
     suspend fun orgs(): List<OrgDetail> = emptyList()
@@ -28,10 +28,8 @@ class HubUsageActions(private val session: AppSession) : UsageActions {
     override suspend fun accounts(): List<AccountRow> = session.withClient { it.listAccounts() }
     override suspend fun setNickname(uuid: String, nickname: String?): AccountRow =
         session.withClient { it.setAccountNickname(uuid, nickname) }
-    override suspend fun setForbiddenProjects(uuid: String, projectIds: List<Long>): AccountRow =
-        session.withClient { it.setAccountProjects(uuid, projectIds) }
-    override suspend fun setForbiddenOrgs(uuid: String, orgIds: List<Long>): AccountRow =
-        session.withClient { it.setAccountOrgs(uuid, orgIds) }
+    override suspend fun setAccountBlocks(uuid: String, projectIds: List<Long>?, orgIds: List<Long>?): AccountRow =
+        session.withClient { it.setAccountBlocks(uuid, projectIds, orgIds) }
     override suspend fun orgs(): List<OrgDetail> = session.withClient { it.workOrgs() }
     override suspend fun autoSwitch(enabled: Boolean?, continueAfter: Boolean?): AutoSwitchView =
         session.withClient { it.autoSwitchAccount(enabled, continueAfter) }

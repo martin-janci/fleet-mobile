@@ -1,6 +1,6 @@
 package dev.claudefleet.mobile.data
 
-import dev.claudefleet.mobile.model.AccountRow
+import dev.claudefleet.mobile.model.AccountBlocks
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.MyAccess
@@ -10,7 +10,7 @@ import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.StartProgress
 import dev.claudefleet.mobile.model.Ticket
 import dev.claudefleet.mobile.model.TrackerRow
-import dev.claudefleet.mobile.model.accountsForbiddenFor
+import dev.claudefleet.mobile.model.forbiddenAccounts
 import dev.claudefleet.mobile.model.orgOfProject
 import dev.claudefleet.mobile.net.HubCapabilities
 import kotlinx.coroutines.flow.Flow
@@ -127,11 +127,12 @@ interface FleetState {
     val accountNames: StateFlow<Map<String, String>> get() = NoWork.accountNames
 
     /**
-     * The `list_accounts` rows [accountNames] is read from, kept whole for
-     * the projects and orgs each account is forbidden for: the phone's login
-     * choices skip those ([forbiddenAccounts]). Empty where [accountNames] is.
+     * Account uuid → the projects and orgs it is forbidden for (claude-fleet
+     * migrations 217/218), from the same `list_accounts` read as
+     * [accountNames]: so the phone neither defaults to nor pre-picks a login
+     * the hub would refuse. Empty from an older hub.
      */
-    val accounts: StateFlow<List<AccountRow>> get() = NoWork.accounts
+    val accountBlocks: StateFlow<Map<String, AccountBlocks>> get() = NoWork.accountBlocks
 
     /**
      * Account uuid → its last usage reading, read when the hub lists
@@ -235,13 +236,16 @@ interface FleetState {
 
 /**
  * The accounts project [projectId] forbids, itself or through its org, from
- * what this fleet already holds: the desktop's `forbiddenOf`
- * (account_limits.ts). The org counts only where [orgOfProject] can tell it.
+ * the [FleetState.accountBlocks] this fleet already holds: the desktop's
+ * `forbiddenOf` (account_limits.ts). The org is [orgId] when the caller knows
+ * it (a session row's own), else the project's as [orgOfProject] reads it
+ * from the org rules; where neither can tell, only the project's own blocks
+ * count, and the hub still refuses.
  */
-fun FleetState.forbiddenAccounts(projectId: Long?): Set<String> {
+fun FleetState.forbiddenAccountsIn(projectId: Long?, orgId: Long? = null): Set<String> {
     if (projectId == null) return emptySet()
-    val project = projects.value.firstOrNull { it.id == projectId }
-    return accountsForbiddenFor(projectId, accounts.value, project?.let { orgs.value.orgOfProject(it) })
+    val org = orgId ?: projects.value.firstOrNull { it.id == projectId }?.let { orgs.value.orgOfProject(it) }
+    return forbiddenAccounts(accountBlocks.value, projectId, org)
 }
 
 /** The defaults [FleetState] hands a fake: a hub without the work graph. */
@@ -251,7 +255,7 @@ private object NoWork {
     val myWork: StateFlow<Set<Long>?> = MutableStateFlow<Set<Long>?>(null).asStateFlow()
     val orgs: StateFlow<OrgDirectory> = MutableStateFlow(OrgDirectory.EMPTY).asStateFlow()
     val accountNames: StateFlow<Map<String, String>> = MutableStateFlow<Map<String, String>>(emptyMap()).asStateFlow()
-    val accounts: StateFlow<List<AccountRow>> = MutableStateFlow<List<AccountRow>>(emptyList()).asStateFlow()
+    val accountBlocks: StateFlow<Map<String, AccountBlocks>> = MutableStateFlow<Map<String, AccountBlocks>>(emptyMap()).asStateFlow()
     val accountUsage: StateFlow<Map<String, AccountUsageSnapshot>> =
         MutableStateFlow<Map<String, AccountUsageSnapshot>>(emptyMap()).asStateFlow()
     val trackers: StateFlow<List<TrackerRow>> = MutableStateFlow<List<TrackerRow>>(emptyList()).asStateFlow()

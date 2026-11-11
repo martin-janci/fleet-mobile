@@ -15,7 +15,9 @@ import dev.claudefleet.mobile.model.suggestedHostOf
 import dev.claudefleet.mobile.net.json
 import kotlinx.serialization.json.JsonNull
 import dev.claudefleet.mobile.model.HostLogin
+import dev.claudefleet.mobile.model.AccountBlocks
 import dev.claudefleet.mobile.model.AccountRow
+import dev.claudefleet.mobile.model.blocks
 import dev.claudefleet.mobile.model.OrgDirectory
 import dev.claudefleet.mobile.model.OrgInfo
 import dev.claudefleet.mobile.model.OrgRule
@@ -70,7 +72,7 @@ private class StartFleet(caps: HubCapabilities = MAIN_HUB) : FleetState {
     override val sessionChanges = MutableSharedFlow<Long>(extraBufferCapacity = 16)
     override val capabilities = MutableStateFlow(caps)
     override val accountNames = MutableStateFlow(mapOf("acc-1" to "m.janci@32bit.sk", "acc-2" to "team@32bit.sk"))
-    override val accounts = MutableStateFlow<List<AccountRow>>(emptyList())
+    override val accountBlocks = MutableStateFlow<Map<String, AccountBlocks>>(emptyMap())
     override val orgs = MutableStateFlow(OrgDirectory.EMPTY)
     override val startProgress = MutableSharedFlow<StartProgress>(extraBufferCapacity = 16)
     override suspend fun refresh() {}
@@ -467,7 +469,7 @@ class NewSessionStartTest {
                 HostLogin(profile = "team", accountUuid = "acc-2", usedPct = 60.0),
             ),
         )
-        val fleet = StartFleet().apply { accounts.value = listOf(AccountRow("acc-1", forbiddenProjectIds = listOf(3))) }
+        val fleet = StartFleet().apply { accountBlocks.value = listOf(AccountRow("acc-1", forbiddenProjectIds = listOf(3))).associate { it.uuid to it.blocks() } }
         val vm = vm(fleet, actions, backgroundScope)
         vm.selectProject(3)
         runCurrent()
@@ -497,7 +499,7 @@ class NewSessionStartTest {
             ),
         )
         val fleet = StartFleet().apply {
-            accounts.value = listOf(AccountRow("acc-1", forbiddenOrgIds = listOf(9)))
+            accountBlocks.value = listOf(AccountRow("acc-1", forbiddenOrgIds = listOf(9))).associate { it.uuid to it.blocks() }
             orgs.value = OrgDirectory(orgs = mapOf(9L to OrgInfo(9, "Acme")), rules = listOf(OrgRule(id = 1, orgId = 9, owner = "me")))
         }
         val vm = vm(fleet, actions, backgroundScope)
@@ -511,7 +513,7 @@ class NewSessionStartTest {
     fun a_host_with_only_forbidden_logins_cannot_start_the_project() = runTest {
         val actions = StartActions()
         val fleet = StartFleet().apply {
-            accounts.value = listOf(AccountRow("acc-1", forbiddenProjectIds = listOf(3)), AccountRow("acc-2", forbiddenProjectIds = listOf(3)))
+            accountBlocks.value = listOf(AccountRow("acc-1", forbiddenProjectIds = listOf(3)), AccountRow("acc-2", forbiddenProjectIds = listOf(3))).associate { it.uuid to it.blocks() }
         }
         val vm = vm(fleet, actions, backgroundScope)
         vm.selectProject(3)

@@ -71,6 +71,9 @@ data class MissionGroups(
     val doneThisWeek: List<Mission>,
 ) {
     val isEmpty: Boolean get() = waiting.isEmpty() && running.isEmpty() && paused.isEmpty() && drafts.isEmpty() && doneThisWeek.isEmpty()
+
+    /** What Pause all stops: every active mission, the ones waiting on a person among them, as the hub pauses them. */
+    val pausable: List<Mission> get() = (waiting + running).filter { it.state == "active" }.distinctBy { it.id }
 }
 
 internal fun missionGroups(missions: List<Mission>, nowSeconds: Long): MissionGroups {
@@ -231,7 +234,7 @@ fun OrbitMissionsScreen(
             item(key = "actions") {
                 Column(modifier = Modifier.padding(horizontal = gutter(), vertical = 12.dp)) {
                     val pauseAll = handlers.onPauseAll
-                    if (pauseAll != null && groups.running.isNotEmpty()) {
+                    if (pauseAll != null && groups.pausable.isNotEmpty()) {
                         TextButton(onClick = { askingPause = true }, enabled = state.busy == null) {
                             Text("Pause all missions…", color = o.statusFailed)
                         }
@@ -249,14 +252,14 @@ fun OrbitMissionsScreen(
     if (askingPause && pauseAll != null) {
         BottomSheet(
             title = "Pause all missions?",
-            meta = pauseAllMeta(groups.running.size),
+            meta = pauseAllMeta(groups.pausable.size),
             onDismiss = { askingPause = false },
-            primary = SheetAction(pauseAllLabel(groups.running.size), enabled = state.busy == null) {
+            primary = SheetAction(pauseAllLabel(groups.pausable.size), enabled = state.busy == null) {
                 askingPause = false
                 pauseAll()
             },
         ) {
-            for (m in groups.running) {
+            for (m in groups.pausable) {
                 PhoneRow(title = m.name.ifBlank { "Mission ${m.id}" }, line = missionRowLine(m), word = missionWord(m), divider = false)
             }
             Text("Resume from here or from Control. Tasks and sessions stay as they are.", color = o.fgMuted, fontSize = 13.sp)

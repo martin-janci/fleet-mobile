@@ -656,11 +656,78 @@ class MyWorkViewModelTest {
         // A due date, against the local day (2026-11-04); none once the task is done.
         val today = 20_761L
         assertEquals("Due Fri · no sessions · tracker down", taskCardLine(tasks[1].copy(dueAt = "2026-11-06"), today))
-        assertEquals("Overdue Oct 30 · no sessions · tracker down", taskCardLine(tasks[1].copy(dueAt = "2026-10-30"), today))
+        assertEquals("Overdue · Oct 30 · no sessions · tracker down", taskCardLine(tasks[1].copy(dueAt = "2026-10-30"), today))
         assertEquals(
             "no sessions · tracker down",
             taskCardLine(tasks[1].copy(dueAt = "2026-10-30", statusCategory = StatusCategory.Done, statusName = null), today),
         )
+    }
+
+    /**
+     * A 0.6.4 hub drops `priority` and `label` without a word and refuses
+     * `sort: priority`: remembered ones are neither sent nor shown (no
+     * Priority group either), and stay remembered for a hub that takes them.
+     */
+    @Test
+    fun a_hub_before_the_priority_release_is_sent_no_priority_label_or_priority_sort() = runTest {
+        val remembered = WorkTreeFilters(status = "open", priority = "urgent", label = "api", sort = "priority")
+        val prefs = FakePrefs().apply {
+            putStringList(MyWorkViewModel.FILTERS_KEY, listOf(json.encodeToString(WorkTreeFilters.serializer(), remembered)))
+        }
+        val old = WorkFleet(caps = WorkFleet.WORK_VIEW).apply {
+            status.value = ConnectionStatus.Connected("0.6.4")
+            hubVersion.value = "0.6.4"
+        }
+        val actions = FakeWorkActions().answeringTree()
+        val vm = myWork(fleet = old, actions = actions, prefs = prefs)
+        vm.attach()
+        runCurrent()
+
+        assertEquals(WorkTreeFilters(status = "open"), actions.treeCalls.single().filters)
+        val s = vm.state.value
+        assertEquals(WorkTreeFilters(status = "open"), s.filters, "nothing on screen claims a filter the hub ignored")
+        assertFalse(s.priorityFilter)
+        assertFalse("priority" in s.sorts)
+        assertEquals(1, s.facets.size)
+
+        val newer = FakeWorkActions().answeringTree()
+        val vm2 = myWork(actions = newer, prefs = prefs)
+        vm2.attach()
+        runCurrent()
+        assertEquals(remembered, newer.treeCalls.single().filters, "a hub that takes them gets them back")
+        assertTrue(vm2.state.value.priorityFilter)
+    }
+
+    /** Until the new filter's own page arrives, the old (empty) one does not say "No tasks match" the new filter. */
+    @Test
+    fun no_empty_sentence_for_a_filter_whose_page_is_still_coming() = runTest {
+        val actions = FakeWorkActions().apply { treeAnswer = { _, _ -> WorkTreePage() } }
+        val vm = myWork(actions = actions)
+        vm.attach()
+        vm.setPriority("urgent")
+        runCurrent()
+        assertTrue(vm.state.value.isEmpty)
+
+        val gate = CompletableDeferred<Unit>()
+        actions.treeGate = { gate.await() }
+        vm.setPriority("high")
+        runCurrent()
+        assertFalse(vm.state.value.isEmpty, "the urgent page says nothing about high")
+        assertFalse(vm.state.value.pageCurrent)
+
+        gate.complete(Unit)
+        runCurrent()
+        assertTrue(vm.state.value.isEmpty)
+        assertEquals("Priority: High", vm.state.value.facets.joinToString { it.label })
+    }
+
+    /** The Label chip matches as the hub does, case and accents ignored: a saved "uloha" selects the page's "Úloha", not a second chip. */
+    @Test
+    fun the_label_chip_matches_by_fold() {
+        assertTrue(sameLabel("uloha", "Úloha"))
+        assertFalse(sameLabel(null, "Úloha"))
+        assertEquals(listOf("Úloha", "api"), labelFilterChoices(listOf("Úloha", "api"), "ULOHA"))
+        assertEquals(listOf("api", "old"), labelFilterChoices(listOf("api"), "old"))
     }
 
     // ---- a new task ----

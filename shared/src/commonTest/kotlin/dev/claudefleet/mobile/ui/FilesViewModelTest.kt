@@ -122,6 +122,33 @@ class FilesViewModelTest {
         assertTrue(files.state.value.isEmpty, "a read that answered nothing is empty")
     }
 
+    /** Review phone_misc 5: Try again only re-lists, so it is offered only for a list read's failure. */
+    @Test
+    fun try_again_is_offered_for_a_failed_list_not_for_a_failed_remove() = runTest {
+        val actions = object : DownloadActions by FakeDownloads() {
+            var fail = true
+            override suspend fun list(sessionId: Long?, limit: Int?): DownloadList =
+                if (fail) throw HubError.Transport(IllegalStateException("x")) else DownloadList(listOf(download(1)))
+            override suspend fun remove(id: Long): Boolean = throw HubError.Transport(IllegalStateException("down"))
+        }
+        val files = FilesViewModel(FilesFleet(ALL), actions, backgroundScope, true, FakeHandoff(), clock = { NOW })
+        files.refresh().join()
+        runCurrent()
+        assertTrue(files.state.value.retryable, "a failed list offers Try again")
+
+        actions.fail = false
+        files.refresh().join()
+        runCurrent()
+        assertFalse(files.state.value.retryable)
+        actions.fail = true
+        files.askRemove(1)
+        files.confirmRemove()!!.join()
+        runCurrent()
+        assertNotNull(files.state.value.error)
+        assertTrue(files.state.value.listFailed, "the follow-up list failed too")
+        assertFalse(files.state.value.retryable, "the banner is the remove's failure, which a re-list would not redo")
+    }
+
     private fun vm(
         fleet: FilesFleet,
         actions: FakeDownloads,

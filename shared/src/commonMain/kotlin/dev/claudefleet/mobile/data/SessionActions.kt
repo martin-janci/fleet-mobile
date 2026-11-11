@@ -111,9 +111,13 @@ interface SessionActions {
     suspend fun restartWith(sessionId: Long, model: String?, effort: String?): Unit =
         throw UnsupportedOperationException("restart_session { model, effort }")
 
-    /** Which login on [hostAlias] has room left (`check_account_headroom`), for work in [projectId]. */
-    suspend fun accountHeadroom(hostAlias: String, profile: String?, projectId: Long? = null): Headroom =
+    /** Which login on [hostAlias] has room left (`check_account_headroom`). */
+    suspend fun accountHeadroom(hostAlias: String, profile: String?): Headroom =
         throw UnsupportedOperationException("check_account_headroom")
+
+    /** [accountHeadroom] for work in [projectId]: the hub suggests no account the project forbids. */
+    suspend fun accountHeadroomIn(hostAlias: String, profile: String?, projectId: Long?): Headroom =
+        accountHeadroom(hostAlias, profile)
 
     /**
      * Send later: typed now if idle, else kept by the hub for the next idle
@@ -250,7 +254,10 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
         session.withClient { it.restartWith(sessionId, model, effort) }
     }
 
-    override suspend fun accountHeadroom(hostAlias: String, profile: String?, projectId: Long?): Headroom =
+    override suspend fun accountHeadroom(hostAlias: String, profile: String?): Headroom =
+        session.withClient { it.checkAccountHeadroom(hostAlias, profile) }
+
+    override suspend fun accountHeadroomIn(hostAlias: String, profile: String?, projectId: Long?): Headroom =
         session.withClient { it.checkAccountHeadroom(hostAlias, profile, projectId) }
 
     override suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming): QueuePromptResult =

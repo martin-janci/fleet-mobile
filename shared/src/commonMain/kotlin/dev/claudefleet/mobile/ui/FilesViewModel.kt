@@ -80,6 +80,11 @@ data class FilesUiState(
     val error: Friendly? = null,
     /** The last list read failed. Not cleared by Dismiss: the list is still unread. */
     val listFailed: Boolean = false,
+    /**
+     * The banner shows the list read's failure, so Try again (a re-list) is
+     * what would mend it; an action's failure is not redone by a re-list.
+     */
+    val retryable: Boolean = false,
 ) {
     /** Empty only when the hub answered with nothing; a failed read is not "No files yet". */
     val isEmpty: Boolean get() = loaded && files.isEmpty() && !listFailed
@@ -164,6 +169,8 @@ class FilesViewModel(
 
     /** Pull to refresh: the spinner stays until the hub has answered. */
     fun refresh(): Job = scope.launch {
+        // Single-flight: a second tap or pull while one is out sends no second list.
+        if (local.value.refreshing) return@launch
         local.update { it.copy(refreshing = true) }
         load()
         local.update { it.copy(refreshing = false) }
@@ -330,6 +337,7 @@ class FilesViewModel(
             notice = l.notice,
             error = l.error ?: l.listError,
             listFailed = l.listFailed,
+            retryable = l.error == null && l.listFailed && l.listError != null,
         )
     }
 

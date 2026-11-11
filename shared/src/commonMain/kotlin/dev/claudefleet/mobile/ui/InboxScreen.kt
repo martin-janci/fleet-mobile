@@ -57,6 +57,8 @@ import dev.claudefleet.mobile.model.relativeTime
 import dev.claudefleet.mobile.model.relativeWithin
 import dev.claudefleet.mobile.model.roomText
 import dev.claudefleet.mobile.ui.kit.OrbitChip
+import dev.claudefleet.mobile.ui.kit.BottomSheet
+import dev.claudefleet.mobile.ui.kit.SheetAction
 import dev.claudefleet.mobile.ui.kit.PhoneRow
 
 /**
@@ -475,7 +477,7 @@ private fun AgentActionButtons(
  * from whom, Approve all / Reject all, and each item (which issue, which
  * fields) under Show each with its own Approve and Reject.
  */
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun AgentActionGroupCard(
     g: AgentActionGroup,
@@ -488,8 +490,24 @@ private fun AgentActionGroupCard(
     onRejectAll: (AgentActionGroup) -> Unit,
 ) {
     var open by remember(g.key) { mutableStateOf(false) }
+    // Approve all asks first, naming each write: one tap answers every one.
+    var confirmingAll by remember(g.key) { mutableStateOf(false) }
     val newest = g.items.first().first
     val busy = g.items.any { it.first.id in state.busy }
+    if (confirmingAll) {
+        BottomSheet(
+            title = "Approve all ${g.items.size}?",
+            meta = g.from?.let { "Proposed by $it. Each runs within a minute." } ?: "Each runs within a minute.",
+            onDismiss = { confirmingAll = false },
+            primary = SheetAction("Approve all ${g.items.size}", enabled = !busy) {
+                confirmingAll = false
+                onApproveAll(g)
+            },
+            scrollable = true,
+        ) {
+            for ((a, about) in g.items) Text("• " + agentActionTitle(a, about), color = Fleet.colors.fg, fontSize = 14.sp)
+        }
+    }
     val notice = g.items.firstNotNullOfOrNull { state.notices[it.first.id] }
     Column {
         PhoneRow(
@@ -504,7 +522,7 @@ private fun AgentActionGroupCard(
         Column(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp)) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (state.canAnswer) {
-                    OutlinedButton(onClick = { onApproveAll(g) }, enabled = !busy) { Text("Approve all ${g.items.size}") }
+                    OutlinedButton(onClick = { confirmingAll = true }, enabled = !busy) { Text("Approve all ${g.items.size}…") }
                     TextButton(onClick = { onRejectAll(g) }, enabled = !busy) { Text("Reject all") }
                 }
                 TextButton(onClick = { open = !open }) { Text(if (open) "Hide" else "Show each") }

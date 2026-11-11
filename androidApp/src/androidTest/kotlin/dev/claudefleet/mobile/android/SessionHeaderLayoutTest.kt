@@ -25,7 +25,7 @@ import org.junit.runner.RunWith
  * The session header on a narrow phone, with everything it can carry at once.
  *
  * It used to be one `TopAppBar` whose `actions` held the status strip, the
- * `/compact` chip, a retirement chip and five icons. `actions` is measured
+ * `/compact` chip, a clean-up chip and five icons. `actions` is measured
  * before the title, so on a phone the title got zero width: the host alias
  * wrapped a character per line, the bar grew most of the way down the screen,
  * and the strip ran off the left edge over the back arrow. Every one of those
@@ -102,7 +102,7 @@ class SessionHeaderLayoutTest {
         assertTrue("the strip is not under the title: ${strip.top} vs ${host.bottom}", strip.top >= host.bottom)
 
         // Everything the header offers is on screen and whole.
-        for (label in listOf("/compact", "retire: requested")) {
+        for (label in listOf("/compact", "Clean up in progress")) {
             compose.onNodeWithText(label).assertIsDisplayed()
             val right = compose.onNodeWithText(label).getBoundsInRoot().right
             assertTrue("\"$label\" is cut off at $right", right <= WIDTH)

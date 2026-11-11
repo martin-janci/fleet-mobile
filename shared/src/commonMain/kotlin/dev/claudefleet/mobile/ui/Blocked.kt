@@ -15,7 +15,16 @@ sealed interface Answer {
      * A dialog's numbered option, pressed as the digit key [n] — never typed
      * as text (see [HUB_VERSION_DIGIT_KEYS] for why text cannot answer it).
      */
-    data class Option(val n: Int, val label: String, val checked: Boolean = false) : Answer
+    data class Option(
+        val n: Int,
+        val label: String,
+        val checked: Boolean = false,
+        /** The hub marks this answer as saved beyond the session (`PendingOption.persists`). */
+        val persists: Boolean = false,
+    ) : Answer {
+        /** The folder-wide choice the phone never sends: the hub's flag, or the label rule for older hubs. */
+        val isFolderWide: Boolean get() = persists || isFolderRule(label)
+    }
     data object Enter : Answer
 
     /**
@@ -53,6 +62,15 @@ data class BlockedCard(
     /** A multi-select question: an option's chip toggles its box, [Answer.Continue] moves on. */
     val multi: Boolean = false,
 )
+
+/**
+ * What makes [this] another question for the tap guard: the headline, the
+ * options' numbers and labels and the detail — not a multi-select's ticks,
+ * which change on every tap and must not re-arm the dead time (the
+ * desktop's fingerprint leaves them out too).
+ */
+internal fun BlockedCard.questionKey(): List<Any?> =
+    listOf(headline, detail, multi) + answers.map { if (it is Answer.Option) Answer.Option(it.n, it.label) else it }
 
 /**
  * The stuck-kind -> card mapping lives here and only here.
@@ -97,15 +115,16 @@ fun blockedCard(row: SessionRow, hubVersion: String?): BlockedCard? {
             val headline = p?.question ?: Activity.pending(row.currentActivity) ?: "Waiting for input"
             val digits = semverAtLeast(hubVersion, HUB_VERSION_DIGIT_KEYS)
             val options = if (digits) {
-                p?.options.orEmpty().filter { it.n in 1..ANSWER_MAX_DIGIT }.map { Answer.Option(it.n, it.label, it.checked) }
+                p?.options.orEmpty().filter { it.n in 1..ANSWER_MAX_DIGIT }.map { Answer.Option(it.n, it.label, it.checked, persists = it.persists) }
             } else {
                 emptyList()
             }
             val multi = p?.multi == true
             val continueKey = if (multi && digits) listOf(Answer.Continue) else emptyList()
             // A rule Claude Code saves for the folder answers every later
-            // session there: not a one-tap choice on a phone (plan v2 R4).
-            val kept = if (multi) options else options.filterNot { isFolderRule(it.label) }
+            // session there: not a one-tap choice on a phone (plan v2 R4). The
+            // hub says so itself (`persists`); an older hub only by the label.
+            val kept = if (multi) options else options.filterNot { it.isFolderWide }
             val explain = if (kept.size < options.size) FOLDER_RULE_ON_DESKTOP else null
             BlockedCard(headline, kept + continueKey + keyAnswers, explain = explain, detail = p?.detail, multi = multi)
         }
