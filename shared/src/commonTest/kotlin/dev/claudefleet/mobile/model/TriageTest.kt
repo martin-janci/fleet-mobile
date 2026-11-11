@@ -125,7 +125,8 @@ class TriageTest {
 
     @Test
     fun a_broken_lifecycle_is_its_own_bucket_however_it_broke() {
-        assertEquals(TriageBucket.LIFECYCLE, row(safeKillState = "failed").triageBucket())
+        // claude-fleet HITL audit H-17: a failed clean up is Failed.
+        assertEquals(TriageBucket.FAILED, row(safeKillState = "failed").triageBucket())
         assertEquals(TriageBucket.LIFECYCLE, row(safeKillState = "requested").triageBucket())
         assertEquals(TriageBucket.LIFECYCLE, row(status = "ghost").triageBucket())
         assertEquals(TriageBucket.LIFECYCLE, row(lostAt = NOW - 10).triageBucket())

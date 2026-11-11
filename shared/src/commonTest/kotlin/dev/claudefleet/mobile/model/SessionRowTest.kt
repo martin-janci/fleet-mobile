@@ -132,7 +132,7 @@ class SessionRowTest {
         assertEquals("waiting", calm.copy(claudeStatus = "blocked", stuckKind = "oom").attentionReason)
         assertEquals("stuck", calm.copy(stuckKind = "press_enter").attentionReason)
         assertEquals("failed", calm.copy(claudeStatus = "failed").attentionReason)
-        assertEquals("lifecycle", calm.copy(safeKillState = "failed").attentionReason)
+        assertEquals("failed", calm.copy(safeKillState = "failed").attentionReason)
         assertEquals("lifecycle", calm.copy(safeKillState = "requested").attentionReason)
         assertNull(calm.copy(safeKillState = "waiting_for_clean").attentionReason)
         assertEquals("lifecycle", calm.copy(status = "ghost").attentionReason)

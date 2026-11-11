@@ -95,6 +95,9 @@ fun SessionRow.triageBucket(idleSeconds: Long = 0, now: Long = 0): TriageBucket 
     // A merged or closed PR's checks can fail for good: nobody has anything left to fix.
     val prFinished = prEvidence?.state.let { it == "MERGED" || it == "CLOSED" }
     if (ciStatus == "failing" && claudeStatus in IDLE_STATUSES && !prFinished) return TriageBucket.CI_FAILING
+    // A failed clean up could not commit or push: Failed, as the hub files it
+    // (claude-fleet HITL audit H-17), not Paused.
+    if (safeKillState == "failed") return TriageBucket.FAILED
     if (isDoneUnread) return TriageBucket.DONE_UNREAD
     if (isLifecycleBroken) return TriageBucket.LIFECYCLE
     if (isIdleLong(idleSeconds, now)) return TriageBucket.IDLE_LONG
@@ -135,7 +138,7 @@ private val SessionRow.isDoneUnread: Boolean
     get() = status != "ghost" && lostAt == null && claudeStatus in IDLE_STATUSES && isUnread
 
 private val SessionRow.isLifecycleBroken: Boolean
-    get() = safeKillState == "failed" || safeKillState == "requested" || status == "ghost" || lostAt != null
+    get() = safeKillState == "requested" || status == "ghost" || lostAt != null
 
 private fun SessionRow.isIdleLong(idleSeconds: Long, now: Long): Boolean {
     if (idleSeconds <= 0) return false

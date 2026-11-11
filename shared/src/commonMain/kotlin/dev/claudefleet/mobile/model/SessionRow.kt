@@ -208,7 +208,9 @@ data class SessionRow(
             claudeStatus == "blocked" || pendingForm != null -> "waiting"
             stuckKind != null -> "stuck"
             claudeStatus == "failed" -> "failed"
-            safeKillState == "failed" || safeKillState == "requested" ||
+            // A failed clean up is Failed (claude-fleet HITL audit H-17).
+            safeKillState == "failed" -> "failed"
+            safeKillState == "requested" ||
                 status == "ghost" || lostAt != null -> "lifecycle"
             else -> null
         }
