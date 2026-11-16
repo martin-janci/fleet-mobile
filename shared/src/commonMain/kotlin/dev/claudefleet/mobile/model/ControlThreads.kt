@@ -38,8 +38,17 @@ fun threadWaitWords(reason: String): String = when (reason) {
     else -> "Waits on you"
 }
 
+/**
+ * A reason that puts a thread in Needs you: the hub's counted states (Action
+ * required, Failed, Blocked), as the desktop's `countsTowardBadge`. A lost or
+ * ghost row (`lifecycle`, state Paused) needs no answer from anyone, so it
+ * goes by what it was doing (claude-fleet 2026-11-16, "Needs you" flood).
+ */
+private val SessionRow.threadNeedsYou: Boolean
+    get() = needsAttention && attention?.state != "paused" && attentionReason != "lifecycle"
+
 private fun sessionGroup(s: SessionRow, since: Long): ThreadGroup = when {
-    s.needsAttention -> ThreadGroup.NEEDS
+    s.threadNeedsYou -> ThreadGroup.NEEDS
     s.claudeStatus == "working" -> ThreadGroup.WORKING
     (s.lastStopAt ?: 0) >= since || (s.claudeStatus == "completed" && (s.lastActivityAt ?: 0) >= since) -> ThreadGroup.DONE
     else -> ThreadGroup.EARLIER
@@ -55,7 +64,9 @@ private fun sessionLine(s: SessionRow): String {
         "stopped" -> "Stopped"
         else -> null
     }
-    return listOfNotNull(lostLine(s) ?: status, s.hostAlias.ifBlank { null }).joinToString(" · ")
+    // A row in Needs you says why ("Host down · mefistos"), not only its status.
+    val why = s.attentionReason?.takeIf { s.threadNeedsYou }?.let(::reasonLabel)
+    return listOfNotNull(why ?: lostLine(s) ?: status, s.hostAlias.ifBlank { null }).joinToString(" · ")
 }
 
 private fun missionGroup(state: String, waiting: Boolean, updatedAt: Long, since: Long): ThreadGroup = when {
