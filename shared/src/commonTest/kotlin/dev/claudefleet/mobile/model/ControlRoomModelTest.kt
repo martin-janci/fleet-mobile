@@ -59,6 +59,24 @@ class ControlRoomModelTest {
     }
 
     @Test
+    fun a_needs_you_thread_says_why_and_a_lost_one_needs_nobody() {
+        val rows = listOf(
+            SessionRow(
+                id = 2, tmuxName = "task-573", origin = "operator", hostAlias = "mefistos", claudeStatus = "working",
+                lastActivityAt = 1_500, attention = Attention(reason = "host_down", state = "blocked"),
+            ),
+            SessionRow(
+                id = 3, tmuxName = "gone", origin = "operator", hostAlias = "htz", claudeStatus = "idle", lostAt = 900,
+                lastActivityAt = 900, attention = Attention(reason = "lifecycle", state = "paused"),
+            ),
+        )
+        val by = buildThreads(rows, emptyList(), emptyList(), operatorId = null, since = 1_000).associateBy { it.key }
+        assertEquals(ThreadGroup.NEEDS, by.getValue("s:2").group)
+        assertEquals("Host down · mefistos", by.getValue("s:2").line)
+        assertEquals(ThreadGroup.EARLIER, by.getValue("s:3").group)
+    }
+
+    @Test
     fun a_missions_graph_lays_its_steps_out_by_wave_and_marks_where_it_is() {
         val d = MissionDetail(
             mission = Mission(id = 9, name = "Ship it"),
