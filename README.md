@@ -273,12 +273,11 @@ the log the hub reads afterwards.
 
 ## What it does
 
-- **Layout** — Classic or New: *New
-  navigation* in Settings, on unless a phone chose Classic. Classic's bottom bar is
-  Sessions, Work, Files, Hosts and Settings. New's is Inbox, Sessions,
-  Control, Work and More; Hosts, Files, Settings and the places below move
-  under More, and a session opens in tabs (Conversation, the agent, Terminals,
-  Files, Details).
+- **Layout** — the bottom bar is Inbox, Sessions, Control, Work and More;
+  Hosts, Files, Settings and the places below open from More, and a session
+  opens in tabs (Conversation, the agent, Terminals, Files, Details). The old
+  Classic bar and its switch in Settings are gone (redesign 14.13); a phone
+  that had chosen Classic opens on this bar.
 - **Sessions** — every session across every host, grouped by host and then by
   project, with status, the one-line activity the hub already computes, and a
   filter for the ones that need a human (blocked or stuck). A long press picks
@@ -309,11 +308,11 @@ the log the hub reads afterwards.
   one (each deletable when no session lives in it); **Add a project** (clone
   a URL or a repository `gh` there sees, or a new one, on GitHub too after a
   confirmation); or a **Background agent** started on a task.
-- **Usage** (More → Accounts and usage; Settings → Usage in Classic) — estimated cost over 24 h / 7 / 30 days: the
+- **Usage** (More → Accounts and usage, or Settings → Usage) — estimated cost over 24 h / 7 / 30 days: the
   total, by host, by day and the costliest sessions; the fleet's Claude
   accounts. A subscription's 5-hour and weekly windows are the desktop's own
   read and are not served by the hub.
-- **Company** (More → Organisations; Settings → Company in Classic; once the
+- **Company** (More → Organisations, or Settings → Company; once the
   hub lists an organisation to this device) — claude-fleet's org overview, read only: each org's sessions and
   how many need you, its hosts and trackers, and, as far as the hub sends
   them to this token, its spend today / this week / this month against its

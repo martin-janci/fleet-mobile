@@ -57,9 +57,8 @@ class TheBackGestureReachesTheNavigatorTest {
     /**
      * Enabled on the screens pushed over a tab — a session, the New session
      * form, a task (the Work view's detail), a session's worktree — and
-     * nowhere else: the navigator's own contract, `nav.isPushed` (which knows
-     * the layout: Hosts, Files and Settings are pushed over More on the New
-     * bar), read directly
+     * nowhere else: the navigator's own contract, `nav.isPushed` (Hosts, Files
+     * and Settings are pushed over More too), read directly
      * rather than spelled out again here where it could drift from it.
      *
      * On a tab the handler must be *disabled* rather than enabled-and-ignoring:
@@ -83,10 +82,8 @@ class TheBackGestureReachesTheNavigatorTest {
     /**
      * One file, and one handler per question. Two that answered the same
      * question would fight over the gesture in an order nobody picked. The
-     * Settings tab's closes an open fleet settings page (drawn inside the
-     * tab, so not a pushed screen); on the New layout the Orbit settings
-     * (redesign 14.11) has its own in the other branch of the same `if`,
-     * which also closes an open group, so only one of the two is ever composed. The worktree screen's answers another:
+     * Orbit settings' (redesign 14.11) closes an open fleet settings page or
+     * an open group before `nav.back()` leaves Settings. The worktree screen's answers another:
      * enabled only while a diff, commit or file is open over its tab, and
      * composed inside the screen — after `App`'s — so it is asked first and
      * closes what is open before `nav.back()` leaves the screen. A session's
@@ -135,14 +132,13 @@ class TheBackGestureReachesTheNavigatorTest {
                 "practiceState.open != null",
                 "whatsNew != null",
                 "fleetCheck || importing || (help.mode == null && whatsNew == null)",
-                // SettingsRoute's two, in source order after FleetRoute; it is
-                // composed from FleetRoute's Settings branch, so at runtime they
-                // still come before What's new's.
+                // SettingsRoute's, in source order after FleetRoute; it is
+                // composed from FleetRoute's Settings branch, so at runtime it
+                // still comes before What's new's.
                 "fleetPageOpen || place != SettingsPlace.Home",
-                "fleetPageOpen",
-                "wizard && wizardStep.previous != null && !state.creating",
-                "wizard && wizardStep.previous == null && !state.creating && newSessionTyped(state)",
-                "wizard && toolsState.addingOn != null",
+                "wizardStep.previous != null && !state.creating",
+                "wizardStep.previous == null && !state.creating && newSessionTyped(state)",
+                "toolsState.addingOn != null",
                 "filesOpen",
                 "full != SessionFull.None",
                 "repairWait != null",

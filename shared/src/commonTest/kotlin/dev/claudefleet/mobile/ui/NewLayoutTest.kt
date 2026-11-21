@@ -2,7 +2,6 @@ package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.SessionRow
-import dev.claudefleet.mobile.store.FakePrefs
 import dev.claudefleet.mobile.ui.kit.StatusWord
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -10,54 +9,46 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * The New bar (redesign 14.2): Inbox · Sessions · Control · Work · More, with
- * every Classic destination still reachable. The parity half of the step is
- * [every_classic_destination_opens_from_new]; the rest is how back and the
- * lit tab behave once Hosts, Files and Settings are pushed over More.
+ * The Orbit Fleet bar (redesign 14.2): Inbox · Sessions · Control · Work ·
+ * More, the only bar since the 14.13 sign-off, with every destination the old
+ * Classic bar had still reachable. The parity half is
+ * [every_former_tab_opens_from_the_bar]; the rest is how back and the lit tab
+ * behave with Hosts, Files and Settings pushed over More.
  */
 class NewLayoutTest {
 
     @Test
-    fun the_bars_are_the_plans() {
-        assertEquals(listOf(Tab.Sessions, Tab.Work, Tab.Files, Tab.Hosts, Tab.Settings), PhoneLayout.Classic.tabs)
-        assertEquals(listOf(Tab.Inbox, Tab.Sessions, Tab.Control, Tab.Work, Tab.More), PhoneLayout.New.tabs)
+    fun the_bar_is_the_plans() {
+        assertEquals(listOf(Tab.Inbox, Tab.Sessions, Tab.Control, Tab.Work, Tab.More), Tab.entries)
     }
 
     @Test
-    fun new_opens_on_the_inbox_and_classic_on_the_list() {
-        assertEquals(Screen.Inbox, Navigator(PhoneLayout.New).screen.value)
-        assertEquals(Tab.Inbox, Navigator(PhoneLayout.New).tab.value)
-        assertEquals(Screen.Sessions(), Navigator().screen.value)
+    fun the_app_opens_on_the_inbox() {
+        assertEquals(Screen.Inbox, Navigator().screen.value)
+        assertEquals(Tab.Inbox, Navigator().tab.value)
     }
 
-    /** Nothing is lost, only moved: each Classic tab's screen is reachable on the New bar. */
+    /** Nothing is lost, only moved: each screen the Classic bar had as a tab is reachable. */
     @Test
-    fun every_classic_destination_opens_from_new() {
-        for (tab in PhoneLayout.Classic.tabs) {
-            val nav = Navigator(PhoneLayout.New)
-            when (tab) {
-                Tab.Sessions -> nav.select(Tab.Sessions)
-                Tab.Work -> nav.select(Tab.Work)
-                Tab.Files -> { nav.select(Tab.More); nav.openFromMore(Screen.Files) }
-                Tab.Hosts -> { nav.select(Tab.More); nav.openFromMore(Screen.Hosts) }
-                Tab.Settings -> { nav.select(Tab.More); nav.openFromMore(Screen.Settings) }
-                else -> error("not a Classic tab: $tab")
-            }
-            val expected = when (tab) {
-                Tab.Sessions -> Screen.Sessions()
-                Tab.Work -> Screen.Work
-                Tab.Files -> Screen.Files
-                Tab.Hosts -> Screen.Hosts
-                else -> Screen.Settings
-            }
-            assertEquals(expected, nav.screen.value, "$tab from the New bar")
+    fun every_former_tab_opens_from_the_bar() {
+        val opens: List<Pair<Screen, (Navigator) -> Unit>> = listOf(
+            Screen.Sessions() to { nav: Navigator -> nav.select(Tab.Sessions) },
+            Screen.Work to { nav: Navigator -> nav.select(Tab.Work) },
+            Screen.Files to { nav: Navigator -> nav.select(Tab.More); nav.openFromMore(Screen.Files) },
+            Screen.Hosts to { nav: Navigator -> nav.select(Tab.More); nav.openFromMore(Screen.Hosts) },
+            Screen.Settings to { nav: Navigator -> nav.select(Tab.More); nav.openFromMore(Screen.Settings) },
+        )
+        for ((expected, open) in opens) {
+            val nav = Navigator()
+            open(nav)
+            assertEquals(expected, nav.screen.value, "$expected from the bar")
         }
     }
 
     @Test
     fun hosts_files_and_settings_sit_over_more_and_back_returns_there() {
         for (screen in listOf(Screen.Hosts, Screen.Files, Screen.Settings)) {
-            val nav = Navigator(PhoneLayout.New)
+            val nav = Navigator()
             nav.select(Tab.More)
             nav.openFromMore(screen)
             assertEquals(Tab.More, nav.tab.value, "More stays lit over $screen")
@@ -70,7 +61,7 @@ class NewLayoutTest {
 
     @Test
     fun usage_and_company_open_over_more_too() {
-        val nav = Navigator(PhoneLayout.New)
+        val nav = Navigator()
         nav.select(Tab.More)
         nav.openUsage()
         assertEquals(Tab.More, nav.tab.value)
@@ -83,7 +74,7 @@ class NewLayoutTest {
 
     @Test
     fun a_session_opened_from_the_inbox_comes_back_to_it() {
-        val nav = Navigator(PhoneLayout.New)
+        val nav = Navigator()
         nav.open(7)
         assertEquals(Tab.Inbox, nav.tab.value)
         nav.back()
@@ -92,7 +83,7 @@ class NewLayoutTest {
 
     @Test
     fun the_coordinator_session_opened_from_control_keeps_control_lit() {
-        val nav = Navigator(PhoneLayout.New)
+        val nav = Navigator()
         nav.select(Tab.Control)
         nav.open(42)
         assertEquals(Tab.Control, nav.tab.value)
@@ -101,30 +92,8 @@ class NewLayoutTest {
     }
 
     @Test
-    fun on_classic_hosts_files_and_settings_stay_tabs() {
-        val nav = Navigator()
-        nav.openFromMore(Screen.Hosts)
-        assertEquals(Tab.Hosts, nav.tab.value)
-        assertFalse(nav.isPushed(Screen.Hosts))
-        assertFalse(nav.back())
-    }
-
-    @Test
-    fun switching_layout_starts_on_the_new_bars_first_tab() {
-        val nav = Navigator()
-        nav.open(7)
-        nav.setLayout(PhoneLayout.New)
-        assertEquals(Screen.Inbox, nav.screen.value)
-        assertEquals(PhoneLayout.New, nav.layout.value)
-        assertFalse(nav.back(), "no history carried across")
-        nav.setLayout(PhoneLayout.Classic)
-        assertEquals(Screen.Sessions(), nav.screen.value)
-        assertEquals(Tab.Sessions, nav.tab.value)
-    }
-
-    @Test
     fun losing_files_under_more_goes_back_to_more() {
-        val nav = Navigator(PhoneLayout.New)
+        val nav = Navigator()
         nav.select(Tab.More)
         nav.openFromMore(Screen.Files)
         nav.filesUnavailable()
@@ -132,23 +101,11 @@ class NewLayoutTest {
     }
 
     @Test
-    fun losing_work_on_new_goes_to_the_inbox() {
-        val nav = Navigator(PhoneLayout.New)
+    fun losing_work_goes_to_the_inbox() {
+        val nav = Navigator()
         nav.select(Tab.Work)
         nav.workUnavailable()
         assertEquals(Screen.Inbox, nav.screen.value)
-    }
-
-    @Test
-    fun the_layout_is_remembered_and_new_is_the_default() {
-        val prefs = FakePrefs()
-        assertEquals(PhoneLayout.New, loadPhoneLayout(prefs), "G5.4: New is the default")
-        savePhoneLayout(prefs, PhoneLayout.Classic)
-        assertEquals(PhoneLayout.Classic, loadPhoneLayout(prefs), "a phone that chose Classic keeps it")
-        savePhoneLayout(prefs, PhoneLayout.New)
-        assertEquals(PhoneLayout.New, loadPhoneLayout(prefs))
-        prefs.putStringList(LAYOUT_PREF, listOf("something-newer"))
-        assertEquals(PhoneLayout.New, loadPhoneLayout(prefs), "an unknown value falls back to the default")
     }
 
     @Test

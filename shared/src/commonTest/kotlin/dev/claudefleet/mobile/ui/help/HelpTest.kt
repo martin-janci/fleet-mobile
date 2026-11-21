@@ -8,7 +8,6 @@ import dev.claudefleet.mobile.store.FakePrefs
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import dev.claudefleet.mobile.ui.Navigator
-import dev.claudefleet.mobile.ui.PhoneLayout
 import dev.claudefleet.mobile.ui.Screen
 import dev.claudefleet.mobile.ui.Tab
 import kotlin.test.Test
@@ -202,7 +201,7 @@ class HelpTest {
 
     @Test
     fun learn_practice_and_guides_sit_over_more_and_back_returns_there() {
-        val nav = Navigator(PhoneLayout.New)
+        val nav = Navigator()
         nav.select(Tab.More)
         nav.openLearn()
         assertEquals(Screen.Learn, nav.screen.value)

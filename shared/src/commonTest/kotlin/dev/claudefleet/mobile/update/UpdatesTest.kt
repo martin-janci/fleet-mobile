@@ -2,7 +2,6 @@ package dev.claudefleet.mobile.update
 
 import dev.claudefleet.mobile.store.FakePrefs
 import dev.claudefleet.mobile.ui.Navigator
-import dev.claudefleet.mobile.ui.PhoneLayout
 import dev.claudefleet.mobile.ui.Screen
 import dev.claudefleet.mobile.ui.Tab
 import dev.claudefleet.mobile.ui.hubMismatchWords
@@ -490,7 +489,7 @@ class UpdatesTest {
 
     @Test
     fun the_updating_screen_sits_over_more_and_back_returns_there() {
-        val nav = Navigator(PhoneLayout.New)
+        val nav = Navigator()
         nav.select(Tab.More)
         nav.openUpdate()
         assertEquals(Screen.Update, nav.screen.value)

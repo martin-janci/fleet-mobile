@@ -85,7 +85,7 @@ class OrbitMissionsTest {
 
     @Test
     fun missions_open_over_control_and_back_returns_there() {
-        val nav = Navigator(PhoneLayout.New)
+        val nav = Navigator()
         nav.select(Tab.Control)
         nav.openMissions()
         assertEquals(Screen.Missions, nav.screen.value)
