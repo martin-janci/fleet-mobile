@@ -73,9 +73,6 @@ fun SettingsScreen(
     onOpenCompany: (() -> Unit)? = null,
     /** Notifications while the app is away; [NoBackgroundNotifier] draws nothing. */
     notifier: BackgroundNotifier = NoBackgroundNotifier,
-    /** The bottom bar this phone draws (redesign 14.2); null hides the switch. */
-    layout: PhoneLayout? = null,
-    onSetLayout: (PhoneLayout) -> Unit = {},
     /** What tapping a Work row opens; null hides the choice. */
     workTap: WorkTapChoice? = null,
     onSetWorkTap: (WorkTapChoice) -> Unit = {},
@@ -114,8 +111,6 @@ fun SettingsScreen(
             Field("Hub version", state.hubVersion)
 
             if (notifier.supported) NotifyRow(notifier)
-
-            if (layout != null) LayoutRow(layout, onSetLayout)
 
             if (workTap != null) WorkTapRow(workTap, onSetWorkTap)
 
@@ -192,33 +187,6 @@ fun SettingsScreen(
             Spacer(Modifier.height(24.dp))
         }
         fleetSaveBar()
-    }
-}
-
-/**
- * Classic or New navigation, like the desktop's layout switch. New is the
- * Orbit Fleet bar (Inbox, Sessions, Control, Work, More); everything the
- * Classic bar had is still there, under More or in the session.
- */
-@Composable
-internal fun LayoutRow(layout: PhoneLayout, onSetLayout: (PhoneLayout) -> Unit) {
-    val on = layout == PhoneLayout.New
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .toggleable(value = on, role = Role.Switch, onValueChange = { onSetLayout(if (it) PhoneLayout.New else PhoneLayout.Classic) })
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text("New navigation", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "Inbox, Sessions, Control, Work and More. Hosts, Files and Settings move under More.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Switch(checked = on, onCheckedChange = null)
     }
 }
 

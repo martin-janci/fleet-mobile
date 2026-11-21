@@ -14,12 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.ui.unit.dp
-import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -157,11 +152,9 @@ import dev.claudefleet.mobile.ui.controlForms
 import dev.claudefleet.mobile.ui.TodayLink
 import dev.claudefleet.mobile.ui.asksAboutToday
 import dev.claudefleet.mobile.ui.FilesHandlers
-import dev.claudefleet.mobile.ui.FilesScreen
 import dev.claudefleet.mobile.ui.FilesViewModel
 import dev.claudefleet.mobile.ui.rememberFileHandoff
 import dev.claudefleet.mobile.ui.MyWorkHandlers
-import dev.claudefleet.mobile.ui.MyWorkScreen
 import dev.claudefleet.mobile.ui.PhoneLockScreen
 import dev.claudefleet.mobile.ui.PhoneTidyHandlers
 import dev.claudefleet.mobile.ui.guard
@@ -174,7 +167,6 @@ import dev.claudefleet.mobile.ui.PhoneReviewSheet
 import dev.claudefleet.mobile.ui.PhoneMyWorkScreen
 import dev.claudefleet.mobile.ui.MyWorkViewModel
 import dev.claudefleet.mobile.ui.ReviewHandlers
-import dev.claudefleet.mobile.ui.ReviewSheet
 import dev.claudefleet.mobile.ui.ReviewViewModel
 import dev.claudefleet.mobile.ui.PhonePullRequestsSheet
 import dev.claudefleet.mobile.ui.PullRequestsHandlers
@@ -182,11 +174,9 @@ import dev.claudefleet.mobile.ui.PullRequestsViewModel
 import dev.claudefleet.mobile.ui.SessionTasksHandlers
 import dev.claudefleet.mobile.ui.SessionTasksViewModel
 import dev.claudefleet.mobile.ui.TaskHandlers
-import dev.claudefleet.mobile.ui.TaskScreen
 import dev.claudefleet.mobile.ui.TaskViewModel
 import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.GroupRef
-import dev.claudefleet.mobile.ui.HostsScreen
 import dev.claudefleet.mobile.ui.OrbitFilesScreen
 import dev.claudefleet.mobile.ui.OrbitHostsHandlers
 import dev.claudefleet.mobile.ui.FirstRun
@@ -256,7 +246,6 @@ import dev.claudefleet.mobile.ui.MoreEntry
 import dev.claudefleet.mobile.ui.MoreScreen
 import dev.claudefleet.mobile.ui.Navigator
 import dev.claudefleet.mobile.ui.openOverSheets
-import dev.claudefleet.mobile.ui.PhoneLayout
 import dev.claudefleet.mobile.ui.hostsLine
 import dev.claudefleet.mobile.ui.accountsLine
 import dev.claudefleet.mobile.ui.filesLine
@@ -278,8 +267,6 @@ import dev.claudefleet.mobile.ui.MissionSteerUi
 import dev.claudefleet.mobile.ui.ControlActivity
 import dev.claudefleet.mobile.ui.ControlActivityBar
 import dev.claudefleet.mobile.ui.sharedRows
-import dev.claudefleet.mobile.ui.loadPhoneLayout
-import dev.claudefleet.mobile.ui.savePhoneLayout
 import dev.claudefleet.mobile.ui.kit.Assemble
 import dev.claudefleet.mobile.ui.kit.BottomBar
 import dev.claudefleet.mobile.ui.kit.BottomBarBadge
@@ -351,7 +338,6 @@ import dev.claudefleet.mobile.ui.SessionsUiState
 import dev.claudefleet.mobile.ui.TicketsUiState
 import dev.claudefleet.mobile.model.SearchHit
 import dev.claudefleet.mobile.ui.TidyHandlers
-import dev.claudefleet.mobile.ui.TidySheet
 import dev.claudefleet.mobile.ui.TidyViewModel
 import dev.claudefleet.mobile.ui.MissionsHandlers
 import dev.claudefleet.mobile.ui.MissionsSheet
@@ -390,10 +376,7 @@ import dev.claudefleet.mobile.ui.OrbitTrackersScreen
 import dev.claudefleet.mobile.ui.TrackerWizardHandlers
 import dev.claudefleet.mobile.ui.TrackersViewModel
 import dev.claudefleet.mobile.ui.UsageHandlers
-import dev.claudefleet.mobile.ui.CompanyHandlers
-import dev.claudefleet.mobile.ui.CompanyScreen
 import dev.claudefleet.mobile.ui.CompanyViewModel
-import dev.claudefleet.mobile.ui.UsageScreen
 import dev.claudefleet.mobile.ui.UsageViewModel
 import dev.claudefleet.mobile.ui.SessionViewModel
 import dev.claudefleet.mobile.ui.SessionWorkHandlers
@@ -404,7 +387,6 @@ import dev.claudefleet.mobile.ui.SessionFiltersHandlers
 import dev.claudefleet.mobile.ui.SessionFiltersSheet
 import dev.claudefleet.mobile.model.SessionFacetId
 import dev.claudefleet.mobile.ui.SessionsHandlers
-import dev.claudefleet.mobile.ui.SessionsScreen
 import dev.claudefleet.mobile.ui.SessionsTab
 import dev.claudefleet.mobile.ui.BulkHandlers
 import dev.claudefleet.mobile.ui.SessionsSheet
@@ -415,7 +397,6 @@ import dev.claudefleet.mobile.ui.FleetSettingsSection
 import dev.claudefleet.mobile.ui.FleetSaveBar
 import dev.claudefleet.mobile.ui.FieldBatch
 import dev.claudefleet.mobile.ui.FleetSettingsViewModel
-import dev.claudefleet.mobile.ui.SettingsScreen
 import dev.claudefleet.mobile.ui.FirstImport
 import dev.claudefleet.mobile.ui.FleetCheck
 import dev.claudefleet.mobile.ui.firstImportProgress
@@ -425,7 +406,6 @@ import dev.claudefleet.mobile.ui.OrbitSettingsScreen
 import dev.claudefleet.mobile.ui.OrbitSettingsInput
 import dev.claudefleet.mobile.ui.OrbitSettingsHandlers
 import dev.claudefleet.mobile.ui.SettingsPlace
-import dev.claudefleet.mobile.ui.LayoutRow
 import dev.claudefleet.mobile.ui.SettingsViewModel
 import dev.claudefleet.mobile.ui.SystemBarsAppearance
 import dev.claudefleet.mobile.ui.Tab
@@ -437,7 +417,6 @@ import dev.claudefleet.mobile.ui.TodaySheet
 import dev.claudefleet.mobile.ui.TodayViewModel
 import dev.claudefleet.mobile.ui.scan.qrScannerSupported
 import dev.claudefleet.mobile.ui.theme.Fleet
-import dev.claudefleet.mobile.ui.theme.FleetIcons
 import dev.claudefleet.mobile.ui.theme.FleetTheme
 import dev.claudefleet.mobile.ui.theme.localClock
 import dev.claudefleet.mobile.ui.PhoneSettings
@@ -884,13 +863,12 @@ fun App(container: AppContainer) {
                             justPaired = null
                             fleetCheck = false
                         }
-                        // The New layout's first run (14.19): a welcome once
+                        // The first run (14.19): a welcome once
                         // per phone, and the "no hub yet" steps, before Pair.
                         val unpairReason by container.session.unpairReason.collectAsState()
                         val pairLinkPending by container.pairLink.collectAsState()
                         var firstRun by remember(container) {
                             val welcome = showWelcome(
-                                layout = loadPhoneLayout(container.prefs),
                                 welcomed = container.hints.shown(WELCOME_HINT),
                                 signedOut = unpairReason != null,
                                 pairLink = pairLinkPending != null,
@@ -1064,7 +1042,7 @@ private fun ControlTab(
     autofixCanApply: Boolean = false,
 ) {
     // The Control tab is Control's conversation (redesign 9.8,
-    // 14.7). New bar only: the Classic bar has no Control tab.
+    // 14.7).
     val controlState by control.state.collectAsState()
     val attention by sessions.state.collectAsState()
     // The lifecycle, not the composition: a pocketed phone on
@@ -1297,11 +1275,10 @@ private fun FleetRoute(
         }
     }
 
-    // The phone's layout switch (redesign 14.2): Classic until someone picks
-    // New in Settings, read once per pairing and written on every change.
-    val nav = remember(credentials) { Navigator(loadPhoneLayout(container.prefs)) }
+    // The Orbit Fleet bar (redesign 14.2), the only one since the 14.13
+    // sign-off. A `ui.layout` an older version stored is no longer read.
+    val nav = remember(credentials) { Navigator() }
     val screen by nav.screen.collectAsState()
-    val layout by nav.layout.collectAsState()
     val tab by nav.tab.collectAsState()
     // The first import after a pair (14.12): set as the fleet check ends, on the New bar only.
     var importing by remember(credentials) { mutableStateOf(false) }
@@ -1348,7 +1325,7 @@ private fun FleetRoute(
         )
     }
     val textSearch = remember(repository, scope) { TextSearchViewModel(repository.capabilities, container.searchActions, scope) }
-    val tidy = remember(repository, scope) { TidyViewModel(repository, container.workActions, scope, credentials.canWrite, preselect = { nav.layout.value == PhoneLayout.Classic }) }
+    val tidy = remember(repository, scope) { TidyViewModel(repository, container.workActions, scope, credentials.canWrite, preselect = { false }) }
     val tidyState by tidy.state.collectAsState()
     val missions = remember(repository, scope) { MissionsViewModel(repository, container.missionActions, scope, credentials.canWrite) }
     val agentActionsVm = remember(repository, scope) { AgentActionsViewModel(repository, container.builtInAgentActions, scope, credentials.canWrite) }
@@ -1556,9 +1533,9 @@ private fun FleetRoute(
         when (lessonPlace) {
             null -> Unit
             LessonPlace.Practice -> nav.openPractice()
-            LessonPlace.Inbox -> nav.select(if (layout == PhoneLayout.New) Tab.Inbox else Tab.Sessions)
+            LessonPlace.Inbox -> nav.select(Tab.Inbox)
             LessonPlace.Sessions -> nav.select(Tab.Sessions)
-            LessonPlace.Control -> nav.select(if (layout == PhoneLayout.New) Tab.Control else Tab.Sessions)
+            LessonPlace.Control -> nav.select(Tab.Control)
             LessonPlace.Settings -> nav.openFromMore(Screen.Settings)
         }
     }
@@ -1595,65 +1572,29 @@ private fun FleetRoute(
                 enter = expandVertically(expandFrom = Alignment.Top),
                 exit = shrinkVertically(shrinkTowards = Alignment.Top),
             ) {
-                val attention by sessions.state.collectAsState()
-                if (layout == PhoneLayout.New) {
-                    val barRows by repository.sessions.collectAsState()
-                    val barAccess by repository.access.collectAsState()
-                    // The Inbox's own rows, so the badge, the Inbox and Today agree (review r09 B1).
-                    // A mission waiting on a person counts too (G5.4), as the Inbox's header does.
-                    // And a review a colleague asked of this person, as the Inbox's header counts it.
-                    val needYou = remember(barRows, barAccess, missionsState.missions, missionsState.available, agentActionsState.pending, reviewRequestsState.asks) {
-                        inboxRows(barRows, barAccess).size +
-                            (if (missionsState.available) missionWaits(missionsState.missions).size else 0) +
-                            agentActionsState.pending.size +
-                            reviewRequestsState.asks.size
-                    }
-                    // The Orbit Fleet bar: one badge, the Needs you count, on
-                    // Inbox. Work's To review count stays on the Work screen.
-                    val items = PhoneLayout.New.tabs
-                        .filter { it != Tab.Work || workState.available }
-                        .map { newBarItem(it) }
-                    BottomBar(
-                        modifier = Modifier.tourAnchor(tourAnchors, TourAnchor.Bar),
-                        items = items,
-                        selected = tab.name,
-                        onSelect = { key -> nav.select(Tab.valueOf(key)) },
-                        badge = BottomBarBadge(Tab.Inbox.name, needYou),
-                    )
-                } else NavigationBar {
-                    // Work only when the hub serves `work { tree }`, Files only
-                    // when it keeps downloads.
-                    val shown = PhoneLayout.Classic.tabs.filter {
-                        (it != Tab.Work || workState.available) && (it != Tab.Files || filesState.available)
-                    }
-                    for (entry in shown) {
-                        NavigationBarItem(
-                            selected = tab == entry,
-                            onClick = { nav.select(entry) },
-                            icon = {
-                                val icon = when (entry) {
-                                    Tab.Sessions -> FleetIcons.Sessions
-                                    Tab.Work -> FleetIcons.Work
-                                    Tab.Files -> FleetIcons.Files
-                                    Tab.Hosts -> FleetIcons.Hosts
-                                    else -> FleetIcons.Settings
-                                }
-                                if (entry == Tab.Sessions && attention.attentionCount > 0) {
-                                    BadgedBox(badge = { Badge { Text("${attention.attentionCount}") } }) {
-                                        Icon(icon, contentDescription = entry.name)
-                                    }
-                                } else if (entry == Tab.Work && workState.reviewCount > 0) {
-                                    BadgedBox(badge = { Badge { Text("${workState.reviewCount}") } }) {
-                                        Icon(icon, contentDescription = entry.name)
-                                    }
-                                } else {
-                                    Icon(icon, contentDescription = entry.name)
-                                }
-                            },
-                            label = { Text(entry.name) },
-                        )
-                    }
+                val barRows by repository.sessions.collectAsState()
+                val barAccess by repository.access.collectAsState()
+                // The Inbox's own rows, so the badge, the Inbox and Today agree (review r09 B1).
+                // A mission waiting on a person counts too (G5.4), as the Inbox's header does.
+                // And a review a colleague asked of this person, as the Inbox's header counts it.
+                val needYou = remember(barRows, barAccess, missionsState.missions, missionsState.available, agentActionsState.pending, reviewRequestsState.asks) {
+                    inboxRows(barRows, barAccess).size +
+                        (if (missionsState.available) missionWaits(missionsState.missions).size else 0) +
+                        agentActionsState.pending.size +
+                        reviewRequestsState.asks.size
                 }
+                // The Orbit Fleet bar: one badge, the Needs you count, on
+                // Inbox. Work's To review count stays on the Work screen.
+                val items = Tab.entries
+                    .filter { it != Tab.Work || workState.available }
+                    .map { newBarItem(it) }
+                BottomBar(
+                    modifier = Modifier.tourAnchor(tourAnchors, TourAnchor.Bar),
+                    items = items,
+                    selected = tab.name,
+                    onSelect = { key -> nav.select(Tab.valueOf(key)) },
+                    badge = BottomBarBadge(Tab.Inbox.name, needYou),
+                )
             }
         },
     ) { padding ->
@@ -1683,7 +1624,6 @@ private fun FleetRoute(
                     val state by sessions.state.collectAsState()
                     val ticketsState by tickets.state.collectAsState()
                     val todayState by today.state.collectAsState()
-                    val agentState by agent.state.collectAsState()
                     val bulkState by bulk.state.collectAsState()
                     val hits = rememberSearchHits(state.filters.query, state.searchOpen, ticketsState.available, repository, textSearch)
                     val sessionsHandlers = SessionsHandlers(
@@ -1717,8 +1657,6 @@ private fun FleetRoute(
                         onOpenTickets = if (ticketsState.available) ({ tickets.open() }) else null,
                         onOpenToday = if (todayState.available) ({ today.open() }) else null,
                         onOpenMissions = if (missionsState.available) ({ missions.open() }) else null,
-                        // On the New bar Control replaces the agent button.
-                        onOpenAgent = if (agentState.available && layout == PhoneLayout.Classic) ({ agent.open() }) else null,
                         onDismissAgentError = agent::dismissError,
                         onToggleSelect = bulk::toggle,
                         onClearSelection = bulk::clear,
@@ -1731,31 +1669,21 @@ private fun FleetRoute(
                         onSearchTicket = { q -> tickets.open(); tickets.onQuery(q); tickets.search() },
                         onSearchFound = { openSearchHit(it, hits.query, nav, container) },
                     )
-                    // The New bar's Sessions tab (redesign 14.3); Classic keeps its list.
-                    if (layout == PhoneLayout.New) {
-                        SessionsTab(
-                            state = state,
-                            handlers = sessionsHandlers,
-                            bulk = bulkState,
-                            hits = hits,
-                            bulkHandlers = BulkHandlers(
-                                onSelectAll = bulk::selectAll,
-                                onRetry = { bulk.retry(it) },
-                                onRetryAll = { bulk.retryFailed() },
-                                onArchive = { bulk.archive(); Unit },
-                            ),
-                            hub = hubLabel(credentials.hub),
-                        )
-                    } else {
-                        SessionsScreen(
-                            state = state,
-                            agent = agentState,
-                            bulk = bulkState,
-                            hits = hits,
-                            handlers = sessionsHandlers,
-                        )
-                    }
-                    SessionsSheets(state, sessions, ticketsState, tickets, nav, layout, repository)
+                    // The Sessions tab (redesign 14.3).
+                    SessionsTab(
+                        state = state,
+                        handlers = sessionsHandlers,
+                        bulk = bulkState,
+                        hits = hits,
+                        bulkHandlers = BulkHandlers(
+                            onSelectAll = bulk::selectAll,
+                            onRetry = { bulk.retry(it) },
+                            onRetryAll = { bulk.retryFailed() },
+                            onArchive = { bulk.archive(); Unit },
+                        ),
+                        hub = hubLabel(credentials.hub),
+                    )
+                    SessionsSheets(state, sessions, ticketsState, tickets, nav, repository)
                 }
                 is Screen.NewSession -> key(current) {
                     val ticketsAvailable = tickets.state.collectAsState().value.available
@@ -1771,7 +1699,6 @@ private fun FleetRoute(
                         callScope = scope,
                         onCreated = nav::created,
                         onBack = { nav.back() },
-                        wizard = layout == PhoneLayout.New,
                         // r09 B14: the tickets list lives on Sessions; its Start comes back here.
                         onFromTicket = { nav.select(Tab.Sessions); tickets.open(); Unit }
                             .takeIf { ticketsAvailable },
@@ -1790,8 +1717,8 @@ private fun FleetRoute(
                         // The fleet's scope: a change to the session's tasks
                         // is not cancelled by leaving the session.
                         callScope = scope,
-                        // The New bar draws the session as tabs (redesign 14.4).
-                        newLayout = layout == PhoneLayout.New,
+                        // A session opened from a list draws as tabs (redesign 14.4).
+                        workspace = true,
                         autofixCanApply = autofixState.canApply,
                     )
                 }
@@ -1848,22 +1775,18 @@ private fun FleetRoute(
                     val workRowOf: (Long) -> dev.claudefleet.mobile.model.SessionRow? = { id -> workRows.firstOrNull { it.id == id } }
                     // What a row's tap opens (This phone): its ticket, or its live session.
                     val workTap by container.phone.workTap.collectAsState()
-                    if (layout == PhoneLayout.New) {
-                        val workStatus by repository.status.collectAsState()
-                        PhoneMyWorkScreen(
-                            state = workState,
-                            status = workStatus,
-                            nowSeconds = epochSeconds(),
-                            rowOf = workRowOf,
-                            handlers = workHandlers,
-                            reviewCount = if (reviewState.loaded) reviewState.total else workState.reviewCount,
-                            onStart = { nav.newSession(ticketKey = it) },
-                            tapOpens = workTap,
-                        )
-                    } else {
-                        MyWorkScreen(state = workState, handlers = workHandlers, tapOpens = workTap)
-                    }
-                    if (prState.open && layout == PhoneLayout.New) {
+                    val workStatus by repository.status.collectAsState()
+                    PhoneMyWorkScreen(
+                        state = workState,
+                        status = workStatus,
+                        nowSeconds = epochSeconds(),
+                        rowOf = workRowOf,
+                        handlers = workHandlers,
+                        reviewCount = if (reviewState.loaded) reviewState.total else workState.reviewCount,
+                        onStart = { nav.newSession(ticketKey = it) },
+                        tapOpens = workTap,
+                    )
+                    if (prState.open) {
                         PhonePullRequestsSheet(
                             state = prState,
                             handlers = PullRequestsHandlers(
@@ -1894,11 +1817,7 @@ private fun FleetRoute(
                             onDismissUndo = review::dismissUndo,
                             onDismissError = review::dismissError,
                         )
-                        if (layout == PhoneLayout.New) {
-                            PhoneReviewSheet(state = reviewState, handlers = reviewHandlers, rowOf = workRowOf)
-                        } else {
-                            ReviewSheet(state = reviewState, handlers = reviewHandlers)
-                        }
+                        PhoneReviewSheet(state = reviewState, handlers = reviewHandlers, rowOf = workRowOf)
                     }
                 }
                 Screen.Usage -> {
@@ -1919,11 +1838,7 @@ private fun FleetRoute(
                         onAutoSwitch = { usage.setAutoSwitch(enabled = it); Unit },
                         onAutoSwitchContinue = { usage.setAutoSwitch(continueAfter = it); Unit },
                     )
-                    if (layout == PhoneLayout.New) {
-                        OrbitUsageScreen(state = usageState, nowSeconds = epochSeconds(), handlers = usageHandlers)
-                    } else {
-                        UsageScreen(state = usageState, nowSeconds = epochSeconds(), handlers = usageHandlers)
-                    }
+                    OrbitUsageScreen(state = usageState, nowSeconds = epochSeconds(), handlers = usageHandlers)
                 }
                 Screen.Company -> {
                     val company = remember(repository, scope) { CompanyViewModel(repository, container.companyActions, scope) }
@@ -1931,47 +1846,34 @@ private fun FleetRoute(
                     val companyState by company.state.collectAsState()
                     // An org's detail is drawn inside this screen: back closes it first.
                     BackHandler(enabled = companyState.openId != null) { company.close() }
-                    if (layout == PhoneLayout.New) {
-                        val members = remember(repository, scope) { MembersViewModel(repository, container.memberActions, scope, credentials.canWrite) }
-                        val membersState by members.state.collectAsState()
-                        OrbitOrgsScreen(
-                            state = companyState,
+                    val members = remember(repository, scope) { MembersViewModel(repository, container.memberActions, scope, credentials.canWrite) }
+                    val membersState by members.state.collectAsState()
+                    OrbitOrgsScreen(
+                        state = companyState,
+                        nowSeconds = epochSeconds(),
+                        handlers = OrbitOrgsHandlers(
+                            onBack = { if (!company.close()) nav.back() },
+                            onRefresh = { company.refresh() },
+                            onOpen = company::open,
+                            onDismissError = company::dismissError,
+                            onOpenSessions = { org -> sessions.showOrg(org); nav.select(Tab.Sessions) },
+                            onOpenHosts = { nav.openFromMore(Screen.Hosts) },
+                            onOpenMembers = { org: OrgDetail -> members.open(org); Unit }.takeIf { membersState.available },
+                            onOpenAutomation = { automation.open(); Unit }.takeIf { automationState.available },
+                            automationLine = automationLine(automationState.routines, automationState.paused),
+                        ),
+                    )
+                    if (membersState.open) {
+                        MembersSheet(
+                            state = membersState,
                             nowSeconds = epochSeconds(),
-                            handlers = OrbitOrgsHandlers(
-                                onBack = { if (!company.close()) nav.back() },
-                                onRefresh = { company.refresh() },
-                                onOpen = company::open,
-                                onDismissError = company::dismissError,
-                                onOpenSessions = { org -> sessions.showOrg(org); nav.select(Tab.Sessions) },
-                                onOpenHosts = { nav.openFromMore(Screen.Hosts) },
-                                onOpenMembers = { org: OrgDetail -> members.open(org); Unit }.takeIf { membersState.available },
-                                onOpenAutomation = { automation.open(); Unit }.takeIf { automationState.available },
-                                automationLine = automationLine(automationState.routines, automationState.paused),
-                            ),
-                        )
-                        if (membersState.open) {
-                            MembersSheet(
-                                state = membersState,
-                                nowSeconds = epochSeconds(),
-                                handlers = MembersHandlers(
-                                    onClose = { members.close(); company.refresh() },
-                                    onSetRole = { m, role -> members.setRole(m, role) },
-                                    onRemove = { members.askRemove(it) },
-                                    onConfirmRemove = { members.remove(it) },
-                                    onCancelRemove = members::cancelRemove,
-                                    onDismissError = members::dismissError,
-                                ),
-                            )
-                        }
-                    } else {
-                        CompanyScreen(
-                            state = companyState,
-                            nowSeconds = epochSeconds(),
-                            handlers = CompanyHandlers(
-                                onBack = { if (!company.close()) nav.back() },
-                                onRefresh = { company.refresh() },
-                                onOpen = company::open,
-                                onDismissError = company::dismissError,
+                            handlers = MembersHandlers(
+                                onClose = { members.close(); company.refresh() },
+                                onSetRole = { m, role -> members.setRole(m, role) },
+                                onRemove = { members.askRemove(it) },
+                                onConfirmRemove = { members.remove(it) },
+                                onCancelRemove = members::cancelRemove,
+                                onDismissError = members::dismissError,
                             ),
                         )
                     }
@@ -2001,7 +1903,6 @@ private fun FleetRoute(
                         onStartHere = { nav.newSession(ticketKey = it) },
                         onOpenTask = nav::openTask,
                         onBack = { nav.back() },
-                        newLayout = layout == PhoneLayout.New,
                     )
                 }
                 Screen.Files -> {
@@ -2024,19 +1925,15 @@ private fun FleetRoute(
                         onRetry = if (filesState.canRetry) ({ id: Long -> files.retry(id); Unit }) else null,
                         onOpenSession = nav::open,
                     )
-                    if (layout == PhoneLayout.New) {
-                        val fileHosts by repository.hosts.collectAsState()
-                        val reachable = remember(fileHosts) { fileHosts.associate { it.alias to it.reachable } }
-                        OrbitFilesScreen(
-                            state = filesState,
-                            status = status,
-                            handlers = filesHandlers,
-                            // A host the hub does not list is not known to be gone.
-                            hostReachable = { alias -> reachable[alias] ?: true },
-                        )
-                    } else {
-                        FilesScreen(state = filesState, status = status, handlers = filesHandlers)
-                    }
+                    val fileHosts by repository.hosts.collectAsState()
+                    val reachable = remember(fileHosts) { fileHosts.associate { it.alias to it.reachable } }
+                    OrbitFilesScreen(
+                        state = filesState,
+                        status = status,
+                        handlers = filesHandlers,
+                        // A host the hub does not list is not known to be gone.
+                        hostReachable = { alias -> reachable[alias] ?: true },
+                    )
                 }
                 Screen.Hosts -> {
                     val state by hosts.state.collectAsState()
@@ -2045,31 +1942,20 @@ private fun FleetRoute(
                     val hostSheet by hostDetail.state.collectAsState()
                     val onHostDetails = { alias: String -> hostDetail.open(alias); Unit }
                         .takeIf { hostCaps.probeHost || hostCaps.restoreSessions || hostCaps.discoverLost }
-                    if (layout == PhoneLayout.New) {
-                        OrbitHostsScreen(
-                            state = state,
-                            nowSeconds = epochSeconds(),
-                            handlers = OrbitHostsHandlers(
-                                onRefresh = { hosts.refresh() },
-                                onDismissError = hosts::dismissError,
-                                onOpen = onHostDetails ?: { alias: String -> nav.showSessionsFor(alias); Unit },
-                                onCheck = { alias: String -> hosts.check(alias); Unit }.takeIf { hostCaps.probeHost },
-                                // The host's sheet runs the reboot plan's dry run and the lost-conversation scan on opening.
-                                onRecovery = { alias: String -> hostDetail.open(alias); Unit }
-                                    .takeIf { (credentials.canWrite && hostCaps.restoreSessions) || hostCaps.discoverLost },
-                                onAddHost = { addHost.open(); Unit }.takeIf { addHostState.available },
-                            ),
-                        )
-                    } else {
-                        HostsScreen(
-                            state = state,
+                    OrbitHostsScreen(
+                        state = state,
+                        nowSeconds = epochSeconds(),
+                        handlers = OrbitHostsHandlers(
                             onRefresh = { hosts.refresh() },
                             onDismissError = hosts::dismissError,
-                            onOpenHost = { nav.showSessionsFor(it) },
-                            onHostDetails = onHostDetails,
+                            onOpen = onHostDetails ?: { alias: String -> nav.showSessionsFor(alias); Unit },
+                            onCheck = { alias: String -> hosts.check(alias); Unit }.takeIf { hostCaps.probeHost },
+                            // The host's sheet runs the reboot plan's dry run and the lost-conversation scan on opening.
+                            onRecovery = { alias: String -> hostDetail.open(alias); Unit }
+                                .takeIf { (credentials.canWrite && hostCaps.restoreSessions) || hostCaps.discoverLost },
                             onAddHost = { addHost.open(); Unit }.takeIf { addHostState.available },
-                        )
-                    }
+                        ),
+                    )
                     if (hostSheet.alias != null) {
                         HostDetailSheet(
                             state = hostSheet,
@@ -2282,7 +2168,7 @@ private fun FleetRoute(
                             } else if (missionsState.available) {
                                 add(MoreEntry("Automation", "Missions, and Pause all") { nav.openMissions() })
                             }
-                            if (trackersState.available && layout == PhoneLayout.New) {
+                            if (trackersState.available) {
                                 // The owner's trusted phone manages the hub's trackers (14.20, contract 13).
                                 add(MoreEntry("Trackers", "Jira, GitHub, Linear, Asana") { nav.openTrackers() })
                             }
@@ -2422,7 +2308,6 @@ private fun FleetRoute(
                     repository = repository,
                     scope = scope,
                     nav = nav,
-                    layout = layout,
                     settings = settings,
                     fleetSettings = fleetSettings,
                     settingsCaps = settingsCaps,
@@ -2444,14 +2329,14 @@ private fun FleetRoute(
                     modifier = Modifier.align(Alignment.BottomCenter),
                     // On the New bar a Control step's prompts open the coordinator
                     // with the prompt in its composer; nothing is sent (14.22).
-                    onPrompt = if (layout == PhoneLayout.New && lessonAgent.available) ({ prompt: String -> agent.open(fill = prompt); Unit }) else null,
+                    onPrompt = if (lessonAgent.available) ({ prompt: String -> agent.open(fill = prompt); Unit }) else null,
                 )
             }
             BackHandler(enabled = whatsNew != null) { whatsNew = null }
             whatsNew?.let { news ->
                 WhatsNewScreen(
                     whatsNew = news,
-                    backLabel = if (layout == PhoneLayout.New) "Back to Inbox" else "Back to Sessions",
+                    backLabel = "Back to Inbox",
                     onBack = { whatsNew = null },
                 )
             }
@@ -2474,8 +2359,8 @@ private fun FleetRoute(
                         onClearFilters = today::clearFilters,
                         onOpenTidy = { today.close(); tidy.open(); Unit }.takeIf { tidyState.available },
                     ),
-                    // New: Waiting on me is the Inbox's own list, so the counts agree.
-                    waitingNow = if (layout == PhoneLayout.New) inboxRows(todaySessions, todayAccess) else null,
+                    // Waiting on me is the Inbox's own list, so the counts agree.
+                    waitingNow = inboxRows(todaySessions, todayAccess),
                     nowSeconds = epochSeconds(),
                 )
             }
@@ -2490,14 +2375,10 @@ private fun FleetRoute(
                     onDismissError = tidy::dismissError,
                 )
                 // New (redesign 14.15): nothing ticked, the outcome per session with Undo and Retry.
-                if (layout == PhoneLayout.New) {
-                    PhoneTidySheet(
-                        state = tidyState,
-                        handlers = PhoneTidyHandlers(tidy = tidyHandlers, onUndo = { tidy.undo(it) }, onRetry = { tidy.retry(it) }),
-                    )
-                } else {
-                    TidySheet(state = tidyState, handlers = tidyHandlers)
-                }
+                PhoneTidySheet(
+                    state = tidyState,
+                    handlers = PhoneTidyHandlers(tidy = tidyHandlers, onUndo = { tidy.undo(it) }, onRetry = { tidy.retry(it) }),
+                )
             }
             if (automationState.open) {
                 AutomationSheet(
@@ -2526,12 +2407,8 @@ private fun FleetRoute(
                         onOpenMissions = if (missionsState.available) {
                             {
                                 automation.close()
-                                // The New layout's Missions screen (14.16); Classic keeps the sheet.
-                                if (layout == PhoneLayout.New) {
-                                    nav.openMissions()
-                                } else {
-                                    missions.open()
-                                }
+                                // The Missions screen (14.16).
+                                nav.openMissions()
                                 Unit
                             }
                         } else {
@@ -2574,15 +2451,11 @@ private fun FleetRoute(
                         onClose = missions::close,
                         onRefresh = { missions.refresh() },
                         onSelect = { missions.select(it) },
-                        // New layout: "‹ Missions" goes to the Missions screen, never
-                        // the Classic list inside the sheet (review w21-12).
-                        onBack = if (layout == PhoneLayout.New) {
-                            {
-                                missions.close()
-                                if (screen != Screen.Missions) nav.openMissions()
-                            }
-                        } else {
-                            missions::back
+                        // "‹ Missions" goes to the Missions screen, never
+                        // the sheet's own list (review w21-12).
+                        onBack = {
+                            missions.close()
+                            if (screen != Screen.Missions) nav.openMissions()
                         },
                         onStart = { missions.start(it) },
                         onDecide = { card, ok, note -> missions.decide(card, ok, note) },
@@ -2616,9 +2489,9 @@ private fun FleetRoute(
                                 delivered = steerState.delivered[m.id] ?: 0,
                                 busy = steer.busy(steerRows),
                             )
-                        }.takeIf { layout == PhoneLayout.New },
+                        },
                     ),
-                    orbit = layout == PhoneLayout.New,
+                    orbit = true,
                 )
             }
         }
@@ -2632,7 +2505,7 @@ private fun FleetRoute(
     // Once, after pairing and the fleet check: how much help.
     if (help.mode == null && !fleetCheck && !importing && whatsNew == null) {
         HelpPicker(
-            onPick = { mode -> helpSettings.pick(mode, tourHere = layout == PhoneLayout.New && screen == Screen.Inbox) },
+            onPick = { mode -> helpSettings.pick(mode, tourHere = screen == Screen.Inbox) },
             onPracticeFirst = { mode ->
                 helpSettings.pick(mode, tourHere = false)
                 practice.reset()
@@ -2648,11 +2521,11 @@ private fun FleetRoute(
             status = status,
             hub = hubLabel(credentials.hub),
             clientName = credentials.name,
-            exitLabel = if (layout == PhoneLayout.New) FullscreenWait.FleetCheck.exitLabel else "Skip, open Sessions",
+            exitLabel = FullscreenWait.FleetCheck.exitLabel,
             onDone = {
-                // The New bar follows a connected check with the first import
-                // while the hub still has hosts it never read.
-                importing = layout == PhoneLayout.New && status is ConnectionStatus.Connected &&
+                // A connected check is followed by the first import while
+                // the hub still has hosts it never read.
+                importing = status is ConnectionStatus.Connected &&
                     firstImportProgress(checkHosts) != null
                 onFleetCheckDone()
             },
@@ -2670,7 +2543,7 @@ private fun FleetRoute(
     BackHandler(enabled = fleetCheck || importing || (help.mode == null && whatsNew == null)) {}
 }
 
-/** The Settings tab: This phone, the hub's pages, and Classic's own screen. */
+/** Settings, over More: This phone and the hub's pages. */
 // Opted in here for BackHandler, as FleetRoute is.
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -2679,7 +2552,6 @@ private fun SettingsRoute(
     repository: FleetRepository,
     scope: CoroutineScope,
     nav: Navigator,
-    layout: PhoneLayout,
     settings: SettingsViewModel,
     fleetSettings: FleetSettingsViewModel,
     settingsCaps: HubCapabilities,
@@ -2721,7 +2593,7 @@ private fun SettingsRoute(
                 ),
                 pageHead = { pageId ->
                     // Decisions (Jev) opens with who opted in and what Jev may do (14.17).
-                    if (layout == PhoneLayout.New && pageId == DECISIONS_PAGE) {
+                    if (pageId == DECISIONS_PAGE) {
                         val jevOrgs = remember(repository, scope) { CompanyViewModel(repository, container.companyActions, scope) }
                         LaunchedEffect(jevOrgs) { jevOrgs.load() }
                         val orgsState by jevOrgs.state.collectAsState()
@@ -2742,110 +2614,80 @@ private fun SettingsRoute(
             )
         }
     }
-    val onSetLayout: (PhoneLayout) -> Unit = { chosen ->
-        savePhoneLayout(container.prefs, chosen)
-        nav.setLayout(chosen)
-    }
     val onOpenUsage = nav::openUsage.takeIf { settingsCaps.usage || settingsCaps.accounts }
     val onOpenCompany = nav::openCompany.takeIf { orgDirectory.orgs.isNotEmpty() }
-    if (layout == PhoneLayout.New) {
-        // The Orbit settings (redesign 14.11): This phone and the
-        // desktop's groups over the hub's pages. Back closes an
-        // open page first, then the group, then leaves Settings.
-        val place by settings.place.collectAsState()
-        val theme by container.phone.theme.collectAsState()
-        val motion by container.phone.motion.collectAsState()
-        val notifyKinds by container.phone.notifyKinds.collectAsState()
-        val quiet by container.phone.quiet.collectAsState()
-        val lockOn by container.phone.lock.collectAsState()
-        val workTap by container.phone.workTap.collectAsState()
-        val contrast by container.phone.contrast.collectAsState()
-        val accent by container.phone.accent.collectAsState()
-        val gate = rememberBiometricGate()
-        BackHandler(enabled = fleetPageOpen || place != SettingsPlace.Home) {
-            if (!fleetSettings.back()) settings.back()
-        }
-        OrbitSettingsScreen(
-            place = place,
-            input = OrbitSettingsInput(
-                settings = state,
-                fleet = fleet.takeIf { settingsCaps.fleetSettings },
-                theme = theme,
-                notifyKinds = notifyKinds,
-                updateMode = updateState.mode.takeIf { updateState.supported },
-                updateCheck = updateState.manual,
-                lock = lockOn,
-                motion = motion,
-                quiet = quiet,
-                workTap = workTap,
-                contrast = contrast,
-                accent = accent,
-            ),
-            handlers = OrbitSettingsHandlers(
-                onOpen = settings::open,
-                onBack = { if (!fleetSettings.back()) settings.back() },
-                onOpenPage = fleetSettings::open,
-                onSetTheme = container.phone::setTheme,
-                onSetMotion = container.phone::setMotion,
-                onSetContrast = container.phone::setContrast,
-                onSetAccent = container.phone::setAccent,
-                onSetWorkTap = container.phone::setWorkTap,
-                onSetNotify = container.phone::setNotify,
-                onSetQuiet = container.phone::setQuiet,
-                onSetUpdateMode = updates::setMode,
-                onCheckUpdates = { updates.checkNow() },
-                // Either way, only once the check has passed.
-                onSetLock = if (gate.available) {
-                    { on: Boolean -> gate.ask(if (on) "Turn on the lock" else "Turn off the lock") { ok -> if (ok) container.phone.setLock(on) } }
-                } else {
-                    null
-                },
-                onForget = { settings.forget() },
-                onDismissError = settings::dismissError,
-                onOpenUsage = onOpenUsage,
-                onOpenCompany = onOpenCompany,
-                onRetryFleet = { fleetSettings.load() },
-                onDismissFleetError = fleetSettings::dismissLoadError,
-            ),
-            fleetPageOpen = fleetPageOpen,
-            fleetPage = fleetSection,
-            notifier = container.notifier,
-            homeExtras = { LayoutRow(layout, onSetLayout) },
-            fleetSaveBar = fleetSaveBar,
-            thisPhoneExtras = {
-                HelpSettingsSection(
-                    help = help,
-                    settings = helpSettings,
-                    tourAvailable = layout == PhoneLayout.New,
-                    onTour = { helpSettings.startTour(); nav.select(Tab.Inbox) },
-                    onPractice = { practice.reset(); nav.openPractice() },
-                )
-            },
-        )
-    } else {
-        // A fleet settings page is drawn inside the Settings tab:
-        // back closes the page, not the app.
-        BackHandler(enabled = fleetPageOpen) { fleetSettings.back() }
-        // Classic has no More: Update ready sits at the top of Settings.
-        Column(Modifier.fillMaxSize()) {
-            updateState.available?.let { UpdateCard(it, container.appVersion, onOpen = nav::openUpdate) }
-            SettingsScreen(
-                state = state,
-                onForget = { settings.forget() },
-                onDismissError = settings::dismissError,
-                fleetPageOpen = fleetPageOpen,
-                onOpenUsage = onOpenUsage,
-                onOpenCompany = onOpenCompany,
-                notifier = container.notifier,
-                layout = layout,
-                onSetLayout = onSetLayout,
-                workTap = container.phone.workTap.collectAsState().value,
-                onSetWorkTap = container.phone::setWorkTap,
-                fleetSettings = fleetSection,
-                fleetSaveBar = fleetSaveBar,
-            )
-        }
+    // The Orbit settings (redesign 14.11): This phone and the
+    // desktop's groups over the hub's pages. Back closes an
+    // open page first, then the group, then leaves Settings.
+    val place by settings.place.collectAsState()
+    val theme by container.phone.theme.collectAsState()
+    val motion by container.phone.motion.collectAsState()
+    val notifyKinds by container.phone.notifyKinds.collectAsState()
+    val quiet by container.phone.quiet.collectAsState()
+    val lockOn by container.phone.lock.collectAsState()
+    val workTap by container.phone.workTap.collectAsState()
+    val contrast by container.phone.contrast.collectAsState()
+    val accent by container.phone.accent.collectAsState()
+    val gate = rememberBiometricGate()
+    BackHandler(enabled = fleetPageOpen || place != SettingsPlace.Home) {
+        if (!fleetSettings.back()) settings.back()
     }
+    OrbitSettingsScreen(
+        place = place,
+        input = OrbitSettingsInput(
+            settings = state,
+            fleet = fleet.takeIf { settingsCaps.fleetSettings },
+            theme = theme,
+            notifyKinds = notifyKinds,
+            updateMode = updateState.mode.takeIf { updateState.supported },
+            updateCheck = updateState.manual,
+            lock = lockOn,
+            motion = motion,
+            quiet = quiet,
+            workTap = workTap,
+            contrast = contrast,
+            accent = accent,
+        ),
+        handlers = OrbitSettingsHandlers(
+            onOpen = settings::open,
+            onBack = { if (!fleetSettings.back()) settings.back() },
+            onOpenPage = fleetSettings::open,
+            onSetTheme = container.phone::setTheme,
+            onSetMotion = container.phone::setMotion,
+            onSetContrast = container.phone::setContrast,
+            onSetAccent = container.phone::setAccent,
+            onSetWorkTap = container.phone::setWorkTap,
+            onSetNotify = container.phone::setNotify,
+            onSetQuiet = container.phone::setQuiet,
+            onSetUpdateMode = updates::setMode,
+            onCheckUpdates = { updates.checkNow() },
+            // Either way, only once the check has passed.
+            onSetLock = if (gate.available) {
+                { on: Boolean -> gate.ask(if (on) "Turn on the lock" else "Turn off the lock") { ok -> if (ok) container.phone.setLock(on) } }
+            } else {
+                null
+            },
+            onForget = { settings.forget() },
+            onDismissError = settings::dismissError,
+            onOpenUsage = onOpenUsage,
+            onOpenCompany = onOpenCompany,
+            onRetryFleet = { fleetSettings.load() },
+            onDismissFleetError = fleetSettings::dismissLoadError,
+        ),
+        fleetPageOpen = fleetPageOpen,
+        fleetPage = fleetSection,
+        notifier = container.notifier,
+        fleetSaveBar = fleetSaveBar,
+        thisPhoneExtras = {
+            HelpSettingsSection(
+                help = help,
+                settings = helpSettings,
+                tourAvailable = true,
+                onTour = { helpSettings.startTour(); nav.select(Tab.Inbox) },
+                onPractice = { practice.reset(); nav.openPractice() },
+            )
+        },
+    )
 }
 
 /** A destination on the New bar, keyed by its [Tab] name so `Navigator.select` can take it back. */
@@ -2854,7 +2696,7 @@ private fun newBarItem(tab: Tab): BottomBarItem = when (tab) {
     Tab.Sessions -> BottomBarItem(tab.name, "Sessions", OrbitIcons.Sessions)
     Tab.Control -> BottomBarItem(tab.name, "Control", OrbitIcons.Control)
     Tab.Work -> BottomBarItem(tab.name, "Work", OrbitIcons.Work)
-    else -> BottomBarItem(tab.name, "More", OrbitIcons.More)
+    Tab.More -> BottomBarItem(tab.name, "More", OrbitIcons.More)
 }
 
 // The wizard's `BackHandler`; see the opt-in note on `FleetRoute`.
@@ -2870,7 +2712,6 @@ private fun NewSessionRoute(
     callScope: CoroutineScope,
     onCreated: (Long) -> Unit,
     onBack: () -> Unit,
-    wizard: Boolean = false,
     onFromTicket: (() -> Unit)? = null,
 ) {
     val scope = rememberWorkScope()
@@ -2891,15 +2732,15 @@ private fun NewSessionRoute(
     }
     val state by vm.state.collectAsState()
     LaunchedEffect(vm, initialProject) { initialProject?.let(vm::selectProject) }
-    // The New layout's wizard step lives here so its back gesture is one of
+    // The wizard step lives here so its back gesture is one of
     // `App`'s handlers: on Project or Review it goes one step back; on Where
     // (and while a start runs, which is safe to leave) `nav.back()` leaves.
     var wizardStep by remember { mutableStateOf(WizardStep.Where) }
-    BackHandler(enabled = wizard && wizardStep.previous != null && !state.creating) { wizardStep.previous?.let { wizardStep = it } }
+    BackHandler(enabled = wizardStep.previous != null && !state.creating) { wizardStep.previous?.let { wizardStep = it } }
     // Leaving from the first step asks first when something was typed (review r09 B5).
     var askDiscard by remember { mutableStateOf(false) }
-    BackHandler(enabled = wizard && wizardStep.previous == null && !state.creating && newSessionTyped(state)) { askDiscard = true }
-    val leave: () -> Unit = { if (wizard && !state.creating && newSessionTyped(state)) askDiscard = true else onBack() }
+    BackHandler(enabled = wizardStep.previous == null && !state.creating && newSessionTyped(state)) { askDiscard = true }
+    val leave: () -> Unit = { if (!state.creating && newSessionTyped(state)) askDiscard = true else onBack() }
     val tools = remember(repository, scope) { ProjectToolsViewModel(repository, container.projectActions, scope, credentials.canWrite) }
     val toolsState by tools.state.collectAsState()
     LaunchedEffect(tools, state.host, state.projectId) { tools.loadWorktrees(state.host, state.projectId) }
@@ -2912,7 +2753,7 @@ private fun NewSessionRoute(
     var addTyped by remember { mutableStateOf(false) }
     var askDiscardAdd by remember { mutableStateOf(false) }
     val closeAdd: () -> Unit = { if (!toolsState.adding && addTyped) askDiscardAdd = true else tools.closeAdd() }
-    BackHandler(enabled = wizard && toolsState.addingOn != null) {
+    BackHandler(enabled = toolsState.addingOn != null) {
         if (!toolsState.adding && addStep == AddProjectStep.Where) addStep = AddProjectStep.Source else closeAdd()
     }
     NewSessionScreen(
@@ -2952,7 +2793,7 @@ private fun NewSessionRoute(
             onOpen = vm::openStarted,
             onDone = vm::dismissResult,
         ),
-        wizard = wizard,
+        wizard = true,
         wizardStep = wizardStep,
         onWizardStep = { wizardStep = it },
         addStep = addStep,
@@ -3001,7 +2842,6 @@ private fun TaskRoute(
     onStartHere: (String) -> Unit,
     onOpenTask: (String) -> Unit,
     onBack: () -> Unit,
-    newLayout: Boolean = false,
 ) {
     val scope = rememberWorkScope()
     val vm = remember(taskId, repository, scope) {
@@ -3060,23 +2900,19 @@ private fun TaskRoute(
         onFileUnder = { vm.fileUnder(it) },
         onMakeFollowup = { vm.makeFollowup(it) },
     )
-    if (newLayout) {
-        val rows by repository.sessions.collectAsState()
-        PhoneTaskScreen(
-            state = state,
-            status = status,
-            nowSeconds = epochSeconds(),
-            rowOf = { id -> rows.firstOrNull { it.id == id } },
-            handlers = PhoneTaskHandlers(
-                task = handlers,
-                onLink = { vm.confirmLink(it) },
-                onNotThis = { vm.rejectLink(it) },
-                onClearSummary = vm::clearSummary,
-            ),
-        )
-    } else {
-        TaskScreen(state = state, status = status, handlers = handlers)
-    }
+    val rows by repository.sessions.collectAsState()
+    PhoneTaskScreen(
+        state = state,
+        status = status,
+        nowSeconds = epochSeconds(),
+        rowOf = { id -> rows.firstOrNull { it.id == id } },
+        handlers = PhoneTaskHandlers(
+            task = handlers,
+            onLink = { vm.confirmLink(it) },
+            onNotThis = { vm.rejectLink(it) },
+            onClearSummary = vm::clearSummary,
+        ),
+    )
 }
 
 /** The Sessions screen's sheets: filters and tickets. Its own function to keep `FleetRoute` under the JVM's method size limit. */
@@ -3087,7 +2923,6 @@ private fun SessionsSheets(
     ticketsState: TicketsUiState,
     tickets: TicketsViewModel,
     nav: Navigator,
-    layout: PhoneLayout,
     repository: FleetRepository,
 ) {
     if (state.filtersOpen) {
@@ -3125,9 +2960,9 @@ private fun SessionsSheets(
                     sessions.clearFacet(id)
                     if (id == SessionFacetId.HOST) nav.clearHostFilter()
                 },
-                // New: "Filters and grouping" in one sheet.
-                onSetGroupMode = if (layout == PhoneLayout.New) sessions::setGroupMode else null,
-                onToggleNeedsAttention = if (layout == PhoneLayout.New) sessions::toggleNeedsAttentionOnly else null,
+                // "Filters and grouping" in one sheet.
+                onSetGroupMode = sessions::setGroupMode,
+                onToggleNeedsAttention = sessions::toggleNeedsAttentionOnly,
             ),
         )
     }
@@ -3160,7 +2995,7 @@ private fun SessionsSheets(
                 onCycleSort = tickets::cycleSort,
                 onToggleArchived = { tickets.toggleArchived() },
             ),
-            rowOf = if (layout == PhoneLayout.New) ({ id -> ticketRows.firstOrNull { it.id == id } }) else null,
+            rowOf = { id -> ticketRows.firstOrNull { it.id == id } },
         )
     }
 }
@@ -3219,7 +3054,12 @@ private fun SessionRoute(
     onOpenSession: (Long) -> Unit,
     onOpenRepo: (Long) -> Unit,
     callScope: CoroutineScope,
-    newLayout: Boolean = false,
+    /**
+     * The session as its tabbed workspace (redesign 14.4): what a session
+     * opened from a list draws. False is the bare conversation Control
+     * embeds, with the sheets in place of the tabs.
+     */
+    workspace: Boolean = false,
     /**
      * The hub lets this device apply a fix: `autofix list`'s `can_apply` (a
      * trusted, full-access device), not merely a write token. False until
@@ -3231,7 +3071,7 @@ private fun SessionRoute(
 ) {
     val scope = rememberWorkScope()
     val queuesForControl = control != null
-    val vm = remember(sessionId, repository, scope, newLayout, queuesForControl) {
+    val vm = remember(sessionId, repository, scope, workspace, queuesForControl) {
         SessionViewModel(
             sessionId = sessionId,
             fleet = repository,
@@ -3246,7 +3086,7 @@ private fun SessionRoute(
             quickReplies = container.quickReplies,
             drafts = container.drafts,
             // The New bar keeps a refused prompt in the conversation (redesign 14.5).
-            keepNotSent = newLayout,
+            keepNotSent = workspace,
             // ⋮ Background agent… (MobileFormsSession), on this session's host.
             background = container.newSessionActions,
             // Control's composer queues on the hub while it works (Control review F19).
@@ -3298,10 +3138,10 @@ private fun SessionRoute(
     }
     // The Details tab's Review… and Force kill… ask here (r09 B18); ⋮ keeps its own.
     var detailsAsk by remember { mutableStateOf<DetailsAsk?>(null) }
-    // The Hex field while a repair or a recreate runs (MobileFullscreenLoaders), New bar only.
+    // The Hex field while a repair or a recreate runs (MobileFullscreenLoaders), in the workspace only.
     var repairWait by remember(sessionId) { mutableStateOf<RepairWait?>(null) }
     fun underHex(wait: RepairWait, call: () -> Job) {
-        if (!newLayout) {
+        if (!workspace) {
             call()
             return
         }
@@ -3359,7 +3199,7 @@ private fun SessionRoute(
     // (instead of the sheet). Each reads when it is opened.
     val hasWorktree = caps.repo || caps.repoLog || caps.repoFiles
     var sessionTab by remember(sessionId) { mutableStateOf(SessionTab.Conversation) }
-    val repoVm = if (newLayout && hasWorktree) {
+    val repoVm = if (workspace && hasWorktree) {
         remember(sessionId, repository, scope) {
             RepoViewModel(
                 sessionId = sessionId,
@@ -3390,7 +3230,7 @@ private fun SessionRoute(
     // "Plan ready" and stopped, the session's changes are read for the file
     // it names. Its words are the signal, so a session started on the
     // desktop shows the card here too.
-    val planVm = if (newLayout && caps.repo) {
+    val planVm = if (workspace && caps.repo) {
         remember(sessionId, scope) { PlanReadyViewModel(sessionId, container.repoActions, container.planSettled, scope) }
     } else {
         null
@@ -3431,7 +3271,7 @@ private fun SessionRoute(
     }
     // Back closes an open diff, commit or file in the Files tab before it
     // leaves the session; composed after `App`'s handler, so asked first.
-    val filesOpen = newLayout && sessionTab == SessionTab.Files && repoFiles?.views?.isNotEmpty() == true
+    val filesOpen = workspace && sessionTab == SessionTab.Files && repoFiles?.views?.isNotEmpty() == true
     BackHandler(enabled = filesOpen) { repoVm?.back() }
     // Full screen (redesign 14.21): composed after the Files tab's, so Back leaves it first.
     var full by remember(sessionId) { mutableStateOf(SessionFull.None) }
@@ -3541,7 +3381,7 @@ private fun SessionRoute(
         onRetry = { anchor, prompt -> vm.retry(anchor, prompt) },
         // A fork is a new session: open it, with this one a Back away.
         onFork = { anchor, worktree -> vm.fork(anchor, worktree, onOpenSession) },
-        onOpenDetails = { if (newLayout) selectTab(SessionTab.Details) else detailsVm.open() },
+        onOpenDetails = { if (workspace) selectTab(SessionTab.Details) else detailsVm.open() },
         onLoadOlder = { vm.loadOlder() },
         onViewConversation = { vm.view(it) },
         onBackToCurrent = vm::backToCurrent,
@@ -3552,11 +3392,11 @@ private fun SessionRoute(
         onPressEnter = { vm.pressEnter() },
         onStop = { vm.interrupt() },
         // The New bar opens Move with no host chosen (redesign 14.5).
-        onMove = { moveVm.open(fresh = newLayout) }.takeIf { move.available },
+        onMove = { moveVm.open(fresh = workspace) }.takeIf { move.available },
         // A dismissed ghost has no screen left to show: back to where it was opened from.
         onDismissGhost = { vm.dismissGhost(onBack) },
         onSetPinned = { vm.setPinned(it) },
-        onOpenRepo = (if (newLayout) ({ selectTab(SessionTab.Files) }) else ({ onOpenRepo(sessionId) })).takeIf { hasWorktree },
+        onOpenRepo = (if (workspace) ({ selectTab(SessionTab.Files) }) else ({ onOpenRepo(sessionId) })).takeIf { hasWorktree },
         showFoldHint = foldHintOwed,
         onFoldHintShown = { container.hints.markShown(Hints.DOUBLE_TAP) },
         onAnswerInWords = { vm.answerInWords() },
@@ -3565,8 +3405,8 @@ private fun SessionRoute(
         onRetryLastTurn = { vm.retryLastTurn(it) },
         onDismissFailed = vm::dismissFailed,
         // ⋮ Archive leaves the session: back to where it was opened from.
-        onArchive = { extrasVm.archive(onBack); Unit }.takeIf { newLayout && caps.archiveSession && credentials.canWrite },
-        notice = extras.archiveError.takeIf { newLayout },
+        onArchive = { extrasVm.archive(onBack); Unit }.takeIf { workspace && caps.archiveSession && credentials.canWrite },
+        notice = extras.archiveError.takeIf { workspace },
         onDismissNotice = extrasVm::dismissArchiveError,
         onPaneKey = { vm.pressKey(it) },
         later = run {
@@ -3614,7 +3454,7 @@ private fun SessionRoute(
         } else {
             null
         },
-        tabs = if (!newLayout) {
+        tabs = if (!workspace) {
             null
         } else {
             SessionTabsHost(
@@ -3810,7 +3650,7 @@ private fun SessionRoute(
         MoveSheet(
             state = move,
             nowSeconds = epochSeconds(),
-            orbit = newLayout,
+            orbit = workspace,
             handlers = MoveHandlers(
                 onClose = moveVm::close,
                 onTarget = { moveVm.selectTarget(it) },
@@ -3823,8 +3663,8 @@ private fun SessionRoute(
             ),
         )
     }
-    // On the New bar Details is a tab, not a sheet.
-    if (details.open && !newLayout) {
+    // In the workspace Details is a tab, not a sheet.
+    if (details.open && !workspace) {
         val rows by repository.sessions.collectAsState()
         SessionDetailsSheet(
             state = details,
