@@ -88,13 +88,13 @@ import kotlinx.coroutines.launch
 const val WELCOME_HINT: String = "welcome"
 
 /**
- * Whether an unpaired phone opens on the welcome rather than on Pair: the New
- * layout, never welcomed before, and not here because it was signed out or
- * forgot a hub (Pair says why then, and the welcome would hide it), nor
- * because a pair link opened the app (Pair shows what the link filled in).
+ * Whether an unpaired phone opens on the welcome rather than on Pair: never
+ * welcomed before, and not here because it was signed out or forgot a hub
+ * (Pair says why then, and the welcome would hide it), nor because a pair
+ * link opened the app (Pair shows what the link filled in).
  */
-fun showWelcome(layout: PhoneLayout, welcomed: Boolean, signedOut: Boolean, pairLink: Boolean = false): Boolean =
-    layout == PhoneLayout.New && !welcomed && !signedOut && !pairLink
+fun showWelcome(welcomed: Boolean, signedOut: Boolean, pairLink: Boolean = false): Boolean =
+    !welcomed && !signedOut && !pairLink
 
 /** Where an unpaired phone is on the New layout. */
 enum class FirstRun { Welcome, NoHub, Pair }

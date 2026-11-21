@@ -12,16 +12,25 @@ import kotlin.test.assertTrue
  */
 class NavigatorTest {
 
+    /** The app opens on the Inbox; most of these start from the Sessions tab. */
+    private fun onSessions() = Navigator().apply { select(Tab.Sessions) }
+
+    /** Hosts, Files and Settings are pushed over More, which is the tab. */
+    private fun Navigator.openOverMore(screen: Screen) {
+        select(Tab.More)
+        openFromMore(screen)
+    }
+
     @Test
-    fun the_app_opens_on_the_fleet_list() {
-        val nav = Navigator()
+    fun the_sessions_tab_opens_on_the_fleet_list() {
+        val nav = onSessions()
         assertEquals(Screen.Sessions(), nav.screen.value)
         assertEquals(Tab.Sessions, nav.tab.value)
     }
 
     @Test
     fun opening_a_session_keeps_the_sessions_tab_lit() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.open(7)
 
         assertEquals(Screen.Session(7), nav.screen.value)
@@ -32,7 +41,7 @@ class NavigatorTest {
 
     @Test
     fun back_from_a_session_returns_to_the_list() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.open(7)
 
         assertTrue(nav.back(), "the app handled it")
@@ -46,34 +55,34 @@ class NavigatorTest {
      */
     @Test
     fun back_on_a_tab_is_not_the_apps_to_handle() {
-        val nav = Navigator()
+        val nav = onSessions()
         assertFalse(nav.back())
         assertEquals(Screen.Sessions(), nav.screen.value)
 
-        nav.select(Tab.Hosts)
+        nav.select(Tab.More)
         assertFalse(nav.back())
-        assertEquals(Screen.Hosts, nav.screen.value)
+        assertEquals(Screen.More, nav.screen.value)
     }
 
     @Test
     fun switching_tabs_from_a_session_leaves_it() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.open(7)
-        nav.select(Tab.Settings)
+        nav.select(Tab.More)
 
-        assertEquals(Screen.Settings, nav.screen.value)
-        assertEquals(Tab.Settings, nav.tab.value)
+        assertEquals(Screen.More, nav.screen.value)
+        assertEquals(Tab.More, nav.tab.value)
 
         // And coming back shows the list, not the session that was open. A
         // remembered session is a rule with an expiry date on it — the session
-        // can be killed from the desktop while the Settings tab is showing.
+        // can be killed from the desktop while the More tab is showing.
         nav.select(Tab.Sessions)
         assertEquals(Screen.Sessions(), nav.screen.value)
     }
 
     @Test
     fun selecting_the_tab_already_showing_changes_nothing() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.select(Tab.Sessions)
         assertEquals(Screen.Sessions(), nav.screen.value)
     }
@@ -84,19 +93,19 @@ class NavigatorTest {
      * business. Coming back from Pair therefore has to start from the top.
      */
     @Test
-    fun a_fresh_navigator_after_pairing_starts_at_the_list() {
-        val nav = Navigator()
-        nav.select(Tab.Settings)
+    fun a_fresh_navigator_after_pairing_starts_at_the_inbox() {
+        val nav = onSessions()
+        nav.select(Tab.More)
 
-        assertEquals(Screen.Sessions(), Navigator().screen.value)
-        assertEquals(Screen.Settings, nav.screen.value)
+        assertEquals(Screen.Inbox, Navigator().screen.value)
+        assertEquals(Screen.More, nav.screen.value)
     }
 
     /** Tapping a host row jumps straight to Sessions, filtered to that host. */
     @Test
     fun tapping_a_host_shows_sessions_filtered_to_it() {
-        val nav = Navigator()
-        nav.select(Tab.Hosts)
+        val nav = onSessions()
+        nav.openOverMore(Screen.Hosts)
 
         nav.showSessionsFor("mefistos")
 
@@ -110,7 +119,7 @@ class NavigatorTest {
      */
     @Test
     fun reselecting_the_sessions_tab_clears_the_host_filter() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.showSessionsFor("mefistos")
 
         nav.select(Tab.Sessions)
@@ -126,7 +135,7 @@ class NavigatorTest {
      */
     @Test
     fun back_from_a_session_opened_from_a_filtered_list_keeps_the_filter() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.showSessionsFor("mefistos")
 
         nav.open(7)
@@ -138,7 +147,7 @@ class NavigatorTest {
     /** The unfiltered case still works the same as before this fix. */
     @Test
     fun back_from_a_session_opened_from_the_unfiltered_list_stays_unfiltered() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.open(7)
 
         assertTrue(nav.back())
@@ -153,7 +162,7 @@ class NavigatorTest {
      */
     @Test
     fun reselecting_after_a_filtered_back_still_clears_the_filter() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.showSessionsFor("mefistos")
         nav.open(7)
         nav.back()
@@ -175,7 +184,7 @@ class NavigatorTest {
      */
     @Test
     fun clearing_the_filter_then_opening_a_session_and_coming_back_stays_cleared() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.showSessionsFor("mefistos")
 
         nav.clearHostFilter()
@@ -188,8 +197,8 @@ class NavigatorTest {
     /** Nothing to clear from a session, Hosts, or Settings — the chip only exists on Sessions. */
     @Test
     fun clearHostFilter_on_a_non_sessions_screen_is_a_no_op() {
-        val nav = Navigator()
-        nav.select(Tab.Hosts)
+        val nav = onSessions()
+        nav.openOverMore(Screen.Hosts)
 
         nav.clearHostFilter()
 
@@ -203,7 +212,7 @@ class NavigatorTest {
      */
     @Test
     fun new_session_is_pushed_over_the_list_and_takes_its_host_filter() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.showSessionsFor("pine")
 
         nav.newSession()
@@ -214,7 +223,7 @@ class NavigatorTest {
 
     @Test
     fun back_from_the_form_returns_to_the_list_as_it_stood() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.showSessionsFor("pine")
         nav.newSession()
 
@@ -228,7 +237,7 @@ class NavigatorTest {
      */
     @Test
     fun back_from_the_session_the_form_created_skips_the_form() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.showSessionsFor("pine")
         nav.newSession()
 
@@ -242,8 +251,8 @@ class NavigatorTest {
     /** Only the list offers the form; anywhere else there is no list to return to. */
     @Test
     fun new_session_from_another_tab_does_nothing() {
-        val nav = Navigator()
-        nav.select(Tab.Hosts)
+        val nav = onSessions()
+        nav.openOverMore(Screen.Hosts)
 
         nav.newSession()
 
@@ -253,7 +262,7 @@ class NavigatorTest {
     /** A create that finishes after the person left the form does not pull them back. */
     @Test
     fun a_create_finishing_after_the_form_was_left_changes_nothing() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.newSession()
         nav.back()
 
@@ -261,7 +270,7 @@ class NavigatorTest {
         assertEquals(Screen.Sessions(), nav.screen.value)
 
         nav.newSession()
-        nav.select(Tab.Settings)
+        nav.openOverMore(Screen.Settings)
         nav.created(42)
         assertEquals(Screen.Settings, nav.screen.value)
     }
@@ -269,7 +278,7 @@ class NavigatorTest {
     /** Start here from the Tickets sheet: the same form in ticket mode, and the made session opens like any other. */
     @Test
     fun start_here_opens_the_form_in_ticket_mode_and_created_opens_the_session() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.showSessionsFor("pine")
         nav.newSession(ticketKey = "PAY-9")
 
@@ -284,7 +293,7 @@ class NavigatorTest {
 
     @Test
     fun the_work_tab_is_a_root_like_the_others() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.select(Tab.Work)
 
         assertEquals(Screen.Work, nav.screen.value)
@@ -295,7 +304,7 @@ class NavigatorTest {
     /** The Work view's Start chip opens the form in ticket mode; back returns to Work. */
     @Test
     fun start_from_the_work_view_opens_the_form_for_its_ticket() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.select(Tab.Work)
 
         nav.newSession(ticketKey = "FLEET-12")
@@ -308,7 +317,7 @@ class NavigatorTest {
     /** Task → session → back lands on the task, and back again on the Work view — with the Work tab lit throughout. */
     @Test
     fun task_then_session_then_back_returns_to_the_task_then_to_work() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.select(Tab.Work)
         nav.openTask("item:12")
         assertEquals(Screen.Task("item:12"), nav.screen.value)
@@ -326,7 +335,7 @@ class NavigatorTest {
     /** A task opened from a session's Tasks comes back to that session, then to the list it was opened from. */
     @Test
     fun a_task_opened_from_a_session_returns_to_the_session() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.showSessionsFor("pine")
         nav.open(7)
         nav.openTask("ref:OPS-1")
@@ -343,7 +352,7 @@ class NavigatorTest {
     /** Start here from a task: the form in ticket mode, and back from the made session lands on the task, never the form. */
     @Test
     fun start_here_from_a_task_returns_to_the_task() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.select(Tab.Work)
         nav.openTask("item:12")
 
@@ -360,7 +369,7 @@ class NavigatorTest {
     /** A plain New session is the list's; a task offers only ticket mode. */
     @Test
     fun a_plain_new_session_from_a_task_does_nothing() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.select(Tab.Work)
         nav.openTask("item:12")
 
@@ -371,7 +380,7 @@ class NavigatorTest {
 
     @Test
     fun switching_tabs_forgets_the_way_back() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.select(Tab.Work)
         nav.openTask("item:12")
         nav.open(7)
@@ -383,24 +392,24 @@ class NavigatorTest {
         assertEquals(Screen.Sessions(), nav.screen.value, "not the task from the other tab")
     }
 
-    /** The hub stopped serving the Work view: a lit Work tab goes back to the list; any other tab stays. */
+    /** The hub stopped serving the Work view: a lit Work tab goes back to the first tab; any other tab stays. */
     @Test
     fun losing_the_work_view_leaves_the_work_tab() {
-        val nav = Navigator()
-        nav.select(Tab.Hosts)
+        val nav = onSessions()
+        nav.openOverMore(Screen.Hosts)
         nav.workUnavailable()
         assertEquals(Screen.Hosts, nav.screen.value)
 
         nav.select(Tab.Work)
         nav.openTask("item:12")
         nav.workUnavailable()
-        assertEquals(Screen.Sessions(), nav.screen.value)
-        assertEquals(Tab.Sessions, nav.tab.value)
+        assertEquals(Screen.Inbox, nav.screen.value)
+        assertEquals(Tab.Inbox, nav.tab.value)
     }
 
     @Test
     fun opening_the_task_already_showing_adds_no_step() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.select(Tab.Work)
         nav.openTask("item:12")
         nav.openTask("item:12")
@@ -411,7 +420,7 @@ class NavigatorTest {
 
     @Test
     fun a_worktree_opens_over_its_session_and_back_returns_to_it() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.open(7)
         nav.openRepo(7)
 
@@ -426,7 +435,7 @@ class NavigatorTest {
 
     @Test
     fun opening_the_same_worktree_twice_is_one_step() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.open(7)
         nav.openRepo(7)
         nav.openRepo(7)
@@ -437,32 +446,32 @@ class NavigatorTest {
 
     @Test
     fun usage_opens_over_settings_and_back_returns_there() {
-        val nav = Navigator()
-        nav.select(Tab.Settings)
+        val nav = onSessions()
+        nav.openOverMore(Screen.Settings)
         nav.openUsage()
 
         assertEquals(Screen.Usage, nav.screen.value)
-        assertEquals(Tab.Settings, nav.tab.value)
+        assertEquals(Tab.More, nav.tab.value)
         assertTrue(nav.back())
         assertEquals(Screen.Settings, nav.screen.value)
     }
 
     @Test
     fun company_opens_over_settings_and_back_returns_there() {
-        val nav = Navigator()
-        nav.select(Tab.Settings)
+        val nav = onSessions()
+        nav.openOverMore(Screen.Settings)
         nav.openCompany()
         nav.openCompany()
 
         assertEquals(Screen.Company, nav.screen.value)
-        assertEquals(Tab.Settings, nav.tab.value)
+        assertEquals(Tab.More, nav.tab.value)
         assertTrue(nav.back())
         assertEquals(Screen.Settings, nav.screen.value)
     }
 
     @Test
     fun a_new_session_in_a_project_opens_the_form_with_it_picked() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.newSessionIn(3)
         assertEquals(Screen.NewSession(projectId = 3), nav.screen.value)
         assertTrue(nav.back())
@@ -471,7 +480,7 @@ class NavigatorTest {
 
     @Test
     fun back_from_a_session_opened_out_of_a_sheet_puts_the_sheet_back_up() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.showSessionsFor("pine")
         nav.openFrom(7, SessionsSheet.Today)
         assertEquals(Screen.Session(7), nav.screen.value)
@@ -485,7 +494,7 @@ class NavigatorTest {
 
     @Test
     fun opening_from_a_sheet_anywhere_but_the_list_is_a_plain_open() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.select(Tab.Work)
         nav.openFrom(7, SessionsSheet.Tickets)
         assertTrue(nav.back())
@@ -494,7 +503,7 @@ class NavigatorTest {
 
     @Test
     fun a_tab_tap_never_brings_a_sheet_back() {
-        val nav = Navigator()
+        val nav = onSessions()
         nav.openFrom(7, SessionsSheet.Tidy)
         nav.select(Tab.Sessions)
         assertEquals(Screen.Sessions(), nav.screen.value)

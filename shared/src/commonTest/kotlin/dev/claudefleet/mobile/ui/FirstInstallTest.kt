@@ -68,14 +68,13 @@ private class Installs : AgentInstallActions {
 class FirstInstallTest {
 
     @Test
-    fun the_welcome_shows_once_on_the_new_layout_and_never_over_a_sign_out() {
-        assertTrue(showWelcome(PhoneLayout.New, welcomed = false, signedOut = false))
-        assertFalse(showWelcome(PhoneLayout.New, welcomed = true, signedOut = false))
-        assertFalse(showWelcome(PhoneLayout.New, welcomed = false, signedOut = true))
-        assertFalse(showWelcome(PhoneLayout.Classic, welcomed = false, signedOut = false))
+    fun the_welcome_shows_once_and_never_over_a_sign_out() {
+        assertTrue(showWelcome(welcomed = false, signedOut = false))
+        assertFalse(showWelcome(welcomed = true, signedOut = false))
+        assertFalse(showWelcome(welcomed = false, signedOut = true))
         assertFalse(
-            showWelcome(PhoneLayout.New, welcomed = false, signedOut = false, pairLink = true),
-            "a pair link opens on Pair, filled, even on a first run now that New is the default",
+            showWelcome(welcomed = false, signedOut = false, pairLink = true),
+            "a pair link opens on Pair, filled, even on a first run",
         )
     }
 

@@ -10,7 +10,7 @@ sealed interface Screen {
     /**
      * The fleet list, optionally narrowed to one host — what tapping a host
      * row on the Hosts screen does. `null` is "no filter", not "unknown host";
-     * every ordinary navigation to Sessions (a tab tap, app start) passes it.
+     * every ordinary navigation to Sessions (a tab tap) passes it.
      */
     data class Sessions(
         val hostAlias: String? = null,
@@ -43,7 +43,7 @@ sealed interface Screen {
     /** One task and all of its sessions, pushed over the Work view (or a session's Tasks). */
     data class Task(val taskId: String) : Screen
 
-    /** The hub's copies of files sessions sent (claude-fleet file downloads). A tab of its own. */
+    /** The hub's copies of files sessions sent (claude-fleet file downloads), pushed over More. */
     data object Files : Screen
 
     /** One session's worktree — changes, history, files — pushed over that session. */
@@ -55,13 +55,13 @@ sealed interface Screen {
     /** The company's organisations, read-only (claude-fleet's company administration), pushed over Settings. */
     data object Company : Screen
 
-    /** New layout only (redesign 14.2): what needs a person, oldest ask first. The first tab. */
+    /** Redesign 14.2: what needs a person, oldest ask first. The first tab. */
     data object Inbox : Screen
 
-    /** New layout only: the coordinator (the fleet agent) and missions. Replaces the agent button. */
+    /** The coordinator (the fleet agent) and missions. Replaces the agent button. */
     data object Control : Screen
 
-    /** New layout only: Hosts, accounts and usage, automation, Files, organisations and Settings. */
+    /** Hosts, accounts and usage, automation, Files, organisations and Settings. */
     data object More : Screen
 
     /** The phone app's own update (redesign 14.18): download, signature, install. Pushed over More, Inbox or Settings. */
@@ -73,10 +73,10 @@ sealed interface Screen {
     /** The practice fleet: sample sessions on this phone that never reach the hub. */
     data object Practice : Screen
 
-    /** New layout only (redesign 14.16): Missions as a screen, opened from Control and More. */
+    /** Redesign 14.16: Missions as a screen, opened from Control and More. */
     data object Missions : Screen
 
-    /** New layout only (redesign 14.20): the hub's trackers and Connect a tracker, from More. */
+    /** Redesign 14.20: the hub's trackers and Connect a tracker, from More. */
     data object Trackers : Screen
 
     /** One of the hub's approved guides, step by step, with Undo per change. */
@@ -84,22 +84,13 @@ sealed interface Screen {
 }
 
 /**
- * Which bottom bar the phone draws (redesign 14.2), like the desktop's
- * `ui.layout`. [Classic] is today's five tabs; [New] is the Orbit Fleet bar,
- * Inbox · Sessions · Control · Work · More, where Files, Hosts and Settings
- * open from More instead of being tabs. Nothing is removed, only moved.
+ * The destinations in the bottom bar, in the order it draws them: the Orbit
+ * Fleet bar (redesign 14.2), Inbox · Sessions · Control · Work · More. Files,
+ * Hosts and Settings open from More. The old Classic bar, where those three
+ * were tabs, went with the 14.13 sign-off. [Work] is drawn only when the hub
+ * serves the Work view (`work { tree }`) — see `App.kt`.
  */
-enum class PhoneLayout(val tabs: List<Tab>) {
-    Classic(listOf(Tab.Sessions, Tab.Work, Tab.Files, Tab.Hosts, Tab.Settings)),
-    New(listOf(Tab.Inbox, Tab.Sessions, Tab.Control, Tab.Work, Tab.More)),
-}
-
-/**
- * The destinations in the bottom bar; which ones depends on [PhoneLayout].
- * [Work] is drawn only when the hub serves the Work view (`work { tree }`),
- * and [Files] only when it keeps downloads (`list_downloads`) — see `App.kt`.
- */
-enum class Tab { Sessions, Work, Files, Hosts, Settings, Inbox, Control, More }
+enum class Tab { Inbox, Sessions, Control, Work, More }
 
 /** The Sessions list's sheets a session can be opened from, and back returns to. */
 enum class SessionsSheet { Today, Tidy, Tickets }
@@ -118,7 +109,7 @@ enum class SessionsSheet { Today, Tidy, Tickets }
  * the root reads the auth state and this navigator only describes where you are
  * once you are in.
  */
-class Navigator(layout: PhoneLayout = PhoneLayout.Classic) {
+class Navigator {
     /**
      * Everything this navigator knows, as one value: which screen, which tab
      * is lit, and where back goes. Every move is one [MutableStateFlow.update]
@@ -129,9 +120,8 @@ class Navigator(layout: PhoneLayout = PhoneLayout.Classic) {
      * from it ([publish]).
      */
     private data class NavState(
-        val layout: PhoneLayout = PhoneLayout.Classic,
-        val screen: Screen = rootOf(layout.tabs.first()),
-        val tab: Tab = layout.tabs.first(),
+        val screen: Screen = rootOf(Tab.entries.first()),
+        val tab: Tab = Tab.entries.first(),
         /**
          * Where [back] returns to, most recent last — the screens a pushed one
          * (a session, the form, a task) was opened *from*, each as it stood: the
@@ -152,17 +142,12 @@ class Navigator(layout: PhoneLayout = PhoneLayout.Classic) {
         val history: List<Screen> = emptyList(),
     )
 
-    private val nav = MutableStateFlow(NavState(layout = layout))
+    private val nav = MutableStateFlow(NavState())
 
     private val _screen = MutableStateFlow(nav.value.screen)
     val screen: StateFlow<Screen> = _screen.asStateFlow()
 
     private val _tab = MutableStateFlow(nav.value.tab)
-
-    private val _layout = MutableStateFlow(layout)
-
-    /** The bar being drawn. */
-    val layout: StateFlow<PhoneLayout> = _layout.asStateFlow()
 
     /**
      * Which tab is lit. A session belongs to the list it was opened from, so
@@ -307,7 +292,7 @@ class Navigator(layout: PhoneLayout = PhoneLayout.Classic) {
     fun back(): Boolean {
         var handled = false
         move { s ->
-            handled = isPushedOn(s.screen, s.layout)
+            handled = isPushedScreen(s.screen)
             if (!handled) {
                 s
             } else {
@@ -328,31 +313,11 @@ class Navigator(layout: PhoneLayout = PhoneLayout.Classic) {
      */
     fun select(tab: Tab) = move { it.copy(history = emptyList()).going(rootOf(tab)) }
 
-    /**
-     * Switch between the Classic and New bars. Starts over on the new bar's
-     * first tab, as a tab switch does: a screen that was a tab in one layout
-     * (Hosts) is pushed in the other, so carrying the history across would
-     * leave back pointing at places the new bar does not have.
-     */
-    fun setLayout(layout: PhoneLayout) = move { s ->
-        if (s.layout == layout) s else NavState(layout = layout)
-    }
+    /** Open one of More's destinations over More: Hosts, Files or Settings. Back returns to More. */
+    fun openFromMore(screen: Screen) = move { s -> if (s.screen == screen) s else s.pushing(s.screen).going(screen) }
 
-    /**
-     * Open one of More's destinations over More (New layout): Hosts, Files or
-     * Settings, which are tabs only on the Classic bar. Back returns to More.
-     * On the Classic bar it is the tab itself.
-     */
-    fun openFromMore(screen: Screen) = move { s ->
-        when {
-            s.layout == PhoneLayout.Classic -> tabOf(screen, s.layout)?.let { s.copy(history = emptyList()).going(rootOf(it)) } ?: s
-            s.screen == screen -> s
-            else -> s.pushing(s.screen).going(screen)
-        }
-    }
-
-    /** Whether back is the app's to handle on [screen] under the current layout. See [isPushedOn]. */
-    fun isPushed(screen: Screen): Boolean = isPushedOn(screen, nav.value.layout)
+    /** Whether back is the app's to handle on [screen]. See [isPushedScreen]. */
+    fun isPushed(screen: Screen): Boolean = isPushedScreen(screen)
 
     /**
      * Jump to the Sessions tab filtered to one host — what tapping a host row
@@ -381,31 +346,26 @@ class Navigator(layout: PhoneLayout = PhoneLayout.Classic) {
     /**
      * The Work tab went away — the hub stopped serving `work { tree }`, or a
      * reconnect landed on an older hub. A Work screen has nothing to draw
-     * then, so the app goes to the list rather than leaving a lit tab that
+     * then, so the app goes to the Inbox rather than leaving a lit tab that
      * is no longer in the bar.
      */
     fun workUnavailable() = move {
-        if (it.tab == Tab.Work) it.copy(history = emptyList()).going(rootOf(it.layout.tabs.first())) else it
+        if (it.tab == Tab.Work) it.copy(history = emptyList()).going(rootOf(Tab.entries.first())) else it
     }
 
     /**
-     * The Files tab went away (a reconnect landed on a hub without downloads):
-     * as [workUnavailable]. On the New bar Files is under More, so the app
-     * goes back to More.
+     * Files went away (a reconnect landed on a hub without downloads): Files
+     * is under More, so the app goes back to More.
      */
     fun filesUnavailable() = move {
-        when {
-            it.tab == Tab.Files -> it.copy(history = emptyList()).going(rootOf(Tab.Sessions))
-            it.screen == Screen.Files -> it.copy(history = emptyList()).going(Screen.More)
-            else -> it
-        }
+        if (it.screen == Screen.Files) it.copy(history = emptyList()).going(Screen.More) else it
     }
 
     private fun NavState.going(screen: Screen): NavState = copy(
         screen = screen,
         // A session or the form belongs to the tab it was opened from — the
         // Work tab stays lit over a session opened from a task.
-        tab = tabOf(screen, layout) ?: history.lastOrNull()?.let { tabOf(it, layout) } ?: tab,
+        tab = tabOf(screen) ?: history.lastOrNull()?.let { tabOf(it) } ?: tab,
     )
 
     /** One move: an atomic step of [nav], then [publish]. */
@@ -425,7 +385,6 @@ class Navigator(layout: PhoneLayout = PhoneLayout.Classic) {
             val s = nav.value
             _screen.value = s.screen
             _tab.value = s.tab
-            _layout.value = s.layout
             if (nav.value == s) return
         }
     }
@@ -438,36 +397,29 @@ class Navigator(layout: PhoneLayout = PhoneLayout.Classic) {
 
 /**
  * A screen pushed over a tab, which back leaves; a tab's own screen is not
- * one. Hosts, Files and Settings are tabs on the Classic bar and pushed over
- * More on the New one.
+ * one. Hosts, Files and Settings are pushed over More.
  */
-internal fun isPushedOn(screen: Screen, layout: PhoneLayout): Boolean =
+private fun isPushedScreen(screen: Screen): Boolean =
     screen is Screen.Session || screen is Screen.NewSession || screen is Screen.Task || screen is Screen.Repo ||
         screen == Screen.Usage || screen == Screen.Company || screen == Screen.Update ||
         screen == Screen.Learn || screen == Screen.Practice || screen is Screen.Guide || screen == Screen.Missions ||
-        screen == Screen.Trackers ||
-        (layout == PhoneLayout.New && (screen == Screen.Hosts || screen == Screen.Files || screen == Screen.Settings))
+        screen == Screen.Trackers || screen == Screen.Hosts || screen == Screen.Files || screen == Screen.Settings
 
 private fun rootOf(tab: Tab): Screen = when (tab) {
     Tab.Sessions -> Screen.Sessions()
     Tab.Work -> Screen.Work
-    Tab.Files -> Screen.Files
-    Tab.Hosts -> Screen.Hosts
-    Tab.Settings -> Screen.Settings
     Tab.Inbox -> Screen.Inbox
     Tab.Control -> Screen.Control
     Tab.More -> Screen.More
 }
 
 /** The tab a screen lights, or null for one that belongs to whichever it was opened from. */
-private fun tabOf(screen: Screen, layout: PhoneLayout): Tab? = when (screen) {
+private fun tabOf(screen: Screen): Tab? = when (screen) {
     is Screen.Sessions -> Tab.Sessions
     is Screen.Session, is Screen.NewSession, is Screen.Repo, Screen.Usage, Screen.Company, Screen.Update,
-    Screen.Learn, Screen.Practice, is Screen.Guide, Screen.Missions, Screen.Trackers -> null
+    Screen.Learn, Screen.Practice, is Screen.Guide, Screen.Missions, Screen.Trackers,
+    Screen.Files, Screen.Hosts, Screen.Settings -> null
     Screen.Work, is Screen.Task -> Tab.Work
-    Screen.Files -> if (layout == PhoneLayout.New) null else Tab.Files
-    Screen.Hosts -> if (layout == PhoneLayout.New) null else Tab.Hosts
-    Screen.Settings -> if (layout == PhoneLayout.New) null else Tab.Settings
     Screen.Inbox -> Tab.Inbox
     Screen.Control -> Tab.Control
     Screen.More -> Tab.More
