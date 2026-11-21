@@ -37,13 +37,8 @@ class EveryErrorBannerCanBeDismissedTest {
         assertEquals(
             listOf(
                 "AddHostScreen.kt",
-                "CompanyScreen.kt",
-                "FilesScreen.kt",
                 "FleetSettingsScreen.kt",
-                "HostsScreen.kt",
                 "MorePlacesScreen.kt",
-                "MyWorkScreen.kt",
-                "NewSessionScreen.kt",
                 "OrbitMissionsScreen.kt",
                 "OrbitOrgsScreen.kt",
                 "OrbitSettingsScreen.kt",
@@ -51,10 +46,7 @@ class EveryErrorBannerCanBeDismissedTest {
                 "PairScreen.kt",
                 "RepoScreen.kt",
                 "SessionScreen.kt",
-                "SessionsScreen.kt",
-                "SettingsScreen.kt",
                 "TaskScreen.kt",
-                "UsageScreen.kt",
             ),
             callSites.keys.sorted(),
         )

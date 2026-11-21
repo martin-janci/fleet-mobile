@@ -24,6 +24,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -45,6 +46,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import dev.claudefleet.mobile.model.Page
 import dev.claudefleet.mobile.model.inWords
 import dev.claudefleet.mobile.notify.NOTIFY_PHONE
@@ -58,6 +60,7 @@ import dev.claudefleet.mobile.notify.NotifyKinds
 import dev.claudefleet.mobile.notify.PhoneQuiet
 import dev.claudefleet.mobile.notify.clockText
 import dev.claudefleet.mobile.notify.parseClock
+import dev.claudefleet.mobile.notify.rememberNotificationPermission
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.components.ScreenHeader
@@ -693,6 +696,56 @@ private fun ForgetHub(s: SettingsUiState, onForget: () -> Unit) {
             text = { Text("This phone stops seeing the fleet. To come back you need a new pairing code from the hub's operator.") },
             confirmButton = { DangerTextButton(onClick = { asking = false; onForget() }) { Text("Forget") } },
             dismissButton = { TextButton(onClick = { asking = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+/**
+ * Notify me when a session needs me — on Android, a foreground service with
+ * its own ongoing notification holds the hub's stream open, so it is the
+ * person's to turn on, and the system's leave is asked for right then.
+ */
+@Composable
+internal fun NotifyRow(notifier: BackgroundNotifier) {
+    val on by notifier.enabled.collectAsState()
+    var refused by remember { mutableStateOf(false) }
+    val ask = rememberNotificationPermission()
+    val note by notifier.note.collectAsState()
+    LifecycleResumeEffect(notifier) {
+        notifier.refreshNote()
+        onPauseOrDispose { }
+    }
+    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+    val flip: (Boolean) -> Unit = { want ->
+        if (!want) {
+            notifier.setEnabled(false)
+        } else {
+            ask { granted ->
+                refused = !granted
+                if (granted) notifier.setEnabled(true)
+            }
+        }
+    }
+    // The whole row is the switch: a tap on its words flips it, and a screen
+    // reader reads the words as the switch's own.
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .toggleable(value = on, role = Role.Switch, onValueChange = flip)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Notify me when a session needs me", style = MaterialTheme.typography.titleSmall)
+            Text(
+                if (refused) "Notifications are turned off for this app in the system's settings."
+                else note ?: "Waiting, stuck or failed — even with the app closed. Keeps a connection to the hub open, with its own notification.",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (refused) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = on,
+            onCheckedChange = null,
         )
     }
 }

@@ -1,32 +1,18 @@
 package dev.claudefleet.mobile.ui
 
-import dev.claudefleet.mobile.model.relativeAgo
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -38,21 +24,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.AccountRow
 import dev.claudefleet.mobile.model.AutoSwitchView
 import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.unnamedProject
-import dev.claudefleet.mobile.model.UsageReport
 import dev.claudefleet.mobile.model.relativeTime
-import dev.claudefleet.mobile.ui.components.ErrorBanner
-import dev.claudefleet.mobile.ui.components.ScreenHeader
-import dev.claudefleet.mobile.ui.components.formatUsd
-import dev.claudefleet.mobile.ui.theme.FleetIcons
-import dev.claudefleet.mobile.ui.kit.InlineLoading
 
 data class UsageHandlers(
     val onBack: () -> Unit = {},
@@ -229,117 +207,6 @@ internal fun AccountDialogFor(account: AccountRow, state: UsageUiState, handlers
 }
 
 /**
- * Estimated usage over a window — total, by host, by day, the costliest
- * sessions — and the Claude accounts on the fleet's hosts. Every figure is
- * an estimate from the hub's price table, which the screen says up front.
- */
-@Composable
-fun UsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: Long, modifier: Modifier = Modifier) {
-    var naming by remember { mutableStateOf<AccountRow?>(null) }
-    naming?.let { a -> AccountDialogFor(a, state, handlers) { naming = null } }
-    Column(modifier = modifier.fillMaxSize()) {
-        ScreenHeader(
-            title = "Usage",
-            subtitle = "Estimated from a price table — not a bill",
-            navigation = { IconButton(onClick = handlers.onBack) { Icon(FleetIcons.ArrowBack, contentDescription = "Back") } },
-            actions = {
-                IconButton(onClick = handlers.onRefresh, enabled = !state.loading) { Icon(FleetIcons.Refresh, contentDescription = "Refresh") }
-            },
-        )
-        InlineLoading(waiting = state.loading)
-        ErrorBanner(state.error, onDismiss = handlers.onDismissError)
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            if (state.available) {
-                item {
-                    Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for (w in UsageWindow.entries) {
-                            FilterChip(selected = w == state.window, onClick = { handlers.onSelect(w) }, label = { Text(w.label) })
-                        }
-                    }
-                }
-                state.report?.let { report -> usageSections(report, handlers) }
-            } else if (state.capsKnown) {
-                item { Note("This hub does not report usage.") }
-            } else {
-                // Not "does not report" while the hub's tools are still unknown (r13 P20, review M13).
-                item { Note("Connecting to the hub…") }
-            }
-            state.autoSwitch?.let { view ->
-                item { Heading("When an account runs out") }
-                item { AutoSwitchRows(view, state, handlers) }
-            }
-            if (state.accountsAvailable) {
-                item { Heading("Claude accounts") }
-                if (state.accounts.isEmpty() && !state.loading) item { Note(NO_ACCOUNTS_YET) }
-                items(state.accounts, key = { "account:${it.uuid}" }) { a ->
-                    Column {
-                        AccountLine(
-                            a,
-                            nowSeconds,
-                            onClick = { naming = a }.takeIf { state.canRename || state.canSetProjects },
-                            forbidden = forbiddenProjectsLine(a, state.projects, state.orgs),
-                        )
-                        // The 5-hour and weekly meters, as the new layout draws them (review M14).
-                        if (state.limitsAvailable) AccountLimitsBlock(state.limits[a.uuid], nowSeconds)
-                    }
-                }
-                if (state.accounts.isNotEmpty() && !state.limitsAvailable && state.capsKnown) item { Note(LIMITS_ON_DESKTOP) }
-                item { Note(ADD_ACCOUNT_ON_DESKTOP) }
-            }
-        }
-    }
-}
-
-private fun androidx.compose.foundation.lazy.LazyListScope.usageSections(report: UsageReport, handlers: UsageHandlers) {
-    item {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text(formatUsd(report.total.costMicros), style = MaterialTheme.typography.displaySmall)
-            Text(
-                "${compactCount(report.total.tokens)} tokens · ${compactCount(report.total.outputTokens)} out",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-    if (report.byHost.isNotEmpty()) {
-        item { Heading("By host") }
-        val top = report.byHost.values.maxOf { it.costMicros }.coerceAtLeast(1)
-        items(report.byHost.entries.sortedByDescending { it.value.costMicros }.map { it.key to it.value }, key = { "host:${it.first}" }) { (host, t) ->
-            Bar(host, formatUsd(t.costMicros), t.costMicros.toFloat() / top)
-        }
-    }
-    if (report.byDay.isNotEmpty()) {
-        // The hub buckets days in UTC (`DayUsage`), which may not be the phone's day (review M18).
-        item { Heading("By day (UTC)") }
-        val days = report.byDay.sortedByDescending { it.day }
-        val top = days.maxOf { it.costMicros }.coerceAtLeast(1)
-        items(days, key = { "day:${it.day}" }) { d ->
-            val backfill = if (d.backfillCostMicros > 0) " (+${formatUsd(d.backfillCostMicros)} history)" else ""
-            Bar(d.day, formatUsd(d.costMicros) + backfill, d.costMicros.toFloat() / top)
-        }
-    }
-    if (report.sessions.isNotEmpty()) {
-        item { Heading(if (report.sessionsTruncated) "Costliest sessions (the first ${report.sessions.size})" else "Sessions") }
-        items(report.sessions, key = { "session:${it.sessionId}" }) { s ->
-            Row(
-                modifier = Modifier.fillMaxWidth().clickable { handlers.onOpenSession(s.sessionId) }.padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(s.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        listOfNotNull(s.hostAlias.takeIf { it.isNotBlank() }, s.model).joinToString(" · "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Text(formatUsd(s.costMicros), style = MaterialTheme.typography.labelLarge)
-            }
-        }
-    }
-}
-
-/**
  * The person's own answer to automatic account switching, as on the
  * desktop's Accounts page: switch my sessions, and tell them to carry on.
  * The fleet's own switch is the owner's, in Settings; the line says so when
@@ -390,54 +257,6 @@ private fun ToggleRow(title: String, sub: String, checked: Boolean, enabled: Boo
             Text(sub, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Switch(checked = checked, onCheckedChange = null, enabled = enabled)
-    }
-}
-
-@Composable
-private fun Heading(text: String) {
-    HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
-    Text(text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp))
-}
-
-@Composable
-private fun Note(text: String) {
-    Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
-}
-
-/** A label, a figure, and a bar of [fraction] of the widest one. */
-@Composable
-private fun Bar(label: String, figure: String, fraction: Float) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-        Row {
-            Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(figure, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
-        }
-        Box(modifier = Modifier.fillMaxWidth().height(4.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
-            Box(modifier = Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).fillMaxHeight().background(MaterialTheme.colorScheme.primary))
-        }
-    }
-}
-
-@Composable
-private fun AccountLine(account: AccountRow, nowSeconds: Long, onClick: (() -> Unit)? = null, forbidden: String? = null) {
-    Column(
-        modifier = Modifier.fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClickLabel = "Name this account", onClick = onClick) else Modifier)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-    ) {
-        Text(account.label, style = MaterialTheme.typography.bodyMedium)
-        Text(
-            listOfNotNull(
-                account.email?.takeIf { it != account.label },
-                account.organizationName,
-                account.seatTier,
-                if (account.hasExtraUsage) "extra usage on" else null,
-                forbidden,
-                relativeAgo(account.lastSeenAt, nowSeconds)?.let { "seen $it" },
-            ).joinToString(" · "),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 

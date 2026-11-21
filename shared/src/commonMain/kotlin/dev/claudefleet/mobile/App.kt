@@ -276,7 +276,7 @@ import dev.claudefleet.mobile.ui.kit.rememberPhoneConnection
 import dev.claudefleet.mobile.ui.kit.HubBanner
 import dev.claudefleet.mobile.ui.kit.LocalHubReconnect
 import dev.claudefleet.mobile.ui.kit.LocalReducedMotion
-import dev.claudefleet.mobile.ui.NewSessionScreen
+import dev.claudefleet.mobile.ui.NewSessionWizard
 import dev.claudefleet.mobile.ui.NewSessionExtras
 import dev.claudefleet.mobile.ui.DiscardSheet
 import dev.claudefleet.mobile.ui.newSessionTyped
@@ -1325,7 +1325,7 @@ private fun FleetRoute(
         )
     }
     val textSearch = remember(repository, scope) { TextSearchViewModel(repository.capabilities, container.searchActions, scope) }
-    val tidy = remember(repository, scope) { TidyViewModel(repository, container.workActions, scope, credentials.canWrite, preselect = { false }) }
+    val tidy = remember(repository, scope) { TidyViewModel(repository, container.workActions, scope, credentials.canWrite) }
     val tidyState by tidy.state.collectAsState()
     val missions = remember(repository, scope) { MissionsViewModel(repository, container.missionActions, scope, credentials.canWrite) }
     val agentActionsVm = remember(repository, scope) { AgentActionsViewModel(repository, container.builtInAgentActions, scope, credentials.canWrite) }
@@ -2491,7 +2491,6 @@ private fun FleetRoute(
                             )
                         },
                     ),
-                    orbit = true,
                 )
             }
         }
@@ -2756,7 +2755,7 @@ private fun NewSessionRoute(
     BackHandler(enabled = toolsState.addingOn != null) {
         if (!toolsState.adding && addStep == AddProjectStep.Where) addStep = AddProjectStep.Source else closeAdd()
     }
-    NewSessionScreen(
+    NewSessionWizard(
         state = state,
         onBack = leave,
         onSelectHost = vm::selectHost,
@@ -2793,9 +2792,8 @@ private fun NewSessionRoute(
             onOpen = vm::openStarted,
             onDone = vm::dismissResult,
         ),
-        wizard = true,
-        wizardStep = wizardStep,
-        onWizardStep = { wizardStep = it },
+        step = wizardStep,
+        onStep = { wizardStep = it },
         addStep = addStep,
         addHandlers = AddProjectHandlers(
             onStep = { addStep = it },

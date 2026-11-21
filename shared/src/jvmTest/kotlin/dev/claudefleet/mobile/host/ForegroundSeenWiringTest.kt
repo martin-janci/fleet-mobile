@@ -11,7 +11,7 @@ import kotlin.test.assertTrue
 class ForegroundSeenWiringTest {
 
     private val app: String by lazy { Repo.file("shared/src/commonMain/kotlin/dev/claudefleet/mobile/App.kt").readText() }
-    private val settings: String by lazy { Repo.file("shared/src/commonMain/kotlin/dev/claudefleet/mobile/ui/SettingsScreen.kt").readText() }
+    private val settings: String by lazy { Repo.file("shared/src/commonMain/kotlin/dev/claudefleet/mobile/ui/OrbitSettingsScreen.kt").readText() }
 
     @Test
     fun the_open_app_keeps_the_seen_set_with_the_lifecycle() {

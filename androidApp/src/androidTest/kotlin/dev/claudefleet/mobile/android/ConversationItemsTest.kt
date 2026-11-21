@@ -81,7 +81,7 @@ class ConversationItemsTest {
 
     @Test
     fun every_item_kind_puts_something_on_the_screen() {
-        // Wrapped, because the bar's `StatusChip` reads `LocalStatusColors`
+        // Wrapped, because the bar's `StatusDot` reads `LocalStatusColors`
         // and `FleetTheme` is the only thing that provides it — composing
         // the screen bare throws "FleetTheme is not applied".
         compose.setContent {

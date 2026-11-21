@@ -21,8 +21,6 @@ enum class TidyChoice(val wire: String, val label: String) {
 /** How long Keep (and Snooze) hold a session out of Tidy-up. */
 const val KEEP_DAYS: Int = 7
 
-private val REASON_ORDER = listOf("done_idle", "pr_merged_idle", "not_planned", "duplicate_worktree", "ghost_expiring", "idle_unlinked")
-
 private val REASON_LABELS = mapOf(
     "done_idle" to "Done and idle",
     "pr_merged_idle" to "PR merged, idle",
@@ -33,17 +31,6 @@ private val REASON_LABELS = mapOf(
 )
 
 internal fun tidyReasonLabel(reason: String): String = REASON_LABELS[reason] ?: reason.replace('_', ' ')
-
-/**
- * One failed apply in words: the session's name rather than its row id, and
- * the action as the menu said it rather than its wire value.
- */
-internal fun tidyFailureLine(sessionId: Long, error: String?, action: String, candidates: List<TidyCandidate>): String {
-    val c = candidates.firstOrNull { it.sessionId == sessionId }
-    val name = c?.let { it.label?.takeIf { l -> l.isNotBlank() } ?: it.tmuxName } ?: "a session no longer listed"
-    val what = TidyChoice.entries.firstOrNull { it.wire == action }?.label ?: action.replace('_', ' ')
-    return "$name (${error ?: what})"
-}
 
 /** What [c] may become: its suggested kill, then what its link allows (archive, snooze, never), or keep. */
 internal fun tidyChoices(c: TidyCandidate): List<TidyChoice> = buildList {
@@ -63,16 +50,6 @@ internal fun tidyDefault(c: TidyCandidate): TidyChoice? {
     val choices = tidyChoices(c)
     return choices.firstOrNull { it.wire == c.action } ?: choices.firstOrNull()
 }
-
-/** Ticked to begin with — never a lost session about to expire, never one merely idle and unlinked. */
-internal fun tidyPreselected(c: TidyCandidate): Boolean =
-    c.action != "resume_or_expire" && c.reason != "idle_unlinked" && tidyDefault(c) != null
-
-/** The candidates by reason, in the desktop's order. */
-internal fun tidyGroups(candidates: List<TidyCandidate>): List<Pair<String, List<TidyCandidate>>> =
-    candidates.groupBy { it.reason }.entries
-        .sortedBy { REASON_ORDER.indexOf(it.key).let { i -> if (i < 0) 99 else i } }
-        .map { it.key to it.value }
 
 /** What to send for the ticked candidates, each with its chosen (or suggested) action. */
 internal fun tidyItems(
@@ -140,4 +117,14 @@ private fun tidyVerb(action: String): String = when (action) {
     TidyChoice.Keep.wire -> "keep"
     TidyChoice.Never.wire -> "set never"
     else -> action.replace('_', ' ')
+}
+
+/** 90 → "1 min", 7200 → "2 h", 200000 → "2 d" — as the desktop's `formatIdle`. */
+internal fun formatIdle(secs: Long): String {
+    val s = secs.coerceAtLeast(0)
+    return when {
+        s >= 86_400 -> "${s / 86_400} d"
+        s >= 3_600 -> "${s / 3_600} h"
+        else -> "${(s / 60).coerceAtLeast(1)} min"
+    }
 }

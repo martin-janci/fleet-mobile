@@ -120,7 +120,7 @@ data class HostGroup(
      * Whether the person has folded this host away.
      *
      * A *drawing* decision, not a narrowing one: [projects] is still built and
-     * [sessionCount] still counts, and `SessionsScreen` is what skips emitting
+     * [sessionCount] still counts, and `SessionsTab` is what skips emitting
      * the items. Emptying the group here instead would make the count read
      * zero on exactly the headings whose count is the only thing left to say —
      * which is the one number that would stop anyone unfolding it again.

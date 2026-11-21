@@ -47,8 +47,8 @@ data class TidyUiState(
 /**
  * The desktop's Tidy-up on the phone: what the hub suggests retiring — done
  * and idle, merged and idle, won't-do, duplicates, ghosts about to expire,
- * idle with no work — each with the choices its rule allows, the suggested
- * ones ticked; Apply sends the ticked choices (`tidy_apply`). Nothing is
+ * idle with no work — each with the choices its rule allows, none ticked
+ * (redesign 14.15); Apply sends the ticked choices (`tidy_apply`). Nothing is
  * applied untouched by a person, and a kill can still need the desktop's
  * confirmation. Below it, work that came back after it was done.
  */
@@ -57,12 +57,6 @@ class TidyViewModel(
     private val actions: WorkActions,
     private val scope: CoroutineScope,
     private val canWrite: Boolean,
-    /**
-     * Whether a new candidate comes in ticked. Classic ticks the rule's
-     * suggestions; the New layout (redesign 14.15) opens with nothing ticked,
-     * so nothing is applied that a person did not pick.
-     */
-    private val preselect: () -> Boolean = { true },
 ) {
     private data class Local(
         val open: Boolean = false,
@@ -214,10 +208,10 @@ class TidyViewModel(
             val reopened = if (caps.has(HubCapabilities.WORK, "reopened")) actions.reopened() else emptyList()
             local.update { l ->
                 val known = l.candidates.mapTo(HashSet()) { it.sessionId }
-                // New candidates come in with the suggested tick; ones already
-                // shown keep whatever the person did with theirs.
-                val ticks = preselect()
-                val ticked = report.candidates.filter { c -> if (c.sessionId in known) c.sessionId in l.ticked else ticks && tidyPreselected(c) }
+                // New candidates come in unticked, so nothing is applied that a
+                // person did not pick; ones already shown keep whatever the
+                // person did with theirs.
+                val ticked = report.candidates.filter { c -> c.sessionId in known && c.sessionId in l.ticked }
                     .mapTo(HashSet()) { it.sessionId }
                 l.copy(loading = false, candidates = report.candidates, ticked = ticked, reopened = reopened)
             }
@@ -230,3 +224,13 @@ class TidyViewModel(
 }
 
 private const val UNARCHIVE = "unarchive"
+
+data class TidyHandlers(
+    val onClose: () -> Unit = {},
+    val onToggle: (Long) -> Unit = {},
+    val onChoose: (Long, TidyChoice) -> Unit = { _, _ -> },
+    val onApply: () -> Unit = {},
+    val onOpenSession: (Long) -> Unit = {},
+    val onDismissReopened: (Long) -> Unit = {},
+    val onDismissError: () -> Unit = {},
+)

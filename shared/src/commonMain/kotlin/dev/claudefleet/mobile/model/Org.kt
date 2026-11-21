@@ -84,9 +84,6 @@ data class OrgMember(
     val label: String get() = displayName?.takeIf { it.isNotBlank() } ?: name
 }
 
-/** The hub sent this caller the org's spend (its administrators only). */
-val OrgDetail.hasSpend: Boolean get() = spentTodayMicros != null || spentWeekMicros != null || spentMonthMicros != null
-
 /** An org as a label draws it. */
 data class OrgInfo(val id: Long, val name: String, val color: String? = null)
 

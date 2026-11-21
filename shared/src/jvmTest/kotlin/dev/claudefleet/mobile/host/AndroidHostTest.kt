@@ -85,7 +85,7 @@ class TheCameraIsAskedForOnlyWhenTheScannerOpensTest {
         val callers = Repo.shipped.filter { Regex("""rememberNotificationPermission\(\)""").containsMatchIn(it.readText()) }
             .map { it.name }
             .filterNot { it.startsWith("NotificationPermission.") }
-        assertEquals(listOf("PairScreen.kt", "SettingsScreen.kt"), callers.sorted(), "asked when the person turns notifications on, and nowhere else")
+        assertEquals(listOf("OrbitSettingsScreen.kt", "PairScreen.kt"), callers.sorted(), "asked when the person turns notifications on, and nowhere else")
     }
 
     /**

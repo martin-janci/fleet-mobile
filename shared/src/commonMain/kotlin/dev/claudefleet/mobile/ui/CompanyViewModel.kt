@@ -113,12 +113,19 @@ internal fun roleWord(role: String): String = when (role) {
     else -> role.replaceFirstChar { it.uppercase() }
 }
 
-/**
- * Spent against a budget in whole USD: "$12.40 of $50", and the bare figure
- * when there is no budget (`0` or absent); null when the hub sent no spend.
- */
-internal fun spendAgainst(micros: Long?, budgetUsd: Long?): String? {
-    micros ?: return null
-    val spent = dev.claudefleet.mobile.ui.components.formatUsd(micros)
-    return if (budgetUsd != null && budgetUsd > 0) "$spent of $$budgetUsd" else spent
+/** The list line under an org's name: its sessions, and a budget it has reached. */
+internal fun orgSummary(org: OrgDetail): String = listOfNotNull(
+    sessionsLine(org),
+    org.myRole?.let { roleWord(it) },
+    when {
+        "daily" in org.overBudget && "monthly" in org.overBudget -> "over its daily and monthly budget"
+        "daily" in org.overBudget -> "over its daily budget"
+        "monthly" in org.overBudget -> "over its monthly budget"
+        else -> null
+    },
+).joinToString(" · ")
+
+internal fun sessionsLine(org: OrgDetail): String {
+    val sessions = if (org.sessionCount == 1) "1 session" else "${org.sessionCount} sessions"
+    return if (org.needsYou > 0) "$sessions, ${org.needsYou} need${if (org.needsYou == 1) "s" else ""} you" else sessions
 }

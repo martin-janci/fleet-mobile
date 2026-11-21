@@ -134,14 +134,6 @@ class CompanyViewModelTest {
     }
 
     @Test
-    fun spend_reads_against_its_budget_and_alone_without_one() {
-        assertEquals("$12.40 of $50", spendAgainst(12_400_000, 50))
-        assertEquals("$12.40", spendAgainst(12_400_000, 0))
-        assertEquals("$12.40", spendAgainst(12_400_000, null))
-        assertNull(spendAgainst(null, 50), "no spend sent is no figure, not \$0")
-    }
-
-    @Test
     fun an_org_line_names_its_sessions_role_and_a_budget_it_reached() {
         assertEquals("1 session", orgSummary(OrgDetail(id = 1, sessionCount = 1)))
         assertEquals(

@@ -62,7 +62,7 @@ class ConversationScrollTest {
      */
     private fun show(sessionId: Long, initial: Int, loaded: Boolean = true): (Int) -> Unit {
         var state by mutableStateOf(SessionUiState(conversation = conversation(initial), loaded = loaded))
-        // Wrapped, because the bar's `StatusChip` reads `LocalStatusColors`
+        // Wrapped, because the bar's `StatusDot` reads `LocalStatusColors`
         // and `FleetTheme` is the only thing that provides it — composing the
         // screen bare throws "FleetTheme is not applied" before anything can
         // be measured.

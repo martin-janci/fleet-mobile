@@ -55,13 +55,6 @@ class TidyTest {
     }
 
     @Test
-    fun what_is_ticked_to_begin_with() {
-        assertTrue(tidyPreselected(linkedDone))
-        assertFalse(tidyPreselected(unlinkedIdle), "idle and unlinked is never ticked for you")
-        assertFalse(tidyPreselected(expiringGhost), "an expiring ghost is never ticked for you")
-    }
-
-    @Test
     fun items_carry_the_link_and_the_days() {
         val items = tidyItems(
             listOf(linkedDone, unlinkedIdle, merged),
@@ -77,18 +70,10 @@ class TidyTest {
         )
     }
 
-    @Test
-    fun groups_come_in_the_desktops_order() {
-        assertEquals(
-            listOf("done_idle", "pr_merged_idle", "ghost_expiring", "idle_unlinked"),
-            tidyGroups(listOf(unlinkedIdle, expiringGhost, merged, linkedDone)).map { it.first },
-        )
-    }
-
     private val tools = setOf(HubCapabilities.WORK, HubCapabilities.WORK_LINK)
 
     @Test
-    fun opening_ticks_the_suggestions_and_apply_sends_them_then_reads_again() = runTest {
+    fun a_ticked_suggestion_is_sent_by_apply_then_read_again() = runTest {
         val work = FakeWorkActions()
         work.tidyAnswer = TidyReport(candidates = listOf(linkedDone, unlinkedIdle))
         val vm = TidyViewModel(TidyFleet(tools), work, backgroundScope, canWrite = true)
@@ -96,6 +81,8 @@ class TidyTest {
         assertTrue(vm.state.value.available)
 
         vm.open().join()
+        runCurrent()
+        vm.toggle(1)
         runCurrent()
         assertEquals(setOf(1L), vm.state.value.ticked)
         assertEquals(1, vm.state.value.kills)
@@ -150,21 +137,13 @@ class TidyTest {
         assertEquals("2 d", formatIdle(200_000))
     }
 
-    @Test
-    fun a_failed_apply_names_the_session_and_says_the_action_in_words() {
-        val named = TidyCandidate(sessionId = 5, tmuxName = "fleet-api", label = "API work", reason = "done_idle", action = "safe_kill")
-        assertEquals("API work (Clean up)", tidyFailureLine(5, null, "safe_kill", listOf(named)))
-        assertEquals("API work (E_BUSY: dirty)", tidyFailureLine(5, "E_BUSY: dirty", "kill", listOf(named)))
-        assertEquals("a session no longer listed (resume or expire)", tidyFailureLine(9, null, "resume_or_expire", listOf(named)))
-    }
-
-    // ── The New layout (redesign 14.15, MobileTidyTickets) ──
+    // ── Redesign 14.15 (MobileTidyTickets) ──
 
     @Test
-    fun the_new_layout_opens_with_nothing_ticked() = runTest {
+    fun tidy_up_opens_with_nothing_ticked() = runTest {
         val work = FakeWorkActions()
         work.tidyAnswer = TidyReport(candidates = listOf(linkedDone, merged))
-        val vm = TidyViewModel(TidyFleet(tools), work, backgroundScope, canWrite = true, preselect = { false })
+        val vm = TidyViewModel(TidyFleet(tools), work, backgroundScope, canWrite = true)
         vm.open().join()
         runCurrent()
         assertEquals(emptySet(), vm.state.value.ticked)
@@ -179,7 +158,7 @@ class TidyTest {
         val work = FakeWorkActions()
         val other = merged.copy(sessionId = 6, linkId = 60, tmuxName = "verify-email")
         work.tidyAnswer = TidyReport(candidates = listOf(merged.copy(tmuxName = "background-review"), other, unlinkedIdle))
-        val vm = TidyViewModel(TidyFleet(tools), work, backgroundScope, canWrite = true, preselect = { false })
+        val vm = TidyViewModel(TidyFleet(tools), work, backgroundScope, canWrite = true)
         vm.open().join()
         runCurrent()
         vm.toggle(4)
@@ -214,7 +193,7 @@ class TidyTest {
         val work = FakeWorkActions()
         work.tidyAnswer = TidyReport(candidates = listOf(unlinkedIdle.copy(tmuxName = "hosts-spike")))
         work.tidyRefuse = setOf(2)
-        val vm = TidyViewModel(TidyFleet(tools), work, backgroundScope, canWrite = true, preselect = { false })
+        val vm = TidyViewModel(TidyFleet(tools), work, backgroundScope, canWrite = true)
         vm.open().join()
         runCurrent()
         vm.choose(2, TidyChoice.SafeKill)

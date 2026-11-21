@@ -41,15 +41,6 @@ class DueDateTest {
         assertNull(dueLabel("soon", today))
     }
 
-    @Test
-    fun the_task_screen_line_and_the_chip_flag_a_date_that_has_passed() {
-        assertEquals(DueLabel("Due Fri · 2026-11-06", false), dueLine("2026-11-06", today, done = false))
-        assertEquals(DueLabel("Overdue · was due 2026-10-30", true), dueLine("2026-10-30", today, done = false))
-        assertNull(dueLine("2026-10-30", today, done = true), "a done task shows no due date (the desktop's openDue)")
-        assertEquals(DueLabel("Due: next week", false), dueLine("next week", today, done = false))
-        assertNull(dueLine(" ", today, done = false))
-    }
-
     /** The desktop's `openDue`: "Due Fri" / "Overdue · Oct 30", nothing once done, nothing for a date that does not parse. */
     @Test
     fun open_due_is_the_desktops_chip() {
