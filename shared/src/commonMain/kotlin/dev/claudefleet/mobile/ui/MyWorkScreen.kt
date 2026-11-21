@@ -1,41 +1,24 @@
 package dev.claudefleet.mobile.ui
 
-import dev.claudefleet.mobile.ui.components.WorkRow
-import androidx.compose.foundation.layout.heightIn
 import dev.claudefleet.mobile.ui.components.DangerTextButton
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -45,28 +28,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.IdOrWord
 import dev.claudefleet.mobile.model.WorkFacetId
-import dev.claudefleet.mobile.model.facetSentence
 import dev.claudefleet.mobile.model.fold
-import dev.claudefleet.mobile.model.todayEpochDay
 import dev.claudefleet.mobile.model.WorkRule
-import dev.claudefleet.mobile.model.WorkTask
 import dev.claudefleet.mobile.model.WorkTreeFilters
 import dev.claudefleet.mobile.model.WorkView
-import dev.claudefleet.mobile.ui.components.ErrorBanner
-import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.components.WorkStatusDot
-import dev.claudefleet.mobile.ui.theme.FleetIcons
-import dev.claudefleet.mobile.ui.kit.InlineLoading
-import dev.claudefleet.mobile.ui.kit.OrbitPullToRefresh
 
 /** Everything the My work tab reports. */
 data class MyWorkHandlers(
@@ -131,313 +101,11 @@ internal fun NewTaskSheetFor(state: MyWorkUiState, handlers: MyWorkHandlers) {
     )
 }
 
-/**
- * The **My work** tab: saved views as chips, then *Filters (n)* beside the
- * *Assigned to me* and *To review* toggles, a strip of removable chips for
- * what the sheet holds, and org → group sections (headers with the hub's
- * counts) of compact task cards, each section folding away and loading more
- * of itself on its own. Archived tasks are hidden by default; the list's last
- * row says how many and shows them. The layout and the words are the
- * desktop's Work view (claude-fleet `WorkFiltersBar.svelte`). When the hub
- * cannot be reached the last page stays, under "Offline · as of 10:42".
- *
- * Stateless: it draws a [MyWorkUiState]; [MyWorkViewModel] is what is tested.
- */
-@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
-@Composable
-fun MyWorkScreen(
-    state: MyWorkUiState,
-    handlers: MyWorkHandlers = MyWorkHandlers(),
-    reviewCount: Int = state.reviewCount,
-    /** What tapping a row opens (This phone); its Session button is there either way. */
-    tapOpens: WorkTapChoice = WorkTapChoice.TICKET,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier = modifier.fillMaxSize()) {
-        ScreenHeader(
-            title = "My work",
-            subtitle = state.stale ?: if (state.loaded) "${state.total} task${if (state.total == 1) "" else "s"}" else null,
-            actions = {
-                if (state.canCreateTask) {
-                    IconButton(onClick = handlers.onOpenNewTask) { Icon(FleetIcons.Add, contentDescription = "New task") }
-                }
-                IconButton(onClick = handlers.onToggleSearch) {
-                    Icon(FleetIcons.Search, contentDescription = if (state.searchOpen) "Close search" else "Search tasks")
-                }
-                handlers.onOpenReview?.let { openReview ->
-                    TextButton(onClick = openReview) {
-                        if (reviewCount > 0) {
-                            BadgedBox(badge = { Badge { Text("$reviewCount") } }) { Text("Review") }
-                        } else {
-                            Text("Review")
-                        }
-                    }
-                }
-            },
-            below = {
-                if (state.searchOpen) {
-                    OutlinedTextField(
-                        value = state.queryText,
-                        onValueChange = handlers.onSetQuery,
-                        label = { Text("Key or title") },
-                        singleLine = true,
-                        trailingIcon = if (state.queryText.isEmpty()) null else {
-                            { IconButton(onClick = { handlers.onSetQuery("") }) { Icon(FleetIcons.Close, contentDescription = "Clear search") } }
-                        },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                    )
-                }
-                if (state.viewsAvailable && state.views.isNotEmpty()) {
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
-                    ) {
-                        items(state.views, key = { it.id }) { view ->
-                            FilterChip(
-                                selected = view.id == state.activeViewId,
-                                onClick = { handlers.onApplyView(view) },
-                                label = { Text(view.name, maxLines = 1) },
-                            )
-                        }
-                    }
-                }
-                // The sheet's entry, then the two quick toggles, which show
-                // their own state and so get no chip in the strip.
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    FiltersButton(count = state.filters.sheetCount, onClick = handlers.onOpenFilters)
-                    FilterChip(
-                        selected = state.filters.mine == true,
-                        onClick = handlers.onToggleMine,
-                        label = { Text("Assigned to me") },
-                    )
-                    FilterChip(
-                        selected = state.filters.review == true,
-                        onClick = handlers.onToggleReview,
-                        label = { Text("To review") },
-                    )
-                }
-                FilterStrip(
-                    facets = state.stripFacets,
-                    onClear = handlers.onClearFacet,
-                    onClearAll = handlers.onClearFilters,
-                    modifier = Modifier.padding(bottom = 4.dp),
-                )
-            },
-        )
-        state.stale?.let { StaleNotice(it) }
-        ErrorBanner(state.error, onDismiss = handlers.onDismissError, onRetry = handlers.onRefresh.takeIf { !state.loaded && !state.conflict })
-        if (state.error != null && state.conflict) ReloadRow(handlers.onReload)
-        InlineLoading(waiting = state.loading)
-
-        OrbitPullToRefresh(
-            isRefreshing = false,
-            onRefresh = handlers.onRefresh,
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                if (state.isEmpty) {
-                    item(key = "empty") {
-                        EmptyWork(state, handlers, Modifier.fillParentMaxSize())
-                    }
-                } else if (!state.loaded && !state.loading) {
-                    item(key = "not-yet") {
-                        Text(
-                            when {
-                                !state.connected -> "Not connected to the hub."
-                                state.error != null -> "Couldn't load your work. Pull to try again."
-                                else -> "Nothing read yet — pull to load."
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(24.dp),
-                        )
-                    }
-                }
-                for (org in state.orgs) {
-                    stickyHeader(key = org.key) {
-                        OrgHeader(org, onClick = { handlers.onToggleSection(org.key) })
-                    }
-                    if (org.collapsed) continue
-                    for (group in org.groups) {
-                        item(key = "g-${group.key}") {
-                            GroupHeader(group, onClick = { handlers.onToggleSection(group.key) })
-                        }
-                        if (group.collapsed) continue
-                        items(group.tasks, key = { "t-${group.key}-${it.taskId}" }) { task ->
-                            TaskCard(
-                                task,
-                                onClick = { handlers.openRow(task, tapOpens) },
-                                onOpenSession = liveSessionOf(task)?.let { id -> { handlers.onOpenSession(id) } },
-                            )
-                        }
-                        if (group.hasMore || group.error != null || group.loadingMore) {
-                            item(key = "more-${group.key}") {
-                                LoadMoreRow(group, state.connected, onClick = { handlers.onLoadMore(group.key) })
-                            }
-                        }
-                    }
-                }
-                // Archived tasks are hidden by default; the last row says how
-                // many (the hub's `archived_hidden`) and shows them all.
-                if (state.archivedRow && !state.isEmpty) {
-                    item(key = "archived") {
-                        ArchivedRow(state.archivedHidden, state.showArchived, "tasks", handlers.onSetArchived)
-                    }
-                }
-            }
-        }
-    }
-    if (state.filtersOpen) WorkFiltersSheet(state, handlers)
-    if (state.rulesOpen) RulesSheet(state.rules, handlers.onCloseRules)
-    NewTaskSheetFor(state, handlers)
-}
-
-@Composable
-internal fun StaleNotice(text: String) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-    ) {
-        Text(text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-    }
-}
-
 /** *Reload* beside a conflict: what the hub has now, instead of what this screen last read. */
 @Composable
 internal fun ReloadRow(onReload: () -> Unit) {
     Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.End) {
         OutlinedButton(onClick = onReload) { Text("Reload") }
-    }
-}
-
-@Composable
-private fun OrgHeader(org: WorkOrgSection, onClick: () -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-        Row(
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClick = onClick).padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Chevron(org.collapsed, org.name)
-                Spacer(Modifier.width(4.dp))
-                Text(org.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            }
-            Text("${org.count}", style = MaterialTheme.typography.labelSmall)
-        }
-    }
-}
-
-@Composable
-private fun GroupHeader(group: WorkGroupSection, onClick: () -> Unit) {
-    val words = groupSourceWords(group.group)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(start = 24.dp, end = 16.dp, top = 10.dp, bottom = 4.dp)
-            .clearAndSetSemantics { contentDescription = "${group.group.title}, ${group.count} tasks, $words" },
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Chevron(group.collapsed, group.group.title)
-        Spacer(Modifier.width(4.dp))
-        Text(
-            group.group.title,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.secondary,
-            modifier = Modifier.weight(1f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text("${group.count}", style = MaterialTheme.typography.labelSmall)
-    }
-}
-
-@Composable
-private fun Chevron(collapsed: Boolean, name: String) {
-    Icon(
-        FleetIcons.ArrowBack,
-        contentDescription = if (collapsed) "Unfold $name" else "Fold $name away",
-        modifier = Modifier.size(18.dp).rotate(if (collapsed) 180f else -90f),
-        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-}
-
-/** A compact task card: key, title, status, tracker, counts, and what wants a person. */
-@Composable
-internal fun TaskCard(task: WorkTask, onClick: () -> Unit, onOpenSession: (() -> Unit)? = null) {
-    WorkRow(
-        label = task.label,
-        title = if (task.key != null) task.title else "",
-        details = taskCardLine(task, remember { todayEpochDay() }),
-        onClick = onClick,
-        status = task.statusCategory,
-        unavailable = task.unavailable,
-        review = task.review,
-        needsYou = task.needsYou,
-        onOpenSession = onOpenSession,
-    )
-}
-
-/**
- * The card's second line, in words — out here so it can be asserted. With
- * [todayEpochDay] (the local day), a due date shows as the desktop's row
- * says it: "Due Fri", or "Overdue · Oct 30" once it has passed; a done
- * task's is history. Led by the same facts as the New layout's row
- * ([taskFacts]).
- */
-internal fun taskCardLine(task: WorkTask, todayEpochDay: Long? = null): String = buildList {
-    taskFacts(task, todayEpochDay).text.takeIf { it.isNotEmpty() }?.let { add(it) }
-    task.statusName?.takeIf { it.isNotBlank() }?.let { add(it) }
-    task.trackerName?.takeIf { it.isNotBlank() }?.let { add(it) }
-    val c = task.counts
-    if (c.active > 0) add("${c.active} active")
-    if (c.ended > 0) add("${c.ended} past")
-    if (c.suggested > 0) add("${c.suggested} suggested")
-    if (c.active == 0 && c.ended == 0 && c.suggested == 0) add("no sessions")
-    if (task.unavailable) add("unavailable")
-    if (task.trackerDown) add("tracker down")
-    if (task.review) add("to review")
-}.joinToString(" · ")
-
-@Composable
-private fun LoadMoreRow(group: WorkGroupSection, connected: Boolean, onClick: () -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-        group.error?.let { Text(it.body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-        if (group.loadingMore) {
-            InlineLoading(waiting = true)
-        } else if (group.hasMore) {
-            TextButton(onClick = onClick, enabled = connected) {
-                Text("Load more (${group.tasks.size} of ${group.count})")
-            }
-        }
-    }
-}
-
-@Composable
-private fun EmptyWork(state: MyWorkUiState, handlers: MyWorkHandlers, modifier: Modifier) {
-    Column(modifier = modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        when {
-            // The desktop's words: what is on, and the way out under it.
-            state.facets.isNotEmpty() -> {
-                Text(emptyWorkSentence(facetSentence(state.facets)), style = MaterialTheme.typography.bodyMedium)
-                TextButton(onClick = handlers.onClearFilters) { Text("Clear filters") }
-            }
-            state.archivedHidden > 0 -> Text("No tasks to show.", style = MaterialTheme.typography.bodyMedium)
-            else -> {
-                Text("No tasks here", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Tasks appear when a tracker is connected on the hub, or a session is linked to work.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-        }
-        if (state.archivedRow) ArchivedRow(state.archivedHidden, state.showArchived, "tasks", handlers.onSetArchived)
     }
 }
 
@@ -452,9 +120,10 @@ internal fun labelFilterChoices(labels: List<String>, current: String?): List<St
 internal fun emptyWorkSentence(facets: String): String = "No tasks match $facets."
 
 /**
- * One sheet of labelled chip groups — Organisation, Tracker, Status,
- * Sessions, each led by *Any* — then *Show archived*, and saving the
- * filters as a view. *Assigned to me* and *To review* are on the screen.
+ * One sheet of labelled chip groups — *Assigned to me* and *To review* (the
+ * Work tab has one Mine chip, and To review opens the cards), then
+ * Organisation, Tracker, Status, Sessions, each led by *Any* — then *Show
+ * archived*, and saving the filters as a view.
  *
  * A remembered org or tracker the last page no longer lists still gets its
  * chip, selected, so a filter that is on always has a control that shows it
@@ -466,8 +135,6 @@ internal fun emptyWorkSentence(facets: String): String = "No tasks match $facets
 internal fun WorkFiltersSheet(
     state: MyWorkUiState,
     handlers: MyWorkHandlers,
-    /** The New layout keeps *Assigned to me* and *To review* in the sheet: its screen has one Mine chip and To review opens the cards. */
-    quickToggles: Boolean = false,
 ) {
     var naming by remember { mutableStateOf(false) }
     val f = state.filters
@@ -480,12 +147,10 @@ internal fun WorkFiltersSheet(
                 Text("Filters", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                 TextButton(onClick = handlers.onClearFilters, enabled = !f.isEmpty || state.showArchived) { Text("Clear all") }
             }
-            if (quickToggles) {
-                FilterGroup("Show") {
-                    ChipFlow {
-                        ChoiceChip("Assigned to me", f.mine == true, handlers.onToggleMine)
-                        ChoiceChip("Has something to review", f.review == true, handlers.onToggleReview)
-                    }
+            FilterGroup("Show") {
+                ChipFlow {
+                    ChoiceChip("Assigned to me", f.mine == true, handlers.onToggleMine)
+                    ChoiceChip("Has something to review", f.review == true, handlers.onToggleReview)
                 }
             }
             if (state.filterOrgs.isNotEmpty() || f.org != null) {

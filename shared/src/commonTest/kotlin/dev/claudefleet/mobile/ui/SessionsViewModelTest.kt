@@ -546,7 +546,7 @@ class SessionsViewModelTest {
 /**
  * The needs-attention filter, through the method the bar is actually wired to.
  *
- * `SessionsScreen` calls `toggleNeedsAttentionOnly`, and nothing in the app ever
+ * The app wires `toggleNeedsAttentionOnly` to the Sessions handlers, and nothing ever
  * called `setNeedsAttentionOnly(on)` — but every test did. So the path being
  * exercised was not the path that ships, which is the arrangement that lets a
  * bug live in the gap between them. The setter is gone and these go through the
@@ -899,7 +899,6 @@ class NeedsAttentionToggleTest {
         runCurrent()
         val labels = vm.state.value.groups.single().projects.associate { it.label to it.orgLabel }
         assertEquals(mapOf("PAY-7" to "Acme", "ENG-2" to "Side"), labels)
-        assertEquals("Work PAY-7, PAY-7 title, in Acme", workHeaderDescription(linked("PAY-7"), 0, "Acme"))
 
         vm.toggleOrg(1)
         runCurrent()

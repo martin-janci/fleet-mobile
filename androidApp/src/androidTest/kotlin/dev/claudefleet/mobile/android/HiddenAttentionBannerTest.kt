@@ -7,7 +7,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.ui.SessionsHandlers
-import dev.claudefleet.mobile.ui.SessionsScreen
+import dev.claudefleet.mobile.ui.SessionsTab
 import dev.claudefleet.mobile.ui.SessionsUiState
 import dev.claudefleet.mobile.ui.theme.FleetTheme
 import org.junit.Assert.assertEquals
@@ -31,7 +31,7 @@ class HiddenAttentionBannerTest {
     private fun show(hidden: Int, handlers: SessionsHandlers = SessionsHandlers()) {
         compose.setContent {
             FleetTheme {
-                SessionsScreen(
+                SessionsTab(
                     state = SessionsUiState(
                         status = ConnectionStatus.Connected(hubVersion = "0.2.29"),
                         hiddenAttention = hidden,

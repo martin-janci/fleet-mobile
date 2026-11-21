@@ -390,12 +390,6 @@ internal fun fileFailure(raw: String?, host: String): String {
     }
 }
 
-/**
- * The Classic Files row's failure line: the same plain sentence as the New
- * layout's (#182), never the hub's raw `error` (review r13).
- */
-internal fun classicFailedLine(file: FileLine): String = "Failed: " + fileFailure(file.error, file.host)
-
 /** A fetch's failure in words: a vanished file is not "this session is gone". */
 private fun fetchFailure(t: Throwable): Friendly = when {
     t is HubError.Tool && t.code == DOWNLOAD_GONE ->
@@ -404,3 +398,22 @@ private fun fetchFailure(t: Throwable): Friendly = when {
         Friendly("The file arrived damaged", "Nothing was kept. Tap it to try again.", isError = true, details = explain(t))
     else -> friendly(t)
 }
+
+/** What the Files tab can ask its view model to do. */
+data class FilesHandlers(
+    val onRefresh: () -> Unit,
+    val onTap: (Long) -> Unit,
+    val onCancelTransfer: () -> Unit,
+    val onHandOff: (Handoff) -> Unit,
+    val onCloseOpened: () -> Unit,
+    /** Null for a token that may not remove (readonly, or a hub without the tool). */
+    val onRemove: ((Long) -> Unit)?,
+    val onConfirmRemove: () -> Unit,
+    val onCancelRemove: () -> Unit,
+    val onDismissError: () -> Unit,
+    val onDismissNotice: () -> Unit,
+    /** Copy a failed file off its host again; null for a token or hub that may not. */
+    val onRetry: ((Long) -> Unit)? = null,
+    /** Open the session a file came from. */
+    val onOpenSession: ((Long) -> Unit)? = null,
+)

@@ -6,7 +6,6 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.model.GroupRef
 import dev.claudefleet.mobile.model.GroupSource
 import dev.claudefleet.mobile.model.ReviewPage
-import dev.claudefleet.mobile.model.StatusCategory
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.IdOrWord
 import dev.claudefleet.mobile.model.WorkTreeFilters
@@ -641,25 +640,6 @@ class MyWorkViewModelTest {
         assertEquals(
             emptyList(),
             placeableGroups(listOf(GroupRef("tracker:1:ABC", "ABC", GroupSource.Tracker), GroupRef("repo:acme/api", "acme/api", GroupSource.Repo), GroupRef("key:OLD", "OLD", GroupSource.Key))),
-        )
-    }
-
-    @Test
-    fun a_task_card_line_says_counts_and_trouble_in_words() {
-        val tasks = page(WorkTreeJson.TREE).tasks
-        assertEquals("In Review · Jira (acme) · 1 active · 2 past · 1 suggested · to review", taskCardLine(tasks[0]))
-        assertEquals("no sessions · tracker down", taskCardLine(tasks[1]))
-        // Urgent and high lead the line; medium and low are the usual case.
-        assertEquals("Urgent · no sessions · tracker down", taskCardLine(tasks[1].copy(priority = "urgent")))
-        assertEquals("High · no sessions · tracker down", taskCardLine(tasks[1].copy(priority = "high")))
-        assertEquals("no sessions · tracker down", taskCardLine(tasks[1].copy(priority = "low")))
-        // A due date, against the local day (2026-11-04); none once the task is done.
-        val today = 20_761L
-        assertEquals("Due Fri · no sessions · tracker down", taskCardLine(tasks[1].copy(dueAt = "2026-11-06"), today))
-        assertEquals("Overdue · Oct 30 · no sessions · tracker down", taskCardLine(tasks[1].copy(dueAt = "2026-10-30"), today))
-        assertEquals(
-            "no sessions · tracker down",
-            taskCardLine(tasks[1].copy(dueAt = "2026-10-30", statusCategory = StatusCategory.Done, statusName = null), today),
         )
     }
 

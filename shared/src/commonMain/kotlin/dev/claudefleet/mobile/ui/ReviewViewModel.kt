@@ -488,3 +488,30 @@ internal fun failureWords(code: String?): String = when (code) {
     "E_NOTFOUND" -> "It is no longer there."
     else -> "The hub refused this one" + (code?.let { " ($it)" } ?: "") + "."
 }
+
+/** Everything the Review sheet reports. */
+data class ReviewHandlers(
+    val onClose: () -> Unit = {},
+    val onReload: () -> Unit = {},
+    val onLoadMore: () -> Unit = {},
+    val onConfirm: (ReviewItem) -> Unit = {},
+    val onReject: (ReviewItem) -> Unit = {},
+    val onKeep: (ReviewItem) -> Unit = {},
+    val onRemove: (ReviewItem) -> Unit = {},
+    val onMakePrimary: (ReviewItem) -> Unit = {},
+    val onToggleChange: (ReviewItem) -> Unit = {},
+    val onChange: (ReviewItem, ReviewAlternative) -> Unit = { _, _ -> },
+    val onConfirmAll: () -> Unit = {},
+    val onUndo: () -> Unit = {},
+    val onDismissUndo: () -> Unit = {},
+    val onDismissError: () -> Unit = {},
+)
+
+/** What a card is about, in words. */
+internal fun reviewKindWords(kind: ReviewKind): String = when (kind) {
+    ReviewKind.Suggestion -> "Suggested link"
+    ReviewKind.CrossOrg -> "Links two organisations"
+    ReviewKind.Unavailable -> "Ticket no longer available"
+    ReviewKind.NoPrimary -> "No primary task"
+    ReviewKind.Unknown -> "Needs a look on the desktop"
+}

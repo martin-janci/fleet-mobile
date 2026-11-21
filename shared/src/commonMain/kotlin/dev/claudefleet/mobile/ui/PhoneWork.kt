@@ -444,7 +444,7 @@ fun PhoneMyWorkScreen(
             }
         }
     }
-    if (state.filtersOpen) WorkFiltersSheet(state, handlers, quickToggles = true)
+    if (state.filtersOpen) WorkFiltersSheet(state, handlers)
     if (state.rulesOpen) RulesSheet(state.rules, handlers.onCloseRules)
     NewTaskSheetFor(state, handlers)
 }

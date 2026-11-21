@@ -72,10 +72,9 @@ import dev.claudefleet.mobile.ui.theme.OrbitTokens
 /*
  * Add a project as the Orbit Fleet wizard (redesign 14.20, board
  * MobileWizards): Source, then Where, then the clone itself under the Data
- * rain. Drawn from the New session wizard in the New layout; Classic keeps
- * [AddProjectSheet]. The same [ProjectToolsViewModel] and the same calls
- * drive both, so the hub's own checks (a GitHub creation is confirmed first)
- * hold here unchanged.
+ * rain. Drawn from the New session wizard. It drives the same
+ * [ProjectToolsViewModel] and the same calls the desktop does, so the hub's
+ * own checks (a GitHub creation is confirmed first) hold here unchanged.
  *
  * The sources are the desktop's four (6.11): a repository `gh` on the host
  * can see, a URL, a folder already on the host, or a new empty repository

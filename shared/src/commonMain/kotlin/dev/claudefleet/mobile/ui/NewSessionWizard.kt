@@ -71,14 +71,13 @@ import dev.claudefleet.mobile.ui.theme.OrbitTokens
 /**
  * The New session form as the Orbit Fleet wizard (redesign 14.6, board
  * MobileNewSession): three steps, Where, Project and Review, then the Pulse
- * sequence while the hub starts it. Drawn under the New navigation; Classic
- * keeps the one long form in [NewSessionScreen].
+ * sequence while the hub starts it.
  *
- * Nothing is lost, only moved. The same [NewSessionUiState] and the same
- * taps drive both, so every rule the view model holds (unreachable hosts
- * cannot be picked, the branch is validated, a multi-start is confirmed
- * first) holds here unchanged. The step is the only thing the wizard adds,
- * and it is screen state: going back a step keeps everything filled in.
+ * [NewSessionUiState] and its taps drive it, so every rule the view model
+ * holds (unreachable hosts cannot be picked, the branch is validated, a
+ * multi-start is confirmed first) holds here unchanged. The step is the only
+ * thing the wizard adds, and it is screen state: going back a step keeps
+ * everything filled in.
  */
 @Composable
 internal fun NewSessionWizard(

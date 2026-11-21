@@ -338,12 +338,8 @@ class TaskViewModelTest {
     }
 
     @Test
-    fun session_lines_say_state_and_why_in_words() {
+    fun link_and_placement_words_say_state_in_words() {
         val s = DETAIL.task.sessions
-        assertEquals("primary · set by hand", sessionLinkLine(s[0]))
-        assertEquals("suggested · branch abc-12 · R3", sessionLinkLine(s[1]))
-        assertEquals("ended · PR #9 · killed", sessionLinkLine(s[2]))
-        assertEquals("not this", sessionLinkLine(s[3]))
         assertEquals("secondary", linkStateWords(s[0].copy(primary = false)))
         // A placement is local: its words never claim the tracker moved.
         assertEquals("placed by a person", groupSourceWords(WorkTask().group.copy(source = GroupSource.Manual)))

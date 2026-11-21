@@ -60,7 +60,6 @@ class OrgAndCardTest {
         assertEquals(1, acme.needsYou)
         assertEquals("readonly", acme.devices?.single()?.mode)
         assertEquals(100L, acme.devices?.single()?.lastSeenAt)
-        assertTrue(acme.hasSpend)
         assertEquals(31_000_000L, acme.spentMonthMicros)
         assertEquals(30L, acme.budgetMonthlyUsd)
         assertEquals(listOf("monthly"), acme.overBudget)
@@ -70,7 +69,6 @@ class OrgAndCardTest {
         val side = details[1]
         assertFalse(side.ownsHub)
         assertNull(side.devices, "a member is not sent the org's devices")
-        assertFalse(side.hasSpend, "nor its spend")
         assertNull(side.budgetMonthlyUsd)
         assertEquals("member", side.myRole)
     }

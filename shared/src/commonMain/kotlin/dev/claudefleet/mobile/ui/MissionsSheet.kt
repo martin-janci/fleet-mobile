@@ -3,7 +3,6 @@ package dev.claudefleet.mobile.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,19 +34,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.claudefleet.mobile.model.Mission
 import dev.claudefleet.mobile.model.MissionCard
-import dev.claudefleet.mobile.model.MissionDetail
 import dev.claudefleet.mobile.model.MissionStep
 import dev.claudefleet.mobile.model.SpendAsk
-import dev.claudefleet.mobile.model.autonomyLabel
 import dev.claudefleet.mobile.model.dollars
 import dev.claudefleet.mobile.model.isQuestion
 import dev.claudefleet.mobile.model.key
 import dev.claudefleet.mobile.model.line
 import dev.claudefleet.mobile.model.missionWaitLabel
-import dev.claudefleet.mobile.model.openCards
 import dev.claudefleet.mobile.model.options
 import dev.claudefleet.mobile.model.pauseMove
-import dev.claudefleet.mobile.model.pauseMoveLabel
 import dev.claudefleet.mobile.model.summary
 import dev.claudefleet.mobile.ui.components.DangerTextButton
 import dev.claudefleet.mobile.ui.components.ErrorBanner
@@ -87,24 +82,23 @@ data class MissionsHandlers(
  * (Go), its cards (Apply / Dismiss, a question answered in words) and the
  * autonomy that applies, with Pause or Resume. Pause all asks first.
  * A step naming a task opens that task; Sessions opens the mission's live ones.
- * With [orbit] (the New layout) one mission is drawn by [OrbitMissionDetail].
+ * One mission is drawn by [OrbitMissionDetail].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MissionsSheet(state: MissionsUiState, handlers: MissionsHandlers, orbit: Boolean = false) {
+fun MissionsSheet(state: MissionsUiState, handlers: MissionsHandlers) {
     var confirmPauseAll by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
         val detail = state.detail
-        // The New layout draws one mission as the MobileControl board's panel.
-        if (orbit && detail != null) {
+        // One mission is drawn as the MobileControl board's panel.
+        if (detail != null) {
             OrbitMissionDetail(detail, state, handlers)
             return@ModalBottomSheet
         }
         Column(modifier = Modifier.fillMaxWidth()) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (detail != null) TextButton(onClick = handlers.onBack) { Text("‹ Missions") }
                 Text(
-                    detail?.mission?.name ?: "Missions",
+                    "Missions",
                     style = MaterialTheme.typography.titleLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -115,7 +109,7 @@ fun MissionsSheet(state: MissionsUiState, handlers: MissionsHandlers, orbit: Boo
             InlineLoading(waiting = state.loading || state.busy != null, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
             Outcome(state)
-            if (detail == null) MissionList(state, handlers) { confirmPauseAll = true } else MissionBody(detail, state, handlers)
+            MissionList(state, handlers) { confirmPauseAll = true }
         }
     }
     if (confirmPauseAll) {
@@ -173,110 +167,6 @@ private fun MissionRow(m: Mission, onClick: () -> Unit) {
         Text(m.summary(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         m.waitingOn?.let { Text(missionWaitLabel(it), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
     }
-}
-
-@Composable
-private fun MissionBody(detail: MissionDetail, state: MissionsUiState, handlers: MissionsHandlers) {
-    val m = detail.mission
-    val plan = detail.plan
-    val titles = remember(detail.items) { detail.items.associate { it.id to (it.key ?: it.title) } }
-    LazyColumn(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 16.dp)) {
-        item(key = "head") {
-            Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                if (m.goal.isNotBlank()) Text(m.goal, style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    listOfNotNull(m.summary(), detail.phase).joinToString(" · "),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                plan?.let { p ->
-                    val a = p.autonomy
-                    Text(
-                        "Autonomy ${a.effective}: ${autonomyLabel(a.effective)}" + if (a.why.isNotBlank()) " (${a.why})" else "",
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                    a.grant?.let { g ->
-                        Text(
-                            "Grant: level ${g.level} by ${g.grantedBy}" + (g.budgetMicros?.let { " · budget ${dollars(it)}" } ?: ""),
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    }
-                    Text("Spent ${dollars(p.costMicros)}", style = MaterialTheme.typography.labelSmall)
-                }
-            }
-        }
-        if (state.canPause && detail.mayChange && m.pauseMove() != null) {
-            item(key = "pause") {
-                TextButton(
-                    onClick = handlers.onTogglePause,
-                    enabled = state.busy == null,
-                    modifier = Modifier.padding(horizontal = 12.dp),
-                ) { Text(m.pauseMoveLabel().orEmpty()) }
-            }
-        }
-        if (plan == null) {
-            item(key = "noplan") {
-                Text(
-                    if (m.state == "draft") "A draft: Start it, or ask Control to plan it." else "This mission takes no more steps.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-                )
-            }
-            // A finished mission's sessions are still worth opening.
-            missionSessions(detail, handlers)
-            return@LazyColumn
-        }
-        val cards = plan.openCards
-        if (cards.isNotEmpty()) {
-            item(key = "cards-h") { SectionTitle("Waiting for you (${cards.size})") }
-            items(cards, key = { "card:${it.id}" }) { c -> CardRow(c, state, detail.mayChange, handlers) }
-        }
-        item(key = "steps-h") { SectionTitle("Next steps") }
-        if (plan.steps.isEmpty()) {
-            item(key = "steps-none") {
-                Text("Nothing is ready.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 24.dp))
-            }
-        }
-        items(plan.steps, key = { "step:${it.key()}" }) { s ->
-            StepRow(s, s.itemId?.let { titles[it] }, state.canStart && detail.mayChange && state.busy == null, handlers, showGo = state.canStart && detail.mayChange)
-        }
-        if (state.canStart && detail.mayChange && plan.steps.count { it.kind != "ask" } > 1) {
-            item(key = "start-all") {
-                TextButton(
-                    onClick = { handlers.onStart(null) },
-                    enabled = state.busy == null,
-                    modifier = Modifier.padding(horizontal = 12.dp),
-                ) { Text("Take every step") }
-            }
-        }
-        missionSessions(detail, handlers)
-    }
-}
-
-/** The mission's live sessions, each opening its session: Classic's list of them. */
-private fun androidx.compose.foundation.lazy.LazyListScope.missionSessions(detail: MissionDetail, handlers: MissionsHandlers) {
-    val sessions = missionSessionLines(detail)
-    if (sessions.isEmpty()) return
-    item(key = "sessions-h") { SectionTitle("Sessions (${sessions.size})") }
-    items(sessions, key = { "session:${it.sessionId}" }) { s ->
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .openable(handlers.onOpenSession?.let { open -> { open(s.sessionId) } })
-                .padding(horizontal = 24.dp, vertical = 6.dp)
-                .testTag("$MISSION_SESSION_TAG${s.sessionId}"),
-        ) {
-            Text(s.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (s.line.isNotBlank()) {
-                Text(s.line, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-    }
-}
-
-@Composable
-private fun SectionTitle(text: String) {
-    Text(text, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 24.dp, top = 12.dp, bottom = 4.dp).semantics { heading() })
 }
 
 /**
