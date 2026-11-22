@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.model.ConfirmRequest
 import dev.claudefleet.mobile.model.ControlHandoff
+import dev.claudefleet.mobile.model.JournalFollow
 import dev.claudefleet.mobile.model.OperatorStatus
 
 /**
@@ -14,6 +15,9 @@ interface ControlActions {
     suspend fun confirms(): List<ConfirmRequest>
     suspend fun answer(nonce: String, approved: Boolean): Boolean
     suspend fun handoffs(limit: Int): List<ControlHandoff>
+
+    /** The journal's threads and whether Control still follows each (`control_journal { read }`); empty where the hub has none. */
+    suspend fun follows(): List<JournalFollow> = emptyList()
 }
 
 /** [ControlActions] against the paired hub, through [AppSession.withClient]. */
@@ -22,4 +26,5 @@ class HubControlActions(private val session: AppSession) : ControlActions {
     override suspend fun confirms(): List<ConfirmRequest> = session.withClient { it.mcpConfirms() }
     override suspend fun answer(nonce: String, approved: Boolean): Boolean = session.withClient { it.answerMcpConfirm(nonce, approved) }
     override suspend fun handoffs(limit: Int): List<ControlHandoff> = session.withClient { it.controlHandoffs(limit) }
+    override suspend fun follows(): List<JournalFollow> = session.withClient { it.controlFollows() }
 }

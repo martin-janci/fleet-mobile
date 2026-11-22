@@ -9,6 +9,7 @@ import dev.claudefleet.mobile.ui.kit.StatusWord
 import dev.claudefleet.mobile.ui.theme.StatusTone
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -144,6 +145,22 @@ class PhoneSessionsTest {
         assertEquals(listOf(3L), proposedRows(rows).map { it.id })
         assertEquals(StatusWord.IDLE, phoneWord(proposed), "shown in its own tone, not as Needs you")
         assertEquals("1 needs you · 0 running · +1 proposed", inboxSubtitle(1, 0, proposed = 1))
+    }
+
+    /**
+     * Review w04-2: a lost row (reason lifecycle, state paused) needs nobody.
+     * It is not in the Inbox, its count or a needs-you count, as the desktop's
+     * `countsTowardBadge`; a lost row that still asks something is.
+     */
+    @Test
+    fun a_lost_row_is_not_in_the_inbox() {
+        val lost = row(5, status = "idle", attention = Attention("lifecycle", since = 60, state = "paused")).copy(lostAt = 60)
+        val ghost = row(6, status = "idle").copy(status = "ghost")
+        val asking = row(7, status = "blocked", attention = Attention("waiting", since = 70, state = "action_required")).copy(lostAt = 60)
+        val rows = listOf(lost, ghost, asking)
+        assertEquals(listOf(7L), inboxRows(rows).map { it.id })
+        assertFalse(lost.needsAttention)
+        assertFalse(ghost.needsAttention, "the fallback for an older hub reads a ghost as lifecycle: not counted either")
     }
 
     @Test

@@ -108,11 +108,12 @@ private fun questionOf(key: String?): String? = key?.substringAfter('#', "")?.if
  * for a background agent done) — never for one running outside fleet, never
  * for Jev's proposal ([SessionRow.isProposed], contract 15), and never for a
  * routine's run that finished ([SessionRow.isRoutineRun]: the routine's news,
- * read in its runs; its failures and questions still announce), as the
- * desktop does.
+ * read in its runs; its failures and questions still announce), and never
+ * for a lost, ghost or pending-kill row (`lifecycle`: nobody can answer it,
+ * review w04-2), as the desktop does.
  */
 internal val SessionRow.notifyReason: String?
-    get() = attentionReason?.takeUnless { isProposed }
+    get() = attentionReason?.takeIf { needsAttention }
         ?: DONE_REASON.takeIf { claudeStatus == "completed" && kind != "external" && !isRoutineRun }
 
 /** The hub's attention reason as the notification says it — the app's one table, [reasonLabel]. */

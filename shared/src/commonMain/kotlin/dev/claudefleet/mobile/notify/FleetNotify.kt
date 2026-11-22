@@ -28,7 +28,7 @@ fun notifyStateOf(reason: String?): String = when (reason) {
     "failed", "stop_failed" -> "failed"
     DONE_REASON -> "done"
     ROUTINE_FAILED_REASON -> "routine_failed"
-    "stuck", "host_down", "account_limit", "no_credentials", "context_full", "stale_working", "lifecycle", "ci_failing" -> "blocked"
+    "stuck", "host_down", "account_limit", "no_credentials", "context_full", "stale_working", "ci_failing" -> "blocked"
     else -> "needs_you"
 }
 

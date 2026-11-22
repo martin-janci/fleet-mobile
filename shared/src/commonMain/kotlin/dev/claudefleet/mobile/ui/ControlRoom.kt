@@ -46,21 +46,18 @@ import dev.claudefleet.mobile.model.GraphCard
 import dev.claudefleet.mobile.model.GraphStep
 import dev.claudefleet.mobile.model.STEPS_PER_WAVE
 import dev.claudefleet.mobile.model.StepTone
-import dev.claudefleet.mobile.model.ThreadGroup
 import dev.claudefleet.mobile.model.groupThreads
 import dev.claudefleet.mobile.model.relativeAgo
-import dev.claudefleet.mobile.model.threadsSummary
 import dev.claudefleet.mobile.ui.theme.Fleet
 import dev.claudefleet.mobile.ui.theme.OrbitColors
 
 /*
  * Control as a Thread room on the phone (mission control hardening,
  * claude-fleet #914 and #921), phone-sized: the threads Control handed out
- * behind one strip under the header, the task graph as a card, and the
+ * behind the activity row's Threads count, the task graph as a card, and the
  * mission's "Steer" box that hands text to Control.
  */
 
-const val THREADS_STRIP_TAG = "control.threads"
 const val THREAD_ROW_TAG = "control.thread."
 const val TASK_GRAPH_TAG = "task-graph"
 const val STEER_TAG = "mission.steer"
@@ -71,27 +68,6 @@ private fun toneColor(t: StepTone, o: OrbitColors): Color = when (t) {
     StepTone.WAITING -> o.statusWaiting
     StepTone.FAILED -> o.statusFailed
     StepTone.IDLE -> o.statusIdle
-}
-
-/** "Threads · 2 need you · 3 working ›": opens the list. Nothing when Control handed nothing out. */
-@Composable
-fun ControlThreadsStrip(threads: List<ControlThread>, onOpen: () -> Unit) {
-    val summary = threadsSummary(threads) ?: return
-    val o = Fleet.colors
-    val needs = threads.any { it.group == ThreadGroup.NEEDS }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClickLabel = "Show Control's threads", onClick = onOpen)
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .testTag(THREADS_STRIP_TAG),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Box(Modifier.size(8.dp).background(if (needs) o.statusWaiting else o.statusWorking, CircleShape))
-        Text("Threads · $summary", color = o.fg2, fontSize = 14.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text("›", color = o.fgMuted, fontSize = 16.sp)
-    }
 }
 
 /** The threads Control handed out, grouped Needs you / Working / Done today / Earlier. A tap opens the session or the mission. */

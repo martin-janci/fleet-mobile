@@ -233,8 +233,26 @@ data class SessionRow(
     fun offeredSuggestion(draft: String): String? =
         promptSuggestion?.trim()?.takeIf { it.isNotEmpty() && claudeStatus == "idle" && draft.isBlank() }
 
-    /** The rows the "needs attention" filter keeps, and every needs-you count counts. Never a [isProposed] row. */
-    val needsAttention: Boolean get() = attentionReason != null && !isProposed
+    /**
+     * The rows the "needs attention" filter keeps, and every needs-you count
+     * counts: the hub's counted states (Action required, Failed, Blocked), as
+     * the desktop's `countsTowardBadge`. Never a [isProposed] row, and never a
+     * lost, ghost or pending-kill row (`lifecycle`, state Paused): it needs no
+     * answer from anyone, so neither the Inbox, a count nor a notification
+     * takes it (claude-fleet 2026-11-16, "Needs you" flood; review w04-2).
+     */
+    val needsAttention: Boolean
+        get() = attentionReason.let { it != null && it != "lifecycle" } && !isProposed && attention?.state != "paused"
+
+    /**
+     * A counted row that asks something of a person right now (a prompt, a
+     * stuck pane, a full context, a stale turn): the hub's `action_required`
+     * state, or the reasons the desktop files there for a hub that stamps no
+     * state. The one kind of Needs you a thread Control no longer follows keeps.
+     */
+    val actionRequired: Boolean
+        get() = needsAttention &&
+            (attention?.state?.let { it == "action_required" } ?: (attentionReason in ACTION_REQUIRED_REASONS))
 
     /**
      * A routine started it, one session per run ([origin] `routine`, its id in
@@ -307,6 +325,9 @@ data class Attention(
  * (`recovery.auto_restore`, when on) brings back by itself:
  * `RESUMABLE_LOST_REASONS` in claude-fleet's `store/rows.rs`.
  */
+/** The reasons `attention_states.json` files under `action_required`: [SessionRow.actionRequired]'s fallback. */
+private val ACTION_REQUIRED_REASONS = setOf("waiting", "stuck", "context_full", "stale_working")
+
 val RESUMABLE_LOST_REASONS: Set<String> = setOf("process_died", "tmux_server_gone", "host_reboot")
 
 /** Why a session was lost, in words; null for an unknown or absent reason. Mirrors the desktop's `lostReasonLabel`. */
