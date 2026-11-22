@@ -53,7 +53,31 @@ data class HostRow(
      * signed in as far as fleet knows.
      */
     @SerialName("signed_out_logins") val signedOutLogins: List<SignedOutLogin> = emptyList(),
+    /**
+     * The host's Claude login profiles (`hosts.claude_profiles`): each one's
+     * account and what signs it in. Null when never read, and from an older
+     * hub. What tells a setup-token profile apart ([isSetupToken], review w12-3).
+     */
+    @SerialName("claude_profiles") val claudeProfiles: List<HostProfile>? = null,
 )
+
+/** One login profile on a host (the hub's `HostProfileRow`). */
+@Serializable
+data class HostProfile(
+    val name: String = "",
+    @SerialName("account_uuid") val accountUuid: String? = null,
+    val email: String? = null,
+    /** `setup_token` when fleet wrote a `claude setup-token` token there; null for a `/login` or an API key. */
+    val credential: String? = null,
+)
+
+/**
+ * The login [profile] on this host holds a setup token fleet wrote rather
+ * than a `/login` (the hub's `login_health::is_setup_token`): `/login` does
+ * not sign it in again, a new token does. The host's own login never does.
+ */
+fun HostRow.isSetupToken(profile: String?): Boolean =
+    profile != null && claudeProfiles.orEmpty().any { it.name == profile && it.credential == "setup_token" }
 
 /** One signed-out login on a host: its profile (null = the host's own login) and since when (unix seconds). */
 @Serializable

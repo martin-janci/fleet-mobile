@@ -72,7 +72,7 @@ private class Restores : HostActions {
         )
     }
     override suspend fun discover(alias: String): List<LostCandidate> = emptyList<LostCandidate>().also { calls += "discover" }
-    override suspend fun resume(alias: String, candidate: LostCandidate) = SessionRow(id = 1, tmuxName = "r")
+    override suspend fun resume(alias: String, candidate: LostCandidate, overLimitOk: Boolean) = SessionRow(id = 1, tmuxName = "r")
 }
 
 private val RESTORE_TOOLS = setOf(HubCapabilities.PROBE_HOST, HubCapabilities.RESTORE_HOST_SESSIONS, HubCapabilities.DISCOVER_LOST_SESSIONS)

@@ -1,6 +1,8 @@
 package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.net.HubError
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -100,5 +102,46 @@ class FriendlyTest {
         assertEquals("The hub answered oddly", f.title)
         assertEquals("The hub's reply is under Details.", f.body)
         assertTrue("bad gateway" in f.details.orEmpty(), "the reply itself has to survive somewhere")
+    }
+
+    /** Review w12-1: an account limit says which limit, and only a usage-window one may be started anyway. */
+    @Test
+    fun an_account_limit_reads_by_its_details() {
+        val daily = HubError.Tool(
+            "E_ACCOUNT_LIMIT",
+            "daily limit reached",
+            buildJsonObject { put("daily_limit_usd", 20.0); put("spent_usd", 21.5) },
+        )
+        val d = friendly(daily)
+        assertEquals("That account spent its daily limit", d.title)
+        assertTrue("Accounts page" in d.body)
+        assertFalse("start anyway" in d.body)
+        assertFalse(canStartAnyway(daily))
+
+        val window = HubError.Tool(
+            "E_ACCOUNT_LIMIT",
+            "pass over_limit_ok",
+            buildJsonObject {
+                put("used_pct", 97.0)
+                put("pause_at_pct", 95.0)
+                put("suggested_email", "me@example.com")
+                put("suggested_host", "htz")
+            },
+        )
+        val w = friendly(window)
+        assertEquals("That login is at its limit", w.title)
+        assertEquals(
+            "This login has 3% left (fleet pauses a login at 5% left). me@example.com on htz has room; start it from New session to choose that login.",
+            w.body,
+        )
+        assertTrue(canStartAnyway(window))
+
+        val alone = friendly(HubError.Tool("E_ACCOUNT_LIMIT", "x", buildJsonObject { put("used_pct", 99.6) }))
+        assertEquals("This login has 0% left. No other login has room right now.", alone.body)
+
+        val bare = friendly(HubError.Tool("E_ACCOUNT_LIMIT", "x"))
+        assertEquals("That account is at its limit", bare.title)
+        assertFalse("Account," in bare.body, "no field named that this screen may not have")
+        assertFalse(canStartAnyway(HubError.Tool("E_ACCOUNT_LIMIT", "x")))
     }
 }

@@ -68,6 +68,11 @@ data class HubHealth(
      * older hub.
      */
     val updates: UpdatesHealth? = null,
+    /**
+     * Per-host health; only each host's login conflicts are read here
+     * (review w12-4). Empty from an older hub.
+     */
+    val hosts: List<HostHealthEntry> = emptyList(),
 )
 
 /** `fleet_health.updates` (`service::update::UpdatesHealth`). */
@@ -175,4 +180,13 @@ data class LoopHealth(
     @SerialName("last_error") val lastError: String? = null,
     val runs: Long = 0,
     val failures: Long = 0,
+)
+
+/** One host of `fleet_health.hosts`: the part this app reads. */
+@Serializable
+@JsonIgnoreUnknownKeys
+data class HostHealthEntry(
+    val alias: String = "",
+    /** Two copies of one Claude login on the host ([LoginConflict]); not sent when none, nor by an older hub. */
+    @SerialName("login_conflicts") val loginConflicts: List<LoginConflict> = emptyList(),
 )

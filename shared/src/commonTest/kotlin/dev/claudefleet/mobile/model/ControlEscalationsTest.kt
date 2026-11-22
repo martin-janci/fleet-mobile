@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.model
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -131,6 +132,26 @@ class ControlEscalationsTest {
         assertNull(cards[0].sessionId)
         assertEquals(TriageBucket.NO_CREDENTIALS, cards[0].bucket)
         assertTrue(loginEscalations(hosts, setOf("login:htz:work:$aug9", "login:local::$aug9")) { 0 }.isEmpty())
+    }
+
+    /** Review w12-3: a setup-token profile is renewed with `claude setup-token`, never `/login`. */
+    @Test
+    fun a_signed_out_setup_token_gets_the_setup_token_command() {
+        val aug9 = 1_754_740_800L
+        val h = HostRow(
+            alias = "htz",
+            signedOutLogins = listOf(SignedOutLogin(profile = "ci", since = aug9), SignedOutLogin(profile = "work", since = aug9)),
+            claudeProfiles = listOf(HostProfile(name = "ci", credential = "setup_token"), HostProfile(name = "work")),
+        )
+        assertTrue(h.isSetupToken("ci"))
+        assertFalse(h.isSetupToken("work"))
+        assertFalse(h.isSetupToken(null), "the host's own login never is")
+        val cards = loginEscalations(listOf(h), emptySet()) { 0 }
+        assertEquals("ssh -t htz 'claude setup-token'", cards[0].detail)
+        assertTrue(cards[0].line.startsWith("Claude setup token on htz (ci) expired since Aug 9 · make a new token with `claude setup-token`"))
+        assertTrue("Setup token on htz, profile ci" in cards[0].line)
+        assertEquals("ssh -t htz 'CLAUDE_CONFIG_DIR=~/.claude-profiles/work claude /login'", cards[1].detail)
+        assertEquals("claude setup-token", loginShellCommand("local", "ci", token = true))
     }
 
     /** Review D18: the day is the person's, not UTC's. */

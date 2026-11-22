@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.data.HostActions
 import dev.claudefleet.mobile.model.HostCheck
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.lines
+import dev.claudefleet.mobile.model.LoginConflict
 import dev.claudefleet.mobile.model.LostCandidate
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.RestoreOutcome
@@ -13,6 +14,9 @@ import dev.claudefleet.mobile.model.RestorePlanEntry
 import dev.claudefleet.mobile.model.RestoreReport
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.net.HubCapabilities
+import dev.claudefleet.mobile.net.HubError
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -72,10 +76,15 @@ private class Hosts : HostActions {
             LostCandidate(claudeSessionId = "c4", cwd = "/tmp", projectId = null, resumable = true),
         )
     }
-    override suspend fun resume(alias: String, candidate: LostCandidate): SessionRow {
-        calls += "resume:${candidate.claudeSessionId}"
+    /** When set, a resume without `over_limit_ok` is refused with it. */
+    var resumeRefusal: Throwable? = null
+    override suspend fun resume(alias: String, candidate: LostCandidate, overLimitOk: Boolean): SessionRow {
+        calls += "resume:${candidate.claudeSessionId}" + if (overLimitOk) ":anyway" else ""
+        if (!overLimitOk) resumeRefusal?.let { throw it }
         return SessionRow(id = 42, tmuxName = "resumed")
     }
+    var conflicts: List<LoginConflict> = emptyList()
+    override suspend fun loginConflicts(alias: String): List<LoginConflict> = conflicts
     override suspend fun check(alias: String): HostCheck {
         calls += "check"
         return HostCheck(alias = alias, checkedAt = 9, tmuxVersion = "3.4", agentsOnPath = listOf("claude"), fleetHooks = false, guardHook = true)
@@ -234,6 +243,50 @@ class HostDetailViewModelTest {
         assertEquals("resume:c1", hosts.calls.last())
         assertEquals(42L, opened)
         assertNull(vm.state.value.resuming)
+    }
+
+    /** Review w12-2: past the login's pause line the row offers Start anyway; a spent daily limit does not. */
+    @Test
+    fun a_resume_refused_past_the_pause_line_can_start_anyway_and_a_daily_limit_cannot() = runTest {
+        val hosts = Hosts()
+        hosts.resumeRefusal = HubError.Tool("E_ACCOUNT_LIMIT", "pass over_limit_ok", buildJsonObject { put("used_pct", 97.0); put("pause_at_pct", 95.0) })
+        val vm = HostDetailViewModel(HostFleet(ALL_HOST), hosts, backgroundScope, canWrite = true)
+        vm.open("pine").join()
+        runCurrent()
+        val c = vm.state.value.resumable.single()
+        var opened: Long? = null
+
+        vm.resume(c) { opened = it }.join()
+        runCurrent()
+        assertEquals(setOf("c1"), vm.state.value.overLimit)
+        assertNull(opened)
+
+        vm.resume(c, overLimitOk = true) { opened = it }.join()
+        runCurrent()
+        assertEquals("resume:c1:anyway", hosts.calls.last())
+        assertEquals(42L, opened)
+        assertTrue(vm.state.value.overLimit.isEmpty())
+
+        hosts.resumeRefusal = HubError.Tool("E_ACCOUNT_LIMIT", "daily", buildJsonObject { put("daily_limit_usd", 20.0); put("spent_usd", 21.0) })
+        vm.resume(c) { }.join()
+        runCurrent()
+        assertTrue(vm.state.value.overLimit.isEmpty(), "a spent daily limit is never started anyway")
+        val calls = hosts.calls.size
+        vm.resume(c, overLimitOk = true) { }.join()
+        assertEquals(calls, hosts.calls.size, "Start anyway is not sent for a row that does not offer it")
+    }
+
+    /** Review w12-4: the hub's login conflicts show on the sheet, one sentence each. */
+    @Test
+    fun the_hosts_login_conflicts_show_in_words() = runTest {
+        val hosts = Hosts()
+        hosts.conflicts = listOf(LoginConflict(kind = "keychain_and_file"), LoginConflict(kind = "not_known_yet"))
+        val vm = HostDetailViewModel(HostFleet(ALL_HOST), hosts, backgroundScope, canWrite = true)
+        vm.open("mac").join()
+        runCurrent()
+        val lines = vm.state.value.loginConflicts
+        assertEquals(1, lines.size, "a kind this build does not know says nothing")
+        assertTrue(lines.single().startsWith("mac: the default Claude login is kept twice"))
     }
 
     @Test

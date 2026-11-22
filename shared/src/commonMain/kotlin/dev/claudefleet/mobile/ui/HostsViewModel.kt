@@ -7,7 +7,9 @@ import dev.claudefleet.mobile.model.HostLoad
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.hostLoad
 import dev.claudefleet.mobile.model.dayLabel
+import dev.claudefleet.mobile.model.isSetupToken
 import dev.claudefleet.mobile.model.loginShellCommand
+import dev.claudefleet.mobile.model.setupTokenRenewal
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.ui.kit.StatusWord
 import kotlinx.coroutines.CancellationException
@@ -229,7 +231,7 @@ internal fun hostFacts(host: HostRow, logins: Boolean = true): String? = listOfN
 ).joinToString(" · ").ifEmpty { null }
 
 /** One signed-out login in the host sheet's Logins block: what it says, and the command that signs it in again. */
-data class LoginLine(val text: String, val command: String)
+data class LoginLine(val text: String, val command: String, val token: Boolean = false)
 
 /**
  * [host]'s signed-out logins for its sheet (review w23-2): "work · signed out
@@ -238,7 +240,14 @@ data class LoginLine(val text: String, val command: String)
  */
 internal fun loginLines(host: HostRow, offsetSeconds: (Long) -> Int): List<LoginLine> = host.signedOutLogins.map { l ->
     val since = if (l.since > 0) " since ${dayLabel(l.since, offsetSeconds(l.since))}" else ""
-    LoginLine("${l.profile ?: "Host login"} · signed out$since", loginShellCommand(host.alias, l.profile))
+    // A setup token is renewed, not signed in again (review w12-3).
+    val token = host.isSetupToken(l.profile)
+    val text = if (token && l.profile != null) {
+        "${l.profile} · setup token expired$since · ${setupTokenRenewal(host.alias, l.profile)}"
+    } else {
+        "${l.profile ?: "Host login"} · signed out$since"
+    }
+    LoginLine(text, loginShellCommand(host.alias, l.profile, token), token)
 }
 
 /** [kb] kibibytes as "212 GB", or "3.4 GB" under ten; "0.2 GB" rather than "0 GB" for a nearly full disk. */

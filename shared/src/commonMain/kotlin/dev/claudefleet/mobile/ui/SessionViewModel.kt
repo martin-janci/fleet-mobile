@@ -561,9 +561,10 @@ class SessionViewModel(
     val quickReplies: QuickReplies = QuickReplies(EphemeralPrefs, EphemeralQuickReplies),
     private val drafts: DraftMemory = DraftMemory(),
     /**
-     * The New bar (redesign 14.5): a prompt the hub refuses stays in the
-     * conversation as [SessionUiState.notSent] instead of going back into the
-     * box. False keeps the Classic rule — the words return to the box.
+     * Redesign 14.5: a prompt the hub refuses stays in the conversation as
+     * [SessionUiState.notSent] instead of going back into the box. False puts
+     * the words back into the box; App.kt passes it for a session screen
+     * with no workspace, which today is Control's chat only.
      */
     private val keepNotSent: Boolean = false,
     /**
@@ -1952,7 +1953,9 @@ class SessionViewModel(
                         pauseAtPct = h.pauseAtPct,
                         signedOut = signedOut,
                         forbidden = off,
-                        picked = open.picked?.takeIf { it.accountUuid !in off } ?: h.suggestion?.takeIf { it in choices },
+                        // Neither a forbidden nor a signed-out login is ever picked: the hub refuses both (review w12-5).
+                        picked = open.picked?.takeIf { it.accountUuid !in off && it.profile !in signedOut }
+                            ?: h.suggestion?.takeIf { it in choices && it.accountUuid !in off && it.profile !in signedOut },
                         notice = if (choices.isEmpty()) "${r.hostAlias} has no other login to switch to." else null,
                     ),
                 )
@@ -1966,9 +1969,11 @@ class SessionViewModel(
 
     fun pickAccountSwitch(login: HostLogin) {
         local.update { l ->
-            // A login the project forbids is shown, never picked.
-            if (l.accountSwitch?.forbidden?.contains(login.accountUuid) == true) l
-            else l.copy(accountSwitch = l.accountSwitch?.copy(picked = login))
+            // A login the project forbids is shown, never picked; nor is a
+            // signed-out one, which the hub refuses to switch onto (review w12-5).
+            val open = l.accountSwitch
+            if (open == null || login.accountUuid in open.forbidden || login.profile in open.signedOut) l
+            else l.copy(accountSwitch = open.copy(picked = login))
         }
     }
 

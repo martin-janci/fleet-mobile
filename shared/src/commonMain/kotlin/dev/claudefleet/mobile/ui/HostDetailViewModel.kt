@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.model.HostCheck
 import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.LostCandidate
 import dev.claudefleet.mobile.model.RestoreReport
+import dev.claudefleet.mobile.model.describeLoginConflict
 import dev.claudefleet.mobile.model.isSignalLost
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -46,6 +47,14 @@ data class HostDetailUiState(
      */
     val discoverNote: String? = null,
     val resuming: String? = null,
+    /**
+     * The conversations (`claude_session_id`) the hub refused to resume as
+     * past the login's pause line: each offers "Start anyway" (review w12-2).
+     * Never a spent daily limit, which cannot be started anyway.
+     */
+    val overLimit: Set<String> = emptySet(),
+    /** The host's login conflicts, one sentence each (review w12-4); empty when none, or from an older hub. */
+    val loginConflicts: List<String> = emptyList(),
     val error: Friendly? = null,
     /** The host is armed: the restore runs from this phone when the hub next sees it answer. */
     val whenBack: Boolean = false,
@@ -94,6 +103,8 @@ class HostDetailViewModel(
         /** The scan was held back for a host that does not answer: it runs when the host does. */
         val scanWaits: Boolean = false,
         val resuming: String? = null,
+        val overLimit: Set<String> = emptySet(),
+        val loginConflicts: List<String> = emptyList(),
         val error: Friendly? = null,
     )
 
@@ -163,6 +174,8 @@ class HostDetailViewModel(
             candidates = l.candidates,
             discoverNote = l.discoverNote,
             resuming = l.resuming,
+            overLimit = l.overLimit,
+            loginConflicts = l.loginConflicts,
             error = l.error,
             whenBack = l.alias != null && l.alias in b.armed,
             backNote = l.alias?.let(b.notes::get),
@@ -172,7 +185,20 @@ class HostDetailViewModel(
     /** Open [alias]'s sheet and look for what it lost. */
     fun open(alias: String): Job = scope.launch {
         local.value = Local(alias = alias)
+        launch { readLoginConflicts(alias) }
         checkLost()
+    }
+
+    /** What the hub says about two copies of one login on [alias]; quiet when it cannot say. */
+    private suspend fun readLoginConflicts(alias: String) {
+        val lines = try {
+            actions.loginConflicts(alias).mapNotNull { describeLoginConflict(it, alias) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            return
+        }
+        local.update { if (it.alias == alias) it.copy(loginConflicts = lines) else it }
     }
 
     fun close() {
@@ -292,14 +318,33 @@ class HostDetailViewModel(
         if (local.value.alias == alias) checkLost().join()
     }
 
-    /** Resume [candidate]'s conversation in a new session, and hand its id over to open. */
-    fun resume(candidate: LostCandidate, onStarted: (Long) -> Unit): Job = scope.launch {
+    /**
+     * Resume [candidate]'s conversation in a new session, and hand its id over
+     * to open. [overLimitOk] only from "Start anyway", on a conversation the
+     * hub refused as past its login's pause line ([HostDetailUiState.overLimit]).
+     */
+    fun resume(candidate: LostCandidate, overLimitOk: Boolean = false, onStarted: (Long) -> Unit): Job = scope.launch {
         val alias = local.value.alias ?: return@launch
         if (!canWrite || local.value.resuming != null) return@launch
-        local.update { it.copy(resuming = candidate.claudeSessionId, error = null) }
-        val row = guarded(alias) { actions.resume(alias, candidate) }
-        local.update { it.copy(resuming = null) }
-        if (row != null) onStarted(row.id)
+        val id = candidate.claudeSessionId
+        if (overLimitOk && id !in local.value.overLimit) return@launch
+        local.update { it.copy(resuming = id, error = null) }
+        val row = try {
+            actions.resume(alias, candidate, overLimitOk)
+        } catch (e: CancellationException) {
+            local.update { it.copy(resuming = null) }
+            throw e
+        } catch (t: Throwable) {
+            // Past the pause line: the person may start it anyway. A spent
+            // daily limit says where to raise it instead (`canStartAnyway`).
+            local.update {
+                if (it.alias != alias) it.copy(resuming = null)
+                else it.copy(resuming = null, error = friendly(t), overLimit = if (canStartAnyway(t)) it.overLimit + id else it.overLimit)
+            }
+            return@launch
+        }
+        local.update { it.copy(resuming = null, overLimit = it.overLimit - id) }
+        onStarted(row.id)
     }
 
     /** [block]'s value, or null with its error shown on [alias]'s sheet — only while that sheet is the one open. */

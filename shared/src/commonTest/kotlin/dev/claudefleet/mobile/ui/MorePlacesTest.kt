@@ -76,7 +76,7 @@ private class ProbeOnly : HostActions {
     override suspend fun restorePlan(alias: String): RestoreReport = error("not on the Hosts list")
     override suspend fun restore(alias: String): RestoreReport = error("not on the Hosts list")
     override suspend fun discover(alias: String): List<LostCandidate> = error("not on the Hosts list")
-    override suspend fun resume(alias: String, candidate: LostCandidate): SessionRow = error("not on the Hosts list")
+    override suspend fun resume(alias: String, candidate: LostCandidate, overLimitOk: Boolean): SessionRow = error("not on the Hosts list")
 }
 
 private val PROBE = HubCapabilities.of(ToolCatalog(setOf("probe_host")))
