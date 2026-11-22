@@ -100,17 +100,25 @@ data class AccountMeter(val name: String, val line: String?, val leftFraction: F
  * no account (an older hub, a host login fleet has not read). A window whose
  * reset has passed counts as whole again. A session on a named Claude
  * login ([profile]) leads with it, as the desktop's loginLabel does:
- * "work (m@work)" (review w23-7).
+ * "work (m@work)" (review w23-7). With the session's [launchModel], that
+ * model's own weekly window counts as a limit too (review w10-5).
  */
-fun accountMeter(accountUuid: String?, name: String?, usage: AccountUsageSnapshot?, now: Long, profile: String? = null): AccountMeter? {
+fun accountMeter(
+    accountUuid: String?,
+    name: String?,
+    usage: AccountUsageSnapshot?,
+    now: Long,
+    profile: String? = null,
+    launchModel: String? = null,
+): AccountMeter? {
     val uuid = accountUuid ?: return null
     val account = name ?: uuid.take(8)
     val label = profile?.takeIf { it.isNotBlank() }?.let { "$it ($account)" } ?: account
     // A reading the last try failed to refresh says so, and how old it is
     // (review w23-7): an expired login's meters are not current.
     val stale = usage?.takeIf { it.usage != null && it.status != null }?.let { limitsNote(it, now) }?.removeSuffix(".")
-    usage?.limitAt(now)?.let { limit ->
-        val window = if (limit.weekly) "weekly" else "5-hour"
+    usage?.limitAt(now, launchModel)?.let { limit ->
+        val window = limit.windowWords
         val resets = relativeWithin(limit.resetsAt, now)?.let { " · resets in $it" }.orEmpty()
         return AccountMeter(label, "At its $window limit$resets" + stale?.let { " · $it" }.orEmpty(), 0f, low = true)
     }

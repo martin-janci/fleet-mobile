@@ -39,6 +39,7 @@ import dev.claudefleet.mobile.model.FleetTask
 import dev.claudefleet.mobile.model.GithubRepo
 import dev.claudefleet.mobile.model.HostCheck
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.LoginStatus
 import dev.claudefleet.mobile.model.HubHealth
 import dev.claudefleet.mobile.model.WizardState
 import dev.claudefleet.mobile.model.MoveOutcome
@@ -646,14 +647,18 @@ class HubClient(
      * From the usage the hub already keeps; never a fresh fetch. With
      * [projectId] the hub never suggests an account forbidden for that
      * project (claude-fleet migration 217); an older hub ignores the key.
+     * With [model] (a session's `launch_model`) that model's own weekly
+     * window counts toward each login's use (review w10-5); an older hub
+     * ignores it too.
      */
-    suspend fun checkAccountHeadroom(hostAlias: String, profile: String?, projectId: Long? = null): Headroom =
+    suspend fun checkAccountHeadroom(hostAlias: String, profile: String?, projectId: Long? = null, model: String? = null): Headroom =
         call(
             "check_account_headroom",
             buildJsonObject {
                 put("host_alias", hostAlias)
                 profile?.let { put("profile", it) }
                 projectId?.let { put("project_id", it) }
+                model?.takeIf { it.isNotBlank() }?.let { put("model", it) }
             },
         ) { json.decodeFromJsonElement(Headroom.serializer(), it) }
 
@@ -1034,6 +1039,31 @@ class HubClient(
                 put("ssh_alias", sshAlias)
             },
         ) { json.decodeFromJsonElement(HostRow.serializer(), it) }
+
+    /**
+     * One of `add_account`'s login actions over a login that exists
+     * (`again: true`; reviews w02-8 / w12-6): `start_login`, `login_key`
+     * ([key]), `login_code` ([code]) or `end_login`. [profile] null is the
+     * host's own login, sent as "". The hub serves this to its owner's
+     * trusted full device (`owner_device_admin`) and refuses any other with
+     * E_FORBIDDEN naming `fleet-hub client trust`.
+     */
+    suspend fun loginAgain(action: String, host: String, profile: String?, key: String? = null, code: String? = null) {
+        call("add_account", loginAgainArgs(action, host, profile) { key?.let { put("key", it) }; code?.let { put("code", it.trim()) } }) { }
+    }
+
+    /** `add_account { login_status, again }`: the login pane, its sign-in link, and whether the login is signed in. */
+    suspend fun loginAgainStatus(host: String, profile: String?): LoginStatus =
+        call("add_account", loginAgainArgs("login_status", host, profile)) { json.decodeFromJsonElement(LoginStatus.serializer(), it) }
+
+    private fun loginAgainArgs(action: String, host: String, profile: String?, extra: JsonObjectBuilder.() -> Unit = {}): JsonObject =
+        buildJsonObject {
+            put("action", action)
+            put("host_alias", host)
+            put("profile", profile.orEmpty())
+            put("again", true)
+            extra()
+        }
 
     /**
      * Start the hub's fleet-agent install job on [alias] (`install_agent`,
@@ -3070,6 +3100,9 @@ class HubClient(
             "new_session",
             "work_link",
             "ensure_operator",
+            // Sign in again (reviews w02-8 / w12-6): each login action runs
+            // tmux on the host over SSH, `Deadline::Lifecycle` on the hub.
+            "add_account",
             // Every other tool this app calls that the hub bounds at
             // `Deadline::Lifecycle` (`TOOL_POLICIES` in its `guard.rs`): each
             // runs on a host over SSH, some for minutes — a restore of many

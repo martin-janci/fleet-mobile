@@ -54,6 +54,8 @@ const val HOST_RESUME_TAG = "host.resume."
 
 /** One login conflict's sentence in the host sheet's Logins block. */
 const val HOST_LOGIN_CONFLICT_TAG = "host.login.conflict"
+/** A signed-out login's Sign in again, where the hub offers it (reviews w02-8 / w12-6). */
+const val HOST_LOGIN_SIGN_IN_TAG = "host.login.sign_in"
 
 data class HostDetailHandlers(
     val onClose: () -> Unit = {},
@@ -297,7 +299,8 @@ private fun PlanEntryRow(entry: RestorePlanEntry) {
 /** The health checklist's lines, or why the host could not be asked. */
 /**
  * The host's signed-out Claude logins, each with its sign-in command to copy
- * and run in a terminal (review w23-2, the desktop host sheet's Logins).
+ * and run in a terminal (review w23-2, the desktop host sheet's Logins), and
+ * Sign in again where the hub offers it to this phone (w02-8 / w12-6).
  */
 @Composable
 private fun LoginsBlock(lines: List<LoginLine>, conflicts: List<String> = emptyList()) {
@@ -307,10 +310,24 @@ private fun LoginsBlock(lines: List<LoginLine>, conflicts: List<String> = emptyL
     Column(modifier = Modifier.padding(top = 8.dp)) {
         Text("Logins", style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
         for (l in lines) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(l.text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+            // Sign in again from the phone where the hub offers it (reviews
+            // w02-8 / w12-6); the command stays, for a computer.
+            val signIn = l.target?.let { signInFor(it) }
+            val copy: @Composable () -> Unit = {
                 TextButton(onClick = { clipboard.setText(AnnotatedString(l.command)); copied.mark(l.command) }) {
                     Text(if (copied.isCopied(l.command)) "Copied" else if (l.token) "Copy token command" else "Copy login command")
+                }
+            }
+            if (signIn == null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(l.text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                    copy()
+                }
+            } else {
+                Text(l.text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = signIn, modifier = Modifier.testTag(HOST_LOGIN_SIGN_IN_TAG)) { Text("Sign in again") }
+                    copy()
                 }
             }
         }

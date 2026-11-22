@@ -87,8 +87,18 @@ private fun sessionGroup(s: SessionRow, unfollowed: Boolean, since: Long): Threa
 data class ThreadFacts(
     val accountNames: Map<String, String> = emptyMap(),
     val limits: Map<String, AccountLimit> = emptyMap(),
+    /**
+     * The accounts with a model's own weekly window at its limit (the
+     * desktop's `limited_models`, review w10-5): it holds only a session
+     * launched on that model ([limitOf]).
+     */
+    val limitedModels: Map<String, Map<ModelFamily, AccountLimit>> = emptyMap(),
     val hosts: List<HostRow> = emptyList(),
 ) {
+    /** The limit holding [s]: its account's, or its launch model's weekly window ([limitFor]). */
+    internal fun limitOf(s: SessionRow): AccountLimit? =
+        s.accountUuid?.let { limitFor(limits[it], limitedModels[it], s.launchModel) }
+
     internal fun accountName(uuid: String?): String =
         uuid?.takeIf { it.isNotBlank() }?.let { accountNames[it] ?: it.take(8) } ?: "its account"
 
@@ -113,7 +123,7 @@ fun stuckKindLabel(kind: String?): String? = when (kind) {
 private fun blockedLine(s: SessionRow, facts: ThreadFacts): String? = when (s.attentionReason) {
     "host_down" -> "Needs you · blocked on ${s.hostAlias}, which is down"
     "account_limit" -> {
-        val w = if (s.accountUuid?.let { facts.limits[it] }?.weekly == false) "5-hour" else "weekly"
+        val w = facts.limitOf(s)?.windowWords ?: "weekly"
         "Paused · $w limit on ${facts.accountName(s.accountUuid)}"
     }
     // The login on this host, when fleet saw it signed out there: the same

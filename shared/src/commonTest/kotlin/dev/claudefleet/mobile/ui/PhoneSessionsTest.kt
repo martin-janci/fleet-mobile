@@ -1,6 +1,7 @@
 package dev.claudefleet.mobile.ui
 
 import dev.claudefleet.mobile.model.AccountLimit
+import dev.claudefleet.mobile.model.ModelFamily
 import dev.claudefleet.mobile.model.Attention
 import dev.claudefleet.mobile.model.PendingInput
 import dev.claudefleet.mobile.model.SessionRow
@@ -265,5 +266,10 @@ class PhoneSessionsTest {
             waitsOn(limited, null, AccountLimit(weekly = true, resetsAt = 1_000 + 3 * 86_400), 1_000),
         )
         assertEquals("Paused · weekly limit on x", waitsOn(limited, "x", AccountLimit(weekly = true, resetsAt = null), 1_000))
+        // Review w10-5: a model's own weekly window says which model.
+        assertEquals(
+            "Paused · weekly Sonnet limit on x",
+            waitsOn(limited, "x", AccountLimit(weekly = true, resetsAt = null, model = ModelFamily.SONNET), 1_000),
+        )
     }
 }

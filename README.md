@@ -473,6 +473,13 @@ the log the hub reads afterwards.
   `set_account_nickname` to its owner's own device, so that phone can add a
   host from the hub's SSH config, install fleet-agent on one and name a
   Claude account (the hub still asks a trusted `full` device for the writes).
+  The same phone signs a signed-out Claude login in again where the hub
+  lists `add_account` with `again` (Control's login card, a host's Logins,
+  an account's row): the hub opens `claude /login` on the host, the phone
+  opens the sign-in link in its browser and pastes the code back. An
+  untrusted phone is told the `fleet-hub client trust` command, the command
+  to run on the host stays to copy everywhere, and a setup-token login keeps
+  its `claude setup-token` guidance. Adding a new account stays the desktop's.
   Provisioning, removing or hiding a host, secrets and pairing other clients
   stay the hub operator's: the hub refuses a client token all of those, so
   the app does not offer a button that would produce an error. The tools it

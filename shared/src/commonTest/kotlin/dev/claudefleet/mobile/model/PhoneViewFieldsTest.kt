@@ -47,6 +47,7 @@ class PhoneViewFieldsTest {
             "last_stop_at",
             "last_turn_at",
             "last_viewed_at",
+            "launch_model",
             "lost_at",
             "lost_reason",
             "needs_attention",

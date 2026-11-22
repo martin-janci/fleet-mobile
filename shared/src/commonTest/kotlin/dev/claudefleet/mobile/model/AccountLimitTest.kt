@@ -81,4 +81,63 @@ class AccountLimitTest {
         assertEquals("01234567", row.copy(email = "").label)
         assertEquals("01234567", row.copy(email = null).label)
     }
+
+    /** Review w10-5: `launch_model` holds aliases and full ids alike (the hub's `model_family`). */
+    @Test
+    fun a_launch_model_maps_to_the_family_whose_window_it_bills() {
+        for ((m, want) in listOf(
+            "opus" to ModelFamily.OPUS,
+            "Opus[1m]" to ModelFamily.OPUS,
+            "claude-opus-4-5-20251101" to ModelFamily.OPUS,
+            "us.anthropic.claude-opus-4-1-20250805-v1:0" to ModelFamily.OPUS,
+            "sonnet" to ModelFamily.SONNET,
+            "sonnet[1m]" to ModelFamily.SONNET,
+            "claude-sonnet-4-5" to ModelFamily.SONNET,
+            "opusplan" to null,
+            "haiku" to null,
+            "fable" to null,
+            "default" to null,
+            "best" to null,
+            "" to null,
+        )) assertEquals(want, modelFamily(m), m)
+        assertNull(modelFamily(null))
+    }
+
+    /**
+     * Review w10-5: a model's own weekly window holds only a session launched
+     * on that model; with the account's window too, the one that frees last.
+     */
+    @Test
+    fun a_model_window_holds_only_the_sessions_launched_on_that_model() {
+        val opusFull = AccountUsageSnapshot(
+            "a",
+            AccountUsageWindows(sevenDay = UsageWindow(60.0, 9_000), sevenDayOpus = UsageWindow(100.0, 8_000)),
+            "ok",
+            900,
+        )
+        val opus = AccountLimit(weekly = true, resetsAt = 8_000, model = ModelFamily.OPUS)
+        assertEquals(opus, opusFull.limitAt(now, "opus"))
+        assertEquals(opus, opusFull.limitAt(now, "claude-opus-4-5-20251101"))
+        assertEquals("weekly Opus", opus.windowWords)
+        assertNull(opusFull.limitAt(now, "sonnet"))
+        assertNull(opusFull.limitAt(now, "opusplan"))
+        assertNull(opusFull.limitAt(now))
+        assertEquals(mapOf(ModelFamily.OPUS to opus), opusFull.modelLimitsAt(now))
+        // Reset: no longer a limit.
+        assertNull(opusFull.limitAt(8_000, "opus"))
+
+        val five = AccountLimit(weekly = false, resetsAt = 2_000)
+        val models = mapOf(ModelFamily.OPUS to opus)
+        assertEquals(opus, limitFor(five, models, "opus"))
+        assertEquals(five, limitFor(five, models, "sonnet"))
+        assertEquals(five, limitFor(five, models, null))
+        // A tie: the account's own window.
+        assertEquals(AccountLimit(false, 8_000), limitFor(AccountLimit(false, 8_000), models, "opus"))
+        assertNull(limitFor(null, models, null))
+        assertEquals("5-hour", five.windowWords)
+        assertEquals("weekly", AccountLimit(weekly = true, resetsAt = null).windowWords)
+        // The row carries it; absent = the host's default.
+        assertEquals("opus", json.decodeFromString(SessionRow.serializer(), """{"id":1,"launch_model":"opus"}""").launchModel)
+        assertNull(json.decodeFromString(SessionRow.serializer(), """{"id":1}""").launchModel)
+    }
 }

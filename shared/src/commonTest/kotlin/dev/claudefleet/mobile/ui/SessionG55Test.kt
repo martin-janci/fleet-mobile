@@ -123,6 +123,8 @@ class SessionG55Test {
     fun a_switch_target_names_what_makes_it_a_dead_end() {
         val same = HostLogin(profile = "work2", accountUuid = "acc-a", usedPct = 100.0)
         assertEquals("0% left · same account, shares its limit · past the pause line", switchLoginSub(same, "acc-a", 95.0, signedOut = false))
+        // Review w09-9: a login a conflict names says so.
+        assertEquals("0% left · same account, shares its limit · past the pause line · login conflict", switchLoginSub(same.copy(conflicted = true), "acc-a", 95.0, signedOut = false))
         val fine = HostLogin(profile = "home", accountUuid = "acc-b", usedPct = 12.0)
         assertEquals("88% left", switchLoginSub(fine, "acc-a", 95.0, signedOut = false))
         assertEquals("88% left · signed out · sign in first", switchLoginSub(fine, "acc-a", 95.0, signedOut = true))

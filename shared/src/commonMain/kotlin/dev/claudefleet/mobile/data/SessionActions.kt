@@ -120,6 +120,13 @@ interface SessionActions {
         accountHeadroom(hostAlias, profile)
 
     /**
+     * [accountHeadroomIn] for a session launched on [model] (its
+     * `launch_model`): that model's own weekly window counts too (review w10-5).
+     */
+    suspend fun accountHeadroomFor(hostAlias: String, profile: String?, projectId: Long?, model: String?): Headroom =
+        accountHeadroomIn(hostAlias, profile, projectId)
+
+    /**
      * Send later: typed now if idle, else kept by the hub for the next idle
      * moment (`queue_prompt`); [timing] holds it until a time, until the
      * account's limit resets, or drops it if the session is archived first.
@@ -259,6 +266,9 @@ class HubSessionActions(private val session: AppSession) : SessionActions {
 
     override suspend fun accountHeadroomIn(hostAlias: String, profile: String?, projectId: Long?): Headroom =
         session.withClient { it.checkAccountHeadroom(hostAlias, profile, projectId) }
+
+    override suspend fun accountHeadroomFor(hostAlias: String, profile: String?, projectId: Long?, model: String?): Headroom =
+        session.withClient { it.checkAccountHeadroom(hostAlias, profile, projectId, model) }
 
     override suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming): QueuePromptResult =
         session.withClient { it.queuePrompt(sessionId, prompt, timing) }

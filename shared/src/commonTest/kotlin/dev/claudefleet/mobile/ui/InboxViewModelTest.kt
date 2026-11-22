@@ -30,8 +30,8 @@ private class FakeInbox(
         refuse?.let { throw it }
     }
 
-    override suspend fun headroom(hostAlias: String, profile: String?, projectId: Long?): Headroom {
-        calls += "headroom $hostAlias ${profile.orEmpty()}" + (projectId?.let { " project $it" } ?: "")
+    override suspend fun headroom(hostAlias: String, profile: String?, projectId: Long?, model: String?): Headroom {
+        calls += "headroom $hostAlias ${profile.orEmpty()}" + (projectId?.let { " project $it" } ?: "") + (model?.let { " model $it" } ?: "")
         return headroom
     }
 
@@ -112,6 +112,10 @@ class InboxViewModelTest {
         vm.proposeSwitch(paused().copy(projectId = 7), switchAvailable = true); runCurrent()
         assertEquals(team, vm.state.value.switchTargets[2L])
         assertEquals("headroom mac  project 7", hub.calls.single())
+        // Review w10-5: an Opus-launched row reads headroom for its model.
+        vm.proposeSwitch(paused(id = 3).copy(projectId = 7, launchModel = "opus"), switchAvailable = true); runCurrent()
+        assertEquals("headroom mac  project 7 model opus", hub.calls.last())
+        hub.calls.removeAt(hub.calls.lastIndex)
 
         // A signed-out row: the same rule.
         val row = paused().copy(projectId = 7, claudeProfile = "work", attention = Attention("no_credentials", since = 20, state = "blocked"))

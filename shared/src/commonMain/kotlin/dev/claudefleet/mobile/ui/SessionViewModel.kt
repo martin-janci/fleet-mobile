@@ -562,9 +562,10 @@ class SessionViewModel(
     private val drafts: DraftMemory = DraftMemory(),
     /**
      * Redesign 14.5: a prompt the hub refuses stays in the conversation as
-     * [SessionUiState.notSent] instead of going back into the box. False puts
-     * the words back into the box; App.kt passes it for a session screen
-     * with no workspace, which today is Control's chat only.
+     * [SessionUiState.notSent] instead of going back into the box. App.kt
+     * passes true for every screen, Control's chat included (one rule,
+     * review w08-9). False, the words back into the box with a banner, is
+     * what a bare view model does (this file's older tests).
      */
     private val keepNotSent: Boolean = false,
     /**
@@ -1871,7 +1872,7 @@ class SessionViewModel(
             // Never a login the hub knows is signed out (review w23-3).
             val host = fleet.hosts.value.firstOrNull { it.alias == r.hostAlias }
             val out = { l: HostLogin -> host?.isSignedOut(l.profile) == true }
-            val h = actions.accountHeadroomIn(r.hostAlias, r.claudeProfile, r.projectId)
+            val h = actions.accountHeadroomFor(r.hostAlias, r.claudeProfile, r.projectId, r.launchModel)
             // Never a login on an account the session's project forbids: the
             // hub refuses that restart (E_ACCOUNT_FORBIDDEN).
             val off = fleet.forbiddenAccountsIn(r.projectId, r.orgId)
@@ -1941,7 +1942,7 @@ class SessionViewModel(
             val signedOut = fleet.hosts.value.firstOrNull { it.alias == r.hostAlias }?.signedOutLogins.orEmpty().map { it.profile }
             // Listed, but not pickable: the hub refuses a switch onto one (E_ACCOUNT_FORBIDDEN).
             val off = fleet.forbiddenAccountsIn(r.projectId, r.orgId)
-            val h = actions.accountHeadroomIn(r.hostAlias, r.claudeProfile, r.projectId)
+            val h = actions.accountHeadroomFor(r.hostAlias, r.claudeProfile, r.projectId, r.launchModel)
                 .forAccount(r.accountUuid, { l -> l.profile in signedOut }, off)
             val choices = otherLogins(h, r.claudeProfile)
             local.update { l ->

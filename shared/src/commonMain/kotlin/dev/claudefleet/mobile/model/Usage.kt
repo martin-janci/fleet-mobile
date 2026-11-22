@@ -127,12 +127,57 @@ data class AccountUsageSnapshot(
     @SerialName("fetched_at") val fetchedAt: Long? = null,
 )
 
-/** An account at a usage limit: which window, and when it resets. */
-data class AccountLimit(val weekly: Boolean, val resetsAt: Long?)
+/**
+ * A model with a weekly window of its own (`seven_day_opus`,
+ * `seven_day_sonnet`, review w10-5): claude-fleet's `account_usage::ModelFamily`.
+ */
+enum class ModelFamily(val label: String) { OPUS("Opus"), SONNET("Sonnet") }
+
+/**
+ * The model family a `claude --model` value ([SessionRow.launchModel]) bills:
+ * an alias (`opus`, `sonnet[1m]`) or a full id (`claude-opus-4-5-20251101`),
+ * any case. Null for no model (the host's default), one with no window of
+ * its own (`haiku`, `fable`) and one that is not one model (`opusplan`,
+ * `default`, `best`). Mirrors the desktop's `modelFamily` (`attention.ts`).
+ */
+fun modelFamily(model: String?): ModelFamily? {
+    val m = model?.trim()?.lowercase()?.substringBefore('[') ?: return null
+    return when {
+        "opusplan" in m -> null
+        "opus" in m -> ModelFamily.OPUS
+        "sonnet" in m -> ModelFamily.SONNET
+        else -> null
+    }
+}
+
+/**
+ * An account at a usage limit: which window, and when it resets. [model] is
+ * set for a model's own weekly window ([weekly] is then true too), which
+ * holds only a session launched on that model (review w10-5).
+ */
+data class AccountLimit(val weekly: Boolean, val resetsAt: Long?, val model: ModelFamily? = null) {
+    /** "5-hour", "weekly", "weekly Opus": the desktop's `LIMIT_WORDS`. */
+    val windowWords: String get() = model?.let { "weekly ${it.label}" } ?: if (weekly) "weekly" else "5-hour"
+}
 
 /** A window's length, for a reading with no reset time (the hub's `FIVE_HOUR_SECS`, `WEEK_SECS`). */
 private const val FIVE_HOUR_SECS = 5 * 3_600L
 private const val WEEK_SECS = 7 * 86_400L
+
+/**
+ * Whether this window is at its limit at [now]: the hub's rule
+ * (`Window::live_at`) — fully used and not reset yet, before its reset time
+ * or, with none, while the reading ([fetchedAt]) is younger than [len].
+ */
+private fun UsageWindow.atLimit(len: Long, now: Long, fetchedAt: Long?): Boolean {
+    if (utilization < 100.0) return false
+    val at = resetsAt
+    if (at != null) return at > now
+    val f = fetchedAt ?: return false
+    return now - f < len
+}
+
+private fun frees(l: AccountLimit): Long = l.resetsAt ?: Long.MAX_VALUE
 
 /**
  * The limit this account is at, at [now] (unix seconds), or null. The hub's
@@ -141,25 +186,52 @@ private const val WEEK_SECS = 7 * 86_400L
  * or, with none, while the reading is younger than the window
  * (`Window::live_at`). With both at their limit the one that frees last
  * decides (no reset time holds longest); weekly wins a tie.
+ *
+ * With [launchModel] (the session's `launch_model`), that model's own weekly
+ * window counts too ([limitFor], review w10-5); without it only the two
+ * account windows do.
  */
-fun AccountUsageSnapshot.limitAt(now: Long): AccountLimit? {
+fun AccountUsageSnapshot.limitAt(now: Long, launchModel: String? = null): AccountLimit? {
     val u = usage ?: return null
-    fun UsageWindow.atLimit(len: Long): Boolean {
-        if (utilization < 100.0) return false
-        val at = resetsAt
-        if (at != null) return at > now
-        val f = fetchedAt ?: return false
-        return now - f < len
-    }
-    val weekly = u.sevenDay?.takeIf { it.atLimit(WEEK_SECS) }
-    val five = u.fiveHour?.takeIf { it.atLimit(FIVE_HOUR_SECS) }
+    val weekly = u.sevenDay?.takeIf { it.atLimit(WEEK_SECS, now, fetchedAt) }
+    val five = u.fiveHour?.takeIf { it.atLimit(FIVE_HOUR_SECS, now, fetchedAt) }
     fun frees(w: UsageWindow): Long = w.resetsAt ?: Long.MAX_VALUE
-    return when {
+    val account = when {
         weekly != null && five != null && frees(five) > frees(weekly) -> AccountLimit(weekly = false, resetsAt = five.resetsAt)
         weekly != null -> AccountLimit(weekly = true, resetsAt = weekly.resetsAt)
         five != null -> AccountLimit(weekly = false, resetsAt = five.resetsAt)
         else -> null
     }
+    if (launchModel == null) return account
+    return limitFor(account, modelLimitsAt(now), launchModel)
+}
+
+/**
+ * The model windows of this account at their limit at [now] (the desktop's
+ * `limited_models` entry for it, review w10-5); empty when none is.
+ */
+fun AccountUsageSnapshot.modelLimitsAt(now: Long): Map<ModelFamily, AccountLimit> {
+    val u = usage ?: return emptyMap()
+    return buildMap {
+        u.sevenDayOpus?.takeIf { it.atLimit(WEEK_SECS, now, fetchedAt) }
+            ?.let { put(ModelFamily.OPUS, AccountLimit(weekly = true, resetsAt = it.resetsAt, model = ModelFamily.OPUS)) }
+        u.sevenDaySonnet?.takeIf { it.atLimit(WEEK_SECS, now, fetchedAt) }
+            ?.let { put(ModelFamily.SONNET, AccountLimit(weekly = true, resetsAt = it.resetsAt, model = ModelFamily.SONNET)) }
+    }
+}
+
+/**
+ * The limit that holds a session launched on [launchModel] (review w10-5):
+ * its account's limit ([account]) and its model's own weekly window (from
+ * [models]); both at their limit, the one that frees last, the account's on
+ * a tie. A session on the default model, or one with no window of its own,
+ * ignores [models]. Mirrors the desktop's `limitFor` / the hub's
+ * `attention::Facts::limit_for`.
+ */
+fun limitFor(account: AccountLimit?, models: Map<ModelFamily, AccountLimit>?, launchModel: String?): AccountLimit? {
+    val model = modelFamily(launchModel)?.let { models?.get(it) } ?: return account
+    if (account == null) return model
+    return if (frees(model) > frees(account)) model else account
 }
 
 /** One login on a host (`check_account_headroom`, claude-fleet's `account_limits::HostLogin`). */
@@ -175,7 +247,22 @@ data class HostLogin(
      * start or switch onto it opens `/login`. The hub leaves it out when false.
      */
     @SerialName("signed_out") val signedOut: Boolean = false,
+    /**
+     * A login conflict names this login (a copied login, the macOS Keychain
+     * and a file, two logins on one account): a pick ranks it after every
+     * other, still used when nothing else is left (review w09-9). The hub
+     * leaves it out when false.
+     */
+    val conflicted: Boolean = false,
 )
+
+/**
+ * The order a pick ranks logins in: a conflicted one after every other, then
+ * the least used (the desktop's `ranksBefore`, the hub's `min_pick`); no
+ * reading after every reading.
+ */
+private val pickOrder: Comparator<HostLogin> =
+    compareBy<HostLogin> { it.conflicted }.thenBy { it.usedPct ?: Double.MAX_VALUE }
 
 /**
  * `auto_switch_account`: the signed-in person's answer to automatic account
@@ -207,7 +294,8 @@ data class Headroom(
  * (a profile can be logged into another account since the start), so when
  * the row names an account the host has a login for, `over` and the
  * suggestion are read for that account: the login under the line with the
- * least used, on another account, and never on one of [forbidden] (the
+ * least used (a conflicted one last, review w09-9), on another account,
+ * and never on one of [forbidden] (the
  * accounts the session's project forbids, [forbiddenAccounts]).
  */
 fun Headroom.forAccount(
@@ -231,7 +319,7 @@ fun Headroom.forAccount(
             // Nor a login on an account the session's project forbids: the
             // hub refuses that switch (`E_ACCOUNT_FORBIDDEN`).
             if (l.accountUuid in forbidden) continue
-            if (suggestion == null || pct < (suggestion.usedPct ?: Double.MAX_VALUE)) suggestion = l
+            if (suggestion == null || pickOrder.compare(l, suggestion) < 0) suggestion = l
         }
     }
     return copy(chosen = chosen, over = over, suggestion = suggestion)
@@ -241,7 +329,8 @@ fun Headroom.forAccount(
  * For a session whose login is signed out (`no_credentials`, review w23-4):
  * the signed-in login on the host with the most room, other than
  * [exceptProfile] (the session's own, which is the one signed out), and
- * under the pause line. Logins with a reading come first; null when none.
+ * under the pause line. Logins with a reading come first, a conflicted one
+ * last (review w09-9); null when none.
  */
 fun Headroom.signedInElsewhere(
     exceptProfile: String?,
@@ -251,7 +340,7 @@ fun Headroom.signedInElsewhere(
     logins.filter { l ->
         l.profile != exceptProfile && !signedOut(l) && (l.usedPct ?: 0.0) < pauseAtPct && l.accountUuid !in forbidden
     }
-        .minByOrNull { it.usedPct ?: Double.MAX_VALUE }
+        .minWithOrNull(pickOrder)
 
 /** What an account is forbidden for (`AccountRow.forbiddenProjectIds` / `forbiddenOrgIds`). */
 data class AccountBlocks(val projects: Set<Long> = emptySet(), val orgs: Set<Long> = emptySet()) {
@@ -287,9 +376,9 @@ fun leftText(usedPct: Double): String = "${(100 - kotlin.math.round(usedPct).toI
 /**
  * The signed-in login with a reading and the most room: the default the
  * desktop's New session picks (`freestLogin`, account_limits.ts, over its
- * `allowedLogins`). Never one on an account in [forbidden]. Null when no
- * such login has a reading.
+ * `allowedLogins`). Never one on an account in [forbidden]; a conflicted one
+ * only when no other qualifies (review w09-9). Null when no such login has a
+ * reading.
  */
 fun freestLogin(logins: List<HostLogin>, forbidden: Set<String> = emptySet()): HostLogin? =
-    logins.filter { !it.signedOut && it.accountUuid !in forbidden }
-        .mapNotNull { l -> l.usedPct?.let { l to it } }.minByOrNull { it.second }?.first
+    logins.filter { !it.signedOut && it.accountUuid !in forbidden && it.usedPct != null }.minWithOrNull(pickOrder)

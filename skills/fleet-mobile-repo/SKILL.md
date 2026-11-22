@@ -168,6 +168,16 @@ missing feature should only hide a button. Instead, on every `ready`,
   later, held by the hub until the session is next idle) and `runs` (the
   Automation sheet's Runs union) are each called only where `tools/list`
   names them; an older hub keeps the old screen.
+- **Sign in again (reviews w02-8 / w12-6).** `HubCapabilities.signInAgain`:
+  `add_account` listed with `start_login` and the `again` argument (an older
+  schema without `again` would open a *new* login). `SignInViewModel` runs
+  `start_login` → `login_status` every 2 s → `login_code` / `login_key` →
+  `end_login`, all with `again: true`; profile "" is the host's own login.
+  `LocalSignIn` hands the opener to Control's login card, the host sheet's
+  Logins and the Accounts rows; null there means copy-command only. The hub
+  answers an untrusted phone E_FORBIDDEN (`owner_device_admin`); the sheet
+  says the trust command and keeps the copy command. Setup-token logins are
+  never opened (their `claude setup-token` guidance stays).
 - **Tune prompt.** `session_prompt_tune` (`HubCapabilities.promptTune`): the
   composer's ✎ opens a sheet where a model rewrites the draft. It is a
   proposal: *Use this* replaces the draft and never sends. The hub refuses it

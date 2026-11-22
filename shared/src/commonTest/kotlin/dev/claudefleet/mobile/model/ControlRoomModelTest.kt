@@ -92,10 +92,14 @@ class ControlRoomModelTest {
             row(8, "no_credentials", "blocked") { it.copy(accountUuid = "acc") },
             row(9, "account_limit", "blocked") { it.copy(accountUuid = "five") },
             row(10, "waiting", "action_required"),
+            row(11, "account_limit", "blocked") { it.copy(accountUuid = "five", launchModel = "opus") },
+            row(12, "account_limit", "blocked") { it.copy(accountUuid = "five", launchModel = "sonnet") },
         )
         val facts = ThreadFacts(
             accountNames = mapOf("acc" to "tech.silvester"),
             limits = mapOf("five" to AccountLimit(weekly = false, resetsAt = 5_000)),
+            // Review w10-5: the Opus window frees later, and holds only the Opus session.
+            limitedModels = mapOf("five" to mapOf(ModelFamily.OPUS to AccountLimit(weekly = true, resetsAt = 90_000, model = ModelFamily.OPUS))),
             hosts = listOf(HostRow(alias = "htz", signedOutLogins = listOf(SignedOutLogin(profile = "work")))),
         )
         val line = buildThreads(rows, emptyList(), emptyList(), operatorId = null, since = 0, facts = facts).associate { it.id to it.line }
@@ -109,6 +113,8 @@ class ControlRoomModelTest {
         assertEquals("Needs you · blocked on tech.silvester, which is signed out", line[8])
         assertEquals("Paused · 5-hour limit on five", line[9])
         assertEquals("Needs you · waiting for your answer · htz", line[10])
+        assertEquals("Paused · weekly Opus limit on five", line[11])
+        assertEquals("Paused · 5-hour limit on five", line[12])
     }
 
     /**

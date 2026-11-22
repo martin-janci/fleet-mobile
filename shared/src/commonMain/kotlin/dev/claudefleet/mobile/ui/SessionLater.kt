@@ -405,7 +405,8 @@ data class AccountSwitch(
  * switch onto it (review w12-5), so it says to sign it in first. Nor is one
  * on an account the session's project forbids ([forbidden]): the hub refuses
  * it, so it says "not for this project" in place of its room, as the
- * desktop's picker does.
+ * desktop's picker does. One a login conflict names says so: fleet picks it
+ * only when nothing else is left (review w09-9).
  */
 fun switchLoginSub(l: HostLogin, sessionAccount: String?, pauseAtPct: Double, signedOut: Boolean, forbidden: Boolean = false): String =
     if (forbidden) NOT_FOR_THIS_PROJECT else listOfNotNull(
@@ -413,6 +414,7 @@ fun switchLoginSub(l: HostLogin, sessionAccount: String?, pauseAtPct: Double, si
         "same account, shares its limit".takeIf { sessionAccount != null && l.accountUuid == sessionAccount },
         "past the pause line".takeIf { (l.usedPct ?: 0.0) >= pauseAtPct },
         "signed out · sign in first".takeIf { signedOut },
+        "login conflict".takeIf { l.conflicted },
     ).joinToString(" · ")
 
 /** What a login on an account the project forbids says in a picker: the desktop's words. */

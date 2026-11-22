@@ -1031,20 +1031,6 @@ fun SessionScreen(
                         onDismiss = { onDismissFailed(f.key) },
                     )
                 }
-                state.notSent?.let { n ->
-                    NotSentCard(
-                        notSent = n,
-                        canRetry = state.canSendQuick && state.card == null,
-                        onRetry = { scrollToNewest(); onRetryNotSent() },
-                        onEdit = {
-                            onEditNotSent()
-                            immersive = false
-                            stopReading()
-                            focusPrompt = true
-                        },
-                        modifier = Modifier.heightIn(max = cardMax),
-                    )
-                }
                 // Plan first (claude-fleet docs/plan-first.md): the agent said
                 // "Plan ready" and waits for a yes. A question comes first.
                 plan?.takeIf { state.card == null && state.viewing == null }?.let { host ->
@@ -1061,6 +1047,22 @@ fun SessionScreen(
                         modifier = Modifier.heightIn(max = cardMax),
                     )
                 }
+            }
+            // A refused prompt, kept in the conversation with Retry and Edit:
+            // in Control's chat too, which has no tabs (one rule, review w08-9).
+            state.notSent?.let { n ->
+                NotSentCard(
+                    notSent = n,
+                    canRetry = state.canSendQuick && state.card == null,
+                    onRetry = { scrollToNewest(); onRetryNotSent() },
+                    onEdit = {
+                        onEditNotSent()
+                        immersive = false
+                        stopReading()
+                        focusPrompt = true
+                    },
+                    modifier = Modifier.heightIn(max = cardMax),
+                )
             }
 
             // Between the conversation and the composer: a person who opened this

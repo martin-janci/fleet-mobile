@@ -2,7 +2,9 @@ package dev.claudefleet.mobile.model
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * The accounts a project forbids (claude-fleet migrations 217/218): the
@@ -92,5 +94,26 @@ class ForbiddenAccountsTest {
             dir(OrgRule(id = 5, orgId = 1, owner = "acme"), OrgRule(id = 6, orgId = 2, owner = "other", pathPrefix = "/srv")).orgOfProject(p),
             "a path rule for another owner cannot apply",
         )
+    }
+
+    /** Review w09-9: a login a conflict names is picked after every other, and still when it is all there is. */
+    @Test
+    fun a_conflicted_login_ranks_last_in_every_pick() {
+        val copied = HostLogin(profile = "copied", accountUuid = "copied-acct", usedPct = 5.0, conflicted = true)
+        val b = HostLogin(profile = "b", accountUuid = "b-acct", usedPct = 60.0)
+        val full = HostLogin(profile = "own", accountUuid = "own-acct", usedPct = 99.0)
+        assertEquals(b, freestLogin(listOf(copied, b)))
+        assertEquals(copied, freestLogin(listOf(copied)))
+        val h = Headroom(pauseAtPct = 95.0, logins = listOf(full, copied, b))
+        assertEquals(b, h.forAccount("own-acct").suggestion)
+        assertEquals(copied, h.copy(logins = listOf(full, copied)).forAccount("own-acct").suggestion)
+        assertEquals(b, h.signedInElsewhere("own", { false }))
+    }
+
+    @Test
+    fun a_conflicted_login_decodes_and_defaults_to_false() {
+        val l = dev.claudefleet.mobile.net.json.decodeFromString(HostLogin.serializer(), """{"account_uuid":"a","used_pct":5,"conflicted":true}""")
+        assertTrue(l.conflicted)
+        assertFalse(dev.claudefleet.mobile.net.json.decodeFromString(HostLogin.serializer(), """{"account_uuid":"a"}""").conflicted)
     }
 }

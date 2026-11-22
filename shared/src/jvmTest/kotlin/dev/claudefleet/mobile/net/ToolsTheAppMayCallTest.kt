@@ -246,6 +246,12 @@ class ToolsTheAppMayCallTest {
         // `Access::Person`, called only when the hub lists it
         // (`HubCapabilities.accountProjects`).
         "set_account_projects",
+        // Sign in again (reviews w02-8 / w12-6): `add_account`'s login actions
+        // with `again` only, never `api_key`, `setup_token` or a new login.
+        // `Access::Person`; the hub refuses an untrusted device
+        // (`owner_device_admin`). Called only where `tools/list` names it with
+        // `again` (`HubCapabilities.signInAgain`) and the token is full.
+        "add_account",
         // A host's health checklist on its sheet (revision 17): readonly and
         // `Access::Person`, called only when the hub lists it (`checkHost`).
         "check_host",
@@ -342,6 +348,23 @@ class ToolsTheAppMayCallTest {
             .map { use -> Regex("""fun (\w+)\(""").findAll(client.substring(0, use.range.first)).last().groupValues[1] }
             .toList()
         assertEquals(listOf("linkWork"), users, "no start, multi-start or resume ever forces")
+    }
+
+    /**
+     * Sign in again only (reviews w02-8 / w12-6): every `add_account` call
+     * goes through `loginAgainArgs`, which always sends `again: true`, so the
+     * phone never adds a login, a setup token or an API key.
+     */
+    @Test
+    fun add_account_is_only_ever_sent_with_again() {
+        val client = sharedSources().single { it.name == "HubClient.kt" }.readText()
+        val users = Regex("""call\(\s*"add_account"""").findAll(client)
+            .map { use -> Regex("""fun (\w+)\(""").findAll(client.substring(0, use.range.first)).last().groupValues[1] }
+            .toList()
+        assertEquals(listOf("loginAgain", "loginAgainStatus"), users)
+        assertTrue(Regex("""call\("add_account", loginAgainArgs\(""").findAll(client).count() == 2, "both go through loginAgainArgs")
+        val args = client.substringAfter("private fun loginAgainArgs(").substringBefore("\n\n")
+        assertTrue("put(\"again\", true)" in args, "loginAgainArgs always sends again: true")
     }
 
     /**
