@@ -23,10 +23,11 @@ data class AgentUiState(
 )
 
 /**
- * The way into the fleet's agent from the phone: one call, then the agent's
- * own session on the ordinary Session screen — its conversation, its prompt
- * box, its quick replies. The desktop's agent sheet is that same session in a
- * smaller frame, so the phone needs no second conversation view.
+ * The way into the fleet's agent from a place outside the Control tab (a
+ * lesson's prompt, Missions → New mission in Control): one call, then the
+ * Control tab, which is the agent's conversation with its queue and its
+ * escalations (review w08-2). Never the plain Session screen: that would be
+ * a second copy of Control without them.
  *
  * Offered only when the hub lists `ensure_operator` for this token (an older
  * hub does not, and the hub hides it from nobody else) **and** the credential
@@ -40,7 +41,7 @@ class AgentViewModel(
     private val canWrite: Boolean,
     /** Where [open]'s `fill` goes: the agent session's draft, which its Session screen starts from. */
     private val drafts: DraftMemory? = null,
-    /** Show the agent's session. */
+    /** Show the agent's conversation: the Control tab. */
     private val onOpenSession: (Long) -> Unit,
 ) {
     private data class Local(val waking: Boolean = false, val error: Friendly? = null)

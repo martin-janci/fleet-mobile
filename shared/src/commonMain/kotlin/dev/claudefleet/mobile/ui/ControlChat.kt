@@ -43,6 +43,8 @@ import dev.claudefleet.mobile.data.ControlActions
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.ConfirmRequest
 import dev.claudefleet.mobile.model.ControlHandoff
+import dev.claudefleet.mobile.model.FollowMark
+import dev.claudefleet.mobile.model.followMarks
 import dev.claudefleet.mobile.model.approvalWords
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.OperatorStatus
@@ -77,7 +79,8 @@ import kotlinx.coroutines.flow.drop
  * its session. The tab is Control's conversation under a "Control · N need
  * you" header with its views, and the calls Control waits on a person's yes
  * for (9.2's confirms) as cards above the composer, Approve and Deny, neither
- * pre-selected. New layout only; the Classic bar keeps the agent button.
+ * pre-selected. A lesson's prompt and Missions' "New mission in Control"
+ * wake it and land here too (AgentViewModel).
  */
 
 /** Control's views across the top of the tab. Sessions and Missions open their own screens. */
@@ -101,10 +104,16 @@ data class ControlUiState(
     val confirms: List<ConfirmRequest> = emptyList(),
     /** Nonces with an answer in flight. */
     val answering: Set<String> = emptySet(),
-    /** What Control handed on, oldest first, as chips (redesign 9.3); empty on a hub without the receipts. */
+    /** What Control handed on, oldest first, as chips (redesign 9.3): every receipt read, one per session; empty on a hub without the receipts. */
     val handoffs: List<HandoffChip> = emptyList(),
     /** The receipts themselves, for the threads list and the task graph card (claude-fleet #914). */
     val receipts: List<ControlHandoff> = emptyList(),
+    /**
+     * The journal's threads by key ([followMarks]): which ones Control still
+     * follows (review w04-1). Null until read, and on a hub or a device the
+     * journal is not for: then every thread counts as followed.
+     */
+    val follows: Map<String, FollowMark>? = null,
     /** "Watching CI on #476 and #477" ([watchingCiLine]); null while no handed-on PR's checks run. */
     val watchingCi: String? = null,
     val error: Friendly? = null,
@@ -187,6 +196,7 @@ class ControlViewModel(
         val confirms: List<ConfirmRequest> = emptyList(),
         val answering: Set<String> = emptySet(),
         val handoffs: List<ControlHandoff> = emptyList(),
+        val follows: Map<String, FollowMark>? = null,
         val error: Friendly? = null,
         val statusFailed: Boolean = false,
         /** Confirms put away on this phone ([hide]); the hub still has them, and the desktop still answers them. */
@@ -223,8 +233,9 @@ class ControlViewModel(
             canConfirm = caps.confirms,
             confirms = if (caps.confirms) l.confirms.filterNot { it.nonce in l.hidden } else emptyList(),
             answering = l.answering,
-            handoffs = if (caps.handoffs) handoffChips(l.handoffs, rows) else emptyList(),
+            handoffs = if (caps.handoffs) handoffChips(l.handoffs, rows, limit = HANDOFFS_SHOWN) else emptyList(),
             receipts = if (caps.handoffs) l.handoffs else emptyList(),
+            follows = l.follows.takeIf { caps.controlJournal },
             watchingCi = if (caps.handoffs) watchingCiLine(l.handoffs, rows) else null,
             error = l.error,
             connected = status is ConnectionStatus.Connected,
@@ -411,6 +422,8 @@ class ControlViewModel(
         }
     }
 
+    private var followsTick = 0
+
     private suspend fun readHandoffs() {
         try {
             val handoffs = actions.handoffs(HANDOFFS_SHOWN)
@@ -420,6 +433,20 @@ class ControlViewModel(
         } catch (_: Throwable) {
             // Keep what is shown; the next tick reads again.
         }
+        // What Control still follows moves slowly (a thread goes quiet after
+        // hours): read with every [FOLLOWS_EVERY]th handoffs read, not each tick.
+        if (fleet.capabilities.value.controlJournal && followsTick++ % FOLLOWS_EVERY == 0) readFollows()
+    }
+
+    private suspend fun readFollows() {
+        try {
+            val follows = followMarks(actions.follows())
+            local.update { it.copy(follows = follows) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            // Not this device's journal (E_FORBIDDEN), or a failed read: every thread counts as followed.
+        }
     }
 
     companion object {
@@ -428,6 +455,9 @@ class ControlViewModel(
         /** How many receipts Control reads, and how many chips it draws. */
         const val HANDOFFS_SHOWN = 20
         const val CHIPS_SHOWN = 3
+
+        /** Control's follows are read with one handoffs read in this many. */
+        const val FOLLOWS_EVERY = 8
     }
 }
 
@@ -736,14 +766,16 @@ fun handoffWorkState(state: String?): String = when (state) {
 }
 
 /**
- * The newest [ControlViewModel.CHIPS_SHOWN] receipts as chips, oldest first (the order a transcript reads).
+ * The newest [limit] receipts as chips, oldest first (the order a transcript reads).
  * Several handoffs to one session are one chip, the newest: its state is the session's, so two
- * read the same twice (Martin, 2026-11-11).
+ * read the same twice (Martin, 2026-11-11). Control's activity row counts and lists every
+ * receipt it read ([ControlViewModel.HANDOFFS_SHOWN], review w08-5); [ControlViewModel.CHIPS_SHOWN]
+ * is for an inline row of chips.
  */
-fun handoffChips(handoffs: List<ControlHandoff>, rows: List<SessionRow>): List<HandoffChip> =
+fun handoffChips(handoffs: List<ControlHandoff>, rows: List<SessionRow>, limit: Int = ControlViewModel.CHIPS_SHOWN): List<HandoffChip> =
     handoffs
         .distinctBy { h -> if (h.kind == "session" && h.sessionId != null) "s${h.sessionId}" else "h${h.id}" }
-        .take(ControlViewModel.CHIPS_SHOWN).reversed().map { h -> handoffChip(h, rows) }
+        .take(limit).reversed().map { h -> handoffChip(h, rows) }
 
 fun handoffChip(h: ControlHandoff, rows: List<SessionRow>): HandoffChip = when (h.kind) {
     "session" -> {

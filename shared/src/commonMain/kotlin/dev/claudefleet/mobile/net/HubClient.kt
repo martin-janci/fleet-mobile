@@ -26,6 +26,7 @@ import dev.claudefleet.mobile.model.Commit
 import dev.claudefleet.mobile.model.AgentInstall
 import dev.claudefleet.mobile.model.ConfirmRequest
 import dev.claudefleet.mobile.model.ControlHandoff
+import dev.claudefleet.mobile.model.JournalFollow
 import dev.claudefleet.mobile.model.OperatorStatus
 import dev.claudefleet.mobile.model.ChangedFile
 import dev.claudefleet.mobile.model.Conversation
@@ -1375,6 +1376,17 @@ class HubClient(
     suspend fun controlHandoffs(limit: Int): List<ControlHandoff> =
         call("control_handoffs", buildJsonObject { put("limit", limit) }) {
             json.decodeFromJsonElement(ListSerializer(ControlHandoff.serializer()), it)
+        }
+
+    /**
+     * The threads Control started or was handed, and whether it still follows
+     * each (`control_journal { read }`'s `follows`, review w04-1). The hub
+     * answers it to Control, the master and the fleet admin's own device only.
+     */
+    suspend fun controlFollows(): List<JournalFollow> =
+        call("control_journal", buildJsonObject { put("action", "read") }) {
+            val follows = (it as? JsonObject)?.get("follows") ?: return@call emptyList()
+            json.decodeFromJsonElement(ListSerializer(JournalFollow.serializer()), follows)
         }
 
     /**

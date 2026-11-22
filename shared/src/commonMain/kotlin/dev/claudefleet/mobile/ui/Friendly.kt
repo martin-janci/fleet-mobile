@@ -3,6 +3,11 @@ package dev.claudefleet.mobile.ui
 import dev.claudefleet.mobile.log.FleetLog
 import dev.claudefleet.mobile.log.LogLevel
 import dev.claudefleet.mobile.net.HubError
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.doubleOrNull
+import kotlin.math.roundToInt
 
 /** What a banner shows: a title, a sentence, and the raw hub text behind a Details expander. */
 data class Friendly(val title: String, val body: String, val isError: Boolean, val details: String? = null)
@@ -70,13 +75,8 @@ private fun friendlyWords(t: Throwable): Friendly {
             "E_BG_SESSION" -> Friendly("Runs outside tmux", "This session has no terminal to type into.", isError = true, details = raw)
             "E_PINNED" -> Friendly("This session is pinned", "Unpin it first: ⋮ › Unpin, or on the desktop.", isError = true, details = raw)
             // The hub's text is written for agents ("pass over_limit_ok"); the
-            // person picks another account, or picks this one knowing it.
-            "E_ACCOUNT_LIMIT" -> Friendly(
-                "That account is at its limit",
-                "Pick another account under Account, or pick this one again to start anyway.",
-                isError = true,
-                details = raw,
-            )
+            // person gets what is spent and where to go (review w12-1).
+            "E_ACCOUNT_LIMIT" -> accountLimitWords(t.details, raw)
             else -> Friendly("The hub refused that", t.message, isError = true, details = raw)
         }
         // Every branch carries `details`, and these four used to carry none —
@@ -115,6 +115,48 @@ private fun friendlyWords(t: Throwable): Friendly {
             details = raw,
         )
     }
+}
+
+private fun JsonElement?.field(name: String): JsonPrimitive? = ((this as? JsonObject)?.get(name) as? JsonPrimitive)
+
+/**
+ * Whether an `E_ACCOUNT_LIMIT` is the usage-window refusal (details carry
+ * `used_pct`), the one `over_limit_ok` passes, and so may be started anyway.
+ * A spent daily limit (`daily_limit_usd` / `spent_usd`) cannot be: its fix is
+ * on the desktop's Accounts page. The desktop's `canStartAnyway`.
+ */
+fun canStartAnyway(t: Throwable): Boolean {
+    if (t !is HubError.Tool || t.code != "E_ACCOUNT_LIMIT") return false
+    return t.details.field("used_pct")?.doubleOrNull != null && t.details.field("daily_limit_usd") == null
+}
+
+/**
+ * An `E_ACCOUNT_LIMIT` in words, by its details: a spent daily limit, a login
+ * past its pause line (the desktop's `accountLimitText`: the reading, the
+ * pause line, the login with room), or neither named.
+ */
+private fun accountLimitWords(details: JsonElement?, raw: String): Friendly {
+    if (details.field("daily_limit_usd") != null) {
+        return Friendly(
+            "That account spent its daily limit",
+            "Raise or clear it on the desktop's Accounts page, or pick a login on another account.",
+            isError = true,
+            details = raw,
+        )
+    }
+    val used = details.field("used_pct")?.doubleOrNull
+        ?: return Friendly("That account is at its limit", "Pick a login on another account.", isError = true, details = raw)
+    fun left(pct: Double): Int = maxOf(0, 100 - pct.roundToInt())
+    val line = details.field("pause_at_pct")?.doubleOrNull?.let { " (fleet pauses a login at ${left(it)}% left)" }.orEmpty()
+    val head = "This login has ${left(used)}% left$line."
+    val host = details.field("suggested_host")?.takeIf { it.isString }?.content
+    val body = if (host == null) {
+        "$head No other login has room right now."
+    } else {
+        val who = details.field("suggested_email")?.takeIf { it.isString }?.content?.takeIf { '@' in it } ?: "Another login"
+        "$head $who on $host has room; start it from New session to choose that login."
+    }
+    return Friendly("That login is at its limit", body, isError = true, details = raw)
 }
 
 /**

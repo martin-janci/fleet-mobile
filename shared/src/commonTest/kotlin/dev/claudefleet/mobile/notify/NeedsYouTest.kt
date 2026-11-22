@@ -67,6 +67,21 @@ class NeedsYouTest {
         assertTrue(unparsed.isEmpty(), "losing the parsed question is not news")
     }
 
+    /** Review w04-2: a lost row (reason lifecycle, state paused) needs nobody, so nothing rings for it. */
+    @Test
+    fun a_lost_row_raises_no_alert() {
+        val lost = row(6).copy(attention = Attention("lifecycle", state = "paused"), lostAt = 80)
+        val (alerts, seen) = needsYouAlerts(mapOf(6L to null), listOf(lost))
+        assertTrue(alerts.isEmpty(), "a lost row is not news")
+        assertEquals(mapOf(6L to null), seen)
+        // The old fallback (a hub that stamps nothing) reads a ghost as lifecycle too: still silent.
+        val (ghost, _) = needsYouAlerts(emptyMap(), listOf(row(7).copy(status = "ghost")))
+        assertTrue(ghost.isEmpty())
+        // A lost row that still asks something is waiting, and rings.
+        val (asks, _) = needsYouAlerts(emptyMap(), listOf(row(8, "waiting").copy(lostAt = 80)))
+        assertEquals("waiting", asks.single().reason)
+    }
+
     @Test
     fun a_new_session_that_already_needs_you_is_news() {
         val (alerts, _) = needsYouAlerts(emptyMap(), listOf(row(2, "failed")))

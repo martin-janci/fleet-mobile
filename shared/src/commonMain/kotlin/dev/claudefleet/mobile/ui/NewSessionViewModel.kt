@@ -321,6 +321,12 @@ class NewSessionViewModel(
         /** The person tapped a login; [pickedProfile] is it (null = the host's own). */
         val loginPicked: Boolean = false,
         val pickedProfile: String? = null,
+        /**
+         * The login (`host|profile`) the hub last refused as past its pause
+         * line (`E_ACCOUNT_LIMIT` with `used_pct`): picked again, it starts
+         * anyway even where this phone's own reading saw room (review w12-1).
+         */
+        val hubOverLogin: String? = null,
         /** Ticket mode: the hub's planned branch, and what it was planned for (`key|host|project`). */
         val draft: String? = null,
         val draftFor: String? = null,
@@ -656,7 +662,8 @@ class NewSessionViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {
-                local.update { it.copy(creating = false, error = explainCreateFailure(t)) }
+                val over = if (canStartAnyway(t)) "${request.hostAlias}|${request.profile}" else null
+                local.update { it.copy(creating = false, error = explainCreateFailure(t), hubOverLogin = over ?: it.hubOverLogin) }
             }
         }
     }
@@ -963,7 +970,7 @@ class NewSessionViewModel(
         // The login the row shows is the one sent, picked or defaulted; only a
         // picked one may start past the pause line (the person chose it).
         val login = s.account
-        val overOk = l.loginPicked && login?.over == true
+        val overOk = l.loginPicked && (login?.over == true || (login != null && l.hubOverLogin == "${s.host}|${login.profile}"))
         if (s.startFrom == StartFrom.Branch) {
             // An existing branch: its own worktree, checked out rather than
             // forked — the hub's script takes `base == name` as "this branch".
@@ -1122,10 +1129,12 @@ private fun isBranchName(name: String): Boolean = name.isNotEmpty() && name.none
  */
 private fun explainCreateFailure(t: Throwable): Friendly {
     val base = friendly(t)
-    return if (t is HubError.Transport) {
-        base.copy(body = "The session may still have been created — check the list before trying again.")
-    } else {
-        base
+    return when {
+        t is HubError.Transport -> base.copy(body = "The session may still have been created — check the list before trying again.")
+        // Only New session has the Account field, and only a login past its
+        // pause line (not a spent daily limit) can be started anyway (review w12-1).
+        canStartAnyway(t) -> base.copy(body = "${base.body} Or pick another account under Account, or pick this one again to start anyway.")
+        else -> base
     }
 }
 

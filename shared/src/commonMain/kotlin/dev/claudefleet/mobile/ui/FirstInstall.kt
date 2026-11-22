@@ -79,7 +79,7 @@ import kotlinx.coroutines.launch
  * end, and a host joining the fleet from Hosts — what will be installed, then
  * the hub's fleet-agent install job (claude-fleet 4.9) followed step by step,
  * Pulse while it works and Sonar until the host's first heartbeat. Nothing is
- * installed until the person taps Install agent. New layout only.
+ * installed until the person taps Install agent.
  */
 
 // ── Welcome and no hub yet ──
@@ -96,7 +96,7 @@ const val WELCOME_HINT: String = "welcome"
 fun showWelcome(welcomed: Boolean, signedOut: Boolean, pairLink: Boolean = false): Boolean =
     !welcomed && !signedOut && !pairLink
 
-/** Where an unpaired phone is on the New layout. */
+/** Where an unpaired phone is. */
 enum class FirstRun { Welcome, NoHub, Pair }
 
 /** The three promises, as the board words them. */
@@ -121,7 +121,7 @@ val NO_HUB_STEPS_TEXT: String = """
 const val WELCOME_PAIR_TAG = "welcome.pair"
 const val WELCOME_NO_HUB_TAG = "welcome.nohub"
 
-/** The first thing a new phone sees on the New layout: three plain promises and the one next step. */
+/** The first thing a new phone sees: three plain promises and the one next step. */
 @Composable
 fun WelcomeScreen(onPair: () -> Unit, onNoHub: () -> Unit, modifier: Modifier = Modifier) {
     val o = Fleet.colors

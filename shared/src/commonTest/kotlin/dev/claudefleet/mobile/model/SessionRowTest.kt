@@ -116,7 +116,14 @@ class SessionRowTest {
         )
         assertEquals("lifecycle", row.attentionReason)
         assertEquals(42L, row.attention?.since)
-        assertTrue(row.needsAttention)
+        // A lost row needs nobody (review w04-2): it is never counted.
+        assertFalse(row.needsAttention)
+        val waiting = json.decodeFromString(
+            SessionRow.serializer(),
+            """{"id":1,"claude_status":"working","needs_attention":{"reason":"waiting","since":42}}""",
+        )
+        assertEquals("waiting", waiting.attentionReason)
+        assertTrue(waiting.needsAttention)
     }
 
     /**

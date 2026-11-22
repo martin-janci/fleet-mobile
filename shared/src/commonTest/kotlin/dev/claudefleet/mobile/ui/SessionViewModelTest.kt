@@ -32,6 +32,7 @@ import dev.claudefleet.mobile.model.ConversationSummary
 import dev.claudefleet.mobile.model.RepairReport
 import dev.claudefleet.mobile.model.Conversation
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.SignedOutLogin
 import dev.claudefleet.mobile.model.PendingInput
 import dev.claudefleet.mobile.model.PendingOption
 import dev.claudefleet.mobile.model.ProjectRow
@@ -5054,6 +5055,32 @@ class SessionViewModelTest {
         vm.confirmAccountSwitch().join()
         runCurrent()
         assertEquals(listOf("team"), actions.restartedUnder)
+    }
+
+    /** Review w12-5: the hub refuses every switch onto a signed-out login, so it is listed but never picked. */
+    @Test
+    fun switch_account_from_details_never_picks_a_signed_out_login() = runTest {
+        val actions = FakeActions().apply {
+            headroom = Headroom(
+                pauseAtPct = 95.0,
+                logins = listOf(HostLogin("work", "acc-a", 99.0), HostLogin("spare", "acc-b", 10.0), HostLogin("team", "acc-c", 60.0)),
+            )
+        }
+        val fleet = FakeFleetState(listOf(running)).apply {
+            capabilities.value = HubCapabilities(tools = switchTools, params = mapOf("restart_session" to setOf("session_id", "profile")))
+            hosts.value = listOf(HostRow(alias = running.hostAlias, reachable = true, signedOutLogins = listOf(SignedOutLogin(profile = "spare"))))
+        }
+        val vm = SessionViewModel(ID, fleet, actions, backgroundScope)
+        runCurrent()
+        vm.openAccountSwitch().join()
+        runCurrent()
+        val open = assertNotNull(vm.state.value.accountSwitch)
+        assertEquals(listOf("spare", "team"), open.logins.map { it.profile }, "listed")
+        assertTrue(open.picked?.profile != "spare", "never proposed")
+        vm.pickAccountSwitch(HostLogin("spare", "acc-b", 10.0))
+        runCurrent()
+        assertTrue(vm.state.value.accountSwitch?.picked?.profile != "spare", "a signed-out login is not pickable")
+        assertEquals("90% left · signed out · sign in first", switchLoginSub(open.logins[0], "acc-a", 95.0, signedOut = true))
     }
 
     @Test

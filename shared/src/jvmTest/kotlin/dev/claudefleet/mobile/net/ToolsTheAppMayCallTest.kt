@@ -102,8 +102,9 @@ class ToolsTheAppMayCallTest {
         // What Control's agent handed on, for its chips (redesign 9.3):
         // readonly, `Access::PersonDevice` (a receipt quotes its prompt).
         "control_handoffs",
-        // A mission steered from the phone is followed (review w04-11):
-        // `control_journal { action: follow }`, `Access::Client` and not
+        // A mission steered from the phone is followed (review w04-11), and
+        // Control's threads read which it still follows (review w04-1):
+        // `control_journal { action: follow | read }`, `Access::Client` and not
         // readonly; the tool itself admits only Control and the owner's
         // device, so the call is best effort, and made only when
         // `tools/list` names it (`HubCapabilities.controlJournal`).

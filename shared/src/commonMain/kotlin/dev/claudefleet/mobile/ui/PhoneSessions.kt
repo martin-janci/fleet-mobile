@@ -329,9 +329,8 @@ private fun PickBox(selected: Boolean) {
  *  - *Today*, Tickets, Missions and *Select sessions* sit under ⋮;
  *  - the agent's ✦ is the Control tab.
  *
- * Search, bulk select and its outcome are drawn here too; the view models
- * are the Classic list's, so a filter or a grouping chosen on one layout is
- * the other's after a switch or a restart.
+ * Search, bulk select and its outcome are drawn here too, from the same
+ * view models, so a filter or a grouping survives a restart.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -352,7 +351,7 @@ fun SessionsTab(
     var scope by remember { mutableStateOf(SearchScope.ALL) }
     var sending by remember { mutableStateOf(false) }
     var killing by remember { mutableStateOf(false) }
-    // The routines unfolded, as on Classic: a routine's runs sit folded to one line.
+    // The routines unfolded: a routine's runs sit folded to one line.
     var openRoutines by remember { mutableStateOf(emptySet<String>()) }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -464,7 +463,7 @@ fun SessionsTab(
                         }
                         // A routine starts a session per run: they sit here, a
                         // line per routine, out of the tree (claude-fleet's
-                        // Routines section; Classic draws the same).
+                        // Routines section).
                         if (state.routineGroups.isNotEmpty()) {
                             item(key = "routines-heading") { RoutinesHeading(state.routineGroups.sumOf { it.sessions.size }) }
                             for (group in state.routineGroups) {
@@ -590,9 +589,9 @@ private fun TabHeader(state: SessionsUiState, handlers: SessionsHandlers, canSel
         is ConnectionStatus.Offline -> staleLine("offline", state.staleAt)
         is ConnectionStatus.Refused -> staleLine("refused", state.staleAt)
     }
-    // Everything that narrows the list, Needs you included: the New tab has
-    // no Needs you chip of its own (that is the Inbox), so a Needs you filter
-    // carried over from Classic must still be on screen to turn off.
+    // Everything that narrows the list, Needs you included: the tab has no
+    // Needs you chip of its own (that is the Inbox), so a Needs you filter
+    // that is on must still be on screen to turn off.
     val facets = state.facets.filterNot { it.id == SessionFacetId.SEARCH }
     ScreenHeader(
         title = "Sessions",

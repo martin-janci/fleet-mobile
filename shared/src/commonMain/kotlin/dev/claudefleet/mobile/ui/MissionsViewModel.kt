@@ -184,11 +184,6 @@ class MissionsViewModel(
         readOne(missionId)
     }
 
-    /** Back from a mission to the list. */
-    fun back() {
-        local.update { it.copy(loading = false, detail = null, results = null, notice = null, pick = it.pick + 1) }
-    }
-
     fun dismissError() {
         local.update { it.copy(error = null) }
     }

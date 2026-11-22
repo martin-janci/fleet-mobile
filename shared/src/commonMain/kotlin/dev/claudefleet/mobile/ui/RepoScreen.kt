@@ -108,8 +108,8 @@ data class RepoHandlers(
     val onDismissNotice: () -> Unit = {},
     /**
      * Put words in the session's composer — never send them: "Ask Claude Code
-     * to commit", or a long-pressed diff line. Null on the Classic worktree
-     * screen, which has no composer beside it.
+     * to commit", or a long-pressed diff line. Null on the standalone worktree
+     * screen ([RepoScreen]), which has no composer beside it.
      */
     val onAsk: ((String) -> Unit)? = null,
     /** Step out of the open diff, commit or file (the Files tab has no header of its own). */
@@ -122,8 +122,8 @@ data class RepoHandlers(
  * commit history and each commit's files, and the files themselves, any of
  * which can be sent to Downloads. Back steps out of what is open first.
  *
- * The Classic bar's own screen; on the New bar the same body is the session's
- * Files tab ([RepoBody]).
+ * The standalone screen; inside a session the same body is its Files tab
+ * ([RepoBody]).
  */
 @Composable
 fun RepoScreen(state: RepoUiState, handlers: RepoHandlers, modifier: Modifier = Modifier) {

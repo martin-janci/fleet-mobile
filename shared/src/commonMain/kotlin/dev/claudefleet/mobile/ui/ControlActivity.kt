@@ -35,7 +35,7 @@ import dev.claudefleet.mobile.ui.theme.Fleet
 
 /*
  * Control's activity as one row of counts under the view pills (the phone's
- * port of the desktop's ControlActivity, claude-fleet #1046): "3 need you ·
+ * port of the desktop's ControlActivity, claude-fleet #1046): "Needs you · 3 ·
  * ↗ 2 handed off · Threads 9". Each count opens its list in a sheet, with
  * every action the cards had. Above the composer stay only what the chat
  * waits on (confirms, other sessions' forms), so the conversation keeps the
@@ -55,7 +55,10 @@ data class ActivityCount(val section: ControlActivity, val label: String, val at
  * ones a card would draw: Inbox has the rest, and the sheet links there.
  */
 fun activityCounts(needs: Int, handoffs: List<HandoffChip>, plan: Boolean, threads: List<ControlThread>): List<ActivityCount> = buildList {
-    if (needs > 0) add(ActivityCount(ControlActivity.Needs, "$needs need you", attention = true))
+    // Its own words, not the header's "N need you": this counts the cards
+    // (Later'd ones out, a down host as one, signed-out logins in), which is
+    // a different set from the header's rows (review w08-4).
+    if (needs > 0) add(ActivityCount(ControlActivity.Needs, "Needs you · $needs", attention = true))
     val handed = handoffs.size
     if (handed > 0 || plan) {
         val label = if (handed > 0) "↗ $handed handed off" else "↗ Plan"

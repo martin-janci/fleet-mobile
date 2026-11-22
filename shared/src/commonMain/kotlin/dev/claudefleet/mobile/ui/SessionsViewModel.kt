@@ -152,16 +152,14 @@ enum class GroupMode(val label: String) {
 
     /**
      * Hosts with their sessions straight under them, no project headings —
-     * the New layout's "Group: host" (MobileNav). Offered by the New
-     * layout's filter sheet only; the Classic chip's cycle skips it, so a
-     * Classic list never lands here unless New chose it.
+     * "Group: host" (MobileNav), offered by the filter sheet.
      */
     HOST("host"),
 
     /**
-     * Orgs with their sessions under them, by project — the New layout's
-     * "Group: org" (review r09 B7). Offered by the New layout's sheet only
-     * while the sessions span two orgs or more; the Classic cycle skips it.
+     * Orgs with their sessions under them, by project — "Group: org"
+     * (review r09 B7). Offered by the filter sheet only while
+     * the sessions span two orgs or more.
      */
     ORG("org"),
 }
@@ -314,9 +312,6 @@ data class SessionsUiState(
 
     /** The strip's chips: [facets] less the ones with a control of their own on screen (Needs you, the search). */
     val stripFacets: List<Facet<SessionFacetId>> get() = facets.filterNot { it.id.onScreen }
-
-    /** The filters that are on, in words — the strip and the empty state say the same thing. */
-    fun filterNames(): List<String> = facets.map { it.label }
 
     /** Rows are being hidden: what makes the "N of M" line worth drawing. */
     val narrowed: Boolean get() = filters.any && shown != total
@@ -737,20 +732,6 @@ class SessionsViewModel(
         // knows how to read. `urgency` has no representation there; it is not
         // `work`, so it writes the same thing `project` does.
         prefs?.putStringList(BY_WORK_KEY, if (mode == GroupMode.WORK) listOf(ON) else emptyList())
-    }
-
-    /**
-     * The next view along, which is what tapping the header chip does — the
-     * desktop's `group-by-toggle`, where the label always names the mode you
-     * are *in* rather than the one you would get.
-     *
-     * Work is skipped on a hub without the work graph rather than offered and
-     * ignored, so the cycle a person sees is the cycle they get.
-     */
-    fun cycleGroupMode(workAvailable: Boolean) {
-        val modes = GroupMode.entries.filter { it != GroupMode.HOST && it != GroupMode.ORG && (it != GroupMode.WORK || workAvailable) }
-        val next = modes[(modes.indexOf(local.value.groupMode).coerceAtLeast(0) + 1) % modes.size]
-        setGroupMode(next)
     }
 
     /** Only sessions on *My work* tickets, or all of them again. Never talks to the hub. */

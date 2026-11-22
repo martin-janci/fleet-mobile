@@ -53,9 +53,7 @@ class ControlRoomModelTest {
         assertEquals(ThreadGroup.NEEDS, by.getValue("s:3").group)
         assertEquals(ThreadGroup.DONE, by.getValue("s:5").group)
         assertEquals(ThreadGroup.EARLIER, by.getValue("s:6").group)
-        assertEquals("1 needs you · 2 working · 1 done today", threadsSummary(threads))
         assertEquals(listOf(ThreadGroup.NEEDS, ThreadGroup.WORKING, ThreadGroup.DONE, ThreadGroup.EARLIER), groupThreads(threads).map { it.first })
-        assertNull(threadsSummary(emptyList()))
     }
 
     @Test
@@ -72,8 +70,94 @@ class ControlRoomModelTest {
         )
         val by = buildThreads(rows, emptyList(), emptyList(), operatorId = null, since = 1_000).associateBy { it.key }
         assertEquals(ThreadGroup.NEEDS, by.getValue("s:2").group)
-        assertEquals("Host down · mefistos", by.getValue("s:2").line)
+        assertEquals("Needs you · blocked on mefistos, which is down", by.getValue("s:2").line)
         assertEquals(ThreadGroup.EARLIER, by.getValue("s:3").group)
+        assertEquals("Lost · htz", by.getValue("s:3").line)
+    }
+
+    /** Review w04-5: a Needs you thread's line reads as the desktop's strip (`control_threads.ts`, `blockedLine`). */
+    @Test
+    fun a_needs_you_line_reads_as_the_desktops() {
+        fun row(id: Long, reason: String, state: String, f: (SessionRow) -> SessionRow = { it }) = f(
+            SessionRow(id = id, tmuxName = "t$id", origin = "operator", hostAlias = "htz", claudeStatus = "idle", attention = Attention(reason, state = state)),
+        )
+        val rows = listOf(
+            row(1, "account_limit", "blocked") { it.copy(accountUuid = "acc") },
+            row(2, "ci_failing", "failed"),
+            row(3, "stuck", "action_required") { it.copy(stuckKind = "press_enter") },
+            row(4, "stop_failed", "failed"),
+            row(5, "context_full", "action_required"),
+            row(6, "stale_working", "action_required"),
+            row(7, "no_credentials", "blocked") { it.copy(claudeProfile = "work") },
+            row(8, "no_credentials", "blocked") { it.copy(accountUuid = "acc") },
+            row(9, "account_limit", "blocked") { it.copy(accountUuid = "five") },
+            row(10, "waiting", "action_required"),
+        )
+        val facts = ThreadFacts(
+            accountNames = mapOf("acc" to "tech.silvester"),
+            limits = mapOf("five" to AccountLimit(weekly = false, resetsAt = 5_000)),
+            hosts = listOf(HostRow(alias = "htz", signedOutLogins = listOf(SignedOutLogin(profile = "work")))),
+        )
+        val line = buildThreads(rows, emptyList(), emptyList(), operatorId = null, since = 0, facts = facts).associate { it.id to it.line }
+        assertEquals("Paused · weekly limit on tech.silvester", line[1])
+        assertEquals("Failed · checks failing · htz", line[2])
+        assertEquals("Needs you · stuck on press Enter · htz", line[3])
+        assertEquals("Failed · last turn failed · htz", line[4])
+        assertEquals("Needs you · context almost full · htz", line[5])
+        assertEquals("Needs you · says working, no news · htz", line[6])
+        assertEquals("Needs you · signed out on htz (work)", line[7])
+        assertEquals("Needs you · blocked on tech.silvester, which is signed out", line[8])
+        assertEquals("Paused · 5-hour limit on five", line[9])
+        assertEquals("Needs you · waiting for your answer · htz", line[10])
+    }
+
+    /**
+     * Review w04-1, the desktop's case: a thread Control no longer follows
+     * (it went quiet) leaves Needs you for a failure or a block on its
+     * account, but not for a question. Followed, the same rows still need you.
+     */
+    @Test
+    fun a_thread_control_stopped_following_leaves_needs_you_for_a_failure_or_a_block_not_for_a_question() {
+        val now = 1_000_000L
+        val failed = SessionRow(
+            id = 1, tmuxName = "pd-1859", origin = "operator", hostAlias = "mefistos", claudeStatus = "failed",
+            lastActivityAt = now - 3 * 86_400, attention = Attention(reason = "stop_failed", state = "failed"),
+        )
+        val limited = SessionRow(
+            id = 2, tmuxName = "task-480", origin = "operator", hostAlias = "mefistos", claudeStatus = "idle",
+            lastActivityAt = now - 4 * 86_400, attention = Attention(reason = "account_limit", state = "blocked"),
+        )
+        val asking = SessionRow(
+            id = 3, tmuxName = "task-1", origin = "operator", hostAlias = "mefistos", claudeStatus = "blocked",
+            lastActivityAt = now - 5 * 86_400, attention = Attention(reason = "waiting", state = "action_required"),
+        )
+        val quiet = followMarks(listOf(1L, 2L, 3L).map { JournalFollow(kind = "session", id = it, state = "quiet") })
+        val since = now - 3_600
+        val groups = buildThreads(listOf(failed, limited, asking), emptyList(), emptyList(), operatorId = null, since = since, follows = quiet)
+            .associate { it.title to it.group }
+        assertEquals(mapOf("pd-1859" to ThreadGroup.EARLIER, "task-480" to ThreadGroup.EARLIER, "task-1" to ThreadGroup.NEEDS), groups)
+        // Followed, the same failure and block still need you.
+        val followed = buildThreads(listOf(failed, limited), emptyList(), emptyList(), operatorId = null, since = since)
+        assertEquals(listOf(ThreadGroup.NEEDS, ThreadGroup.NEEDS), followed.map { it.group })
+        // A muted thread is not "unfollowed": it still counts, as the desktop's `unfollowedWhy`.
+        val muted = followMarks(listOf(JournalFollow(kind = "session", id = 1, state = "quiet", muted = true)))
+        assertEquals(ThreadGroup.NEEDS, buildThreads(listOf(failed), emptyList(), emptyList(), null, since, muted).single().group)
+    }
+
+    /** The journal's follows reach past the newest receipts: a thread it names joins the list (review w04-1). */
+    @Test
+    fun the_journals_follows_add_threads_the_receipts_no_longer_name() {
+        val rows = listOf(SessionRow(id = 7, tmuxName = "handed", claudeStatus = "idle", lastActivityAt = 500))
+        val follows = followMarks(
+            listOf(
+                JournalFollow(kind = "session", id = 7, state = "following"),
+                JournalFollow(kind = "mission", id = 9, state = "following", name = "Ship it"),
+                JournalFollow(kind = "session", id = 99, state = "following"),
+            ),
+        )
+        val threads = buildThreads(rows, emptyList(), emptyList(), operatorId = null, since = 1_000, follows = follows)
+        assertEquals(setOf("s:7", "m:9"), threads.map { it.key }.toSet(), "a session the fleet does not list is left out")
+        assertEquals("Ship it", threads.single { it.mission }.title)
     }
 
     @Test

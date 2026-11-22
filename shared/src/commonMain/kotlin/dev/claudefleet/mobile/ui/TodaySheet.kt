@@ -119,9 +119,9 @@ fun TodaySheet(
     state: TodayUiState,
     handlers: TodayHandlers,
     /**
-     * The New layout (redesign 14.3, MobileSessionsTools): *Waiting on me*
-     * is the live fleet's needs-you rows, the Inbox's own list, so the two
-     * counts can never disagree. Null on Classic, which keeps the hub's digest.
+     * Redesign 14.3 (MobileSessionsTools): *Waiting on me* is the live
+     * fleet's needs-you rows, the Inbox's own list, so the two counts can
+     * never disagree. Null keeps the hub's digest.
      */
     waitingNow: List<SessionRow>? = null,
     nowSeconds: Long = 0,

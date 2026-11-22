@@ -352,7 +352,7 @@ class MissionsTest {
         hold = gate
         fleet.workChanges.emit(2)
         runCurrent()
-        vm.back()
+        vm.close()
         gate.complete(Unit)
         runCurrent()
         assertNull(vm.state.value.detail, "Back stays back")
@@ -398,7 +398,7 @@ class MissionsTest {
         val b = CompletableDeferred<Unit>().also { gates[2L] = it }
         vm.select(1)
         runCurrent()
-        vm.back()
+        vm.close()
         vm.select(2)
         runCurrent()
         assertTrue(vm.state.value.loading)
@@ -432,7 +432,7 @@ class MissionsTest {
         fake.calls.clear()
         val press = vm.start()
         runCurrent()
-        vm.back()
+        vm.close()
         gate.complete(Unit)
         press.join()
         runCurrent()

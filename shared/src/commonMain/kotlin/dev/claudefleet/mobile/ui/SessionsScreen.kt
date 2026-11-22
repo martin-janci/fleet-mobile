@@ -64,8 +64,6 @@ data class SessionsHandlers(
     val onToggleNeedsAttention: () -> Unit = {},
     val onRefresh: () -> Unit = {},
     val onDismissError: () -> Unit = {},
-    /** Move to the next view: project → work → urgency. Work is skipped without the work graph. */
-    val onCycleGroupMode: () -> Unit = {},
     /** Show the search field, or hide it (hiding clears the query). */
     val onToggleSearch: () -> Unit = {},
     val onSetQuery: (String) -> Unit = {},
@@ -97,12 +95,6 @@ data class SessionsHandlers(
     val onOpenToday: (() -> Unit)? = null,
     /** Open the Missions sheet. Null hides the action — a hub without missions. */
     val onOpenMissions: (() -> Unit)? = null,
-    /**
-     * Open the fleet's agent (the desktop's ✦). Null hides the action — a hub
-     * without `ensure_operator`, or a `readonly` pairing.
-     */
-    val onOpenAgent: (() -> Unit)? = null,
-    val onDismissAgentError: () -> Unit = {},
     /** Multi-select: pick or unpick a row, drop the selection, act on it, close its outcome. */
     val onToggleSelect: (Long) -> Unit = {},
     val onClearSelection: () -> Unit = {},

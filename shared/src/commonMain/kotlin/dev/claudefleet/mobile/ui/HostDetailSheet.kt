@@ -27,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -48,6 +49,12 @@ import dev.claudefleet.mobile.model.hostLoad
 import dev.claudefleet.mobile.model.loadParts
 import dev.claudefleet.mobile.model.troubleSentence
 
+/** A found conversation's Resume (or Start anyway) button, by its `claude_session_id`. */
+const val HOST_RESUME_TAG = "host.resume."
+
+/** One login conflict's sentence in the host sheet's Logins block. */
+const val HOST_LOGIN_CONFLICT_TAG = "host.login.conflict"
+
 data class HostDetailHandlers(
     val onClose: () -> Unit = {},
     val onProbe: () -> Unit = {},
@@ -57,6 +64,8 @@ data class HostDetailHandlers(
     val onCheckLost: () -> Unit = {},
     val onRestore: () -> Unit = {},
     val onResume: (LostCandidate) -> Unit = {},
+    /** Resume past the login's pause line, after the hub refused it as such (review w12-2). */
+    val onResumeAnyway: (LostCandidate) -> Unit = {},
     val onDismissError: () -> Unit = {},
     /** Arm and disarm Run plan when back. */
     val onRunWhenBack: () -> Unit = {},
@@ -105,7 +114,7 @@ fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowS
                     host?.let { hostFacts(it, logins = false) }?.let { facts ->
                         Text(facts, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    host?.let { h -> LoginsBlock(remember(h.alias, h.signedOutLogins) { loginLines(h) { utcOffsetSeconds(it) } }) }
+                    host?.let { h -> LoginsBlock(remember(h.alias, h.signedOutLogins, h.claudeProfiles) { loginLines(h) { utcOffsetSeconds(it) } }, state.loginConflicts) }
                     // Host health (claude-fleet #913): the load now, and what it means when it is trouble.
                     host?.takeIf { it.healthAt != null }?.let { hostLoad(it, nowSeconds) }?.let { load ->
                         Text(
@@ -211,8 +220,13 @@ fun HostDetailSheet(state: HostDetailUiState, handlers: HostDetailHandlers, nowS
                             )
                         }
                         if (state.canRestore) {
-                            TextButton(onClick = { handlers.onResume(c) }, enabled = state.resuming == null) {
-                                Text(if (state.resuming == c.claudeSessionId) "Starting…" else "Resume")
+                            val anyway = c.claudeSessionId in state.overLimit
+                            TextButton(
+                                onClick = { if (anyway) handlers.onResumeAnyway(c) else handlers.onResume(c) },
+                                enabled = state.resuming == null,
+                                modifier = Modifier.testTag(HOST_RESUME_TAG + c.claudeSessionId),
+                            ) {
+                                Text(if (state.resuming == c.claudeSessionId) "Starting…" else if (anyway) "Start anyway" else "Resume")
                             }
                         }
                     }
@@ -286,8 +300,8 @@ private fun PlanEntryRow(entry: RestorePlanEntry) {
  * and run in a terminal (review w23-2, the desktop host sheet's Logins).
  */
 @Composable
-private fun LoginsBlock(lines: List<LoginLine>) {
-    if (lines.isEmpty()) return
+private fun LoginsBlock(lines: List<LoginLine>, conflicts: List<String> = emptyList()) {
+    if (lines.isEmpty() && conflicts.isEmpty()) return
     val clipboard = LocalClipboardManager.current
     val copied = rememberCopied(lines)
     Column(modifier = Modifier.padding(top = 8.dp)) {
@@ -296,9 +310,14 @@ private fun LoginsBlock(lines: List<LoginLine>) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(l.text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
                 TextButton(onClick = { clipboard.setText(AnnotatedString(l.command)); copied.mark(l.command) }) {
-                    Text(if (copied.isCopied(l.command)) "Copied" else "Copy login command")
+                    Text(if (copied.isCopied(l.command)) "Copied" else if (l.token) "Copy token command" else "Copy login command")
                 }
             }
+        }
+        // Two copies of one login, which keep signing each other out: why
+        // signing in again does not last, and what to stop (review w12-4).
+        for (c in conflicts) {
+            Text(c, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp).testTag(HOST_LOGIN_CONFLICT_TAG))
         }
     }
 }

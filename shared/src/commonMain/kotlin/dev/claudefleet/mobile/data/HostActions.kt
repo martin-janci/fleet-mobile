@@ -2,6 +2,7 @@ package dev.claudefleet.mobile.data
 
 import dev.claudefleet.mobile.model.HostCheck
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.LoginConflict
 import dev.claudefleet.mobile.model.LostCandidate
 import dev.claudefleet.mobile.model.RestoreReport
 import dev.claudefleet.mobile.model.SessionRow
@@ -17,7 +18,14 @@ interface HostActions {
     suspend fun restorePlan(alias: String): RestoreReport
     suspend fun restore(alias: String): RestoreReport
     suspend fun discover(alias: String): List<LostCandidate>
-    suspend fun resume(alias: String, candidate: LostCandidate): SessionRow
+    /** [overLimitOk]: the person chose to start past the login's pause line ("Start anyway", review w12-2). */
+    suspend fun resume(alias: String, candidate: LostCandidate, overLimitOk: Boolean): SessionRow
+
+    /**
+     * [alias]'s login conflicts, as `fleet_health` reports them (review
+     * w12-4): empty from an older hub, which does not send them.
+     */
+    suspend fun loginConflicts(alias: String): List<LoginConflict> = emptyList()
 
     /** [alias]'s health checklist (`check_host`); called only where the hub lists it. */
     suspend fun check(alias: String): HostCheck = throw UnsupportedOperationException("check_host")
@@ -26,16 +34,19 @@ interface HostActions {
 class HubHostActions(private val session: AppSession) : HostActions {
     override suspend fun probe(alias: String) = session.withClient { it.probeHost(alias) }
     override suspend fun check(alias: String) = session.withClient { it.checkHost(alias) }
+    override suspend fun loginConflicts(alias: String): List<LoginConflict> =
+        session.withClient { it.fleetHealth() }.hosts.firstOrNull { it.alias == alias }?.loginConflicts.orEmpty()
     override suspend fun restorePlan(alias: String) = session.withClient { it.restoreHostSessions(alias, dryRun = true) }
     override suspend fun restore(alias: String) = session.withClient { it.restoreHostSessions(alias, dryRun = false) }
     override suspend fun discover(alias: String) = session.withClient { it.discoverLostSessions(alias) }
-    override suspend fun resume(alias: String, candidate: LostCandidate): SessionRow = session.withClient {
+    override suspend fun resume(alias: String, candidate: LostCandidate, overLimitOk: Boolean): SessionRow = session.withClient {
         it.newSession(
             hostAlias = alias,
             projectId = requireNotNull(candidate.projectId) { "a conversation outside every project cannot be resumed" },
             worktreeId = candidate.worktreeId,
             resumeClaudeSessionId = candidate.claudeSessionId,
             name = candidate.derivedTmuxName.orEmpty(),
+            overLimitOk = overLimitOk,
         )
     }
 }

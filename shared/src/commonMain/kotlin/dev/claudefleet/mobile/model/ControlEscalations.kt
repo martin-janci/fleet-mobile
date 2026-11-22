@@ -113,11 +113,22 @@ private fun shq(s: String): String =
  * The sign-in command a person can paste into a terminal: `ssh -t htz
  * 'CLAUDE_CONFIG_DIR=~/.claude-profiles/work claude /login'`, or the bare
  * line for the hub's own `local` host (the desktop's `loginShellCommand`).
+ * For a setup-token profile ([token], [HostRow.isSetupToken]) it is
+ * `claude setup-token`, whose token then goes into the desktop's + Add
+ * account: fleet exports the token over any `/login` (review w12-3).
  */
-fun loginShellCommand(host: String, profile: String?): String {
-    val inner = profile?.let { "CLAUDE_CONFIG_DIR=~/.claude-profiles/$it claude /login" } ?: "claude /login"
+fun loginShellCommand(host: String, profile: String?, token: Boolean = false): String {
+    val inner = when {
+        token -> "claude setup-token"
+        profile != null -> "CLAUDE_CONFIG_DIR=~/.claude-profiles/$profile claude /login"
+        else -> "claude /login"
+    }
     return if (host == "local") inner else "ssh -t ${shq(host)} ${shq(inner)}"
 }
+
+/** What renews a setup-token profile, in words: the hub's `login_health::relogin_command` for one. */
+fun setupTokenRenewal(host: String, profile: String): String =
+    "make a new token with `claude setup-token`, then add it on the desktop (Accounts › + Add account → Setup token on $host, profile $profile)"
 
 /**
  * One card per signed-out login on a visible host, minus those put off (the
@@ -134,7 +145,13 @@ fun loginEscalations(hosts: List<HostRow>, later: Set<String>, offsetSeconds: (L
             if (key in later) continue
             val whose = l.profile?.let { "${h.alias} ($it)" } ?: h.alias
             val since = if (l.since > 0) " since ${dayLabel(l.since, offsetSeconds(l.since))}" else ""
-            out += Escalation(key, null, TriageBucket.NO_CREDENTIALS, "Claude login on $whose is signed out$since", loginShellCommand(h.alias, l.profile))
+            val token = h.isSetupToken(l.profile)
+            val line = if (token && l.profile != null) {
+                "Claude setup token on $whose expired$since · ${setupTokenRenewal(h.alias, l.profile)}"
+            } else {
+                "Claude login on $whose is signed out$since"
+            }
+            out += Escalation(key, null, TriageBucket.NO_CREDENTIALS, line, loginShellCommand(h.alias, l.profile, token))
         }
     }
     return out
