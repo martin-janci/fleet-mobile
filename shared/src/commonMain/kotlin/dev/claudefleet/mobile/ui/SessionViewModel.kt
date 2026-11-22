@@ -562,9 +562,10 @@ class SessionViewModel(
     private val drafts: DraftMemory = DraftMemory(),
     /**
      * Redesign 14.5: a prompt the hub refuses stays in the conversation as
-     * [SessionUiState.notSent] instead of going back into the box. False puts
-     * the words back into the box; App.kt passes it for a session screen
-     * with no workspace, which today is Control's chat only.
+     * [SessionUiState.notSent] instead of going back into the box. App.kt
+     * passes true for every screen, Control's chat included (one rule,
+     * review w08-9). False, the words back into the box with a banner, is
+     * what a bare view model does (this file's older tests).
      */
     private val keepNotSent: Boolean = false,
     /**

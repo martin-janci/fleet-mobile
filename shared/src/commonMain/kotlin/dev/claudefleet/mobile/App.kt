@@ -3106,8 +3106,9 @@ private fun SessionRoute(
             // `AppContainer.quickReplies`.
             quickReplies = container.quickReplies,
             drafts = container.drafts,
-            // The New bar keeps a refused prompt in the conversation (redesign 14.5).
-            keepNotSent = workspace,
+            // A refused prompt stays in the conversation as "Not sent" (redesign
+            // 14.5), in Control's chat as in every session (review w08-9).
+            keepNotSent = true,
             // ⋮ Background agent… (MobileFormsSession), on this session's host.
             background = container.newSessionActions,
             // Control's composer queues on the hub while it works (Control review F19).
