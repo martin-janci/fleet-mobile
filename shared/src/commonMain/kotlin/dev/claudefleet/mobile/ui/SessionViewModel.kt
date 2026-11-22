@@ -1872,7 +1872,7 @@ class SessionViewModel(
             // Never a login the hub knows is signed out (review w23-3).
             val host = fleet.hosts.value.firstOrNull { it.alias == r.hostAlias }
             val out = { l: HostLogin -> host?.isSignedOut(l.profile) == true }
-            val h = actions.accountHeadroomIn(r.hostAlias, r.claudeProfile, r.projectId)
+            val h = actions.accountHeadroomFor(r.hostAlias, r.claudeProfile, r.projectId, r.launchModel)
             // Never a login on an account the session's project forbids: the
             // hub refuses that restart (E_ACCOUNT_FORBIDDEN).
             val off = fleet.forbiddenAccountsIn(r.projectId, r.orgId)
@@ -1942,7 +1942,7 @@ class SessionViewModel(
             val signedOut = fleet.hosts.value.firstOrNull { it.alias == r.hostAlias }?.signedOutLogins.orEmpty().map { it.profile }
             // Listed, but not pickable: the hub refuses a switch onto one (E_ACCOUNT_FORBIDDEN).
             val off = fleet.forbiddenAccountsIn(r.projectId, r.orgId)
-            val h = actions.accountHeadroomIn(r.hostAlias, r.claudeProfile, r.projectId)
+            val h = actions.accountHeadroomFor(r.hostAlias, r.claudeProfile, r.projectId, r.launchModel)
                 .forAccount(r.accountUuid, { l -> l.profile in signedOut }, off)
             val choices = otherLogins(h, r.claudeProfile)
             local.update { l ->

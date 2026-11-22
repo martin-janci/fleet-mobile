@@ -34,8 +34,11 @@ interface InboxActions {
     /** Retry the last turn: its prompt again, as a new one. */
     suspend fun retry(sessionId: Long, prompt: String)
 
-    /** Which login on [hostAlias] has room left (`check_account_headroom`), for work in [projectId]. */
-    suspend fun headroom(hostAlias: String, profile: String?, projectId: Long? = null): Headroom
+    /**
+     * Which login on [hostAlias] has room left (`check_account_headroom`), for
+     * work in [projectId] on [model] (the row's `launch_model`, review w10-5).
+     */
+    suspend fun headroom(hostAlias: String, profile: String?, projectId: Long? = null, model: String? = null): Headroom
 
     /** Restart the session under [profile], resuming its conversation. */
     suspend fun restartUnder(sessionId: Long, profile: String)
@@ -47,8 +50,8 @@ class SessionInboxActions(private val actions: SessionActions) : InboxActions {
         actions.sendPrompt(sessionId, prompt)
     }
 
-    override suspend fun headroom(hostAlias: String, profile: String?, projectId: Long?): Headroom =
-        actions.accountHeadroomIn(hostAlias, profile, projectId)
+    override suspend fun headroom(hostAlias: String, profile: String?, projectId: Long?, model: String?): Headroom =
+        actions.accountHeadroomFor(hostAlias, profile, projectId, model)
 
     override suspend fun restartUnder(sessionId: Long, profile: String) = actions.restartUnder(sessionId, profile)
 }
@@ -179,7 +182,7 @@ class InboxViewModel(
         if (!inboxRowActions(row, canWrite, switchAvailable, null).switchAccount) return null
         return press(row.id) {
             val out = { l: HostLogin -> signedOut(row.hostAlias, l.profile) }
-            val h = actions.headroom(row.hostAlias, row.claudeProfile, row.projectId)
+            val h = actions.headroom(row.hostAlias, row.claudeProfile, row.projectId, row.launchModel)
             // Never a login the hub would refuse for the row's project (E_ACCOUNT_FORBIDDEN).
             val off = forbidden(row.projectId, row.orgId)
             val target = if (row.attention?.reason == "no_credentials") {

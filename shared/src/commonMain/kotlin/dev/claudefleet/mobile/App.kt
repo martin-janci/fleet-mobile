@@ -50,6 +50,7 @@ import dev.claudefleet.mobile.model.PrFeedback
 import dev.claudefleet.mobile.model.planApprovedPrompt
 import dev.claudefleet.mobile.model.planSaid
 import dev.claudefleet.mobile.model.limitAt
+import dev.claudefleet.mobile.model.modelLimitsAt
 import dev.claudefleet.mobile.model.isSignedOut
 import dev.claudefleet.mobile.ui.SessionLaterHost
 import dev.claudefleet.mobile.ui.PromptTuneHost
@@ -1113,6 +1114,7 @@ private fun ControlTab(
         val facts = ThreadFacts(
             accountNames = threadAccountNames,
             limits = buildMap { for ((uuid, snap) in threadUsage) snap.limitAt(now)?.let { put(uuid, it) } },
+            limitedModels = buildMap { for ((uuid, snap) in threadUsage) snap.modelLimitsAt(now).takeIf { it.isNotEmpty() }?.let { put(uuid, it) } },
             hosts = threadHosts,
         )
         buildThreads(controlRows, controlState.receipts, missionList, controlState.sessionId, localMidnight(now, utcOffsetSeconds(now)), controlState.follows, facts)
@@ -2084,7 +2086,7 @@ private fun FleetRoute(
                                 row,
                                 credentials.canWrite,
                                 inboxCaps.switchAccount,
-                                row.accountUuid?.let(inboxList.accountUsage::get)?.limitAt(inboxList.nowSeconds),
+                                row.accountUuid?.let(inboxList.accountUsage::get)?.limitAt(inboxList.nowSeconds, row.launchModel),
                             )
                         },
                         rowHandlers = InboxRowHandlers(
@@ -3457,7 +3459,7 @@ private fun SessionRoute(
                 onConfirmSwitch = { vm.confirmSwitch { uuid -> names[uuid] } },
                 onCancelSwitch = vm::cancelSwitch,
                 onWait = vm::waitForReset,
-                limitResetsAt = state.session?.accountUuid?.let(usage::get)?.limitAt(state.nowSeconds)?.resetsAt,
+                limitResetsAt = state.session?.let { s -> s.accountUuid?.let(usage::get)?.limitAt(state.nowSeconds, s.launchModel) }?.resetsAt,
                 accountName = { uuid -> names[uuid] },
             )
         },
@@ -3573,7 +3575,7 @@ private fun SessionRoute(
                         sessions = rows,
                         // The Account row and its meter (MobileSession, gap plan G5.5).
                         account = details.session?.accountUuid?.let { uuid ->
-                            accountMeter(uuid, names[uuid], usage[uuid], details.nowSeconds, details.session?.claudeProfile)
+                            accountMeter(uuid, names[uuid], usage[uuid], details.nowSeconds, details.session?.claudeProfile, details.session?.launchModel)
                         },
                         // What Switch account… did; the paused card says it itself.
                         notice = state.limitNotice?.takeIf { !state.canSwitchAccount } ?: state.sendLaterNotice?.takeIf { prSent.isNotEmpty() },

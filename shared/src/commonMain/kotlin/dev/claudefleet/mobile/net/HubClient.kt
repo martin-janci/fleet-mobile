@@ -647,14 +647,18 @@ class HubClient(
      * From the usage the hub already keeps; never a fresh fetch. With
      * [projectId] the hub never suggests an account forbidden for that
      * project (claude-fleet migration 217); an older hub ignores the key.
+     * With [model] (a session's `launch_model`) that model's own weekly
+     * window counts toward each login's use (review w10-5); an older hub
+     * ignores it too.
      */
-    suspend fun checkAccountHeadroom(hostAlias: String, profile: String?, projectId: Long? = null): Headroom =
+    suspend fun checkAccountHeadroom(hostAlias: String, profile: String?, projectId: Long? = null, model: String? = null): Headroom =
         call(
             "check_account_headroom",
             buildJsonObject {
                 put("host_alias", hostAlias)
                 profile?.let { put("profile", it) }
                 projectId?.let { put("project_id", it) }
+                model?.takeIf { it.isNotBlank() }?.let { put("model", it) }
             },
         ) { json.decodeFromJsonElement(Headroom.serializer(), it) }
 

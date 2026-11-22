@@ -69,6 +69,13 @@ data class SessionRow(
     @SerialName("started_at") val startedAt: Long? = null,
     @SerialName("usage_cost_micros") val usageCostMicros: Long? = null,
     @SerialName("usage_model") val usageModel: String? = null,
+    /**
+     * The `claude --model` the session launches with (an alias or a full id);
+     * null = the host's default, and from an older hub. A model's own weekly
+     * window holds the row only when this names that model (review w10-5,
+     * [limitFor]).
+     */
+    @SerialName("launch_model") val launchModel: String? = null,
     @SerialName("parent_session_id") val parentSessionId: Long? = null,
     val branch: String? = null,
     /** The hub's own progress through a `safe_kill_session` retirement, or null when none is armed. */

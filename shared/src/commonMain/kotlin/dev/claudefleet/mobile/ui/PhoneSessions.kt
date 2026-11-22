@@ -145,7 +145,8 @@ internal fun blockedLine(
     nowSeconds: Long = 0,
 ): String? = when (row.attention?.reason) {
     "account_limit" -> {
-        val what = if (limit?.weekly == true) "Paused · weekly limit" else "Paused · limit"
+        // "weekly Opus" for a model's own window (review w10-5).
+        val what = if (limit?.weekly == true) "Paused · ${limit.windowWords} limit" else "Paused · limit"
         val on = accountName?.let { " on $it" } ?: ""
         val resets = relativeWithin(limit?.resetsAt, nowSeconds)?.let { " · resets in $it" } ?: ""
         "$what$on$resets"
@@ -159,9 +160,12 @@ internal fun blockedLine(
     else -> lostLine(row)
 }
 
-/** The limit [row]'s account is at now, from the usage readings; null when none is known. */
+/**
+ * The limit [row]'s account is at now, from the usage readings, its launch
+ * model's own weekly window included (review w10-5); null when none is known.
+ */
 internal fun SessionsUiState.limitOf(row: SessionRow): AccountLimit? =
-    row.accountUuid?.let(accountUsage::get)?.limitAt(nowSeconds)
+    row.accountUuid?.let(accountUsage::get)?.limitAt(nowSeconds, row.launchModel)
 
 /** "PR #476 ✓": the pull request and its CI in one chip, or "CI ✗" alone; null when neither. */
 internal fun prChip(row: SessionRow): Pair<String, StatusWord?>? {

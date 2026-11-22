@@ -290,7 +290,7 @@ fun InboxScreen(
                             showHost = true,
                             since = row.askedAt,
                             accountName = row.accountUuid?.let(accountNames::get),
-                            limit = row.accountUuid?.let(accountUsage::get)?.limitAt(nowSeconds),
+                            limit = row.accountUuid?.let(accountUsage::get)?.limitAt(nowSeconds, row.launchModel),
                             onClick = { onOpenSession(row.id) },
                         )
                         InboxRowButtons(
