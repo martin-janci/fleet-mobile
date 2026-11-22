@@ -81,6 +81,8 @@ const val ESCALATION_CARD_TAG = "control.escalation."
 const val ESCALATION_OPEN_TAG = "control.escalation.open."
 /** A login card's Copy (its sign-in command), keyed like Open. */
 const val ESCALATION_COPY_TAG = "control.escalation.copy."
+/** A login card's Sign in again, where the hub offers it. */
+const val ESCALATION_SIGN_IN_TAG = "control.escalation.sign_in."
 const val ESCALATION_LATER_TAG = "control.escalation.later."
 const val ESCALATIONS_MORE_TAG = "control.escalations.more"
 
@@ -138,7 +140,15 @@ fun EscalationCards(
                         ) { Text("Open") }
                     } else {
                         val command = e.detail
-                        if (command != null) {
+                        // Sign in again where the hub offers it to this phone; the
+                        // sheet keeps the command to copy (reviews w02-8 / w12-6).
+                        val signIn = e.login?.let { signInFor(it) }
+                        if (signIn != null) {
+                            OutlinedButton(
+                                onClick = signIn,
+                                modifier = Modifier.heightIn(min = 36.dp).testTag(ESCALATION_SIGN_IN_TAG + e.key),
+                            ) { Text("Sign in") }
+                        } else if (command != null) {
                             OutlinedButton(
                                 onClick = { clipboard.setText(AnnotatedString(command)) },
                                 modifier = Modifier.heightIn(min = 36.dp).testTag(ESCALATION_COPY_TAG + e.key),

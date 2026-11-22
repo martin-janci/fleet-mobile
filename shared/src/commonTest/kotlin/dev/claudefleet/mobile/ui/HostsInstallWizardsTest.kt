@@ -7,6 +7,7 @@ import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.HostActions
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.LoginTarget
 import dev.claudefleet.mobile.model.LostCandidate
 import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.OrgDirectory
@@ -277,8 +278,8 @@ class HostsInstallWizardsTest {
         )
         assertEquals(
             listOf(
-                LoginLine("work · signed out since Nov 2", "ssh -t htz 'CLAUDE_CONFIG_DIR=~/.claude-profiles/work claude /login'"),
-                LoginLine("Host login · signed out", "ssh -t htz 'claude /login'"),
+                LoginLine("work · signed out since Nov 2", "ssh -t htz 'CLAUDE_CONFIG_DIR=~/.claude-profiles/work claude /login'", target = LoginTarget("htz", "work")),
+                LoginLine("Host login · signed out", "ssh -t htz 'claude /login'", target = LoginTarget("htz", null)),
             ),
             loginLines(h) { 0 },
         )

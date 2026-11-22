@@ -26,6 +26,10 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import dev.claudefleet.mobile.model.LoginTarget
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -301,6 +305,7 @@ fun OrbitUsageScreen(state: UsageUiState, handlers: UsageHandlers, nowSeconds: L
                                 forbidden = forbiddenProjectsLine(a, state.projects, state.orgs),
                             )
                             if (state.limitsAvailable) AccountLimitsBlock(state.limits[it.uuid], nowSeconds)
+                            state.signedOut[it.uuid]?.let { logins -> AccountLoginsBlock(logins) }
                         }
                     }
                     if (!state.limitsAvailable && state.capsKnown) item(key = "limits") { Quiet(LIMITS_ON_DESKTOP, small = true) }
@@ -452,6 +457,38 @@ private fun AccountItem(
         onClick = onClick,
     )
 }
+
+/**
+ * An account's signed-out logins under its row: Sign in again where the hub
+ * offers it to this phone (reviews w02-8 / w12-6), else the command to copy.
+ * A setup-token login keeps its token command (review w12-3).
+ */
+@Composable
+private fun AccountLoginsBlock(logins: List<LoginTarget>) {
+    val o = Fleet.colors
+    val clipboard = LocalClipboardManager.current
+    Column(modifier = Modifier.padding(horizontal = gutter())) {
+        for (t in logins) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${t.profile ?: "host login"} on ${t.host} · ${if (t.token) "setup token expired" else "signed out"}",
+                    style = Fleet.type.textSm,
+                    color = o.statusWaiting,
+                    modifier = Modifier.weight(1f),
+                )
+                val signIn = signInFor(t)
+                if (signIn != null) {
+                    TextButton(onClick = signIn, modifier = Modifier.testTag(ACCOUNT_SIGN_IN_TAG + "${t.host}:${t.profile.orEmpty()}")) { Text("Sign in again") }
+                } else {
+                    TextButton(onClick = { clipboard.setText(AnnotatedString(t.command)) }) { Text(if (t.token) "Copy token command" else "Copy login command") }
+                }
+            }
+        }
+    }
+}
+
+/** An account row's Sign in again, keyed `host:profile`. */
+const val ACCOUNT_SIGN_IN_TAG = "usage.account.sign_in."
 
 private fun LazyListScope.orbitUsage(report: UsageReport, handlers: UsageHandlers) {
     item(key = "total") {

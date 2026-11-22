@@ -49,6 +49,8 @@ data class Escalation(
     val line: String,
     /** The question or the command a permission asks for, when the pane shows one. */
     val detail: String? = null,
+    /** A login card's login, for Sign in again (reviews w02-8 / w12-6); null on every other card. */
+    val login: LoginTarget? = null,
 )
 
 /** How many cards the chat draws; the rest are "N more in Needs you". */
@@ -151,7 +153,8 @@ fun loginEscalations(hosts: List<HostRow>, later: Set<String>, offsetSeconds: (L
             } else {
                 "Claude login on $whose is signed out$since"
             }
-            out += Escalation(key, null, TriageBucket.NO_CREDENTIALS, line, loginShellCommand(h.alias, l.profile, token))
+            val login = LoginTarget(h.alias, l.profile, token)
+            out += Escalation(key, null, TriageBucket.NO_CREDENTIALS, line, login.command, login)
         }
     }
     return out

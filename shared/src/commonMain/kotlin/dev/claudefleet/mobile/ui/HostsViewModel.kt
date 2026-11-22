@@ -8,6 +8,7 @@ import dev.claudefleet.mobile.model.HostRow
 import dev.claudefleet.mobile.model.hostLoad
 import dev.claudefleet.mobile.model.dayLabel
 import dev.claudefleet.mobile.model.isSetupToken
+import dev.claudefleet.mobile.model.LoginTarget
 import dev.claudefleet.mobile.model.loginShellCommand
 import dev.claudefleet.mobile.model.setupTokenRenewal
 import dev.claudefleet.mobile.model.SessionRow
@@ -231,7 +232,13 @@ internal fun hostFacts(host: HostRow, logins: Boolean = true): String? = listOfN
 ).joinToString(" · ").ifEmpty { null }
 
 /** One signed-out login in the host sheet's Logins block: what it says, and the command that signs it in again. */
-data class LoginLine(val text: String, val command: String, val token: Boolean = false)
+data class LoginLine(
+    val text: String,
+    val command: String,
+    val token: Boolean = false,
+    /** The login, for Sign in again (reviews w02-8 / w12-6). */
+    val target: LoginTarget? = null,
+)
 
 /**
  * [host]'s signed-out logins for its sheet (review w23-2): "work · signed out
@@ -247,7 +254,8 @@ internal fun loginLines(host: HostRow, offsetSeconds: (Long) -> Int): List<Login
     } else {
         "${l.profile ?: "Host login"} · signed out$since"
     }
-    LoginLine(text, loginShellCommand(host.alias, l.profile, token), token)
+    val target = LoginTarget(host.alias, l.profile, token)
+    LoginLine(text, target.command, token, target)
 }
 
 /** [kb] kibibytes as "212 GB", or "3.4 GB" under ten; "0.2 GB" rather than "0 GB" for a nearly full disk. */

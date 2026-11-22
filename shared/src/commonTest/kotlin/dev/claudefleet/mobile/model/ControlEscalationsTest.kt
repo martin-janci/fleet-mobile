@@ -129,6 +129,9 @@ class ControlEscalationsTest {
         assertEquals("Claude login on htz (work) is signed out since Aug 9", cards[0].line)
         assertEquals("ssh -t htz 'CLAUDE_CONFIG_DIR=~/.claude-profiles/work claude /login'", cards[0].detail)
         assertEquals("claude /login", cards[1].detail)
+        // Sign in again (w02-8 / w12-6) opens the login the card is about.
+        assertEquals(LoginTarget("htz", "work"), cards[0].login)
+        assertEquals(LoginTarget("local", null), cards[1].login)
         assertNull(cards[0].sessionId)
         assertEquals(TriageBucket.NO_CREDENTIALS, cards[0].bucket)
         assertTrue(loginEscalations(hosts, setOf("login:htz:work:$aug9", "login:local::$aug9")) { 0 }.isEmpty())
@@ -148,6 +151,7 @@ class ControlEscalationsTest {
         assertFalse(h.isSetupToken(null), "the host's own login never is")
         val cards = loginEscalations(listOf(h), emptySet()) { 0 }
         assertEquals("ssh -t htz 'claude setup-token'", cards[0].detail)
+        assertEquals(LoginTarget("htz", "ci", token = true), cards[0].login, "a token card is marked, so it never opens the OAuth flow")
         assertTrue(cards[0].line.startsWith("Claude setup token on htz (ci) expired since Aug 9 · make a new token with `claude setup-token`"))
         assertTrue("Setup token on htz, profile ci" in cards[0].line)
         assertEquals("ssh -t htz 'CLAUDE_CONFIG_DIR=~/.claude-profiles/work claude /login'", cards[1].detail)

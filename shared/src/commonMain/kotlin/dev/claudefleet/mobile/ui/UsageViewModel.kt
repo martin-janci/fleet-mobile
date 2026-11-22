@@ -5,6 +5,8 @@ import dev.claudefleet.mobile.data.UsageActions
 import dev.claudefleet.mobile.model.AccountRow
 import dev.claudefleet.mobile.model.AccountUsageSnapshot
 import dev.claudefleet.mobile.model.AutoSwitchView
+import dev.claudefleet.mobile.model.LoginTarget
+import dev.claudefleet.mobile.model.signedOutByAccount
 import dev.claudefleet.mobile.model.OrgDetail
 import dev.claudefleet.mobile.model.ProjectRow
 import dev.claudefleet.mobile.model.SessionRow
@@ -78,6 +80,8 @@ data class UsageUiState(
     val limits: Map<String, AccountUsageSnapshot> = emptyMap(),
     /** Each account's live sessions, by its uuid ([sessionsByAccount]). */
     val sessions: Map<String, AccountSessions> = emptyMap(),
+    /** Each account's signed-out logins, by its uuid, for Sign in again on its row (reviews w02-8 / w12-6). */
+    val signedOut: Map<String, List<LoginTarget>> = emptyMap(),
     /** The person's answer to automatic switching; null until read or where the hub has no such tool. */
     val autoSwitch: AutoSwitchView? = null,
     /** The hub takes "continue after a switch" too. */
@@ -115,14 +119,18 @@ class UsageViewModel(
 
     private val accountSessions = fleet.sessions.map(::sessionsByAccount).distinctUntilChanged()
 
+    /** The fleet's projects with each account's signed-out logins, as one flow (combine takes five). */
+    private val projectsAndLogins = combine(fleet.projects, fleet.hosts.map(::signedOutByAccount).distinctUntilChanged()) { p, s -> p to s }
+
     val state: StateFlow<UsageUiState> = combine(
         local,
         fleet.capabilities,
         fleet.accountUsage,
         accountSessions,
-        fleet.projects,
-    ) { l, caps, limits, sessions, projects ->
+        projectsAndLogins,
+    ) { l, caps, limits, sessions, (projects, signedOut) ->
         UsageUiState(
+            signedOut = signedOut,
             available = caps.usage,
             capsKnown = caps.known,
             accountsAvailable = caps.accounts,

@@ -75,6 +75,12 @@ import dev.claudefleet.mobile.data.HubSessionExtrasActions
 import dev.claudefleet.mobile.data.HubAgentInstallActions
 import dev.claudefleet.mobile.data.AddHostActions
 import dev.claudefleet.mobile.data.HubAddHostActions
+import dev.claudefleet.mobile.ui.SignInViewModel
+import dev.claudefleet.mobile.ui.SignInSheet
+import dev.claudefleet.mobile.ui.LocalSignIn
+import dev.claudefleet.mobile.model.LoginTarget
+import dev.claudefleet.mobile.data.SignInActions
+import dev.claudefleet.mobile.data.HubSignInActions
 import dev.claudefleet.mobile.data.AgentInstallActions
 import dev.claudefleet.mobile.data.SessionExtrasActions
 import dev.claudefleet.mobile.data.HubSessionActions
@@ -656,6 +662,8 @@ class AppContainer(
     /** The fleet-agent install job, from Hosts (redesign 14.19). */
     val agentInstallActions: AgentInstallActions = HubAgentInstallActions(session)
     val addHostActions: AddHostActions = HubAddHostActions(session)
+    /** Sign in again (reviews w02-8 / w12-6): `add_account`'s login actions with `again`. */
+    val signInActions: SignInActions = HubSignInActions(session)
 
     /** The hub's own version, for the Settings screen to show beside this app's. */
     val versionActions: VersionActions = HubVersionActions(session)
@@ -1332,6 +1340,9 @@ private fun FleetRoute(
         AgentInstallViewModel(repository, container.agentInstallActions, scope, credentials.canWrite)
     }
     val addHost = remember(repository, scope) { AddHostViewModel(repository, container.addHostActions, scope, credentials.canWrite) }
+    // Sign in again (w02-8 / w12-6): one sheet for Control's login card, the host sheet and Accounts.
+    val signIn = remember(repository, scope) { SignInViewModel(repository, container.signInActions, scope, credentials.canWrite) }
+    val signInState by signIn.state.collectAsState()
     // The fleet's scope, like the New session form's `callScope`: a resume
     // started from the sheet must not be cancelled by closing it.
     val tickets = remember(repository, scope) {
@@ -1583,7 +1594,9 @@ private fun FleetRoute(
     val reconnect: () -> Unit = remember(repository) { { repository.reconnectNow() } }
     // The Kill sheet names the uncommitted files it would throw away (review w22-2).
     val killCheck: (suspend (Long) -> List<ChangedFile>)? = if (settingsCaps.repo) container.repoActions::changes else null
-    CompositionLocalProvider(LocalHubReconnect provides reconnect, LocalKillCheck provides killCheck) {
+    // Each place that shows a signed-out login offers Sign in again only while the hub does.
+    val openSignIn: ((LoginTarget) -> Unit)? = if (signInState.available) ({ t -> signIn.open(t); Unit }) else null
+    CompositionLocalProvider(LocalHubReconnect provides reconnect, LocalKillCheck provides killCheck, LocalSignIn provides openSignIn) {
     Scaffold(
         bottomBar = {
             // Not on a session: it is a detail screen with its own Back, and
@@ -2519,6 +2532,7 @@ private fun FleetRoute(
         }
     }
     }
+    SignInSheet(signInState, signIn)
     // The tour runs on the real Inbox, over the bar as well, and stops for nothing else.
     val stop = help.tourStop
     if (stop != null && screen == Screen.Inbox && !fleetCheck && !importing) {

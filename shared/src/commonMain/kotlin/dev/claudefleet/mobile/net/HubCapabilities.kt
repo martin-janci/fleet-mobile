@@ -193,6 +193,16 @@ data class HubCapabilities(
      */
     val addHost: Boolean get() = ADD_HOST in tools && DISCOVER_HOSTS in tools
 
+    /**
+     * Sign in again on the phone (reviews w02-8 / w12-6): `add_account`'s
+     * login actions with `again`. `Access::Person` on the hub, so only the
+     * owner's own device is listed it; the actions also need a trusted full
+     * device (`owner_device_admin`), refused with E_FORBIDDEN otherwise. A
+     * hub whose schema has no `again` would open a new login instead, so
+     * the argument must be listed too.
+     */
+    val signInAgain: Boolean get() = has(ADD_ACCOUNT, "start_login") && accepts(ADD_ACCOUNT, "again")
+
     /** Archiving a session from its ⋮ menu (`work_link { action: archive }`). */
     val archiveSession: Boolean get() = has(WORK_LINK, "archive")
 
@@ -442,6 +452,7 @@ data class HubCapabilities(
         const val NEW_SHELL_SESSION = "new_shell_session"
         const val INSTALL_AGENT = "install_agent"
         const val ADD_HOST = "add_host"
+        const val ADD_ACCOUNT = "add_account"
         const val DISCOVER_HOSTS = "discover_hosts"
         const val AGENT_INSTALLS = "agent_installs"
         const val LIST_GITHUB_REPOS = "list_github_repos"
