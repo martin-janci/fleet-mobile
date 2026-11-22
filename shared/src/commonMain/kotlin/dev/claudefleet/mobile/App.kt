@@ -258,6 +258,7 @@ import dev.claudefleet.mobile.ui.doneTodayRows
 import dev.claudefleet.mobile.model.localMidnight
 import dev.claudefleet.mobile.data.NetworkSignal
 import dev.claudefleet.mobile.model.buildThreads
+import dev.claudefleet.mobile.model.ThreadFacts
 import dev.claudefleet.mobile.model.graphFromTree
 import dev.claudefleet.mobile.ui.AutonomyChip
 import dev.claudefleet.mobile.ui.AutonomyViewModel
@@ -448,6 +449,14 @@ import dev.claudefleet.mobile.notify.keepSeenWhileOpen
  * Ktor engine differs per platform, so both are constructed by the host and
  * handed in. Everything downstream of them is shared.
  */
+/** The prefs key an older version kept the Classic / New layout choice under. */
+internal const val LEGACY_LAYOUT_KEY = "ui.layout"
+
+/** Clear [LEGACY_LAYOUT_KEY] when it still holds a choice; a no-op once it is empty. */
+internal fun forgetLayoutChoice(prefs: Prefs) {
+    if (prefs.getStringList(LEGACY_LAYOUT_KEY).isNotEmpty()) prefs.putStringList(LEGACY_LAYOUT_KEY, emptyList())
+}
+
 class AppContainer(
     secrets: Secrets,
     val prefs: Prefs,
@@ -481,6 +490,9 @@ class AppContainer(
 ) {
     init {
         clientPlatform?.let { p -> clientHeaderValue(p, appVersion)?.let { FleetClient.header = it } }
+        // The Classic layout's choice is gone (14.13): forget it, as the desktop
+        // does at load, so a later reader of the key revives nothing (review w08-8).
+        forgetLayoutChoice(prefs)
     }
 
     /**
@@ -1084,9 +1096,18 @@ private fun ControlTab(
     val missionList = missionsState.missions
     // Control's thread strip and Missions pill read the missions too, not only Inbox and Missions (review w21-2).
     LaunchedEffect(missionsState.available) { if (missionsState.available) missions.refresh() }
-    val threads = remember(controlRows, controlState.receipts, missionList, controlState.sessionId) {
+    // A Blocked thread names its account and its login, as the desktop's strip does (review w04-5).
+    val threadAccountNames by repository.accountNames.collectAsState()
+    val threadUsage by repository.accountUsage.collectAsState()
+    val threadHosts by repository.hosts.collectAsState()
+    val threads = remember(controlRows, controlState.receipts, missionList, controlState.sessionId, controlState.follows, threadAccountNames, threadUsage, threadHosts) {
         val now = epochSeconds()
-        buildThreads(controlRows, controlState.receipts, missionList, controlState.sessionId, localMidnight(now, utcOffsetSeconds(now)))
+        val facts = ThreadFacts(
+            accountNames = threadAccountNames,
+            limits = buildMap { for ((uuid, snap) in threadUsage) snap.limitAt(now)?.let { put(uuid, it) } },
+            hosts = threadHosts,
+        )
+        buildThreads(controlRows, controlState.receipts, missionList, controlState.sessionId, localMidnight(now, utcOffsetSeconds(now)), controlState.follows, facts)
     }
     val treeGraph = remember(controlState.receipts) {
         controlState.receipts.lastOrNull { it.kind == "tree" && it.items.isNotEmpty() }?.let(::graphFromTree)
@@ -1276,7 +1297,7 @@ private fun FleetRoute(
     }
 
     // The Orbit Fleet bar (redesign 14.2), the only one since the 14.13
-    // sign-off. A `ui.layout` an older version stored is no longer read.
+    // sign-off. A `ui.layout` an older version stored is cleared by AppContainer.
     val nav = remember(credentials) { Navigator() }
     val screen by nav.screen.collectAsState()
     val tab by nav.tab.collectAsState()
@@ -1389,7 +1410,9 @@ private fun FleetRoute(
             scope = scope,
             canWrite = credentials.canWrite,
             drafts = container.drafts,
-            onOpenSession = { nav.open(it) },
+            // Control is its own tab, with its queue, escalations and activity:
+            // never a second, plain copy of its session (review w08-2).
+            onOpenSession = { nav.select(Tab.Control) },
         )
     }
     // The Work view (claude-fleet M14): the My work tab and its Review sheet.
@@ -1631,7 +1654,6 @@ private fun FleetRoute(
                         onToggleNeedsAttention = sessions::toggleNeedsAttentionOnly,
                         onRefresh = { sessions.refresh() },
                         onDismissError = sessions::dismissError,
-                        onCycleGroupMode = { sessions.cycleGroupMode(state.workAvailable) },
                         onToggleSearch = sessions::toggleSearch,
                         onSetQuery = sessions::setQuery,
                         onOpenFilters = { sessions.setFiltersOpen(true) },
@@ -1656,8 +1678,7 @@ private fun FleetRoute(
                         onNewSession = if (credentials.canWrite) ({ nav.newSession() }) else null,
                         onOpenTickets = if (ticketsState.available) ({ tickets.open() }) else null,
                         onOpenToday = if (todayState.available) ({ today.open() }) else null,
-                        onOpenMissions = if (missionsState.available) ({ missions.open() }) else null,
-                        onDismissAgentError = agent::dismissError,
+                        onOpenMissions = if (missionsState.available) ({ nav.openMissions() }) else null,
                         onToggleSelect = bulk::toggle,
                         onClearSelection = bulk::clear,
                         onStartSelect = bulk::start,
@@ -1968,6 +1989,7 @@ private fun FleetRoute(
                                 onCheckLost = { hostDetail.checkLost() },
                                 onRestore = { hostDetail.restore() },
                                 onResume = { c -> hostDetail.resume(c) { id -> hostDetail.close(); nav.open(id) } },
+                                onResumeAnyway = { c -> hostDetail.resume(c, overLimitOk = true) { id -> hostDetail.close(); nav.open(id) } },
                                 onDismissError = hostDetail::dismissError,
                                 onRunWhenBack = hostDetail::runWhenBack,
                                 onCancelWhenBack = hostDetail::cancelWhenBack,
@@ -2330,6 +2352,9 @@ private fun FleetRoute(
                     // On the New bar a Control step's prompts open the coordinator
                     // with the prompt in its composer; nothing is sent (14.22).
                     onPrompt = if (lessonAgent.available) ({ prompt: String -> agent.open(fill = prompt); Unit }) else null,
+                    promptWaking = lessonAgent.waking,
+                    promptError = lessonAgent.error,
+                    onDismissPromptError = agent::dismissError,
                 )
             }
             BackHandler(enabled = whatsNew != null) { whatsNew = null }
@@ -2450,7 +2475,6 @@ private fun FleetRoute(
                     handlers = MissionsHandlers(
                         onClose = missions::close,
                         onRefresh = { missions.refresh() },
-                        onSelect = { missions.select(it) },
                         // "‹ Missions" goes to the Missions screen, never
                         // the sheet's own list (review w21-12).
                         onBack = {
@@ -2461,7 +2485,6 @@ private fun FleetRoute(
                         onDecide = { card, ok, note -> missions.decide(card, ok, note) },
                         onTogglePause = { missions.togglePause() },
                         onDiscardDraft = { missions.discardDraft() },
-                        onPauseAll = { missions.pauseAll() },
                         onDismissError = missions::dismissError,
                         onApproveSpend = { missions.approveSpend(it, epochSeconds()) },
                         onDenySpend = { missions.denySpend(it) },

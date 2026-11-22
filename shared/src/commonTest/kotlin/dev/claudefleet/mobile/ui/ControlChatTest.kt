@@ -431,12 +431,26 @@ class ControlChatTest {
         assertEquals(listOf(1L, 2L, 4L), handoffChips(hs, listOf(row)).map { it.id })
     }
 
+    /** Review w08-5: the row counts every session handed off it read, not the three an inline row draws. */
+    @Test
+    fun more_than_three_handed_off_are_counted_and_a_fourth_waiting_one_turns_the_chip_amber() {
+        val rows = (1L..8L).map { SessionRow(id = it, friendlyName = "s$it", claudeStatus = if (it == 1L) "blocked" else "working") }
+        // Newest first, as the hub answers; session 1 (the oldest) waits on a person.
+        val hs = (8L downTo 1L).map { ControlHandoff(id = it, kind = "session", sessionId = it) }
+        val chips = handoffChips(hs, rows, limit = ControlViewModel.HANDOFFS_SHOWN)
+        assertEquals(8, chips.size)
+        val handed = activityCounts(0, chips, plan = false, threads = emptyList()).single()
+        assertEquals("↗ 8 handed off", handed.label)
+        assertTrue(handed.attention, "the waiting fourth-or-later one counts")
+        assertEquals(3, handoffChips(hs, rows).size, "the inline cut stays three")
+    }
+
     @Test
     fun the_activity_row_counts_only_what_there_is() {
         assertEquals(emptyList(), activityCounts(0, emptyList(), plan = false, threads = emptyList()))
         val chips = listOf(HandoffChip(1, "Sent to api", "working", 3), HandoffChip(2, "Sent to web", "waiting", 4))
         val counts = activityCounts(56, chips, plan = false, threads = emptyList())
-        assertEquals(listOf("56 need you", "↗ 2 handed off"), counts.map { it.label })
+        assertEquals(listOf("Needs you · 56", "↗ 2 handed off"), counts.map { it.label })
         assertTrue(counts.all { it.attention })
         assertFalse(activityCounts(0, chips.take(1), plan = false, threads = emptyList()).single().attention)
         assertEquals("↗ Plan", activityCounts(0, emptyList(), plan = true, threads = emptyList()).single().label)

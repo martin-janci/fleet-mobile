@@ -1,6 +1,5 @@
 package dev.claudefleet.mobile.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,11 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -27,12 +22,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.claudefleet.mobile.model.Mission
 import dev.claudefleet.mobile.model.MissionCard
 import dev.claudefleet.mobile.model.MissionStep
 import dev.claudefleet.mobile.model.SpendAsk
@@ -40,18 +33,14 @@ import dev.claudefleet.mobile.model.dollars
 import dev.claudefleet.mobile.model.isQuestion
 import dev.claudefleet.mobile.model.key
 import dev.claudefleet.mobile.model.line
-import dev.claudefleet.mobile.model.missionWaitLabel
 import dev.claudefleet.mobile.model.options
 import dev.claudefleet.mobile.model.pauseMove
-import dev.claudefleet.mobile.model.summary
-import dev.claudefleet.mobile.ui.components.DangerTextButton
 import dev.claudefleet.mobile.ui.components.ErrorBanner
 import dev.claudefleet.mobile.ui.kit.InlineLoading
 
 data class MissionsHandlers(
     val onClose: () -> Unit = {},
     val onRefresh: () -> Unit = {},
-    val onSelect: (Long) -> Unit = {},
     val onBack: () -> Unit = {},
     /** One step; null takes every next step. */
     val onStart: (MissionStep?) -> Unit = {},
@@ -60,7 +49,6 @@ data class MissionsHandlers(
     val onTogglePause: () -> Unit = {},
     /** Throw a draft away, after its confirm. */
     val onDiscardDraft: () -> Unit = {},
-    val onPauseAll: () -> Unit = {},
     val onDismissError: () -> Unit = {},
     /** The spend ask's two answers (redesign 14.16); each only ever from a tap. */
     val onApproveSpend: (SpendAsk) -> Unit = {},
@@ -78,16 +66,16 @@ data class MissionsHandlers(
 )
 
 /**
- * Missions as a sheet: the list with Pause all, and one mission's next steps
- * (Go), its cards (Apply / Dismiss, a question answered in words) and the
- * autonomy that applies, with Pause or Resume. Pause all asks first.
- * A step naming a task opens that task; Sessions opens the mission's live ones.
- * One mission is drawn by [OrbitMissionDetail].
+ * One mission as a sheet: its next steps (Go), its cards (Apply / Dismiss, a
+ * question answered in words) and the autonomy that applies, with Pause or
+ * Resume. A step naming a task opens that task; Sessions opens the mission's
+ * live ones. Drawn by [OrbitMissionDetail]; the list of missions is the
+ * Missions screen's, never this sheet's (review w08-6), so until the mission
+ * reads the sheet shows only its spinner or why the read failed.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MissionsSheet(state: MissionsUiState, handlers: MissionsHandlers) {
-    var confirmPauseAll by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = handlers.onClose) {
         val detail = state.detail
         // One mission is drawn as the MobileControl board's panel.
@@ -97,29 +85,14 @@ fun MissionsSheet(state: MissionsUiState, handlers: MissionsHandlers) {
         }
         Column(modifier = Modifier.fillMaxWidth()) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "Missions",
-                    style = MaterialTheme.typography.titleLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f).padding(horizontal = 12.dp).semantics { heading() },
-                )
-                TextButton(onClick = handlers.onRefresh, enabled = !state.loading) { Text("Refresh") }
+                TextButton(onClick = handlers.onBack) { Text("‹ Missions") }
+                Spacer(Modifier.weight(1f))
             }
             InlineLoading(waiting = state.loading || state.busy != null, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
             ErrorBanner(state.error, onDismiss = handlers.onDismissError)
             Outcome(state)
-            MissionList(state, handlers) { confirmPauseAll = true }
+            Spacer(Modifier.height(16.dp))
         }
-    }
-    if (confirmPauseAll) {
-        AlertDialog(
-            onDismissRequest = { confirmPauseAll = false },
-            title = { Text("Pause all missions?") },
-            text = { Text("Every running mission you may change stops taking steps, and its grant ends. Runs already going keep going.") },
-            confirmButton = { DangerTextButton(onClick = { confirmPauseAll = false; handlers.onPauseAll() }) { Text("Pause all") } },
-            dismissButton = { TextButton(onClick = { confirmPauseAll = false }) { Text("Cancel") } },
-        )
     }
 }
 
@@ -137,36 +110,6 @@ internal fun Outcome(state: MissionsUiState) {
         style = MaterialTheme.typography.bodySmall,
         modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
     )
-}
-
-@Composable
-private fun MissionList(state: MissionsUiState, handlers: MissionsHandlers, onPauseAll: () -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f, fill = false)) {
-            if (state.missions.isEmpty() && !state.loading) {
-                item { Text("No missions. Start one on the desktop.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(24.dp)) }
-            }
-            items(state.missions, key = { "mission:${it.id}" }) { m -> MissionRow(m) { handlers.onSelect(m.id) } }
-            item { Spacer(Modifier.height(8.dp)) }
-        }
-        if (state.canPauseAll) {
-            HorizontalDivider()
-            DangerTextButton(
-                onClick = onPauseAll,
-                enabled = state.running > 0 && state.busy == null,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
-            ) { Text(if (state.running > 0) "Pause all (${state.running} running)" else "Pause all") }
-        }
-    }
-}
-
-@Composable
-private fun MissionRow(m: Mission, onClick: () -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 24.dp, vertical = 10.dp)) {
-        Text(m.name.ifBlank { "Mission ${m.id}" }, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(m.summary(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        m.waitingOn?.let { Text(missionWaitLabel(it), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
-    }
 }
 
 /**

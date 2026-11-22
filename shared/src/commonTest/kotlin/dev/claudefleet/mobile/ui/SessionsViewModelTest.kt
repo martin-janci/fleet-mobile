@@ -1140,7 +1140,7 @@ class SessionFilterStateTest {
         vm.setProjectFilter(2)
         runCurrent()
         assertEquals(1, vm.state.value.shown)
-        assertEquals(listOf("Project: martin-janci/fleet-mobile"), vm.state.value.filterNames())
+        assertEquals(listOf("Project: martin-janci/fleet-mobile"), vm.state.value.facets.map { it.label })
 
         vm.setProjectFilter(null)
         runCurrent()
@@ -1396,38 +1396,6 @@ class GroupModeTest {
         runCurrent()
         assertEquals(inTree, vm.state.value.shown)
         assertEquals(listOf(2L), vm.state.value.urgent.map { it.id })
-    }
-
-    @Test
-    fun the_cycle_skips_work_on_a_hub_without_the_work_graph() = runTest {
-        val vm = SessionsViewModel(FakeFleet(listOf(session(1))), backgroundScope)
-
-        vm.cycleGroupMode(workAvailable = false)
-        runCurrent()
-        assertEquals(GroupMode.URGENCY, vm.state.value.groupMode)
-
-        vm.cycleGroupMode(workAvailable = false)
-        runCurrent()
-        assertEquals(GroupMode.PROJECT, vm.state.value.groupMode)
-    }
-
-    @Test
-    fun the_cycle_visits_all_three_when_the_hub_has_the_work_graph() = runTest {
-        val fleet = FakeFleet(listOf(session(1)))
-        fleet.capabilities.value = HubCapabilities.of(ToolCatalog(setOf("work")))
-        val vm = SessionsViewModel(fleet, backgroundScope)
-
-        val seen = buildList {
-            repeat(4) {
-                vm.cycleGroupMode(workAvailable = true)
-                runCurrent()
-                add(vm.state.value.groupMode)
-            }
-        }
-        assertEquals(
-            listOf(GroupMode.WORK, GroupMode.URGENCY, GroupMode.PROJECT, GroupMode.WORK),
-            seen,
-        )
     }
 
     /** `byWork` is still what the screen asks, so the work grouping is unchanged. */
@@ -1942,21 +1910,6 @@ class NewSessionsTabTest {
         assertEquals(setOf(StatusFilter.WORKING), state.filters.statuses)
         assertEquals(TimeWindow.H8, state.filters.window)
         assertTrue(state.filters.needsAttentionOnly)
-    }
-
-    /** Classic's Group chip keeps its three views; the host view is New's, chosen in the sheet. */
-    @Test
-    fun the_classic_cycle_never_lands_on_the_host_view_and_leaves_it_cleanly() = runTest {
-        val vm = SessionsViewModel(FakeFleet(listOf(session(1))), backgroundScope)
-        repeat(4) {
-            vm.cycleGroupMode(workAvailable = false)
-            runCurrent()
-            assertTrue(vm.state.value.groupMode != GroupMode.HOST)
-        }
-        vm.setGroupMode(GroupMode.HOST)
-        vm.cycleGroupMode(workAvailable = false)
-        runCurrent()
-        assertTrue(vm.state.value.groupMode in setOf(GroupMode.PROJECT, GroupMode.URGENCY))
     }
 
     @Test

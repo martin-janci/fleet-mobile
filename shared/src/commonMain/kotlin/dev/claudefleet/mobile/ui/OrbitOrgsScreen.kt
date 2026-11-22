@@ -97,6 +97,17 @@ internal fun budgetMeter(org: OrgDetail): BudgetMeter? {
         ?: meter("Budget today", org.spentTodayMicros, org.budgetDailyUsd, "daily")
 }
 
+/**
+ * "Today $1.20 · 7 days $8.40 · Month $31.00": what the org spent, budget or
+ * not (review w08-1: the meter shows only with a budget). Null when the hub
+ * sent no spend (only its administrators see it).
+ */
+internal fun spendLine(org: OrgDetail): String? = listOfNotNull(
+    org.spentTodayMicros?.let { "Today ${formatUsd(it)}" },
+    org.spentWeekMicros?.let { "7 days ${formatUsd(it)}" },
+    org.spentMonthMicros?.let { "Month ${formatUsd(it)}" },
+).takeIf { it.isNotEmpty() }?.joinToString(" · ")
+
 /** "František (owner), Martin (member)". */
 internal fun membersLine(org: OrgDetail): String? = org.members?.takeIf { it.isNotEmpty() }?.joinToString(", ") { m ->
     "${m.label} (${if (m.role == "admin") "owner" else roleWord(m.role).lowercase()})"
@@ -192,6 +203,7 @@ private fun LazyListScope.orgDetail(org: OrgDetail, handlers: OrbitOrgsHandlers,
                     }
                 }
                 budgetMeter(org)?.let { BudgetBar(it) }
+                spendLine(org)?.let { Text("Spend · $it", color = o.fg2, fontSize = 13.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 8.dp)) }
             }
         }
     }

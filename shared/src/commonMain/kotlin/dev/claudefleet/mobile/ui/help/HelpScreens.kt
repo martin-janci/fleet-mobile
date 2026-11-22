@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.ui.help
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -68,6 +69,7 @@ import dev.claudefleet.mobile.ui.AccountMeter
 import dev.claudefleet.mobile.ui.accountMeter
 import dev.claudefleet.mobile.ui.FieldRow
 import dev.claudefleet.mobile.ui.FleetSettingsUiState
+import dev.claudefleet.mobile.ui.Friendly
 import dev.claudefleet.mobile.ui.PhoneSessionRow
 import dev.claudefleet.mobile.ui.components.ScreenHeader
 import dev.claudefleet.mobile.ui.components.SectionLabel
@@ -424,6 +426,8 @@ private fun Label(text: String) =
 
 // ---- a lesson on the real screens ----
 
+const val LESSON_PROMPT_ERROR_TAG = "lesson.prompt.error"
+
 /**
  * The bar a running lesson puts over the real screen: which lesson, which
  * step, one sentence saying where to look. Next and End lesson are its only
@@ -439,6 +443,11 @@ fun LessonBar(
     onEnd: () -> Unit,
     modifier: Modifier = Modifier,
     onPrompt: ((String) -> Unit)? = null,
+    /** Control is being found or started for a prompt: the prompts wait (review w08-3). */
+    promptWaking: Boolean = false,
+    /** Why the last prompt could not reach Control, with its way out. */
+    promptError: Friendly? = null,
+    onDismissPromptError: () -> Unit = {},
 ) {
     val o = Fleet.colors
     val index = LESSONS.indexOfFirst { it.id == lesson.id } + 1
@@ -461,7 +470,14 @@ fun LessonBar(
         if (onPrompt != null && current.prompts.isNotEmpty()) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (prompt in current.prompts) {
-                    OutlinedButton(onClick = { onPrompt(prompt) }) { Text(prompt, fontSize = 14.sp) }
+                    OutlinedButton(onClick = { onPrompt(prompt) }, enabled = !promptWaking) { Text(prompt, fontSize = 14.sp) }
+                }
+            }
+            if (promptWaking) Text("Waking Control…", color = o.fg2, fontSize = 13.sp)
+            promptError?.let { e ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${e.title} · ${e.body}", color = o.fg, fontSize = 13.sp, modifier = Modifier.weight(1f).testTag(LESSON_PROMPT_ERROR_TAG))
+                    TextButton(onClick = onDismissPromptError) { Text("Dismiss", color = o.fgMuted, fontSize = 13.sp) }
                 }
             }
         }

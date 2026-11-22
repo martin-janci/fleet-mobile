@@ -65,6 +65,16 @@ class OrbitOrgsTest {
         assertEquals("Budget today", daily.title)
     }
 
+    /** Review w08-1: the spend shows with no budget too, the 7-day figure included. */
+    @Test
+    fun the_spend_line_shows_with_or_without_a_budget() {
+        val org = sefcik.copy(budgetMonthlyUsd = null, budgetDailyUsd = null, spentTodayMicros = 1_200_000, spentWeekMicros = 8_400_000, spentMonthMicros = 31_000_000)
+        assertNull(budgetMeter(org), "no budget, no meter")
+        assertEquals("Today $1.20 · 7 days $8.40 · Month $31.00", spendLine(org))
+        assertEquals("Month $31.00", spendLine(org.copy(spentTodayMicros = null, spentWeekMicros = null)))
+        assertNull(spendLine(org.copy(spentTodayMicros = null, spentWeekMicros = null, spentMonthMicros = null)), "a member sees no spend")
+    }
+
     @Test
     fun an_orgs_consent_to_jev_is_read_and_absent_is_unknown() {
         val json = Json { ignoreUnknownKeys = true }
