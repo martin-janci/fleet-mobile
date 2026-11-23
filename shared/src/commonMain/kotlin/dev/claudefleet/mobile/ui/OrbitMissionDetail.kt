@@ -606,7 +606,7 @@ internal fun SpendAskCard(ask: SpendAsk, canAnswer: Boolean, onApprove: () -> Un
         )
         if (ask.why.isNotBlank()) Text("Why: ${ask.why}", color = o.fgMuted, fontSize = 13.sp, lineHeight = 18.sp)
         Text(
-            "Nothing is pre-selected. Deny tells the lead to finish within ${dollars(ask.budgetMicros)}.",
+            "Nothing is pre-selected. Deny keeps the mission paused at ${dollars(ask.budgetMicros)}; raise the budget or finish it by hand.",
             color = o.fgMuted,
             fontSize = 13.sp,
             lineHeight = 18.sp,

@@ -169,6 +169,40 @@ class SignInTest {
         runCurrent()
     }
 
+    /**
+     * Review w03-6: the host's own login on a Mac reached over SSH (the
+     * probe reports `login_split`) says first that a `/login` there writes a
+     * second copy, and starts only on Sign in here anyway. A profile does not.
+     */
+    @Test
+    fun the_host_login_of_a_mac_says_so_before_it_signs_in() = runTest {
+        val fleet = SignInFleet(WITH_SIGN_IN)
+        fleet.hosts.value = listOf(HostRow(alias = "mac", reachable = true, loginSplit = false))
+        val actions = FakeSignIn()
+        val vm = SignInViewModel(fleet, actions, backgroundScope, canWrite = true)
+        runCurrent()
+        vm.open(LoginTarget("mac", null))
+        runCurrent()
+        assertTrue(vm.state.value.macNote)
+        assertTrue(actions.calls.isEmpty(), "nothing starts before the person picks")
+        assertTrue("+ Add account on the desktop" in macLoginNote("mac"))
+
+        vm.signInAnyway()
+        runCurrent()
+        assertFalse(vm.state.value.macNote)
+        assertEquals("start mac/", actions.calls.first())
+        vm.finish()
+        runCurrent()
+
+        actions.calls.clear()
+        vm.open(LoginTarget("mac", "work"))
+        runCurrent()
+        assertFalse(vm.state.value.macNote, "a login profile has one copy only")
+        assertEquals("start mac/work", actions.calls.first())
+        vm.finish()
+        runCurrent()
+    }
+
     /** w12-6: a phone the hub does not trust is told how to trust it, and keeps the command. */
     @Test
     fun an_untrusted_phone_is_told_the_trust_command_and_keeps_the_copy_command() = runTest {

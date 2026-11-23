@@ -14,6 +14,14 @@ data class HostRow(
     val hidden: Boolean = false,
     @SerialName("last_pinged_at") val lastPingedAt: Long? = null,
     @SerialName("account_uuid") val accountUuid: String? = null,
+    /**
+     * The health probe's Keychain-and-file check, which it reports (true or
+     * false) only for a Mac the hub reaches over SSH: there a `/login` of the
+     * host's own login writes `~/.claude/.credentials.json` beside the
+     * Keychain copy (the desktop's `ownLoginSplitRisk`, review w03-6). Null
+     * elsewhere and from an older hub.
+     */
+    @SerialName("login_split") val loginSplit: Boolean? = null,
     val provisioned: Boolean = false,
     /** `ssh` | `agent` — how the hub reaches this host. */
     val transport: String = "ssh",

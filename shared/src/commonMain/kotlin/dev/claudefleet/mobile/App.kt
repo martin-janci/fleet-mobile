@@ -147,6 +147,7 @@ import dev.claudefleet.mobile.ui.ControlChrome
 import dev.claudefleet.mobile.ui.EscalationCards
 import dev.claudefleet.mobile.ui.EscalationLater
 import dev.claudefleet.mobile.model.escalations
+import dev.claudefleet.mobile.model.controlSessionIds
 import dev.claudefleet.mobile.model.loginEscalations
 import dev.claudefleet.mobile.ui.FormContext
 import dev.claudefleet.mobile.ui.ControlForms
@@ -260,6 +261,7 @@ import dev.claudefleet.mobile.ui.moreFooter
 import dev.claudefleet.mobile.ui.moreSubtitle
 import dev.claudefleet.mobile.ui.inboxRows
 import dev.claudefleet.mobile.ui.proposedRows
+import dev.claudefleet.mobile.ui.pausedRows
 import dev.claudefleet.mobile.ui.runningRows
 import dev.claudefleet.mobile.ui.doneTodayRows
 import dev.claudefleet.mobile.model.localMidnight
@@ -274,6 +276,7 @@ import dev.claudefleet.mobile.ui.MissionSteer
 import dev.claudefleet.mobile.ui.MissionSteerUi
 import dev.claudefleet.mobile.ui.ControlActivity
 import dev.claudefleet.mobile.ui.ControlActivityBar
+import dev.claudefleet.mobile.ui.EscalationScope
 import dev.claudefleet.mobile.ui.sharedRows
 import dev.claudefleet.mobile.ui.kit.Assemble
 import dev.claudefleet.mobile.ui.kit.BottomBar
@@ -444,6 +447,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
+import dev.claudefleet.mobile.notify.keepSeenForHub
 import dev.claudefleet.mobile.notify.writeFleetNotify
 import dev.claudefleet.mobile.notify.NoBackgroundNotifier
 import dev.claudefleet.mobile.notify.BackgroundNotifier
@@ -520,10 +524,33 @@ class AppContainer(
     private val _questionFocus = MutableStateFlow<Long?>(null)
     val questionFocus: StateFlow<Long?> = _questionFocus.asStateFlow()
 
-    /** The platform's entry point for a tapped "needs you" notification. */
-    fun onOpenSession(sessionId: Long) {
+    /**
+     * The platform's entry point for a tapped "needs you" notification.
+     * [hub] is the hub the notification was posted for, when it says: a
+     * notification left up from an earlier pairing names a session of that
+     * hub, and the same id here is another session (review w16-1).
+     */
+    fun onOpenSession(sessionId: Long, hub: String? = null) {
+        sessionTapHub = hub
         _questionFocus.value = sessionId
         _openSession.value = sessionId
+    }
+
+    /** The hub the parked session (or retry) tap was posted for; null when it did not say. */
+    private var sessionTapHub: String? = null
+
+    /** The hub the parked mission tap was posted for; null when it did not say. */
+    private var missionTapHub: String? = null
+
+    /**
+     * Whether a tap posted for [hub] may act here: it said no hub, or it is
+     * the hub this phone is paired with now. Asked when the paired screens
+     * take the tap, not when it lands: a cold start delivers the tap before
+     * the stored credential has been read.
+     */
+    private fun tapIsForThisHub(hub: String?): Boolean {
+        val paired = session.credentials()?.hub ?: return hub == null
+        return hub == null || hub == paired
     }
 
     /** True once for [sessionId] after a notification asked for its question; then false. */
@@ -551,8 +578,15 @@ class AppContainer(
         return taken
     }
 
-    /** Taken exactly once. */
-    fun consumeOpenSession(): Long? = _openSession.getAndUpdate { null }
+    /** Taken exactly once; null when the tap was posted for another hub. */
+    fun consumeOpenSession(): Long? {
+        val id = _openSession.getAndUpdate { null } ?: return null
+        if (tapIsForThisHub(sessionTapHub)) return id
+        // Another hub's id: its question focus and Retry go with it.
+        _questionFocus.value = null
+        _retrySession.value = null
+        return null
+    }
 
     /**
      * A failed session's notification Retry (MobileControl): parked like
@@ -564,24 +598,25 @@ class AppContainer(
     val retrySession: StateFlow<Long?> = _retrySession.asStateFlow()
 
     /** The platform's entry point for a failure notification's Retry: open the session, then retry it there. */
-    fun onRetrySession(sessionId: Long) {
-        onOpenSession(sessionId)
+    fun onRetrySession(sessionId: Long, hub: String? = null) {
+        onOpenSession(sessionId, hub)
         _retrySession.value = sessionId
     }
 
-    /** Taken exactly once. */
-    fun consumeRetrySession(): Long? = _retrySession.getAndUpdate { null }
+    /** Taken exactly once; null when the tap was posted for another hub, which must never retry here. */
+    fun consumeRetrySession(): Long? = _retrySession.getAndUpdate { null }?.takeIf { tapIsForThisHub(sessionTapHub) }
 
     /** A mission's notification (its tap or Review grant): open that mission, its grant card first. Parked like [openSession]. */
     private val _openMission = MutableStateFlow<Long?>(null)
     val openMission: StateFlow<Long?> = _openMission.asStateFlow()
 
-    fun onOpenMission(missionId: Long) {
+    fun onOpenMission(missionId: Long, hub: String? = null) {
+        missionTapHub = hub
         _openMission.value = missionId
     }
 
-    /** Taken exactly once. */
-    fun consumeOpenMission(): Long? = _openMission.getAndUpdate { null }
+    /** Taken exactly once; null when the tap was posted for another hub. */
+    fun consumeOpenMission(): Long? = _openMission.getAndUpdate { null }?.takeIf { tapIsForThisHub(missionTapHub) }
 
     /** Forget a parked notification tap: a new pairing may be another hub, where its id is another session. */
     fun dropOpenRequests() {
@@ -883,6 +918,10 @@ fun App(container: AppContainer) {
                         LaunchedEffect(state) {
                             justPaired = null
                             fleetCheck = false
+                            // Forgotten or revoked: the alerts still up name the
+                            // old fleet's ids, which a next pairing reads as its
+                            // own sessions (review w16-1).
+                            container.notifier.withdrawAll()
                         }
                         // The first run (14.19): a welcome once
                         // per phone, and the "no hub yet" steps, before Pair.
@@ -1138,11 +1177,20 @@ private fun ControlTab(
     val laterKeys by container.escalationLater.later.collectAsState()
     // A host that answers again ends its Later at FleetRoute, whichever tab is on screen (review w21-1, w24).
     val controlHosts by repository.hosts.collectAsState()
-    val escalationCards = remember(controlRows, controlAccess, controlState.sessionId, laterKeys, settingsCaps.ask, controlHosts) {
+    val fleetWide by container.escalationLater.fleetWide.collectAsState()
+    // By default only Control's own threads raise a card, with an All fleet switch for the rest (review w21-10);
+    // before Control has a session there are no threads of its own, so the whole fleet does.
+    val escalationScope = remember(controlRows, controlState.receipts, controlState.follows, controlState.sessionId) {
+        if (controlState.sessionId == null) null else controlSessionIds(controlRows, controlState.receipts, controlState.follows)
+    }
+    val (escalationCards, escalationsOutside) = remember(controlRows, controlAccess, controlState.sessionId, laterKeys, settingsCaps.ask, controlHosts, escalationScope, fleetWide) {
         val later = laterKeys.toSet()
-        // A signed-out login is a card even with no session on it yet (review M3), after the sessions' own cards.
-        escalations(controlRows.filter { controlAccess.levelFor(it) == null }, controlState.sessionId, later, formsShown = settingsCaps.ask) +
-            loginEscalations(controlHosts, later) { utcOffsetSeconds(it) }
+        val answerable = controlRows.filter { controlAccess.levelFor(it) == null }
+        val all = escalations(answerable, controlState.sessionId, later, formsShown = settingsCaps.ask)
+        val ours = if (escalationScope == null) all else escalations(answerable, controlState.sessionId, later, formsShown = settingsCaps.ask, scope = escalationScope)
+        // A signed-out login is a card even with no session on it yet (review M3), after the sessions' own cards, whatever the scope.
+        val logins = loginEscalations(controlHosts, later) { utcOffsetSeconds(it) }
+        (if (fleetWide) all else ours) + logins to all.size - ours.size
     }
     var threadsOpen by remember { mutableStateOf(false) }
     // Control's activity row (needs you, handed off, threads): which count's sheet is open.
@@ -1193,6 +1241,7 @@ private fun ControlTab(
                             onOpenSession = nav::open,
                             onLater = container.escalationLater::putOff,
                             onInbox = { nav.select(Tab.Inbox) },
+                            scope = EscalationScope(fleetWide, escalationsOutside, container.escalationLater::setFleetWide),
                         )
                     },
                     aboveComposer = {
@@ -1299,6 +1348,13 @@ private fun FleetRoute(
     // closing the app does not announce what the person just looked at.
     val poster = container.notifier.poster
     val alertsOn by container.notifier.enabled.collectAsState()
+    // There, the seen sets are this hub's alone, and another hub's alerts go
+    // (review w16-1); Android's service does this for itself.
+    if (poster != null) {
+        LaunchedEffect(credentials.hub) {
+            if (container.prefs.keepSeenForHub(credentials.hub)) container.notifier.withdrawAll()
+        }
+    }
     if (poster != null && alertsOn) {
         LifecycleStartEffect(repository, poster) {
             val job = scope.launch { keepSeenWhileOpen(repository, container.prefs, poster) }
@@ -1385,6 +1441,10 @@ private fun FleetRoute(
             signedOut = { alias, profile -> repository.hosts.value.firstOrNull { it.alias == alias }?.isSignedOut(profile) == true },
             forbidden = { projectId, orgId -> repository.forbiddenAccountsIn(projectId, orgId) },
         )
+    }
+    // A row that leaves Needs you takes its notice and Switch proposal with it (review w17-5).
+    LaunchedEffect(inboxActions) {
+        repository.sessions.collect { rows -> inboxActions.keepOnly(inboxRows(rows, repository.access.value).map { it.id }.toSet()) }
     }
     val trackers = remember(repository, scope) { TrackersViewModel(repository, container.trackerActions, scope, credentials.canWrite) }
     val trackersState by trackers.state.collectAsState()
@@ -2069,6 +2129,7 @@ private fun FleetRoute(
                         rows = rows,
                         running = all.count { it.claudeStatus == "working" },
                         proposed = proposedList.size,
+                        paused = remember(all, access) { pausedRows(all, access).size },
                         proposedList = proposedList,
                         missionRows = missionRows,
                         onOpenMission = { missions.openOne(it) },
@@ -2096,6 +2157,7 @@ private fun FleetRoute(
                             onCancelSwitch = inboxActions::cancelSwitch,
                             onWait = inboxActions::waitForReset,
                             onNotWaiting = inboxActions::notWaiting,
+                            onDismissNotice = inboxActions::dismissNotice,
                         ),
                         runningList = remember(all) { runningRows(all) },
                         doneTodayList = remember(all, inboxList.nowSeconds / 60) {
@@ -3129,6 +3191,8 @@ private fun SessionRoute(
             background = container.newSessionActions,
             // Control's composer queues on the hub while it works (Control review F19).
             queueWhileWorking = queuesForControl,
+            // A prompt on its way is not aborted by Back or a tab switch (review w17-1).
+            callScope = callScope,
         )
     }
     val workVm = remember(sessionId, repository, scope) {

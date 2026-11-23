@@ -38,6 +38,12 @@ data class SignInUiState(
     val available: Boolean = false,
     /** The login the sheet is open for; null when it is closed. */
     val target: LoginTarget? = null,
+    /**
+     * The host's own login on a Mac reached over SSH ([HostRow.loginSplit]):
+     * the sheet says first that a `/login` there writes a second copy beside
+     * the Keychain's, and starts only on Sign in here anyway (review w03-6).
+     */
+    val macNote: Boolean = false,
     /** `start_login` is on its way. */
     val starting: Boolean = false,
     /** The pane opened on the host: the sheet polls it until the login is signed in. */
@@ -114,8 +120,17 @@ class SignInViewModel(
         // Another login's sheet closes its pane first.
         local.value.target?.takeIf { it != target && local.value.started }?.let { endQuietly(it) }
         poller?.cancel()
-        local.value = SignInUiState(target = target, starting = !target.token, nowMs = clock())
-        if (target.token) return@launch
+        val split = !target.token && target.profile == null &&
+            fleet.hosts.value.firstOrNull { it.alias == target.host }?.loginSplit != null
+        local.value = SignInUiState(target = target, starting = !target.token && !split, macNote = split, nowMs = clock())
+        if (target.token || split) return@launch
+        start(target)
+    }
+
+    /** The Mac note's Sign in here anyway: start the sign-in it held back. */
+    fun signInAnyway(): Job = scope.launch {
+        val target = local.value.target?.takeIf { local.value.macNote } ?: return@launch
+        local.update { it.copy(macNote = false, starting = true) }
         start(target)
     }
 

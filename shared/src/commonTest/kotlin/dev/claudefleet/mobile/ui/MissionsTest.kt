@@ -290,8 +290,8 @@ class MissionsTest {
         val fleet = MissionsFleet(loop)
         val vm = MissionsViewModel(fleet, actions, backgroundScope, canWrite = true)
         runCurrent()
-        vm.open().join()
-        vm.select(1).join()
+        vm.refresh().join()
+        vm.openOne(1).join()
         runCurrent()
         actions.calls.clear()
         fleet.workChanges.emit(2)
@@ -318,8 +318,8 @@ class MissionsTest {
         assertEquals(emptyList(), fake.calls, "nothing read yet")
 
         advanceTimeBy(2_001)
-        vm.open().join()
-        vm.select(1).join()
+        vm.refresh().join()
+        vm.openOne(1).join()
         runCurrent()
         fake.calls.clear()
         val press = vm.start()
@@ -345,8 +345,8 @@ class MissionsTest {
         }
         val fleet = MissionsFleet(loop)
         val vm = MissionsViewModel(fleet, actions, backgroundScope, canWrite = true)
-        vm.open().join()
-        vm.select(1).join()
+        vm.refresh().join()
+        vm.openOne(1).join()
         runCurrent()
         val gate = CompletableDeferred<Unit>()
         hold = gate
@@ -371,7 +371,7 @@ class MissionsTest {
         }
         val fleet = MissionsFleet(loop)
         val vm = MissionsViewModel(fleet, actions, backgroundScope, canWrite = true)
-        vm.open().join()
+        vm.refresh().join()
         runCurrent()
         fail = true
         fleet.workChanges.emit(2)
@@ -393,13 +393,13 @@ class MissionsTest {
             }
         }
         val vm = MissionsViewModel(MissionsFleet(loop), actions, backgroundScope, canWrite = true)
-        vm.open().join()
+        vm.refresh().join()
         val a = CompletableDeferred<Unit>().also { gates[1L] = it }
         val b = CompletableDeferred<Unit>().also { gates[2L] = it }
-        vm.select(1)
+        vm.openOne(1)
         runCurrent()
         vm.close()
-        vm.select(2)
+        vm.openOne(2)
         runCurrent()
         assertTrue(vm.state.value.loading)
 
@@ -426,8 +426,8 @@ class MissionsTest {
             }
         }
         val vm = MissionsViewModel(MissionsFleet(loop), actions, backgroundScope, canWrite = true)
-        vm.open().join()
-        vm.select(1).join()
+        vm.refresh().join()
+        vm.openOne(1).join()
         runCurrent()
         fake.calls.clear()
         val press = vm.start()
@@ -445,8 +445,8 @@ class MissionsTest {
     fun go_sends_the_steps_key_and_reads_the_mission_again() = runTest {
         val actions = FakeMissionActions()
         val vm = MissionsViewModel(MissionsFleet(loop), actions, backgroundScope, canWrite = true)
-        vm.open().join()
-        vm.select(1).join()
+        vm.refresh().join()
+        vm.openOne(1).join()
         runCurrent()
         val step = vm.state.value.detail!!.plan!!.steps.single()
 
@@ -462,8 +462,8 @@ class MissionsTest {
     fun a_question_is_answered_with_its_words_and_pause_sends_the_version() = runTest {
         val actions = FakeMissionActions()
         val vm = MissionsViewModel(MissionsFleet(loop), actions, backgroundScope, canWrite = true)
-        vm.open().join()
-        vm.select(1).join()
+        vm.refresh().join()
+        vm.openOne(1).join()
         runCurrent()
 
         vm.decide(MissionCard(id = 11, kind = "ask", payload = buildJsonObject { put("question", JsonPrimitive("Which db?")) }), ok = true, note = "pg").join()
@@ -489,8 +489,8 @@ class MissionsTest {
         actions.list = listOf(draft)
         actions.detail = MissionDetail(mission = draft, mayChange = true)
         val vm = MissionsViewModel(MissionsFleet(loop), actions, backgroundScope, canWrite = true)
-        vm.open().join()
-        vm.select(1).join()
+        vm.refresh().join()
+        vm.openOne(1).join()
         runCurrent()
 
         vm.togglePause().join()
@@ -505,7 +505,7 @@ class MissionsTest {
 
         // Only a draft is discarded.
         actions.detail = MissionDetail(mission = draft.copy(state = "active"), mayChange = true)
-        vm.select(1).join()
+        vm.openOne(1).join()
         runCurrent()
         val before = actions.calls.count { it.startsWith("state") }
         vm.discardDraft().join()
@@ -518,7 +518,7 @@ class MissionsTest {
         val actions = FakeMissionActions()
         actions.paused = listOf(1L, 2L)
         val vm = MissionsViewModel(MissionsFleet(loop), actions, backgroundScope, canWrite = true)
-        vm.open().join()
+        vm.refresh().join()
         runCurrent()
         assertEquals(1, vm.state.value.running)
 
@@ -706,7 +706,9 @@ class MissionsTest {
         vm.denySpend(spendAsk(braked)!!).join()
         runCurrent()
         assertTrue(actions.calls.none { it.startsWith("grant") || it.startsWith("state") })
-        assertTrue("decide 77 true No more spend: finish within \$30.00." in actions.calls)
+        assertTrue("decide 77 true No more spend: the budget stays at \$30.00." in actions.calls)
+        // Review w05-4: nothing makes the lead finish within budget; the mission stays paused.
+        assertEquals("Denied. The mission stays paused.", vm.state.value.notice)
     }
 
     @Test

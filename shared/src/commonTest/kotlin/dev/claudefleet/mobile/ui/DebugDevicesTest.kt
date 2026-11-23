@@ -284,6 +284,23 @@ class DebugDevicesTest {
         assertEquals(2, actions.calls.size, "no reads once the screen is gone")
     }
 
+    /** Review w19-3: in the background (the stream stopped) the strip asks nothing, and reads again once back. */
+    @Test
+    fun the_strip_asks_nothing_while_the_app_is_in_the_background() = runTest {
+        val actions = FakeDeviceActions()
+        val (vm, fleet) = strip(actions)
+        fleet.status.value = ConnectionStatus.Offline("stopped")
+        val watch = backgroundScope.launch { vm.watch() }
+        runCurrent()
+        advanceTimeBy(SessionDevicesViewModel.POLL_MS * 3)
+        assertEquals(emptyList<String>(), actions.calls)
+        fleet.status.value = ConnectionStatus.Connected("0.9.3")
+        // The next tick (at 3 × POLL_MS) reads.
+        advanceTimeBy(1)
+        assertEquals(listOf("list false"), actions.calls)
+        watch.cancel()
+    }
+
     @Test
     fun the_strip_never_asks_a_hub_without_debug_devices_and_a_failed_read_is_quiet() = runTest {
         val actions = FakeDeviceActions()
