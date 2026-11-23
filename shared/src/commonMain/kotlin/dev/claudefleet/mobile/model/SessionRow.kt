@@ -212,13 +212,22 @@ data class SessionRow(
         get() = attention?.reason ?: when {
             // Running outside fleet: read-only here, so never a person's job.
             kind == "external" -> null
-            claudeStatus == "blocked" || pendingForm != null -> "waiting"
+            // Waiting is a live state (review w13-2): a lost row's open form
+            // or last block waits on an agent that is gone.
+            isLive && (claudeStatus == "blocked" || pendingForm != null) -> "waiting"
             stuckKind != null -> "stuck"
             claudeStatus == "failed" -> "failed"
-            safeKillState == "failed" || safeKillState == "requested" ||
-                status == "ghost" || lostAt != null -> "lifecycle"
+            safeKillState == "failed" || safeKillState == "requested" || !isLive -> "lifecycle"
             else -> null
         }
+
+    /**
+     * The session's agent is still there: not lost, not a ghost (the
+     * desktop's `live` in `classify`). Only a live session can wait on a
+     * person (review w13-2).
+     */
+    val isLive: Boolean
+        get() = status != "ghost" && lostAt == null
 
     /**
      * Jev proposes the session is waiting on a person (hub contract 15, gap
@@ -249,7 +258,8 @@ data class SessionRow(
      * takes it (claude-fleet 2026-11-16, "Needs you" flood; review w04-2).
      */
     val needsAttention: Boolean
-        get() = attentionReason.let { it != null && it != "lifecycle" } && !isProposed && attention?.state != "paused"
+        get() = attentionReason.let { it != null && it != "lifecycle" && (it != "waiting" || isLive) } &&
+            !isProposed && attention?.state != "paused"
 
     /**
      * A counted row that asks something of a person right now (a prompt, a

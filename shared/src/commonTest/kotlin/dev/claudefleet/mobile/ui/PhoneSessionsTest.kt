@@ -149,6 +149,22 @@ class PhoneSessionsTest {
     }
 
     /**
+     * Review w04-4: a mass loss is not silent. The lost rows stay out of the
+     * Inbox and its count, and the header names them, as the desktop's footer
+     * ("… · 6 paused") does.
+     */
+    @Test
+    fun the_inbox_header_names_the_paused_rows_it_does_not_count() {
+        val lost = (1L..6L).map { SessionRow(id = it, tmuxName = "s$it", hostAlias = "mercury", lostAt = 5, attention = Attention("lifecycle", since = 5, state = "paused")) }
+        val waiting = SessionRow(id = 7, tmuxName = "s7", claudeStatus = "blocked", attention = Attention("waiting", since = 50, state = "action_required"))
+        val rows = lost + waiting
+        assertEquals(listOf(7L), inboxRows(rows).map { it.id })
+        assertEquals((1L..6L).toList(), pausedRows(rows).map { it.id })
+        assertEquals("1 needs you · 0 running · 6 paused", inboxSubtitle(1, 0, paused = pausedRows(rows).size))
+        assertEquals("0 need you · 0 running", inboxSubtitle(0, 0, paused = 0))
+    }
+
+    /**
      * Review w04-2: a lost row (reason lifecycle, state paused) needs nobody.
      * It is not in the Inbox, its count or a needs-you count, as the desktop's
      * `countsTowardBadge`; a lost row that still asks something is.
@@ -159,7 +175,9 @@ class PhoneSessionsTest {
         val ghost = row(6, status = "idle").copy(status = "ghost")
         val asking = row(7, status = "blocked", attention = Attention("waiting", since = 70, state = "action_required")).copy(lostAt = 60)
         val rows = listOf(lost, ghost, asking)
-        assertEquals(listOf(7L), inboxRows(rows).map { it.id })
+        // Review w13-2: a lost row's question waits on an agent that is gone.
+        assertEquals(emptyList(), inboxRows(rows).map { it.id })
+        assertFalse(asking.needsAttention)
         assertFalse(lost.needsAttention)
         assertFalse(ghost.needsAttention, "the fallback for an older hub reads a ghost as lifecycle: not counted either")
     }

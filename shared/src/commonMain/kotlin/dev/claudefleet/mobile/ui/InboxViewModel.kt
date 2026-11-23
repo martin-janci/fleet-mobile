@@ -10,6 +10,7 @@ import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.forAccount
 import dev.claudefleet.mobile.model.signedInElsewhere
 import dev.claudefleet.mobile.model.loginLabel
+import dev.claudefleet.mobile.epochSeconds
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -31,8 +32,12 @@ import kotlinx.coroutines.launch
 
 /** The calls the Inbox's rows make: the session screen's own, nothing else. */
 interface InboxActions {
-    /** Retry the last turn: its prompt again, as a new one. */
-    suspend fun retry(sessionId: Long, prompt: String)
+    /**
+     * Retry the last turn: its prompt again, as a new one, under
+     * [clientMsgId] (`send_prompt { client_msg_id }`), so a second press after
+     * a lost answer is replayed by the hub rather than typed twice.
+     */
+    suspend fun retry(sessionId: Long, prompt: String, clientMsgId: String)
 
     /**
      * Which login on [hostAlias] has room left (`check_account_headroom`), for
@@ -46,8 +51,8 @@ interface InboxActions {
 
 /** [InboxActions] through the session screen's [SessionActions]. */
 class SessionInboxActions(private val actions: SessionActions) : InboxActions {
-    override suspend fun retry(sessionId: Long, prompt: String) {
-        actions.sendPrompt(sessionId, prompt)
+    override suspend fun retry(sessionId: Long, prompt: String, clientMsgId: String) {
+        actions.sendPrompt(sessionId, prompt, clientMsgId)
     }
 
     override suspend fun headroom(hostAlias: String, profile: String?, projectId: Long?, model: String?): Headroom =
@@ -164,15 +169,26 @@ class InboxViewModel(
      * offered as a switch target.
      */
     private val forbidden: (projectId: Long?, orgId: Long?) -> Set<String> = { _, _ -> emptySet() },
+    private val clock: () -> Long = { epochSeconds() },
 ) {
     private val _state = MutableStateFlow(InboxUiState())
+
+    /**
+     * Each row's Retry send id, by session and prompt, kept until a press is
+     * answered: a press whose answer was lost goes out again under the same
+     * id, which the hub replays rather than typing the prompt twice (review w17-4).
+     */
+    private val retryIds = mutableMapOf<Pair<Long, String>, String>()
     val state: StateFlow<InboxUiState> = _state.asStateFlow()
 
     /** Retry the last turn of a failed row: [inboxRowActions]'s prompt, sent again. */
     fun retry(row: SessionRow, switchAvailable: Boolean = false): Job? {
         val prompt = inboxRowActions(row, canWrite, switchAvailable, null).retryPrompt ?: return null
-        return press(row.id) {
-            actions.retry(row.id, prompt)
+        val key = row.id to prompt
+        val id = retryIds.getOrPut(key) { newPromptSendId(clock()) }
+        return press(row.id, write = true) {
+            actions.retry(row.id, prompt, id)
+            retryIds.remove(key)
             "Sent the last prompt again."
         }
     }
@@ -229,8 +245,30 @@ class InboxViewModel(
         _state.update { it.copy(notices = it.notices - sessionId) }
     }
 
-    /** One press on one row; [call] answers the row's notice (null: none). A refusal is the notice. */
-    private fun press(sessionId: Long, call: suspend () -> String?): Job? {
+    /**
+     * Forget what this phone said or proposed for rows that left Needs you
+     * ([needYou] is the ids still there): a row that fails again hours later
+     * is a new failure, not the old press's notice or Switch proposal
+     * (review w17-5). A Not waiting is kept by its own key ([proposalKey]).
+     */
+    fun keepOnly(needYou: Set<Long>) {
+        val s = _state.value
+        if (s.notices.keys.all { it in needYou } && s.switchTargets.keys.all { it in needYou } && s.waiting.keys.all { it in needYou }) return
+        _state.update {
+            it.copy(
+                notices = it.notices.filterKeys { id -> id in needYou || id in it.busy },
+                switchTargets = it.switchTargets.filterKeys { id -> id in needYou },
+                waiting = it.waiting.filterKeys { id -> id in needYou },
+            )
+        }
+    }
+
+    /**
+     * One press on one row; [call] answers the row's notice (null: none). A
+     * refusal is the notice; a [write] whose outcome is unknown says so
+     * ([friendlyWrite]) rather than that it failed.
+     */
+    private fun press(sessionId: Long, write: Boolean = false, call: suspend () -> String?): Job? {
         if (sessionId in _state.value.busy) return null
         _state.update { it.copy(busy = it.busy + sessionId, notices = it.notices - sessionId) }
         return scope.launch {
@@ -239,7 +277,7 @@ class InboxViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (t: Throwable) {
-                friendly(t).body
+                (if (write) friendlyWrite(t) else friendly(t)).body
             }
             _state.update {
                 it.copy(

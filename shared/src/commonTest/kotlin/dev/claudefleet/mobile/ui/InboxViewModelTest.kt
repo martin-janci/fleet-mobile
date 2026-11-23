@@ -25,8 +25,11 @@ private class FakeInbox(
 ) : InboxActions {
     val calls = mutableListOf<String>()
 
-    override suspend fun retry(sessionId: Long, prompt: String) {
+    val retryIds = mutableListOf<String>()
+
+    override suspend fun retry(sessionId: Long, prompt: String, clientMsgId: String) {
         calls += "retry $sessionId $prompt"
+        retryIds += clientMsgId
         refuse?.let { throw it }
     }
 
@@ -85,6 +88,47 @@ class InboxViewModelTest {
         assertFalse(inboxRowActions(paused(), canWrite = true, switchAvailable = false, limit = null).switchAccount, "a hub that cannot say which login has room")
         assertNull(inboxRowActions(paused(), canWrite = true, switchAvailable = true, limit = null).waitUntil, "no reading, no reset to wait for")
         assertFalse(inboxRowActions(SessionRow(id = 3, tmuxName = "x", claudeStatus = "blocked", attention = Attention("waiting")), true, true, null).any)
+    }
+
+    /**
+     * Review w17-4: Retry goes out under one `client_msg_id` until a press is
+     * answered, so a second press after a lost answer cannot type the prompt
+     * twice, and an unknown outcome says so rather than that it failed.
+     */
+    @Test
+    fun a_retry_whose_answer_was_lost_goes_out_again_under_the_same_id() = runTest {
+        val hub = FakeInbox(refuse = HubError.Tool("E_SSH_TIMEOUT", "timed out"))
+        val vm = InboxViewModel(hub, this, canWrite = true)
+        vm.retry(failed()); runCurrent()
+        assertEquals(friendlyWrite(HubError.Tool("E_SSH_TIMEOUT", "timed out")).body, vm.state.value.notices[1L])
+        hub.refuse = null
+        vm.retry(failed()); runCurrent()
+        assertEquals(2, hub.retryIds.size)
+        assertEquals(hub.retryIds[0], hub.retryIds[1], "the same send to the hub")
+        assertEquals("Sent the last prompt again.", vm.state.value.notices[1L])
+        vm.retry(failed()); runCurrent()
+        assertTrue(hub.retryIds[2] != hub.retryIds[1], "answered: the next Retry is a new send")
+    }
+
+    /** Review w17-5: a row that leaves Needs you takes its notice and Switch proposal with it. */
+    @Test
+    fun a_notice_and_a_proposal_go_when_their_row_leaves_needs_you() = runTest {
+        val hub = FakeInbox(headroom = Headroom(pauseAtPct = 95.0, logins = listOf(HostLogin(accountUuid = "acct-a", usedPct = 100.0), HostLogin(profile = "home", accountUuid = "acct-c", usedPct = 40.0))))
+        val vm = InboxViewModel(hub, this, canWrite = true)
+        vm.retry(failed()); runCurrent()
+        vm.proposeSwitch(paused(), switchAvailable = true); runCurrent()
+        assertEquals(setOf(1L), vm.state.value.notices.keys)
+        assertEquals(setOf(2L), vm.state.value.switchTargets.keys)
+
+        vm.keepOnly(setOf(1L, 2L))
+        assertEquals(setOf(1L), vm.state.value.notices.keys, "still in Needs you: kept")
+        vm.keepOnly(emptySet())
+        assertTrue(vm.state.value.notices.isEmpty())
+        assertTrue(vm.state.value.switchTargets.isEmpty())
+
+        vm.retry(failed()); runCurrent()
+        vm.dismissNotice(1L)
+        assertTrue(vm.state.value.notices.isEmpty(), "a tap puts the notice away")
     }
 
     /** Review w23-3: a signed-out login is never proposed, though its last reading has room. */
