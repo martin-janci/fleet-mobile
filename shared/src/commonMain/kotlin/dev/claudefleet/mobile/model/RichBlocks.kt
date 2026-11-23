@@ -967,13 +967,29 @@ fun fieldHolds(c: JsonElement?, shown: Map<String, JsonElement>): Boolean {
     val field = c["field"].stringOrNull() ?: return true
     val got = shown[field]
     fun matches(want: JsonElement): Boolean =
-        if (got is JsonArray) got.any { it == want } else got != null && got == want
+        if (got is JsonArray) got.any { same(it, want) } else got != null && same(got, want)
     c["eq"]?.let { return matches(it) }
     (c["in"] as? JsonArray)?.let { list -> return list.any { matches(it) } }
-    (c["truthy"] as? JsonPrimitive)?.booleanOrNull?.let { want ->
-        return ((got as? JsonPrimitive)?.booleanOrNull == true) == want
+    (c["truthy"] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull?.let { want ->
+        // A real bool only, as Rust and TS read it: the text "true" is not on (review w19-6).
+        val on = (got as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull == true
+        return on == want
     }
     return true
+}
+
+/**
+ * Whether two answer values are the same, as the hub's `same` (forms.rs)
+ * and JS `===` see them: two numbers by value (8080 is 8080.0), anything
+ * else as JSON (review w19-6).
+ */
+private fun same(a: JsonElement, b: JsonElement): Boolean {
+    if (a is JsonPrimitive && b is JsonPrimitive && !a.isString && !b.isString) {
+        val x = a.doubleOrNull
+        val y = b.doubleOrNull
+        if (x != null && y != null) return x == y
+    }
+    return a == b
 }
 
 /** The steps asked, given the answers so far; a field's own `when` filters

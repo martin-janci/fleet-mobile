@@ -841,7 +841,7 @@ private fun ColumnScope.FilePane(path: String, content: FileContent?, state: Rep
     Column(modifier = Modifier.fillMaxWidth().weight(1f)) {
         when {
             content.isDir -> Quiet("A folder.")
-            content.binary -> Quiet("A binary file" + (content.size?.let { " ($it bytes)" } ?: "") + " — send it to Downloads to open it on the phone.")
+            content.binary -> Quiet(binaryFileNote(content, state.canSendFile))
             markdown && !source -> LazyColumn(modifier = Modifier.fillMaxSize()) {
                 item { MarkdownText(content.content, modifier = Modifier.padding(16.dp)) }
                 if (content.truncated) item { Quiet("Cut short by the hub — the rest is not shown.") }
@@ -853,20 +853,47 @@ private fun ColumnScope.FilePane(path: String, content: FileContent?, state: Rep
             }
         }
     }
+    // Share hands the text over only when it is the whole file and small
+    // enough for the platform to carry; otherwise say why (review w11-8).
+    val shareText = text?.takeIf { canShareText(content) }
+    shareNote(content, state.canSendFile)?.let { Quiet(it) }
     // Save and Share at the thumb, as the board draws them.
-    if (state.canSendFile || text != null) {
+    if (state.canSendFile || shareText != null) {
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (state.canSendFile) {
                 OutlinedButton(onClick = { handlers.onSendToDownloads(path) }, enabled = !state.sending, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) {
                     Text("Send to Downloads", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            if (text != null) {
-                OutlinedButton(onClick = { share(text) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Share") }
+            if (shareText != null) {
+                OutlinedButton(onClick = { share(shareText) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Share") }
             }
         }
     }
 }
+
+/**
+ * The most text Share hands the platform: Android carries it in a binder
+ * parcel (about 1 MiB, UTF-16), and a larger one fails to start the share
+ * sheet, silently (review w11-8).
+ */
+internal const val SHARE_TEXT_MAX = 200_000
+
+/** Whether Share may hand [content]'s text on: the whole file, and small enough to carry. */
+internal fun canShareText(content: FileContent): Boolean =
+    !content.binary && !content.isDir && !content.truncated && content.content.length <= SHARE_TEXT_MAX
+
+/** Why a text file has no Share, in a line; null when it has one (or is not text). */
+internal fun shareNote(content: FileContent, canSendFile: Boolean): String? {
+    if (content.binary || content.isDir || canShareText(content)) return null
+    val why = if (content.truncated) "The hub sent only the first 512 KiB of this file, so it is not shared as text." else "This file is too large to share as text."
+    return why + if (canSendFile) " Send it to Downloads to share the whole file." else ""
+}
+
+/** A binary file's line: Downloads only where this phone can send files there. */
+internal fun binaryFileNote(content: FileContent, canSendFile: Boolean): String =
+    "A binary file" + (content.size?.let { " ($it bytes)" } ?: "") +
+        if (canSendFile) " — send it to Downloads to open it on the phone." else " — this phone can't open it here."
 
 /** One place [findInLines] found the query: the line (0-based, the list's own index) and where on it the match starts. */
 internal data class FileMatch(val line: Int, val start: Int)
