@@ -534,6 +534,101 @@ private fun key(o: JsonObject, name: String, p: Problems, where: String): String
 private fun optArr(o: JsonObject, k: String, p: Problems, where: String, min: Int, max: Int): List<JsonElement>? =
     if (o[k] == null || o[k] is JsonNull) null else arr(o, k, p, where, min, max)
 
+// ── Dashboard widgets: the desktop's `dashWidget` / `dashQuery` (rich_blocks.ts) ──
+
+private val DASH_WIDGET_KINDS = listOf("stat", "groups", "buckets", "burnup", "summary", "feed", "fleet")
+private val DASH_FLEET_SOURCES = listOf("sessions", "hosts", "accounts")
+private val DASH_FLEET_SHOWS = listOf("stat", "list")
+private val DASH_FEED_SHOWS = listOf("text", "stat")
+private val DASH_SUMMARY_SOURCES = listOf("work", "sessions", "hosts", "accounts", "feeds")
+private const val DASH_SUMMARY_PROMPT_MAX = 500
+private const val DASH_BURNUP_MAX_DAYS = 90
+private val DASH_WORK_STAGES = listOf("backlog", "in_progress", "in_review", "blocked", "done")
+private val DASH_STAT_VALUES = listOf("total", "open", "needs_you", "pct_done", "cost") + DASH_WORK_STAGES
+private val DASH_GROUP_SHOWS = listOf("stages", "done")
+private val DASH_BUCKET_STATES = listOf("planned", "active", "closed", "released")
+private val DASH_BUCKET_GROUPS = listOf("sprint", "release")
+private val DASH_TEXT_FILTERS = listOf("query", "assignee", "status_name", "iteration", "epic", "item_type", "label")
+private val DASH_PRIORITIES = listOf("urgent", "high", "medium", "low", "none")
+private val DASH_STATUS_FILTERS = listOf("any", "open", "todo", "in_progress", "done")
+private val DASH_HAS_FILTERS = listOf("any", "active", "past_only", "none", "suggested")
+private val DASH_WORK_GROUP_BY = listOf("group", "org", "person", "mission", "account", "repo", "sprint", "release", "epic")
+
+/** The entries of [list] that are in [allowed]; each other one is a problem at `<where> › <noun> N`. */
+private fun dashPick(list: List<JsonElement>?, allowed: List<String>, p: Problems, where: String, noun: String) {
+    list?.forEachIndexed { j, x ->
+        if (x.stringOrNull()?.let { it in allowed } != true) p.add("$where › $noun ${j + 1}", "must be one of ${allowed.joinToString(", ")}")
+    }
+}
+
+private fun dashQuery(v: JsonElement?, p: Problems, at: String) {
+    if (v == null || v is JsonNull) return
+    if (v !is JsonObject) {
+        p.add(at, "`query` must be an object")
+        return
+    }
+    val where = "$at › query"
+    for (k in v.keys.sorted()) {
+        when (k) {
+            "org" -> {
+                val x = v[k]
+                val ok = x.stringOrNull() == "none" ||
+                    (x as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull?.let { it == kotlin.math.floor(it) && it >= 1 } == true
+                if (!ok) p.add(where, "`org` must be an org id or none")
+            }
+            "status" -> oneOf(v, k, p, where, DASH_STATUS_FILTERS)
+            "has" -> oneOf(v, k, p, where, DASH_HAS_FILTERS)
+            "group_by" -> oneOf(v, k, p, where, DASH_WORK_GROUP_BY)
+            "mine", "review" -> optBool(v, k, p, where)
+            "priority" -> oneOf(v, k, p, where, DASH_PRIORITIES)
+            "stages" -> dashPick(arr(v, k, p, where, 1, DASH_WORK_STAGES.size), DASH_WORK_STAGES, p, where, "stage")
+            else -> if (k in DASH_TEXT_FILTERS) str(v, k, p, where, 200, required = true) else p.add(where, "`$k` is not a filter")
+        }
+    }
+}
+
+/** One dashboard widget's problems, in the desktop's order; the phone draws none of them. */
+private fun dashWidget(o: JsonObject, p: Problems, at: String) {
+    val kind = oneOf(o, "kind", p, at, DASH_WIDGET_KINDS)
+    str(o, "title", p, at, 80, required = true)
+    dashQuery(o["query"], p, at)
+    // As written, not as checked: a bad `group_by` is one problem, not two.
+    val by = (o["query"] as? JsonObject)?.get("group_by")?.stringOrNull()
+    when (kind) {
+        "stat" -> {
+            oneOf(o, "value", p, at, DASH_STAT_VALUES)
+            optBool(o, "warn", p, at)
+        }
+        "groups" -> {
+            if (by == null) p.add(at, "a groups widget needs `query.group_by`")
+            oneOf(o, "show", p, at, DASH_GROUP_SHOWS, "stages")
+            val limit = whole(o, "limit", p, at, 1)
+            if (limit != null && limit > 20) p.add(at, "`limit` must be at most 20")
+            optBool(o, "hide_none", p, at)
+        }
+        "buckets" -> {
+            if (by !in DASH_BUCKET_GROUPS) p.add(at, "a buckets widget needs `query.group_by` sprint or release")
+            dashPick(optArr(o, "states", p, at, 1, DASH_BUCKET_STATES.size), DASH_BUCKET_STATES, p, at, "state")
+        }
+        "burnup" -> {
+            val days = whole(o, "days", p, at, 2)
+            if (days != null && days > DASH_BURNUP_MAX_DAYS) p.add(at, "`days` must be at most $DASH_BURNUP_MAX_DAYS")
+        }
+        "summary" -> {
+            str(o, "prompt", p, at, DASH_SUMMARY_PROMPT_MAX, required = true)
+            dashPick(optArr(o, "sources", p, at, 1, DASH_SUMMARY_SOURCES.size), DASH_SUMMARY_SOURCES, p, at, "source")
+        }
+        "feed" -> {
+            key(o, "key", p, at)
+            oneOf(o, "show", p, at, DASH_FEED_SHOWS, "text")
+        }
+        "fleet" -> {
+            oneOf(o, "source", p, at, DASH_FLEET_SOURCES)
+            oneOf(o, "show", p, at, DASH_FLEET_SHOWS, "stat")
+        }
+    }
+}
+
 private fun axis(v: JsonElement?, p: Problems, where: String): ResultAxis {
     if (v !is JsonObject) {
         p.add(where, "must be an object")
@@ -849,7 +944,9 @@ fun checkUiBlock(raw: String): UiCheck {
             val title = str(v, "title", p, "", 80, required = true)
             str(v, "intro", p, "", 300)
             val why = str(v, "why", p, "", 500)
-            arr(v, "widgets", p, "", 1, 12)
+            // Each widget checked as the desktop and the hub check it (review
+            // w14-6): one they refuse is not sent to a desktop that will not show it.
+            each(arr(v, "widgets", p, "", 1, 12), p, "widget") { o, at -> dashWidget(o, p, at) }
             title?.let { UiBlock.DesktopOnly("dashboard", it, why) }
         }
         else -> UiBlock.Setting(whole(v, "proposal", p, "", 1, required = true) ?: 0, str(v, "note", p, "", 500))
