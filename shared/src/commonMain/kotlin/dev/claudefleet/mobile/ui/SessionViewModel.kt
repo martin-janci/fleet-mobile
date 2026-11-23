@@ -580,6 +580,14 @@ class SessionViewModel(
      * pane, shown with Cancel until the turn ends and the hub types it.
      */
     private val queueWhileWorking: Boolean = false,
+    /**
+     * The fleet's scope, which outlives this screen (as `NewSessionViewModel`'s
+     * `callScope` does): a prompt on its way when the person presses Back or
+     * switches tab is not aborted with the screen. One that fails after the
+     * screen is gone is kept as Not sent ([DraftMemory]) for the return
+     * (review w17-1). Null runs the calls in [scope], as a bare view model does.
+     */
+    private val callScope: CoroutineScope? = null,
 ) {
     /**
      * The screen state this class owns, as opposed to what the fleet owns.
@@ -678,7 +686,9 @@ class SessionViewModel(
             // Only the words are kept across leaving the session, not why the
             // send failed: it may have gone through (review phone-systemic-2),
             // so the card asks for a look before Retry.
-            notSent = drafts.recallUnsent(sessionId)?.let { NotSent(it, Friendly("Not sent", "The hub may not have taken this prompt. Check the conversation, then retry it or edit it.", isError = false)) },
+            // Kept whole, so the card reads as it did and Retry reuses the
+            // send's `client_msg_id` (review w17-2).
+            notSent = drafts.recallNotSent(sessionId),
         ),
     )
     private val tokenReadOnly = !canSendPrompts
@@ -855,7 +865,7 @@ class SessionViewModel(
         }
         // Likewise a prompt the hub refused, until it is retried or edited (review w22-4).
         scope.launch {
-            local.map { it.notSent?.text }.distinctUntilChanged().collect { drafts.keepUnsent(sessionId, it) }
+            local.map { it.notSent }.distinctUntilChanged().collect { drafts.keepNotSent(sessionId, it) }
         }
         // A draft filled from outside the box while it is open (a lesson's prompt).
         scope.launch {
@@ -1382,7 +1392,11 @@ class SessionViewModel(
         val body = text.trim()
         local.update { it.copy(sending = true, error = null, pending = body, draft = "") }
         try {
-            val r = actions.queuePrompt(sessionId, body, SendLaterTiming())
+            val r = outliving({ actions.queuePrompt(sessionId, body, SendLaterTiming()) }) { t ->
+                // Gone: back in the box the return finds, unless it holds
+                // something else or the hub may have kept it (review w17-3).
+                if (!scope.isActive && !mayHaveRun(t) && drafts.recall(sessionId).isEmpty()) drafts.keep(sessionId, text)
+            }
             quickReplies.remember(body)
             val queued = orNullUnlessCancelled { actions.queuedPrompts(sessionId) }
             local.update { it.copy(sending = false, pending = null, queued = queued?.filter { q -> q.waiting } ?: it.queued) }
@@ -1391,7 +1405,17 @@ class SessionViewModel(
             local.update { it.copy(sending = false, pending = null, draft = if (it.draft.isEmpty()) text else it.draft) }
             throw e
         } catch (t: Throwable) {
-            val failure = friendly(t)
+            // `queue_prompt` keeps no `client_msg_id`: an answer lost after the
+            // hub stored the prompt is read back, and words it has are not put
+            // back in the box to be queued twice (review w17-3).
+            val unknown = mayHaveRun(t)
+            val queued = if (unknown) orNullUnlessCancelled { actions.queuedPrompts(sessionId) }?.filter { q -> q.waiting } else null
+            if (queued != null && queued.any { q -> q.body == body }) {
+                quickReplies.remember(body)
+                local.update { it.copy(sending = false, pending = null, queued = queued) }
+                return
+            }
+            val failure = if (unknown) friendlyWrite(t) else friendly(t)
             local.update {
                 it.copy(
                     sending = false,
@@ -1515,7 +1539,15 @@ class SessionViewModel(
             )
         }
         try {
-            actions.sendPrompt(sessionId, text, clientMsgId)
+            outliving({ actions.sendPrompt(sessionId, text, clientMsgId) }) { t ->
+                // Written here too, not only by this screen's collector: the
+                // screen may be gone, or go before its collector runs.
+                if (keep) {
+                    drafts.keepNotSent(sessionId, NotSent(text, friendlyWrite(t), clientMsgId, mayHaveRun(t)))
+                } else if (clearDraft && !scope.isActive && drafts.recall(sessionId).isEmpty()) {
+                    drafts.keep(sessionId, text)
+                }
+            }
             quickReplies.remember(text)
             // Any accepted prompt starts a new turn, so the suggestion on offer
             // is spent — unless the row has already moved on to another one.
@@ -1557,6 +1589,32 @@ class SessionViewModel(
                 )
             }
         }
+    }
+
+    /**
+     * Run [call] in [callScope], so leaving the screen does not abort it, and
+     * wait for it here. [onFailure] runs there, before this returns, with
+     * whatever [call] threw but cancellation: the place to keep the words
+     * when the screen may be gone (review w17-1).
+     */
+    private suspend fun <T> outliving(call: suspend () -> T, onFailure: (Throwable) -> Unit): T {
+        val outer = callScope ?: return call()
+        val result = CompletableDeferred<Result<T>>()
+        outer.launch {
+            val r = try {
+                Result.success(call())
+            } catch (e: CancellationException) {
+                Result.failure(e)
+            } catch (t: Throwable) {
+                try {
+                    onFailure(t)
+                } catch (_: Throwable) {
+                }
+                Result.failure(t)
+            }
+            result.complete(r)
+        }
+        return result.await().getOrThrow()
     }
 
     /**

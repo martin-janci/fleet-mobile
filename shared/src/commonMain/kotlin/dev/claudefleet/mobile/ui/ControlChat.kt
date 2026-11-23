@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -176,8 +177,9 @@ fun controlBlockedLine(blocked: String?, host: String?, fallback: String? = null
 
 /**
  * Control's state on the phone. [attach] while the tab shows: it reads
- * `operator_status` once and Control's confirms every [pollMs] (the hub's
- * `confirm:changed` frame is not on the phone's stream yet). [wake] is the
+ * `operator_status` once, and Control's confirms and handoffs on each
+ * `confirm:changed` / `handoff:changed` frame, with a poll every [pollMs] as
+ * the net under a lost frame. [wake] is the
  * one write, and only on a tap: `ensure_operator` may start a session.
  */
 class ControlViewModel(
@@ -289,6 +291,12 @@ class ControlViewModel(
                     if (fleet.capabilities.value.confirms && fleet.status.value is ConnectionStatus.Connected) readConfirms()
                 }
             }
+            // Handoffs likewise, on `handoff:changed` (review w19-5).
+            launch {
+                fleet.handoffChanges.collect {
+                    if (fleet.capabilities.value.handoffs && fleet.status.value is ConnectionStatus.Connected) readHandoffs()
+                }
+            }
             readStatus()
             // Every tick checks the capabilities, rather than the loop ending
             // when they are not known yet (a cold start before `tools/list`
@@ -345,10 +353,12 @@ class ControlViewModel(
                 local.update { it.copy(waking = false) }
                 throw e
             } catch (t: Throwable) {
-                local.update { it.copy(waking = false, error = friendly(t)) }
+                local.update { it.copy(waking = false, error = friendlyWrite(t)) }
                 // Starting a session can outlast the call's timeout and still
                 // land: ask what is true now rather than say "not running".
                 readStatus()
+                // It did land: no failure banner over a running Control (review w17-6).
+                if (local.value.status?.ready == true) local.update { it.copy(error = null) }
             }
         }
     }
@@ -450,7 +460,11 @@ class ControlViewModel(
     }
 
     companion object {
-        const val CONFIRM_POLL_MS = 4_000L
+        /**
+         * The safety net under `confirm:changed` and `handoff:changed`, which
+         * say each change at once: a hub without them, a lost frame (review w19-5).
+         */
+        const val CONFIRM_POLL_MS = 30_000L
 
         /** How many receipts Control reads, and how many chips it draws. */
         const val HANDOFFS_SHOWN = 20
@@ -511,7 +525,8 @@ fun ControlViews(
         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        ViewPill("Chat", selected = true, tag = ControlView.Chat) {}
+        // Where the person is: no click, nothing to announce as an action.
+        ViewPill("Chat", selected = true, tag = ControlView.Chat, onClick = null)
         ViewPill(listOfNotNull("Sessions", sessions?.toString()).joinToString(" "), selected = false, tag = ControlView.Sessions, onClick = onSessions)
         if (onMissions != null) {
             ViewPill(listOfNotNull("Missions", missions?.toString()).joinToString(" "), selected = false, tag = ControlView.Missions, onClick = onMissions)
@@ -523,20 +538,30 @@ fun ControlViews(
     }
 }
 
+/**
+ * One of Control's view pills. The pill is drawn 32 dp tall inside a
+ * `touch-min` target, and the ones that open another screen are buttons, not
+ * tabs (review w17-8); the selected Chat pill takes no tap.
+ */
 @Composable
-private fun ViewPill(label: String, selected: Boolean, tag: ControlView, onClick: () -> Unit) {
+private fun ViewPill(label: String, selected: Boolean, tag: ControlView, onClick: (() -> Unit)?) {
     val o = Fleet.colors
-    Surface(
-        color = if (selected) o.accent.copy(alpha = 0.16f) else o.bgPane,
-        border = BorderStroke(1.dp, if (selected) o.accent else o.controlBorder),
-        shape = RoundedCornerShape(50),
+    Box(
+        contentAlignment = Alignment.Center,
         modifier = Modifier
-            .heightIn(min = 32.dp)
+            .heightIn(min = OrbitTokens.spacing("touch-min").dp)
             .semantics { this.selected = selected }
-            .clickable(role = Role.Tab, onClick = onClick)
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
             .testTag(CONTROL_VIEW_TAG + tag.name),
     ) {
-        Text(label, style = Fleet.type.textSm, color = if (selected) o.fg else o.fg2, modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp))
+        Surface(
+            color = if (selected) o.accent.copy(alpha = 0.16f) else o.bgPane,
+            border = BorderStroke(1.dp, if (selected) o.accent else o.controlBorder),
+            shape = RoundedCornerShape(50),
+            modifier = Modifier.heightIn(min = 32.dp),
+        ) {
+            Text(label, style = Fleet.type.textSm, color = if (selected) o.fg else o.fg2, modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp))
+        }
     }
 }
 
@@ -919,7 +944,8 @@ const val CONTROL_FORMS_SHOWN = 3
  * whose form its own conversation already carries.
  */
 fun controlForms(rows: List<SessionRow>, controlSessionId: Long?): List<SessionRow> =
-    rows.filter { it.pendingForm != null && it.id != controlSessionId }
+    // A lost session's form waits on an agent that is gone (review w13-2).
+    rows.filter { it.pendingForm != null && it.isLive && it.id != controlSessionId }
 
 const val CONTROL_FORM_TAG = "control.form."
 

@@ -404,6 +404,18 @@ class AutomationTest {
         assertEquals("Run now only · skips the next run", routineLine(Routine(id = 5, enabled = true, trigger = "manual", skipNext = true), now))
     }
 
+    /** Review w06-6: the cron line says the zone the hub reads it in, so "0 9" does not read as phone time. */
+    @Test
+    fun a_schedule_names_the_zone_it_runs_in() {
+        val now = 1_000_000L
+        val cron = Routine(id = 1, enabled = true, trigger = "cron", cron = "0 9 * * 1-5", nextRunAt = now + 3 * 3_600)
+        assertEquals("0 9 * * 1-5 UTC · next in 3 h", routineLine(cron.copy(utcOffsetMin = 0), now))
+        assertEquals("0 9 * * 1-5 UTC+1 · next in 3 h", routineLine(cron.copy(utcOffsetMin = 60), now))
+        assertEquals("0 9 * * 1-5 UTC-5:30 · next in 3 h", routineLine(cron.copy(utcOffsetMin = -330), now))
+        assertEquals("0 9 * * 1-5 Europe/Bratislava · next in 3 h", routineLine(cron.copy(utcOffsetMin = 60, timeZone = "Europe/Bratislava"), now))
+        assertEquals("0 9 * * 1-5 · next in 3 h", routineLine(cron, now), "an older hub says no zone")
+    }
+
     @Test
     fun a_run_says_what_it_came_to_when_how_long_and_what_it_cost() {
         val now = 10_000L

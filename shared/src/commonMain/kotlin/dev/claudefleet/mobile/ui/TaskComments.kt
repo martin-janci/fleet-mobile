@@ -64,8 +64,9 @@ internal fun TaskCommentsBlock(state: TaskUiState, handlers: TaskHandlers, nowSe
     val timeline = remember(state.comments, state.trackerComments) { commentTimeline(state.comments, state.trackerComments) }
     if (timeline.isEmpty() && !state.canComment && !state.trackerCommentsFailed) return
     // Saveable: this block is a lazy item, and scrolling it away must not
-    // untick the box while the draft (the view model's) is kept.
-    var toTracker by rememberSaveable { mutableStateOf(false) }
+    // untick the box while the draft (the view model's) is kept. Ticked
+    // from the start, as on the desktop and in work-graph.md (review w07-4).
+    var toTracker by rememberSaveable { mutableStateOf(true) }
     var deleting by remember { mutableStateOf<TaskComment?>(null) }
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -711,7 +711,7 @@ fun PhoneTaskScreen(
                             "Open in ${task.trackerName?.takeIf { it.isNotBlank() } ?: "the tracker"}",
                             color = o.accent,
                             fontSize = 14.sp,
-                            modifier = Modifier.heightIn(min = 32.dp).clickable { runCatching { uri.openUri(url) } }.padding(vertical = 6.dp),
+                            modifier = Modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp).clickable { runCatching { uri.openUri(url) } }.padding(vertical = 6.dp),
                         )
                     }
                 }

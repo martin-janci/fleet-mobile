@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.DeviceActions
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.DebugDevice
@@ -96,7 +97,9 @@ class SessionDevicesViewModel(
         fleet.capabilities.map { it.debugDevices }.distinctUntilChanged().collectLatest { served ->
             if (!served) return@collectLatest
             while (true) {
-                readQuietly()
+                // In the background the stream is stopped: no call goes out
+                // until the app is back (review w19-3), as Terminals' loop.
+                if (fleet.status.value is ConnectionStatus.Connected) readQuietly()
                 delay(POLL_MS)
             }
         }

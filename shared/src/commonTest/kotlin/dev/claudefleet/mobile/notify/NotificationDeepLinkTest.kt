@@ -18,6 +18,13 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.test.runTest
+
+private class PairedSecrets(private val hub: String) : Secrets {
+    override suspend fun read(): Credentials? = Credentials(hub, "tok", "phone", "full")
+    override suspend fun write(credentials: Credentials) {}
+    override suspend fun clear() {}
+}
 
 private class NoSecrets : Secrets {
     override suspend fun read(): Credentials? = null
@@ -98,5 +105,35 @@ class NotificationDeepLinkTest {
         c.dropOpenRequests()
         assertNull(c.consumeOpenMission())
         assertNull(c.consumeRetrySession())
+    }
+
+    /**
+     * Review w16-1: a notification left up from an earlier pairing names
+     * that hub's session, mission or retry. On another hub the same id is
+     * someone else's, so the tap opens nothing there and retries nothing.
+     */
+    @Test
+    fun a_tap_posted_for_another_hub_opens_and_retries_nothing() = runTest {
+        val c = AppContainer(
+            secrets = PairedSecrets("https://b.example"),
+            prefs = FakePrefs(),
+            http = HttpClient(MockEngine { respondError(HttpStatusCode.ServiceUnavailable) }),
+            appVersion = "test",
+        )
+        c.session.restore()
+
+        c.onRetrySession(42, hub = "https://a.example")
+        assertNull(c.consumeOpenSession(), "hub A's session 42 is not hub B's")
+        assertNull(c.consumeRetrySession(), "and is never retried on B")
+        assertFalse(c.consumeQuestionFocus(42))
+        c.onOpenMission(5, hub = "https://a.example")
+        assertNull(c.consumeOpenMission())
+
+        c.onOpenSession(42, hub = "https://b.example")
+        assertEquals(42L, c.consumeOpenSession(), "this hub's tap opens")
+        c.onOpenMission(5, hub = "https://b.example")
+        assertEquals(5L, c.consumeOpenMission())
+        c.onOpenSession(43)
+        assertEquals(43L, c.consumeOpenSession(), "a tap that names no hub (posted before this was) still opens")
     }
 }

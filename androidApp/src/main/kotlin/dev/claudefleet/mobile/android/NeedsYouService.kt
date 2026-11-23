@@ -12,9 +12,11 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import dev.claudefleet.mobile.AppContainer
 import dev.claudefleet.mobile.data.AuthState
+import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.net.HubClient
 import dev.claudefleet.mobile.notify.BackgroundNotifier
 import dev.claudefleet.mobile.notify.NeedsYouAlert
@@ -34,6 +36,8 @@ import dev.claudefleet.mobile.notify.decodeSeen
 import dev.claudefleet.mobile.notify.encodeSeen
 import dev.claudefleet.mobile.notify.needsYouEvents
 import dev.claudefleet.mobile.notify.notifyAllows
+import dev.claudefleet.mobile.notify.androidNotificationsNote
+import dev.claudefleet.mobile.notify.watchingNotice
 import dev.claudefleet.mobile.store.Credentials
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CancellationException
@@ -154,8 +158,28 @@ class NeedsYouService : Service() {
             memory.edit().remove(SEEN).apply()
             withdrawAll()
         }
+        // Every alert this watch posts names its hub, so a tap on one left up
+        // after a re-pair cannot open the same id on another hub (review w16-1).
+        hub = credentials.hub
         val fleet = container.repository(credentials, this)
         fleet.start()
+        // The ongoing notice says when the watch cannot do its job — the hub
+        // refused this build, or has not answered for a while — rather than
+        // claiming to watch all evening (review w16-2).
+        launch {
+            var downSince: Long? = null
+            // Never a line: the first look always writes, so a previous
+            // credential's trouble line does not stay up.
+            var said: String? = "\u0000"
+            fleet.status.collect { status ->
+                downSince = if (status is ConnectionStatus.Connected) null else downSince ?: (System.currentTimeMillis() / 1000)
+                val line = watchingNotice(status, downSince)
+                if (line != said) {
+                    said = line
+                    manager(this@NeedsYouService).notify(ONGOING_ID, ongoing(line))
+                }
+            }
+        }
         launch { watchRoutines(HubClient(http, credentials.hub, credentials.token), container) }
         launch { watchMissions(HubClient(http, credentials.hub, credentials.token), container) }
         val remembered = memory.getStringSet(SEEN, null)?.let { decodeSeen(it.toList()) }
@@ -175,6 +199,10 @@ class NeedsYouService : Service() {
     /** The sessions with a notification up, for the group's summary. */
     private val shown = linkedMapOf<Long, String>()
 
+    /** The hub the current watch is for, carried by every alert's taps ([EXTRA_HUB]). */
+    @Volatile
+    private var hub: String? = null
+
     /**
      * Every alert this app has up — sessions, the summary, routines,
      * missions, whichever instance posted them — but not the ongoing notice
@@ -182,8 +210,7 @@ class NeedsYouService : Service() {
      */
     private fun withdrawAll() {
         shown.clear()
-        val m = manager(this)
-        m.activeNotifications.filter { it.notification.channelId == ALERTS }.forEach { m.cancel(it.id) }
+        withdrawAlerts(this)
     }
 
     /**
@@ -194,7 +221,7 @@ class NeedsYouService : Service() {
      */
     private fun withdraw(sessionId: Long) {
         shown.remove(sessionId)
-        manager(this).cancel(alertId(sessionId))
+        manager(this).cancel(TAG_SESSION, alertId(sessionId))
         summarize()
     }
 
@@ -206,7 +233,7 @@ class NeedsYouService : Service() {
         val m = manager(this)
         // An alert the person tapped (auto-cancel) or swiped away left
         // without telling [shown]: count only what is still showing.
-        val showing = m.activeNotifications.map { it.id }.toSet()
+        val showing = m.activeNotifications.filter { it.tag == TAG_SESSION }.map { it.id }.toSet()
         shown.keys.retainAll { alertId(it) in showing }
         if (shown.size < 2) {
             m.cancel(SUMMARY_ID)
@@ -237,8 +264,13 @@ class NeedsYouService : Service() {
      */
     private fun post(alert: NeedsYouAlert) {
         val c = needsYouContent(alert)
+        // Its own action: the request code alone is shared with the other
+        // kinds' taps (a mission's, the update notice's), and extras do not
+        // tell two PendingIntents apart (review w16-4).
         val open = Intent(this, MainActivity::class.java)
+            .setAction(ACTION_OPEN_SESSION)
             .putExtra(EXTRA_SESSION_ID, alert.sessionId)
+            .putExtra(EXTRA_HUB, hub)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val tap = PendingIntent.getActivity(
             this,
@@ -292,7 +324,7 @@ class NeedsYouService : Service() {
         }
         val n = builder.build()
         // One per session: a session that needs you again replaces its own.
-        manager(this).notify(alertId(alert.sessionId), n)
+        manager(this).notify(TAG_SESSION, alertId(alert.sessionId), n)
         shown[alert.sessionId] = "${c.title} — ${alert.text}"
         summarize()
     }
@@ -345,7 +377,7 @@ class NeedsYouService : Service() {
                 val (alerts, resolved) = watch.look(missions)
                 // A wait that ended takes its notification down (review w21-3),
                 // whichever instance of the service posted it.
-                for (id in resolved) manager(this).cancel(MISSION_BASE + (id % 100_000).toInt())
+                for (id in resolved) manager(this).cancel(TAG_MISSION, MISSION_BASE + (id % 100_000).toInt())
                 if (!AppVisibility.foreground && container.prefs.notifyAllows(MISSION_WAITING_REASON)) alerts.forEach(::postMission)
             }
             delay(if (missions != null) ROUTINE_POLL_MS else ROUTINE_RETRY_MS)
@@ -362,7 +394,9 @@ class NeedsYouService : Service() {
             this,
             MISSION_BASE + (alert.missionId % 100_000).toInt(),
             Intent(this, MainActivity::class.java)
+                .setAction(ACTION_OPEN_MISSION)
                 .putExtra(EXTRA_MISSION_ID, alert.missionId)
+                .putExtra(EXTRA_HUB, hub)
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
@@ -376,7 +410,7 @@ class NeedsYouService : Service() {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
         for (action in missionWaitActions(alert)) button(builder, action, open)
-        manager(this).notify(MISSION_BASE + (alert.missionId % 100_000).toInt(), builder.build())
+        manager(this).notify(TAG_MISSION, MISSION_BASE + (alert.missionId % 100_000).toInt(), builder.build())
     }
 
     /** The one place a notification gets a button; every button comes from the shared action lists. */
@@ -397,12 +431,13 @@ class NeedsYouService : Service() {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .build()
-        manager(this).notify(ROUTINE_BASE + (alert.runId % 100_000).toInt(), n)
+        manager(this).notify(TAG_ROUTINE, ROUTINE_BASE + (alert.runId % 100_000).toInt(), n)
     }
 
     private fun alertId(sessionId: Long) = ALERT_BASE + (sessionId % 100_000).toInt()
 
-    private fun ongoing(): Notification {
+    /** The ongoing notice; [trouble] is why the watch is not watching right now ([watchingNotice]). */
+    private fun ongoing(trouble: String? = null): Notification {
         val open = PendingIntent.getActivity(
             this,
             0,
@@ -411,8 +446,9 @@ class NeedsYouService : Service() {
         )
         return NotificationCompat.Builder(this, WATCHING)
             .setSmallIcon(R.drawable.ic_notify)
-            .setContentTitle("Watching the fleet")
-            .setContentText("You will be told when a session needs you. Turn it off in Settings.")
+            .setContentTitle(if (trouble == null) "Watching the fleet" else "Not watching the fleet")
+            .setContentText(trouble ?: "You will be told when a session needs you. Turn it off in Settings.")
+            .setStyle(trouble?.let { NotificationCompat.BigTextStyle().bigText(it) })
             .setContentIntent(open)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)
@@ -421,6 +457,12 @@ class NeedsYouService : Service() {
 
     companion object {
         const val EXTRA_SESSION_ID = "dev.claudefleet.mobile.SESSION_ID"
+        /** The hub an alert was posted for (review w16-1). */
+        const val EXTRA_HUB = "dev.claudefleet.mobile.HUB"
+        /** A session alert's tap; each kind has its own action, so their PendingIntents never resolve to one (review w16-4). */
+        const val ACTION_OPEN_SESSION = "dev.claudefleet.mobile.NEEDS_YOU_OPEN_SESSION"
+        /** A mission alert's tap. */
+        const val ACTION_OPEN_MISSION = "dev.claudefleet.mobile.NEEDS_YOU_OPEN_MISSION"
         /** The mission a mission's notification opens. */
         const val EXTRA_MISSION_ID = "dev.claudefleet.mobile.MISSION_ID"
         /** A failure notification's Retry: open the session and retry it in the app. */
@@ -428,7 +470,8 @@ class NeedsYouService : Service() {
         /** The service's own intent for a notification's Later. */
         const val ACTION_LATER = "dev.claudefleet.mobile.NEEDS_YOU_LATER"
         private const val WATCHING = "watching"
-        private const val ALERTS = "needs_you"
+        /** The alerts' channel, which a person can silence in Android settings ([AndroidBackgroundNotifier.refreshNote]). */
+        internal const val ALERTS = "needs_you"
         private const val ONGOING_ID = 1
         private const val ALERT_BASE = 1_000
         private const val SUMMARY_ID = 2
@@ -438,6 +481,27 @@ class NeedsYouService : Service() {
         private const val ROUTINE_RETRY_MS = 5 * 60_000L
         private const val GROUP = "needs_you"
         private const val SEEN = "seen"
+
+        /**
+         * Each kind's notifications under a tag of its own, so a session's id
+         * never lands on a mission's, a routine's or the update notice's
+         * (`UpdateNotices.ID`) (review w16-4).
+         */
+        private const val TAG_SESSION = "session"
+        private const val TAG_MISSION = "mission"
+        private const val TAG_ROUTINE = "routine"
+
+        /**
+         * Every alert this app has up — sessions, the summary, routines,
+         * missions, whichever instance posted them — but not the ongoing
+         * notice or another channel's (the update's). From the service, and
+         * from the notifier when "Notify me" goes off or the pairing goes,
+         * with no service running (review w16-1).
+         */
+        fun withdrawAlerts(context: Context) {
+            val m = manager(context)
+            m.activeNotifications.filter { it.notification.channelId == ALERTS }.forEach { m.cancel(it.tag, it.id) }
+        }
 
         private fun manager(context: Context) = context.getSystemService(NotificationManager::class.java)
 
@@ -475,10 +539,33 @@ class AndroidBackgroundNotifier(private val context: Context) : BackgroundNotifi
     override val supported: Boolean = true
     override val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
 
+    private val _note = MutableStateFlow<String?>(null)
+
+    /**
+     * Said under the switch when Android keeps the alerts from the person:
+     * the app's notifications turned off, or the alerts' channel silenced,
+     * after the switch went on (review w16-3). Read again whenever Settings
+     * comes back on screen.
+     */
+    override val note: StateFlow<String?> = _note.asStateFlow()
+
+    override fun refreshNote() {
+        val appOn = NotificationManagerCompat.from(context).areNotificationsEnabled()
+        val channel = context.getSystemService(NotificationManager::class.java)?.getNotificationChannel(NeedsYouService.ALERTS)
+        _note.value = androidNotificationsNote(appOn, channel?.importance != NotificationManager.IMPORTANCE_NONE)
+    }
+
     override fun setEnabled(on: Boolean) {
         prefs.edit().putBoolean(KEY, on).apply()
         _enabled.value = on
         apply()
+        // Stopping the service leaves its alerts up, and a later re-pair
+        // would read their ids as the new hub's (review w16-1).
+        if (!on) NeedsYouService.withdrawAlerts(context)
+    }
+
+    override fun withdrawAll() {
+        NeedsYouService.withdrawAlerts(context)
     }
 
     /** Start the service if it is wanted, stop it if not — at launch, and after every change. */

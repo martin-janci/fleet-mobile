@@ -24,9 +24,8 @@ class ChatBlockKindsTest {
     private companion object {
         /**
          * Shared cases for what the desktop and the hub check and the phone
-         * does not read yet: a wizard's drafted `values` and a dashboard's
-         * widgets (the phone checks only the block around them, review
-         * w21-5), a choice's `recommended`,
+         * does not read yet: a wizard's drafted `values` (a dashboard's
+         * widgets are checked since review w14-6), a choice's `recommended`,
          * a progress's `started_at` and step `detail`, and an error's next-step
          * `action`. Found when the fixture was copied again for the `device`
          * kind, which the phone does read. Each name must still be a case and
@@ -38,8 +37,6 @@ class ChatBlockKindsTest {
             "choices with a recommended that is not a flag",
             "a progress with a bad start time and a long step detail",
             "an error next step with an unknown action or no host",
-            "a dashboard whose widgets do not check out",
-            "a burn-up over too short or too long a window",
         )
     }
 

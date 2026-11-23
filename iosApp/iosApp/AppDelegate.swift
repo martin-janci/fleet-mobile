@@ -63,13 +63,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             return
         }
         let content = response.notification.request.content
+        // The hub it was posted for: a notification left up from an earlier
+        // pairing must not open the same id on another hub (review w16-1).
+        let hub = content.userInfo["hub"] as? String
         if let id = content.userInfo["missionId"] as? NSNumber {
-            MainViewControllerKt.onOpenMission(missionId: id.int64Value)
+            MainViewControllerKt.onOpenMission(missionId: id.int64Value, hub: hub)
         } else if let id = content.userInfo["sessionId"] as? NSNumber {
             if response.actionIdentifier == "retry" {
-                MainViewControllerKt.onRetrySession(sessionId: id.int64Value)
+                MainViewControllerKt.onRetrySession(sessionId: id.int64Value, hub: hub)
             } else {
-                MainViewControllerKt.onOpenSession(sessionId: id.int64Value)
+                MainViewControllerKt.onOpenSession(sessionId: id.int64Value, hub: hub)
             }
         }
         completionHandler()

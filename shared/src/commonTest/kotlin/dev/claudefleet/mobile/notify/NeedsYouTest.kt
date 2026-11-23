@@ -77,9 +77,9 @@ class NeedsYouTest {
         // The old fallback (a hub that stamps nothing) reads a ghost as lifecycle too: still silent.
         val (ghost, _) = needsYouAlerts(emptyMap(), listOf(row(7).copy(status = "ghost")))
         assertTrue(ghost.isEmpty())
-        // A lost row that still asks something is waiting, and rings.
+        // A lost row that still shows a question waits on an agent that is gone: silent too (review w13-2).
         val (asks, _) = needsYouAlerts(emptyMap(), listOf(row(8, "waiting").copy(lostAt = 80)))
-        assertEquals("waiting", asks.single().reason)
+        assertTrue(asks.isEmpty())
     }
 
     @Test

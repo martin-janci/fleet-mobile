@@ -3028,6 +3028,17 @@ private fun PromptBox(
     var showHistory by remember { mutableStateOf(false) }
     // The mic (MobileSession): what it hears goes after what is typed, unsent.
     val dictate = rememberDictation { heard -> onDraftChange(withDictation(state.draft, heard)) }
+    // The field's text lives here, not in `state.draft`: that is a `stateIn`
+    // of a `combine` on another dispatcher and trails the keystrokes, and a
+    // String-valued field recomposed with a stale value drops a character or
+    // jumps the cursor (review w17-7). The view model's value is taken only
+    // when it changed the draft itself — a quote, a fill, a send clearing it.
+    val echo = remember { ComposerEcho() }
+    var field by remember { mutableStateOf(state.draft) }
+    LaunchedEffect(state.draft) {
+        val d = state.draft
+        if (!echo.isEcho(d) && d != field) field = d
+    }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(focusNow) {
         if (focusNow) {
@@ -3065,8 +3076,12 @@ private fun PromptBox(
         val micKey = dictate.takeIf { typing }
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextField(
-                value = state.draft,
-                onValueChange = onDraftChange,
+                value = field,
+                onValueChange = { v ->
+                    field = v
+                    echo.typed(v)
+                    onDraftChange(v)
+                },
                 modifier = Modifier
                     .weight(1f)
                     .focusRequester(focusRequester)
@@ -3775,5 +3790,40 @@ private fun FleetNoteLine(note: FleetNote) {
                 }
             }
         }
+    }
+}
+
+/**
+ * The composer's own keystrokes on their way through the view model (review
+ * w17-7): a draft value that comes back from it is either an echo of one of
+ * these, which the field already shows (or has typed past), or a change the
+ * view model made itself, which the field takes.
+ */
+internal class ComposerEcho {
+    private val sent = ArrayDeque<String>()
+
+    /** The field sent [text] to the view model. */
+    fun typed(text: String) {
+        sent.addLast(text)
+        while (sent.size > MAX_PENDING) sent.removeFirst()
+    }
+
+    /**
+     * True when [fromViewModel] is one of the field's own values coming back:
+     * it and every older one are spent. False for a value the field never
+     * sent, which the view model wrote itself; nothing is pending after it.
+     */
+    fun isEcho(fromViewModel: String): Boolean {
+        val i = sent.indexOf(fromViewModel)
+        if (i < 0) {
+            sent.clear()
+            return false
+        }
+        repeat(i + 1) { sent.removeFirst() }
+        return true
+    }
+
+    private companion object {
+        const val MAX_PENDING = 64
     }
 }

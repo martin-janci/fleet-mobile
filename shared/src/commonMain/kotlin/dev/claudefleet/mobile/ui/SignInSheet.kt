@@ -58,6 +58,14 @@ const val SIGN_IN_SEND_CODE_TAG = "sign_in.send_code"
 const val SIGN_IN_COMMAND_TAG = "sign_in.command"
 const val SIGN_IN_DONE_TAG = "sign_in.done"
 
+internal const val SIGN_IN_MAC_NOTE_TAG = "signIn.macNote"
+
+/** The Mac note's words (the desktop's SignInAgain), pointing to the desktop for + Add account. */
+fun macLoginNote(host: String): String =
+    "$host is a Mac. Signing its own login in from fleet writes ~/.claude/.credentials.json next to the Keychain copy, " +
+        "and the two copies sign each other out. A login profile has only one copy: add one for this account with " +
+        "+ Add account on the desktop instead."
+
 /** How often the link's expiry line is redrawn while the sheet is open. */
 private const val EXPIRY_TICK_MS = 15_000L
 
@@ -90,6 +98,15 @@ fun SignInSheet(state: SignInUiState, vm: SignInViewModel) {
             when {
                 target.token && target.profile != null -> {
                     Text("${target.profile} signs in with a setup token: ${setupTokenRenewal(target.host, target.profile)}.", style = MaterialTheme.typography.bodyMedium)
+                }
+                // Review w03-6: the desktop's Mac note. The phone has no
+                // + Add account, so it points there.
+                state.macNote -> {
+                    Text(macLoginNote(target.host), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag(SIGN_IN_MAC_NOTE_TAG))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { vm.finish() }) { Text("Cancel") }
+                        OutlinedButton(onClick = { vm.signInAnyway() }) { Text("Sign in here anyway") }
+                    }
                 }
                 done != null -> {
                     Text("$done New sessions on ${target.host} can bill it.", style = MaterialTheme.typography.bodyMedium)

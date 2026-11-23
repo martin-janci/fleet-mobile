@@ -48,10 +48,13 @@ class MainActivity : ComponentActivity() {
         if (intent == null || intent.getBooleanExtra(EXTRA_DELIVERED, false)) return
         // A tapped "needs you" notification: open that session; its Retry
         // opens it and retries there; a mission's opens that mission.
+        // The hub it was posted for: one left up from an earlier pairing must
+        // not open the same id on another hub (review w16-1).
+        val hub = intent.getStringExtra(NeedsYouService.EXTRA_HUB)
         intent.getLongExtra(NeedsYouService.EXTRA_SESSION_ID, -1L).takeIf { it >= 0 }?.let { id ->
-            if (intent.action == NeedsYouService.ACTION_RETRY) container.onRetrySession(id) else container.onOpenSession(id)
+            if (intent.action == NeedsYouService.ACTION_RETRY) container.onRetrySession(id, hub) else container.onOpenSession(id, hub)
         }
-        intent.getLongExtra(NeedsYouService.EXTRA_MISSION_ID, -1L).takeIf { it >= 0 }?.let(container::onOpenMission)
+        intent.getLongExtra(NeedsYouService.EXTRA_MISSION_ID, -1L).takeIf { it >= 0 }?.let { container.onOpenMission(it, hub) }
         intent.takeIf { it.action == Intent.ACTION_VIEW }?.data?.let {
             // A browser adds BROWSABLE to every intent it fires: such a link is
             // only accepted as the answer to this phone's own sign-in.

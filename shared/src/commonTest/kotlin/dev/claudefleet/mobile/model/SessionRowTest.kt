@@ -148,6 +148,28 @@ class SessionRowTest {
         assertNull(calm.copy(kind = "external", claudeStatus = "blocked").attentionReason)
     }
 
+    /**
+     * Review w13-2: waiting is a live state. A lost row whose form is still
+     * open (or whose last state was blocked) waits on an agent that is gone:
+     * it is lifecycle, not "Needs you · waiting", whatever an older hub stamped.
+     */
+    @Test
+    fun a_lost_session_with_an_open_form_does_not_wait_on_anyone() {
+        val form = json.decodeFromString(
+            SessionRow.serializer(),
+            """{"id":1,"claude_status":"idle","pending_form":{"form_id":"f1","title":"Deploy?"}}""",
+        )
+        assertEquals("waiting", form.attentionReason)
+        assertEquals("lifecycle", form.copy(lostAt = 5).attentionReason)
+        assertEquals("lifecycle", form.copy(status = "ghost", claudeStatus = "blocked").attentionReason)
+        assertFalse(form.copy(lostAt = 5).needsAttention)
+        val stamped = json.decodeFromString(
+            SessionRow.serializer(),
+            """{"id":1,"lost_at":5,"needs_attention":{"reason":"waiting","since":42}}""",
+        )
+        assertFalse(stamped.needsAttention, "a lost row is not counted as waiting even when stamped so")
+    }
+
     /** The phone view from a hub with the work graph: `ok_json_compact` drops what is empty. */
     @Test
     fun work_and_the_suggestion_parse_with_every_optional_field_absent() {

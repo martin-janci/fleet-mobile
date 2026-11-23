@@ -5,6 +5,7 @@ import dev.claudefleet.mobile.model.BackgroundOptions
 import dev.claudefleet.mobile.model.NewBgSessionResult
 import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.QueuePromptResult
+import dev.claudefleet.mobile.model.QueuedPrompt
 import dev.claudefleet.mobile.model.SuggestedHost
 
 /**
@@ -69,6 +70,13 @@ interface NewSessionActions {
         throw UnsupportedOperationException("queue_prompt")
 
     /**
+     * The session's queued prompts (`queued_prompts`), to tell whether a first
+     * message whose answer was lost was kept after all (review w17-3). Null
+     * where it cannot be read: the message then goes back in the box.
+     */
+    suspend fun queuedPrompts(sessionId: Long): List<QueuedPrompt>? = null
+
+    /**
      * Jev's host for a new session of [projectId] (`propose_host_placement`),
      * or null when it proposes none. A fake that does not care proposes none.
      */
@@ -109,4 +117,7 @@ class HubNewSessionActions(private val session: AppSession) : NewSessionActions 
 
     override suspend fun firstMessage(sessionId: Long, prompt: String): QueuePromptResult =
         session.withClient { it.queuePrompt(sessionId, prompt) }
+
+    override suspend fun queuedPrompts(sessionId: Long): List<QueuedPrompt> =
+        session.withClient { it.queuedPrompts(sessionId, null) }
 }

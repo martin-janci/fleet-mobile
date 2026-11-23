@@ -83,4 +83,16 @@ class EscalationLaterTest {
         assertEquals(false, queuesSendNow(false, "working"))
         assertEquals(false, queuesSendNow(true, null))
     }
+
+    /** Review w21-10: the cards' scope is Control's threads by default, kept across a restart, and the switch shows only when it changes something. */
+    @Test
+    fun the_all_fleet_switch_is_kept_and_shows_only_when_there_is_more() {
+        val prefs = FakePrefs()
+        assertEquals(false, EscalationLater(prefs).fleetWide.value)
+        EscalationLater(prefs).setFleetWide(true)
+        assertEquals(true, EscalationLater(prefs).fleetWide.value)
+        assertNull(escalationScopeLabel(EscalationScope(fleetWide = false, others = 0)))
+        assertEquals("All fleet (2 more)", escalationScopeLabel(EscalationScope(fleetWide = false, others = 2)))
+        assertEquals("Only Control's threads", escalationScopeLabel(EscalationScope(fleetWide = true, others = 0)))
+    }
 }

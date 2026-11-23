@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -141,9 +142,25 @@ fun doneTodayRows(sessions: List<SessionRow>, midnight: Long): List<SessionRow> 
             StatusWord.of(StatusTone.of(r.claudeStatus, r.stuckKind)).let { it == StatusWord.DONE || it == StatusWord.IDLE }
     }.sortedWith(compareByDescending<SessionRow, Long?>(nullsLast()) { it.lastActivityAt }.thenBy { it.id })
 
-/** "4 need you · 6 running · +1 proposed": the Inbox header's line; Jev's proposals ([proposedRows]) never join the count. */
-internal fun inboxSubtitle(needYou: Int, running: Int, proposed: Int = 0): String =
-    "$needYou need${if (needYou == 1) "s" else ""} you · $running running" + if (proposed > 0) " · +$proposed proposed" else ""
+/**
+ * "4 need you · 6 running · +1 proposed · 6 paused": the Inbox header's line;
+ * Jev's proposals ([proposedRows]) never join the count, nor do the paused
+ * rows ([pausedRows]), which are named so a mass loss is not silent (review w04-4).
+ */
+internal fun inboxSubtitle(needYou: Int, running: Int, proposed: Int = 0, paused: Int = 0): String =
+    "$needYou need${if (needYou == 1) "s" else ""} you · $running running" +
+        (if (proposed > 0) " · +$proposed proposed" else "") +
+        (if (paused > 0) " · $paused paused" else "")
+
+/**
+ * The sessions fleet paused for no one to answer — lost, a ghost, on their way
+ * out (`lifecycle`, state Paused): out of the Inbox and its notifications, and
+ * counted in its header as the desktop's footer does (`notWaiting`, review w04-4).
+ */
+fun pausedRows(sessions: List<SessionRow>, access: MyAccess = MyAccess.UNKNOWN): List<SessionRow> =
+    sessions.filter {
+        (it.attention?.state == "paused" || it.attentionReason == "lifecycle") && access.levelFor(it) == null
+    }
 
 /**
  * What an empty Inbox says. "Nothing needs you" is a claim about the fleet,
@@ -186,6 +203,8 @@ fun InboxScreen(
     doneTodayList: List<SessionRow> = emptyList(),
     /** Jev's "probably waiting" rows ([proposedRows]): named in the header, never counted. */
     proposed: Int = 0,
+    /** The paused rows ([pausedRows]): named in the header, never counted (review w04-4). */
+    paused: Int = 0,
     /** Those rows themselves (G5.4), drawn under Needs you with Not waiting. */
     proposedList: List<SessionRow> = emptyList(),
     /** Missions that wait on a person ([missionWaits]), rows of their own under the sessions (G5.4). */
@@ -215,7 +234,7 @@ fun InboxScreen(
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
             title = "Inbox",
-            subtitle = inboxSubtitle(needYou, running, proposed),
+            subtitle = inboxSubtitle(needYou, running, proposed, paused),
             modifier = Modifier.tourAnchor(anchors, TourAnchor.Header),
             actions = {
                 onOpenToday?.let { TextButton(onClick = it, modifier = Modifier.tourAnchor(anchors, TourAnchor.Today)) { Text("Today") } }
@@ -442,6 +461,8 @@ class InboxRowHandlers(
     val onCancelSwitch: (Long) -> Unit = {},
     val onWait: (Long, Long) -> Unit = { _, _ -> },
     val onNotWaiting: (SessionRow) -> Unit = {},
+    /** A tap on a row's notice puts it away (review w17-5). */
+    val onDismissNotice: (Long) -> Unit = {},
 )
 
 /**
@@ -591,6 +612,13 @@ private fun InboxRowButtons(
                 }
             }
         }
-        notice?.let { Text(it, color = o.fg2, fontSize = 12.sp) }
+        notice?.let {
+            Text(
+                it,
+                color = o.fg2,
+                fontSize = 12.sp,
+                modifier = Modifier.clickable(onClickLabel = "Dismiss") { handlers.onDismissNotice(row.id) },
+            )
+        }
     }
 }

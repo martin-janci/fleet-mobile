@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.ui.theme.OrbitTokens
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -69,7 +70,7 @@ internal fun TaskResultBlock(state: TaskUiState, handlers: TaskHandlers, nowSeco
                 resultPrLabel(pr),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.heightIn(min = 32.dp).clickable { runCatching { uri.openUri(pr.url) } }.padding(vertical = 6.dp),
+                modifier = Modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp).clickable { runCatching { uri.openUri(pr.url) } }.padding(vertical = 6.dp),
             )
         }
     }

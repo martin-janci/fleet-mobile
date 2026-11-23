@@ -39,6 +39,10 @@ class IosBackgroundNotifier(
         }
     }
 
+    override fun withdrawAll() {
+        alertPoster.withdrawAll()
+    }
+
     /** Main thread only: `backgroundRefreshStatus` is UIKit. Settings calls it on resume. */
     override fun refreshNote() {
         val refresh = UIApplication.sharedApplication.backgroundRefreshStatus ==

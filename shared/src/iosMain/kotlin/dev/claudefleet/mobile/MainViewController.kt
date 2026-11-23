@@ -122,25 +122,25 @@ private val iosContainer: AppContainer by lazy {
 }
 
 /** The one notifier, shared by the container (Settings, the open app) and the background check. */
-private val iosNotifier: IosBackgroundNotifier by lazy { IosBackgroundNotifier(IosAlertPoster()) }
+private val iosNotifier: IosBackgroundNotifier by lazy { IosBackgroundNotifier(IosAlertPoster { iosContainer.session.credentials()?.hub }) }
 
 /**
  * A tapped "needs you" notification, from `AppDelegate`'s notification
  * delegate. Held by the container until the paired screens take it — a tap can
  * start the app cold.
  */
-fun onOpenSession(sessionId: Long) {
-    iosContainer.onOpenSession(sessionId)
+fun onOpenSession(sessionId: Long, hub: String?) {
+    iosContainer.onOpenSession(sessionId, hub)
 }
 
 /** A failure notification's Retry (MobileControl): open the session; the app retries it there. */
-fun onRetrySession(sessionId: Long) {
-    iosContainer.onRetrySession(sessionId)
+fun onRetrySession(sessionId: Long, hub: String?) {
+    iosContainer.onRetrySession(sessionId, hub)
 }
 
 /** A mission's notification, its tap or Review grant: open that mission, its grant card first. */
-fun onOpenMission(missionId: Long) {
-    iosContainer.onOpenMission(missionId)
+fun onOpenMission(missionId: Long, hub: String?) {
+    iosContainer.onOpenMission(missionId, hub)
 }
 
 /** A running background check; `AppDelegate` cancels it when iOS's time is up. */

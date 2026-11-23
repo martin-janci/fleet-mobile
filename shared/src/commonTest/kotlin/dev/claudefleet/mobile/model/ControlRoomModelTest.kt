@@ -145,9 +145,57 @@ class ControlRoomModelTest {
         // Followed, the same failure and block still need you.
         val followed = buildThreads(listOf(failed, limited), emptyList(), emptyList(), operatorId = null, since = since)
         assertEquals(listOf(ThreadGroup.NEEDS, ThreadGroup.NEEDS), followed.map { it.group })
-        // A muted thread is not "unfollowed": it still counts, as the desktop's `unfollowedWhy`.
-        val muted = followMarks(listOf(JournalFollow(kind = "session", id = 1, state = "quiet", muted = true)))
-        assertEquals(ThreadGroup.NEEDS, buildThreads(listOf(failed), emptyList(), emptyList(), null, since, muted).single().group)
+        // Review w04-1: a muted thread is not followed either, as the desktop's
+        // "a muted thread is not followed either" — even one Control still follows.
+        val muted = followMarks(listOf(JournalFollow(kind = "session", id = 1, state = "following", muted = true)))
+        assertEquals(ThreadGroup.EARLIER, buildThreads(listOf(failed), emptyList(), emptyList(), null, since, muted).single().group)
+        // Review w04-2: a row out of Needs you leads with its status, the reason without its head.
+        val lines = buildThreads(listOf(failed, limited, asking), emptyList(), emptyList(), operatorId = null, since = since, follows = quiet)
+            .associate { it.title to it.line }
+        assertEquals("Failed · last turn failed · mefistos", lines["pd-1859"])
+        assertEquals("Idle · weekly limit on its account", lines["task-480"])
+        assertEquals("Needs you · waiting for your answer · mefistos", lines["task-1"])
+        val down = SessionRow(
+            id = 4, tmuxName = "task-573", origin = "operator", hostAlias = "mefistos", claudeStatus = "idle",
+            lastActivityAt = now - 3 * 86_400, attention = Attention(reason = "host_down", state = "blocked"),
+        )
+        val merged = SessionRow(
+            id = 5, tmuxName = "task-9", origin = "operator", hostAlias = "htz", claudeStatus = "completed",
+            lastActivityAt = now - 60, lastStopAt = now - 60, attention = Attention(reason = "stop_failed", state = "failed"),
+        )
+        val gone = followMarks(listOf(JournalFollow(kind = "session", id = 4, state = "quiet"), JournalFollow(kind = "session", id = 5, state = "merged")))
+        val out = buildThreads(listOf(down, merged), emptyList(), emptyList(), operatorId = null, since = since, follows = gone).associateBy { it.id }
+        assertEquals(ThreadGroup.EARLIER, out.getValue(4).group)
+        assertEquals("Idle · blocked on mefistos, which is down", out.getValue(4).line)
+        assertEquals(ThreadGroup.DONE, out.getValue(5).group)
+        assertEquals("Done · last turn failed · htz", out.getValue(5).line)
+    }
+
+    /**
+     * Review w04-3: a mission that ended goes by when it did, as the
+     * desktop's `missionGroup`: a failure today needs you, an older one is
+     * Earlier, a cancel never needs you, and a wait on a final mission does not count.
+     */
+    @Test
+    fun a_mission_that_ended_goes_by_when_it_did() {
+        val since = 10_000L
+        val missions = listOf(
+            Mission(id = 1, name = "today", state = "failed", updatedAt = 10_500),
+            Mission(id = 2, name = "weeks ago", state = "failed", updatedAt = 100),
+            Mission(id = 3, name = "cancelled", state = "cancelled", updatedAt = 10_500),
+            Mission(id = 4, name = "old done", state = "completed", updatedAt = 100),
+            Mission(id = 5, name = "working", state = "active", updatedAt = 100),
+        )
+        val follows = followMarks(missions.map { JournalFollow(kind = "mission", id = it.id, state = "following") })
+        val groups = buildThreads(emptyList(), emptyList(), missions, operatorId = null, since = since, follows = follows)
+            .associate { it.id to it.group }
+        assertEquals(
+            mapOf(1L to ThreadGroup.NEEDS, 2L to ThreadGroup.EARLIER, 3L to ThreadGroup.DONE, 4L to ThreadGroup.EARLIER, 5L to ThreadGroup.WORKING),
+            groups,
+        )
+        // Only a receipt knows it: no finish time, so a failure is Earlier, not Needs you for ever.
+        val handed = listOf(ControlHandoff(id = 1, at = 10_500, kind = "mission", missionId = 8, missionState = "failed"))
+        assertEquals(ThreadGroup.EARLIER, buildThreads(emptyList(), handed, emptyList(), operatorId = null, since = since).single().group)
     }
 
     /** The journal's follows reach past the newest receipts: a thread it names joins the list (review w04-1). */

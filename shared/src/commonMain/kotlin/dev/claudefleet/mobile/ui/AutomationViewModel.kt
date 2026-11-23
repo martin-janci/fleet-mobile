@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.data.RoutineActions
 import dev.claudefleet.mobile.model.FleetRun
@@ -197,6 +198,8 @@ class AutomationViewModel(
      */
     fun refreshRun(): Job = scope.launch {
         val open = local.value.runDetail ?: return@launch
+        // In the background the stream is stopped, and so are these reads (review w19-3).
+        if (fleet.status.value !is ConnectionStatus.Connected) return@launch
         try {
             val fresh = actions.fleetRuns(RUNS_SHOWN)
             local.update { l ->
@@ -443,7 +446,8 @@ fun routineLine(r: Routine, nowSeconds: Long): String {
         "event" -> "When ${eventLabel(r.event)}" + (r.eventHost?.takeIf { it.isNotBlank() }?.let { " on $it" } ?: "")
         "manual" -> "Run now only"
         else -> listOfNotNull(
-            r.cron?.takeIf { it.isNotBlank() },
+            // With the zone the hub reads it in (review w06-6).
+            r.cron?.takeIf { it.isNotBlank() }?.let { c -> r.cronZone?.let { "$c $it" } ?: c },
             r.nextRunAt?.let { relativeWithin(it, nowSeconds) }?.let { "next in $it" },
         ).joinToString(" · ").ifEmpty { "On a schedule" }
     }

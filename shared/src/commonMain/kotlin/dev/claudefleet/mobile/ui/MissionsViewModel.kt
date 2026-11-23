@@ -157,11 +157,6 @@ class MissionsViewModel(
         }
     }
 
-    fun open(): Job = scope.launch {
-        local.update { it.copy(open = true, detail = null, results = null, notice = null, error = null, pick = it.pick + 1) }
-        read()
-    }
-
     /**
      * Open the sheet straight on one mission: the New layout's Missions
      * screen lists them itself and hands a tap to the sheet's detail.
@@ -178,11 +173,6 @@ class MissionsViewModel(
     }
 
     fun refresh(): Job = scope.launch { read() }
-
-    fun select(missionId: Long): Job = scope.launch {
-        local.update { it.copy(results = null, notice = null, error = null, pick = it.pick + 1) }
-        readOne(missionId)
-    }
 
     fun dismissError() {
         local.update { it.copy(error = null) }
@@ -242,13 +232,15 @@ class MissionsViewModel(
     }
 
     /**
-     * The spend ask's Deny: the budget stays; the brake's card is answered so
-     * the lead finishes within it. The grant is not touched.
+     * The spend ask's Deny: the budget stays and the brake's card is
+     * answered. The mission stays paused — the hub forwards no note to its
+     * workers and plans only active missions — so the words say that, not
+     * that the lead finishes within budget (review w05-4). The grant is not touched.
      */
     fun denySpend(ask: SpendAsk): Job = act("spend:${ask.missionId}") { id ->
         if (!state.value.canDecide || id != ask.missionId) return@act
-        actions.decideCard(ask.cardId, ok = true, note = "No more spend: finish within ${dollars(ask.budgetMicros)}.")
-        local.update { it.copy(notice = "Denied. The budget stays at ${dollars(ask.budgetMicros)}.") }
+        actions.decideCard(ask.cardId, ok = true, note = "No more spend: the budget stays at ${dollars(ask.budgetMicros)}.")
+        local.update { it.copy(notice = "Denied. The mission stays paused.") }
     }
 
     /**

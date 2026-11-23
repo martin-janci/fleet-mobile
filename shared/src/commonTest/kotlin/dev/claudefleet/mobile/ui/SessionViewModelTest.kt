@@ -51,6 +51,7 @@ import dev.claudefleet.mobile.store.FakePrefs
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -4170,6 +4171,105 @@ class SessionViewModelTest {
         assertNull(vm.state.value.notSent)
     }
 
+    /**
+     * Review w17-1: Back (or a tab switch) while a prompt is on its way does
+     * not abort the send, and one that fails after the screen is gone is
+     * there as Not sent on the return, with its id.
+     */
+    @Test
+    fun leaving_the_screen_while_a_prompt_is_on_its_way_neither_aborts_nor_loses_it() = runTest {
+        val drafts = DraftMemory()
+        val actions = FakeActions()
+        val gate = CompletableDeferred<Unit>()
+        actions.sendGate = gate
+        val screen = CoroutineScope(backgroundScope.coroutineContext + Job())
+        val first = SessionViewModel(ID, FakeFleetState(), actions, screen, keepNotSent = true, drafts = drafts, callScope = backgroundScope)
+        first.onDraftChange("ship it")
+        first.send()
+        runCurrent()
+        assertEquals(listOf("ship it"), actions.sentPrompts)
+
+        screen.cancel()
+        actions.sendFails = HubError.Transport(ConnectException())
+        gate.complete(Unit)
+        runCurrent()
+
+        val again = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, keepNotSent = true, drafts = drafts, callScope = backgroundScope)
+        runCurrent()
+        val kept = assertNotNull(again.state.value.notSent, "the prompt that failed after leaving is there on the return")
+        assertEquals("ship it", kept.text)
+        assertEquals(actions.sentIds.single(), kept.clientMsgId)
+        assertEquals("", again.state.value.draft)
+    }
+
+    @Test
+    fun a_send_that_completes_after_leaving_the_screen_still_lands() = runTest {
+        val drafts = DraftMemory()
+        val actions = FakeActions()
+        val gate = CompletableDeferred<Unit>()
+        actions.sendGate = gate
+        val screen = CoroutineScope(backgroundScope.coroutineContext + Job())
+        val first = SessionViewModel(ID, FakeFleetState(), actions, screen, keepNotSent = true, drafts = drafts, callScope = backgroundScope)
+        first.onDraftChange("ship it")
+        first.send()
+        runCurrent()
+        screen.cancel()
+        gate.complete(Unit)
+        runCurrent()
+
+        val again = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, keepNotSent = true, drafts = drafts, callScope = backgroundScope)
+        runCurrent()
+        assertNull(again.state.value.notSent, "it went through: nothing to retry")
+        assertEquals("", again.state.value.draft)
+    }
+
+    /**
+     * Review w17-7: the composer keeps its own text. A value that comes back
+     * from the view model late (an echo of a keystroke the field has typed
+     * past) is not written over the field; a change the view model made
+     * itself (a quote, a send clearing the box) is.
+     */
+    @Test
+    fun the_composer_takes_only_the_view_models_own_changes() {
+        val echo = ComposerEcho()
+        echo.typed("a")
+        echo.typed("ab")
+        echo.typed("abc")
+        assertTrue(echo.isEcho("a"), "a stale echo: the field keeps \"abc\"")
+        assertTrue(echo.isEcho("abc"), "the last one, skipping a conflated value")
+        assertFalse(echo.isEcho(""), "Send cleared the box: the field takes it")
+        echo.typed("x")
+        assertFalse(echo.isEcho("> quoted\nx"), "a quote: the field takes it")
+        assertFalse(echo.isEcho("x"), "nothing is pending after a change of the view model's own")
+    }
+
+    /**
+     * Review w17-2: a Not sent card recalled after leaving the session reads
+     * as it did ("May have gone through", not "Not sent: not sent"), and its
+     * Retry goes out under the first send's id, so the hub cannot type it twice.
+     */
+    @Test
+    fun a_recalled_not_sent_card_keeps_its_reason_and_its_id() = runTest {
+        val drafts = DraftMemory()
+        val actions = FakeActions()
+        actions.sendFails = HubError.Tool("E_SSH_TIMEOUT", "ssh timed out after 10s")
+        val first = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, keepNotSent = true, drafts = drafts)
+        first.onDraftChange("open the PR and deploy")
+        first.send().join()
+        runCurrent()
+
+        val again = SessionViewModel(ID, FakeFleetState(), actions, backgroundScope, keepNotSent = true, drafts = drafts)
+        runCurrent()
+        val kept = again.state.value.notSent!!
+        assertEquals("May have gone through", notSentHeadline(kept))
+        assertFalse(notSentHeadline(kept).startsWith("Not sent: not sent"))
+
+        actions.sendFails = null
+        again.retryNotSent().join()
+        runCurrent()
+        assertEquals(actions.sentIds[0], actions.sentIds[1], "the retry is the same send to the hub")
+    }
+
     @Test
     fun a_send_that_never_left_the_phone_is_not_sent() = runTest {
         val actions = FakeActions()
@@ -4696,6 +4796,44 @@ class SessionViewModelTest {
         runCurrent()
         assertEquals(listOf(1L), actions.cancelled)
         assertTrue(vm.state.value.queued.isEmpty())
+    }
+
+    /**
+     * Review w17-3: a queued prompt whose answer was lost after the hub kept
+     * it is not put back in the box as "not sent", so Queue again cannot
+     * send it twice; one the hub does not have goes back, said as a maybe.
+     */
+    @Test
+    fun a_queued_prompt_whose_answer_was_lost_is_read_back_not_put_back() = runTest {
+        val fake = FakeActions()
+        var keep = true
+        val actions = object : SessionActions by fake {
+            override suspend fun queuePrompt(sessionId: Long, prompt: String, timing: SendLaterTiming): QueuePromptResult {
+                if (keep) fake.queuePrompt(sessionId, prompt, timing)
+                throw HubError.Tool("E_SSH_TIMEOUT", "timed out")
+            }
+        }
+        val vm = SessionViewModel(
+            ID,
+            FakeFleetState(listOf(row(status = "working")), tools = setOf("queue_prompt", "queued_prompts")),
+            actions,
+            backgroundScope,
+            queueWhileWorking = true,
+        )
+        runCurrent()
+        vm.onDraftChange("also check CI")
+        vm.send().join()
+        runCurrent()
+        assertEquals("", vm.state.value.draft, "the hub has it: not back in the box")
+        assertNull(vm.state.value.error)
+        assertEquals(listOf("also check CI"), vm.state.value.queued.map { it.body })
+
+        keep = false
+        vm.onDraftChange("and the docs")
+        vm.send().join()
+        runCurrent()
+        assertEquals("and the docs", vm.state.value.draft, "the hub does not have it: back in the box")
+        assertEquals(friendlyWrite(HubError.Tool("E_SSH_TIMEOUT", "timed out")).title, vm.state.value.error?.title)
     }
 
     @Test

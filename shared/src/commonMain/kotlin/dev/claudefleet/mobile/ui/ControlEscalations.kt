@@ -66,6 +66,20 @@ class EscalationLater(private val prefs: Prefs? = null, private val now: () -> L
         if (kept.size != entries.size) save(kept)
     }
 
+    private val fleet = MutableStateFlow(prefs?.getStringList(SCOPE_KEY)?.firstOrNull() == "fleet")
+
+    /**
+     * Whether the cards cover the whole fleet rather than Control's own
+     * threads (the desktop's `escalationScope`, review w21-10); kept in
+     * [prefs], off by default.
+     */
+    val fleetWide: StateFlow<Boolean> = fleet.asStateFlow()
+
+    fun setFleetWide(on: Boolean) {
+        fleet.value = on
+        prefs?.putStringList(SCOPE_KEY, listOf(if (on) "fleet" else "control"))
+    }
+
     private fun save(next: List<LaterEntry>) {
         entries = next
         keys.value = next.map { it.key }
@@ -74,6 +88,7 @@ class EscalationLater(private val prefs: Prefs? = null, private val now: () -> L
 
     companion object {
         const val KEY = "control_escalations_later"
+        const val SCOPE_KEY = "control_escalations_scope"
     }
 }
 

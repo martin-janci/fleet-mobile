@@ -33,7 +33,29 @@ data class Routine(
     val memory: String? = null,
     /** The fleet notes each finished run in the notebook. */
     @SerialName("memory_auto") val memoryAuto: Boolean = false,
-)
+    /** The offset the hub reads [cron] at, minutes east of UTC; null from an older hub. */
+    @SerialName("utc_offset_min") val utcOffsetMin: Int? = null,
+    /** The zone the schedule was written in (`Europe/Bratislava`), when one was named; shown beside it. */
+    @SerialName("time_zone") val timeZone: String? = null,
+) {
+    /**
+     * The zone [cron] is read in, for its line (review w06-6): "0 9 * * 1-5"
+     * alone reads as phone time, but the hub reads it at [utcOffsetMin]. The
+     * named zone when there is one, else "UTC", "UTC+1", "UTC+5:30"; null
+     * from a hub that says neither.
+     */
+    val cronZone: String?
+        get() = timeZone?.takeIf { it.isNotBlank() } ?: utcOffsetMin?.let(::utcOffsetLabel)
+}
+
+/** "UTC", "UTC+1", "UTC-3", "UTC+5:30" for an offset in minutes east of UTC. */
+fun utcOffsetLabel(minutes: Int): String {
+    if (minutes == 0) return "UTC"
+    val sign = if (minutes > 0) "+" else "-"
+    val abs = kotlin.math.abs(minutes)
+    val tail = if (abs % 60 == 0) "${abs / 60}" else "${abs / 60}:${(abs % 60).toString().padStart(2, '0')}"
+    return "UTC$sign$tail"
+}
 
 /**
  * One notebook (claude-fleet `store::RoutineMemoryRow`): the routine's own
