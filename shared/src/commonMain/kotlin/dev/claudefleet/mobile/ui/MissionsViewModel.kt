@@ -92,6 +92,12 @@ class MissionsViewModel(
         val missions: List<Mission> = emptyList(),
         val detail: MissionDetail? = null,
         val busy: String? = null,
+        /**
+         * The mission [busy]'s press is on; null for Pause all. The press
+         * shows (spinner, buttons held) only on its own mission's detail, so
+         * leaving it while it runs does not hold another one (review w16-1).
+         */
+        val busyFor: Long? = null,
         val results: List<StepResult>? = null,
         val notice: String? = null,
         val error: Friendly? = null,
@@ -124,7 +130,7 @@ class MissionsViewModel(
             loading = l.loading,
             missions = l.missions,
             detail = l.detail,
-            busy = l.busy,
+            busy = l.busy.takeIf { l.busyFor == null || l.detail == null || l.detail.mission.id == l.busyFor },
             results = l.results,
             notice = l.notice,
             error = l.error,
@@ -181,13 +187,13 @@ class MissionsViewModel(
     /** Go on one step; null takes every next step the loop lists. */
     fun start(step: MissionStep? = null): Job = act(step?.key() ?: "all") { id ->
         val out = actions.start(id, step?.key())
-        local.update { it.copy(results = out.results) }
+        say { it.copy(results = out.results) }
     }
 
     /** Apply ([ok]) or dismiss a card; a question's answer is [note]. */
     fun decide(card: MissionCard, ok: Boolean, note: String? = null): Job = act("card:${card.id}") {
         actions.decideCard(card.id, ok, note)
-        local.update { it.copy(notice = if (ok) "Applied." else "Dismissed.") }
+        say { it.copy(notice = if (ok) "Applied." else "Dismissed.") }
     }
 
     /**
@@ -225,10 +231,10 @@ class MissionsViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(error = spendPartlyApproved(friendly(t), ask, resumed)) }
+            say { it.copy(error = spendPartlyApproved(friendly(t), ask, resumed)) }
             return@act
         }
-        local.update { it.copy(notice = "Approved ${dollars(ask.moreMicros)} more. The mission runs again.") }
+        say { it.copy(notice = "Approved ${dollars(ask.moreMicros)} more. The mission runs again.") }
     }
 
     /**
@@ -240,7 +246,7 @@ class MissionsViewModel(
     fun denySpend(ask: SpendAsk): Job = act("spend:${ask.missionId}") { id ->
         if (!state.value.canDecide || id != ask.missionId) return@act
         actions.decideCard(ask.cardId, ok = true, note = "No more spend: the budget stays at ${dollars(ask.budgetMicros)}.")
-        local.update { it.copy(notice = "Denied. The mission stays paused.") }
+        say { it.copy(notice = "Denied. The mission stays paused.") }
     }
 
     /**
@@ -252,7 +258,7 @@ class MissionsViewModel(
         if (!state.value.canSignGrant) return@act
         if (level !in 1..3 || hours !in 1..GRANT_MAX_HOURS || (budgetDollars != null && budgetDollars <= 0)) return@act
         actions.signGrant(id, level, hours, budgetDollars?.let { it * 100 })
-        local.update {
+        say {
             it.copy(notice = "Signed: level $level for $hours h" + (budgetDollars?.let { d -> ", up to \$$d." } ?: ", no spend cap."))
         }
     }
@@ -261,7 +267,7 @@ class MissionsViewModel(
     fun retryItem(itemId: Long): Job = act("retry:$itemId") {
         if (!state.value.canRetry) return@act
         val r = actions.retryItem(itemId)
-        local.update { it.copy(results = listOf(r)) }
+        say { it.copy(results = listOf(r)) }
     }
 
     /** Pause an active mission, resume a paused one. */
@@ -274,7 +280,7 @@ class MissionsViewModel(
             m.state == "draft" -> "Started."
             else -> "Resumed."
         }
-        local.update { it.copy(notice = said) }
+        say { it.copy(notice = said) }
     }
 
     /** Throw a draft away (`mission_state` → cancelled); only ever after the confirm. */
@@ -282,7 +288,7 @@ class MissionsViewModel(
         val m = local.value.detail?.mission ?: return@act
         if (m.state != "draft") return@act
         actions.setState(id, "cancelled", m.version)
-        local.update { it.copy(notice = "Draft discarded.") }
+        say { it.copy(notice = "Draft discarded.") }
     }
 
     /** Pause every mission this person may change, and end their grants. */
@@ -309,18 +315,36 @@ class MissionsViewModel(
         }
     }
 
+    /**
+     * What a press may write: [say] changes the sheet only while the person
+     * is still where they pressed ([Local.pick] unchanged since), so mission
+     * A's outcome never lands on mission B's detail (review w16-1).
+     */
+    private inner class Press(private val mine: Long) {
+        fun say(f: (Local) -> Local) {
+            local.update { if (it.pick == mine) f(it) else it }
+        }
+    }
+
+    /** [id]'s press is over: its busy goes, unless another mission's press took the slot since. */
+    private fun Local.done(id: Long): Local = if (busyFor == id) copy(busy = null, busyFor = null) else this
+
     /** One press on the open mission, then a fresh read of it — whatever it changed is the hub's to say. */
-    private fun act(busy: String, call: suspend (Long) -> Unit): Job = scope.launch {
+    private fun act(busy: String, call: suspend Press.(Long) -> Unit): Job = scope.launch {
         val id = local.value.detail?.mission?.id ?: return@launch
-        if (local.value.busy != null) return@launch
-        val mine = local.updateAndGet { it.copy(busy = busy, error = null, results = null, notice = null, pick = it.pick + 1) }.pick
+        // One press per mission at a time, and none under Pause all; a press
+        // on another mission may go while this one runs (review w16-1).
+        if (local.value.busy != null && (local.value.busyFor == null || local.value.busyFor == id)) return@launch
+        val mine = local.updateAndGet { it.copy(busy = busy, busyFor = id, error = null, results = null, notice = null, pick = it.pick + 1) }.pick
         val after = try {
-            call(id)
-            local.updateAndGet { it.copy(busy = null, pick = it.pick + 1) }.pick
+            Press(mine).call(id)
+            local.updateAndGet { it.done(id).copy(pick = it.pick + 1) }.pick
         } catch (e: CancellationException) {
+            local.update { it.done(id) }
             throw e
         } catch (t: Throwable) {
-            local.updateAndGet { it.copy(busy = null, error = friendly(t), pick = it.pick + 1) }.pick
+            // A failure is about the mission pressed: shown only if it is still the one on screen.
+            local.updateAndGet { it.done(id).copy(error = if (it.pick == mine) friendly(t) else it.error, pick = it.pick + 1) }.pick
         }
         // The person went Back, picked another mission or closed the sheet
         // while the press ran: its read would pull them back into this one.

@@ -142,7 +142,7 @@ class NeedsYouCheck(
      */
     private suspend fun missions() {
         val missions = try {
-            withTimeoutOrNull(timeout) { session.withClient { it.workMissions() } }
+            withTimeoutOrNull(timeout) { session.withClient { it.workMissions(waiting = true) } }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {

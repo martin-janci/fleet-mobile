@@ -85,7 +85,8 @@ fun watchingNotice(
     val since = downSince?.let { " since ${clockLabel(it, offsetSeconds(it))}" }.orEmpty()
     return when (status) {
         is ConnectionStatus.Connected -> null
-        is ConnectionStatus.Refused -> "Not watching: this hub needs a newer version of the app. Update it to get alerts again."
+        // The verdict's own words: the hub or the app may be the old side (review w04-5).
+        is ConnectionStatus.Refused -> "Not watching. ${status.reason}"
         is ConnectionStatus.Reconnecting ->
             if (status.attempt < WATCH_GRACE_ATTEMPTS) null else "Can't reach the hub$since. No alerts until it answers."
         // Not started, stopped or revoked: the service says so by stopping, not here.

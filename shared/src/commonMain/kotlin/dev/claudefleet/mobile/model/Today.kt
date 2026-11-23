@@ -87,14 +87,18 @@ data class TodayShipped(
 /** A Today group's bucket, after the phone's org filter. */
 enum class TodayBucket { Waiting, InProgress, Stale }
 
-/** What the Today sheet draws: the four sections, in the desktop's order. */
+/**
+ * What the Today sheet draws: the four sections, in the desktop's order, and
+ * the missions waiting on a person, listed under Waiting on me (review w09-6).
+ */
 data class TodayView(
     val waiting: List<TodayGroup> = emptyList(),
     val inProgress: List<TodayGroup> = emptyList(),
     val shipped: List<TodayShipped> = emptyList(),
     val stale: List<TodayGroup> = emptyList(),
+    val missions: List<TodayMission> = emptyList(),
 ) {
-    val isEmpty: Boolean get() = waiting.isEmpty() && inProgress.isEmpty() && shipped.isEmpty() && stale.isEmpty()
+    val isEmpty: Boolean get() = waiting.isEmpty() && inProgress.isEmpty() && shipped.isEmpty() && stale.isEmpty() && missions.isEmpty()
 }
 
 /**
@@ -120,7 +124,7 @@ fun bucketOf(sessions: List<TodaySession>): TodayBucket = when {
  * Cut the digest to [org] — null keeps everything — the way the Sessions
  * list's org filter does: a session by [orgOfSession] (its live row's org,
  * which falls back to the digest's own `org_id` for a session the phone has
- * no row for), a shipped entry by its `org_id`. Groups left empty are dropped
+ * no row for), a shipped entry and a waiting mission by its `org_id`. Groups left empty are dropped
  * and the rest re-bucketed. The desktop's `scopeToday`, with an org id where
  * the desktop has a scope id.
  */
@@ -139,9 +143,15 @@ fun scopeToday(today: Today, org: Long?, orgOfSession: (TodaySession) -> Long?):
         }
     }
     val shipped = if (org == null) today.shipped else today.shipped.filter { it.orgId == org }
-    return TodayView(waiting, inProgress, shipped, stale)
+    val missions = today.missions.filter { it.waitingOn != null && (org == null || it.orgId == org) }
+    return TodayView(waiting, inProgress, shipped, stale, missions)
 }
 
+/**
+ * Why a session is under Waiting on me, in the standup's words: the
+ * desktop's `ATTENTION_WORDS`, pinned by the shared standup fixture. Any
+ * other reason is printed as it came, as the desktop's copy does.
+ */
 private val ATTENTION_WORDS = mapOf(
     "waiting" to "waiting for an answer",
     "stuck" to "stuck",
@@ -149,9 +159,12 @@ private val ATTENTION_WORDS = mapOf(
     "lifecycle" to "needs a look",
 )
 
+/** Why a session waits on a person, in the standup's words. */
+fun attentionWords(reason: String): String = ATTENTION_WORDS[reason] ?: reason
+
 /** How a session reads in a line: its name, and why it is listed. */
 fun sessionPhrase(s: TodaySession, bucket: TodayBucket): String = when {
-    bucket == TodayBucket.Waiting && s.attention != null -> "${s.name} (${ATTENTION_WORDS[s.attention] ?: s.attention})"
+    bucket == TodayBucket.Waiting && s.attention != null -> "${s.name} (${attentionWords(s.attention)})"
     bucket == TodayBucket.Stale && s.stale != null ->
         "${s.name} (${if (s.stale == "done") "ticket done, session still running" else "idle"})"
     else -> s.name
@@ -189,18 +202,39 @@ private fun shippedLine(x: TodayShipped): String {
  * each only when it has something. The desktop's `standupText`, line for
  * line, so the same digest copies the same text from either. Tracker titles
  * are copied as they are: the clipboard is the person's own, not an agent's.
+ *
+ * [waitingSessions], when given, are Waiting on me's session lines as the
+ * sheet draws them (the live Inbox rows, [waitingLine]) in place of the
+ * digest's, so the copy says what the screen shows (review w09-6).
  */
-fun standupText(v: TodayView): String {
+fun standupText(v: TodayView, waitingSessions: List<String>? = null): String {
     val parts = mutableListOf<String>()
     fun section(title: String, lines: List<String>) {
         if (lines.isNotEmpty()) parts += (listOf(title) + lines).joinToString("\n")
     }
     section("Shipped", v.shipped.map(::shippedLine))
     section("In progress", v.inProgress.flatMap { groupLines(it, TodayBucket.InProgress) })
-    section("Waiting on me", v.waiting.flatMap { groupLines(it, TodayBucket.Waiting) })
+    section("Waiting on me", (waitingSessions ?: v.waiting.flatMap { groupLines(it, TodayBucket.Waiting) }) + v.missions.map(::missionLine))
     section("Stale", v.stale.flatMap { groupLines(it, TodayBucket.Stale) })
     return if (parts.isNotEmpty()) parts.joinToString("\n\n") + "\n" else "Nothing to report.\n"
 }
+
+/** "- Mission Ship 1.4 — sign the autonomy grant": the desktop's `missionLine`. */
+fun missionLine(m: TodayMission): String {
+    val w = m.waitingOn
+    val words = when (w?.reason) {
+        null -> "needs you"
+        "question" -> "answer its question"
+        "sign_grant" -> "sign the autonomy grant"
+        "confirm" -> "${w.openCards} to confirm"
+        else -> w.reason.replace('_', ' ')
+    }
+    return "- Mission ${m.name.ifBlank { "${m.id}" }} — $words"
+}
+
+/** A live waiting session as the standup reads it: "- pay (waiting for an answer)". */
+fun waitingLine(name: String, reason: String?): String =
+    "- " + if (reason != null) "$name (${attentionWords(reason)})" else name
 
 /** A section of the Today sheet, as its filter chips name them. */
 enum class TodaySection(val label: String) {
@@ -253,12 +287,14 @@ fun filterToday(v: TodayView, f: TodayFilters): TodayView {
         inProgress = if (keep(TodaySection.InProgress)) inProgress else emptyList(),
         shipped = if (keep(TodaySection.Shipped)) v.shipped else emptyList(),
         stale = if (keep(TodaySection.Stale)) stale else emptyList(),
+        // A mission names no host and no ticket: only the section chips narrow it.
+        missions = if (keep(TodaySection.Waiting)) v.missions else emptyList(),
     )
 }
 
 /** How many entries a section lists: its tasks (a no-work group counts once), or its shipped lines. */
 fun TodayView.count(s: TodaySection): Int = when (s) {
-    TodaySection.Waiting -> waiting.size
+    TodaySection.Waiting -> waiting.size + missions.size
     TodaySection.InProgress -> inProgress.size
     TodaySection.Shipped -> shipped.size
     TodaySection.Stale -> stale.size

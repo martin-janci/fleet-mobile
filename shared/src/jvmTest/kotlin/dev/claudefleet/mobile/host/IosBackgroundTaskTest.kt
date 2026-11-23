@@ -71,6 +71,7 @@ class IosBackgroundTaskTest {
         assertTrue("onOpenSession(sessionId: id.int64Value, hub: hub)" in delegate)
         assertTrue("onRetrySession(sessionId: id.int64Value, hub: hub)" in delegate)
         assertTrue("onOpenMission(missionId: id.int64Value, hub: hub)" in delegate)
+        assertTrue("onOpenRoutine(routineId: id.int64Value, hub: hub)" in delegate, "a failed routine's tap opens it (review w16-4)")
         assertTrue("task.expirationHandler = { check.cancel() }" in delegate)
         assertTrue("nonisolated private static func run" in delegate, "the launch handler runs on a background queue")
         assertTrue("@Sendable task in" in delegate)

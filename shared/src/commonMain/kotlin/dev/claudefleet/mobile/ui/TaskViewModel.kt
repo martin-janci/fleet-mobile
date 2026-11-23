@@ -263,6 +263,11 @@ class TaskViewModel(
     private val refreshDebounceMs: Long = 2_000,
     /** Where writes run: the fleet's scope, not this screen's. */
     private val callScope: CoroutineScope = scope,
+    /**
+     * The comment box's text and its send, by task, outliving this screen
+     * (review w16-5): null keeps them here only.
+     */
+    private val commentDrafts: TaskCommentDrafts? = null,
 ) {
     private data class Local(
         val loading: Boolean = false,
@@ -292,7 +297,13 @@ class TaskViewModel(
         val epics: List<EpicFacet>? = null,
     )
 
-    private val local = MutableStateFlow(Local())
+    private val local = MutableStateFlow(
+        Local(
+            commentDraft = commentDrafts?.text(taskId).orEmpty(),
+            // A comment the hub refused after the person had left: said on return.
+            error = commentDrafts?.takeFailure(taskId),
+        ),
+    )
 
     /** The re-read while an AI check runs on the hub. */
     private var checkPoll: Job? = null
@@ -714,7 +725,9 @@ class TaskViewModel(
     }
 
     fun setCommentDraft(text: String) {
-        local.update { it.copy(commentDraft = text.take(COMMENT_MAX)) }
+        val t = text.take(COMMENT_MAX)
+        local.update { it.copy(commentDraft = t) }
+        commentDrafts?.keep(taskId, t)
     }
 
     /**
@@ -728,9 +741,15 @@ class TaskViewModel(
         // The box's text as typed, not [state]'s: that copy follows a beat later.
         val body = local.value.commentDraft.trim().ifEmpty { return null }
         if (!s.canComment) return null.also { refuseOffline(COMMENT) }
-        return itemWrite(COMMENT) {
+        // One send per task, from any visit: a comment still on the wire from
+        // a visit the person left is not posted a second time (review w16-5).
+        if (commentDrafts?.startSend(taskId) == false) return null
+        return itemWrite(COMMENT, onFailure = { why -> commentDrafts?.endSend(taskId, failure = why?.takeIf { !scope.isActive }) }) {
             actions.comment(itemId, body, postToTracker && s.canPostToTracker)
-            local.update { it.copy(commentDraft = "") }
+            commentDrafts?.endSend(taskId, failure = null)
+            // Only what was sent leaves the box: words typed meanwhile stay.
+            commentDrafts?.sent(taskId, body)
+            local.update { it.copy(commentDraft = if (it.commentDraft.trim() == body) "" else it.commentDraft) }
         }
     }
 
@@ -771,20 +790,23 @@ class TaskViewModel(
         return itemWrite(CHECK_SETUP) { actions.setTicketCheck(setup.projectId, mode, command) }
     }
 
-    /** One write about the item, then the task re-read. */
-    private fun itemWrite(action: String, call: suspend () -> Unit): Job? {
-        if (local.value.busy) return null
-        if (!allowed(fleet.capabilities.value, fleet.status.value, action)) return null.also { refuseOffline(action) }
+    /** One write about the item, then the task re-read. [onFailure] hears a write that did not go: its refusal's words, or null when none was made. */
+    private fun itemWrite(action: String, onFailure: (Friendly?) -> Unit = {}, call: suspend () -> Unit): Job? {
+        if (local.value.busy) return null.also { onFailure(null) }
+        if (!allowed(fleet.capabilities.value, fleet.status.value, action)) return null.also { refuseOffline(action); onFailure(null) }
         local.update { it.copy(busy = true, error = null, conflict = false) }
         return callScope.launch {
             try {
                 call()
                 if (scope.isActive) scope.launch { load() }
             } catch (e: CancellationException) {
+                onFailure(null)
                 throw e
             } catch (t: Throwable) {
                 if (t is HubError.Tool && t.isUnknownAction()) fleet.actionMissing(WORK_LINK, action)
-                local.update { it.copy(error = friendlyWorkWrite(t), conflict = t.isConflict()) }
+                val why = friendlyWorkWrite(t)
+                onFailure(why)
+                local.update { it.copy(error = why, conflict = t.isConflict()) }
             } finally {
                 local.update { it.copy(busy = false) }
             }
@@ -950,8 +972,45 @@ class TaskViewModel(
 internal fun promotionLine(p: PromotionView): String? {
     val where = p.tracker.ifBlank { "the tracker" }
     return when (p.state) {
-        "pending" -> "Creating the ticket in $where…"
+        // A try already failed (r2 w07-3): the hub serves its error while it
+        // retries, so a promotion stuck for hours does not read as just sent.
+        "pending" -> p.error?.takeIf { it.isNotBlank() }?.let { "Still trying to create the ticket in $where: $it" } ?: "Creating the ticket in $where…"
         "failed" -> "Not created in $where: ${p.error ?: "the tracker refused it"}"
         else -> null
     }
+}
+
+/**
+ * The task comment box beyond one visit (review w16-5): its text by task,
+ * which comment is on the wire, and a refusal that came after the person had
+ * left, said when they come back. Held by the app for this run; a task page
+ * is a new view model on every visit.
+ */
+class TaskCommentDrafts {
+    private val texts = mutableMapOf<String, String>()
+    private val sending = mutableSetOf<String>()
+    private val failures = mutableMapOf<String, Friendly>()
+
+    fun text(taskId: String): String? = texts[taskId]
+
+    fun keep(taskId: String, text: String) {
+        if (text.isEmpty()) texts.remove(taskId) else texts[taskId] = text
+    }
+
+    /** Mark [taskId]'s comment on the wire; false when one already is. */
+    fun startSend(taskId: String): Boolean = sending.add(taskId)
+
+    /** The send is over; [failure] is a refusal nobody was there to read. */
+    fun endSend(taskId: String, failure: Friendly?) {
+        sending.remove(taskId)
+        if (failure != null) failures[taskId] = failure
+    }
+
+    /** The hub took [body]: the box forgets it, unless it holds other words by now. */
+    fun sent(taskId: String, body: String) {
+        if (texts[taskId]?.trim() == body) texts.remove(taskId)
+    }
+
+    /** A refusal kept for the next visit, once. */
+    fun takeFailure(taskId: String): Friendly? = failures.remove(taskId)
 }

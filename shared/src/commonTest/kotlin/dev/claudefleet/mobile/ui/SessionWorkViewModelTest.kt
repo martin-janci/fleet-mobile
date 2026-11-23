@@ -189,7 +189,13 @@ internal class FakeWorkActions : WorkActions {
         previewCalls += "preview $key $hostAlias ${projectId ?: "-"}"
         return previewAnswer ?: throw HubError.Tool("E_NOTFOUND", "no plan")
     }
-    override suspend fun resume(key: String, hostAlias: String?) = record("resume $key ${hostAlias ?: "-"}")
+    /** Holds a resume until completed (a start over SSH, 10–30 s). */
+    var resumeGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
+    override suspend fun resume(key: String, hostAlias: String?): SessionRow {
+        resumeGate?.await()
+        return record("resume $key ${hostAlias ?: "-"}")
+    }
 
     /** What a multi-start answers; the call is recorded as `start_many KEY host [ids]`. */
     var manyAnswer = MultiStart()
@@ -334,6 +340,7 @@ internal class FakeWorkActions : WorkActions {
     }
 
     override suspend fun comment(itemId: Long, body: String, postToTracker: Boolean): dev.claudefleet.mobile.model.TaskComment {
+        writeGate()
         write("comment $itemId \"$body\" tracker=$postToTracker")
         return dev.claudefleet.mobile.model.TaskComment(id = 1, itemId = itemId, body = body, mine = true)
     }

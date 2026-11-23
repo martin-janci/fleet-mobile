@@ -3,6 +3,7 @@ package dev.claudefleet.mobile.model
 import dev.claudefleet.mobile.net.json
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -112,6 +113,36 @@ class TodayTest {
         assertEquals("Nothing to report.\n", standupText(empty))
     }
 
+    /**
+     * Review w09-6: a mission waiting on a person is under Waiting on me,
+     * cut by the org filter like a shipped entry, and in the standup; the
+     * sheet's live rows replace the digest's session lines.
+     */
+    @Test
+    fun a_waiting_mission_is_listed_scoped_and_in_the_standup() {
+        val t = Today(
+            since = 0,
+            now = 1,
+            missions = listOf(
+                TodayMission(id = 7, name = "Ship 1.4", orgId = 1, waitingOn = MissionWait("sign_grant", since = 5)),
+                TodayMission(id = 8, name = "Other", orgId = 2, waitingOn = MissionWait("confirm", since = 5, openCards = 2)),
+            ),
+        )
+        val all = scopeToday(t, null, orgOf)
+        assertFalse(all.isEmpty)
+        assertEquals(2, all.count(TodaySection.Waiting))
+        assertEquals(listOf(7L), scopeToday(t, 1, orgOf).missions.map { it.id })
+        assertEquals(
+            "Waiting on me\n- Mission Ship 1.4 — sign the autonomy grant\n- Mission Other — 2 to confirm\n",
+            standupText(all),
+        )
+        assertEquals(
+            "Waiting on me\n- pay (waiting for an answer)\n- Mission Ship 1.4 — sign the autonomy grant\n- Mission Other — 2 to confirm\n",
+            standupText(all, listOf(waitingLine("pay", "waiting"))),
+        )
+        assertTrue(filterToday(all, TodayFilters(sections = setOf(TodaySection.Shipped))).missions.isEmpty())
+    }
+
     @Test
     fun standupText_keeps_markup_in_a_tracker_title_as_the_text_it_is() {
         val t = Today(since = 0, now = 1, shipped = listOf(TodayShipped(how = "done", key = "X-1", title = "<b>bold</b>", at = 1)))
@@ -122,6 +153,7 @@ class TodayTest {
     fun sessionPhrase_says_why_a_session_is_listed_only_in_its_own_bucket() {
         assertEquals("pay (stuck)", sessionPhrase(s(1, "pay", attention = "stuck"), TodayBucket.Waiting))
         assertEquals("pay (lifecycle-x)", sessionPhrase(s(1, "pay", attention = "lifecycle-x"), TodayBucket.Waiting))
+        // Review w09-3: no reason the hub serves is printed as its raw token.
         assertEquals("pay (ticket done, session still running)", sessionPhrase(s(1, "pay", stale = "done"), TodayBucket.Stale))
         assertEquals("pay", sessionPhrase(s(1, "pay", attention = "stuck"), TodayBucket.InProgress))
     }

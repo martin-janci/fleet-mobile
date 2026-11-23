@@ -171,6 +171,30 @@ class TicketsViewModelTest {
         assertNull(tickets.state.value.confirmResume)
     }
 
+    /**
+     * Review w16-3: a resume that lands after the person closed the sheet
+     * does not pull them into the session, and reopening meanwhile does not
+     * offer Resume a second time.
+     */
+    @Test
+    fun a_resume_that_lands_after_the_sheet_closed_opens_nothing() = runTest {
+        val nav = Nav()
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val actions = FakeWorkActions().apply { planAnswer = plan(); resumeGate = gate }
+        val tickets = vm(WorkFleet(), actions, backgroundScope, nav)
+        tickets.select(PAY9)
+        runCurrent()
+        tickets.resume()
+        tickets.confirmResume()
+        runCurrent()
+        tickets.close()
+        assertTrue(tickets.state.value.busy, "the resume is still on the wire")
+        gate.complete(Unit)
+        runCurrent()
+        assertEquals(emptyList(), nav.opened)
+        assertFalse(tickets.state.value.busy)
+    }
+
     @Test
     fun a_cancelled_resume_calls_nothing() = runTest {
         val nav = Nav()

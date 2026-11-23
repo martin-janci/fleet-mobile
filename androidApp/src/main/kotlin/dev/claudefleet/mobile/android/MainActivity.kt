@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
             if (intent.action == NeedsYouService.ACTION_RETRY) container.onRetrySession(id, hub) else container.onOpenSession(id, hub)
         }
         intent.getLongExtra(NeedsYouService.EXTRA_MISSION_ID, -1L).takeIf { it >= 0 }?.let { container.onOpenMission(it, hub) }
+        intent.getLongExtra(NeedsYouService.EXTRA_ROUTINE_ID, -1L).takeIf { it >= 0 }?.let { container.onOpenRoutine(it, hub) }
         intent.takeIf { it.action == Intent.ACTION_VIEW }?.data?.let {
             // A browser adds BROWSABLE to every intent it fires: such a link is
             // only accepted as the answer to this phone's own sign-in.
@@ -67,6 +68,7 @@ class MainActivity : ComponentActivity() {
     private fun consumed(intent: Intent): Intent = Intent(intent).apply {
         removeExtra(NeedsYouService.EXTRA_SESSION_ID)
         removeExtra(NeedsYouService.EXTRA_MISSION_ID)
+        removeExtra(NeedsYouService.EXTRA_ROUTINE_ID)
         putExtra(EXTRA_DELIVERED, true)
     }
 

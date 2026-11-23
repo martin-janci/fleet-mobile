@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.claudefleet.mobile.model.FailingRoutine
 import dev.claudefleet.mobile.model.GrantLevel
 import dev.claudefleet.mobile.model.MyAccess
 import dev.claudefleet.mobile.model.SessionRow
@@ -91,6 +92,13 @@ fun proposedRows(
     sessions.filter { it.isProposed && access.levelFor(it) == null && proposalKey(it) !in setAside }
         .sortedWith(compareBy<SessionRow, Long?>(nullsLast()) { it.askedAt }.thenBy { it.id })
 
+/**
+ * Everything that needs this person, as one count: the Inbox's header, the
+ * bar's badge and Today's "N need you" (review w09-6), so the three agree.
+ */
+fun needYouCount(sessions: Int, missions: Int, agentActions: Int, reviewAsks: Int, failedRoutines: Int): Int =
+    sessions + missions + agentActions + reviewAsks + failedRoutines
+
 /** One session someone else shared with this person, and at what level (redesign 11.10, the Watch board). */
 data class SharedRow(val row: SessionRow, val level: String)
 
@@ -103,9 +111,17 @@ fun sharedRows(sessions: List<SessionRow>, access: MyAccess): List<SharedRow> =
     sessions.mapNotNull { row -> access.levelFor(row)?.let { SharedRow(row, it) } }
         .sortedWith(compareByDescending<SharedRow, Long?>(nullsFirst()) { it.row.lastActivityAt }.thenBy { it.row.id })
 
-/** "Answer · waiting for its owner": a shared row's line under its name. */
+/**
+ * "Watch · waiting for its owner": a shared row's line under its name. At
+ * Watch the question is its owner's; at Answer or Steer it is this person's
+ * to answer, so it reads "needs an answer" (review w08-2).
+ */
 internal fun sharedLine(s: SharedRow): String =
-    GrantLevel.word(s.level) + if (s.row.needsAttention) " · waiting for its owner" else ""
+    GrantLevel.word(s.level) + when {
+        !s.row.needsAttention -> ""
+        s.level == GrantLevel.WATCH -> " · waiting for its owner"
+        else -> " · needs an answer"
+    }
 
 /**
  * The word a needs-you row leads with: Paused for an account at its limit
@@ -226,11 +242,15 @@ fun InboxScreen(
     inbox: InboxUiState = InboxUiState(),
     rowActions: (SessionRow) -> InboxRowActions = { InboxRowActions() },
     rowHandlers: InboxRowHandlers = InboxRowHandlers(),
+    /** Routines whose newest run failed, which this person may change ([failedRoutineRows], review w09-7). */
+    failedRoutines: List<FailingRoutine> = emptyList(),
+    onOpenRoutine: (Long) -> Unit = {},
 ) {
     var view by rememberSaveable { mutableStateOf(InboxView.NeedsYou) }
     // A mission waiting on a person is one more thing that needs you (G5.4).
-    // So is an agent's action waiting for an answer (agents step 5).
-    val needYou = rows.size + missionRows.size + agentActions.pending.size + reviews.asks.size
+    // So is an agent's action waiting for an answer (agents step 5), and a
+    // routine that failed (review w09-7).
+    val needYou = needYouCount(rows.size, missionRows.size, agentActions.pending.size, reviews.asks.size, failedRoutines.size)
     Column(modifier = modifier.fillMaxSize()) {
         ScreenHeader(
             title = "Inbox",
@@ -283,7 +303,7 @@ fun InboxScreen(
             }
         } else OrbitPullToRefresh(isRefreshing = refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                if (rows.isEmpty() && shared.isEmpty() && missionRows.isEmpty() && proposedList.isEmpty() && reviews.asks.isEmpty()) {
+                if (needYou == 0 && shared.isEmpty() && proposedList.isEmpty()) {
                     item(key = "empty") {
                         Box(modifier = Modifier.fillParentMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                             Text(inboxEmptyText(connection), color = Fleet.colors.fgMuted, fontSize = 15.sp, textAlign = TextAlign.Center)
@@ -384,6 +404,17 @@ fun InboxScreen(
                         age = relativeTime(m.waitingOn?.since?.takeIf { it > 0 }, nowSeconds),
                         onClick = { onOpenMission(m.id) },
                         chips = { OrbitChip("Mission") },
+                    )
+                }
+                items(failedRoutines, key = { "routine-${it.run.id}" }) { f ->
+                    PhoneRow(
+                        title = f.routine.name.ifBlank { "Routine ${f.routine.id}" },
+                        line = f.run.reason?.trim()?.takeIf { it.isNotEmpty() } ?: "Its last run failed",
+                        word = StatusWord.FAILED,
+                        lead = phoneLead(StatusWord.FAILED, live),
+                        age = relativeTime(f.run.startedAt.takeIf { it > 0 }, nowSeconds),
+                        onClick = { onOpenRoutine(f.routine.id) },
+                        chips = { OrbitChip("Routine") },
                     )
                 }
                 if (proposedList.isNotEmpty()) {

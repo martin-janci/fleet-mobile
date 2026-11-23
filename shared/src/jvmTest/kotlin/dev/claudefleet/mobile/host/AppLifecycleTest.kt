@@ -233,5 +233,11 @@ class AppLifecycleTest {
         assertTrue("notify(TAG_MISSION, MISSION_BASE" in service)
         assertTrue("notify(TAG_ROUTINE, ROUTINE_BASE" in service)
         assertTrue(".setAction(ACTION_OPEN_SESSION)" in service && ".setAction(ACTION_OPEN_MISSION)" in service)
+        // A failed routine's tap opens that routine, for its hub (review w16-4).
+        val routine = service.substringAfter("private fun postRoutine(", "").substringBefore("\n    }\n")
+        assertTrue(".setAction(ACTION_OPEN_ROUTINE)" in routine && ".putExtra(EXTRA_ROUTINE_ID, alert.routineId)" in routine)
+        assertTrue(".putExtra(EXTRA_HUB, hub)" in routine)
+        val deliver = activity.substringAfter("private fun deliver(", "").substringBefore("override fun")
+        assertTrue("container.onOpenRoutine(it, hub)" in deliver)
     }
 }

@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 
 enum class AutomationTab { Routines, Runs, Agents }
@@ -132,6 +133,13 @@ class AutomationViewModel(
         val busy: String? = null,
         val notice: String? = null,
         val error: Friendly? = null,
+        /**
+         * Bumped by every move of the person's (open, select, back, a tab,
+         * close), as Missions' `pick`: a routine's read that answers after
+         * the person moved on is dropped, so Back or a tab switch is never
+         * undone by a late answer (review w16-2).
+         */
+        val pick: Long = 0,
     )
 
     private val local = MutableStateFlow(Local())
@@ -165,19 +173,32 @@ class AutomationViewModel(
     }.stateIn(scope, SharingStarted.Eagerly, AutomationUiState())
 
     fun open(): Job = scope.launch {
-        local.update { it.copy(open = true, detail = null, notice = null, error = null) }
+        local.update { it.copy(open = true, detail = null, notice = null, error = null, pick = it.pick + 1) }
         read()
     }
 
+    /**
+     * Open the sheet on [routineId]'s detail: a failed routine's notification
+     * or its Inbox row (review w16-4, w09-7). A move the person makes while
+     * the list loads wins.
+     */
+    fun openRoutine(routineId: Long): Job = scope.launch {
+        val mine = local.updateAndGet {
+            it.copy(open = true, tab = AutomationTab.Routines, detail = null, memory = null, runDetail = null, notice = null, error = null, pick = it.pick + 1)
+        }.pick
+        read()
+        if (local.value.pick == mine && state.value.available) readOne(routineId)
+    }
+
     fun close() {
-        local.update { it.copy(open = false, detail = null, memory = null, runDetail = null, notice = null) }
+        local.update { it.copy(open = false, detail = null, memory = null, runDetail = null, notice = null, pick = it.pick + 1) }
     }
 
     /** The More row's line wants the routines without the sheet open. */
     fun refresh(): Job = scope.launch { read() }
 
     fun show(tab: AutomationTab) {
-        local.update { it.copy(tab = tab, detail = null, memory = null, runDetail = null) }
+        local.update { it.copy(tab = tab, detail = null, memory = null, runDetail = null, pick = it.pick + 1) }
     }
 
     /** Open [run]'s steps (a routine fire or an agent job, on a hub that keeps traces). */
@@ -235,13 +256,13 @@ class AutomationViewModel(
         }
     }
 
-    fun select(routineId: Long): Job = scope.launch {
-        local.update { it.copy(notice = null, error = null) }
-        readOne(routineId)
+    fun select(routineId: Long): Job {
+        local.update { it.copy(notice = null, error = null, pick = it.pick + 1) }
+        return scope.launch { readOne(routineId) }
     }
 
     fun back() {
-        local.update { it.copy(detail = null, memory = null, notice = null) }
+        local.update { it.copy(detail = null, memory = null, notice = null, pick = it.pick + 1) }
     }
 
     /**
@@ -346,7 +367,7 @@ class AutomationViewModel(
             } else {
                 local.update { it.copy(loading = false, runs = recentRuns(routines), fleetRuns = null) }
             }
-            local.value.detail?.routine?.id?.let { readOne(it) }
+            local.value.detail?.routine?.id?.let { readOne(it, quiet = true) }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -370,11 +391,24 @@ class AutomationViewModel(
             }
         }.sortedByDescending { it.run.startedAt }.take(RUNS_SHOWN)
 
-    private suspend fun readOne(routineId: Long) {
-        local.update { it.copy(loading = true) }
+    /**
+     * Read [routineId] into the detail. Every write is dropped once the
+     * person moved ([Local.pick]); a [quiet] re-read of the routine already
+     * open (after the list's read) leaves [Local.loading] alone.
+     */
+    private suspend fun readOne(routineId: Long, quiet: Boolean = false) {
+        val pick = local.value.pick
+        if (!quiet) local.update { it.copy(loading = true) }
         try {
             val detail = actions.routine(routineId)
-            local.update { it.copy(loading = false, detail = detail, explain = null, memory = null).withRoutine(detail.routine) }
+            local.update {
+                if (it.pick != pick) {
+                    if (quiet) it else it.copy(loading = false)
+                } else {
+                    it.copy(loading = if (quiet) it.loading else false, detail = detail, explain = null, memory = null).withRoutine(detail.routine)
+                }
+            }
+            if (local.value.pick != pick) return
             // The why is a second read: an older hub refuses the action, and
             // the routine still shows without it.
             val why = try {
@@ -384,7 +418,7 @@ class AutomationViewModel(
             } catch (_: Throwable) {
                 null
             }
-            local.update { if (it.detail?.routine?.id == routineId) it.copy(explain = why) else it }
+            local.update { if (it.pick == pick && it.detail?.routine?.id == routineId) it.copy(explain = why) else it }
             // Its notebooks, only for a routine whose row names them: an
             // older hub sends no `memory`, and is never asked the action. A
             // hub that names them serves the action, so a failed read says
@@ -392,17 +426,23 @@ class AutomationViewModel(
             if (detail.routine.memory != null) {
                 try {
                     val memory = actions.memory(routineId)
-                    local.update { if (it.detail?.routine?.id == routineId) it.copy(memory = memory) else it }
+                    local.update { if (it.pick == pick && it.detail?.routine?.id == routineId) it.copy(memory = memory) else it }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (t: Throwable) {
-                    local.update { if (it.detail?.routine?.id == routineId) it.copy(error = friendly(t)) else it }
+                    local.update { if (it.pick == pick && it.detail?.routine?.id == routineId) it.copy(error = friendly(t)) else it }
                 }
             }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            local.update { it.copy(loading = false, error = friendly(t)) }
+            local.update {
+                when {
+                    it.pick != pick -> if (quiet) it else it.copy(loading = false)
+                    quiet -> it.copy(error = friendly(t))
+                    else -> it.copy(loading = false, error = friendly(t))
+                }
+            }
         }
     }
 

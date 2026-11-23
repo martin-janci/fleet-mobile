@@ -1,5 +1,6 @@
 package dev.claudefleet.mobile.data
 
+import dev.claudefleet.mobile.model.FailingRoutine
 import dev.claudefleet.mobile.model.FleetRun
 import dev.claudefleet.mobile.model.HubHealth
 import dev.claudefleet.mobile.model.Routine
@@ -77,6 +78,13 @@ interface RoutineActions {
     /** Rewrite one notebook (`routine` | `project`); `""` clears it. Answers them as the hub now holds them. */
     suspend fun setMemory(routineId: Long, notebook: String, text: String): RoutineMemory =
         throw UnsupportedOperationException("this hub keeps no routine memory")
+
+    /**
+     * The routines whose newest run failed (`routines { failing }`,
+     * claude-fleet 8.6), for the Inbox's Failed rows. The default is a hub
+     * without the action: none.
+     */
+    suspend fun failing(): List<FailingRoutine> = emptyList()
 }
 
 /** [RoutineActions] against the paired hub, through [AppSession.withClient]. */
@@ -111,6 +119,8 @@ class HubRoutineActions(private val session: AppSession) : RoutineActions {
 
     override suspend fun setMemory(routineId: Long, notebook: String, text: String): RoutineMemory =
         session.withClient { it.setRoutineMemory(routineId, notebook, text) }
+
+    override suspend fun failing(): List<FailingRoutine> = session.withClient { it.failingRoutines() }
 
     private companion object {
         const val AUTOMATION_PAUSED = "automation.paused"

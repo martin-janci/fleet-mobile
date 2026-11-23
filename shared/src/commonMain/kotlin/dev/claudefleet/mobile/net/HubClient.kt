@@ -1706,9 +1706,15 @@ class HubClient(
 
     // ---- missions (claude-fleet orchestration O1–O8) ----
 
-    /** The missions this token may see (`work { action: missions }`). */
-    suspend fun workMissions(): List<Mission> =
-        call("work", buildJsonObject { put("action", "missions") }) {
+    /**
+     * The missions this token may see (`work { action: missions }`). With
+     * [waiting], only those waiting on a person, read from the hub's read
+     * pool (the watchers' minute poll, review w19-2); a hub that predates the
+     * filter ignores it and answers every mission, which [dev.claudefleet.mobile.ui.missionWaits]
+     * narrows the same way.
+     */
+    suspend fun workMissions(waiting: Boolean = false): List<Mission> =
+        call("work", buildJsonObject { put("action", "missions"); if (waiting) put("waiting", true) }) {
             json.decodeFromJsonElement(ListSerializer(Mission.serializer()), it)
         }
 

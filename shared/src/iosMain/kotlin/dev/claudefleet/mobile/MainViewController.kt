@@ -143,6 +143,11 @@ fun onOpenMission(missionId: Long, hub: String?) {
     iosContainer.onOpenMission(missionId, hub)
 }
 
+/** A failed routine's notification: open that routine in Automation (review w16-4). */
+fun onOpenRoutine(routineId: Long, hub: String?) {
+    iosContainer.onOpenRoutine(routineId, hub)
+}
+
 /** A running background check; `AppDelegate` cancels it when iOS's time is up. */
 class NeedsYouRun internal constructor(private val job: Job) {
     fun cancel() {
