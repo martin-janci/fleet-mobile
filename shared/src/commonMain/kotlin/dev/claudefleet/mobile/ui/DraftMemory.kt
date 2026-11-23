@@ -62,16 +62,25 @@ class DraftMemory(private val prefs: Prefs? = null) {
     /**
      * The prompt the hub refused ("Not sent" on the New bar), by session: the
      * box was already emptied, so leaving the screen used to lose it (review
-     * w22-4). Kept for this run only, beside the drafts.
+     * w22-4). Kept for this run only, beside the drafts, and kept whole: why
+     * it failed, whether it may have gone through, and the send's
+     * `client_msg_id`, so the card a return finds reads as it did and its
+     * Retry cannot type the prompt twice (review w17-2).
      */
-    private val unsent: MutableMap<Long, String> = linkedMapOf()
+    private val unsent: MutableMap<Long, NotSent> = linkedMapOf()
 
-    fun recallUnsent(sessionId: Long): String? = unsent[sessionId]
+    fun recallUnsent(sessionId: Long): String? = unsent[sessionId]?.text
+
+    fun recallNotSent(sessionId: Long): NotSent? = unsent[sessionId]
 
     fun keepUnsent(sessionId: Long, text: String?) {
+        keepNotSent(sessionId, text?.let { NotSent(it, RECALLED_NOT_SENT) })
+    }
+
+    fun keepNotSent(sessionId: Long, notSent: NotSent?) {
         unsent.remove(sessionId)
-        if (!text.isNullOrEmpty()) {
-            unsent[sessionId] = text
+        if (notSent != null && notSent.text.isNotEmpty()) {
+            unsent[sessionId] = notSent
             while (unsent.size > MAX_SESSIONS) unsent.remove(unsent.keys.first())
         }
     }
@@ -93,6 +102,9 @@ class DraftMemory(private val prefs: Prefs? = null) {
     }
 
     companion object {
+        /** Why a prompt kept by its words alone was not sent: unknown, so the card asks for a look. */
+        val RECALLED_NOT_SENT = Friendly("Maybe not sent", "The hub may not have taken this prompt. Check the conversation, then retry it or edit it.", isError = false)
+
         /** The prefs key: a flat list of session id, draft, session id, draft, … */
         const val KEY = "composer_drafts"
         /** The prefs key of the hub the drafts were typed for ([forHub]). */

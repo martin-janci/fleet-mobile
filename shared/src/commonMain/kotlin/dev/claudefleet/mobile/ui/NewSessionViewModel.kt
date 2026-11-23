@@ -663,7 +663,17 @@ class NewSessionViewModel(
                 throw e
             } catch (t: Throwable) {
                 val over = if (canStartAnyway(t)) "${request.hostAlias}|${request.profile}" else null
-                local.update { it.copy(creating = false, error = explainCreateFailure(t), hubOverLogin = over ?: it.hubOverLogin) }
+                // Past the hub's pause line, a start anyway takes a fresh pick
+                // of the login, never a plain re-tap of Create (review w04-5).
+                local.update {
+                    it.copy(
+                        creating = false,
+                        error = explainCreateFailure(t),
+                        hubOverLogin = over ?: it.hubOverLogin,
+                        loginPicked = if (over != null) false else it.loginPicked,
+                        pickedProfile = if (over != null) null else it.pickedProfile,
+                    )
+                }
             }
         }
     }
@@ -678,9 +688,20 @@ class NewSessionViewModel(
             actions.firstMessage(sessionId, message)
         } catch (e: CancellationException) {
             throw e
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            // An answer lost after the hub kept it: the message is queued, and
+            // the same words in the box would be sent a second time (review w17-3).
+            if (mayHaveRun(t) && queuedAlready(sessionId, message)) return
             drafts?.fill(sessionId, message)
         }
+    }
+
+    private suspend fun queuedAlready(sessionId: Long, message: String): Boolean = try {
+        actions.queuedPrompts(sessionId)?.any { it.waiting && it.body == message } == true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Throwable) {
+        false
     }
 
     /**
@@ -1133,7 +1154,16 @@ private fun explainCreateFailure(t: Throwable): Friendly {
         t is HubError.Transport -> base.copy(body = "The session may still have been created — check the list before trying again.")
         // Only New session has the Account field, and only a login past its
         // pause line (not a spent daily limit) can be started anyway (review w12-1).
-        canStartAnyway(t) -> base.copy(body = "${base.body} Or pick another account under Account, or pick this one again to start anyway.")
+        canStartAnyway(t) -> {
+            // The person is already in New session: its login is picked under Account (review w04-5).
+            val elsewhere = "; start it from New session to choose that login."
+            val body = if (base.body.endsWith(elsewhere)) {
+                base.body.removeSuffix(elsewhere) + ": pick that login under Account, or pick this one again to start anyway."
+            } else {
+                "${base.body} Pick another account under Account, or pick this one again to start anyway."
+            }
+            base.copy(body = body)
+        }
         else -> base
     }
 }

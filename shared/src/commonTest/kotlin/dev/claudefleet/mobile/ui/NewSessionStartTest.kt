@@ -97,9 +97,13 @@ private class StartActions : NewSessionActions {
         ),
     )
 
+    /** Thrown by the next [newSession], once. */
+    var refuseNext: Throwable? = null
+
     override suspend fun newSession(request: NewSessionRequest): SessionRow {
         requests += request
         gate?.await()
+        refuseNext?.let { refuseNext = null; throw it }
         return SessionRow(id = 41, tmuxName = "dev-me-repo", hostAlias = request.hostAlias)
     }
 
@@ -400,6 +404,42 @@ class NewSessionStartTest {
         runCurrent()
         assertEquals("team", actions.requests.last().profile)
         assertTrue(actions.requests.last().overLimitOk, "the person chose a login past the line, knowing it")
+    }
+
+    /**
+     * Review w04-5: the hub refuses a picked login as past its pause line
+     * where this phone saw room. A plain re-tap of Create does not start past
+     * the line; picking the login again does, and the banner says so once.
+     */
+    @Test
+    fun past_the_hubs_pause_line_only_a_fresh_pick_starts_anyway() = runTest {
+        val actions = StartActions()
+        val vm = vm(StartFleet(), actions, backgroundScope)
+        vm.selectProject(3)
+        runCurrent()
+        vm.pickLogin(null)
+        runCurrent()
+        actions.refuseNext = HubError.Tool(
+            "E_ACCOUNT_LIMIT",
+            "past the pause line",
+            json.parseToJsonElement("""{"used_pct":97,"pause_at_pct":95,"suggested_host":"htz","suggested_email":"b@x"}"""),
+        )
+        vm.create()
+        runCurrent()
+        val body = assertNotNull(vm.state.value.error).body
+        assertTrue("pick that login under Account, or pick this one again to start anyway." in body, body)
+        assertFalse("start it from New session" in body, body)
+        assertFalse("Or pick another account" in body, "said once: $body")
+
+        vm.create()
+        runCurrent()
+        assertFalse(actions.requests.last().overLimitOk, "a re-tap of Create is not a choice to start past the line")
+
+        vm.pickLogin(null)
+        runCurrent()
+        vm.create()
+        runCurrent()
+        assertTrue(actions.requests.last().overLimitOk, "picked again: start anyway")
     }
 
     /** Review M1/F4: unpicked, the row shows the freest signed-in login and that login is sent. */
