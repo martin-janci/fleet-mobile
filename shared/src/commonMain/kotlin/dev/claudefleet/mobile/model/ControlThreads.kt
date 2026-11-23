@@ -62,8 +62,12 @@ data class FollowMark(val state: String, val muted: Boolean, val name: String? =
 fun followMarks(follows: List<JournalFollow>): Map<String, FollowMark> =
     follows.associate { f -> "${if (f.kind == "session") "s" else "m"}:${f.id}" to FollowMark(f.state, f.muted, f.name.ifBlank { null }) }
 
-/** Control no longer follows the thread (it went quiet, its PR merged, it ended); a muted or unknown one still counts as followed. */
-private fun unfollowed(mark: FollowMark?): Boolean = mark != null && !mark.muted && mark.state != "following"
+/**
+ * Control no longer follows the thread (it went quiet, its PR merged, it
+ * ended), or the person muted it: the desktop's `!stillFollowed` (review
+ * w04-1). An unknown one still counts as followed.
+ */
+private fun unfollowed(mark: FollowMark?): Boolean = mark != null && (mark.muted || mark.state != "following")
 
 /**
  * A session's group. A counted reason ([SessionRow.needsAttention]: Action
@@ -147,14 +151,35 @@ private fun reasonWords(s: SessionRow): String? = when (s.attentionReason) {
     else -> null
 }
 
-private fun sessionLine(s: SessionRow, facts: ThreadFacts): String {
-    // A row in Needs you says why, in the desktop's words, not only its status.
+/**
+ * A session's second line. Under Needs you it leads with why; a row whose
+ * reason counts but which sits in another group (Control no longer follows
+ * it) leads with its status and keeps the reason without its "Needs you ·"
+ * head (the desktop's `sessionLine`, review w04-2).
+ */
+private fun sessionLine(s: SessionRow, facts: ThreadFacts, group: ThreadGroup): String {
+    val status = sessionStatus(s)
     if (s.needsAttention) {
-        blockedLine(s, facts)?.let { return it }
+        val blocked = blockedLine(s, facts)
         val why = reasonWords(s) ?: s.attentionReason?.let(::reasonLabel)
-        if (why != null) return listOfNotNull(why, s.hostAlias.ifBlank { null }).joinToString(" · ")
+        if (group == ThreadGroup.NEEDS) {
+            // A row in Needs you says why, in the desktop's words, not only its status.
+            blocked?.let { return it }
+            if (why != null) return listOfNotNull(why, s.hostAlias.ifBlank { null }).joinToString(" · ")
+        } else if (blocked != null) {
+            return listOfNotNull(status, blocked.withoutHead()).joinToString(" · ")
+        } else if (why != null) {
+            return listOfNotNull(status, why.withoutHead(), s.hostAlias.ifBlank { null }).joinToString(" · ")
+        }
     }
-    val status = when (s.claudeStatus) {
+    return listOfNotNull(lostLine(s) ?: status, s.hostAlias.ifBlank { null }).joinToString(" · ")
+}
+
+/** A reason line without its head ("Needs you · ", "Failed · "): the desktop's `replace(/^[^·]+· /, '')`. */
+private fun String.withoutHead(): String = Regex("^[^·]+· ").replaceFirst(this, "")
+
+private fun sessionStatus(s: SessionRow): String? {
+    return when (s.claudeStatus) {
         "working" -> "Working"
         "blocked" -> "Needs you"
         "completed" -> "Done"
@@ -163,14 +188,28 @@ private fun sessionLine(s: SessionRow, facts: ThreadFacts): String {
         "stopped" -> "Stopped"
         else -> null
     }
-    return listOfNotNull(lostLine(s) ?: status, s.hostAlias.ifBlank { null }).joinToString(" · ")
 }
 
-private fun missionGroup(state: String, waiting: Boolean, updatedAt: Long, since: Long): ThreadGroup = when {
+/** A mission that ended: the desktop's `isFinal`, plus the phone's older `done`. */
+private fun missionFinal(state: String): Boolean =
+    state == "completed" || state == "done" || state == "failed" || state == "cancelled"
+
+/**
+ * A mission's group, as the desktop's `missionGroup` words it (review
+ * w04-3): one that ended goes by when it did — a failure today needs you, a
+ * cancel never does, and any of them older is Earlier — so the journal's
+ * every mission Control ever handed is not a Needs you flood. [finishedAt] is
+ * the mission's last change (the phone has no `finished_at`); null when only
+ * a receipt knows it. A wait counts only while the mission is not final.
+ */
+private fun missionGroup(state: String, waiting: Boolean, finishedAt: Long?, since: Long): ThreadGroup = when {
+    missionFinal(state) -> when {
+        (finishedAt ?: 0) < since -> ThreadGroup.EARLIER
+        state == "failed" -> ThreadGroup.NEEDS
+        else -> ThreadGroup.DONE
+    }
     waiting -> ThreadGroup.NEEDS
     state == "active" || state == "running" || state == "in_progress" -> ThreadGroup.WORKING
-    state == "failed" -> ThreadGroup.NEEDS
-    (state == "completed" || state == "done" || state == "cancelled") && updatedAt >= since -> ThreadGroup.DONE
     else -> ThreadGroup.EARLIER
 }
 
@@ -220,13 +259,14 @@ fun buildThreads(
         val row = byId.getValue(id)
         // A mission's worker belongs to the mission's thread, not its own.
         if (row.origin == "mission" && row.originRef?.toLongOrNull()?.let { it in missionIds } == true) continue
+        val group = sessionGroup(row, unfollowed(follows?.get("s:$id")), since)
         out += ControlThread(
             key = "s:$id",
             id = id,
             mission = false,
-            group = sessionGroup(row, unfollowed(follows?.get("s:$id")), since),
+            group = group,
             title = row.displayName,
-            line = sessionLine(row, facts),
+            line = sessionLine(row, facts, group),
             at = maxOf(row.lastActivityAt ?: 0, handedAt[id] ?: 0, row.createdAt ?: 0),
         )
     }
@@ -235,7 +275,7 @@ fun buildThreads(
         val h = missionReceipts[id]
         val m = missionById[id]
         val state = m?.state ?: h?.missionState ?: "draft"
-        val wait = m?.waitingOn
+        val wait = m?.waitingOn?.takeIf { !missionFinal(state) }
         val line = when {
             wait != null -> threadWaitWords(wait.reason)
             m != null && m.total > 0 -> "Mission · ${m.done} of ${m.total} done"
@@ -245,7 +285,7 @@ fun buildThreads(
             key = "m:$id",
             id = id,
             mission = true,
-            group = missionGroup(state, wait != null, maxOf(m?.updatedAt ?: 0, h?.at ?: 0), since),
+            group = missionGroup(state, wait != null, m?.updatedAt, since),
             title = m?.name?.ifBlank { null } ?: h?.missionName ?: follows?.get("m:$id")?.name ?: "Mission $id",
             line = line,
             at = maxOf(m?.updatedAt ?: 0, h?.at ?: 0),

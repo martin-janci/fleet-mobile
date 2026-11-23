@@ -58,19 +58,61 @@ const val ESCALATIONS_SHOWN = 3
 
 fun escalationKey(row: SessionRow, bucket: TriageBucket): String = "${row.id}:${bucket.name.lowercase()}:${row.turnSeq}"
 
+/** Whether the hub still follows a thread: no mark (an older hub, a thread it does not name) counts as followed. */
+fun stillFollowed(mark: FollowMark?): Boolean = mark == null || (!mark.muted && mark.state == "following")
+
+/**
+ * The sessions that are Control's threads (the desktop's `controlSessionIds`,
+ * review w21-10): those its agent started (`origin = operator`), those a
+ * session or task receipt names, those the hub's [follows] name, and the
+ * workers of a mission a receipt or a follow names. A thread muted or no
+ * longer followed is left out, and so are the workers of such a mission.
+ */
+fun controlSessionIds(rows: List<SessionRow>, handoffs: List<ControlHandoff>, follows: Map<String, FollowMark>? = null): Set<Long> {
+    fun followed(key: String) = stillFollowed(follows?.get(key))
+    val ids = HashSet<Long>()
+    val missions = HashSet<Long>()
+    for (h in handoffs) {
+        val sid = h.sessionId
+        if (sid != null && (h.kind == "session" || h.kind == "task")) ids += sid
+        val mid = h.missionId
+        if (mid != null && followed("m:$mid")) missions += mid
+    }
+    for ((key, mark) in follows.orEmpty()) {
+        val id = key.drop(2).toLongOrNull() ?: continue
+        if (!stillFollowed(mark)) continue
+        if (key.startsWith("s:")) ids += id else if (key.startsWith("m:")) missions += id
+    }
+    for (s in rows) {
+        if (s.origin == "operator") ids += s.id
+        else if (s.origin == "mission" && s.originRef?.toLongOrNull()?.let { it in missions } == true) ids += s.id
+    }
+    ids.removeAll { !followed("s:$it") }
+    return ids
+}
+
 /**
  * What needs the person, worst first (then by id, so the list does not
  * reshuffle on every frame), leaving out the cards put off ([later]).
+ * [scope], when given, keeps only those sessions ([controlSessionIds]) and
+ * Control's own row; null is the whole fleet.
  * [controlId] is Control's own session: a card only for [OWN_BUCKETS].
  * With [formsShown] (Control's chat draws other sessions' forms, with
  * Answer here), a session waiting on a form is that card and not this one
  * too (review w21-8).
  */
-fun escalations(rows: List<SessionRow>, controlId: Long?, later: Set<String>, formsShown: Boolean = false): List<Escalation> {
+fun escalations(
+    rows: List<SessionRow>,
+    controlId: Long?,
+    later: Set<String>,
+    formsShown: Boolean = false,
+    scope: Set<Long>? = null,
+): List<Escalation> {
     val out = mutableListOf<Escalation>()
     // A host that is down is one card, not one per session on it; insertion order is kept.
     val down = LinkedHashMap<String, MutableList<SessionRow>>()
     for (row in rows) {
+        if (scope != null && row.id !in scope && row.id != controlId) continue
         val bucket = row.triageBucket()
         val words = why(bucket) ?: continue
         val own = row.id == controlId

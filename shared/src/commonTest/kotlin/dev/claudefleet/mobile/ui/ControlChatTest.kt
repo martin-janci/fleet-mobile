@@ -23,6 +23,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
+import dev.claudefleet.mobile.net.HubError
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -48,6 +49,8 @@ private class ControlFleet(tools: Set<String>) : FleetState {
     override val capabilities = MutableStateFlow(HubCapabilities(tools = tools))
     val confirmFrames = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
     override val confirmChanges = confirmFrames
+    val handoffFrames = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
+    override val handoffChanges = handoffFrames
     override suspend fun refresh() = Unit
 }
 
@@ -72,9 +75,12 @@ private class FakeControl(var status: OperatorStatus) : ControlActions, AgentAct
     var handoffReads = 0
     var handoffs = listOf<ControlHandoff>()
     override suspend fun handoffs(limit: Int): List<ControlHandoff> { handoffReads++; return handoffs.take(limit) }
+    /** Thrown by [ensureOperator] after Control started anyway: the call outlived its timeout. */
+    var wakeTimesOut: Throwable? = null
     override suspend fun ensureOperator(): SessionRow {
         wakes++
         status = OperatorStatus(ready = true, session = SessionRow(id = 77))
+        wakeTimesOut?.let { throw it }
         return SessionRow(id = 77)
     }
 }
@@ -140,6 +146,18 @@ class ControlChatTest {
         runCurrent()
         assertEquals(1, fake.wakes)
         assertEquals(77L, vm.state.value.sessionId)
+    }
+
+    /** Review w17-6: a Wake that timed out but did start Control leaves no failure banner over it. */
+    @Test
+    fun a_wake_that_timed_out_but_landed_leaves_no_banner() = runTest {
+        val fake = FakeControl(OperatorStatus(ready = false, blocked = "absent"))
+        fake.wakeTimesOut = HubError.Tool("E_TIMEOUT", "timed out")
+        val vm = ControlViewModel(ControlFleet(CONTROL_TOOLS), fake, fake, backgroundScope, canWrite = true, pollMs = 100)
+        vm.refresh().join(); runCurrent()
+        vm.wake()?.join(); runCurrent()
+        assertEquals(77L, vm.state.value.sessionId)
+        assertNull(vm.state.value.error, "Control runs: no \"the hub did not answer\" over it")
     }
 
     @Test
@@ -237,6 +255,24 @@ class ControlChatTest {
         runCurrent()
 
         assertEquals(before + 1, fake.confirmReads)
+        vm.detach()
+    }
+
+    /** Review w19-5: a `handoff:changed` frame reads the receipts at once; the poll is only the net. */
+    @Test
+    fun a_handoff_frame_reads_the_receipts_at_once() = runTest {
+        val fake = FakeControl(OperatorStatus(ready = true, session = SessionRow(id = 5)))
+        val fleet = ControlFleet(CONTROL_TOOLS)
+        val vm = ControlViewModel(fleet, fake, fake, backgroundScope, canWrite = true, pollMs = 600_000)
+        vm.attach()
+        runCurrent()
+        val before = fake.handoffReads
+
+        fleet.handoffFrames.emit(Unit)
+        runCurrent()
+
+        assertEquals(before + 1, fake.handoffReads)
+        assertTrue(ControlViewModel.CONFIRM_POLL_MS >= 30_000L, "not 30 calls a minute while the tab is open")
         vm.detach()
     }
 

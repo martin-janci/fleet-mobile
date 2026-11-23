@@ -168,4 +168,41 @@ class ControlEscalationsTest {
         assertEquals("Dec 31", dayLabel(0, -3_600))
         assertEquals("Feb 29", dayLabel(1_709_208_000L, 0)) // 2024-02-29T12:00:00Z
     }
+
+    /**
+     * Review w21-10: by default only Control's threads raise a card (what it
+     * started, what a receipt or the hub's follows name, a followed mission's
+     * workers), never a thread it muted or no longer follows; Control's own
+     * row keeps its own cards whatever the scope.
+     */
+    @Test
+    fun only_controls_own_threads_raise_a_card_unless_the_whole_fleet_is_asked_for() {
+        val rows = listOf(
+            row(1, "control", reason = "account_limit").copy(origin = "operator"),
+            row(2, "started", reason = "failed").copy(origin = "operator"),
+            row(3, "handed", reason = "failed"),
+            row(4, "worker", reason = "failed").copy(origin = "mission", originRef = "7"),
+            row(5, "stranger", reason = "failed"),
+            row(6, "muted", reason = "failed"),
+            row(8, "followed", reason = "failed"),
+        )
+        val handoffs = listOf(
+            ControlHandoff(id = 1, kind = "session", sessionId = 3),
+            ControlHandoff(id = 2, kind = "mission", missionId = 7),
+            ControlHandoff(id = 3, kind = "task", sessionId = 6),
+        )
+        val follows = mapOf(
+            "s:6" to FollowMark("following", muted = true),
+            "s:8" to FollowMark("following", muted = false),
+        )
+        val scope = controlSessionIds(rows, handoffs, follows)
+        assertEquals(setOf(1L, 2L, 3L, 4L, 8L), scope)
+        val ours = escalations(rows, controlId = 1, later = emptySet(), scope = scope)
+        assertEquals(listOf(2L, 3L, 4L, 8L, 1L), ours.map { it.sessionId })
+        val all = escalations(rows, controlId = 1, later = emptySet())
+        assertEquals(2, all.size - ours.size, "the stranger and the muted thread: the All fleet switch's count")
+
+        val done = mapOf("m:7" to FollowMark("done", muted = false))
+        assertFalse(4L in controlSessionIds(rows, handoffs, done), "a mission no longer followed takes its workers with it")
+    }
 }

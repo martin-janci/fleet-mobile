@@ -129,8 +129,17 @@ fun ControlNeedsSheet(
     onLater: (String) -> Unit,
     onInbox: () -> Unit,
     onClose: () -> Unit,
+    scope: EscalationScope = EscalationScope(),
 ) {
     ActivitySheet("Needs you · ${all.size}", onClose) {
+        escalationScopeLabel(scope)?.let { label ->
+            TextButton(
+                onClick = { scope.onSet(!scope.fleetWide) },
+                modifier = Modifier.padding(horizontal = 4.dp).testTag(ESCALATION_SCOPE_TAG),
+            ) {
+                Text(label, style = Fleet.type.textSm, color = Fleet.colors.accent)
+            }
+        }
         EscalationCards(
             all = all,
             onOpen = { onClose(); onOpen(it) },
@@ -142,6 +151,22 @@ fun ControlNeedsSheet(
             Text("All in Inbox ›", style = Fleet.type.textSm, color = Fleet.colors.accent)
         }
     }
+}
+
+/**
+ * Which sessions the Needs you cards cover (review w21-10): Control's own
+ * threads by default, the whole fleet when [fleetWide]. [others] is how many
+ * more cards the whole fleet has.
+ */
+data class EscalationScope(val fleetWide: Boolean = false, val others: Int = 0, val onSet: (Boolean) -> Unit = {})
+
+const val ESCALATION_SCOPE_TAG = "control.escalations.scope"
+
+/** The switch's words, or null when there is nothing outside Control's threads to switch to (the desktop's rule). */
+internal fun escalationScopeLabel(scope: EscalationScope): String? = when {
+    scope.fleetWide -> "Only Control's threads"
+    scope.others > 0 -> "All fleet (${scope.others} more)"
+    else -> null
 }
 
 /** What Control handed on, what it watches, and the newest proposed plan. */
@@ -172,11 +197,12 @@ fun ControlActivityBar(
     onOpenSession: (Long) -> Unit,
     onLater: (String) -> Unit,
     onInbox: () -> Unit,
+    scope: EscalationScope = EscalationScope(),
 ) {
     ControlActivityRow(activityCounts(escalations.size, handoffs, plan != null, threads)) { onToggle(it) }
     // A sheet whose last card went closes (the desktop's rule), not on a later count.
     val empty = when (open) {
-        ControlActivity.Needs -> escalations.isEmpty()
+        ControlActivity.Needs -> escalations.isEmpty() && escalationScopeLabel(scope) == null
         ControlActivity.Handoffs -> handoffs.isEmpty() && plan == null
         else -> false
     }
@@ -184,7 +210,7 @@ fun ControlActivityBar(
     if (empty) return
     when (open) {
         ControlActivity.Needs ->
-            ControlNeedsSheet(escalations, onOpenSession, onLater, onInbox, onClose = { onToggle(null) })
+            ControlNeedsSheet(escalations, onOpenSession, onLater, onInbox, onClose = { onToggle(null) }, scope = scope)
         ControlActivity.Handoffs ->
             ControlHandoffsSheet(handoffs, watching, plan, onOpenSession, onClose = { onToggle(null) })
         // The threads have their own sheet (ControlThreadsSheet): [onToggle] opens it.

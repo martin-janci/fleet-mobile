@@ -300,7 +300,7 @@ internal fun TaskHierarchy(state: TaskUiState, handlers: TaskHandlers, modifier:
                 "Under ${state.parentLabel ?: "its parent task"}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.heightIn(min = 32.dp).clickable(onClick = handlers.onOpenParent).padding(vertical = 6.dp),
+                modifier = Modifier.heightIn(min = OrbitTokens.spacing("touch-min").dp).clickable(onClick = handlers.onOpenParent).padding(vertical = 6.dp),
             )
         }
         state.subtaskRollup?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
