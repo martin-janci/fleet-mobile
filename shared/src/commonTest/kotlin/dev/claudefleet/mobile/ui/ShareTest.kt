@@ -301,13 +301,18 @@ class ShareTest {
     }
 
     @Test
-    fun the_inbox_moves_shared_sessions_out_of_needs_you() {
+    fun the_inbox_keeps_a_watched_session_out_of_needs_you() {
         val waitingMine = MINE.copy(claudeStatus = "blocked")
         val waitingTheirs = THEIRS.copy(claudeStatus = "blocked", lastActivityAt = 50)
         val watched = SessionRow(id = 13, tmuxName = "spec", ownerPersonId = 2, lastActivityAt = 90)
         val access = MyAccess(personId = ME, grants = mapOf(11L to GrantLevel.ANSWER, 13L to GrantLevel.WATCH))
         val rows = listOf(waitingMine, waitingTheirs, watched)
-        assertEquals(listOf(10L), inboxRows(rows, access).map { it.id })
+        // Review w08-3 (option a): a session shared at Answer or Steer is under Needs you too;
+        // one only watched is its owner's to answer.
+        assertEquals(listOf(11L, 10L), inboxRows(rows, access).map { it.id })
+        val watchedWaiting = watched.copy(claudeStatus = "blocked")
+        assertEquals(listOf(11L, 10L), inboxRows(rows - watched + watchedWaiting, access).map { it.id })
+        assertEquals(listOf(10L), inboxRows(rows, access.copy(grants = mapOf(11L to GrantLevel.WATCH))).map { it.id })
         val shared = sharedRows(rows, access)
         assertEquals(listOf(13L, 11L), shared.map { it.row.id })
         assertEquals(listOf("Watch", "Answer · needs an answer"), shared.map(::sharedLine))

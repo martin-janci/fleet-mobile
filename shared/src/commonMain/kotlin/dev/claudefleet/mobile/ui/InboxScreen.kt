@@ -74,7 +74,7 @@ import dev.claudefleet.mobile.ui.kit.PhoneRow
  * id so the list does not reshuffle on every event frame.
  */
 fun inboxRows(sessions: List<SessionRow>, access: MyAccess = MyAccess.UNKNOWN): List<SessionRow> =
-    sessions.filter { it.needsAttention && access.levelFor(it) == null }
+    sessions.filter { it.needsAttention && answersHere(access.levelFor(it)) }
         .sortedWith(compareBy<SessionRow, Long?>(nullsLast()) { it.askedAt }.thenBy { it.id })
 
 /**
@@ -99,13 +99,21 @@ fun proposedRows(
 fun needYouCount(sessions: Int, missions: Int, agentActions: Int, reviewAsks: Int, failedRoutines: Int): Int =
     sessions + missions + agentActions + reviewAsks + failedRoutines
 
+/**
+ * Whether a session at share [level] is this person's to answer (review
+ * w08-3, option a): their own (null), or shared at Answer or Steer. At Watch
+ * the question is its owner's, so it is neither counted nor notified.
+ */
+fun answersHere(level: String?): Boolean = level == null || level == GrantLevel.ANSWER || level == GrantLevel.DRIVE
+
 /** One session someone else shared with this person, and at what level (redesign 11.10, the Watch board). */
 data class SharedRow(val row: SessionRow, val level: String)
 
 /**
  * The Inbox's *Shared with me* section: every session shared with this
- * person, most recently active first. Its questions are its owner's, so it
- * sits here rather than under *Needs you*; [inboxRows] leaves it out.
+ * person, most recently active first. At Watch its questions are its
+ * owner's, so [inboxRows] leaves it out; at Answer or Steer a waiting one is
+ * under *Needs you* as well (review w08-3).
  */
 fun sharedRows(sessions: List<SessionRow>, access: MyAccess): List<SharedRow> =
     sessions.mapNotNull { row -> access.levelFor(row)?.let { SharedRow(row, it) } }

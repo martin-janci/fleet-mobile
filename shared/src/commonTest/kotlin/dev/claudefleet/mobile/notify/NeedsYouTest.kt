@@ -3,7 +3,9 @@ package dev.claudefleet.mobile.notify
 import dev.claudefleet.mobile.data.ConnectionStatus
 import dev.claudefleet.mobile.data.FleetState
 import dev.claudefleet.mobile.model.Attention
+import dev.claudefleet.mobile.model.GrantLevel
 import dev.claudefleet.mobile.model.HostRow
+import dev.claudefleet.mobile.model.MyAccess
 import dev.claudefleet.mobile.model.PendingInput
 import dev.claudefleet.mobile.model.PendingOption
 import dev.claudefleet.mobile.model.ProjectRow
@@ -21,6 +23,19 @@ private fun row(id: Long, reason: String? = null) =
     SessionRow(id = id, tmuxName = "s$id", friendlyName = "session $id", hostAlias = "pine", attention = reason?.let { Attention(it) })
 
 class NeedsYouTest {
+
+    /** Review w08-3 (option a): a session shared at Watch is its owner's question, so no alert; at Answer it alerts. */
+    @Test
+    fun a_watched_shared_session_does_not_alert() {
+        val theirs = row(1, "waiting").copy(ownerPersonId = 2)
+        val watch = MyAccess(personId = 7, grants = mapOf(1L to GrantLevel.WATCH))
+        val (none, seen) = needsYouAlerts(mapOf(1L to null), listOf(theirs), watch)
+        assertTrue(none.isEmpty())
+        val (raised, _) = needsYouAlerts(seen, listOf(theirs), watch.copy(grants = mapOf(1L to GrantLevel.ANSWER)))
+        assertEquals(listOf(1L), raised.map { it.sessionId })
+        val (mine, _) = needsYouAlerts(mapOf(2L to null), listOf(row(2, "waiting")), watch)
+        assertEquals(listOf(2L), mine.map { it.sessionId }, "a row shared with no one is mine")
+    }
 
     @Test
     fun a_session_that_comes_to_need_you_is_news_once() {
