@@ -64,19 +64,35 @@ private fun friendlyWords(t: Throwable): Friendly {
     return when (t) {
         is HubError.Tool -> when (t.code) {
             NO_TRANSCRIPT -> Friendly("Nothing has been said yet", "Send a prompt to start.", isError = false, details = raw)
-            "E_NOTFOUND" -> Friendly("This session is gone", "It was killed or the fleet no longer lists it.", isError = true, details = raw)
+            // Not only sessions: routines, hosts, tasks, people, trackers and
+            // runs are E_NOTFOUND too, so the generic words name none of
+            // them; the session screen says "gone" itself ([friendlySession],
+            // review w15-2).
+            "E_NOTFOUND" -> Friendly("Not found", "It may have been removed on another device. Refresh and try again.", isError = true, details = raw)
             "E_FORBIDDEN" -> trustHint(t.message)?.let { command ->
                 Friendly("Trust this phone on the hub first", "On the hub, run: $command", isError = true, details = raw)
             } ?: Friendly("The hub refused that", t.message, isError = true, details = raw)
-            // Review w16-3: the phone lists and answers confirmations in
-            // Control itself (ControlChat / ControlActions), and a headless
-            // hub has no desktop at all.
-            "E_CONFIRM_REQUIRED" -> Friendly("Needs a yes", "Approve it in Control; this screen will follow.", isError = true, details = raw)
+            // Review w15-1: the hub replays an approved call for its operator
+            // alone, and this screen does not resend with the confirm nonce,
+            // so approving the request does not run it from here; say who
+            // can, as the desktop's `hubNextStep` does. (Trackers and project
+            // tools resend with the nonce and never show this.)
+            "E_CONFIRM_REQUIRED" -> Friendly(
+                "Needs a yes on the hub",
+                "The hub asks for a yes before this, and approving the request won't run it from this phone. " +
+                    "Ask the hub's operator to do it, or to turn off confirming destructive actions on the hub.",
+                isError = true,
+                details = raw,
+            )
             "E_BG_SESSION" -> Friendly("Runs outside tmux", "This session has no terminal to type into.", isError = true, details = raw)
             "E_PINNED" -> Friendly("This session is pinned", "Unpin it first: ⋮ › Unpin, or on the desktop.", isError = true, details = raw)
             // The hub's text is written for agents ("pass over_limit_ok"); the
             // person gets what is spent and where to go (review w12-1).
             "E_ACCOUNT_LIMIT" -> accountLimitWords(t.details, raw)
+            // Transport and internal failures carry log text, and nothing
+            // refused anything: a plain sentence, the text under Details
+            // (review w15-3, the desktop's `PLAIN`).
+            in PLAIN -> PLAIN.getValue(t.code).let { (title, body) -> Friendly(title, body, isError = true, details = raw) }
             else -> Friendly("The hub refused that", t.message, isError = true, details = raw)
         }
         // Every branch carries `details`, and these four used to carry none —
@@ -116,6 +132,38 @@ private fun friendlyWords(t: Throwable): Friendly {
         )
     }
 }
+
+/**
+ * The codes whose message is written for logs ("ssh: connect to host … timed
+ * out", "database is locked"), in words: the desktop's `PLAIN`
+ * (src/lib/error_copy.ts), each with a short next step.
+ */
+private val PLAIN: Map<String, Pair<String, String>> = mapOf(
+    "E_SSH" to ("Couldn't reach the host over SSH" to "Check that the host is up and reachable from the hub, then try again."),
+    "E_SSH_TIMEOUT" to ("The host took too long to answer over SSH" to "Try again in a moment."),
+    "E_HOST_OFFLINE" to ("The host is offline" to "It answers again once it is back."),
+    "E_AGENT_OFFLINE" to ("The host's agent is offline" to "It answers again once the agent reconnects."),
+    "E_AGENT_PROTOCOL" to ("The host's agent answered in a way this version doesn't understand" to "Update the agent or the hub."),
+    "E_TIMEOUT" to ("That took too long to answer" to "Try again in a moment."),
+    "E_TMUX" to ("tmux on the host failed" to "Try again; the hub's log has the details."),
+    "E_SQLITE" to ("The hub's database couldn't do that" to "Try again; the hub's log has the details."),
+    "E_SERIALIZE" to ("Something went wrong reading the answer" to "Try again."),
+    "E_PARSE" to ("Something went wrong reading the answer" to "Try again."),
+    "E_INTERNAL" to ("Something went wrong on the hub" to "Try again; the hub's log has the details."),
+    "E_LOCK" to ("The hub hit an internal error" to "It has to be restarted before it works again."),
+    "E_RATE_LIMITED" to ("Too many requests" to "Try again in a moment."),
+)
+
+/**
+ * [friendly] for the session screen, where a missing thing is the session:
+ * `E_NOTFOUND` reads "This session is gone" here and nowhere else (review w15-2).
+ */
+fun friendlySession(t: Throwable): Friendly =
+    if (t is HubError.Tool && t.code == "E_NOTFOUND") {
+        friendly(t).copy(title = "This session is gone", body = "It was killed or the fleet no longer lists it.")
+    } else {
+        friendly(t)
+    }
 
 private fun JsonElement?.field(name: String): JsonPrimitive? = ((this as? JsonObject)?.get(name) as? JsonPrimitive)
 
