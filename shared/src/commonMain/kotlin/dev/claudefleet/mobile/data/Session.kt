@@ -234,7 +234,10 @@ class AppSession(
             // only after `secrets.clear()` returns, so a store that refuses to
             // forget leaves neither the state nor the reason behind.
             try {
-                revoke()
+                // The credential this call used, not whatever is stored now:
+                // a late 401 on the old token (a long poll, a download) must
+                // not clear a pairing made since (review w16-6).
+                revoke(refused = credentials)
             } catch (_: Exception) {
                 // Nothing to add: the caller is about to be told about the 401.
             }

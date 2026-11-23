@@ -633,6 +633,33 @@ class AppSessionTest {
         assertEquals(AuthState.Unpaired, app.state.value)
         assertEquals(REVOKED_CREDENTIAL_REASON, app.unpairReason.value)
     }
+
+    /**
+     * Review w16-6: a call still in flight on the old token (a long poll, a
+     * download) whose 401 lands after a fresh pair clears only the token it
+     * used, never the new pairing.
+     */
+    @Test
+    fun a_late_401_through_with_client_keeps_a_pairing_made_since() = runTest {
+        val old = Credentials(BASE, "tok-old-value", "phone", "full")
+        val held = Credentials(BASE, "tok-new-value", "phone", "full")
+        val secrets = FakeSecrets(old)
+        val (app, _, _) = session(secrets) { "" to HttpStatusCode.OK }
+        app.restore()
+
+        assertFailsWith<HubError.Unauthorized> {
+            app.withClient {
+                // The person re-paired while this call waited on the old token.
+                secrets.write(held)
+                app.restore()
+                throw HubError.Unauthorized("revoked")
+            }
+        }
+
+        assertEquals(held, secrets.read())
+        assertEquals(AuthState.Paired(held), app.state.value)
+        assertNull(app.unpairReason.value)
+    }
 }
 
 // ---------------------------------------------------------------------------

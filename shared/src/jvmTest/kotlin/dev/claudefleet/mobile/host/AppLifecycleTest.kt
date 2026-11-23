@@ -78,7 +78,7 @@ class AppLifecycleTest {
     @Test
     fun later_withdraws_the_alert_unconditionally() {
         val withdraw = service.substringAfter("private fun withdraw(", "").substringBefore("\n    }")
-        assertTrue("cancel(alertId(sessionId))" in withdraw)
+        assertTrue("cancel(TAG_SESSION, alertId(sessionId))" in withdraw)
         assertTrue("return" !in withdraw, "withdraw must not return early on the in-memory map")
     }
 
@@ -126,8 +126,9 @@ class AppLifecycleTest {
         val forget = hub.substringAfter("if (container.prefs.keepSeenForHub(credentials.hub)) {", "").substringBefore("}")
         assertTrue("memory.edit().remove(SEEN).apply()" in forget && "withdrawAll()" in forget)
         assertTrue(hub.indexOf("keepSeenForHub") in 0 until hub.indexOf("memory.getStringSet(SEEN"), "cleared before it is read")
-        val all = service.substringAfter("private fun withdrawAll()", "").substringBefore("\n    }")
+        val all = service.substringAfter("fun withdrawAlerts(context: Context)", "").substringBefore("\n        }")
         assertTrue("channelId == ALERTS" in all, "only the alerts' channel: not the ongoing notice, not the update's")
+        assertTrue("m.cancel(it.tag, it.id)" in all, "a tagged alert is cancelled under its tag")
     }
 
     /** Failed runs and mission waits are remembered across a restart of the service, as the sessions are. */
@@ -138,7 +139,7 @@ class AppLifecycleTest {
         assertTrue("RoutineFailedWatch(container.prefs)" in routines)
         assertTrue("MissionWaitWatch(container.prefs)" in missions)
         assertTrue("var seen" !in routines && "var seen" !in missions, "a seen set in memory is the baseline again after every restart")
-        assertTrue("for (id in resolved) manager(this).cancel(MISSION_BASE" in missions)
+        assertTrue("for (id in resolved) manager(this).cancel(TAG_MISSION, MISSION_BASE" in missions)
     }
 
     /** After a reboot, "Notify me" comes back without the app being opened. */
@@ -196,5 +197,41 @@ class AppLifecycleTest {
     fun a_cold_start_does_not_call_the_session_gone() {
         assertTrue("state.session == null && !state.streaming -> \"Reading the fleet…\"" in sessionScreen)
         assertTrue("if (state.streaming) \"This session is gone.\" else \"Reading the fleet…\"" in sessionScreen)
+    }
+
+    /**
+     * A notification left up from an earlier pairing must not open, or
+     * retry, the same id on another hub (review w16-1): every tap carries its
+     * hub, the activity hands it on, and turning "Notify me" off or losing
+     * the pairing takes the alerts down even with no service running.
+     */
+    @Test
+    fun every_alert_tap_names_its_hub_and_the_alerts_go_with_the_pairing() {
+        val post = service.substringAfter("private fun post(alert: NeedsYouAlert)", "").substringBefore("\n    }\n")
+        assertTrue(".putExtra(EXTRA_HUB, hub)" in post)
+        val mission = service.substringAfter("private fun postMission(", "").substringBefore("\n    }\n")
+        assertTrue(".putExtra(EXTRA_HUB, hub)" in mission)
+        val deliver = activity.substringAfter("private fun deliver(", "").substringBefore("override fun")
+        assertTrue("getStringExtra(NeedsYouService.EXTRA_HUB)" in deliver)
+        assertTrue("container.onOpenSession(id, hub)" in deliver && "container.onRetrySession(id, hub)" in deliver)
+        assertTrue("container.onOpenMission(it, hub)" in deliver)
+        val notifier = service.substringAfter("class AndroidBackgroundNotifier(", "").substringBefore("companion object")
+        assertTrue("if (!on) NeedsYouService.withdrawAlerts(context)" in notifier)
+        assertTrue("override fun withdrawAll()" in notifier)
+        val unpaired = app.substringAfter("AuthState.Unpaired -> {", "").substringBefore("FirstRun.Welcome ->")
+        assertTrue("container.notifier.withdrawAll()" in unpaired)
+    }
+
+    /**
+     * Each kind's notification under a tag of its own and each tap under an
+     * action of its own: a session's id never replaces the update notice or
+     * a mission's, and its tap never resolves to theirs (review w16-4).
+     */
+    @Test
+    fun the_kinds_never_share_a_notification_or_a_tap() {
+        assertTrue("notify(TAG_SESSION, alertId(alert.sessionId), n)" in service)
+        assertTrue("notify(TAG_MISSION, MISSION_BASE" in service)
+        assertTrue("notify(TAG_ROUTINE, ROUTINE_BASE" in service)
+        assertTrue(".setAction(ACTION_OPEN_SESSION)" in service && ".setAction(ACTION_OPEN_MISSION)" in service)
     }
 }

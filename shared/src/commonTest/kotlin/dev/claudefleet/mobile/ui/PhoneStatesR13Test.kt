@@ -63,6 +63,7 @@ class PhoneStatesR13Test {
             HubError.Http(502, "<html>bad gateway</html>"),
             HubError.Tool("E_INTERNAL", "boom"),
             IllegalStateException("Authorization: Bearer 0123"),
+            HubError.Forbidden("host not allowed", "https://hub.lan"),
         )
         for (t in failures) {
             val said = connectionReason(t)
@@ -71,6 +72,11 @@ class PhoneStatesR13Test {
                 assertFalse(leak in said, "$t leaked $leak: $said")
             }
         }
+        // Review w16-5: the allowed-hosts refusal says who can fix it, not that the answer was unreadable.
+        assertEquals(
+            "The hub refused this address. Only its operator can allow it.",
+            connectionReason(HubError.Forbidden("host not allowed", "https://hub.lan")),
+        )
     }
 
     /** P13-7: a failed status read is not "not running", and a down hub is said to be down. */

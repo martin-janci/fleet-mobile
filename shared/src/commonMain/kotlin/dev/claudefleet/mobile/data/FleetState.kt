@@ -196,6 +196,13 @@ interface FleetState {
     val confirmChanges: Flow<Unit> get() = emptyFlow()
 
     /**
+     * One per `handoff:changed` frame: Control handed something out, or a
+     * receipt moved. Hot and lossy like [confirmChanges]; Control reads
+     * `control_handoffs` on it (review w19-5).
+     */
+    val handoffChanges: Flow<Unit> get() = emptyFlow()
+
+    /**
      * `start:progress` frames as they arrive (claude-fleet redesign 5.13):
      * the worktree, tmux and agent steps of a `new_session` some client
      * started with a `start_token`. The New session form keeps the ones that

@@ -17,6 +17,13 @@ import platform.UserNotifications.UNUserNotificationCenter
 const val MISSION_ID_KEY: String = "missionId"
 
 /**
+ * Where a notification carries the hub it was posted for, so a tap on one
+ * left up from an earlier pairing does not open the same id on another hub
+ * (`AppDelegate` passes it on; review w16-1).
+ */
+const val HUB_KEY: String = "hub"
+
+/**
  * "Needs you" notifications through `UNUserNotificationCenter`: one per
  * session (its identifier replaces an older one), all in one thread so iOS
  * groups them, each carrying its session for the tap.
@@ -25,7 +32,7 @@ const val MISSION_ID_KEY: String = "missionId"
  * app bundle (a bare Kotlin/Native test binary) has no center, and asking for
  * one there is a crash.
  */
-class IosAlertPoster : AlertPoster {
+class IosAlertPoster(private val hub: () -> String? = { null }) : AlertPoster {
     private val center: UNUserNotificationCenter get() = UNUserNotificationCenter.currentNotificationCenter()
 
     override fun post(alert: NeedsYouAlert) {
@@ -36,7 +43,7 @@ class IosAlertPoster : AlertPoster {
             setBody(c.body)
             setThreadIdentifier(c.thread)
             setCategoryIdentifier(c.category)
-            setUserInfo(mapOf<Any?, Any?>(NEEDS_YOU_SESSION_KEY to NSNumber.numberWithLongLong(c.sessionId)))
+            setUserInfo(withHub(NEEDS_YOU_SESSION_KEY to NSNumber.numberWithLongLong(c.sessionId)))
             // An update (the question arriving after the status) replaces the
             // notification without a second sound.
             if (!alert.quiet) setSound(UNNotificationSound.defaultSound)
@@ -89,7 +96,7 @@ class IosAlertPoster : AlertPoster {
             setBody(alert.text)
             setThreadIdentifier(NEEDS_YOU_THREAD)
             setCategoryIdentifier(missionCategory(alert.reason))
-            setUserInfo(mapOf<Any?, Any?>(MISSION_ID_KEY to NSNumber.numberWithLongLong(alert.missionId)))
+            setUserInfo(withHub(MISSION_ID_KEY to NSNumber.numberWithLongLong(alert.missionId)))
             setSound(UNNotificationSound.defaultSound)
         }
         center.addNotificationRequest(
@@ -106,8 +113,12 @@ class IosAlertPoster : AlertPoster {
         center.removeDeliveredNotificationsWithIdentifiers(listOf(needsYouId(sessionId)))
     }
 
-    /** Every delivered "needs you" notification — when the person turns alerts off. */
-    fun withdrawAll() {
+    /** A notification's payload: [entry], and the hub it is for when known. */
+    private fun withHub(entry: Pair<String, Any>): Map<Any?, Any?> =
+        listOfNotNull<Pair<Any?, Any?>>(entry, hub()?.let { HUB_KEY to it }).toMap()
+
+    /** Every delivered "needs you" notification — when the person turns alerts off, or the pairing goes. */
+    override fun withdrawAll() {
         center.getDeliveredNotificationsWithCompletionHandler { delivered ->
             val ids = delivered.orEmpty()
                 .mapNotNull { (it as? UNNotification)?.request?.identifier }

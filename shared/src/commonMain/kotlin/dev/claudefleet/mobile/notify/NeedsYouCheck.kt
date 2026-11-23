@@ -22,6 +22,9 @@ interface AlertPoster {
 
     /** The mission no longer waits: its notification comes down (review w21-3). */
     fun withdrawMission(missionId: Long) {}
+
+    /** Every alert up: they belong to another hub (review w16-1). */
+    fun withdrawAll() {}
 }
 
 /** The seen set the background check and the open app share, in [Prefs]. */
@@ -96,6 +99,9 @@ class NeedsYouCheck(
             null
         } ?: return
 
+        // Another hub's seen sets would diff this hub's runs and missions
+        // against the wrong ids, and its alerts name other sessions (review w16-1).
+        session.credentials()?.hub?.let { hub -> if (prefs.keepSeenForHub(hub)) poster.withdrawAll() }
         val before = prefs.readSeen()
         val (alerts, after) = needsYouAlerts(before.orEmpty(), rows)
         if (before != null) {

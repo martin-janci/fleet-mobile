@@ -27,7 +27,7 @@ class IosBackgroundTaskTest {
     @Test
     fun the_container_holds_the_ios_notifier() {
         assertTrue("notifier = iosNotifier" in main)
-        assertTrue("fun onOpenSession(sessionId: Long)" in main)
+        assertTrue("fun onOpenSession(sessionId: Long, hub: String?)" in main)
         assertTrue("fun scheduleNeedsYouRefreshIfEnabled()" in main)
     }
 
@@ -66,6 +66,11 @@ class IosBackgroundTaskTest {
         assertTrue("UNUserNotificationCenter.current().delegate = self" in delegate)
         assertTrue("userInfo[\"sessionId\"]" in delegate, "the key is NEEDS_YOU_SESSION_KEY")
         assertTrue("MainViewControllerKt.onOpenSession" in delegate)
+        // The hub the alert was posted for goes with every tap (review w16-1).
+        assertTrue("content.userInfo[\"hub\"] as? String" in delegate)
+        assertTrue("onOpenSession(sessionId: id.int64Value, hub: hub)" in delegate)
+        assertTrue("onRetrySession(sessionId: id.int64Value, hub: hub)" in delegate)
+        assertTrue("onOpenMission(missionId: id.int64Value, hub: hub)" in delegate)
         assertTrue("task.expirationHandler = { check.cancel() }" in delegate)
         assertTrue("nonisolated private static func run" in delegate, "the launch handler runs on a background queue")
         assertTrue("@Sendable task in" in delegate)

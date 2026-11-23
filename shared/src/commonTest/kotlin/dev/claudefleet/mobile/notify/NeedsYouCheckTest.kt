@@ -86,6 +86,8 @@ internal class RecordingPoster : AlertPoster {
     override fun withdraw(sessionId: Long) { withdrawn += sessionId }
     val missionsWithdrawn = mutableListOf<Long>()
     override fun withdrawMission(missionId: Long) { missionsWithdrawn += missionId }
+    var withdrewAll = 0
+    override fun withdrawAll() { withdrewAll++ }
 }
 
 private class Hub {
@@ -169,6 +171,30 @@ class NeedsYouCheckTest {
 
         assertEquals(listOf(1L, 2L), poster.withdrawn.sorted(), "1 settled, 2 was killed")
         assertEquals(emptyList(), poster.posted)
+    }
+
+    /**
+     * Review w16-1: a look after a re-pair to another hub does not diff that
+     * hub's sessions against the old one's seen set, and the old hub's
+     * alerts come down: their ids name other sessions here.
+     */
+    @Test
+    fun a_look_at_another_hub_starts_from_a_baseline_and_takes_the_old_alerts_down() = realTime {
+        val hub = Hub().apply { reply = { sse(okResult(rows(1L to "waiting"))) to HttpStatusCode.OK } }
+        val prefs = FakePrefs().apply {
+            keepSeenForHub("https://old.example")
+            writeSeen(mapOf(1L to null))
+        }
+        val poster = RecordingPoster()
+
+        check(hub, prefs = prefs, poster = poster).once()
+
+        assertEquals(1, poster.withdrewAll, "the old hub's alerts come down")
+        assertEquals(emptyList(), poster.posted, "the old hub's seen set is not this hub's: the look is a baseline")
+        assertEquals(mapOf(1L to "waiting"), prefs.readSeen())
+
+        check(hub, prefs = prefs, poster = poster).once()
+        assertEquals(1, poster.withdrewAll, "the same hub again takes nothing down")
     }
 
     @Test

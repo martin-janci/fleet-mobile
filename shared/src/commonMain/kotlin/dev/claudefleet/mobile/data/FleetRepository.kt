@@ -220,6 +220,8 @@ class FleetRepository(
     override val updateDecisions: Flow<Unit> = _updateDecisions.asSharedFlow()
     private val _confirmChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val confirmChanges: Flow<Unit> = _confirmChanges.asSharedFlow()
+    private val _handoffChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val handoffChanges: Flow<Unit> = _handoffChanges.asSharedFlow()
 
     // Lossy and buffered like `_sessionChanges`: a start's step, for the form waiting on it.
     private val _startProgress = MutableSharedFlow<StartProgress>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
@@ -556,6 +558,7 @@ class FleetRepository(
                             if (event.isGrantFrame()) readGrantsSoon()
                             if (event.isUpdateDecisionFrame()) _updateDecisions.tryEmit(Unit)
                             if (event.isConfirmFrame()) _confirmChanges.tryEmit(Unit)
+                            if (event.isHandoffFrame()) _handoffChanges.tryEmit(Unit)
                             event.downloadId()?.let { _downloadChanges.tryEmit(it) }
                             event.startProgress()?.let { _startProgress.tryEmit(it) }
                             event.repairProgress()?.let { _repairProgress.tryEmit(it) }
@@ -844,6 +847,8 @@ internal fun connectionReason(t: Throwable): String = when (t) {
     is HubError.Transport -> "Can't reach the hub from this network."
     is HubError.Http -> "The hub answered with an error."
     is HubError.Tool -> "The hub refused the connection."
+    // The allowed-hosts refusal (a 403): no retry can fix it (review w16-5).
+    is HubError.Forbidden -> "The hub refused this address. Only its operator can allow it."
     is HubError -> "The hub's answer could not be read."
     else -> "The connection dropped."
 }
