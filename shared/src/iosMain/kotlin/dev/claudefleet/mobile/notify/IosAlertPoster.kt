@@ -32,7 +32,10 @@ const val HUB_KEY: String = "hub"
  * app bundle (a bare Kotlin/Native test binary) has no center, and asking for
  * one there is a crash.
  */
-class IosAlertPoster(private val hub: () -> String? = { null }) : AlertPoster {
+class IosAlertPoster(private val hub: () -> String?) : AlertPoster {
+    /** Swift sees no Kotlin default arguments: the tests build it with no hub. */
+    constructor() : this({ null })
+
     private val center: UNUserNotificationCenter get() = UNUserNotificationCenter.currentNotificationCenter()
 
     override fun post(alert: NeedsYouAlert) {
