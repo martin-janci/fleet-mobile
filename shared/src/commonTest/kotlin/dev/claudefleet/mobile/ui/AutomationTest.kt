@@ -196,6 +196,36 @@ class AutomationTest {
         assertEquals(1L, vm.state.value.detail?.routine?.id)
     }
 
+    /** Review w05-3: the tap that started the app opens the routine once the hub has said what it serves. */
+    @Test
+    fun a_routine_opened_before_the_hubs_tools_are_known_still_opens() = runTest {
+        val fleet = AutomationFleet(HubCapabilities())
+        val vm = AutomationViewModel(fleet, FakeRoutineActions(), backgroundScope, canWrite = true)
+        runCurrent()
+        vm.openRoutine(1)
+        runCurrent()
+        assertTrue(vm.state.value.open)
+        assertTrue(vm.state.value.loading, "waiting, not empty")
+        assertNull(vm.state.value.detail)
+
+        fleet.capabilities.value = WITH_ROUTINES
+        runCurrent()
+        assertEquals(1L, vm.state.value.detail?.routine?.id)
+        assertFalse(vm.state.value.loading)
+    }
+
+    /** A hub that never offers routines ends the wait. */
+    @Test
+    fun a_routine_opened_on_a_hub_without_routines_stops_waiting() = runTest {
+        val vm = automation(caps = HubCapabilities())
+        runCurrent()
+        vm.openRoutine(1)
+        testScheduler.advanceTimeBy(CAPS_WAIT_MS + 1)
+        runCurrent()
+        assertFalse(vm.state.value.loading)
+        assertNull(vm.state.value.detail)
+    }
+
     /** Review w16-2: Back or a tab switch while a routine loads is not undone by its late answer. */
     @Test
     fun a_routine_read_that_answers_after_back_is_dropped() = runTest {

@@ -66,8 +66,8 @@ fun needsYouAlerts(
     /** Who this person is and what is shared with them: a session they only watch is its owner's to answer (review w08-3). */
     access: MyAccess = MyAccess.UNKNOWN,
 ): Pair<List<NeedsYouAlert>, Map<Long, String?>> {
-    val mine = rows.filter { answersHere(access.levelFor(it)) }
-    val now = rows.associate { it.id to if (answersHere(access.levelFor(it))) it.notifyKey else null }
+    val mine = rows.filter { answersHere(access.levelFor(it), it) }
+    val now = rows.associate { it.id to if (answersHere(access.levelFor(it), it)) it.notifyKey else null }
     val alerts = mine.mapNotNull { row ->
         val reason = row.notifyReason ?: return@mapNotNull null
         val key = row.notifyKey
@@ -89,7 +89,7 @@ fun needsYouAlerts(
             reason,
             question = row.pendingInput?.question?.trim()?.takeIf { it.isNotEmpty() },
             quiet = quiet,
-            retryable = reason == "failed" && inboxRowActions(row, canWrite = true, switchAvailable = false, limit = null).retryPrompt != null,
+            retryable = reason == "failed" && inboxRowActions(row, canWrite = true, switchAvailable = false, limit = null, level = access.levelFor(row)).retryPrompt != null,
         )
     }
     return alerts to now

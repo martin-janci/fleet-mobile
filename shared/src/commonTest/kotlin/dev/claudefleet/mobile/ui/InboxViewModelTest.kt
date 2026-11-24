@@ -79,6 +79,24 @@ class InboxViewModelTest {
         assertNull(inboxRowActions(failed().copy(isController = true), canWrite = true, switchAvailable = true, limit = null).retryPrompt)
     }
 
+    /** Review w05-2: a shared row counts and offers only what the hub takes from that level. */
+    @Test
+    fun a_shared_row_is_in_needs_you_only_for_what_its_level_may_do() {
+        val G = dev.claudefleet.mobile.model.GrantLevel
+        val waiting = SessionRow(id = 3, tmuxName = "w", claudeStatus = "blocked", ownerPersonId = 2, attention = Attention("waiting", state = "action_required"))
+        val rows = listOf(failed().copy(ownerPersonId = 2), paused().copy(ownerPersonId = 2), waiting)
+        fun shown(level: String) =
+            inboxRows(rows, dev.claudefleet.mobile.model.MyAccess(personId = 7, grants = rows.associate { it.id to level })).map { it.id }.sorted()
+        assertEquals(listOf(3L), shown(G.ANSWER), "a failed turn or a limit is not Answer's to fix")
+        assertEquals(listOf(1L, 3L), shown(G.DRIVE), "Steer may send the prompt again")
+        assertEquals(emptyList(), shown(G.WATCH))
+
+        assertEquals("run the tests", inboxRowActions(failed(), true, true, null, G.DRIVE).retryPrompt)
+        assertNull(inboxRowActions(failed(), true, true, null, G.ANSWER).retryPrompt)
+        assertTrue(inboxRowActions(failed(), true, true, null, G.ANSWER).openLog)
+        assertFalse(inboxRowActions(paused(), true, true, null, G.DRIVE).switchAccount, "a restart is the owner's")
+    }
+
     @Test
     fun a_paused_row_offers_switch_account_and_wait_until_the_reset() {
         val a = inboxRowActions(paused(), canWrite = true, switchAvailable = true, limit = AccountLimit(weekly = true, resetsAt = 5_000))
