@@ -13,7 +13,7 @@ import dev.claudefleet.mobile.model.UsageWindow
 import dev.claudefleet.mobile.model.checksLabel
 import dev.claudefleet.mobile.model.limitAt
 import dev.claudefleet.mobile.model.relativeWithin
-import kotlin.math.roundToInt
+import dev.claudefleet.mobile.model.roundLeft
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -128,8 +128,8 @@ fun accountMeter(
     val five = left(usage?.usage?.fiveHour)
     val week = left(usage?.usage?.sevenDay)
     val line = listOfNotNull(
-        five?.let { "${it.roundToInt()}% left" },
-        week?.let { "week ${it.roundToInt()}% left" },
+        five?.let { "${roundLeft(it)}% left" },
+        week?.let { "week ${roundLeft(it)}% left" },
         stale,
     ).joinToString(" · ").ifEmpty { null }
     val tight = listOfNotNull(five, week).minOrNull()

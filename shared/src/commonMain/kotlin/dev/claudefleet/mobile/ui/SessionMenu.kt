@@ -1,5 +1,7 @@
 package dev.claudefleet.mobile.ui
 
+import dev.claudefleet.mobile.model.SessionRow
+
 /*
  * The session ⋮ menu on the New bar (redesign 14.14, MobileSessionExtras):
  * everything the Classic ⋮ held, written out with what each item does.
@@ -81,6 +83,8 @@ data class OrbitMenuFacts(
     val kill: Boolean = false,
     /** A person pinned it: the hub refuses Clean up (`E_PINNED`) until it is unpinned. */
     val pinned: Boolean = false,
+    /** [mayCleanUp]: false for a shell, a session not running, or one already asked to clean up. */
+    val cleanUp: Boolean = true,
     /** This person may pin or unpin it (`pin_session`). */
     val pin: Boolean = false,
     val worktree: Boolean = false,
@@ -122,8 +126,21 @@ fun orbitMenuItems(f: OrbitMenuFacts): List<OrbitMenuItem> = buildList {
     add(OrbitMenuItem(OrbitItem.Details, "Details", "host, branch, model, timeline", 3, writes = false))
     if (f.worktree) add(OrbitMenuItem(OrbitItem.Worktree, "Files", "changes, history, the worktree", 3, writes = false))
     if (f.archive) add(OrbitMenuItem(OrbitItem.Archive, "Archive", "off the work board", 4))
-    if (f.manage && !f.pinned) add(OrbitMenuItem(OrbitItem.Retire, "Clean up…", "commit and push, then remove; asks first", 4))
+    if (f.manage && !f.pinned && f.cleanUp) add(OrbitMenuItem(OrbitItem.Retire, "Clean up…", "commit and push, then remove; asks first", 4))
     if (f.kill) add(OrbitMenuItem(OrbitItem.Kill, "Kill session…", "asks first", 4, danger = true))
 }
+
+/**
+ * Whether Clean up makes sense for [row], the desktop's rule
+ * (`SessionDetails.svelte`): the hub types a clean-up prompt into the pane,
+ * so never into a shell (bash would run it), a session that is not running,
+ * or one already asked (review w17-2). A pinned one is refused too.
+ */
+fun mayCleanUp(row: SessionRow?): Boolean =
+    row != null && !row.isPinned && row.kind != "shell" && row.status == "running" && row.safeKillState != "requested"
+
+/** The Restart confirm's words; a working session is told its turn goes, as Switch account and relaunch say (review w17-10). */
+fun restartConfirmBody(working: Boolean): String =
+    "This kills and recreates the tmux session in place — for a wedged REPL." + if (working) " The turn in progress is lost." else ""
 
 const val ORBIT_MENU_TAG = "session.menu."

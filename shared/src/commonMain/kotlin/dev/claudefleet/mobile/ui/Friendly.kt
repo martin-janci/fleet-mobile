@@ -7,7 +7,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
-import kotlin.math.roundToInt
+import dev.claudefleet.mobile.model.leftPct
 
 /** What a banner shows: a title, a sentence, and the raw hub text behind a Details expander. */
 data class Friendly(val title: String, val body: String, val isError: Boolean, val details: String? = null)
@@ -194,7 +194,7 @@ private fun accountLimitWords(details: JsonElement?, raw: String): Friendly {
     }
     val used = details.field("used_pct")?.doubleOrNull
         ?: return Friendly("That account is at its limit", "Pick a login on another account.", isError = true, details = raw)
-    fun left(pct: Double): Int = maxOf(0, 100 - pct.roundToInt())
+    fun left(pct: Double): Int = leftPct(pct)
     val line = details.field("pause_at_pct")?.doubleOrNull?.let { " (fleet pauses a login at ${left(it)}% left)" }.orEmpty()
     val head = "This login has ${left(used)}% left$line."
     val host = details.field("suggested_host")?.takeIf { it.isString }?.content

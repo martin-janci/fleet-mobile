@@ -80,7 +80,7 @@ fun needsYouAlerts(
     for (row in rows) {
         // Someone else's to answer (watched, or seen through team reach): not
         // counted, not announced (reviews w08-3, w11-1).
-        if (!access.waitsOnMe(row)) {
+        if (!access.waitsOnMe(row) || !answersHere(access.levelFor(row), row)) {
             now[row.id] = null
             continue
         }
@@ -115,7 +115,7 @@ fun needsYouAlerts(
             reason,
             question = row.pendingInput?.question?.trim()?.takeIf { it.isNotEmpty() },
             quiet = quiet,
-            retryable = reason == "failed" && inboxRowActions(row, canWrite = true, switchAvailable = false, limit = null).retryPrompt != null,
+            retryable = reason == "failed" && inboxRowActions(row, canWrite = true, switchAvailable = false, limit = null, level = access.levelFor(row)).retryPrompt != null,
         )
     }
     // A host down or a login at its limit is one fact: said once, however

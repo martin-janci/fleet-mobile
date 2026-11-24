@@ -962,9 +962,10 @@ internal fun diffLines(diff: String): List<CodeLine> {
                 CodeLine(line, LineKind.Meta)
             line.startsWith("@@") -> {
                 inHunk = true
+                // A crafted header with a number past Int keeps the counters it had.
                 HUNK_HEADER.find(line)?.let {
-                    old = it.groupValues[1].toInt()
-                    new = it.groupValues[2].toInt()
+                    old = it.groupValues[1].toIntOrNull() ?: old
+                    new = it.groupValues[2].toIntOrNull() ?: new
                 }
                 CodeLine(line, LineKind.Hunk)
             }

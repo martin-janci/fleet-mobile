@@ -483,6 +483,85 @@ class MissionsTest {
         assertNull(vm.state.value.busy)
     }
 
+    /** Review w05-4: a press ending after the person opened another mission does not drop that mission's read. */
+    @Test
+    fun a_press_that_ends_during_another_missions_read_leaves_that_read_alone() = runTest {
+        val pressGate = CompletableDeferred<Unit>()
+        var readGate: CompletableDeferred<Unit>? = null
+        val fake = FakeMissionActions()
+        val actions = object : MissionActions by fake {
+            override suspend fun mission(missionId: Long): MissionDetail {
+                if (missionId == 2L) readGate?.await()
+                return fake.detail.copy(mission = fake.detail.mission.copy(id = missionId))
+            }
+            override suspend fun start(missionId: Long, step: String?): StartOutcome {
+                pressGate.await()
+                return fake.start(missionId, step)
+            }
+        }
+        val vm = MissionsViewModel(MissionsFleet(loop), actions, backgroundScope, canWrite = true)
+        vm.refresh().join()
+        vm.openOne(1).join()
+        runCurrent()
+        val press = vm.start()
+        runCurrent()
+        readGate = CompletableDeferred()
+        vm.openOne(2)
+        runCurrent()
+        assertTrue(vm.state.value.loading)
+
+        pressGate.complete(Unit)
+        press.join()
+        runCurrent()
+        readGate!!.complete(Unit)
+        runCurrent()
+
+        assertEquals(2, vm.state.value.detail?.mission?.id)
+        assertFalse(vm.state.value.loading, "the spinner ends with the read")
+    }
+
+    /** Review w05-5: a press still in flight on a mission is still held when the person comes back to it. */
+    @Test
+    fun a_mission_left_under_a_press_cannot_be_pressed_twice() = runTest {
+        val gates = mutableMapOf(1L to CompletableDeferred<Unit>(), 2L to CompletableDeferred<Unit>())
+        val fake = FakeMissionActions()
+        val actions = object : MissionActions by fake {
+            override suspend fun mission(missionId: Long): MissionDetail =
+                fake.detail.copy(mission = fake.detail.mission.copy(id = missionId))
+            override suspend fun start(missionId: Long, step: String?): StartOutcome {
+                fake.calls += "start $missionId"
+                gates.getValue(missionId).await()
+                return StartOutcome(missionId, emptyList())
+            }
+        }
+        val vm = MissionsViewModel(MissionsFleet(loop), actions, backgroundScope, canWrite = true)
+        vm.refresh().join()
+        vm.openOne(1).join()
+        runCurrent()
+        vm.start()
+        runCurrent()
+        vm.openOne(2).join()
+        runCurrent()
+        assertNull(vm.state.value.busy, "mission 2 is free")
+        vm.start()
+        runCurrent()
+        assertNotNull(vm.state.value.busy)
+
+        vm.openOne(1).join()
+        runCurrent()
+        assertNotNull(vm.state.value.busy, "mission 1's press is still out")
+        vm.start().join()
+        runCurrent()
+        assertEquals(listOf("start 1", "start 2"), fake.calls.filter { it.startsWith("start") })
+
+        gates.getValue(2L).complete(Unit)
+        runCurrent()
+        assertNotNull(vm.state.value.busy, "mission 2's end does not free mission 1")
+        gates.getValue(1L).complete(Unit)
+        runCurrent()
+        assertNull(vm.state.value.busy)
+    }
+
     /** Review w16-1: a failed steer on one mission shows in that mission's composer only. */
     @Test
     fun a_steer_error_shows_on_its_own_mission() {

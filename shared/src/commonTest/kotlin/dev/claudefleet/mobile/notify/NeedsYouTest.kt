@@ -37,6 +37,20 @@ class NeedsYouTest {
         assertEquals(listOf(2L), mine.map { it.sessionId }, "a row shared with no one is mine")
     }
 
+    /** Review w05-2: a shared session alerts only for what its level may act on, and Retry only at Steer. */
+    @Test
+    fun a_shared_session_alerts_only_for_what_its_level_may_do() {
+        val failed = row(1, "failed").copy(ownerPersonId = 2, claudeStatus = "failed", lastPrompt = "go")
+        val limit = row(2, "account_limit").copy(ownerPersonId = 2)
+        val answer = MyAccess(personId = 7, grants = mapOf(1L to GrantLevel.ANSWER, 2L to GrantLevel.ANSWER))
+        val (none, _) = needsYouAlerts(mapOf(1L to null, 2L to null), listOf(failed, limit), answer)
+        assertTrue(none.isEmpty())
+        val steer = MyAccess(personId = 7, grants = mapOf(1L to GrantLevel.DRIVE, 2L to GrantLevel.DRIVE))
+        val (raised, _) = needsYouAlerts(mapOf(1L to null, 2L to null), listOf(failed, limit), steer)
+        assertEquals(listOf(1L), raised.map { it.sessionId })
+        assertTrue(raised.single().retryable)
+    }
+
     @Test
     fun a_session_that_comes_to_need_you_is_news_once() {
         val (first, seen) = needsYouAlerts(mapOf(1L to null), listOf(row(1, "waiting")))

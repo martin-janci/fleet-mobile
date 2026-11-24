@@ -6,6 +6,7 @@ import dev.claudefleet.mobile.model.Headroom
 import dev.claudefleet.mobile.model.HostLogin
 import dev.claudefleet.mobile.model.Mission
 import dev.claudefleet.mobile.model.MissionWait
+import dev.claudefleet.mobile.model.GrantLevel
 import dev.claudefleet.mobile.model.SessionRow
 import dev.claudefleet.mobile.model.forAccount
 import dev.claudefleet.mobile.model.signedInElsewhere
@@ -87,19 +88,27 @@ fun inboxRowActions(
     canWrite: Boolean,
     switchAvailable: Boolean,
     limit: AccountLimit?,
+    /**
+     * The level the row is shared with this person at; null for their own.
+     * The hub takes a prompt from Steer and a restart from the owner only, so
+     * Retry is own or Steer and Switch account is own (review w05-2).
+     */
+    level: String? = null,
 ): InboxRowActions {
     val mayManage = canWrite && !row.isController
+    val maySwitch = mayManage && level == null
+    val mayPrompt = mayManage && (level == null || level == GrantLevel.DRIVE)
     return when {
         row.attention?.reason == "account_limit" -> InboxRowActions(
-            switchAccount = mayManage && switchAvailable,
+            switchAccount = maySwitch && switchAvailable,
             waitUntil = limit?.resetsAt,
         )
         // A signed-out login: resume under one that is signed in (review w23-4).
-        row.attention?.reason == "no_credentials" -> InboxRowActions(switchAccount = mayManage && switchAvailable)
+        row.attention?.reason == "no_credentials" -> InboxRowActions(switchAccount = maySwitch && switchAvailable)
         inboxWord(row) == dev.claudefleet.mobile.ui.kit.StatusWord.FAILED -> InboxRowActions(
             openLog = true,
             retryPrompt = row.lastPrompt?.trim()?.takeIf {
-                it.isNotEmpty() && mayManage && row.claudeStatus == "failed" && row.pendingInput == null
+                it.isNotEmpty() && mayPrompt && row.claudeStatus == "failed" && row.pendingInput == null
             },
         )
         else -> InboxRowActions()
@@ -172,6 +181,8 @@ class InboxViewModel(
      */
     private val forbidden: (projectId: Long?, orgId: Long?) -> Set<String> = { _, _ -> emptySet() },
     private val clock: () -> Long = { epochSeconds() },
+    /** The level a row is shared with this person at; null for their own ([inboxRowActions]). */
+    private val level: (SessionRow) -> String? = { null },
 ) {
     private val _state = MutableStateFlow(InboxUiState())
 
@@ -188,7 +199,7 @@ class InboxViewModel(
 
     /** Retry the last turn of a failed row: [inboxRowActions]'s prompt, sent again. */
     fun retry(row: SessionRow, switchAvailable: Boolean = false): Job? {
-        val prompt = inboxRowActions(row, canWrite, switchAvailable, null).retryPrompt ?: return null
+        val prompt = inboxRowActions(row, canWrite, switchAvailable, null, level(row)).retryPrompt ?: return null
         val key = Triple(row.id, prompt, row.turnSeq)
         val id = retryIds.getOrPut(key) { newPromptSendId(clock()) }
         return press(row.id, write = true) {
@@ -200,7 +211,7 @@ class InboxViewModel(
 
     /** Switch account, first tap: which login on the row's host has room on another account. Nothing moves yet. */
     fun proposeSwitch(row: SessionRow, switchAvailable: Boolean): Job? {
-        if (!inboxRowActions(row, canWrite, switchAvailable, null).switchAccount) return null
+        if (!inboxRowActions(row, canWrite, switchAvailable, null, level(row)).switchAccount) return null
         return press(row.id) {
             val out = { l: HostLogin -> signedOut(row.hostAlias, l.profile) }
             val h = actions.headroom(row.hostAlias, row.claudeProfile, row.projectId, row.launchModel)
@@ -224,7 +235,7 @@ class InboxViewModel(
     /** Switch account, second tap: restart under the proposed login. */
     fun confirmSwitch(row: SessionRow, switchAvailable: Boolean): Job? {
         val target = _state.value.switchTargets[row.id] ?: return null
-        if (!inboxRowActions(row, canWrite, switchAvailable, null).switchAccount) return null
+        if (!inboxRowActions(row, canWrite, switchAvailable, null, level(row)).switchAccount) return null
         return press(row.id) {
             actions.restartUnder(row.id, target.profile ?: "")
             _state.update { it.copy(switchTargets = it.switchTargets - row.id) }

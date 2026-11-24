@@ -295,6 +295,7 @@ import dev.claudefleet.mobile.ui.NewSessionWizard
 import dev.claudefleet.mobile.ui.NewSessionExtras
 import dev.claudefleet.mobile.ui.DiscardSheet
 import dev.claudefleet.mobile.ui.newSessionTyped
+import dev.claudefleet.mobile.ui.worktreeGone
 import dev.claudefleet.mobile.ui.NewSessionViewModel
 import dev.claudefleet.mobile.ui.WizardStep
 import dev.claudefleet.mobile.ui.PairScreen
@@ -846,6 +847,7 @@ class AppContainer(
         drafts.forHub(credentials.hub)
         noteDrafts.forHub(credentials.hub)
         planSettled.forHub(credentials.hub)
+        taskCommentDrafts.forHub(credentials.hub)
         return FleetRepository(
             client = HubClient(http, credentials.hub, credentials.token),
             events = HubEventStream(http, credentials.hub, credentials.token),
@@ -1475,6 +1477,7 @@ private fun FleetRoute(
             accountName = { uuid -> repository.accountNames.value[uuid] },
             signedOut = { alias, profile -> repository.hosts.value.firstOrNull { it.alias == alias }?.isSignedOut(profile) == true },
             forbidden = { projectId, orgId -> repository.forbiddenAccountsIn(projectId, orgId) },
+            level = { repository.access.value.levelFor(it) },
         )
     }
     // A row that leaves Needs you takes its notice and Switch proposal with it (review w17-5).
@@ -2227,6 +2230,7 @@ private fun FleetRoute(
                                 credentials.canWrite,
                                 inboxCaps.switchAccount,
                                 row.accountUuid?.let(inboxList.accountUsage::get)?.limitAt(inboxList.nowSeconds, row.launchModel),
+                                access.levelFor(row),
                             )
                         },
                         rowHandlers = InboxRowHandlers(
@@ -2930,9 +2934,16 @@ private fun NewSessionRoute(
     var askDiscard by remember { mutableStateOf(false) }
     BackHandler(enabled = wizardStep.previous == null && !state.creating && newSessionTyped(state)) { askDiscard = true }
     val leave: () -> Unit = { if (!state.creating && newSessionTyped(state)) askDiscard = true else onBack() }
+    // "A ticket" leaves the form as Cancel does: the same question first (review w17-8).
+    var askDiscardForTicket by remember { mutableStateOf(false) }
+    val toTicket: (() -> Unit)? = onFromTicket?.let { go -> { if (!state.creating && newSessionTyped(state)) askDiscardForTicket = true else go() } }
     val tools = remember(repository, scope) { ProjectToolsViewModel(repository, container.projectActions, scope, credentials.canWrite) }
     val toolsState by tools.state.collectAsState()
     LaunchedEffect(tools, state.host, state.projectId) { tools.loadWorktrees(state.host, state.projectId) }
+    // A picked worktree that is no longer in the list (deleted here or elsewhere) is not sent (review w17-4).
+    LaunchedEffect(toolsState.worktrees, state.worktreeId) {
+        if (worktreeGone(state.worktreeId, toolsState.worktrees)) vm.selectWorktree(null)
+    }
     // Add a project resumes on the person's other device where the hub keeps wizards.
     val addDraftsListed = repository.capabilities.collectAsState().value.wizardState
     // Add a project's own steps (redesign 14.20), over the wizard: back on
@@ -2996,7 +3007,7 @@ private fun NewSessionRoute(
             onTyped = { addTyped = it },
             drafts = container.wizardDrafts.takeIf { addDraftsListed },
         ),
-        onFromTicket = onFromTicket,
+        onFromTicket = toTicket,
         extras = NewSessionExtras(
             onStartFrom = vm::setStartFrom,
             onFirstMessage = vm::onFirstMessageChange,
@@ -3010,6 +3021,9 @@ private fun NewSessionRoute(
     )
     if (askDiscard) {
         DiscardSheet(onKeep = { askDiscard = false }, onDiscard = { askDiscard = false; onBack() })
+    }
+    if (askDiscardForTicket) {
+        DiscardSheet(onKeep = { askDiscardForTicket = false }, onDiscard = { askDiscardForTicket = false; onFromTicket?.invoke() })
     }
     if (askDiscardAdd) {
         DiscardSheet(onKeep = { askDiscardAdd = false }, onDiscard = { askDiscardAdd = false; addTyped = false; tools.closeAdd() })

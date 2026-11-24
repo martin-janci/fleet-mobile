@@ -140,4 +140,25 @@ class AccountLimitTest {
         assertEquals("opus", json.decodeFromString(SessionRow.serializer(), """{"id":1,"launch_model":"opus"}""").launchModel)
         assertNull(json.decodeFromString(SessionRow.serializer(), """{"id":1}""").launchModel)
     }
+
+    /** w07-9: one rounding for every "% left": what is left, half up. */
+    @Test
+    fun percent_left_is_rounded_one_way() {
+        assertEquals(37, leftPct(63.5))
+        assertEquals(37, roundLeft(36.5))
+        assertEquals("37% left", leftText(63.5))
+        assertEquals("38% left", leftText(62.5))
+        assertEquals(0, leftPct(140.0))
+        assertEquals(100, leftPct(-3.0))
+    }
+
+    /** w07-6: a days-old reading is not said as today's figure. */
+    @Test
+    fun an_old_reading_says_its_age() {
+        val now = 1_000_000L
+        assertEquals("60% left", roomText(HostLogin(accountUuid = "a", usedPct = 40.0, readAt = now - 600), now))
+        assertEquals("~60% left · read 4 d ago", roomText(HostLogin(accountUuid = "a", usedPct = 40.0, readAt = now - 4 * 86_400), now))
+        assertEquals("60% left", roomText(HostLogin(accountUuid = "a", usedPct = 40.0), now), "a hub that does not say when")
+        assertEquals("no reading", roomText(HostLogin(accountUuid = "a"), now))
+    }
 }

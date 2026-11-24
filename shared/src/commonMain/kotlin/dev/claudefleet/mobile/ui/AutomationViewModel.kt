@@ -28,10 +28,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 enum class AutomationTab { Routines, Runs, Agents }
 
@@ -186,6 +188,14 @@ class AutomationViewModel(
         val mine = local.updateAndGet {
             it.copy(open = true, tab = AutomationTab.Routines, detail = null, memory = null, runDetail = null, notice = null, error = null, pick = it.pick + 1)
         }.pick
+        // A tap that started the app lands before the hub has said what it
+        // serves (review w05-3): wait for that, under the spinner, rather
+        // than leave an empty sheet that nothing fills.
+        if (!state.value.available) {
+            local.update { it.copy(loading = true) }
+            withTimeoutOrNull(CAPS_WAIT_MS) { state.first { it.available } }
+            if (!state.value.available) local.update { if (it.pick == mine) it.copy(loading = false) else it }
+        }
         read()
         if (local.value.pick == mine && state.value.available) readOne(routineId)
     }
@@ -795,3 +805,6 @@ fun memoryLine(m: RoutineMemory): String = listOfNotNull(
     },
     "notes each run".takeIf { m.memoryAuto },
 ).joinToString(" · ")
+
+/** How long a routine opened from a notification waits for the hub's tool list. */
+internal const val CAPS_WAIT_MS = 10_000L

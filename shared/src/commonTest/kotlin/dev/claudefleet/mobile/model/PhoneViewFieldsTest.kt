@@ -82,6 +82,9 @@ class PhoneViewFieldsTest {
         val NOT_HUB_COLUMNS = setOf(
             // Not a column of the hub's session row (its worktree row has one).
             "branch",
+            // A hub column the phone view does not carry yet. Read only to see
+            // it CHANGE between two frames; null after a re-list is not a change.
+            "claude_session_id",
         )
     }
 }

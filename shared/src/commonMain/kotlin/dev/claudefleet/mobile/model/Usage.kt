@@ -254,6 +254,12 @@ data class HostLogin(
      * leaves it out when false.
      */
     val conflicted: Boolean = false,
+    /**
+     * When the reading behind [usedPct] was taken (the hub's snapshot
+     * `fetched_at`), so an old one is not said as today's figure (review
+     * w07-6). Null from a hub that does not say.
+     */
+    @SerialName("read_at") val readAt: Long? = null,
 )
 
 /**
@@ -367,11 +373,33 @@ fun loginLabel(l: HostLogin, accountName: (String) -> String?): String {
     return l.profile?.let { "$it ($who)" } ?: who
 }
 
-/** "5% left" or "no reading": room is always said as what is left, as the desktop's meters do. */
-fun roomText(l: HostLogin): String = l.usedPct?.let { leftText(it) } ?: "no reading"
+/**
+ * "5% left" or "no reading": room is always said as what is left, as the
+ * desktop's meters do. A reading older than [STALE_ROOM_SECS] is an estimate
+ * and says its age: "~60% left · read 4 d ago".
+ */
+fun roomText(l: HostLogin, nowSeconds: Long = dev.claudefleet.mobile.epochSeconds()): String {
+    val used = l.usedPct ?: return "no reading"
+    val at = l.readAt
+    if (at == null || nowSeconds - at <= STALE_ROOM_SECS) return leftText(used)
+    return "~${leftText(used)} · read ${relativeAgo(at, nowSeconds)}"
+}
+
+/** A login's reading older than this is no longer the account's figure: the Accounts card's own limit (3 h). */
+const val STALE_ROOM_SECS = 3 * 3_600L
 
 /** "38% left" for a reading of 62% used. */
-fun leftText(usedPct: Double): String = "${(100 - kotlin.math.round(usedPct).toInt()).coerceAtLeast(0)}% left"
+fun leftText(usedPct: Double): String = "${leftPct(usedPct)}% left"
+
+/**
+ * The whole percent left of a reading of [usedPct] used. The one rounding for
+ * every "% left" on the phone: what is LEFT is rounded, half up, so a reading
+ * shows the same figure in a list, a meter and a refusal.
+ */
+fun leftPct(usedPct: Double): Int = roundLeft(100.0 - usedPct)
+
+/** A percent left as a whole number in 0..100, half up. */
+fun roundLeft(left: Double): Int = kotlin.math.floor(left + 0.5).toInt().coerceIn(0, 100)
 
 /**
  * The signed-in login with a reading and the most room: the default the

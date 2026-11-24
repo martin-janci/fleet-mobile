@@ -64,7 +64,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -795,6 +797,13 @@ class SessionViewModel(
      */
     private var drawnTurnSeq: Long? = null
 
+    /**
+     * The row's `claude_status` as of the same read. A row that leaves
+     * `working` / `blocked` without its turn count moving (Esc fires no Stop
+     * hook) still has an end to read: the last lines and "Interrupted".
+     */
+    private var drawnStatus: String? = null
+
     /** The generation currently inside [fetchLock], fetching and applying. */
     private var running: Generation? = null
 
@@ -998,6 +1007,21 @@ class SessionViewModel(
                     if (gone != null && (now == null || questionKey(now) != gone)) it.copy(goneQuestion = null) else it
                 }
             }
+        }
+        // A `/clear` or a resume puts the session on another conversation
+        // without moving its turn count: start over on it rather than append
+        // under the old one (the desktop's `seenClaude`). Null is "not
+        // known" (a re-list's phone view leaves the column out), never a change.
+        scope.launch {
+            fleet.sessions
+                .map { rows -> rows.firstOrNull { it.id == sessionId }?.claudeSessionId }
+                .filterNotNull()
+                .distinctUntilChanged()
+                .drop(1)
+                .collect {
+                    startOver()
+                    requestRead(first = true)
+                }
         }
         scope.launch {
             fleet.sessionChanges
@@ -2220,9 +2244,12 @@ class SessionViewModel(
     /** After a rewind the session is on a new conversation: drop the old one rather than append to it. */
     private fun startOver() {
         drawnTurnSeq = null
+        drawnStatus = null
         local.update {
             it.copy(conversation = Conversation(), loaded = false, newReply = false, unseen = 0, olderLoaded = false, viewing = null, earlier = null)
         }
+        // The hub kept the conversation this one replaces: the picker's list changed.
+        loadConversations()
     }
 
     /**
@@ -2296,7 +2323,7 @@ class SessionViewModel(
     }
 
     /** Ask the session to persist its work, then arm deletion once it is clean. */
-    fun safeKill(): Job = runManaged(::canManageNow) { actions.safeKill(sessionId) }
+    fun safeKill(): Job = runManaged({ canManageNow() && mayCleanUp(row()) }) { actions.safeKill(sessionId) }
 
     /**
      * Kill the session now, without waiting for it to persist anything. The
@@ -2457,17 +2484,20 @@ class SessionViewModel(
      * idle, done, stopped or failed and its turn count did not change: there
      * is nothing new to read.
      *
-     * A `/clear`, a resume or a compaction switches the conversation under
-     * us. The row does carry `claude_session_id`, but this app's model does
-     * not — no screen draws it. It is covered anyway: a new conversation
-     * starts its turn count over, so the count differs from the drawn one and
-     * the read happens. `!=`, not `>`, for exactly that reason.
+     * One more read happens when the row LEAVES `working` / `blocked`
+     * ([drawnStatus]): an interrupted turn ends without a turn count.
+     *
+     * A `/clear` or a resume switches the conversation under us and does not
+     * move the turn count (the hub only ever adds one to it): the row's
+     * `claude_session_id` says so, and `init` starts over when it changes.
      */
     private fun rowChangeCouldMoveTheConversation(): Boolean {
         val row = row() ?: return true
         if (row.turnSeq != drawnTurnSeq) return true
-        return row.claudeStatus == "working" || row.claudeStatus == "blocked"
+        return inFlight(row.claudeStatus) || inFlight(drawnStatus)
     }
+
+    private fun inFlight(status: String?): Boolean = status == "working" || status == "blocked"
 
     /** True while the hub named a contract this build refuses to talk across. */
     private fun refused(): Boolean = fleet.status.value is ConnectionStatus.Refused
@@ -2551,6 +2581,7 @@ class SessionViewModel(
                 // when it answered, and a turn that completes after this
                 // point must still trigger the next read.
                 drawnTurnSeq = row()?.turnSeq
+                drawnStatus = row()?.claudeStatus
                 local.update { current ->
                     val appended = current.conversation.appending(fresh)
                     // The same "did the tail move" signal `SessionScreen`'s
