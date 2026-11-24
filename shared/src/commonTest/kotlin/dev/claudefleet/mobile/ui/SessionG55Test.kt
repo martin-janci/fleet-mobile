@@ -220,6 +220,19 @@ class SessionG55Test {
         assertNull(parseClock("soon"))
     }
 
+    /** Review w15-1: across a clock change the wall clock asked for is kept, not the seconds. */
+    @Test
+    fun a_time_across_a_clock_change_is_still_that_local_time() {
+        val change = now + 5 * 3_600
+        val spring = { t: Long -> if (t < change) 3_600 else 7_200 }
+        val autumn = { t: Long -> if (t < change) 7_200 else 3_600 }
+        assertEquals(tomorrowMorning(now, { 3_600 }) - 3_600, tomorrowMorning(now, spring))
+        assertEquals(tomorrowMorning(now, { 7_200 }) + 3_600, tomorrowMorning(now, autumn))
+        assertEquals(nextLocalClock(now, { 3_600 }, 20, 0) - 3_600, nextLocalClock(now, spring, 20, 0))
+        // Before the change nothing moves.
+        assertEquals(nextLocalClock(now, { 3_600 }, 11, 0), nextLocalClock(now, spring, 11, 0))
+    }
+
     @Test
     fun the_times_are_the_viewers_local_ones() {
         // 08:00 UTC: today's 09:00 is still ahead, today's 07:30 is not.

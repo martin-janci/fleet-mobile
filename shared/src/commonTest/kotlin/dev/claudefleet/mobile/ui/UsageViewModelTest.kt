@@ -359,6 +359,10 @@ class UsageViewModelTest {
         assertEquals("1.2k", compactCount(1_234))
         assertEquals("2M", compactCount(2_000_000))
         assertEquals("3.5B", compactCount(3_456_000_000))
+        // w07-9: never "1000k" / "1000M".
+        assertEquals("999.9k", compactCount(999_949))
+        assertEquals("1M", compactCount(999_950))
+        assertEquals("1B", compactCount(999_950_000))
     }
 
     @Test
@@ -397,5 +401,31 @@ class UsageViewModelTest {
         readonly.setAutoSwitch(enabled = false)
         runCurrent()
         assertEquals(reads, calls.autoCalls.size)
+    }
+
+    /** w07-1: the headline is the spend of the days shown, not the lifetime cost of the sessions that moved. */
+    @Test
+    fun the_headline_is_the_sum_of_the_days_shown() {
+        val report = UsageReport(
+            total = UsageTotals(inputTokens = 9_000_000, costMicros = 400_000_000),
+            byDay = listOf(
+                dev.claudefleet.mobile.model.DayUsage("2026-11-23", inputTokens = 10, outputTokens = 5, costMicros = 2_000_000),
+                dev.claudefleet.mobile.model.DayUsage("2026-11-24", cacheReadTokens = 100, outputTokens = 1, costMicros = 3_000_000, backfillCostMicros = 50_000_000),
+            ),
+        )
+        val head = usageHeadline(report)
+        assertEquals(5_000_000, head.costMicros)
+        assertEquals(116, head.tokens)
+        assertEquals(6, head.outputTokens)
+        assertEquals("Spent 2026-11-23 to 2026-11-24 (UTC days)", head.label)
+        assertEquals("Spent on 2026-11-24 (UTC)", usageHeadline(report.copy(byDay = report.byDay.takeLast(1))).label)
+    }
+
+    /** With no days to sum, the hub's total is shown under its true name. */
+    @Test
+    fun a_report_without_days_says_its_total_is_the_sessions_whole_cost() {
+        val head = usageHeadline(UsageReport(total = UsageTotals(costMicros = 7)))
+        assertEquals(7, head.costMicros)
+        assertEquals(WHOLE_COST_LABEL, head.label)
     }
 }

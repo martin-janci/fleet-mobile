@@ -18,6 +18,12 @@ class RelativeAgoTest {
         assertEquals("under a minute", relativeWithin(1_030, 1_000))
         assertEquals("under a minute", relativeWithin(1_001, 1_000))
         assertEquals("5 min", relativeWithin(1_300, 1_000))
+        // w07-8 / w15-2: a wait is not floored to one unit.
+        assertEquals("1 h 59 min", relativeWithin(1_000 + 119 * 60, 1_000))
+        assertEquals("2 h", relativeWithin(1_000 + 7_200, 1_000))
+        assertEquals("1 d 23 h", relativeWithin(1_000 + 47 * 3600, 1_000))
+        assertEquals("6 d 23 h", relativeWithin(1_000 + 167 * 3600 + 59, 1_000))
+        assertEquals("2 d", relativeWithin(1_000 + 2 * 86_400, 1_000))
     }
 
     @Test
