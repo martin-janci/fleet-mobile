@@ -371,6 +371,7 @@ internal fun FieldRow(
                 hint?.let { append(" "); append(it) }
                 playbookActivity(d.key, state.playbooksWeek)?.let { append(" "); append(it) }
                 if (d.restart == "app") append(" Applies after the hub restarts.")
+                if (d.restart == "hooks") append(" Applies when each host's hooks are next installed.")
                 d.ownedBy?.let { append(" Change it with $it.") }
                 if (!d.readOnlyHere && state.canWrite && !editable) append(" Change it on a desktop.")
             },

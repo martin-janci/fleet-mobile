@@ -16,7 +16,7 @@ import dev.claudefleet.mobile.model.loginLabel
 import dev.claudefleet.mobile.model.freestLogin
 import dev.claudefleet.mobile.model.AccountBlocks
 import dev.claudefleet.mobile.model.orgOfProject
-import dev.claudefleet.mobile.model.leftText
+import dev.claudefleet.mobile.model.roomText
 import dev.claudefleet.mobile.model.NO_START_STEPS
 import dev.claudefleet.mobile.model.StartStepState
 import dev.claudefleet.mobile.model.folding
@@ -604,6 +604,11 @@ class NewSessionViewModel(
             try {
                 val answer = actions.startMany(confirm.key, confirm.host, ids)
                 val result = multiStartResult(confirm.key, answer, ids, labels, confirm.orgLabel)
+                // A multi-start sends no first message (the field hides once
+                // a project is ticked): words typed before that wait in the
+                // first started session's box, unsent (review w17-5).
+                val typed = s.firstMessage.trim()
+                if (typed.isNotEmpty()) result.projects.firstNotNullOfOrNull { it.sessionId }?.let { drafts?.fill(it, typed) }
                 val clean = result.projects.all { it.outcome == StartOutcome.STARTED }
                 local.update { it.copy(creating = false, result = result.takeUnless { clean }) }
                 if (clean) result.projects.firstOrNull()?.sessionId?.let(onCreated)
@@ -775,6 +780,9 @@ class NewSessionViewModel(
                 val jump = tool?.existingSessionId()
                 when {
                     jump != null -> {
+                        // The ticket already has a session: the words typed
+                        // for a new one wait in its box, unsent (review w17-5).
+                        s.firstMessage.trim().takeIf { it.isNotEmpty() }?.let { drafts?.fill(jump, it) }
                         local.update { it.copy(creating = false) }
                         onCreated(jump)
                     }
@@ -886,7 +894,11 @@ class NewSessionViewModel(
         val pauseAt = headroom?.pauseAtPct ?: 100.0
         // The accounts the chosen project forbids, itself or through its org
         // (the desktop's `forbiddenHere`): shown, never the default, never sent.
-        val forbidden = chosen?.let { forbiddenAccounts(work.accountBlocks, it.id, work.orgs.orgOfProject(it)) }.orEmpty()
+        // The hub's refusal counts the org the HOST is filed under as well.
+        val forbidden = chosen?.let {
+            forbiddenAccounts(work.accountBlocks, it.id, work.orgs.orgOfProject(it)) +
+                forbiddenAccounts(work.accountBlocks, it.id, host?.let(work.orgs.hostOrg::get))
+        }.orEmpty()
         val logins = headroom?.logins.orEmpty().map { accountChoice(it, pauseAt, names, it.accountUuid in forbidden) }
         // Unpicked, the row shows the login the start will use: the signed-in
         // one with the most room, as the desktop's New session defaults
@@ -1043,7 +1055,7 @@ internal fun accountChoice(l: HostLogin, pauseAtPct: Double, names: Map<String, 
     return AccountChoice(
         profile = l.profile,
         label = loginLabel(l) { names[it] },
-        room = used?.let { leftText(it) } ?: "no reading",
+        room = roomText(l),
         over = used != null && used >= pauseAtPct,
         signedOut = l.signedOut,
         forbidden = forbidden,
@@ -1052,13 +1064,13 @@ internal fun accountChoice(l: HostLogin, pauseAtPct: Double, names: Map<String, 
 
 /** [host] with its load: the live sessions on it, by status word. A lost row is not load. */
 private fun hostChoice(host: HostRow, sessions: List<SessionRow>): HostChoice {
-    val tones = sessions
-        .filter { it.hostAlias == host.alias && it.lostAt == null }
-        .map { StatusTone.of(it.claudeStatus, it.stuckKind) }
+    val here = sessions.filter { it.hostAlias == host.alias && it.lostAt == null }
+    val tones = here.map { StatusTone.of(it.claudeStatus, it.stuckKind) }
     return HostChoice(
         alias = host.alias,
         reachable = host.reachable,
-        needsYou = tones.count { it == StatusTone.BLOCKED },
+        // The count the Sessions list's host heading shows.
+        needsYou = here.count { it.needsAttention },
         working = tones.count { it == StatusTone.WORKING },
         idle = tones.count { it == StatusTone.IDLE },
         facts = hostFacts(host),

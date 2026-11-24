@@ -540,6 +540,25 @@ class NewSessionViewModelTest {
         assertFalse(vm.state.value.creating)
     }
 
+    /** Review w17-5: words typed for a start that jumps to the ticket's live session wait in that session's box. */
+    @Test
+    fun a_jump_to_the_existing_session_keeps_the_typed_first_message() = runTest {
+        val work = FakeWorkActions().apply {
+            fail = HubError.Tool("E_EXISTS", "PAY-9 already has a live session; jump to it", buildJsonObject { put("session_id", 41) })
+        }
+        val drafts = DraftMemory()
+        val vm = NewSessionViewModel(
+            WorkFleet(hostRows = listOf(PINE)), FakeCreate(), backgroundScope, true, initialHost = "pine", onCreated = {},
+            ticketKey = "PAY-9", workActions = work, drafts = drafts,
+        )
+        runCurrent()
+        vm.onFirstMessageChange("  check the retry path ")
+        vm.create()
+        runCurrent()
+
+        assertEquals("check the retry path", drafts.recall(41L))
+    }
+
     /**
      * A lost race is `E_EXISTS` too, but this start's own session was made
      * and runs unlinked (`orphan_session_id`). Jumping to the winner and

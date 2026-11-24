@@ -127,14 +127,23 @@ class ProjectToolsViewModel(
     }
 
     /** Read [projectId]'s worktrees on [hostAlias]; null for either clears them. */
-    fun loadWorktrees(hostAlias: String?, projectId: Long?): Job = scope.launch {
-        local.update { it.copy(worktrees = null) }
-        if (hostAlias == null || projectId == null || !fleet.capabilities.value.hostWorktrees) return@launch
-        guarded {
-            val found = actions.worktrees(hostAlias, projectId)
-            local.update { it.copy(worktrees = found) }
+    fun loadWorktrees(hostAlias: String?, projectId: Long?): Job {
+        // Latest ask wins: a remote list is an SSH scan, and an earlier
+        // project's answer landing last would list its worktrees under the
+        // one picked since (review w17-3).
+        val mine = ++worktreeAsk
+        return scope.launch {
+            local.update { it.copy(worktrees = null) }
+            if (hostAlias == null || projectId == null || !fleet.capabilities.value.hostWorktrees) return@launch
+            guarded {
+                val found = actions.worktrees(hostAlias, projectId)
+                if (mine == worktreeAsk) local.update { it.copy(worktrees = found) }
+            }
         }
     }
+
+    /** Counts [loadWorktrees] asks; an answer is applied only to the latest. */
+    private var worktreeAsk = 0L
 
     /** Delete a worktree (refused while a session lives in it), then read the list again. */
     fun deleteWorktree(worktreeId: Long): Job = scope.launch {
@@ -190,3 +199,7 @@ class ProjectToolsViewModel(
 /** The repository a clone URL names, for the Cloning screen: `papaya-pos` from either GitHub URL form. */
 internal fun repoName(url: String): String? =
     url.trim().trimEnd('/').removeSuffix(".git").substringAfterLast('/').substringAfterLast(':').takeIf { it.isNotBlank() }
+
+/** A picked worktree the loaded list no longer has; false while the list is unread. */
+fun worktreeGone(pickedId: Long?, loaded: HostWorktrees?): Boolean =
+    pickedId != null && loaded != null && loaded.worktrees.none { it.id == pickedId }
